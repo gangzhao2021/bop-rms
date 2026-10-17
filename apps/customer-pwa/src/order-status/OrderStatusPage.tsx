@@ -523,6 +523,19 @@ function StatusContent({
   const remakes = view.sources?.remakes ?? [];
   const remaking = (orderItemReference: string) =>
     remakes.find((entry) => entry.orderItemReference === orderItemReference);
+  const pickup = view.order.orderType === "Pickup";
+  // Handoff Section 24.3: the order's own phase when no finer source (kitchen, serving) says more.
+  // A queued kitchen ticket means the store has the order but hasn't started on it.
+  const stage =
+    kitchenLabel === "Ready" ||
+    (kitchenLabel === "Unknown" && view.order.canonicalPhase === "Ready")
+      ? "Ready"
+      : kitchenLabel === "Preparing" ||
+          (kitchenLabel === "Unknown" && view.order.canonicalPhase === "In Progress")
+        ? "Preparing"
+        : view.order.canonicalPhase === "Submitted"
+          ? "Submitted"
+          : "Accepted";
   const [progressHeading, progressMessage] = storeCancelled
     ? ["Order cancelled by the store", staffCancellationReasonText[storeCancelled.reason]]
     : notAccepted
@@ -542,19 +555,20 @@ function StatusContent({
               "Order cancelled",
               "Payment wasn't completed within 30 minutes, so this order was cancelled. If a payment still goes through, it will be refunded automatically.",
             ]
-          : view.order.canonicalPhase === "Cancelled"
-            ? ["Order cancelled", "Your order has been cancelled."]
-            : view.order.canonicalPhase === "Rejected"
-              ? ["Order not accepted", "Your order was not accepted."]
-              : complete
-                ? ["Order collected", "Your order has been collected. Enjoy!"]
-                : notCollected
-                  ? [
-                      "Not collected",
-                      "The store closed this pickup after the pickup time ended. Contact the store about your order or a refund.",
-                    ]
+          : complete
+            ? ["Order collected", "Your order has been collected. Enjoy!"]
+            : // A pickup the store closed as not collected is reported as Cancelled; say why.
+              notCollected
+              ? [
+                  "Not collected",
+                  "The store closed this pickup after the pickup time ended. Contact the store about your order or a refund.",
+                ]
+              : view.order.canonicalPhase === "Cancelled"
+                ? ["Order cancelled", "Your order has been cancelled."]
+                : view.order.canonicalPhase === "Rejected"
+                  ? ["Order not accepted", "Your order was not accepted."]
                   : remakes.length > 0
-                    ? view.order.orderType === "Pickup"
+                    ? pickup
                       ? [
                           "Remaking part of your order",
                           "We're remaking part of your order. We'll have it ready shortly — please wait before collecting it.",
@@ -565,28 +579,43 @@ function StatusContent({
                         ]
                     : allServed
                       ? ["Items served", "All listed items have been served."]
-                      : kitchenLabel === "AwaitingPayment"
-                        ? [
-                            "Waiting for payment",
-                            someServed
-                              ? "Everything paid for has been served. The kitchen starts the next round once it's paid."
-                              : "The kitchen starts your order once it's paid.",
-                          ]
-                        : someServed
+                      : view.order.canonicalPhase === "Fulfilled"
+                        ? ["Order complete", "Your order is complete. Thank you for visiting!"]
+                        : kitchenLabel === "AwaitingPayment"
                           ? [
-                              "Serving your order",
-                              "Some items have been served. Check the remaining items below.",
+                              "Waiting for payment",
+                              someServed
+                                ? "Everything paid for has been served. The kitchen starts the next round once it's paid."
+                                : "The kitchen starts your order once it's paid.",
                             ]
-                          : kitchenLabel === "Ready"
-                            ? view.order.orderType === "Pickup"
-                              ? [
-                                  "Ready for pickup",
-                                  "Your order is ready. Collect it at the counter.",
-                                ]
-                              : ["Kitchen preparation complete", "All listed batches are ready."]
-                            : kitchenLabel === "Preparing"
-                              ? ["Preparing your order", "The kitchen is preparing your order."]
-                              : ["Order submitted", "We have your order."];
+                          : someServed
+                            ? [
+                                "Serving your order",
+                                "Some items have been served. Check the remaining items below.",
+                              ]
+                            : stage === "Ready"
+                              ? pickup
+                                ? [
+                                    "Ready for pickup",
+                                    "Your order is ready. Collect it at the counter.",
+                                  ]
+                                : [
+                                    "Your order is ready",
+                                    "Your food is ready and will be brought to your table shortly.",
+                                  ]
+                              : stage === "Preparing"
+                                ? ["Preparing your order", "The kitchen is preparing your order."]
+                                : stage === "Accepted"
+                                  ? [
+                                      "Order accepted",
+                                      pickup
+                                        ? "The store has your order and will start preparing it soon."
+                                        : "The kitchen has your order and will start preparing it soon.",
+                                    ]
+                                  : [
+                                      "Order submitted",
+                                      "We have your order. The store will confirm it shortly.",
+                                    ];
   const payments = view.sources?.payments;
   const paid = paidTotal(view);
   const paymentLabel =

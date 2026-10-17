@@ -148,6 +148,16 @@ const fulfillmentCompletedPayload = z.strictObject({
   completedAt: z.iso.datetime({ offset: false }),
 });
 
+// WP-2423 / DEC-PILOT-BATCH-PHASE-01: a ready pickup closed as not collected (no actor, no refund).
+const pickupNotCollectedPayload = z.strictObject({
+  fulfillmentReference: z.string().regex(canonicalUuidV7),
+  orderReference: z.string().regex(canonicalUuidV7),
+  notCollectedReference: z.string().regex(canonicalUuidV7),
+  storeReference: z.string().regex(canonicalUuidV7),
+  readyAt: z.iso.datetime({ offset: false }),
+  closedAt: z.iso.datetime({ offset: false }),
+});
+
 const kitchenWorkCreatedPayload = z.strictObject({
   kitchenTicketReference: z.uuid(),
   orderReference: z.uuid(),
@@ -1559,6 +1569,22 @@ export const eventCatalog = defineEventCatalog([
     deprecated: false,
     replacement: null,
     payloadSchema: fulfillmentCompletedPayload,
+  },
+  {
+    eventType: "PickupNotCollected",
+    schemaVersion: 1,
+    ownerModule: "@rms/fulfillment",
+    producerModule: "@rms/fulfillment",
+    stability: "stable",
+    consumers: ["ordering.pickup-not-collected:v1"],
+    tenantScope: "store",
+    dataClassification: "indirect_identifier",
+    compatibility: "additive",
+    retentionCategory: "business_record",
+    replaySemantics: "idempotent",
+    deprecated: false,
+    replacement: null,
+    payloadSchema: pickupNotCollectedPayload,
   },
   {
     eventType: "KitchenItemCompleted",

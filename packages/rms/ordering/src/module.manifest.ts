@@ -43,6 +43,7 @@ const moduleManifestInput =
     ],
     consumedEvents: [
       "rms.fulfillment.fulfillment-completed.v1",
+      "rms.fulfillment.pickup-not-collected.v1",
       "rms.kitchen.kitchen-item-ready.v1",
       "rms.kitchen.kitchen-order-ready.v1",
       "rms.kitchen.kitchen-ticket-closed.v1",
@@ -107,6 +108,7 @@ const moduleManifestInput =
         "order_status_projection_generation",
         "order_status_projection",
         "order_kitchen_progress_fact",
+        "order_pickup_not_collected_fact",
       ],
     },
     ownedJobs: [],

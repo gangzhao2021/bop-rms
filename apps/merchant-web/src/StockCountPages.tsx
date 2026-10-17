@@ -79,8 +79,9 @@ function useView<V>(
   return { state, reload };
 }
 /**
- * v15 run: a person's name as staff know it ("You" for themselves), never an identifier fragment
- * such as "Staff 0100". People who are not on the Store's staff list come in `people`.
+ * v15 run: a person's name as staff know it ("You" for themselves, their role when no name is
+ * recorded), never an identifier fragment such as "Staff 0100". People who are not on the Store's
+ * staff list come in `people`.
  */
 export function staffName(
   view: {
@@ -92,7 +93,7 @@ export function staffName(
   if (reference === null) return "—";
   return (
     [...view.staff, ...(view.people ?? [])].find((item) => item.actorReference === reference)
-      ?.label ?? "Unnamed staff member"
+      ?.label ?? "Staff member"
   );
 }
 

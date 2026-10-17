@@ -51,7 +51,7 @@ export interface OptionRecipeRow {
     readonly version: number;
     readonly content: OptionRecipeChangeContent;
     readonly byViewer: boolean;
-    /** Who saved this change: "You", their name, or "Unnamed staff member". */
+    /** Who saved this change: "You", their name, or their role when no name is recorded. */
     readonly authorLabel: string;
     readonly recordedAt: string;
     readonly published: boolean;

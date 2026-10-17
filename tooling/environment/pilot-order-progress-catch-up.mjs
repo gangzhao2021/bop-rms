@@ -3,10 +3,13 @@ import process from "node:process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadOutboxEnvelope } from "../../packages/bop/eventing/src/index.ts";
+import { createPostgresPickupNotCollectedPublisher } from "../../packages/rms/fulfillment/src/index.ts";
 import {
   loadOrderCanonicalPhase,
   orderKitchenProgressConsumerName,
   orderKitchenProgressEventTypes,
+  orderPickupNotCollectedConsumerName,
+  orderPickupNotCollectedEventType,
 } from "../../packages/rms/ordering/src/index.ts";
 import { createInternalOrderProgressConsumers } from "./pilot-order-progress-consumers.mjs";
 import { isPilotRuntime } from "./pilot-environment.mjs";
@@ -20,23 +23,31 @@ async function scoped(transaction, scope) {
   );
 }
 
-/** Published Kitchen progress events of this Store that Ordering's consumer has not recorded. */
+/** Ordering's progress consumers and the published event types each one records. */
+// Not-collected events the catch-up itself just published are consumed before the relay marks
+// them published; the relay's later delivery then finds them already in the inbox.
+const progressConsumers = [
+  [orderKitchenProgressConsumerName, [...orderKitchenProgressEventTypes], true],
+  [orderPickupNotCollectedConsumerName, [orderPickupNotCollectedEventType], false],
+];
+
+/** Published progress events of this Store that the Ordering consumer for them has not recorded. */
 async function pendingEvents(transaction, scope) {
   await scoped(transaction, scope);
-  const found = await transaction.query(
-    "SELECT o.event_id::text AS event_id FROM platform_eventing.outbox_event o " +
-      "WHERE o.brand_id=$1 AND o.store_id=$2 AND o.event_type=ANY($3::text[]) AND o.published_at IS NOT NULL " +
-      "AND NOT EXISTS (SELECT 1 FROM platform_eventing.consumer_inbox i WHERE i.consumer_name=$4 AND i.event_id=o.event_id) " +
-      "ORDER BY o.recorded_at,o.event_id LIMIT 100001",
-    [
-      scope.brandReference,
-      scope.storeReference,
-      [...orderKitchenProgressEventTypes],
-      orderKitchenProgressConsumerName,
-    ],
-  );
-  if (found.rows.length > 100000) throw new Error("ORDER_PROGRESS_CATCH_UP_TOO_MANY");
-  return found.rows.map((row) => row.event_id);
+  const pending = [];
+  for (const [consumerName, eventTypes, publishedOnly] of progressConsumers) {
+    const found = await transaction.query(
+      "SELECT o.event_id::text AS event_id FROM platform_eventing.outbox_event o " +
+        "WHERE o.brand_id=$1 AND o.store_id=$2 AND o.event_type=ANY($3::text[]) " +
+        (publishedOnly ? "AND o.published_at IS NOT NULL " : "") +
+        "AND NOT EXISTS (SELECT 1 FROM platform_eventing.consumer_inbox i WHERE i.consumer_name=$4 AND i.event_id=o.event_id) " +
+        "ORDER BY o.recorded_at,o.event_id LIMIT 100001",
+      [scope.brandReference, scope.storeReference, eventTypes, consumerName],
+    );
+    if (found.rows.length > 100000) throw new Error("ORDER_PROGRESS_CATCH_UP_TOO_MANY");
+    pending.push(...found.rows.map((row) => row.event_id));
+  }
+  return pending;
 }
 
 /** Each Order's guest-status projection phase and the phase Ordering now merges for it. */
@@ -77,10 +88,20 @@ function summarize(before, after) {
  * WP-2423 / DEC-PILOT-BATCH-PHASE-01 catch-up (v15 use): Kitchen events published before
  * Ordering's `ordering.kitchen-progress:v1` consumer existed are replayed from the outbox through
  * that same consumer, so the inbox makes it idempotent (a second run finds nothing pending).
- * dryRun runs everything in one transaction and rolls it back, reporting what would change.
+ * Pickups closed as not collected before Fulfillment published PickupNotCollected are first
+ * published by Fulfillment (once per closure; replayed events are then consumed directly here and
+ * found already recorded when the relay delivers them). dryRun runs everything in one transaction
+ * and rolls it back, reporting what would change.
  */
-export async function catchUpOrderKitchenProgress({ resources, dryRun, consumers }) {
+export async function catchUpOrderKitchenProgress({ resources, dryRun, consumers, publisher }) {
   const scope = resources.scope;
+  const notCollected =
+    publisher ??
+    createPostgresPickupNotCollectedPublisher({
+      ...scope,
+      nextReference: resources.credentials.reference,
+    });
+  const publish = async (transaction) => (await notCollected.publishMissing(transaction)).length;
   const byType = new Map(consumers.map((consumer) => [consumer.registration.eventType, consumer]));
   const replay = async (transaction, eventId) => {
     await scoped(transaction, scope);
@@ -94,6 +115,7 @@ export async function catchUpOrderKitchenProgress({ resources, dryRun, consumers
     try {
       await resources.transactions.run(async (transaction) => {
         const before = await phases(transaction, scope);
+        const notCollectedPublished = await publish(transaction);
         const pending = await pendingEvents(transaction, scope);
         const outcomes = {};
         for (const eventId of pending) {
@@ -111,6 +133,7 @@ export async function catchUpOrderKitchenProgress({ resources, dryRun, consumers
         const after = await phases(transaction, scope);
         report = {
           mode: "dry-run (rolled back)",
+          notCollectedPublished,
           pendingEvents: pending.length,
           outcomes,
           ...summarize(before, after),
@@ -123,6 +146,7 @@ export async function catchUpOrderKitchenProgress({ resources, dryRun, consumers
     return report;
   }
   const before = await resources.transactions.run((transaction) => phases(transaction, scope));
+  const notCollectedPublished = await resources.transactions.run(publish);
   const pending = await resources.transactions.run((transaction) =>
     pendingEvents(transaction, scope),
   );
@@ -138,7 +162,13 @@ export async function catchUpOrderKitchenProgress({ resources, dryRun, consumers
     outcomes[status] = (outcomes[status] ?? 0) + 1;
   }
   const after = await resources.transactions.run((transaction) => phases(transaction, scope));
-  return { mode: "apply", pendingEvents: pending.length, outcomes, ...summarize(before, after) };
+  return {
+    mode: "apply",
+    notCollectedPublished,
+    pendingEvents: pending.length,
+    outcomes,
+    ...summarize(before, after),
+  };
 }
 
 export function parseCatchUpArguments(argv) {

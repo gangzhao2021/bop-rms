@@ -4,7 +4,7 @@ import {
   parseStockCountCommandBody,
   redactStockCount,
 } from "./merchant-stock-counts.js";
-import { parseStoreWasteCommandBody } from "./merchant-store-waste.js";
+import { createMerchantStoreWaste, parseStoreWasteCommandBody } from "./merchant-store-waste.js";
 
 const id = (n: number) => "01909a1b-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const base = { operationReference: id(1), countReference: id(2), expectedVersion: 3 };
@@ -161,6 +161,14 @@ const d = vi.hoisted(() => ({
   list: vi.fn(),
   members: vi.fn(async (): Promise<unknown[]> => []),
   names: vi.fn(async (): Promise<Map<string, string>> => new Map()),
+  roles:
+    vi.fn<
+      (
+        tx: unknown,
+        scope: { storeReference: string | null },
+      ) => Promise<{ assignments: unknown[]; pending: unknown[] }>
+    >(),
+  waste: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
 vi.mock("./merchant-stock-catalog.js", () => ({
@@ -171,8 +179,14 @@ vi.mock("@bop/membership", async (original) => ({
   listStoreMembers: d.members,
   memberDisplayNames: d.names,
 }));
+vi.mock("@bop/permission", async (original) => ({
+  ...(await original<object>()),
+  listStoreRoleAssignments: d.roles,
+}));
 vi.mock("@rms/inventory", async (original) => ({
   ...(await original<object>()),
+  listStoreWaste: d.waste,
+  listWasteableStock: async () => [],
   createPostgresStockCountPorts: d.ports,
   executeStockCountCommand: d.execute,
   listStockCounts: d.list,
@@ -195,6 +209,7 @@ function setup() {
   });
   d.ports.mockImplementation((_tx: unknown, _owner: unknown, ports: unknown) => ports);
   d.list.mockResolvedValue({ counts: [], hasMore: false });
+  d.roles.mockResolvedValue({ assignments: [], pending: [] });
   d.execute.mockImplementation(
     async (
       command: { action: string; permission: string },
@@ -215,6 +230,11 @@ function setup() {
   const submit = { ...input, body: { action: "Submit", ...base } };
   return { tx, allowed, authorizeActions, service, input, submit };
 }
+const role = (actor: number, roleCode: string, roleName: string) => ({
+  actorReference: id(actor),
+  roleCode,
+  roleName,
+});
 describe("v15 run: stock count people", () => {
   beforeEach(() => vi.clearAllMocks());
   it("names counters from the staff list and the Brand directory, never an identifier fragment", async () => {
@@ -222,12 +242,28 @@ describe("v15 run: stock count people", () => {
     d.members.mockResolvedValue([
       { actorReference: id(10), displayName: "Ana", membershipLifecycle: "Active" },
       { actorReference: id(11), displayName: null, membershipLifecycle: "Active" },
+      { actorReference: id(12), displayName: null, membershipLifecycle: "Active" },
+      { actorReference: id(13), displayName: null, membershipLifecycle: "Active" },
     ]);
+    // The Store owner created by Brand provisioning has no recorded name: they are named by role.
+    d.roles.mockImplementation(async (_tx, scope) => ({
+      assignments:
+        scope.storeReference === null
+          ? [role(11, "brand_owner", "Brand Owner"), role(258, "brand_owner", "Brand Owner")]
+          : [
+              role(11, "synthetic_acceptance_0190fa30", "synthetic_acceptance_0190fa30"),
+              role(11, "store_owner", "Owner"),
+              role(12, "kitchen", "Kitchen"),
+              role(13, "internal_pilot_exception_operator", "internal_pilot_exception_operator"),
+            ],
+      pending: [],
+    }));
     d.names.mockResolvedValue(new Map([[id(256), "Mina Chen"]]));
     d.list.mockResolvedValue({
       counts: [
         { assigneeReference: id(256) },
         { assigneeReference: id(257) },
+        { assigneeReference: id(258) },
         { assigneeReference: id(10) },
         { assigneeReference: null },
       ],
@@ -239,14 +275,77 @@ describe("v15 run: stock count people", () => {
     };
     expect(view.staff).toEqual([
       { actorReference: id(10), label: "You" },
-      { actorReference: id(11), label: "Unnamed staff member" },
+      { actorReference: id(11), label: "Store owner" },
+      { actorReference: id(12), label: "Kitchen" },
+      { actorReference: id(13), label: "Staff member" },
     ]);
-    expect(d.names).toHaveBeenCalledWith(expect.anything(), expect.anything(), [id(256), id(257)]);
+    expect(d.names).toHaveBeenCalledWith(expect.anything(), expect.anything(), [
+      id(256),
+      id(257),
+      id(258),
+    ]);
     expect(view.people).toEqual([
       { actorReference: id(256), label: "Mina Chen" },
-      { actorReference: id(257), label: "Unnamed staff member" },
+      { actorReference: id(257), label: "Staff member" },
+      { actorReference: id(258), label: "Brand owner" },
     ]);
-    expect(JSON.stringify(view)).not.toMatch(/Staff [0-9a-f]{4}/u);
+    expect(JSON.stringify(view)).not.toMatch(/Staff [0-9a-f]{4}|Unnamed/u);
+    expect(JSON.stringify([view.staff, view.people])).not.toMatch(/_|Owner"/u);
+  });
+});
+describe("v15 run: waste people", () => {
+  beforeEach(() => vi.clearAllMocks());
+  it("names recorders and reviewers by name or role, including people no longer on the staff list", async () => {
+    const tx = { query: vi.fn() };
+    d.resolve.mockResolvedValue({
+      selected: { tenantReference: id(7) },
+      context: { brand: { brandReference: id(8) } },
+      store: { storeReference: id(9) },
+      actorReference: id(10),
+      allowed: async () => true,
+      authorizeActions: allowAll,
+      authorizeAction: async () => ({ effect: "Allow" }),
+    });
+    d.members.mockResolvedValue([
+      { actorReference: id(10), displayName: "Mia", membershipLifecycle: "Active" },
+      { actorReference: id(11), displayName: null, membershipLifecycle: "Active" },
+    ]);
+    d.names.mockResolvedValue(new Map([[id(256), "Mina Chen"]]));
+    d.roles.mockImplementation(async (_tx, scope) => ({
+      assignments: scope.storeReference === null ? [] : [role(11, "store_owner", "Owner")],
+      pending: [],
+    }));
+    d.waste.mockResolvedValue({
+      records: [
+        { recordedBy: id(256), review: { reviewedBy: id(11) } },
+        { recordedBy: id(257), review: null },
+        { recordedBy: id(10), review: null },
+      ],
+      hasMore: false,
+    });
+    const service = createMerchantStoreWaste({
+      persistence: {
+        transactions: { run: async (work: (t: object) => Promise<unknown>) => work(tx) },
+        now: () => "2026-10-15T12:00:00.000Z",
+      },
+      authentication: { authorize: async () => ({ sessionReference: id(6) }) },
+      references: { next: () => id(5) },
+      locale: "en-CA",
+    } as unknown as Parameters<typeof createMerchantStoreWaste>[0]);
+    const view = (await service.query({
+      sessionCookie: "synthetic-cookie",
+      csrf: "synthetic-csrf",
+      wasteReference: null,
+      before: null,
+      needsReviewOnly: false,
+    })) as { people: unknown };
+    expect(d.names).toHaveBeenCalledWith(expect.anything(), expect.anything(), [id(256), id(257)]);
+    expect(view.people).toEqual({
+      [id(10)]: "You",
+      [id(11)]: "Store owner",
+      [id(256)]: "Mina Chen",
+      [id(257)]: "Staff member",
+    });
   });
 });
 describe("WP-2423 stock count authorization", () => {

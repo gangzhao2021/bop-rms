@@ -251,7 +251,7 @@ describe("Event Catalog source", () => {
     },
   );
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(143);
+    expect(eventCatalog).toHaveLength(144);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     for (const eventType of [
       "DeviceActivated",
@@ -278,6 +278,16 @@ describe("Event Catalog source", () => {
       ownerModule: "@rms/fulfillment",
       producerModule: "@rms/fulfillment",
       consumers: ["ordering.fulfillment-completed:v1"],
+      tenantScope: "store",
+      dataClassification: "indirect_identifier",
+      replaySemantics: "idempotent",
+    });
+    // WP-2423 / DEC-PILOT-BATCH-PHASE-01: a pickup closed as not collected ends the Order phase.
+    expect(byType.get("PickupNotCollected")).toMatchObject({
+      schemaVersion: 1,
+      ownerModule: "@rms/fulfillment",
+      producerModule: "@rms/fulfillment",
+      consumers: ["ordering.pickup-not-collected:v1"],
       tenantScope: "store",
       dataClassification: "indirect_identifier",
       replaySemantics: "idempotent",
@@ -615,6 +625,7 @@ describe("Event Catalog source", () => {
       "PaymentFailed:v1",
       "PaymentRefunded:v1",
       "PaymentSucceeded:v1",
+      "PickupNotCollected:v1",
       "PriceBookArchived:v1",
       "PriceBookDraftCreated:v1",
       "PriceBookDraftReplaced:v1",
@@ -1315,7 +1326,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(157);
+    expect(eventConsumerContracts).toHaveLength(158);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

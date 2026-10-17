@@ -163,8 +163,11 @@ it("v15 run: flags a person named by an identifier fragment, as on the stock cou
   expect(
     findInternalText([
       "Counting · counted by You · 0 of 3 lines counted",
-      "Counted by Unnamed staff member",
+      "Counted by Store owner",
       "Staff 2 of 4 on shift",
     ]),
   ).toEqual([]);
+  expect(
+    findInternalText(["Counted by Unnamed staff member"]).map((finding) => finding.rule),
+  ).toContain("unnamed person");
 });

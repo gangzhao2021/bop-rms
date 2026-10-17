@@ -3321,6 +3321,42 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): the business worker records the Kitchen preparation facts Ordering consumes (ordering.kitchen-progress:v1) and the guest order status read merges them into the Order phase (Accepted / In Progress / Ready). Append-only; no update or delete; no actor or personal data"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_not_collected_publication",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): closing a ready pickup as not collected records its one PickupNotCollected event in the same transaction, and the order progress catch-up publishes closures recorded before the event existed. Append-only; no update or delete; references and times only, no actor or personal data"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_not_collected_publication",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): closing a ready pickup as not collected records its one PickupNotCollected event in the same transaction, and the order progress catch-up publishes closures recorded before the event existed. Append-only; no update or delete; references and times only, no actor or personal data"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_pickup_not_collected_fact",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): the business worker records the PickupNotCollected closures Ordering consumes (ordering.pickup-not-collected:v1) and the guest order status read merges them into a terminal Order phase. Append-only; no update or delete; no actor or personal data"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_pickup_not_collected_fact",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): the business worker records the PickupNotCollected closures Ordering consumes (ordering.pickup-not-collected:v1) and the guest order status read merges them into a terminal Order phase. Append-only; no update or delete; no actor or personal data"
     }
   ]
 }

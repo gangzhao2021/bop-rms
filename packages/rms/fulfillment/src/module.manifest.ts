@@ -37,7 +37,10 @@ const moduleManifestInput =
       },
     ],
     consumedEvents: ["rms.kitchen.kitchen-item-ready.v1", "rms.ordering.order-confirmed.v1"],
-    publishedEvents: ["rms.fulfillment.fulfillment-completed.v1"],
+    publishedEvents: [
+      "rms.fulfillment.fulfillment-completed.v1",
+      "rms.fulfillment.pickup-not-collected.v1",
+    ],
     ownedDatabase: {
       schema: "rms_fulfillment",
       tables: [
@@ -58,6 +61,7 @@ const moduleManifestInput =
         "pickup_proof_verification",
         "pickup_in_person_verification",
         "pickup_not_collected_record",
+        "pickup_not_collected_publication",
         "pickup_counter_code",
         "pickup_code_check_rejection",
         "fulfillment_item_cancellation",

@@ -724,6 +724,15 @@ export const eventConsumerContracts = defineEventConsumerContracts([
     "record-order-kitchen-progress-fact",
     "none",
   ),
+  // WP-2423 / DEC-PILOT-BATCH-PHASE-01: a pickup closed as not collected ends the Order phase.
+  contract(
+    "ordering.pickup-not-collected",
+    "@rms/ordering",
+    "PickupNotCollected",
+    "store",
+    "record-order-pickup-not-collected-fact",
+    "none",
+  ),
   contract(
     "ordering.fulfillment-completed",
     "@rms/ordering",

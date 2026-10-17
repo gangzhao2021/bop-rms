@@ -1,4 +1,5 @@
 import { appendFulfillmentCompletion } from "./fulfillment-completion-store.js";
+import { appendPickupNotCollectedPublication } from "./pickup-not-collected-publication-store.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   parseCompletePickupHandoffCommand,
@@ -381,6 +382,23 @@ export function createPostgresPickupHandoffStore(options: {
             record.aggregateVersionBefore.toString(),
           ],
         );
+        // WP-2423 / DEC-PILOT-BATCH-PHASE-01: the closure and its PickupNotCollected event commit
+        // together, so Ordering can give the Order its terminal outcome.
+        await appendPickupNotCollectedPublication(tx, {
+          eventReference: options.deriveCompletionReference(
+            "Event",
+            record.fulfillmentReference + ":not-collected:" + record.notCollectedReference,
+          ),
+          brandReference: brand,
+          storeReference: store,
+          fulfillmentReference: record.fulfillmentReference,
+          orderReference: input.orderReference,
+          notCollectedReference: record.notCollectedReference,
+          correlationReference: record.correlationReference,
+          aggregateVersionBefore: record.aggregateVersionBefore,
+          readyAt: record.readyAt,
+          closedAt: record.closedAt,
+        });
         await options.appendAudit(tx, {
           auditReference: parsePickupProofReference(record.notCollectedReference),
           actorReference: parsePickupProofReference(record.actorReference),

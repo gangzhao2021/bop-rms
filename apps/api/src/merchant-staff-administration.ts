@@ -24,6 +24,7 @@ import { revokeActorSessions } from "@bop/identity";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { derivedReference } from "./merchant-products.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { staffRoleLabel } from "./merchant-staff-labels.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -240,8 +241,12 @@ export function createMerchantStaffAdministration(options: {
       .filter((reference) => reference !== viewer && !names.get(reference));
     for (const [reference, name] of await memberDisplayNames(directoryTx(tx), owner, unnamed))
       names.set(reference, name);
+    // Someone without a recorded name is named by their role, never "Unnamed staff member".
     const label = (reference: string) =>
-      reference === viewer ? "You" : (names.get(reference) ?? "Unnamed staff member");
+      reference === viewer
+        ? "You"
+        : (names.get(reference) ??
+          staffRoleLabel(assignments.filter((item) => item.actorReference === reference)));
     return {
       screenId: actor === null ? "IAM-USER-LIST" : "IAM-USER-DETAIL",
       sourceAsOf: now,

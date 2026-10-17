@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "ordering", packageName: "@rms/ordering", layer: "RMS" },
   tables: [
     {
+      table: "order_pickup_not_collected_fact",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "order_kitchen_progress_fact",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },
@@ -393,6 +401,33 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "order-progress.write.order_pickup_not_collected_fact",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_pickup_not_collected_fact" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-progress-store.ts",
+    },
+    {
+      id: "order-progress.read.order_pickup_not_collected_fact",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_pickup_not_collected_fact" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-progress-store.ts",
+    },
+    {
+      id: "order-progress.read.order_header",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_header" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-progress-store.ts",
+    },
     {
       id: "order-progress.write.order_kitchen_progress_fact",
       operation: "write",

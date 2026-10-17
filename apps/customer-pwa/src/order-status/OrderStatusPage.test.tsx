@@ -288,7 +288,7 @@ it("shows partial Dining serving without claiming collection or full payment", (
 });
 
 it.each([
-  [0, "Kitchen preparation complete"],
+  [0, "Your order is ready"],
   [1, "Serving your order"],
   [2, "Items served"],
 ] as const)(
@@ -400,6 +400,147 @@ it.each([
   });
   expect(html).toContain(heading);
   expect(html).not.toContain("Order submitted");
+});
+
+const phaseTable = [
+  [
+    "Pickup",
+    "Submitted",
+    "Order submitted",
+    "We have your order. The store will confirm it shortly.",
+    false,
+  ],
+  [
+    "Pickup",
+    "Accepted",
+    "Order accepted",
+    "The store has your order and will start preparing it soon.",
+    false,
+  ],
+  ["Pickup", "In Progress", "Preparing your order", "The kitchen is preparing your order.", false],
+  ["Pickup", "Ready", "Ready for pickup", "Your order is ready. Collect it at the counter.", false],
+  ["Pickup", "Fulfilled", "Order collected", "Your order has been collected. Enjoy!", true],
+  ["Pickup", "Rejected", "Order not accepted", "Your order was not accepted.", true],
+  ["Pickup", "Cancelled", "Order cancelled", "Your order has been cancelled.", true],
+  [
+    "DineIn",
+    "Submitted",
+    "Order submitted",
+    "We have your order. The store will confirm it shortly.",
+    false,
+  ],
+  [
+    "DineIn",
+    "Accepted",
+    "Order accepted",
+    "The kitchen has your order and will start preparing it soon.",
+    false,
+  ],
+  ["DineIn", "In Progress", "Preparing your order", "The kitchen is preparing your order.", false],
+  [
+    "DineIn",
+    "Ready",
+    "Your order is ready",
+    "Your food is ready and will be brought to your table shortly.",
+    false,
+  ],
+  [
+    "DineIn",
+    "Fulfilled",
+    "Order complete",
+    "Your order is complete. Thank you for visiting!",
+    true,
+  ],
+  ["DineIn", "Rejected", "Order not accepted", "Your order was not accepted.", true],
+  ["DineIn", "Cancelled", "Order cancelled", "Your order has been cancelled.", true],
+] as const;
+
+it.each(phaseTable)(
+  "Handoff 24.3: a %s order in phase %s reads %s",
+  (orderType, canonicalPhase, heading, lede, settled) => {
+    const state = readyState();
+    if (state.status !== "ready") throw new Error("fixture");
+    const completed = orderType === "Pickup" && canonicalPhase === "Fulfilled";
+    const view = {
+      ...state.view,
+      order: {
+        ...state.view.order,
+        orderType,
+        canonicalPhase,
+        fulfillmentStatus: completed ? ("Completed" as const) : ("Unavailable" as const),
+        fulfilledAt: completed ? "2026-08-11T13:59:00.000Z" : null,
+      },
+    };
+    const html = render({ ...state, view });
+    expect(html).toContain(
+      `<h2 id="order-progress-heading">${heading}</h2><p>${lede.replaceAll("'", "&#x27;")}</p>`,
+    );
+    expect(isOrderSettled(view)).toBe(settled);
+    expect(findInternalText([staticText(html)])).toEqual([]);
+  },
+);
+
+it("tells a pickup guest the store accepted the order while the kitchen ticket is still queued", () => {
+  const state = readyState();
+  if (state.status !== "ready") throw new Error("fixture");
+  const html = render({
+    ...state,
+    view: {
+      ...state.view,
+      order: { ...state.view.order, canonicalPhase: "Accepted" },
+      sources: {
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: {
+          batches: [
+            { orderBatchReference: id(3), status: "Queued", updatedAt: "2026-08-11T13:59:00.000Z" },
+          ],
+        },
+        payments: null,
+      },
+    },
+  });
+  expect(html).toContain("Order accepted");
+  expect(html).toContain("<dt>Kitchen status</dt><dd>In the queue</dd>");
+  expect(html).not.toContain("Order submitted");
+  expect(html).toContain("Your pickup code appears here as soon as your order is ready.");
+});
+
+it("WP-2423: a pickup closed as not collected reads as not collected even though its phase is Cancelled", () => {
+  const state = readyState();
+  if (state.status !== "ready") throw new Error("fixture");
+  const view = {
+    ...state.view,
+    order: { ...state.view.order, canonicalPhase: "Cancelled" as const },
+    sources: {
+      checkedAt: "2026-08-11T14:00:00.000Z",
+      kitchen: {
+        batches: [
+          {
+            orderBatchReference: id(3),
+            status: "Ready" as const,
+            updatedAt: "2026-08-11T13:50:00.000Z",
+          },
+        ],
+      },
+      payments: [
+        {
+          status: "Succeeded" as const,
+          occurredAt: "2026-08-11T13:56:00.000Z",
+          amount: { amountMinor: 2598n, currencyCode: "CAD" },
+          freshnessStatus: "Fresh" as const,
+        },
+      ],
+      pickup: { notCollectedAt: "2026-08-11T13:59:00.000Z" },
+    },
+  };
+  const html = render({ ...state, view });
+  expect(html).toContain("Not collected");
+  expect(html).toContain("Contact the store about your order or a refund.");
+  expect(html).not.toContain("Order cancelled");
+  expect(html).not.toContain("Ready for pickup");
+  expect(html).not.toContain("pickup code");
+  expect(isOrderSettled(view)).toBe(true);
+  expect(findInternalText([staticText(html)])).toEqual([]);
 });
 
 it("WP-2423: says a pickup was not collected and stops offering the pickup code", () => {
@@ -803,7 +944,7 @@ describe("WP-2423: a dine-in round whose payment didn't go through", () => {
     expect(html).toContain("Rounds that weren&#x27;t paid are not included.");
     // Only the failed round carries the note; the paid round's kitchen state is not hidden by it.
     expect(html.match(/didn&#x27;t go through/gu)).toHaveLength(1);
-    expect(html).toContain("Kitchen preparation complete");
+    expect(html).toContain("Your order is ready");
     expect(html).not.toContain("order-status__item--cancelled");
   });
 

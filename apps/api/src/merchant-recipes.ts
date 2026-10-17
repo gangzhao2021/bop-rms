@@ -32,6 +32,7 @@ import {
 import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { recipeIngredientItems } from "./recipe-ingredient-items.js";
+import { createStaffLabels } from "./merchant-staff-labels.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
@@ -342,9 +343,13 @@ export function createMerchantRecipes(options: {
           const people = new Map<string, string | null>(
             members.map((member) => [member.actorReference, member.displayName]),
           );
-          // Staff read a person's name ("You" for themselves), never an identifier fragment.
-          const label = (actor: string) =>
-            actor === scope.actorReference ? "You" : (people.get(actor) ?? "Unnamed staff member");
+          // Staff read a person's name ("You" for themselves), or their role when no name is
+          // recorded; never an identifier fragment.
+          const label = await createStaffLabels(tx as unknown as RoleAssignmentTransaction, scope, {
+            viewer: scope.actorReference,
+            at: options.persistence.now(),
+            names: people,
+          });
           const choices = {
             yieldUnits: Object.keys(recipeYieldUnits),
             items: items

@@ -15,6 +15,12 @@ import {
   orderKitchenProgressConsumerName,
 } from "../application/kitchen-progress-event-consumer-service.js";
 import { createOrderStatusQueryService } from "../application/order-status-projection-service.js";
+import {
+  createOrderPickupNotCollectedConsumerService,
+  orderPickupNotCollectedConsumerName,
+  OrderPickupNotCollectedEventError,
+  parseOrderPickupNotCollectedEnvelope,
+} from "../application/pickup-not-collected-event-consumer-service.js";
 
 vi.mock("@bop/identity", async (original) => ({
   ...(await original<typeof import("@bop/identity")>()),
@@ -81,6 +87,24 @@ describe("DEC-PILOT-BATCH-PHASE-01 pickup sequence", () => {
     expect(
       phase(owner({ acceptedBatches: [B1], termination: { phase: "Cancelled" } }), [started(I1)]),
     ).toBe("Cancelled");
+  });
+  it("a ready pickup closed as not collected ends Cancelled (staff termination), never Rejected or Ready", () => {
+    const accepted = owner({ acceptedBatches: [B1], notCollected: true });
+    expect(resolveOrderCanonicalPhase(accepted, [batchReady()])).toEqual({
+      canonicalPhase: "Cancelled",
+      everAccepted: true,
+      everStarted: true,
+    });
+    // A late Kitchen fact after the closure never reopens it.
+    expect(phase(accepted, [batchReady(), started(I1, B1, 9)])).toBe("Cancelled");
+    // A recorded collection always outranks a closure.
+    expect(phase({ ...accepted, fulfilled: true }, [batchReady()])).toBe("Fulfilled");
+    expect(phase(owner({ notCollected: false, acceptedBatches: [B1] }), [batchReady()])).toBe(
+      "Ready",
+    );
+    expect(() =>
+      resolveOrderCanonicalPhase(owner({ notCollected: "yes" as unknown as boolean }), []),
+    ).toThrow(OrderCanonicalPhaseError);
   });
 });
 
@@ -338,5 +362,97 @@ describe("guest status phase", () => {
     expect(await read(null)).toBe("Submitted");
     // Collected only with the recorded completion (Fulfilled iff fulfillmentStatus Completed).
     expect(await read("Fulfilled")).toBe("Ready");
+  });
+});
+
+describe("Pickup not collected event reading and consumer", () => {
+  const event = (
+    overrides: Record<string, unknown> = {},
+    payload: Record<string, unknown> = {},
+  ) => ({
+    eventId: id(80),
+    eventType: "PickupNotCollected",
+    schemaVersion: 1,
+    occurredAt: at(70),
+    producerModule: "@rms/fulfillment",
+    tenantId: id(81),
+    storeId: id(82),
+    aggregateType: "Fulfillment",
+    aggregateId: id(83),
+    aggregateVersion: 4n,
+    correlationId: id(84),
+    causationId: id(85),
+    actor: { type: "System" },
+    payload: {
+      fulfillmentReference: id(83),
+      orderReference: ORDER,
+      notCollectedReference: id(85),
+      storeReference: id(82),
+      readyAt: at(5),
+      closedAt: at(70),
+      ...payload,
+    },
+    redactionClassification: "indirect_identifier",
+    replayMetadata: { replaySafe: true },
+    ...overrides,
+  });
+  it("keeps the order, fulfillment and closure references and time only", () => {
+    expect(parseOrderPickupNotCollectedEnvelope(event())).toEqual({
+      eventId: id(80),
+      brandReference: id(81),
+      storeReference: id(82),
+      orderReference: ORDER,
+      fulfillmentReference: id(83),
+      notCollectedReference: id(85),
+      closedAt: at(70),
+    });
+  });
+  it("refuses other producers, aggregates, Stores, extra fields and a closure before ready", () => {
+    for (const bad of [
+      event({ producerModule: "@rms/kitchen" }),
+      event({ aggregateType: "KitchenTicket" }),
+      event({ eventType: "FulfillmentCompleted" }),
+      event({}, { storeReference: id(99) }),
+      event({}, { fulfillmentReference: id(98) }),
+      event({}, { actorReference: id(97) }),
+      event({}, { readyAt: at(71) }),
+    ])
+      expect(() => parseOrderPickupNotCollectedEnvelope(bad)).toThrow(
+        OrderPickupNotCollectedEventError,
+      );
+  });
+  it("registers ordering.pickup-not-collected:v1 and retries until the Order is visible", async () => {
+    const record = vi.fn(async () => false);
+    const service = createOrderPickupNotCollectedConsumerService({
+      authorization: { authorize: async () => true },
+      facts: { record },
+    });
+    expect(service.registration).toMatchObject({
+      consumerName: orderPickupNotCollectedConsumerName,
+      eventType: "PickupNotCollected",
+      ownerModule: "@rms/ordering",
+      replaySafe: true,
+    });
+    const transaction = { query: vi.fn() };
+    expect(
+      await service.registration.handler({
+        envelope: event() as never,
+        transaction: transaction as never,
+      } as never),
+    ).toEqual({ status: "retry_required", errorCode: "CONSUMER_TEMPORARY_FAILURE" });
+    record.mockResolvedValue(true);
+    expect(
+      await service.registration.handler({
+        envelope: event() as never,
+        transaction: transaction as never,
+      } as never),
+    ).toEqual({ status: "completed" });
+    const denied = createOrderPickupNotCollectedConsumerService({
+      authorization: { authorize: async () => false },
+      facts: { record },
+    });
+    await expect(denied.consume(transaction as never, event() as never)).rejects.toThrow(
+      "ORDERING_PICKUP_NOT_COLLECTED_DENIED",
+    );
   });
 });

@@ -5,6 +5,7 @@ import pg from "pg";
 import { afterEach, it, vi } from "vitest";
 import {
   createPostgresOrderKitchenProgressFactStore,
+  createPostgresOrderPickupNotCollectedFactStore,
   loadOrderCanonicalPhase,
   parseOrderKitchenProgressEnvelope,
 } from "../../rms/ordering/src/index.ts";
@@ -27,7 +28,7 @@ afterEach(() => vi.unstubAllEnvs());
  * cancellation, termination, pickup completion) inserted by the owner with triggers off, and
  * synthetic published Kitchen outbox events (their creation is covered by the Kitchen suites).
  */
-it("advances pickup and multi-round dine-in phases from consumed Kitchen facts, ignores replays and out-of-order delivery, and catches up published events idempotently", async () => {
+it("advances pickup and multi-round dine-in phases from consumed Kitchen facts, ends a pickup closed as not collected, ignores replays and out-of-order delivery, and catches up published events idempotently", async () => {
   vi.stubEnv("NODE_ENV", "development");
   await withIsolatedDatabase({ caseId: "wp2423_phase" }, async (context) => {
     const admin = new Client(context.clientConfig);
@@ -369,6 +370,7 @@ it("advances pickup and multi-round dine-in phases from consumed Kitchen facts, 
         now: () => new Date().toISOString(),
         publicProfile: { binding: { validUntil: "2999-01-01T00:00:00.000Z" } },
         transactions: { run: (work) => run(work) },
+        credentials: { reference: () => fresh() },
       };
       const consumers = createInternalOrderProgressConsumers(resources);
       const consume = (event) =>
@@ -502,6 +504,153 @@ it("advances pickup and multi-round dine-in phases from consumed Kitchen facts, 
       assert.equal(await phaseOf(dine.order), "In Progress");
       await consume(itemReadyEvent(dine.order, r2.batch, r2.items[0], 10));
       assert.equal(await phaseOf(dine.order), "Ready");
+
+      // ── Pickup closed as not collected (Fulfillment's PickupNotCollected → terminal phase).
+      // Test-only stand-in: the Fulfillment row and its closure record seeded by the owner (their
+      // creation and the closure rules are covered by the pickup-proof suite); the closure predates
+      // the event, as the v15 closures do, so the catch-up publishes it through Fulfillment.
+      const uncollected = await order("Pickup", [1]);
+      await accept(uncollected.order, uncollected.batches[0].batch, 1, 2);
+      await consume(orderReadyEvent(uncollected.order, uncollected.batches[0].batch, 1, 5));
+      assert.equal(await phaseOf(uncollected.order), "Ready");
+      const fulfillment = fresh(),
+        closure = fresh();
+      await ownerRecord(
+        "INSERT INTO rms_fulfillment.fulfillment (fulfillment_id,brand_id,store_id,order_id,order_batch_id,confirmation_id,source_event_id,source_aggregate_version,source_snapshot_digest,source_evidence_id,source_evidence_version,source_evidence_digest,fulfillment_type,canonical_phase,aggregate_version,created_at,correlation_id,data_classification) VALUES ($1,$2,$3,$4,$5,$6,$7,1,$8,$9,1,$8,'Pickup','Pending',1,$10,$11,'IndirectIdentifier')",
+        [
+          fulfillment,
+          brand,
+          store,
+          uncollected.order,
+          uncollected.batches[0].batch,
+          fresh(),
+          fresh(),
+          sha("7"),
+          fresh(),
+          time(2),
+          fresh(),
+        ],
+      );
+      await ownerRecord(
+        "INSERT INTO rms_fulfillment.pickup_not_collected_record (pickup_not_collected_id,brand_id,store_id,fulfillment_id,actor_id,reason,ready_at,closed_at,idempotency_id,correlation_id,aggregate_version_before,data_classification) VALUES ($1,$2,$3,$4,$5,'NotCollected',$6,$7,$8,$9,3,'IndirectIdentifier')",
+        [closure, brand, store, fulfillment, fresh(), time(5), time(70), fresh(), fresh()],
+      );
+      const outboxCount = async () =>
+        Number(
+          (
+            await admin.query(
+              "SELECT count(*) FROM platform_eventing.outbox_event WHERE event_type='PickupNotCollected'",
+            )
+          ).rows[0].count,
+        );
+      const ncDry = await catchUpOrderKitchenProgress({ resources, dryRun: true, consumers });
+      assert.equal(ncDry.notCollectedPublished, 1);
+      assert.equal(ncDry.pendingEvents, 1);
+      assert.deepEqual(ncDry.outcomes, { processed: 1 });
+      assert.equal(ncDry.ordersChangedByCatchUp, 1);
+      assert.equal(await outboxCount(), 0); // dry run wrote nothing
+      assert.equal(await phaseOf(uncollected.order), "Ready");
+      const ncApplied = await catchUpOrderKitchenProgress({ resources, dryRun: false, consumers });
+      assert.equal(ncApplied.notCollectedPublished, 1);
+      assert.deepEqual(ncApplied.outcomes, { processed: 1 });
+      assert.equal(await phaseOf(uncollected.order), "Cancelled");
+      assert.equal(await outboxCount(), 1);
+      const outboxEvent = (
+        await admin.query(
+          "SELECT event_id::text,aggregate_id::text,payload_json FROM platform_eventing.outbox_event WHERE event_type='PickupNotCollected'",
+        )
+      ).rows[0];
+      assert.equal(outboxEvent.aggregate_id, fulfillment);
+      assert.deepEqual(outboxEvent.payload_json, {
+        fulfillmentReference: fulfillment,
+        orderReference: uncollected.order,
+        notCollectedReference: closure,
+        storeReference: store,
+        readyAt: time(5),
+        closedAt: time(70),
+      });
+      // Exactly once: a second run publishes and consumes nothing; the relay's later delivery of
+      // the same event is a duplicate in the inbox.
+      const ncAgain = await catchUpOrderKitchenProgress({ resources, dryRun: false, consumers });
+      assert.equal(ncAgain.notCollectedPublished, 0);
+      assert.equal(ncAgain.pendingEvents, 0);
+      const delivered = {
+        eventId: outboxEvent.event_id,
+        eventType: "PickupNotCollected",
+        schemaVersion: 1,
+        occurredAt: time(70),
+        producerModule: "@rms/fulfillment",
+        tenantId: brand,
+        storeId: store,
+        aggregateType: "Fulfillment",
+        aggregateId: fulfillment,
+        aggregateVersion: 4n,
+        correlationId: fresh(),
+        causationId: closure,
+        actor: { type: "System" },
+        payload: outboxEvent.payload_json,
+        redactionClassification: "indirect_identifier",
+        replayMetadata: { replaySafe: true },
+      };
+      assert.deepEqual(await consume(delivered), { status: "duplicate_completed" });
+      // A different closure for the recorded Order is refused by Ordering's record.
+      const notCollectedStore = createPostgresOrderPickupNotCollectedFactStore(scope);
+      await assert.rejects(
+        run((tx) =>
+          notCollectedStore.record(tx, {
+            eventId: fresh(),
+            brandReference: brand,
+            storeReference: store,
+            orderReference: uncollected.order,
+            fulfillmentReference: fulfillment,
+            notCollectedReference: fresh(),
+            closedAt: time(70),
+          }),
+        ),
+        /ORDER_PICKUP_NOT_COLLECTED_CONFLICT/u,
+      );
+      // A closure for a dine-in Order is not a pickup outcome.
+      await assert.rejects(
+        run((tx) =>
+          notCollectedStore.record(tx, {
+            eventId: fresh(),
+            brandReference: brand,
+            storeReference: store,
+            orderReference: dine.order,
+            fulfillmentReference: fresh(),
+            notCollectedReference: fresh(),
+            closedAt: time(70),
+          }),
+        ),
+        /ORDER_PICKUP_NOT_COLLECTED_INVALID/u,
+      );
+      // Append-only and Store-scoped for the API role; the collected pickup stays Fulfilled.
+      await run((tx) => tx.query("DELETE FROM rms_ordering.order_pickup_not_collected_fact", []));
+      await run((tx) =>
+        tx.query("DELETE FROM rms_fulfillment.pickup_not_collected_publication", []),
+      );
+      assert.equal(
+        (await admin.query("SELECT count(*) FROM rms_ordering.order_pickup_not_collected_fact"))
+          .rows[0].count,
+        "1",
+      );
+      assert.equal(
+        (await admin.query("SELECT count(*) FROM rms_fulfillment.pickup_not_collected_publication"))
+          .rows[0].count,
+        "1",
+      );
+      assert.equal(
+        (
+          await run(
+            (tx) =>
+              tx.query("SELECT count(*) FROM rms_ordering.order_pickup_not_collected_fact", []),
+            otherStore,
+          )
+        ).rows[0].count,
+        "0",
+      );
+      assert.equal(await phaseOf(uncollected.order), "Cancelled");
+      assert.equal(await phaseOf(pickup.order), "Fulfilled");
     } finally {
       await admin.end();
     }

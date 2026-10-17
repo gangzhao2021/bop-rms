@@ -33,6 +33,7 @@ import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { recipeIngredientItems } from "./recipe-ingredient-items.js";
+import { createStaffLabels } from "./merchant-staff-labels.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 
 /**
@@ -306,8 +307,11 @@ export function createMerchantOptionRecipes(options: {
             .filter((actor) => actor !== s.actor && !people.get(actor));
           for (const [actor, displayName] of await memberDisplayNames(directory, scope, unnamed))
             people.set(actor, displayName);
-          const label = (actor: string) =>
-            actor === s.actor ? "You" : (people.get(actor) ?? "Unnamed staff member");
+          const label = await createStaffLabels(tx as unknown as RoleAssignmentTransaction, scope, {
+            viewer: s.actor,
+            at,
+            names: people,
+          });
           const options_ = [];
           for (const row of rows) {
             const change =

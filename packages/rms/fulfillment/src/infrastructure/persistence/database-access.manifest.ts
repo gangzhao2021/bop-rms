@@ -35,6 +35,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 / DEC-PILOT-BATCH-PHASE-01: the PickupNotCollected event of each closure.
+      table: "pickup_not_collected_publication",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/fulfillment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "pickup_not_collected_record",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/fulfillment" },

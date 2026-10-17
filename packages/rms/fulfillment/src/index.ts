@@ -62,6 +62,9 @@ export * from "./domain/fulfillment-item-cancellation.js";
 export { createPostgresPickupProofStore } from "./infrastructure/persistence/pickup-proof-store.js";
 
 export { createPostgresPickupHandoffStore } from "./infrastructure/persistence/pickup-handoff-store.js";
+// WP-2423 / DEC-PILOT-BATCH-PHASE-01: a pickup closed as not collected, published for Ordering.
+export * from "./application/pickup-not-collected-event.js";
+export { createPostgresPickupNotCollectedPublisher } from "./infrastructure/persistence/pickup-not-collected-publication-store.js";
 
 export { createPickupCredentialProvider } from "./infrastructure/crypto/pickup-credential-provider.js";
 

@@ -138,7 +138,7 @@ export function StoreWasteListPage({
                         <StaffTime instant={record.recordedAt} />
                       </Link>
                     </td>
-                    <td>{view.people[record.recordedBy] ?? "Unnamed staff member"}</td>
+                    <td>{view.people[record.recordedBy] ?? "Staff member"}</td>
                     <td>
                       {record.lines
                         .map(
@@ -438,7 +438,7 @@ export function StoreWasteDetailPage({
     view.items.find((item) => item.itemReference === reference)?.name ?? "Item";
   const placeName = (reference: string) =>
     view.locations.find((item) => item.locationReference === reference)?.name ?? "Location";
-  const person = (reference: string) => view.people[reference] ?? "Unnamed staff member";
+  const person = (reference: string) => view.people[reference] ?? "Staff member";
   const review = async (decision: "Accepted" | "Voided", reasonCode: string) => {
     if (!client.command) return;
     setBusy(true);

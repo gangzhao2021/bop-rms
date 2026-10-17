@@ -16,7 +16,9 @@ import {
   type StockCountAction,
   type StockCountAggregate,
 } from "@rms/inventory";
+import type { RoleAssignmentTransaction } from "@bop/permission";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { createStaffLabels } from "./merchant-staff-labels.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { merchantStockCatalog } from "./merchant-stock-catalog.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -340,10 +342,13 @@ export function createMerchantStockCounts(options: {
           const names = new Map<string, string | null>(
             members.map((member) => [member.actorReference, member.displayName]),
           );
-          // v15 run: staff read a person's name ("You" for themselves), never an identifier
-          // fragment such as "Staff 0100" (same rule as recipe authors).
-          const label = (actor: string) =>
-            actor === scope.actor ? "You" : (names.get(actor) ?? "Unnamed staff member");
+          // v15 run: staff read a person's name ("You" for themselves), or their role when no
+          // name is recorded, never an identifier fragment such as "Staff 0100".
+          const label = await createStaffLabels(
+            tx as unknown as RoleAssignmentTransaction,
+            scope.owner,
+            { viewer: scope.actor, at: options.persistence.now(), names },
+          );
           const staff = members
             .filter((member) => member.membershipLifecycle === "Active")
             .map((member) => ({

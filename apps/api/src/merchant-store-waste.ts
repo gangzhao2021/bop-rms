@@ -1,4 +1,9 @@
-import { listStoreMembers, type MemberDirectoryTransaction } from "@bop/membership";
+import {
+  listStoreMembers,
+  memberDisplayNames,
+  type MemberDirectoryTransaction,
+} from "@bop/membership";
+import type { RoleAssignmentTransaction } from "@bop/permission";
 import {
   listStoreWaste,
   listWasteableStock,
@@ -14,6 +19,7 @@ import {
   type LedgerTransaction,
 } from "@rms/inventory";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { createStaffLabels } from "./merchant-staff-labels.js";
 import { merchantStockCatalog } from "./merchant-stock-catalog.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -148,18 +154,44 @@ export function createMerchantStoreWaste(options: {
       options.persistence.transactions.run(async (tx) => {
         const scope = await scopeFor(tx, input.sessionCookie, current.sessionReference);
         const catalog = await merchantStockCatalog(tx, scope.owner, options.locale);
-        const members = await listStoreMembers(
-          tx as unknown as MemberDirectoryTransaction,
+        const directory = tx as unknown as MemberDirectoryTransaction;
+        const members = await listStoreMembers(directory, scope.owner);
+        const names = new Map<string, string | null>(
+          members.map((member) => [member.actorReference, member.displayName]),
+        );
+        // v15 run: staff read a person's name ("You" for themselves), or their role when no name
+        // is recorded; never "Unnamed staff member" or an identifier fragment.
+        const label = await createStaffLabels(
+          tx as unknown as RoleAssignmentTransaction,
           scope.owner,
+          { viewer: scope.actor, at: options.persistence.now(), names },
         );
-        const labels = Object.fromEntries(
-          members.map((member) => [
-            member.actorReference,
-            member.actorReference === scope.actor
-              ? "You"
-              : (member.displayName ?? "Unnamed staff member"),
-          ]),
-        );
+        // Everyone a record names: the Store's staff, then people no longer on its staff list (a
+        // Brand Owner, someone whose Store assignment ended) from the Brand's member directory.
+        const people = async (
+          records: readonly { recordedBy: string; review: { reviewedBy: string } | null }[],
+        ) => {
+          const others = [
+            ...new Set(
+              records.flatMap((record) => [
+                record.recordedBy,
+                ...(record.review === null ? [] : [record.review.reviewedBy]),
+              ]),
+            ),
+          ].filter((actor) => !names.has(actor));
+          for (const [actor, displayName] of await memberDisplayNames(
+            directory,
+            scope.owner,
+            others.filter((actor) => actor !== scope.actor),
+          ))
+            names.set(actor, displayName);
+          return Object.fromEntries(
+            [...members.map((member) => member.actorReference), ...others].map((actor) => [
+              actor,
+              label(actor),
+            ]),
+          );
+        };
         const base = {
           sourceAsOf: options.persistence.now(),
           viewer: scope.actor,
@@ -173,7 +205,6 @@ export function createMerchantStoreWaste(options: {
           stock: scope.permissions.mayRecord
             ? await listWasteableStock(ledger(tx), scope.owner)
             : [],
-          people: labels,
         };
         if (input.wasteReference !== null) {
           const record = await loadStoreWaste(ledger(tx), scope.owner, input.wasteReference);
@@ -188,6 +219,7 @@ export function createMerchantStoreWaste(options: {
           return {
             screenId: "INV-WASTE-DETAIL" as const,
             ...base,
+            people: await people([record]),
             records: [record],
             hasMore: false,
           };
@@ -200,7 +232,12 @@ export function createMerchantStoreWaste(options: {
                 needsReviewOnly: input.needsReviewOnly,
               })
             : { records: [], hasMore: false };
-        return { screenId: "INV-WASTE-LIST" as const, ...base, ...page };
+        return {
+          screenId: "INV-WASTE-LIST" as const,
+          ...base,
+          people: await people(page.records),
+          ...page,
+        };
       }),
     );
   };

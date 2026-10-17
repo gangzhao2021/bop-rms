@@ -41,6 +41,12 @@ export interface OrderCanonicalPhaseOwnerFacts {
   readonly termination: null | { readonly phase: "Cancelled" | "Rejected" };
   /** A pickup fulfillment completion record exists (the Order was collected). */
   readonly fulfilled: boolean;
+  /**
+   * The ready pickup was closed by staff as not collected (Fulfillment's PickupNotCollected). A
+   * staff termination of the Order (Handoff 24.8 `Cancelled`, reason kept by Fulfillment); it never
+   * outranks a recorded collection.
+   */
+  readonly notCollected?: boolean;
 }
 
 export class OrderCanonicalPhaseError extends Error {
@@ -101,6 +107,8 @@ export function resolveOrderCanonicalPhase(
     )
       return invalid();
     if (typeof owner.fulfilled !== "boolean") return invalid();
+    const notCollected = owner.notCollected ?? false;
+    if (typeof notCollected !== "boolean") return invalid();
 
     const started = new Set<string>();
     const made = new Set<string>();
@@ -137,7 +145,7 @@ export function resolveOrderCanonicalPhase(
       if (owner.fulfilled && !itemCancelled) phase = "Fulfilled";
       else if (owner.termination !== null)
         phase = owner.termination.phase === "Rejected" && !everAccepted ? "Rejected" : "Cancelled";
-      else if (itemCancelled) phase = "Cancelled";
+      else if (itemCancelled || notCollected) phase = "Cancelled";
       else if (isMade) phase = "Ready";
       else if (everStarted) phase = "InProgress";
       else if (everAccepted) phase = "Accepted";

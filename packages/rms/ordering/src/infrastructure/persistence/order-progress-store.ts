@@ -6,6 +6,7 @@ import {
   type OrderKitchenProgressFactKind,
 } from "../../domain/order-canonical-phase.js";
 import type { OrderKitchenProgressEvent } from "../../application/kitchen-progress-event.js";
+import type { OrderPickupNotCollectedEvent } from "../../application/pickup-not-collected-event-consumer-service.js";
 
 type Scope = Readonly<{ brandReference: string; storeReference: string }>;
 const iso = (value: unknown) => (value instanceof Date ? value.toISOString() : String(value));
@@ -129,6 +130,63 @@ export function createPostgresOrderKitchenProgressFactStore(scope: Scope) {
   });
 }
 
+/**
+ * WP-2423 / DEC-PILOT-BATCH-PHASE-01: append a consumed PickupNotCollected event to Ordering's own
+ * record, one per pickup Order. A replay of the same closure is a no-op; a different closure or
+ * changed payload for a recorded Order or event is refused.
+ */
+export function createPostgresOrderPickupNotCollectedFactStore(scope: Scope) {
+  return Object.freeze({
+    async record(transaction: ConsumerTransaction, event: OrderPickupNotCollectedEvent) {
+      const { brand, store } = await scoped(transaction, scope);
+      if (event.brandReference !== brand || event.storeReference !== store)
+        throw new Error("ORDER_PICKUP_NOT_COLLECTED_SCOPE_DENIED");
+      const order = await transaction.query<{ order_type: string }>(
+        "SELECT order_type FROM rms_ordering.order_header WHERE brand_id=$1 AND store_id=$2 AND order_id=$3",
+        [brand, store, event.orderReference],
+      );
+      const header = order.rows[0];
+      if (!header) return false;
+      if (header.order_type !== "Pickup") throw new Error("ORDER_PICKUP_NOT_COLLECTED_INVALID");
+      const existing = await transaction.query<{
+        source_event_id: string;
+        order_id: string;
+        fulfillment_id: string;
+        not_collected_id: string;
+        closed_at: Date | string;
+      }>(
+        "SELECT source_event_id::text,order_id::text,fulfillment_id::text,not_collected_id::text,closed_at FROM rms_ordering.order_pickup_not_collected_fact WHERE brand_id=$1 AND store_id=$2 AND (source_event_id=$3 OR order_id=$4)",
+        [brand, store, event.eventId, event.orderReference],
+      );
+      if (existing.rows.length > 0) {
+        const same = existing.rows.every(
+          (row) =>
+            row.order_id === event.orderReference &&
+            row.fulfillment_id === event.fulfillmentReference &&
+            row.not_collected_id === event.notCollectedReference &&
+            iso(row.closed_at) === event.closedAt,
+        );
+        if (!same) throw new Error("ORDER_PICKUP_NOT_COLLECTED_CONFLICT");
+        return true;
+      }
+      const inserted = await transaction.query(
+        "INSERT INTO rms_ordering.order_pickup_not_collected_fact (source_event_id,brand_id,store_id,order_id,fulfillment_id,not_collected_id,closed_at) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+        [
+          event.eventId,
+          brand,
+          store,
+          event.orderReference,
+          event.fulfillmentReference,
+          event.notCollectedReference,
+          event.closedAt,
+        ],
+      );
+      if (inserted.rowCount !== 1) throw new Error("ORDER_PICKUP_NOT_COLLECTED_NOT_RECORDED");
+      return true;
+    },
+  });
+}
+
 const uuidList = (value: unknown): string[] => {
   if (Array.isArray(value)) return value.map((entry) => parseOrderingReference(String(entry)));
   if (typeof value === "string" && /^\{.*\}$/u.test(value))
@@ -142,7 +200,8 @@ const uuidList = (value: unknown): string[] => {
 
 /**
  * WP-2423 / DEC-PILOT-BATCH-PHASE-01: the Order's current overall phase, merged by Ordering from
- * its own append-only records (items, acceptance, cancellations, termination, pickup completion)
+ * its own append-only records (items, acceptance, cancellations, termination, pickup completion or
+ * closure as not collected)
  * and the Kitchen facts in its inbox record. Read under the caller's transaction and scope; returns
  * null when the Order is not visible in this Store.
  */
@@ -188,6 +247,10 @@ export async function loadOrderCanonicalPhase(
     "SELECT 1 FROM rms_ordering.order_fulfillment_completion_record " + where + " LIMIT 1",
     values,
   );
+  const notCollected = await transaction.query(
+    "SELECT 1 FROM rms_ordering.order_pickup_not_collected_fact " + where + " LIMIT 1",
+    values,
+  );
   const kitchen = await transaction.query<{
     order_batch_id: string;
     order_item_id: string | null;
@@ -228,6 +291,7 @@ export async function loadOrderCanonicalPhase(
                 throw new Error("ORDER_CANONICAL_PHASE_UNAVAILABLE");
               })(),
       fulfilled: fulfilled.rows.length > 0,
+      notCollected: notCollected.rows.length > 0,
     },
     facts,
   );

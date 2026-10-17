@@ -86,6 +86,7 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `PaymentFailed:v1` — owner `@rms/payment`; stable; store; payment
 - `PaymentRefunded:v1` — owner `@rms/payment`; stable; store; payment
 - `PaymentSucceeded:v1` — owner `@rms/payment`; stable; store; payment
+- `PickupNotCollected:v1` — owner `@rms/fulfillment`; stable; store; indirect_identifier
 - `PriceBookArchived:v1` — owner `@rms/pricing`; stable; brand; none
 - `PriceBookDraftCreated:v1` — owner `@rms/pricing`; stable; brand; none
 - `PriceBookDraftReplaced:v1` — owner `@rms/pricing`; stable; brand; none

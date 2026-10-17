@@ -484,5 +484,16 @@ export {
 } from "./application/kitchen-progress-event-consumer-service.js";
 export {
   createPostgresOrderKitchenProgressFactStore,
+  createPostgresOrderPickupNotCollectedFactStore,
   loadOrderCanonicalPhase,
 } from "./infrastructure/persistence/order-progress-store.js";
+// WP-2423 / DEC-PILOT-BATCH-PHASE-01: a pickup closed as not collected ends the Order phase.
+export {
+  createOrderPickupNotCollectedConsumerService,
+  orderPickupNotCollectedConsumerName,
+  orderPickupNotCollectedEventType,
+  parseOrderPickupNotCollectedEnvelope,
+  OrderPickupNotCollectedEventError,
+  type OrderPickupNotCollectedEvent,
+  type OrderPickupNotCollectedConsumerPorts,
+} from "./application/pickup-not-collected-event-consumer-service.js";

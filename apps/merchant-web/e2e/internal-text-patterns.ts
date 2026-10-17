@@ -70,8 +70,11 @@ export const internalTextRules: readonly InternalTextRule[] = [
   // A role written as a code-like proper noun mid-sentence ("ask Staff"); guests ask staff.
   { name: "capitalized role", pattern: /\b(?:[Aa]sk|[Tt]ell|[Ss]how|[Cc]all) Staff\b/gu },
   // A person named by an identifier fragment, as in the v15 stock count "counted by Staff 0100";
-  // staff read a name ("You", "Mina Chen") or "Unnamed staff member".
+  // staff read a name ("You", "Mina Chen") or, when none is recorded, their role ("Store owner").
   { name: "identifier fragment", pattern: /\b(?:Staff|Member|Actor|User) [0-9a-f]{4}\b/gu },
+  // A person shown as nameless, as in the v15 stock counts "counted by Unnamed staff member" for
+  // the Store owner: every staff member has a name or, failing that, a role.
+  { name: "unnamed person", pattern: /\bUnnamed (?:staff member|person|user)\b/giu },
 ];
 
 /** Reviewed business language that the rules above would otherwise flag. */

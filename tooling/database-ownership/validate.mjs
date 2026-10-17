@@ -2200,6 +2200,8 @@ async function scanUnsupported(root, module, diagnostics) {
             owner: "ordering",
             tables: [
               "order_kitchen_progress_fact",
+              "order_pickup_not_collected_fact",
+              "order_header",
               "order_item",
               "order_batch",
               "order_acceptance_record",
@@ -2791,6 +2793,15 @@ async function scanUnsupported(root, module, diagnostics) {
             "src/infrastructure/persistence/pickup-handoff-store.ts",
             "src/infrastructure/persistence/pickup-handoff-history.ts",
           ].includes(moduleRelative);
+        // WP-2423 / DEC-PILOT-BATCH-PHASE-01: the PickupNotCollected event of each closure.
+        const acceptedPickupNotCollectedPublicationAsset =
+          module.packageName === "@rms/fulfillment" &&
+          module.manifest.ownedDatabase?.schema === "rms_fulfillment" &&
+          ["fulfillment", "pickup_not_collected_record", "pickup_not_collected_publication"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/pickup-not-collected-publication-store.ts";
         const acceptedFulfillmentCompletionStoreAsset =
           module.packageName === "@rms/fulfillment" &&
           module.manifest.ownedDatabase?.schema === "rms_fulfillment" &&
@@ -3679,6 +3690,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPickupProofStoreAsset &&
           !acceptedPickupHandoffStoreAsset &&
           !acceptedFulfillmentCompletionStoreAsset &&
+          !acceptedPickupNotCollectedPublicationAsset &&
           !acceptedKitchenLifecycleStoreAsset &&
           !acceptedKitchenWorkCancellationAsset &&
           !acceptedKitchenReworkAsset &&

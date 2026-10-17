@@ -2,6 +2,7 @@ import { canonicalizeRfc8785, sha256Hex } from "../../bop/audit/src/index.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
@@ -16,7 +17,11 @@ import {
   createKitchenWorkLifecycleService,
   createPostgresKitchenWorkLifecycleStore,
 } from "../../rms/kitchen/src/index.ts";
-import { createPostgresOrderKitchenSourceStore } from "../../rms/ordering/src/index.ts";
+import {
+  acquireOrderDispositionFence,
+  createPostgresDiningOrderPreparationSource,
+  createPostgresOrderKitchenSourceStore,
+} from "../../rms/ordering/src/index.ts";
 import { loadOutboxEnvelope } from "../../bop/eventing/src/index.ts";
 import { readOrderCreationHistory } from "../../rms/ordering/src/infrastructure/persistence/order-creation-query-store.ts";
 import { orderCreatedSourceInput } from "../../rms/ordering/src/application/order-created-source.ts";
@@ -806,6 +811,86 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
           }),
         )
       ).evidenceDigest;
+
+      // v15 2026-10-17 regression (40P01): a guest's dine-in status read takes the Order's
+      // disposition fence (customer-order-status-read.ts), then reads the Order header and Batch
+      // FOR SHARE; the kitchen command's current-source check (`resolveIssued`) runs concurrently.
+      // The guest read holds the fence first and reads the rows only once the kitchen check is
+      // waiting on a lock. When the check locked the header before requesting the fence, the two
+      // deadlocked; with the fence first, the check waits for the read and both complete.
+      {
+        const fenceScope = {
+          brandReference: brand,
+          storeReference: store,
+          orderReference: order.order,
+        };
+        const waiting = async () => {
+          for (let attempt = 0; attempt < 200; attempt += 1) {
+            const rows = await one(
+              "SELECT count(*)::int AS waiting FROM pg_catalog.pg_locks l JOIN pg_catalog.pg_database d ON d.oid=l.database WHERE d.datname=current_database() AND NOT l.granted",
+            );
+            if (rows[0].waiting > 0) return;
+            await delay(25);
+          }
+          throw new Error("kitchen source check never waited on the Order fence");
+        };
+        const deadlocks = async () =>
+          (
+            await one(
+              "SELECT deadlocks::int AS deadlocks FROM pg_catalog.pg_stat_database WHERE datname=current_database()",
+            )
+          )[0].deadlocks;
+        const deadlocksBefore = await deadlocks();
+        let fenced;
+        const held = new Promise((resolve) => (fenced = resolve));
+        const reader = transactions().run(async (tx) => {
+          await acquireOrderDispositionFence(tx, fenceScope);
+          fenced();
+          await waiting();
+          return createPostgresDiningOrderPreparationSource({
+            brandReference: brand,
+            storeReference: store,
+            authorize: async () => true,
+          }).resolve({
+            transaction: tx,
+            brandReference: brand,
+            storeReference: store,
+            orderReference: order.order,
+            diningSessionReference: order.session,
+            guestSessionReference: order.guest,
+            observedAt: new Date().toISOString(),
+          });
+        });
+        await held;
+        const writer = scoped((tx) =>
+          kitchenSource.resolveIssued({
+            transaction: tx,
+            query: { ...sourceQuery, observedAt: new Date().toISOString() },
+          }),
+        );
+        const [read, check] = await Promise.allSettled([reader, writer]);
+        const reason = (result) =>
+          result.status === "rejected"
+            ? String(result.reason?.code ?? "") +
+              " " +
+              String(result.reason?.message ?? result.reason) +
+              " " +
+              String(result.reason?.cause?.code ?? "")
+            : "";
+        // The kitchen source reports a lock failure as unavailable; the server's deadlock count
+        // (flushed when the victim's connection closes) names it.
+        let deadlocksAfter = await deadlocks();
+        for (let attempt = 0; attempt < 20 && deadlocksAfter === deadlocksBefore; attempt += 1) {
+          await delay(100);
+          deadlocksAfter = await deadlocks();
+        }
+        assert.equal(deadlocksAfter - deadlocksBefore, 0, "deadlocks detected (40P01)");
+        assert.equal(read.status, "fulfilled", "guest status read: " + reason(read));
+        assert.equal(check.status, "fulfilled", "kitchen source check: " + reason(check));
+        assert.equal(read.value.orderVersion, 2);
+        assert.equal(read.value.orderReference, order.order);
+        assert.equal(check.value.evidenceDigest, sourceEvidenceDigest);
+      }
       await admin.query(
         "INSERT INTO rms_kitchen.kitchen_ticket (kitchen_ticket_id,brand_id,store_id,order_id,order_batch_id,confirmation_id,consumer_name,consumer_version,source_event_id,source_aggregate_version,source_snapshot_digest,confirmed_at,correlation_id,semantic_event_binding_digest,source_evidence_id,source_evidence_version,source_evidence_digest,source_evidence_captured_at,work_plan_id,work_plan_version,work_plan_digest,work_plan_generated_at,aggregate_version,status,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,'kitchen.confirmed-order:v1',1,$7,2,$8,$9,$10,$11,$12,1,$13,$9,$15,1,$16,$14,1,'Open','System','System',$14,$14)",
         [

@@ -36,6 +36,32 @@ const started = (storeId = scope.storeReference) => ({
   replayMetadata: { replaySafe: true },
 });
 
+const notCollected = (storeId = scope.storeReference) => ({
+  eventId: id(20),
+  eventType: "PickupNotCollected",
+  schemaVersion: 1,
+  occurredAt: "2026-10-17T11:59:00.000Z",
+  producerModule: "@rms/fulfillment",
+  tenantId: scope.brandReference,
+  storeId,
+  aggregateType: "Fulfillment",
+  aggregateId: id(21),
+  aggregateVersion: 4n,
+  correlationId: id(22),
+  causationId: id(24),
+  actor: { type: "System" },
+  payload: {
+    fulfillmentReference: id(21),
+    orderReference: id(23),
+    notCollectedReference: id(24),
+    storeReference: storeId,
+    readyAt: "2026-10-17T10:00:00.000Z",
+    closedAt: "2026-10-17T11:59:00.000Z",
+  },
+  redactionClassification: "indirect_identifier",
+  replayMetadata: { replaySafe: true },
+});
+
 afterEach(() => vi.unstubAllEnvs());
 
 it("registers Ordering's Kitchen progress consumer for each Kitchen event and refuses another Store or an expired binding", async () => {
@@ -46,12 +72,19 @@ it("registers Ordering's Kitchen progress consumer for each Kitchen event and re
     ["ordering.kitchen-progress:v1", "KitchenItemReady"],
     ["ordering.kitchen-progress:v1", "KitchenOrderReady"],
     ["ordering.kitchen-progress:v1", "KitchenTicketClosed"],
+    ["ordering.pickup-not-collected:v1", "PickupNotCollected"],
   ]);
   const transaction = { query: vi.fn() };
   await expect(consumers[0].consume(transaction, started(id(99)))).rejects.toThrow();
   const expired = createInternalOrderProgressConsumers(resources("2026-10-17T00:00:00.000Z"));
   await expect(expired[0].consume(transaction, started())).rejects.toThrow(
     "ORDERING_KITCHEN_PROGRESS_DENIED",
+  );
+  await expect(expired[4].consume(transaction, notCollected())).rejects.toThrow(
+    "ORDERING_PICKUP_NOT_COLLECTED_DENIED",
+  );
+  await expect(consumers[4].consume(transaction, notCollected(id(99)))).rejects.toThrow(
+    "ORDERING_PICKUP_NOT_COLLECTED_DENIED",
   );
   expect(transaction.query).not.toHaveBeenCalled();
 });

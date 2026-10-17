@@ -9,6 +9,7 @@ import { createOrderKitchenSourceFromSnapshot } from "../../application/order-ki
 import { createPostgresOrderCreationQueryStore } from "./order-creation-query-store.js";
 import { createPostgresOrderPaymentDispositionReader } from "./order-payment-disposition-store.js";
 import {
+  acquireOrderDispositionFence,
   createPostgresOrderInitialExecutionReader,
   initialRevisionIsCurrent,
 } from "./order-termination-store.js";
@@ -49,6 +50,12 @@ export function createPostgresOrderKitchenSourceStore(options: {
       scope.brandReference,
       scope.storeReference,
     ]);
+    // WP-2423 lock order: the Order's disposition fence comes before the Order row lock that
+    // `withCurrentSubmission` takes below (FOR UPDATE OF the order header). The dine-in and pickup
+    // readers called inside it take the same fence; taken there, after the row lock, a kitchen
+    // command holding the header and waiting for the fence deadlocked a guest status read that
+    // held the fence and waited for the header FOR SHARE (v15 2026-10-17: 40P01).
+    await acquireOrderDispositionFence(tx, { ...scope, orderReference: query.orderReference });
     const source = createOrderKitchenSourceQueryService({
       authorization: { authorize: (request) => options.authorize(tx, request) },
       digests: { sha256: options.sha256 },
