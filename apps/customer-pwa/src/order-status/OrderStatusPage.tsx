@@ -129,12 +129,20 @@ export function isAwaitingCollection(view: OrderStatusView): boolean {
 /**
  * An accepted order whose food is still queued or being made: the next change the guest waits for
  * is "Ready". A dine-in round already served, or one waiting for payment, is not.
+ *
+ * WP-2423 (v15 2026-10-17): decided from the kitchen's own progress. In the pilot the order's
+ * phase stays `Submitted` until it is collected (Ordering's status projection is advanced only by
+ * Ordering's records), so a phase-only test never applied and the page kept its 15 s pace while
+ * the kitchen made the order. A kitchen ticket exists only once the Store accepted the order; an
+ * order still waiting for the Store (no ticket yet) keeps the normal pace.
  */
 export function isInPreparation(view: OrderStatusView): boolean {
-  const phase = view.order.canonicalPhase;
-  if (isOrderSettled(view) || (phase !== "Accepted" && phase !== "In Progress")) return false;
+  if (isOrderSettled(view) || view.sources?.storeAcceptance !== undefined) return false;
   const kitchen = kitchenStatus(view);
-  return kitchen === "Queued" || kitchen === "Preparing" || kitchen === "Unknown";
+  if (kitchen === "Preparing") return true;
+  if (kitchen === "Queued") return view.sources?.kitchen != null;
+  const phase = view.order.canonicalPhase;
+  return kitchen === "Unknown" && (phase === "Accepted" || phase === "In Progress");
 }
 
 /** The next polling state after the order status changed. */

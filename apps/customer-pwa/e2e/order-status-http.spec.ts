@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import {
+  v15PickupOrderReference,
+  v15PickupStatusBody,
+} from "../src/order-status/v15-pickup-status.fixture";
 
 // Synthetic HTTP evidence for the production App. No live Store or Payment result.
 const id = (n: number) => "018f8800-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -731,5 +735,87 @@ test.describe("@production order status HTTP continuity", () => {
     // Shown on the first follow-up (one second), well before the old 2 s + 3 s backoff.
     expect(Date.now() - (issuedAt ?? 0)).toBeLessThan(2_500);
     expect(codeReads).toBeGreaterThanOrEqual(2);
+  });
+
+  // v15 2026-10-17: the pilot keeps the order phase at Submitted while the kitchen works; the page
+  // read that as "not accepted" and checked every 15 s, so Ready showed 13 s after the kitchen
+  // finished. Bodies below are the shape the pilot sends (see v15-pickup-status.fixture.ts).
+  test("WP-2423: shows a pilot pickup ready within seconds of the kitchen finishing, with no tap before", async ({
+    page,
+  }) => {
+    await page.route("**/bff/customer/entry", (route) =>
+      route.fulfill({
+        status: 201,
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 2,
+          status: "Established",
+          brandDisplayName: "Synthetic Brand",
+          storeDisplayName: "Synthetic Status Store",
+          publicStoreReference: id(6),
+          publicTableReference: null,
+          channel: "Pickup",
+          operatingState: "Open",
+          availableServiceModes: ["Pickup"],
+          locale: "en-CA",
+          contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+          csrfToken: "h".repeat(43),
+        },
+      }),
+    );
+    let readyAt: number | null = null;
+    let reads = 0;
+    await page.route("**/api/v1/orders/*/status", async (route) => {
+      reads += 1;
+      // The kitchen finishes just after the guest's second check.
+      if (reads === 2) readyAt = Date.now() + 200;
+      const finished = readyAt !== null && Date.now() >= readyAt;
+      await route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: v15PickupStatusBody(finished ? "ready" : reads === 1 ? "queued" : "preparing"),
+      });
+    });
+    let codeReads = 0;
+    await page.route("**/api/v1/orders/*/pickup-code", (route) => {
+      codeReads += 1;
+      return route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          status: "Ready",
+          orderReference: v15PickupOrderReference,
+          orderNumber: "17",
+          storeDisplayName: "Synthetic Status Store",
+          pickupInstruction: "Show this code at the pickup counter.",
+          generation: 1,
+          proofKind: "Opaque",
+          proofValue: "AbCdEfGhIjKlMnOpQrStUQ",
+          counterCode: "048213",
+          observedAt: new Date(Date.now() - 1_000).toISOString(),
+          expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+        },
+      });
+    });
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(
+      page.getByRole("heading", { name: "Synthetic Status Store", exact: true }),
+    ).toBeVisible();
+    await page.evaluate((reference) => {
+      history.pushState(null, "", "/orders/" + reference);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, v15PickupOrderReference);
+    const main = page.getByRole("main");
+    await expect(main).toContainText("In the queue");
+    // Before the order is ready there is nothing to tap and no code is asked for.
+    await expect(main).toContainText(
+      "Your pickup code appears here as soon as your order is ready.",
+    );
+    await expect(main.getByRole("button", { name: "Show pickup code" })).toHaveCount(0);
+    expect(codeReads).toBe(0);
+    await expect(main.getByText("048 213", { exact: true })).toBeVisible({ timeout: 8_000 });
+    expect(readyAt).not.toBeNull();
+    // One 3 s check plus the code read, against up to 15 s before.
+    expect(Date.now() - (readyAt ?? 0)).toBeLessThan(5_000);
+    await expectNoInternalText(page);
   });
 });

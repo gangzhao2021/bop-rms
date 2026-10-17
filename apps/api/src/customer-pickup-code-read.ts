@@ -73,6 +73,11 @@ export function createCustomerPickupCodeRead(options: CustomerPickupCodeReadOpti
           orderReference: input.orderReference,
         };
         if (before.order.fulfillmentStatus === "Completed") return notReady;
+        // WP-2423 (v15 2026-10-17): no kitchen ticket yet means the Store has not accepted the
+        // order, so nothing is made and nothing can be ready. Fulfillment readiness only exists
+        // for a confirmed order (its source check refused this one and the guest saw 503 "can't
+        // be shown right now"); the guest is told the code appears once the order is ready.
+        if (before.sources.kitchen === null) return notReady;
         const source = await readiness.lockByOrder({
           ...scope,
           transaction,

@@ -39,6 +39,18 @@ const input = {
   orderReference: "0190fa47-0000-7000-8000-000000000003",
 };
 const now = "2026-09-20T06:00:00.000Z";
+// The Store accepted the order: the kitchen has its ticket (the status read's kitchen source).
+const accepted = {
+  kitchen: {
+    batches: [
+      {
+        orderBatchReference: "0190fa47-0000-7000-8000-000000000005",
+        status: "Ready",
+        updatedAt: now,
+      },
+    ],
+  },
+};
 function options() {
   return {
     status: {
@@ -78,7 +90,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   ports.status.mockResolvedValue({
     order: { orderType: "Pickup", orderNumber: "11", fulfillmentStatus: "Pending" },
-    sources: {},
+    sources: accepted,
   });
   ports.readiness.mockResolvedValue(readinessSource());
   ports.proof.mockResolvedValue({
@@ -116,6 +128,23 @@ describe("current Guest pickup proof read", () => {
     });
     expect(ports.proof).not.toHaveBeenCalled();
   });
+  it("says not ready before the Store accepts, without reading fulfillment (v15: was 503)", async () => {
+    // WP-2423 (v15 2026-10-17): no kitchen ticket yet. Fulfillment readiness exists only for a
+    // confirmed order; asking it refused the order and the guest saw "can't be shown right now".
+    ports.status.mockResolvedValue({
+      order: { orderType: "Pickup", orderNumber: "11", fulfillmentStatus: "Unavailable" },
+      sources: { kitchen: null },
+    });
+    ports.readiness.mockRejectedValue(new Error("INTERNAL_CONFIRMATION_UNAVAILABLE"));
+    await expect(createCustomerPickupCodeRead(options()).read(input)).resolves.toEqual({
+      schemaVersion: 1,
+      status: "NotReady",
+      orderReference: input.orderReference,
+    });
+    expect(ports.readiness).not.toHaveBeenCalled();
+    expect(ports.proof).not.toHaveBeenCalled();
+    expect(ports.recover).not.toHaveBeenCalled();
+  });
   it("returns not ready without recovering a credential for a pending source", async () => {
     ports.readiness.mockResolvedValue(readinessSource(false));
     await expect(createCustomerPickupCodeRead(options()).read(input)).resolves.toMatchObject({
@@ -127,6 +156,7 @@ describe("current Guest pickup proof read", () => {
     ports.status
       .mockResolvedValueOnce({
         order: { orderType: "Pickup", orderNumber: "11", fulfillmentStatus: "Pending" },
+        sources: accepted,
       })
       .mockRejectedValueOnce(new Error("revoked"));
     await expect(createCustomerPickupCodeRead(options()).read(input)).rejects.toThrow("revoked");
@@ -154,7 +184,7 @@ describe("current Guest pickup proof read", () => {
     // WP-2423 DEC-STORE-CUSTOMER-NAME: one name everywhere; the configured one is a fallback.
     ports.status.mockResolvedValue({
       order: { orderType: "Pickup", orderNumber: "11", fulfillmentStatus: "Pending" },
-      sources: { storeContact: { storeDisplayName: "Maple Noodle House" } },
+      sources: { ...accepted, storeContact: { storeDisplayName: "Maple Noodle House" } },
     });
     await expect(createCustomerPickupCodeRead(options()).read(input)).resolves.toMatchObject({
       status: "Ready",
@@ -162,7 +192,7 @@ describe("current Guest pickup proof read", () => {
     });
     ports.status.mockResolvedValue({
       order: { orderType: "Pickup", orderNumber: "11", fulfillmentStatus: "Pending" },
-      sources: {},
+      sources: accepted,
     });
     await expect(createCustomerPickupCodeRead(options()).read(input)).resolves.toMatchObject({
       storeDisplayName: "DEMO Store",
@@ -226,6 +256,7 @@ describe("current Guest pickup proof read", () => {
     ports.status
       .mockResolvedValueOnce({
         order: { orderType: "Pickup", orderNumber: "11", fulfillmentStatus: "Pending" },
+        sources: accepted,
       })
       .mockRejectedValueOnce(new Error("revoked"));
     await expect(createCustomerPickupCodeRead(options()).read(input)).rejects.toThrow("revoked");

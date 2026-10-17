@@ -67,6 +67,11 @@ export function PickupCodePanel({
       {state.status === "hidden" ? (
         autoReveal ? (
           <p role="status">Checking your pickup code…</p>
+        ) : !remaking ? (
+          // WP-2423 (v15 2026-10-17): before the order is ready there is no code to show, so no
+          // button that can only answer "not yet". The page checks the order and shows the code
+          // by itself once the kitchen has finished.
+          <p>Your pickup code appears here as soon as your order is ready.</p>
         ) : (
           <>
             <p>Your pickup code appears here once your order is ready.</p>

@@ -86,7 +86,8 @@ describe("CUST-ORDER-STATUS screen contract", () => {
     expect(html).toContain("Not started yet");
     // No payment result was read: the row is left out rather than shown as unavailable.
     expect(html).not.toContain("<dt>Payment</dt>");
-    expect(html).toContain("Show pickup code");
+    expect(html).toContain("Your pickup code appears here as soon as your order is ready.");
+    expect(html).not.toContain("Show pickup code");
     expect(html).toContain("View receipt and support");
     expect(html).not.toContain("Ready for pickup");
   });

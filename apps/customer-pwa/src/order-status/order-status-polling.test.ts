@@ -12,7 +12,14 @@ import {
   type OrderStatusPoll,
 } from "./OrderStatusPage.js";
 import type { OrderStatusController } from "./order-status-controller.js";
-import type { OrderStatusState, OrderStatusView } from "./types.js";
+import type { OrderReceivedView, OrderStatusState, OrderStatusView } from "./types.js";
+import { setCustomerCsrfCredential } from "../session/customer-transaction-context.js";
+import { createHttpOrderStatusClient } from "./order-status-client.js";
+import {
+  v15PickupOrderReference,
+  v15PickupStatusBody,
+  type V15PickupStage,
+} from "./v15-pickup-status.fixture.js";
 
 const id = (n: number) => `018f7a00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
@@ -261,5 +268,79 @@ describe("WP-2423: the order page while the guest waits at the counter", () => {
     expect(fake.refresh).toHaveBeenCalledTimes(1);
     stop();
     expect(onVisible).toBeUndefined();
+  });
+});
+
+describe("WP-2423 (v15 2026-10-17): pace from the status body the pilot actually sends", () => {
+  afterEach(() => setCustomerCsrfCredential(null));
+
+  async function decoded(stage: V15PickupStage): Promise<OrderStatusView> {
+    setCustomerCsrfCredential("a".repeat(43));
+    const request = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(v15PickupStatusBody(stage)), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    // Decoded exactly as the page decodes it (the client's own strict parser).
+    const result = (await createHttpOrderStatusClient(request).load(v15PickupOrderReference)) as
+      OrderStatusView | OrderReceivedView;
+    if (!("projectionName" in result)) throw new Error("fixture decoded as received");
+    return result;
+  }
+
+  it("keeps the phase at Submitted until collection, as the pilot does", async () => {
+    for (const stage of ["awaiting-acceptance", "queued", "preparing", "ready"] as const)
+      expect((await decoded(stage)).order.canonicalPhase).toBe("Submitted");
+    expect((await decoded("collected")).order.canonicalPhase).toBe("Fulfilled");
+  });
+
+  it.each([
+    ["awaiting-acceptance", orderStatusPollIntervalMs],
+    ["queued", orderPreparingPollIntervalMs],
+    ["preparing", orderPreparingPollIntervalMs],
+    ["ready", orderAwaitingCollectionPollIntervalMs],
+    ["collected", null],
+  ] as const)("checks a %s pickup after %s ms", async (stage, delay) => {
+    expect(delayFor(ready(await decoded(stage)))).toBe(delay);
+  });
+
+  it("shows ready within 3 s of the kitchen finishing (v15: 13 s at the 15 s pace)", async () => {
+    vi.useFakeTimers();
+    try {
+      const queued = ready(await decoded("queued"));
+      const preparing = ready(await decoded("preparing"));
+      const done = ready(await decoded("ready"));
+      let state: OrderStatusState = queued;
+      const reads = [preparing, done];
+      const listeners = new Set<() => void>();
+      const refresh = vi.fn(async () => {
+        const next = reads.shift();
+        if (next) {
+          state = next;
+          listeners.forEach((listener) => listener());
+        }
+      });
+      const stop = startOrderStatusPolling({
+        getState: () => state,
+        load: async () => undefined,
+        refresh,
+        setOnline: () => undefined,
+        dispose: () => undefined,
+        subscribe(listener) {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      });
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(state).toBe(preparing);
+      // The kitchen finishes just after this check; the next one, 3 s later, shows it ready.
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(state).toBe(done);
+      expect(refresh).toHaveBeenCalledTimes(2);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

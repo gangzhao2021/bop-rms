@@ -24,11 +24,26 @@ function render(state: PickupCodeState): string {
 }
 
 describe("CUST-PICKUP-CODE contextual screen", () => {
-  it("starts with no proof and offers to show the code on demand", () => {
+  it("says plainly the code appears once the order is ready, with nothing to tap (WP-2423)", () => {
+    // v15 2026-10-17: a "Show pickup code" tap before the order was ready only ever answered
+    // "not yet" (and on v15, an error). The page shows the code by itself when the order is ready.
     const html = render({ status: "hidden" });
-    expect(html).toContain("Show pickup code");
-    expect(html).toContain("appears here once your order is ready");
+    expect(html).toContain("Your pickup code appears here as soon as your order is ready.");
+    expect(html).not.toContain("Show pickup code");
+    expect(html).not.toContain("<button");
     expect(html).not.toContain("123456");
+  });
+
+  it("still offers the code on demand while part of a ready order is remade", () => {
+    const html = renderToStaticMarkup(
+      <PickupCodePanel
+        orderReference={id(1)}
+        orderNumber="1001"
+        controller={controller({ status: "hidden" })}
+        remaking
+      />,
+    );
+    expect(html).toContain("Show pickup code");
   });
 
   it("renders a synthetic Ready Human Code with an accessible alternative", () => {
