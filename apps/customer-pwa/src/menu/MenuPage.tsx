@@ -289,8 +289,9 @@ export function MenuScreen({
   searchTerm,
   state,
 }: MenuScreenProps) {
-  const title =
-    mode === "search" ? "Search menu" : mode === "detail" && detail ? detail.name : "Menu";
+  // The page title never changes when the menu arrives, so a long item name cannot wrap late and
+  // push the page down; the item's own heading carries its name.
+  const title = mode === "search" ? "Search menu" : "Menu";
   return (
     <CustomerPage
       step="menu"
@@ -338,7 +339,9 @@ export function MenuScreen({
           state={state}
         />
       </div>
-      {state.kind === "PermissionDenied" ? null : <AllergenHelp />}
+      {/* Shown with the loaded content, not under the short loading notice: placed there it would
+          be pushed down when the menu or item arrives (a visible layout shift). */}
+      {state.kind === "PermissionDenied" || state.kind === "Loading" ? null : <AllergenHelp />}
       {context && mode !== "detail" ? <MenuCartBar load={cartCount ?? browserCartCount} /> : null}
     </CustomerPage>
   );

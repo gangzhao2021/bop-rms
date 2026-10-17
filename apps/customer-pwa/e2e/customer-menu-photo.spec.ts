@@ -333,3 +333,58 @@ test("CUST-MENU removes a photo that cannot be loaded instead of showing a broke
   await expectNoInternalText(page);
   expect(errors).toEqual([]);
 });
+
+/** Sum of every layout-shift entry since the last reset, including shifts right after a tap. */
+async function recordLayoutShifts(page: Page) {
+  await page.addInitScript(() => {
+    const state = window as unknown as { __shift: number };
+    state.__shift = 0;
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries())
+        state.__shift += (entry as unknown as { value: number }).value;
+    }).observe({ type: "layout-shift", buffered: true });
+  });
+}
+const settledShift = async (page: Page) => {
+  // Two frames after the last change, so a late shift is still counted.
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  await page.waitForTimeout(300);
+  return page.evaluate(() => (window as unknown as { __shift: number }).__shift);
+};
+const resetShift = (page: Page) =>
+  page.evaluate(() => {
+    (window as unknown as { __shift: number }).__shift = 0;
+  });
+
+for (const viewport of [
+  { width: 390, height: 844 },
+  { width: 1440, height: 900 },
+]) {
+  test(`CUST-MENU keeps the page still from menu to item and back at ${viewport.width} px @production`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await recordLayoutShifts(page);
+    const errors = await setUp(page, serveImage);
+    await page.goto("/menu");
+    const detail = page.locator("article.sellable-detail");
+    for (const name of ["Synthetic mushroom rice bowl", "Synthetic green tea"]) {
+      const card = page.locator("article.menu-card").filter({ hasText: name });
+      await expect(card.getByRole("link", { name: `View ${name}` })).toBeVisible();
+      await expect(page.locator(".menu-help")).toBeVisible();
+      await settledShift(page);
+      await resetShift(page);
+      await card.getByRole("link", { name: `View ${name}` }).click();
+      await expect(detail.getByRole("heading", { name })).toBeVisible();
+      await expect(page.locator(".menu-help")).toBeVisible();
+      expect(await settledShift(page), `menu → ${name}`).toBeLessThan(0.02);
+      await resetShift(page);
+      await page.goBack();
+      await expect(card.getByRole("link", { name: `View ${name}` })).toBeVisible();
+      expect(await settledShift(page), `${name} → menu`).toBeLessThan(0.02);
+    }
+    expect(errors).toEqual([]);
+  });
+}

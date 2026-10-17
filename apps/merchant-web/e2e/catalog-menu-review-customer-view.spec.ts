@@ -247,6 +247,14 @@ test("@production an approver sees each item's customer description and photo, w
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
+    // The new photo and the one customers see now are compared at one thumbnail size.
+    const next = await latte
+      .getByRole("img", { name: "Latte in a tall glass with latte art" })
+      .boundingBox();
+    const now = await latte.getByRole("img", { name: "Latte in a paper cup" }).boundingBox();
+    expect(Math.abs((next?.width ?? 0) - (now?.width ?? -9))).toBeLessThanOrEqual(1);
+    expect(Math.abs((next?.height ?? 0) - (now?.height ?? -9))).toBeLessThanOrEqual(1);
+    expect(next?.width ?? 0).toBeGreaterThanOrEqual(80);
     await review.scrollIntoViewIfNeeded();
     await page.screenshot({
       path: `test-results/menu-review-customer-view-${width}.png`,

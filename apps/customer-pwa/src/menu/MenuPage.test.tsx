@@ -314,6 +314,21 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).toContain(copy);
   });
 
+  it("adds the allergy help with the loaded menu, not under the loading notice", () => {
+    expect(render({ context, mode: "detail", state: { kind: "Loading" } })).not.toContain(
+      "Allergies or accessibility",
+    );
+    const html = render({
+      context,
+      detail: sellable,
+      mode: "detail",
+      state: { kind: "Found", menu },
+    });
+    expect(html).toContain("Allergies or accessibility");
+    // The page title stays "Menu"; only the item's own heading carries its name.
+    expect(html).toContain("<h2>Menu</h2>");
+  });
+
   it("offers re-entry without retrying a denied menu request", () => {
     const html = render({ context, mode: "browse", state: { kind: "PermissionDenied" } });
     expect(html).toContain('href="/"');

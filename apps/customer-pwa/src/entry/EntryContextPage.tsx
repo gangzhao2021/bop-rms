@@ -215,13 +215,16 @@ export function EntryContextView({
           state={state}
         />
       </section>
-      <aside className="entry-help" aria-labelledby="entry-help-heading">
-        <h2 id="entry-help-heading">Need help?</h2>
-        <p>
-          Ask a staff member for an accessible ordering option. Tell staff about allergies before
-          ordering; the QR code does not record allergy or health information.
-        </p>
-      </aside>
+      {/* Not under the short loading notice, where the arriving answer would push it down. */}
+      {state.kind === "Loading" ? null : (
+        <aside className="entry-help" aria-labelledby="entry-help-heading">
+          <h2 id="entry-help-heading">Need help?</h2>
+          <p>
+            Ask a staff member for an accessible ordering option. Tell staff about allergies before
+            ordering; the QR code does not record allergy or health information.
+          </p>
+        </aside>
+      )}
     </CustomerPage>
   );
 }

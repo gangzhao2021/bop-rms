@@ -6106,9 +6106,11 @@ section.product-customer-menu figcaption {
   padding: 0;
   list-style: none;
 }
+/* One thumbnail size for the new photo and the "Customers see now" photo, at every width. */
 .menu-customer-view__item {
+  --menu-customer-view-thumb: 8rem;
   display: grid;
-  grid-template-columns: 8rem minmax(0, 1fr);
+  grid-template-columns: var(--menu-customer-view-thumb) minmax(0, 1fr);
   gap: var(--bop-space-4);
   align-items: start;
   min-width: 0;
@@ -6186,11 +6188,12 @@ section.product-customer-menu figcaption {
   border-left: 2px solid var(--bop-color-border-default);
 }
 .menu-customer-view__before .menu-customer-view__photo {
-  max-width: 8rem;
+  width: var(--menu-customer-view-thumb);
+  max-width: 100%;
 }
 @media (max-width: 480px) {
   .menu-customer-view__item {
-    grid-template-columns: 5.5rem minmax(0, 1fr);
+    --menu-customer-view-thumb: 5.5rem;
     gap: var(--bop-space-3);
   }
 }

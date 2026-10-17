@@ -86,11 +86,22 @@ describe("CUST-ENTRY-CONTEXT", () => {
     expect(html).not.toContain("synthetic entry failure");
   });
 
-  it("always supplies accessibility and allergen assistance", () => {
-    const html = render({ kind: "Loading" });
+  it.each([
+    { kind: "Missing" },
+    { kind: "Offline" },
+    { kind: "ServiceUnavailable" },
+    { kind: "Established", context },
+  ] as const)("supplies accessibility and allergen assistance once $kind is known", (state) => {
+    const html = render(state);
     expect(html).toContain("accessible ordering option");
     expect(html).toContain("allergies");
     expect(html).toContain('aria-live="polite"');
+  });
+
+  it("keeps the assistance out from under the brief loading notice so it never jumps", () => {
+    const html = render({ kind: "Loading" });
+    expect(html).toContain('aria-busy="true"');
+    expect(html).not.toContain("entry-help");
   });
 });
 
