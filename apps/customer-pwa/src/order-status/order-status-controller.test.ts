@@ -238,6 +238,18 @@ describe("WP-1705 Order Status controller", () => {
       expect(() => parseOrderStatusView(candidate, id(1))).toThrow("invalid order status");
   });
 
+  it("accepts a served dine-in Order as Fulfilled without a pickup collection", () => {
+    const dineIn = { ...view(), order: { ...view().order, orderType: "DineIn" } };
+    const fulfilled = { ...dineIn, order: { ...dineIn.order, canonicalPhase: "Fulfilled" } };
+    expect(parseOrderStatusView(fulfilled, id(1)).order.canonicalPhase).toBe("Fulfilled");
+    expect(() =>
+      parseOrderStatusView(
+        { ...fulfilled, order: { ...fulfilled.order, fulfilledAt: "2026-08-11T13:59:00.000Z" } },
+        id(1),
+      ),
+    ).toThrow("invalid order status");
+  });
+
   it("deep-freezes the accepted customer-safe view", () => {
     const accepted = parseOrderStatusView(view(), id(1));
     expect(Object.isFrozen(accepted)).toBe(true);

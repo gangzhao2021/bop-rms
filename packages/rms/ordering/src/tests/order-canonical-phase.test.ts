@@ -152,6 +152,59 @@ describe("DEC-PILOT-BATCH-PHASE-01 dine-in rounds", () => {
   });
 });
 
+describe("DEC-PILOT-BATCH-PHASE-01 dine-in served (Dining's served quantities, rule 2)", () => {
+  const served = (...items: string[]) => ({ servedItems: items });
+  const three = (overrides: Partial<OrderCanonicalPhaseOwnerFacts> = {}) =>
+    owner({
+      items: [
+        { orderItemReference: I1, orderBatchReference: B1 },
+        { orderItemReference: I2, orderBatchReference: B1 },
+        { orderItemReference: I3, orderBatchReference: B2 },
+      ],
+      ...overrides,
+    });
+  const merged = (
+    o: OrderCanonicalPhaseOwnerFacts,
+    k: OrderKitchenProgressFact[],
+    d: { servedItems: string[] } | null,
+  ) => resolveOrderCanonicalPhase(o, k, d).canonicalPhase;
+  it("every remaining item served is Fulfilled; one still at the pass stays Ready", () => {
+    const o = owner({ acceptedBatches: [B1] });
+    expect(merged(o, [batchReady(B1)], served(I1))).toBe("Ready");
+    expect(merged(o, [batchReady(B1)], served(I1, I2))).toBe("Fulfilled");
+    expect(merged(o, [batchReady(B1)], null)).toBe("Ready");
+  });
+  it("multi-round: round 1 served and the unpaid round 2 cancelled is Fulfilled", () => {
+    const o = three({ acceptedBatches: [B1], cancelledBatches: [B2] });
+    expect(merged(o, [batchReady(B1)], served(I1, I2))).toBe("Fulfilled");
+    // While round 2 is still open (awaiting payment), the table is not done.
+    expect(merged(three({ acceptedBatches: [B1] }), [batchReady(B1)], served(I1, I2))).toBe(
+      "In Progress",
+    );
+    // A new round after everything was served moves the table back to In Progress.
+    expect(merged(three({ acceptedBatches: [B1, B2] }), [batchReady(B1)], served(I1, I2))).toBe(
+      "In Progress",
+    );
+    expect(
+      merged(
+        three({ acceptedBatches: [B1, B2] }),
+        [batchReady(B1), ready(I3, B2)],
+        served(I1, I2, I3),
+      ),
+    ).toBe("Fulfilled");
+  });
+  it("a staff-cancelled line is not waiting to be served", () => {
+    const o = owner({ acceptedBatches: [B1], cancelledItems: [I2] });
+    expect(merged(o, [ready(I1)], served(I1))).toBe("Fulfilled");
+  });
+  it("is order-independent and refuses served facts for items outside the Order", () => {
+    const o = owner({ acceptedBatches: [B1] });
+    expect(merged(o, [batchReady(B1)], served(I2, I1))).toBe("Fulfilled");
+    expect(() => merged(o, [], served(I3))).toThrow(OrderCanonicalPhaseError);
+    expect(() => merged(o, [], { servedItems: "x" as never })).toThrow(OrderCanonicalPhaseError);
+  });
+});
+
 describe("replay and out-of-order Kitchen facts", () => {
   it("gives the same phase for any order and for duplicates", () => {
     const o = owner({ acceptedBatches: [B1] });
@@ -324,7 +377,11 @@ describe("guest status phase", () => {
       },
     ],
   };
-  const service = (canonicalPhase: string | null) =>
+  const service = (
+    canonicalPhase: string | null,
+    orderType: "Pickup" | "DineIn" = "Pickup",
+    seen: { orderType: string }[] = [],
+  ) =>
     createOrderStatusQueryService({
       authorization: {
         authorizeCustomer: async () => ({
@@ -344,13 +401,15 @@ describe("guest status phase", () => {
             generationReference: id(800),
             projectedAt: at(1),
             freshnessStatus: "Fresh",
-            snapshot,
+            snapshot: { ...snapshot, orderType },
           }) as never,
         list: async () => [],
       },
       phases: {
-        load: async () =>
-          canonicalPhase === null ? null : { canonicalPhase: canonicalPhase as never },
+        load: async (_reference, order) => {
+          seen.push(order);
+          return canonicalPhase === null ? null : { canonicalPhase: canonicalPhase as never };
+        },
       },
     });
   it("reports Ordering's merged phase instead of the revision-bound snapshot phase", async () => {
@@ -362,6 +421,17 @@ describe("guest status phase", () => {
     expect(await read(null)).toBe("Submitted");
     // Collected only with the recorded completion (Fulfilled iff fulfillmentStatus Completed).
     expect(await read("Fulfilled")).toBe("Ready");
+  });
+  it("a dine-in Order is Fulfilled when every remaining item was served", async () => {
+    const seen: { orderType: string }[] = [];
+    const view = await service("Fulfilled", "DineIn", seen).getCustomer({
+      orderReference: ORDER,
+      observedAt: at(2),
+    });
+    expect(view.order.canonicalPhase).toBe("Fulfilled");
+    expect(view.order.fulfillmentStatus).toBe("Unavailable");
+    expect(view.order.fulfilledAt).toBeNull();
+    expect(seen).toEqual([{ orderType: "DineIn" }]);
   });
 });
 

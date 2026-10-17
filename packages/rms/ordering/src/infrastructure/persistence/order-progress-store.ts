@@ -3,6 +3,7 @@ import { parseOrderingReference } from "../../domain/cart.js";
 import {
   resolveOrderCanonicalPhase,
   type OrderKitchenProgressFact,
+  type OrderDeliveredItemFacts,
   type OrderKitchenProgressFactKind,
 } from "../../domain/order-canonical-phase.js";
 import type { OrderKitchenProgressEvent } from "../../application/kitchen-progress-event.js";
@@ -203,12 +204,14 @@ const uuidList = (value: unknown): string[] => {
  * its own append-only records (items, acceptance, cancellations, termination, pickup completion or
  * closure as not collected)
  * and the Kitchen facts in its inbox record. Read under the caller's transaction and scope; returns
- * null when the Order is not visible in this Store.
+ * null when the Order is not visible in this Store. `delivered` carries dine-in served facts the
+ * caller read from Dining's public reader under the same fence; Ordering never reads Dining tables.
  */
 export async function loadOrderCanonicalPhase(
   transaction: ConsumerTransaction,
   scope: Scope,
   orderReferenceValue: string,
+  delivered: OrderDeliveredItemFacts | null = null,
 ) {
   const { brand, store } = await scoped(transaction, scope);
   const order = parseOrderingReference(orderReferenceValue);
@@ -294,5 +297,6 @@ export async function loadOrderCanonicalPhase(
       notCollected: notCollected.rows.length > 0,
     },
     facts,
+    delivered,
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseStaffCommand } from "./merchant-staff-administration.js";
+import { parseOwnNameCommand, parseStaffCommand } from "./merchant-staff-administration.js";
 
 const id = (n: number) => "01909a0c-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 
@@ -46,5 +46,38 @@ describe("WP-2423 staff administration command input", () => {
     ],
   ])("refuses %s", (_label, value) => {
     expect(() => parseStaffCommand(value)).toThrow(/Invalid/u);
+  });
+});
+
+describe("WP-2423 a member records their own first name", () => {
+  it("accepts a name with version 0 and an operation reference", () => {
+    expect(
+      parseOwnNameCommand({
+        displayName: "Mia Chen",
+        expectedProfileVersion: 0,
+        operationReference: id(2),
+      }),
+    ).toEqual({ displayName: "Mia Chen", expectedProfileVersion: 0, operationReference: id(2) });
+  });
+  it.each([
+    [
+      "a rename (version after the first name)",
+      { displayName: "Mia", expectedProfileVersion: 1, operationReference: id(2) },
+    ],
+    [
+      "someone else",
+      {
+        displayName: "Mia",
+        expectedProfileVersion: 0,
+        operationReference: id(2),
+        actorReference: id(1),
+      },
+    ],
+    ["no operation", { displayName: "Mia", expectedProfileVersion: 0 }],
+    ["bad operation", { displayName: "Mia", expectedProfileVersion: 0, operationReference: "x" }],
+    ["no name", { displayName: null, expectedProfileVersion: 0, operationReference: id(2) }],
+    ["not an object", ["Mia"]],
+  ])("refuses %s", (_label, value) => {
+    expect(() => parseOwnNameCommand(value)).toThrow(/Invalid/u);
   });
 });

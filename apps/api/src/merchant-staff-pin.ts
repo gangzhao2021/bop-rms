@@ -27,6 +27,8 @@ import {
   type MemberDirectoryTransaction,
   type StoreMember,
 } from "@bop/membership";
+import type { RoleAssignmentTransaction } from "@bop/permission";
+import { createStaffLabels, distinctStaffLabels } from "./merchant-staff-labels.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -176,8 +178,31 @@ export function createMerchantStaffPin(options: {
     const pin = await readStaffPinSession(tx, { sessionReference, at });
     if (pin.pinIssued && pin.verifiedUntil === null) fail("FullSignInRequired");
   }
-  async function namedMembers(tx: Tx, scope: { brandReference: string; storeReference: string }) {
+  async function activeMembers(tx: Tx, scope: { brandReference: string; storeReference: string }) {
     return (await listStoreMembers(directory(tx), scope)).filter(active);
+  }
+  /** Labels for the given people and anyone in `others` (never dropped for a missing name). */
+  async function labelsFor(
+    tx: Tx,
+    scope: { brandReference: string; storeReference: string },
+    input: {
+      readonly viewer: string | null;
+      readonly at: string;
+      readonly members: readonly StoreMember[];
+      readonly others?: readonly string[];
+    },
+  ) {
+    const names = new Map<string, string | null>(
+      input.members.map((member) => [member.actorReference, member.displayName]),
+    );
+    const missing = (input.others ?? []).filter((actor) => !names.has(actor));
+    for (const [actor, name] of await memberDisplayNames(directory(tx), scope, missing))
+      names.set(actor, name);
+    return createStaffLabels(tx as unknown as RoleAssignmentTransaction, scope, {
+      viewer: input.viewer,
+      at: input.at,
+      names,
+    });
   }
   const authorize = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
@@ -224,9 +249,7 @@ export function createMerchantStaffPin(options: {
           storeReference: device.storeReference,
         };
         const at = now();
-        const members = (await namedMembers(tx, scope)).filter(
-          (member) => member.displayName !== null,
-        );
+        const members = await activeMembers(tx, scope);
         const states =
           members.length === 0
             ? new Map()
@@ -235,17 +258,27 @@ export function createMerchantStaffPin(options: {
                 at,
                 actorReferences: members.map((member) => member.actorReference),
               });
+        const withPin = members.filter(
+          (member) => states.get(member.actorReference)?.state === "Set",
+        );
+        // Nobody is signed in on the lock screen: everyone is named, nobody is "You".
+        const label = await labelsFor(tx, scope, { viewer: null, at, members: withPin });
+        const labels = distinctStaffLabels(
+          withPin.map((member) => ({
+            actorReference: member.actorReference,
+            label: label(member.actorReference),
+          })),
+        );
         const profile = await options.describeStore(tx, { ...scope, at });
         const named = { ...scope, deviceReference: device.deviceReference };
         return Object.freeze({
           storeLabel: profile.label,
           timeZone: profile.timeZone,
-          staff: members
-            .filter((member) => states.get(member.actorReference)?.state === "Set")
+          staff: withPin
             .map((member) =>
               Object.freeze({
                 choice: options.choiceTokens.issue(named, member.actorReference),
-                name: String(member.displayName),
+                name: labels.get(member.actorReference) ?? "Staff member",
               }),
             )
             .sort((a, b) => a.name.localeCompare(b.name, "en")),
@@ -433,6 +466,8 @@ export function createMerchantStaffPin(options: {
         if (!manageDevices && !resetPins) return fail("Denied");
         const store = where(scope);
         const at = now();
+        const viewer = String(scope.actorReference);
+        const members = await activeMembers(tx, store);
         const current = await tablet(tx, input.deviceCookie);
         const thisDevice =
           current !== null &&
@@ -443,24 +478,24 @@ export function createMerchantStaffPin(options: {
         let devices = null;
         if (manageDevices) {
           const listed = await listStoreSignInDevices(tx, store);
-          const names = await memberDisplayNames(
-            directory(tx),
-            store,
-            listed.map((item) => item.registeredByActorReference),
-          );
+          const label = await labelsFor(tx, store, {
+            viewer,
+            at,
+            members,
+            others: listed.map((item) => item.registeredByActorReference),
+          });
           devices = listed.map((item) =>
             Object.freeze({
               device: item.deviceReference,
               label: item.label,
               registeredAt: item.registeredAt,
-              registeredBy: names.get(item.registeredByActorReference) ?? null,
+              registeredBy: label(item.registeredByActorReference),
               lastUsedAt: item.lastUsedAt,
             }),
           );
         }
         let staffPins = null;
         if (resetPins) {
-          const members = await namedMembers(tx, store);
           const states =
             members.length === 0
               ? new Map()
@@ -469,13 +504,19 @@ export function createMerchantStaffPin(options: {
                   at,
                   actorReferences: members.map((member) => member.actorReference),
                 });
+          const label = await labelsFor(tx, store, { viewer, at, members });
+          const labels = distinctStaffLabels(
+            members.map((member) => ({
+              actorReference: member.actorReference,
+              label: label(member.actorReference),
+            })),
+          );
           staffPins = members
-            .filter((member) => member.displayName !== null)
             .map((member) => {
               const pin: StaffPinView = states.get(member.actorReference) ?? notSet;
               return Object.freeze({
                 staff: member.actorReference,
-                name: String(member.displayName),
+                name: labels.get(member.actorReference) ?? "Staff member",
                 state: pin.state,
                 changedAt: pin.changedAt,
                 lockedUntil: pin.lockedUntil,
@@ -530,9 +571,12 @@ export function createMerchantStaffPin(options: {
         );
         if (registered === "LabelInvalid")
           return Object.freeze({ status: "LabelInvalid" as const });
-        const names = await memberDisplayNames(directory(tx), store, [
-          registered.registeredByActorReference,
-        ]);
+        const label = await labelsFor(tx, store, {
+          viewer: String(scope.actorReference),
+          at,
+          members: [],
+          others: [registered.registeredByActorReference],
+        });
         return Object.freeze({
           status: "Registered" as const,
           deviceCookie: secret,
@@ -540,7 +584,7 @@ export function createMerchantStaffPin(options: {
             device: registered.deviceReference,
             label: registered.label,
             registeredAt: registered.registeredAt,
-            registeredBy: names.get(registered.registeredByActorReference) ?? null,
+            registeredBy: label(registered.registeredByActorReference),
             lastUsedAt: null,
           }),
         });

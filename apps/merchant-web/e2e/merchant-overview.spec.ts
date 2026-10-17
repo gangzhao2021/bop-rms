@@ -308,6 +308,13 @@ test("@production Home reads only the summaries the staff member's screens permi
       requested.push(new URL(route.request().url()).pathname);
       return route.fulfill({ status: 403, json: { error: "request_denied" } });
     });
+  // WP-2423: this member already has a name, so Home does not ask for one.
+  await page.route("**/merchant/organization/staff/me", (route) =>
+    route.fulfill({
+      headers: { "cache-control": "no-store" },
+      json: { name: "Recorded", displayName: "Ava" },
+    }),
+  );
   // WP-2423: the BFF tells a role without store system alerts so in an ordinary answer.
   await page.route("**/merchant/operations-alerts", (route) => {
     requested.push(new URL(route.request().url()).pathname);

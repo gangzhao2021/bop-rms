@@ -21,6 +21,7 @@ import {
   acquireOrderDispositionFence,
   createPostgresDiningOrderPreparationSource,
   createPostgresOrderKitchenSourceStore,
+  loadOrderCanonicalPhase,
 } from "../../rms/ordering/src/index.ts";
 import { loadOutboxEnvelope } from "../../bop/eventing/src/index.ts";
 import { readOrderCreationHistory } from "../../rms/ordering/src/infrastructure/persistence/order-creation-query-store.ts";
@@ -34,6 +35,10 @@ import { createMerchantDiningServeReadyCommand } from "../../../apps/api/src/mer
 import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/merchant-dining-order-close-command.ts";
 import { createDiningOrderCloseConfiguration } from "../../../apps/api/src/dining-order-close-configuration.ts";
 import { createKitchenInventoryConsumption } from "../../../apps/api/src/kitchen-inventory-consumption.ts";
+import {
+  createDiningOrderDeliveryProgress,
+  servedOrderItemFacts,
+} from "../../../apps/api/src/dining-order-delivery-progress.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { ensureSyntheticStockPlace } from "../test-support/stock-place.mjs";
@@ -1060,6 +1065,36 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
       });
       const phases = (view) =>
         view.items.map((entry) => [entry.orderItemReference, entry.phase, entry.deliveredQuantity]);
+      // WP-2423 / DEC-PILOT-BATCH-PHASE-01: the Order phase the guest status read reports, composed
+      // as that read does (restricted role, Order fence first): Ordering's merge of its own records
+      // plus the served facts read through Dining's public served-quantity reader.
+      const orderPhase = () =>
+        scoped(async (tx) => {
+          const orderScope = { brandReference: brand, storeReference: store };
+          await acquireOrderDispositionFence(tx, { ...orderScope, orderReference: order.order });
+          const delivery = await createDiningOrderDeliveryProgress({
+            ...orderScope,
+            diningScope: scope,
+            authorize: async () => true,
+            authorizeKitchen: async () => true,
+            authorizeDining: async () => true,
+          }).load({
+            transaction: tx,
+            ...orderScope,
+            orderReference: order.order,
+            diningSessionReference: order.session,
+            guestSessionReference: order.guest,
+            observedAt: new Date().toISOString(),
+          });
+          assert.ok(delivery);
+          const merged = await loadOrderCanonicalPhase(
+            tx,
+            orderScope,
+            order.order,
+            servedOrderItemFacts(delivery.items),
+          );
+          return merged?.canonicalPhase;
+        });
 
       // ── Before: the round is accepted and both lines wait for the kitchen.
       const before = await progress();
@@ -1265,6 +1300,9 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
         [refs.items[1], "Cancelled", 0],
       ]);
 
+      // Not served yet: the guest's Order phase is not Fulfilled.
+      assert.notEqual(await orderPhase(), "Fulfilled");
+
       // ── Staff serve line A at the current version. A page still holding the version before
       // the cancellation is refused and writes nothing (it refreshes and serves at version 3).
       const serveCommand = (expectedOrderVersion) => ({
@@ -1353,6 +1391,9 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
       assert.equal(await serviceRecords(), 1);
       const delivered = await progress();
       assert.equal(delivered.phase, "Fulfilled");
+      // The guest's Order phase: line A served, line B cancelled — Fulfilled (Dining publishes no
+      // event; before this the phase stopped short of Fulfilled after serving).
+      assert.equal(await orderPhase(), "Fulfilled");
       assert.deepEqual(phases(delivered), [
         [refs.items[0], "Fulfilled", LINES[0].quantity],
         [refs.items[1], "Cancelled", 0],
@@ -1379,6 +1420,8 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
         [{ closures: 1, finalities: 1 }],
       );
       assert.equal((await progress()).closureStatus, "Closed");
+      // Closing the table's Order keeps the served Order Fulfilled.
+      assert.equal(await orderPhase(), "Fulfilled");
       assert.deepEqual(
         [...new Set(merchant.actions)].sort(),
         ["dining.item.serve", "order.close", "ordering.order.cancel"].sort(),

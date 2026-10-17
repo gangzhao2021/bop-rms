@@ -1,4 +1,11 @@
-import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
+import {
+  createDiningOrderDeliveryProgress,
+  servedOrderItemFacts,
+} from "./dining-order-delivery-progress.js";
+
+type DiningDelivery = NonNullable<
+  Awaited<ReturnType<ReturnType<typeof createDiningOrderDeliveryProgress>["load"]>>
+>;
 import {
   createPostgresKitchenCustomerStatusReader,
   listOpenKitchenReworkItems,
@@ -163,6 +170,31 @@ export function createCustomerOrderStatusRead(
               (await stillAuthorized()),
             validateCurrentSource: async () => false,
           });
+          // One Dining delivery read per status read: the phase merge and the served quantities
+          // shown to the guest come from the same facts.
+          let deliveryRead: Promise<DiningDelivery | null> | undefined;
+          const loadDelivery = (): Promise<DiningDelivery | null> => {
+            if (options.diningScope === undefined) return Promise.resolve(null);
+            if (guest.channel !== "DineIn" || guest.diningSessionReference === null)
+              throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
+            const diningScope = options.diningScope;
+            const diningSessionReference = String(guest.diningSessionReference);
+            deliveryRead ??= createDiningOrderDeliveryProgress({
+              ...options.scope,
+              diningScope,
+              authorize: async () => stillAuthorized(),
+              authorizeKitchen: async () => stillAuthorized(),
+              authorizeDining: async () => stillAuthorized(),
+            }).load({
+              transaction,
+              ...options.scope,
+              orderReference,
+              diningSessionReference,
+              guestSessionReference: String(guest.sessionReference),
+              observedAt: now(),
+            });
+            return deliveryRead;
+          };
           const query = createOrderStatusQueryService({
             authorization: {
               authorizeCustomer: async (input) =>
@@ -179,11 +211,26 @@ export function createCustomerOrderStatusRead(
             },
             // WP-2423 / DEC-PILOT-BATCH-PHASE-01: the current phase Ordering merges from its own
             // records and the Kitchen facts it consumed (accepted, preparing, ready, collected).
+            // Dining publishes no events: a dine-in Order's served items come from Dining's public
+            // served-quantity reader here, under the same fence, so every remaining item served
+            // reads Fulfilled (rule 2). Ordering never reads Dining's tables.
             phases: {
-              load: async (reference) => {
+              load: async (reference, order) => {
                 if (reference !== orderReference || !(await stillAuthorized()))
                   throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
-                return loadOrderCanonicalPhase(transaction, options.scope, reference);
+                // A guest outside the table's dining session is refused by the dining read below.
+                const delivery =
+                  order.orderType === "DineIn" &&
+                  guest.channel === "DineIn" &&
+                  guest.diningSessionReference !== null
+                    ? await loadDelivery()
+                    : null;
+                return loadOrderCanonicalPhase(
+                  transaction,
+                  options.scope,
+                  reference,
+                  delivery === null ? null : servedOrderItemFacts(delivery.items),
+                );
               },
             },
           });
@@ -196,22 +243,7 @@ export function createCustomerOrderStatusRead(
             }[];
           } = null;
           if (result.order.orderType === "DineIn" && options.diningScope !== undefined) {
-            if (guest.channel !== "DineIn" || guest.diningSessionReference === null)
-              throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
-            const delivery = await createDiningOrderDeliveryProgress({
-              ...options.scope,
-              diningScope: options.diningScope,
-              authorize: async () => stillAuthorized(),
-              authorizeKitchen: async () => stillAuthorized(),
-              authorizeDining: async () => stillAuthorized(),
-            }).load({
-              transaction,
-              ...options.scope,
-              orderReference,
-              diningSessionReference: String(guest.diningSessionReference),
-              guestSessionReference: String(guest.sessionReference),
-              observedAt: now(),
-            });
+            const delivery = await loadDelivery();
             const members = result.order.batches.flatMap((batch) =>
               batch.items.map((item) => ({
                 orderBatchReference: String(batch.orderBatchReference),

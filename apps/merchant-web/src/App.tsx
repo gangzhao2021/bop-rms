@@ -16,6 +16,7 @@ import {
   workspaceNavigationLinks,
 } from "./WorkspaceLayout.js";
 import { StaffSessionGuard, StaffSignedOutPanel, StaffSwitchButton } from "./StaffSession.js";
+import { OwnNamePrompt } from "./OwnNamePrompt.js";
 import { StaffPinControls } from "./StaffPinControls.js";
 import { StaffSwitchPage } from "./StaffSwitchPage.js";
 import { isOperationalScreen } from "./staff-session.js";
@@ -571,6 +572,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                       screens={state.workspace.navigation.map((item) => item.screenId)}
                     />
                   ) : undefined
+                }
+                prompt={
+                  demo === null && state.kind === "Ready" && !state.switching ? (
+                    <OwnNamePrompt
+                      key={state.workspace.selectedScope.storeReference + state.csrf}
+                      csrf={state.csrf}
+                    />
+                  ) : null
                 }
                 state={state}
                 onSwitchStore={switchStore}

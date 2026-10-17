@@ -416,6 +416,75 @@ test.describe("@production order status HTTP continuity", () => {
     }
   });
 
+  // DEC-PILOT-BATCH-PHASE-01: a dine-in Order is Fulfilled once every remaining item was served
+  // (Dining's served quantities); the table can still order another round, so checks continue.
+  test("WP-2423: a fully served dine-in order reads served and keeps checking for updates", async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    const csrf = "s".repeat(43);
+    await page.route("**/bff/customer/entry", (route) =>
+      route.fulfill({
+        status: 201,
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 2,
+          status: "Established",
+          brandDisplayName: "Synthetic Brand",
+          storeDisplayName: "Synthetic Status Store",
+          publicStoreReference: id(6),
+          publicTableReference: null,
+          channel: "Pickup",
+          operatingState: "Open",
+          availableServiceModes: ["Pickup"],
+          locale: "en-CA",
+          contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+          csrfToken: csrf,
+        },
+      }),
+    );
+    let calls = 0;
+    await page.route("**/api/v1/orders/*/status", async (route) => {
+      calls += 1;
+      const body = status(id(1), "1001", "2598");
+      body.status.order.orderType = "DineIn";
+      body.status.order.canonicalPhase = "Fulfilled";
+      const kitchenBatch = body.status.sources.kitchen.batches[0];
+      if (kitchenBatch) kitchenBatch.status = "Ready";
+      await route.fulfill({
+        json: {
+          ...body,
+          status: {
+            ...body.status,
+            sources: {
+              ...body.status.sources,
+              dining: {
+                items: [
+                  { orderItemReference: id(4), orderBatchReference: id(3), servedQuantity: 1 },
+                ],
+              },
+            },
+          },
+        },
+      });
+    });
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(
+      page.getByRole("heading", { name: "Synthetic Status Store", exact: true }),
+    ).toBeVisible();
+    await page.evaluate((reference) => {
+      history.pushState(null, "", "/orders/" + reference);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, id(1));
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Items served" })).toBeVisible();
+    await expect(main.getByText("This page checks for updates every few seconds.")).toBeVisible();
+    await expect(main).not.toContainText("This order is complete.");
+    await expect(main).not.toContainText("Thank you for visiting");
+    await expectNoInternalText(page);
+    await expect.poll(() => calls, { timeout: 25_000 }).toBeGreaterThan(1);
+  });
+
   // WP-2423 (DEC-PICKUP-COUNTER-CODE): the guest reads a six-digit code to staff.
   test("WP-2423: shows the six-digit pickup code large once the order is ready", async ({
     page,

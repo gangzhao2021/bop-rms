@@ -782,8 +782,11 @@ export function parseOrderStatusView(value: unknown, expectedReference: string):
     new Set(batches.map((batch) => batch.orderBatchReference)).size !== batches.length ||
     batches.some((batch) => Date.parse(batch.submittedAt) < Date.parse(submittedAt)) ||
     currencies.size !== 1 ||
+    // A pickup is Fulfilled only with its recorded collection. A dine-in Order has no Fulfillment
+    // completion: it is Fulfilled once every remaining item was served (DEC-PILOT-BATCH-PHASE-01).
     (order.fulfillmentStatus === "Unavailable" &&
-      (order.canonicalPhase === "Fulfilled" || fulfilledAt !== null)) ||
+      ((order.canonicalPhase === "Fulfilled" && order.orderType !== "DineIn") ||
+        fulfilledAt !== null)) ||
     (order.fulfillmentStatus === "Completed" &&
       (order.canonicalPhase !== "Fulfilled" ||
         fulfilledAt === null ||

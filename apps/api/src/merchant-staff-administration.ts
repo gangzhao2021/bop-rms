@@ -143,6 +143,34 @@ export function parseStaffCommand(value: unknown): StaffCommand {
   }
 }
 
+/**
+ * WP-2423: a signed-in member records their own name the first time (Home: "Add your name so your
+ * team sees who did what"). Only a member with no recorded name may do this, so the expected
+ * profile version is always 0; afterwards a manager maintains the name on the staff page.
+ */
+export interface OwnNameCommand {
+  readonly displayName: string;
+  readonly expectedProfileVersion: 0;
+  readonly operationReference: string;
+}
+export function parseOwnNameCommand(value: unknown): OwnNameCommand {
+  const r = value as Record<string, unknown> | null;
+  if (
+    r === null ||
+    typeof r !== "object" ||
+    Array.isArray(r) ||
+    Object.keys(r).sort().join(",") !== "displayName,expectedProfileVersion,operationReference" ||
+    r.expectedProfileVersion !== 0 ||
+    typeof r.displayName !== "string"
+  )
+    return fail("Invalid");
+  return {
+    displayName: r.displayName,
+    expectedProfileVersion: 0,
+    operationReference: ref(r.operationReference),
+  };
+}
+
 export function createMerchantStaffAdministration(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -558,5 +586,88 @@ export function createMerchantStaffAdministration(options: {
       }),
     );
   };
-  return { query, command };
+  /** The signed-in member's own name state at the selected Store (merchant.access). */
+  const ownProfile = async (input: { sessionCookie: unknown; csrf: unknown }) => {
+    const current = await session(input);
+    return retryTransactionConflict(() =>
+      options.persistence.transactions.run(async (tx) => {
+        const scope = await ownScope(tx, input.sessionCookie, current.sessionReference);
+        const member = await ownMember(tx, scope);
+        // A Brand member without a place at this Store is named on Brand screens, not here.
+        if (member === null) return { name: "NotStoreMember" as const };
+        return member.displayName === null
+          ? { name: "Missing" as const, profileVersion: member.profileVersion }
+          : { name: "Recorded" as const, displayName: member.displayName };
+      }),
+    );
+  };
+  /** The signed-in member records their first name (never someone else's, never a rename). */
+  const nameSelf = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
+    const command = parseOwnNameCommand(input.body);
+    const current = await session(input);
+    return retryTransactionConflict(() =>
+      options.persistence.transactions.run(async (tx) => {
+        const scope = await ownScope(tx, input.sessionCookie, current.sessionReference);
+        const viewer = String(scope.actorReference);
+        if ((await ownMember(tx, scope)) === null) return fail("NotFound");
+        try {
+          const result = await setStoreMemberDisplayName(
+            directoryTx(tx),
+            {
+              brandReference: scope.context.brand.brandReference,
+              storeReference: scope.store.storeReference,
+              actorReference: viewer,
+              // Version 0 only: a retried request is AlreadyApplied, a recorded name is Conflict.
+              expectedProfileVersion: command.expectedProfileVersion,
+              displayName: command.displayName,
+              operationReference: command.operationReference,
+              changedBy: viewer,
+              changedAt: options.persistence.now(),
+              auditReference: options.references.next(),
+            },
+            (transaction, record) =>
+              appendAuditRecordInTransaction(
+                transaction,
+                record as unknown as Parameters<typeof appendAuditRecordInTransaction>[1],
+              ),
+          );
+          return { status: result.status, profileVersion: result.profileVersion };
+        } catch (error) {
+          if (error instanceof MemberDirectoryError)
+            return fail(
+              error.code === "MEMBER_DIRECTORY_NOT_FOUND"
+                ? "NotFound"
+                : error.code === "MEMBER_DIRECTORY_INPUT_INVALID"
+                  ? "Invalid"
+                  : "Conflict",
+            );
+          throw error;
+        }
+      }),
+    );
+  };
+  async function ownScope(tx: Tx, sessionCookie: unknown, sessionReference: string) {
+    const scope = await resolveScope(tx, sessionCookie, "merchant.access", sessionReference).catch(
+      () => fail("PermissionDenied"),
+    );
+    if (!(await scope.allowed())) fail("PermissionDenied");
+    return scope;
+  }
+  async function ownMember(tx: Tx, scope: Awaited<ReturnType<typeof ownScope>>) {
+    try {
+      return await loadStoreMember(
+        directoryTx(tx),
+        {
+          brandReference: scope.context.brand.brandReference,
+          storeReference: scope.store.storeReference,
+        },
+        String(scope.actorReference),
+      );
+    } catch (error) {
+      if (error instanceof MemberDirectoryError && error.code === "MEMBER_DIRECTORY_NOT_FOUND")
+        return null;
+      throw error;
+    }
+  }
+  return { query, command, ownProfile, nameSelf };
 }

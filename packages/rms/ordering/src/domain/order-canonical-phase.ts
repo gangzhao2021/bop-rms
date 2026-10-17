@@ -71,14 +71,25 @@ const toCanonical = {
 } as const satisfies Record<OrderItemProgressFact["phase"], OrderStatusCanonicalPhase>;
 
 /**
+ * Dine-in delivery facts the caller read from the Dining owner's public served-quantity reader
+ * under the same fence (Dining publishes no events). Lists only the Order's items whose whole
+ * ordered quantity was served; a partly served item is not listed.
+ */
+export interface OrderDeliveredItemFacts {
+  readonly servedItems: readonly string[];
+}
+
+/**
  * DEC-PILOT-BATCH-PHASE-01: the Order's overall phase merged from its Batches' and items' facts.
  * Pure and order-independent: facts may arrive in any order or be replayed and give the same result,
  * so a redelivered or late Kitchen event can never move the phase backwards. Grants no command
- * permission and never closes an Order.
+ * permission and never closes an Order. Rule 2: every remaining (not cancelled) item delivered —
+ * a collected pickup, or every dine-in item served — is Fulfilled.
  */
 export function resolveOrderCanonicalPhase(
   owner: OrderCanonicalPhaseOwnerFacts,
   kitchen: readonly OrderKitchenProgressFact[],
+  delivered: OrderDeliveredItemFacts | null = null,
 ): {
   readonly canonicalPhase: OrderStatusCanonicalPhase;
   readonly everAccepted: boolean;
@@ -109,6 +120,13 @@ export function resolveOrderCanonicalPhase(
     if (typeof owner.fulfilled !== "boolean") return invalid();
     const notCollected = owner.notCollected ?? false;
     if (typeof notCollected !== "boolean") return invalid();
+    if (delivered !== null && !Array.isArray(delivered.servedItems)) return invalid();
+    const served = new Set<string>(
+      (delivered?.servedItems ?? []).map((value): string => {
+        const item = parseOrderingReference(value);
+        return batchOf.has(item) ? item : invalid();
+      }),
+    );
 
     const started = new Set<string>();
     const made = new Set<string>();
@@ -142,7 +160,8 @@ export function resolveOrderCanonicalPhase(
         cancelledItems.has(orderItemReference) ||
         notMade.has(orderItemReference);
       let phase: OrderItemProgressFact["phase"];
-      if (owner.fulfilled && !itemCancelled) phase = "Fulfilled";
+      if ((owner.fulfilled || served.has(orderItemReference)) && !itemCancelled)
+        phase = "Fulfilled";
       else if (owner.termination !== null)
         phase = owner.termination.phase === "Rejected" && !everAccepted ? "Rejected" : "Cancelled";
       else if (itemCancelled || notCollected) phase = "Cancelled";
@@ -150,7 +169,7 @@ export function resolveOrderCanonicalPhase(
       else if (everStarted) phase = "InProgress";
       else if (everAccepted) phase = "Accepted";
       else phase = "Submitted";
-      // A collected pickup was accepted even when no kitchen fact was recorded for it.
+      // A collected pickup or served dish was accepted even when no kitchen fact was recorded.
       items.push({
         orderItemReference,
         phase,

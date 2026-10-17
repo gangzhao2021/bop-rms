@@ -327,7 +327,9 @@ export function staffCancelledOrder(view: OrderStatusView): StaffCancellation | 
 export function isOrderSettled(view: OrderStatusView): boolean {
   const phase = view.order.canonicalPhase;
   return (
-    phase === "Fulfilled" ||
+    // A dine-in Order whose items were all served is Fulfilled but the table can still order
+    // another round (staff can enter one too), so the page keeps checking.
+    (phase === "Fulfilled" && view.order.orderType !== "DineIn") ||
     phase === "Cancelled" ||
     phase === "Rejected" ||
     view.order.fulfillmentStatus === "Completed" ||
@@ -580,7 +582,10 @@ function StatusContent({
                     : allServed
                       ? ["Items served", "All listed items have been served."]
                       : view.order.canonicalPhase === "Fulfilled"
-                        ? ["Order complete", "Your order is complete. Thank you for visiting!"]
+                        ? pickup
+                          ? ["Order complete", "Your order is complete. Thank you for visiting!"]
+                          : // Dine-in: everything was served; the table may still order more.
+                            ["Items served", "All listed items have been served."]
                         : kitchenLabel === "AwaitingPayment"
                           ? [
                               "Waiting for payment",

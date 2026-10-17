@@ -23,10 +23,12 @@ export interface OrderStatusQueryPorts {
   /**
    * WP-2423 / DEC-PILOT-BATCH-PHASE-01: Ordering's merged current phase for an Order (own records
    * plus consumed Kitchen facts), read in the caller's transaction. Absent: the snapshot phase.
+   * `order.orderType` lets the composition add dine-in served facts from Dining's public reader.
    */
   readonly phases?: {
     load(
       orderReference: OrderingReference,
+      order: { readonly orderType: "DineIn" | "Pickup" },
     ): Promise<{ readonly canonicalPhase: OrderStatusCanonicalPhase } | null>;
   };
   readonly authorization: {

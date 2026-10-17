@@ -29,6 +29,8 @@ export interface MerchantShellProps {
   readonly overview?: ReactNode;
   /** WP-2423 P2: the live "right now" card; the release note is shown while it is absent. */
   readonly today?: ReactNode;
+  /** WP-2423: a request to the signed-in person shown above the overview (add your name). */
+  readonly prompt?: ReactNode;
 }
 
 function StateView({ state }: { readonly state: Exclude<MerchantShellState, { kind: "Ready" }> }) {
@@ -61,6 +63,7 @@ export function MerchantShell({
   onSwitchStore,
   overview = null,
   today,
+  prompt = null,
 }: MerchantShellProps) {
   const liveBusinessDay = useStoreBusinessDay();
   if (state.kind !== "Ready")
@@ -128,6 +131,7 @@ export function MerchantShell({
             Stale data · refresh before relying on operational status.
           </p>
         ) : null}
+        {prompt}
         {overview ?? (
           <div className="overview-grid">
             <section className="overview-card" aria-labelledby="live-store-status-heading">

@@ -6602,6 +6602,53 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
       .catch((error: unknown) => staffFailure(response, error));
   });
 
+  // WP-2423: Home asks a signed-in member with no recorded name to add one (merchant.access).
+  router.post("/organization/staff/me", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as Record<string, unknown> | undefined;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === undefined ||
+      Object.keys(body).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.staffAdministration) {
+      response.status(503).json({ error: "staff_administration_unavailable" });
+      return;
+    }
+    void options.staffAdministration
+      .ownProfile({ sessionCookie, csrf })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => staffFailure(response, error));
+  });
+  router.post("/organization/staff/me/name", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.staffAdministration) {
+      response.status(503).json({ error: "staff_administration_unavailable" });
+      return;
+    }
+    void options.staffAdministration
+      .nameSelf({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.json(result))
+      .catch((error: unknown) => staffFailure(response, error));
+  });
+
   // WP-2423: INV-ITEM-LIST / DETAIL / CREATE / EDIT reads and Inventory Item commands.
   const inventoryItemStatus = {
     PermissionDenied: 403,

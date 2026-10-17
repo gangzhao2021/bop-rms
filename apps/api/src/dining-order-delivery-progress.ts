@@ -75,6 +75,22 @@ export function createDiningOrderDeliveryProgress(
 }
 
 /**
+ * WP-2423 / DEC-PILOT-BATCH-PHASE-01: the served facts Ordering's phase merge takes for a dine-in
+ * Order — the items whose whole ordered quantity Dining recorded as served. Dining publishes no
+ * events, so this composition (holding both public sources) hands them to
+ * `loadOrderCanonicalPhase`; a partly served or cancelled item is not listed.
+ */
+export function servedOrderItemFacts(
+  items: readonly { readonly orderItemReference: string; readonly remainingQuantity: number }[],
+): { readonly servedItems: readonly string[] } {
+  return Object.freeze({
+    servedItems: Object.freeze(
+      items.filter((item) => item.remainingQuantity === 0).map((item) => item.orderItemReference),
+    ),
+  });
+}
+
+/**
  * WP-2423: items (quantities) the kitchen marked ready and nobody has served yet — waiting at the
  * pass. A partly served item stays Ready; cancelled items never count. The one rule the Tables
  * page (closing a table) and the Home's "ready to serve" both use.

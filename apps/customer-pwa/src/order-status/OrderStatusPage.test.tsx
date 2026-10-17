@@ -444,13 +444,9 @@ const phaseTable = [
     "Your food is ready and will be brought to your table shortly.",
     false,
   ],
-  [
-    "DineIn",
-    "Fulfilled",
-    "Order complete",
-    "Your order is complete. Thank you for visiting!",
-    true,
-  ],
+  // DEC-PILOT-BATCH-PHASE-01: every remaining item served. The table can still order another
+  // round, so the page keeps checking.
+  ["DineIn", "Fulfilled", "Items served", "All listed items have been served.", false],
   ["DineIn", "Rejected", "Order not accepted", "Your order was not accepted.", true],
   ["DineIn", "Cancelled", "Order cancelled", "Your order has been cancelled.", true],
 ] as const;

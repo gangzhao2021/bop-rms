@@ -28,14 +28,35 @@ export function staffRoleLabel(roles: readonly StaffRole[]): string {
 }
 
 /**
+ * One label per person for a list staff choose from: everyone eligible appears, named by the
+ * directory name or, without one, by their role ("Store owner", last resort "Staff member").
+ * Two people with the same label are told apart as "Staff member", "Staff member (2)" (in the
+ * directory's stable order), so a lock-screen choice is never ambiguous.
+ */
+export function distinctStaffLabels(
+  people: readonly { readonly actorReference: string; readonly label: string }[],
+): ReadonlyMap<string, string> {
+  const seen = new Map<string, number>();
+  const result = new Map<string, string>();
+  for (const person of people) {
+    const count = (seen.get(person.label) ?? 0) + 1;
+    seen.set(person.label, count);
+    result.set(person.actorReference, count === 1 ? person.label : `${person.label} (${count})`);
+  }
+  return result;
+}
+
+/**
  * The label function for one read: `names` is the directory name by actor (it may gain entries
  * after this is created); a person without a name is labelled by their current Store and Brand roles.
+ * `viewer` is the signed-in person ("You"); null on a screen nobody is signed in to (the shared
+ * tablet's lock screen), where everyone is named.
  */
 export async function createStaffLabels(
   tx: RoleAssignmentTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
   input: {
-    readonly viewer: string;
+    readonly viewer: string | null;
     readonly at: string;
     readonly names: ReadonlyMap<string, string | null>;
   },

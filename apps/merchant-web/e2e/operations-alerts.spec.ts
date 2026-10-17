@@ -92,8 +92,14 @@ const headers = { "cache-control": "no-store" };
  * does: the board for Owner and Store Manager, "not permitted" for everyone else. Any other merchant read is
  * recorded as unexpected so a new Home dependency is noticed instead of silently failing.
  */
-async function pilotHome(page: Page, role: PilotRole, board: () => unknown) {
+async function pilotHome(
+  page: Page,
+  role: PilotRole,
+  board: () => unknown,
+  ownName: "Recorded" | "Missing" = "Recorded",
+) {
   const alertReads: string[] = [];
+  const nameSaves: unknown[] = [];
   const unexpected: string[] = [];
   const errors: string[] = [];
   await page.route("**/merchant/**", (route) => {
@@ -187,6 +193,21 @@ async function pilotHome(page: Page, role: PilotRole, board: () => unknown) {
       },
     }),
   );
+  // WP-2423: Home asks a member with no recorded name to add one.
+  let named = ownName === "Recorded";
+  await page.route("**/merchant/organization/staff/me", (route) =>
+    route.fulfill({
+      headers,
+      json: named
+        ? { name: "Recorded", displayName: "Ava" }
+        : { name: "Missing", profileVersion: 0 },
+    }),
+  );
+  await page.route("**/merchant/organization/staff/me/name", (route) => {
+    nameSaves.push(route.request().postDataJSON());
+    named = true;
+    return route.fulfill({ headers, json: { status: "Applied", profileVersion: 1 } });
+  });
   await page.route("**/merchant/operations-alerts", (route) => {
     alertReads.push(route.request().method());
     return role === "front-of-house"
@@ -198,7 +219,7 @@ async function pilotHome(page: Page, role: PilotRole, board: () => unknown) {
     if (message.type() !== "error") return;
     errors.push(message.text());
   });
-  return { alertReads, unexpected, errors };
+  return { alertReads, unexpected, errors, nameSaves };
 }
 
 const problem = {
@@ -330,6 +351,29 @@ test("@production Home shows front of house no store system card and does not ke
   await expect(page.getByRole("region", { name: "Right now" })).toBeVisible();
   expect(home.alertReads).toHaveLength(1);
   await expect(page.getByRole("region", { name: "Store system" })).toHaveCount(0);
+  expect(home.errors).toEqual([]);
+  expect(home.unexpected).toEqual([]);
+});
+
+// WP-2423: real stores label who did what. A member with no recorded name is asked on Home, once,
+// in plain words, and the prompt goes away after saving.
+test("@production Home asks a member with no name to add it, and thanks them once saved", async ({
+  page,
+}) => {
+  const home = await pilotHome(page, "owner", () => problem, "Missing");
+  await page.goto("/app");
+  const prompt = page.getByRole("region", { name: "Add your name" });
+  await expect(prompt.getByText("Add your name so your team sees who did what.")).toBeVisible();
+  await prompt.getByRole("button", { name: "Save name" }).click();
+  await expect(prompt.getByRole("alert")).toBeVisible();
+  expect(home.nameSaves).toHaveLength(0);
+  await prompt.getByLabel("Your name").fill("  Cole Park ");
+  await prompt.getByRole("button", { name: "Save name" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Thanks." })).toBeVisible();
+  expect(home.nameSaves).toHaveLength(1);
+  expect(home.nameSaves[0]).toMatchObject({ displayName: "Cole Park", expectedProfileVersion: 0 });
+  await expect(page.getByRole("region", { name: "Add your name" })).toHaveCount(0);
+  await expectNoInternalText(page);
   expect(home.errors).toEqual([]);
   expect(home.unexpected).toEqual([]);
 });

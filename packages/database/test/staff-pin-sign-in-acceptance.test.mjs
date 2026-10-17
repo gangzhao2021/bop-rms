@@ -15,6 +15,7 @@ import {
   createStoreDeviceSecretHasher,
   setStaffPin,
 } from "../../bop/identity/src/index.ts";
+import { createMerchantStaffAdministration } from "../../../apps/api/src/merchant-staff-administration.ts";
 import { createMerchantStaffPin } from "../../../apps/api/src/merchant-staff-pin.ts";
 import {
   installMerchantStaffPinRoutes,
@@ -41,7 +42,9 @@ const id = (n) => "0190b3a0-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const minutes = (n) => n * 60_000;
 const [brand, store, otherStore] = [1, 2, 3].map(id);
 const [manager, ava, cole, former, otherManager] = [10, 11, 12, 13, 14].map(id);
-const names = { [manager]: "Mia", [ava]: "Ava", [cole]: "Cole", [former]: "Finn" };
+// Cole is the Store owner Brand provisioning created: nobody has recorded a name for him yet, so
+// every list names him by his role and never leaves him out.
+const names = { [manager]: "Mia", [ava]: "Ava", [former]: "Finn" };
 const managerActions = new Set([
   "merchant.access",
   "identity.store_device.manage",
@@ -113,10 +116,19 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
             "INSERT INTO bop_membership.member_profile_version (membership_id,version,brand_id,actor_id,display_name,operation_id,changed_by,changed_at,data_classification) VALUES ($1,1,$2,$3,$4,$5,$3,$6,'PersonalData')",
             [membership, brand, actor, name, id(n++), from],
           );
+        return { membership, assignment };
       }
       await member(manager, store);
       await member(ava, store);
-      await member(cole, store);
+      const coleMember = await member(cole, store);
+      await admin.query(
+        "INSERT INTO bop_permission.role VALUES($1,$2,$3,'store_owner','Active',$4,NULL,1,$4,$4)",
+        [id(90), brand, store, from],
+      );
+      await admin.query(
+        "INSERT INTO bop_permission.role_assignment VALUES($1,$2,$3,$4,$5,$6,$7,'Active',$8,NULL,1,$8,$8)",
+        [id(91), id(90), coleMember.membership, coleMember.assignment, cole, brand, store, from],
+      );
       await member(former, store, "Ended");
       await member(otherManager, otherStore, "Active", "Omar");
 
@@ -300,7 +312,8 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
       assert.equal(registered.status, "Registered");
       assert.match(registered.deviceCookie, /^[A-Za-z0-9_-]{43}$/u);
       assert.equal(registered.device.label, "Front counter");
-      assert.equal(registered.device.registeredBy, "Mia");
+      // The person who set the tablet up reads it as themselves.
+      assert.equal(registered.device.registeredBy, "You");
       const tablet = registered.deviceCookie;
       assert.equal(await staffPin.isRegisteredDevice(tablet), true);
       assert.equal(await staffPin.isRegisteredDevice(randomBytes(32).toString("base64url")), false);
@@ -417,8 +430,9 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         timeZone: "America/Toronto",
         staff: [
           { choice: await tokenOn(tablet, ava), name: "Ava" },
-          { choice: await tokenOn(tablet, cole), name: "Cole" },
           { choice: await tokenOn(tablet, manager), name: "Mia" },
+          // No recorded name: named by role on the lock screen, never left out.
+          { choice: await tokenOn(tablet, cole), name: "Store owner" },
         ],
       });
       for (const actor of [ava, cole, manager, brand, store])
@@ -571,7 +585,7 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         const lockBody = await lock.json();
         assert.deepEqual(
           lockBody.staff.map((item) => item.name),
-          ["Ava", "Cole", "Mia"],
+          ["Ava", "Mia", "Store owner"],
         );
         assert.deepEqual(lockBody.fullSignIn, { path: "/internal-test/staff", testOnly: true });
         const unknownTablet = await call("/staff-switch", {
@@ -682,6 +696,15 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         lockedView.staffPins.find((item) => item.staff === ava),
         { staff: ava, name: "Ava", state: "Set", changedAt: T(3), lockedUntil: T(29) },
       );
+      // Everyone at the Store is listed for a PIN reset, the unnamed Store owner by role.
+      assert.deepEqual(
+        lockedView.staffPins.map((item) => [item.staff, item.name]),
+        [
+          [ava, "Ava"],
+          [cole, "Store owner"],
+          [manager, "You"],
+        ],
+      );
       assert.deepEqual(lockedView.thisDevice, {
         device: second.device.device,
         label: "Kitchen pass",
@@ -689,8 +712,8 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
       assert.deepEqual(
         lockedView.devices.map((item) => [item.label, item.registeredBy]),
         [
-          ["Front counter", "Mia"],
-          ["Kitchen pass", "Mia"],
+          ["Front counter", "You"],
+          ["Kitchen pass", "You"],
         ],
       );
       assert.deepEqual(await at(28.99, () => unlock(ava, "482913", null, kitchenTablet)), {
@@ -831,7 +854,7 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
       assert.deepEqual(await at(51, () => unlock(ava, "482913")), { status: "Rejected" });
       assert.deepEqual(
         (await at(51, () => staffPin.switchScreen(tablet))).staff.map((item) => item.name),
-        ["Cole", "Mia"],
+        ["Mia", "Store owner"],
       );
       assert.equal(
         (await at(52, () => staffPin.ownPin({ sessionCookie: avaFull3 }))).pin.state,
@@ -1131,6 +1154,109 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         pepper.toString("hex"),
       ])
         assert.ok(!auditText.includes(secret), "audits never carry a PIN or secret");
+
+      // ── 13. The unnamed Store owner adds his own name from Home (merchant.access, himself only,
+      //        first name only); every list then uses it. Run as the restricted API role.
+      const staffAdministration = createMerchantStaffAdministration({
+        persistence: { transactions: api, now: () => clock, identity: { hasher } },
+        authentication,
+        references: { next: reference },
+      });
+      const coleNow = await at(60, () => signIn(cole));
+      assert.deepEqual(
+        await at(60, () => staffAdministration.ownProfile({ sessionCookie: coleNow, csrf })),
+        { name: "Missing", profileVersion: 0 },
+      );
+      const nameOperation = reference();
+      const nameCommand = {
+        displayName: "Cole Park",
+        expectedProfileVersion: 0,
+        operationReference: nameOperation,
+      };
+      await rejects(
+        at(60, () =>
+          staffAdministration.nameSelf({
+            sessionCookie: coleNow,
+            csrf,
+            body: { ...nameCommand, displayName: " Cole" },
+          }),
+        ),
+        "Invalid",
+      );
+      assert.deepEqual(
+        await at(61, () =>
+          staffAdministration.nameSelf({ sessionCookie: coleNow, csrf, body: nameCommand }),
+        ),
+        { status: "Applied", profileVersion: 1 },
+      );
+      // A retried request is the same change; a second, different one is not a rename path.
+      assert.deepEqual(
+        await at(61.5, () =>
+          staffAdministration.nameSelf({ sessionCookie: coleNow, csrf, body: nameCommand }),
+        ),
+        { status: "AlreadyApplied", profileVersion: 1 },
+      );
+      await rejects(
+        at(62, () =>
+          staffAdministration.nameSelf({
+            sessionCookie: coleNow,
+            csrf,
+            body: { ...nameCommand, displayName: "Mia", operationReference: reference() },
+          }),
+        ),
+        "Conflict",
+      );
+      assert.deepEqual(
+        await at(62, () => staffAdministration.ownProfile({ sessionCookie: coleNow, csrf })),
+        { name: "Recorded", displayName: "Cole Park" },
+      );
+      // Ava already has a name: Home does not ask, and she cannot rename herself there.
+      const avaNow = await at(62, () => signIn(ava));
+      assert.deepEqual(
+        await at(62, () => staffAdministration.ownProfile({ sessionCookie: avaNow, csrf })),
+        { name: "Recorded", displayName: "Ava" },
+      );
+      await rejects(
+        at(62, () =>
+          staffAdministration.nameSelf({
+            sessionCookie: avaNow,
+            csrf,
+            body: { ...nameCommand, displayName: "Mia", operationReference: reference() },
+          }),
+        ),
+        "Conflict",
+      );
+      // Someone who left this Store is not one of its members: Home has nothing to ask or save.
+      const finnNow = await at(62, () => signIn(former));
+      assert.deepEqual(
+        await at(62, () => staffAdministration.ownProfile({ sessionCookie: finnNow, csrf })),
+        { name: "NotStoreMember" },
+      );
+      await rejects(
+        at(62, () =>
+          staffAdministration.nameSelf({
+            sessionCookie: finnNow,
+            csrf,
+            body: { ...nameCommand, operationReference: reference() },
+          }),
+        ),
+        "NotFound",
+      );
+      const miaNow = await at(63, () => signIn(manager));
+      assert.deepEqual(
+        (
+          await at(63, () => staffPin.overview({ sessionCookie: miaNow, deviceCookie: null }))
+        ).staffPins.map((item) => item.name),
+        ["Ava", "Cole Park", "You"],
+      );
+      const profileAudit = (
+        await admin.query(
+          "SELECT actor_reference::text AS actor,after_summary_json::text AS after FROM platform_audit.audit_record WHERE action_code='MEMBER_PROFILE_NAME_CHANGED'",
+        )
+      ).rows;
+      assert.equal(profileAudit.length, 1);
+      assert.equal(profileAudit[0].actor, cole);
+      assert.ok(!profileAudit[0].after.includes("Cole"), "the audit never carries the name");
     } finally {
       await admin.end();
     }

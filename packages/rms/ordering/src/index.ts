@@ -469,6 +469,7 @@ export {
   type OrderKitchenProgressFact,
   type OrderKitchenProgressFactKind,
   type OrderCanonicalPhaseOwnerFacts,
+  type OrderDeliveredItemFacts,
 } from "./domain/order-canonical-phase.js";
 export {
   orderKitchenProgressEventTypes,
