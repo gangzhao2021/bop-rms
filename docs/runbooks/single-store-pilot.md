@@ -488,7 +488,12 @@ customer menu or `Orders` loads on mobile data, the host is up and only the stor
    Please wait or contact the store." Once staff screens are back, the store has **15 minutes** to
    accept or refund each held order; after that an order nobody accepted is refunded automatically
    as before. Keep at least one `Orders` screen open whenever the store is open: an order whose 30
-   minutes end while a staff screen is open is refunded as usual if nobody accepts it. Still pause
+   minutes end while a staff screen is open is refunded as usual if nobody accepts it. In the last 5
+   minutes every signed-in staff screen (Home, `Orders`, `Kitchen`, `Tables` and the rest) shows "Order
+   N will be refunded automatically in N min unless someone accepts it." and chimes at 2 minutes and
+   30 seconds (sound starts once someone has touched that screen); the kitchen display says to ask
+   the counter, since kitchen staff cannot accept. A screen that lost its connection keeps counting
+   down from the last deadline it read. Still pause
    online ordering so no new online orders arrive. See section 5 step 1 for the decision.
 6. **Kitchen tablet failure only**: sign in on the backup device as the kitchen staff member
    (today the internal-test staff page, "Start kitchen display as …"; real staff accounts wait for the

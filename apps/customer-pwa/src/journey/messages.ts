@@ -271,7 +271,6 @@ export const checkoutText = Object.freeze({
   agreePolicies: "I’ve read and agree to the policies above",
   detailsExpired:
     "Checkout information expired. Get a current quote and reload details before saving.",
-  detailsOffline: "You’re offline. Your details won’t be submitted automatically.",
   savingDetails: "Saving checkout details…",
   detailsSaved: "Checkout details saved.",
   detailsInvalid:

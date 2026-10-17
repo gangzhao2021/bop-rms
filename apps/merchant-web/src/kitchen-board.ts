@@ -75,7 +75,12 @@ export interface KitchenBoardView {
    * WP-2423 (v15 2026-10-16): today's paid orders still waiting for acceptance (no kitchen work
    * yet), so the order search can say so. Omitted by older servers; null when not read.
    */
-  readonly awaitingAcceptance?: readonly KitchenOrderLabel[] | null;
+  readonly awaitingAcceptance?: readonly KitchenAwaitingLabel[] | null;
+}
+/** A paid order not accepted yet; a pickup carries when it is refunded unless someone accepts it. */
+export interface KitchenAwaitingLabel extends KitchenOrderLabel {
+  /** Warn before timeouts (WP-2423 2026-10-17); null or absent when no refund deadline runs. */
+  readonly acceptBy?: string | null;
 }
 
 export interface KitchenWorkItemDetailView {
@@ -193,6 +198,20 @@ export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null
     tableLabel: input.tableLabel as string | null,
     enteredByStaff: input.enteredByStaff === true,
   });
+}
+/** WP-2423: an order waiting for acceptance, with a pickup's refund deadline when one runs. */
+function parseKitchenAwaitingLabel(value: unknown): KitchenAwaitingLabel {
+  const hasDeadline =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "acceptBy");
+  const { acceptBy, ...rest } = (
+    hasDeadline ? value : { ...(value as object), acceptBy: null }
+  ) as {
+    acceptBy: unknown;
+  };
+  const label = parseKitchenOrderLabel(rest);
+  if (label === null || (acceptBy !== null && label.orderType !== "Pickup"))
+    throw new Error("KITCHEN_BOARD_INVALID");
+  return Object.freeze({ ...label, acceptBy: acceptBy === null ? null : instant(acceptBy) });
 }
 /** WP-2423 Q2: the Customer's note, as written (bounded, no control characters). */
 export function parseKitchenCustomerNote(value: unknown): string | null {
@@ -366,11 +385,7 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     !hasAwaiting || input.awaitingAcceptance === null
       ? null
       : Object.freeze(
-          (input.awaitingAcceptance as readonly unknown[]).map((entry) => {
-            const label = parseKitchenOrderLabel(entry);
-            if (label === null) throw new Error("KITCHEN_BOARD_INVALID");
-            return label;
-          }),
+          (input.awaitingAcceptance as readonly unknown[]).map(parseKitchenAwaitingLabel),
         );
   if (
     input.screenId !== "KIT-KITCHEN-QUEUE" ||

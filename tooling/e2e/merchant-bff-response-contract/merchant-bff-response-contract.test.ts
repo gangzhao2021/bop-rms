@@ -537,7 +537,11 @@ const kitchenView = {
   operatorStatus: "Named",
   storeReference,
   canCloseEarlierDayTickets: true,
-  awaitingAcceptance: [],
+  // Warn before timeouts: a paid pickup nobody accepted carries its refund deadline to the kitchen.
+  awaitingAcceptance: [
+    { orderNumber: "9", orderType: "Pickup", tableLabel: null, acceptBy: at(40) },
+    { orderNumber: "T7-13", orderType: "DineIn", tableLabel: "T7", acceptBy: null },
+  ],
   items: [kitchenItem(1, "Queued"), kitchenItem(2, "Completed")],
   nextCursor: null,
 } satisfies KitchenList;
@@ -739,6 +743,7 @@ describe("merchant BFF responses carry every read-model field the browser parses
     );
     expect(dropped(kitchenView)).toEqual([]);
     expect(board.items).toHaveLength(2);
+    expect(board.awaitingAcceptance?.map((label) => label.acceptBy)).toEqual([at(40), null]);
   });
 
   it("tables", async () => {

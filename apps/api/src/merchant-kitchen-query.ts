@@ -27,6 +27,7 @@ import {
   withOptionalRead,
 } from "./merchant-round-business-date.js";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
+import { readPickupRefundDeadlines } from "./pickup-acceptance-deadline.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
@@ -241,19 +242,30 @@ export async function kitchenPreparation(
     }),
   );
 }
+/** WP-2423: a paid order the kitchen has no work for yet because staff have not accepted it. */
+export interface KitchenAwaitingAcceptanceLabel extends Omit<KitchenOrderLabel, "enteredByStaff"> {
+  /**
+   * Warn before timeouts (WP-2423 2026-10-17): when a paid pickup order is refunded automatically
+   * unless someone accepts it, so the kitchen display warns too. Null for dine-in rounds (never
+   * refunded for waiting), while an order is held for an outage, or when the deadline is unknown.
+   */
+  readonly acceptBy: string | null;
+}
 /**
  * WP-2423 (v15 2026-10-16): how the kitchen names today's orders waiting for acceptance — number,
- * type and a dine-in order's current table. No Customer identity.
+ * type, a dine-in order's current table and a pickup's refund deadline. No Customer identity.
  */
 export async function kitchenAwaitingAcceptance(
   transaction: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
   orders: readonly {
+    readonly orderReference: string;
     readonly orderNumber: string;
     readonly orderType: "Pickup" | "DineIn";
     readonly diningSessionReference: string | null;
   }[],
-): Promise<readonly Omit<KitchenOrderLabel, "enteredByStaff">[]> {
+  refundDeadlines: ReadonlyMap<string, string> = new Map(),
+): Promise<readonly KitchenAwaitingAcceptanceLabel[]> {
   const sessions = [
     ...new Set(
       orders.flatMap((order) =>
@@ -274,6 +286,8 @@ export async function kitchenAwaitingAcceptance(
           order.diningSessionReference === null
             ? null
             : (tables.get(order.diningSessionReference) ?? null),
+        acceptBy:
+          order.orderType === "Pickup" ? (refundDeadlines.get(order.orderReference) ?? null) : null,
       }),
     ),
   );
@@ -502,15 +516,22 @@ export function createMerchantKitchenQuery(options: {
                         timeZone: scope.store.timeZone,
                         authorize: async () => authorized.guard(),
                       }).today(tx, authority.observedAt);
-                      return kitchenAwaitingAcceptance(
+                      const waiting = await listStoreOrdersAwaitingAcceptance(tx, authority, {
+                        since: today.startsAt,
+                        businessDate: today.businessDate,
+                        limit: 100,
+                      });
+                      // Warn before timeouts: the kitchen display also warns before a paid pickup
+                      // nobody accepted is refunded. Without the deadline the names still show.
+                      const pickups = waiting
+                        .filter((order) => order.orderType === "Pickup")
+                        .map((order) => order.orderReference);
+                      const refundDeadlines = await withOptionalRead(
                         tx,
-                        authority,
-                        await listStoreOrdersAwaitingAcceptance(tx, authority, {
-                          since: today.startsAt,
-                          businessDate: today.businessDate,
-                          limit: 100,
-                        }),
+                        () => readPickupRefundDeadlines(tx, authority, pickups),
+                        new Map<string, string>(),
                       );
+                      return kitchenAwaitingAcceptance(tx, authority, waiting, refundDeadlines);
                     },
                     null,
                   )

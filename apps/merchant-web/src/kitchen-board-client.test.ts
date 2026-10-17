@@ -324,11 +324,72 @@ it("WP-2423 v15: carries today's orders waiting for acceptance from the first pa
     }),
   );
   const view = parseKitchenBoardView(await f.client.loadQueue());
+  // A server before the refund warning sends no deadline: none is assumed.
   expect(view.awaitingAcceptance).toEqual([
-    { orderNumber: "13", orderType: "Pickup", tableLabel: null, enteredByStaff: false },
+    {
+      orderNumber: "13",
+      orderType: "Pickup",
+      tableLabel: null,
+      enteredByStaff: false,
+      acceptBy: null,
+    },
   ]);
   f.fetcher.mockResolvedValue(response({ ...metadata, items: [item()], nextCursor: null }));
   expect(
     Object.hasOwn(parseKitchenBoardView(await f.client.loadQueue()), "awaitingAcceptance"),
   ).toBe(false);
+});
+it("Warn before timeouts: reads a paid pickup's refund deadline with one small first page", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(
+    response({
+      ...metadata,
+      awaitingAcceptance: [
+        {
+          orderNumber: "9",
+          orderType: "Pickup",
+          tableLabel: null,
+          acceptBy: "2026-10-17T13:58:00.000Z",
+        },
+        { orderNumber: "7", orderType: "DineIn", tableLabel: "T4", acceptBy: null },
+      ],
+      items: [item()],
+      nextCursor: null,
+    }),
+  );
+  expect(await f.client.loadAwaitingAcceptance()).toEqual([
+    {
+      orderNumber: "9",
+      orderType: "Pickup",
+      tableLabel: null,
+      enteredByStaff: false,
+      acceptBy: "2026-10-17T13:58:00.000Z",
+    },
+    {
+      orderNumber: "7",
+      orderType: "DineIn",
+      tableLabel: "T4",
+      enteredByStaff: false,
+      acceptBy: null,
+    },
+  ]);
+  const body = JSON.parse(String(f.fetcher.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+  expect(body).toMatchObject({ kind: "List", cursor: null, limit: 1 });
+  // A dine-in round is never refunded for waiting: a deadline on one is refused.
+  f.fetcher.mockResolvedValue(
+    response({
+      ...metadata,
+      awaitingAcceptance: [
+        {
+          orderNumber: "7",
+          orderType: "DineIn",
+          tableLabel: "T4",
+          acceptBy: "2026-10-17T13:58:00.000Z",
+        },
+      ],
+      items: [],
+      nextCursor: null,
+    }),
+  );
+  await expect(f.client.loadAwaitingAcceptance()).rejects.toThrow();
 });

@@ -3,6 +3,7 @@ import {
   parseKitchenBoardView,
   parseKitchenRouteReference,
   parseKitchenWorkItemView,
+  type KitchenAwaitingLabel,
   type KitchenBoardClient,
   type KitchenQueueSearch,
 } from "./kitchen-board.js";
@@ -137,7 +138,10 @@ export function createKitchenBoardClient(options: {
   storeLabel: string;
   storeReference: string;
   fetcher?: typeof fetch;
-}): KitchenBoardClient {
+}): KitchenBoardClient & {
+  /** Today's paid orders still waiting for acceptance (null when the Store could not say). */
+  loadAwaitingAcceptance(): Promise<readonly KitchenAwaitingLabel[] | null>;
+} {
   const fetcher = options.fetcher ?? fetch;
   async function query(body: unknown) {
     if (!/^[A-Za-z0-9_-]{43}$/.test(options.csrf)) return fail();
@@ -258,6 +262,36 @@ export function createKitchenBoardClient(options: {
     return fail();
   }
   return {
+    // Warn before timeouts (WP-2423 2026-10-17): the first page alone carries them; one ticket keeps
+    // the read small for the store-wide refund warning.
+    async loadAwaitingAcceptance() {
+      const first = await query({
+        kind: "List",
+        filters: {
+          orderReference: null,
+          ticketReference: null,
+          workItemReference: null,
+          stationReference: null,
+          status: null,
+        },
+        cursor: null,
+        limit: 1,
+      });
+      if (!("awaitingAcceptance" in first)) return null;
+      return (
+        parseKitchenBoardView({
+          screenId: "KIT-KITCHEN-QUEUE",
+          projectionName: "kitchen_work_queue_v1",
+          projectionVersion: 1,
+          storeLabel: options.storeLabel,
+          projectedAt: first.projectedAt,
+          freshnessStatus: first.stale ? "Stale" : first.freshnessStatus,
+          operatorStatus: first.operatorStatus,
+          items: [],
+          awaitingAcceptance: first.awaitingAcceptance,
+        }).awaitingAcceptance ?? null
+      );
+    },
     async loadQueue(search?: KitchenQueueSearch) {
       const reference = search ? parseKitchenRouteReference(search.reference) : null;
       if (search && search.kind !== "Order" && search.kind !== "Ticket") return fail();

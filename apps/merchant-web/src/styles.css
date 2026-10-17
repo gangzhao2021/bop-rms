@@ -8097,6 +8097,45 @@ body:has(.product-complete-draft) .bop-shell__header,
 .staff-session__switch button {
   min-height: 44px;
 }
+/* WP-2423 "Warn before timeouts": a paid order nobody accepted is about to be refunded. Shown on
+   every screen; the words carry the meaning, the colour only reinforces it. */
+.refund-deadline-warning {
+  /* Above the page, pushing it down rather than covering its header; stays in view on scroll. */
+  position: sticky;
+  top: 0;
+  z-index: 62;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bop-space-3) var(--bop-space-4);
+  margin: 0;
+  padding: var(--bop-space-3) var(--bop-space-4);
+  border-bottom: 1px solid var(--bop-color-border-default);
+  border-left: 6px solid var(--bop-color-warning);
+  background: var(--bop-color-surface-default);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+  font-weight: 600;
+}
+.refund-deadline-warning[data-tier="urgent"],
+.refund-deadline-warning[data-tier="final"] {
+  border-left-color: var(--bop-color-danger);
+}
+.refund-deadline-warning ul {
+  flex: 1 1 18rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.refund-deadline-warning p {
+  flex: 1 1 18rem;
+  margin: 0;
+  font-weight: 400;
+}
+.refund-deadline-warning .shell-action {
+  text-decoration: none;
+  min-height: 44px;
+}
 .staff-session__cover {
   position: fixed;
   inset: 0;

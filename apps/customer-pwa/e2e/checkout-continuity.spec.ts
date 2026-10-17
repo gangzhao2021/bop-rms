@@ -306,8 +306,12 @@ for (const screen of [
           await expect(retryDetails).toBeEnabled();
           await expect(name).toBeDisabled();
           expect(detailCalls).toHaveLength(1);
+          // Offline, the page's single offline notice stands alone; the retry returns on reconnect.
           await context.setOffline(true);
-          await expect(retryDetails).toBeDisabled();
+          await expect(retryDetails).toHaveCount(0);
+          await expect(
+            page.getByText("We couldn’t confirm your details were saved", { exact: false }),
+          ).toHaveCount(0);
           await context.setOffline(false);
           await expect(retryDetails).toBeEnabled();
           await expect(name).toHaveValue("Synthetic Guest");

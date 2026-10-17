@@ -435,14 +435,27 @@ it("WP-2423 v15: names today's orders waiting for acceptance on the first page o
         }
       : sql.includes("rms_dining.dining_session")
         ? { rows: [{ session_id: id(22), label: "T4" }], rowCount: 1 }
-        : { rows: [], rowCount: 0 },
+        : sql.includes("capacity_asap_commitment")
+          ? { rows: [{ order_id: id(20), expires_at: "2026-09-19T12:02:00.000Z" }], rowCount: 1 }
+          : { rows: [], rowCount: 0 },
   );
   const result = (await f.operation(f.input)) as { awaitingAcceptance: unknown };
   expect(doubles.today).toHaveBeenCalledWith(expect.anything(), "2026-09-19T12:00:00.000Z");
+  // Warn before timeouts: the paid pickup carries when it is refunded unless accepted; a dine-in
+  // round is never refunded for waiting.
   expect(result.awaitingAcceptance).toEqual([
-    { orderNumber: "13", orderType: "Pickup", tableLabel: null },
-    { orderNumber: "7", orderType: "DineIn", tableLabel: "T4" },
+    {
+      orderNumber: "13",
+      orderType: "Pickup",
+      tableLabel: null,
+      acceptBy: "2026-09-19T12:02:00.000Z",
+    },
+    { orderNumber: "7", orderType: "DineIn", tableLabel: "T4", acceptBy: null },
   ]);
+  const deadlines = query.mock.calls.find(([sql]) =>
+    String(sql).includes("capacity_asap_commitment"),
+  );
+  expect(deadlines?.[1]).toEqual([id(3), id(4), [id(20)]]);
   const waiting = query.mock.calls.find(([sql]) =>
     String(sql).includes("order_payment_acceptance_wait"),
   );

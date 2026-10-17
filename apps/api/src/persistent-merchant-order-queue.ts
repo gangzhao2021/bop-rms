@@ -33,6 +33,7 @@ import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-pay
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantOrderQueueRead } from "./merchant-order-queue-read.js";
+import { pickupAcceptanceDeadline } from "./pickup-acceptance-deadline.js";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import {
   readCardMachineCancellationRefund,
@@ -695,14 +696,7 @@ export function createPersistentMerchantOrderQueue(options: {
               result.items.map((item) => {
                 const closed = unfulfillable.get(item.orderReference) ?? null;
                 const hold = closed === null ? (held.get(item.orderReference) ?? null) : null;
-                const decideBy =
-                  hold === null || hold.resolutions.length === 0
-                    ? null
-                    : hold.resolutions
-                        .map((entry) => entry.decideBy)
-                        .reduce((earliest, value) => (value < earliest ? value : earliest));
-                const refundChosen =
-                  hold?.resolutions.some((entry) => entry.resolution === "StaffRefund") ?? false;
+                const { decideBy, refundChosen } = pickupAcceptanceDeadline(null, hold);
                 return Object.freeze({
                   ...item,
                   unfulfillable: closed,

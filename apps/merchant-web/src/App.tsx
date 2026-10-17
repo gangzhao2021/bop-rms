@@ -29,6 +29,9 @@ import { WorkspacePage } from "./WorkspacePage.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { parseKitchenBoardView } from "./kitchen-board.js";
+import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
+import { RefundDeadlineWatch, refundDeadlinesFromOrders } from "./RefundDeadlineWatch.js";
+import type { RefundDeadline } from "./refund-deadline-warning.js";
 import type { MerchantDemoClients } from "./merchant-demo.js";
 import type { MerchantBrandWorkspaceClient } from "./merchant-brand-workspace.js";
 import { FULL_SIGN_IN_REQUIRED, needsFullSignIn } from "./full-sign-in.js";
@@ -492,6 +495,44 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
   const switching = useRef(false);
   const sessionPending =
     demo === null && (state.kind === "Loading" || (state.kind === "Ready" && state.switching));
+  // WP-2423 "Warn before timeouts": every screen warns before a paid order nobody accepted is
+  // refunded. Staff who can open Orders read it there; the kitchen display role reads it from the
+  // kitchen board (order number and deadline only).
+  const watchReady = demo === null && state.kind === "Ready" && !state.switching;
+  const watchCsrf = watchReady && state.kind === "Ready" ? state.csrf : null;
+  const watchStore = state.kind === "Ready" ? state.workspace.selectedScope : null;
+  const watchStoreReference = watchStore?.storeReference ?? null;
+  const watchStoreLabel = watchStore?.storeLabel ?? "";
+  const watchOrdersHref =
+    state.kind === "Ready"
+      ? (state.workspace.navigation.find((item) => item.screenId === "OPS-ORDER-QUEUE")?.href ??
+        null)
+      : null;
+  const watchKitchen =
+    state.kind === "Ready" &&
+    state.workspace.navigation.some((item) => item.screenId === "KIT-KITCHEN-QUEUE");
+  const refundRead = useMemo(():
+    ((signal: AbortSignal) => Promise<readonly RefundDeadline[] | null>) | null => {
+    if (watchCsrf === null || watchStoreReference === null) return null;
+    if (watchOrdersHref !== null) {
+      const orders = createCurrentOrderQueueClient();
+      return async (signal) => refundDeadlinesFromOrders(await orders.load(null, signal));
+    }
+    if (!watchKitchen) return null;
+    const kitchen = createKitchenBoardClient({
+      csrf: watchCsrf,
+      storeReference: watchStoreReference,
+      storeLabel: watchStoreLabel,
+    });
+    return async () => {
+      const awaiting = await kitchen.loadAwaitingAcceptance();
+      return awaiting === null
+        ? null
+        : awaiting.flatMap((label) =>
+            label.acceptBy ? [{ orderNumber: label.orderNumber, acceptBy: label.acceptBy }] : [],
+          );
+    };
+  }, [watchCsrf, watchStoreReference, watchStoreLabel, watchOrdersHref, watchKitchen]);
 
   useEffect(() => {
     let active = true;
@@ -1929,6 +1970,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         }
         enabled={state.kind === "Ready" && !state.switching && demo === null}
       >
+        {/* WP-2423 "Warn before timeouts": above every screen, before its own header. */}
+        {refundRead !== null && pathname !== "/operations/switch-staff" ? (
+          <RefundDeadlineWatch
+            key={(watchStoreReference ?? "") + (watchCsrf ?? "")}
+            read={refundRead}
+            ordersHref={watchOrdersHref}
+            onOrdersPage={pathname === "/operations/orders"}
+          />
+        ) : null}
         {state.kind === "Ready" && usesWorkspaceLayout(pathname) && !soldOutFromKitchen ? (
           <WorkspaceLayout
             items={state.workspace.navigation}

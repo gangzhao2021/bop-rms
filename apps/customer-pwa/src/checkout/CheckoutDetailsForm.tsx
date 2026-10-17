@@ -47,9 +47,35 @@ export function normalizePhoneNumber(value: string): string {
   return compact;
 }
 
+export type PickupContactDraft = NonNullable<CheckoutDetailsDraft["pickupContact"]>;
+
+/**
+ * The pickup contact a freshly loaded form starts from. Contact the guest typed but has not saved
+ * yet (kept by the checkout page across a re-price, for example after reconnecting) wins over the
+ * Store's last saved copy; it is only shown again, never sent until the guest continues.
+ */
+export function startingPickupContact(
+  orderType: CheckoutFormSelection["orderType"],
+  unsaved: PickupContactDraft | null,
+  saved: PickupContactDraft | null | undefined,
+): PickupContactDraft | null {
+  if (orderType !== "Pickup") return null;
+  return unsaved ?? saved ?? { name: "", channel: "Phone", value: "" };
+}
+
+/**
+ * Whether the form says it could not confirm a save and offers its retry. While offline the
+ * checkout page's single offline notice is all the guest sees; the retry comes back on reconnect.
+ */
+export function showsUnconfirmedSave(uncertain: boolean, online: boolean): boolean {
+  return uncertain && online;
+}
+
 export function CheckoutDetailsForm({
   selection: provided,
   now = Date.now,
+  unsavedContact = null,
+  onUnsavedContactChange,
   onBusyChange,
   onReadyChange,
   onSubmittableChange,
@@ -57,6 +83,9 @@ export function CheckoutDetailsForm({
 }: {
   readonly selection: CheckoutFormSelection;
   readonly now?: () => number;
+  /** Contact typed but not yet saved, held by the page so a re-price does not clear it. */
+  readonly unsavedContact?: PickupContactDraft | null;
+  readonly onUnsavedContactChange?: (contact: PickupContactDraft | null) => void;
   readonly onBusyChange?: (busy: boolean) => void;
   readonly onReadyChange?: (selection: CheckoutFormSelection | null) => void;
   /** Whether a save could be attempted now (details loaded, policies accepted, online, not expired). */
@@ -79,6 +108,8 @@ export function CheckoutDetailsForm({
   );
   const [, tick] = useState(0);
   const generation = useRef(0);
+  const unsaved = useRef(unsavedContact);
+  unsaved.current = unsavedContact;
   const context = useRef<(() => boolean) | null>(null);
   const load = useCallback(async () => {
     const run = ++generation.current,
@@ -102,10 +133,11 @@ export function CheckoutDetailsForm({
         quoteReference: selection.quoteReference,
         quoteVersion: selection.quoteVersion,
         orderType: selection.orderType,
-        pickupContact:
-          selection.orderType === "Pickup"
-            ? (prior?.pickupContact ?? { name: "", channel: "Phone", value: "" })
-            : null,
+        pickupContact: startingPickupContact(
+          selection.orderType,
+          unsaved.current,
+          prior?.pickupContact,
+        ),
         // WP-2423 Q10: emailing a receipt needs the store's email account (an external gate); until
         // it is connected the receipt is shown on the order page, and no email is collected.
         receipt: { choice: "InSession", email: null },
@@ -183,6 +215,7 @@ export function CheckoutDetailsForm({
   const edit = (patch: Partial<Pick<CheckoutDetailsDraft, "pickupContact" | "receipt">>) => {
     if (busy || !authorized || !online || expired) return;
     setDraft((value) => (value === null ? null : { ...value, ...patch }));
+    if (patch.pickupContact !== undefined) onUnsavedContactChange?.(patch.pickupContact);
     setDirty(true);
   };
   const savedRevision = (): boolean => {
@@ -194,6 +227,7 @@ export function CheckoutDetailsForm({
           : { ...value, expectedVersion: result.acknowledgement.detailsVersion },
       );
       setDirty(false);
+      onUnsavedContactChange?.(null);
       return true;
     }
     return false;
@@ -360,7 +394,6 @@ export function CheckoutDetailsForm({
           ) : null}
         </fieldset>
         {expired ? <p role="alert">{checkoutText.detailsExpired}</p> : null}
-        {!online ? <p role="status">{checkoutText.detailsOffline}</p> : null}
         {save.status === "pending" ? <p role="status">{checkoutText.savingDetails}</p> : null}
         {save.status === "saved" && !dirty ? (
           <p role="status">{checkoutText.detailsSaved}</p>
@@ -369,12 +402,11 @@ export function CheckoutDetailsForm({
         {["conflict", "policy", "requote", "denied"].includes(save.status) ? (
           <p role="alert">{checkoutText.detailsCheckoutChanged}</p>
         ) : null}
-        {uncertain ? (
+        {showsUnconfirmedSave(uncertain, online) ? (
           <>
             <p role="alert">{checkoutText.detailsSaveUnconfirmed}</p>
             <button
               type="button"
-              disabled={!online}
               onClick={() => {
                 void saver.retry().then(savedRevision);
               }}

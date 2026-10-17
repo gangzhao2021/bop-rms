@@ -631,7 +631,8 @@ test("@production Kitchen reloads projection after an authorized Store switch", 
     expect(route.request().headers()["x-bop-csrf"]).toBe(csrfFor(selectedStore));
     expect(query).not.toHaveProperty("storeReference");
     const currentStore = selectedStore === 0 ? storeOne : storeTwo;
-    readStores.push(currentStore.storeReference);
+    // The store-wide refund warning reads one ticket (limit 1); count the board's own reads.
+    if ((query as { limit?: number }).limit !== 1) readStores.push(currentStore.storeReference);
     const itemIndex = selectedStore + 1;
     const projectedAt = "2026-09-19T12:18:00.000Z";
     const item = {

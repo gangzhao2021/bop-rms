@@ -11,6 +11,7 @@ import {
   CheckoutDetailsForm,
   type CheckoutDetailsFormHandle,
   type CheckoutFormSelection,
+  type PickupContactDraft,
 } from "./CheckoutDetailsForm.js";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useNavigate } from "react-router";
@@ -83,6 +84,13 @@ export function CheckoutPage({
   const [readyDetails, setReadyDetails] = useState<CheckoutFormSelection | null>(null);
   const [detailsSubmittable, setDetailsSubmittable] = useState(false);
   const detailsForm = useRef<CheckoutDetailsFormHandle>(null);
+  // Contact the guest typed but has not saved. A re-price (after a reconnect, an expired quote)
+  // remounts the details form for the new quote; this keeps their typing for the same cart. It is
+  // only shown again, never sent until the guest continues.
+  const [unsavedContact, setUnsavedContact] = useState<{
+    readonly cartReference: string;
+    readonly contact: PickupContactDraft;
+  } | null>(null);
   const [continueRequested, setContinueRequested] = useState(false);
   useEffect(() => {
     if (sessionState.status === "ready" && selectedTip.current) {
@@ -154,7 +162,8 @@ export function CheckoutPage({
     });
   }
   // The form stays mounted while the same cart is re-priced (pending) so an in-flight details
-  // save and its retry survive a reconnect; a new quote reference remounts it on purpose.
+  // save and its retry survive a reconnect; a new quote reference remounts it on purpose, and the
+  // contact typed but not yet saved is carried into the new form (`unsavedContact`).
   const detailsSelection =
     retained?.current() &&
     cart &&
@@ -456,6 +465,16 @@ export function CheckoutPage({
           ref={detailsForm}
           now={now}
           selection={detailsSelection}
+          unsavedContact={
+            unsavedContact?.cartReference === detailsSelection.cartReference
+              ? unsavedContact.contact
+              : null
+          }
+          onUnsavedContactChange={(contact) =>
+            setUnsavedContact(
+              contact === null ? null : { cartReference: detailsSelection.cartReference, contact },
+            )
+          }
           onBusyChange={setDetailsLocked}
           onReadyChange={setReadyDetails}
           onSubmittableChange={setDetailsSubmittable}
