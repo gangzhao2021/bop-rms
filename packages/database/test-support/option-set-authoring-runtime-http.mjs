@@ -867,7 +867,7 @@ export async function exerciseOptionSetAuthoringRuntimeHttp(context, selection =
       "GRANT UPDATE(aggregate_version,updated_at) ON rms_catalog.product TO " + role,
     );
     await admin.query(
-      "GRANT UPDATE(status,base_product_version_id,default_locale,localized_names_json,tax_classification_id,updated_at,category_classification_known,primary_category_id,editor_content_json) ON rms_catalog.product_version TO " +
+      "GRANT UPDATE(status,base_product_version_id,default_locale,localized_names_json,tax_classification_id,updated_at,category_classification_known,primary_category_id,editor_content_json,customer_presentation_json) ON rms_catalog.product_version TO " +
         role,
     );
     await admin.query(

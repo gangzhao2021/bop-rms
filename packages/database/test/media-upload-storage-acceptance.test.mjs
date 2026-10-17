@@ -435,6 +435,8 @@ it("persists Media upload finalization with quarantine-only history, exact repla
           "image_processing_completion",
           "image_rendition",
           "image_scan_admission",
+          // WP-2423 menu photos (2000_079): append-only product image records.
+          "product_image",
         ]
           .sort()
           .map((relname) => ({ relname, relrowsecurity: true, relforcerowsecurity: true })),
