@@ -70,7 +70,39 @@ describe("WP-2423 Q13 operations alert board projection", () => {
       ],
       outbound: { email: true, webhooks: 1, heartbeat: false },
       lastSuccessfulBackupAt: "2026-10-14T02:00:00.000Z",
+      plannedUpdate: null,
     });
+  });
+  it("WP-2423 (2026-10-18): passes a planned update window while it is in force, only its instants", () => {
+    const value = {
+      ...board(),
+      maintenance: { startedAt: "2026-10-15T07:58:00.000Z", expiresAt: "2026-10-15T08:13:00.000Z" },
+    };
+    expect(projectOperationsAlertBoard(value, "2026-10-15T08:02:00.000Z").plannedUpdate).toEqual({
+      startedAt: "2026-10-15T07:58:00.000Z",
+      expiresAt: "2026-10-15T08:13:00.000Z",
+    });
+    // Past its end (the board can be a minute old) or with a silent monitor it is not shown.
+    expect(projectOperationsAlertBoard(value, "2026-10-15T08:13:00.000Z").plannedUpdate).toBe(null);
+    expect(
+      projectOperationsAlertBoard(
+        { ...value, maintenance: { ...value.maintenance, expiresAt: "2026-10-15T08:20:00.000Z" } },
+        "2026-10-15T08:06:00.000Z",
+      ),
+    ).toMatchObject({ monitor: "Silent", plannedUpdate: null });
+    expect(
+      projectOperationsAlertBoard({ ...board(), maintenance: null }, "2026-10-15T08:02:00.000Z")
+        .plannedUpdate,
+    ).toBe(null);
+    for (const maintenance of [
+      { ...value.maintenance, reason: "deploy" },
+      { startedAt: "2026-10-15T07:58:00.000Z" },
+      { startedAt: "2026-10-15T08:13:00.000Z", expiresAt: "2026-10-15T07:58:00.000Z" },
+      "soon",
+    ])
+      expect(() =>
+        projectOperationsAlertBoard({ ...board(), maintenance }, "2026-10-15T08:02:00.000Z"),
+      ).toThrow("MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE");
   });
   it("reports a monitor that stopped writing and one that never ran", () => {
     expect(projectOperationsAlertBoard(board(), "2026-10-15T08:05:01.000Z").monitor).toBe("Silent");

@@ -13,6 +13,8 @@ export const BACKUP_STATUS_FILE = "backup-status.json";
 export const BACKUP_REQUEST_FILE = "backup-request";
 export const SUPERVISOR_HEALTH_FILE = "supervisor.health.json";
 export const OPS_CONFIG_FILE = "ops.json";
+/** WP-2423 (2026-10-18): the planned-update marker the deploy procedure writes. */
+export const PLANNED_MAINTENANCE_FILE = "maintenance.json";
 const MAX_JSON_BYTES = 256 * 1024;
 
 const fail = (code) => {

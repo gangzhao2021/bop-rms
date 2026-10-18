@@ -320,6 +320,23 @@ test("@production Home shows store system alerts with what to do, and their reso
     card.getByText(/Resolved recently: Customer ordering page is not loading/u),
   ).toBeVisible();
 
+  // WP-2423 (2026-10-18): a planned update is a calm notice, not an urgent outage.
+  board = {
+    ...problem,
+    observedAt: "2026-10-15T16:06:00.000Z",
+    active: [],
+    plannedUpdate: { startedAt: "2026-10-15T16:05:30.000Z", expiresAt: "2026-10-15T16:20:30.000Z" },
+  };
+  await card.getByRole("button", { name: "Check again" }).click();
+  await expect(
+    card.getByText("System update in progress — ordering may pause for a few minutes."),
+  ).toBeVisible();
+  await expect(card.getByText(/this card shows an urgent alert/u)).toBeVisible();
+  await expect(card.getByText("Urgent", { exact: true })).toHaveCount(0);
+  await expect(card.getByText("Everything is working.")).toHaveCount(0);
+  await expect(card).not.toHaveClass(/overview-card--alerts-critical/u);
+  await expectNoInternalText(page);
+
   // The monitor stopped: nothing is being checked, said plainly.
   board = { ...problem, monitor: "Silent", active: [] };
   await card.getByRole("button", { name: "Check again" }).click();

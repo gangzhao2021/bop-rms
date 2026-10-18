@@ -57,6 +57,11 @@ export interface OperationsAlertView {
     readonly heartbeat: boolean;
   };
   readonly lastSuccessfulBackupAt: string | null;
+  /**
+   * WP-2423 (2026-10-18): a planned update in progress. Store-down alerts wait during it (at most
+   * 15 minutes); the Home shows a calm notice instead. Null when none is in force.
+   */
+  readonly plannedUpdate: { readonly startedAt: string; readonly expiresAt: string } | null;
 }
 
 export const operationsAlertMonitorSilentMs = 5 * 60_000;
@@ -105,15 +110,23 @@ export function projectOperationsAlertBoard(value: unknown, now: string): Operat
       recentlyCleared: Object.freeze([]),
       outbound: Object.freeze({ email: false, webhooks: 0, heartbeat: false }),
       lastSuccessfulBackupAt: null,
+      plannedUpdate: null,
     });
-  const board = record(value, [
+  const boardKeys = [
     "schemaVersion",
     "observedAt",
     "active",
     "recentlyCleared",
     "outboundChannels",
     "lastSuccessfulBackupAt",
-  ]);
+  ];
+  // A board written before planned updates existed has no `maintenance` entry.
+  const board = record(
+    value,
+    value !== null && typeof value === "object" && Object.hasOwn(value, "maintenance")
+      ? [...boardKeys, "maintenance"]
+      : boardKeys,
+  );
   if (board.schemaVersion !== 1) return unavailable();
   const observedAt = instant(board.observedAt);
   if (!Array.isArray(board.active) || board.active.length > operationsAlertKeys.length)
@@ -161,6 +174,16 @@ export function projectOperationsAlertBoard(value: unknown, now: string): Operat
     (channels.webhooks as number) > 10
   )
     return unavailable();
+  let plannedUpdate: OperationsAlertView["plannedUpdate"] = null;
+  if (board.maintenance !== undefined && board.maintenance !== null) {
+    const window = record(board.maintenance, ["startedAt", "expiresAt"]);
+    const startedAt = instant(window.startedAt),
+      expiresAt = instant(window.expiresAt);
+    if (Date.parse(expiresAt) <= Date.parse(startedAt)) return unavailable();
+    // Shown only while it is in force: the board may be up to a minute old.
+    if (Date.parse(at) < Date.parse(expiresAt))
+      plannedUpdate = Object.freeze({ startedAt, expiresAt });
+  }
   const silent = Date.parse(at) - Date.parse(observedAt) > operationsAlertMonitorSilentMs;
   return Object.freeze({
     monitor: silent ? "Silent" : "Reporting",
@@ -174,6 +197,7 @@ export function projectOperationsAlertBoard(value: unknown, now: string): Operat
     }),
     lastSuccessfulBackupAt:
       board.lastSuccessfulBackupAt === null ? null : instant(board.lastSuccessfulBackupAt),
+    plannedUpdate: silent ? null : plannedUpdate,
   });
 }
 

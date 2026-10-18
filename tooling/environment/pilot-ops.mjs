@@ -4,6 +4,8 @@
 //   pilot-ops.mjs test-alert <runtime>          send a test alert to every configured channel
 //   pilot-ops.mjs backup-now <runtime>          ask the running monitor to back up now
 //   pilot-ops.mjs status <runtime>              current alerts (keys and severities only)
+//   pilot-ops.mjs maintenance start <runtime> --reason <text> [--minutes 1-15] [--by <name>]
+//   pilot-ops.mjs maintenance end <runtime>     planned update window (deploys; see the runbook)
 //   pilot-ops.mjs generate-offsite-key <runtime>
 //   pilot-ops.mjs decrypt-backup <runtime> <encrypted file> <output file>
 //
@@ -16,6 +18,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  PLANNED_MAINTENANCE_HELD_KEYS,
   advanceAlertState,
   buildAlertBoard,
   emptyAlertState,
@@ -49,6 +52,13 @@ import {
   observeSupervisor,
 } from "./pilot-ops-observe.mjs";
 import {
+  PLANNED_MAINTENANCE_MAX_MINUTES,
+  activePlannedMaintenance,
+  endPlannedMaintenance,
+  readPlannedMaintenance,
+  startPlannedMaintenance,
+} from "./pilot-ops-maintenance.mjs";
+import {
   decideBackupRun,
   decryptFile,
   emptyBackupStatus,
@@ -58,6 +68,17 @@ import {
 } from "./pilot-ops-backup.mjs";
 
 export const MONITOR_INTERVAL_MS = 60_000;
+/** `--name value` pairs from a closed set; anything else (or a repeat) is refused. */
+const parseOptions = (args, allowed) => {
+  const options = {};
+  for (let index = 0; index < args.length; index += 2) {
+    const [name, value] = [args[index], args[index + 1]];
+    if (!allowed.includes(name) || value === undefined || Object.hasOwn(options, name))
+      throw Error("PILOT_OPS_ARGUMENT_INVALID");
+    options[name] = value;
+  }
+  return options;
+};
 const RUNTIME = /^\.local\/[a-z0-9][a-z0-9_-]{0,63}$/u;
 const runtimeArgument = (value) => {
   if (typeof value !== "string" || !RUNTIME.test(value)) throw Error("PILOT_OPS_ARGUMENT_INVALID");
@@ -110,7 +131,23 @@ export async function runMonitorCycle({ now, state, config, io }) {
     })),
   };
   const conditions = evaluateAlertConditions(observations);
-  const advanced = advanceAlertState(state.alert, conditions, now);
+  // WP-2423 (2026-10-18): a planned update holds the "store system down" alerts for its window.
+  const marker = io.observeMaintenance ? await io.observeMaintenance() : null;
+  const maintenance = activePlannedMaintenance(marker === "unreadable" ? null : marker, now);
+  const previousMaintenance = state.maintenance ?? null;
+  if (marker === "unreadable") await io.log({ event: "maintenance_marker_unreadable" });
+  if (maintenance !== null && maintenance.startedAt !== previousMaintenance?.startedAt)
+    await io.log({ event: "maintenance_active", expiresAt: maintenance.expiresAt });
+  else if (maintenance === null && previousMaintenance !== null)
+    await io.log({
+      event:
+        now >= Date.parse(previousMaintenance.expiresAt)
+          ? "maintenance_expired"
+          : "maintenance_ended",
+    });
+  const advanced = advanceAlertState(state.alert, conditions, now, undefined, {
+    held: maintenance === null ? [] : PLANNED_MAINTENANCE_HELD_KEYS,
+  });
   for (const item of advanced.notifications)
     await io.log({ event: `alert_${item.kind}`, key: item.key, severity: item.severity });
   const channels = await deliver({
@@ -121,7 +158,13 @@ export async function runMonitorCycle({ now, state, config, io }) {
     config,
     log: io.log,
   });
-  const next = { schemaVersion: 1, alert: advanced.state, probes: probes.failingSince, channels };
+  const next = {
+    schemaVersion: 1,
+    alert: advanced.state,
+    probes: probes.failingSince,
+    channels,
+    maintenance,
+  };
   await io.writeState(next);
   await io.writeBoard(
     buildAlertBoard(advanced.state, {
@@ -132,6 +175,7 @@ export async function runMonitorCycle({ now, state, config, io }) {
         heartbeat: config.heartbeat !== null,
       },
       backup: observations.backup === "unreadable" ? null : observations.backup,
+      maintenance,
     }),
   );
   return next;
@@ -150,6 +194,7 @@ function createIo(runtimeDirectory, opsDirectory, config, log) {
       return observeProbes(previous, now, { ca });
     },
     observeSupervisor: (now) => observeSupervisor(absolute, now),
+    observeMaintenance: () => readPlannedMaintenance(absolute),
     observeBackup: (configured) => observeBackup(absolute, configured),
     observeCertificate: (live) => observeCertificate(absolute, live),
     observeDisks: async (current) =>
@@ -335,7 +380,10 @@ export async function sendTestAlert(runtimeDirectory, { channels } = {}) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [command, runtime, ...rest] = process.argv.slice(2);
+  const argv = process.argv.slice(2);
+  // `maintenance start|end <runtime> ...` names its action before the runtime directory.
+  const [command, runtime, ...rest] =
+    argv[0] === "maintenance" ? [`maintenance ${argv[1]}`, ...argv.slice(2)] : argv;
   const controller = new globalThis.AbortController();
   process.once("SIGINT", () => controller.abort());
   process.once("SIGTERM", () => controller.abort());
@@ -351,10 +399,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       console.log("PILOT_BACKUP_REQUESTED (the monitor starts it within a minute)");
     } else if (command === "status" && rest.length === 0) {
       const board = await readPrivateJson(path.join(runtimeDirectory, "ops", ALERT_BOARD_FILE));
+      const marker = await readPlannedMaintenance(runtimeDirectory);
+      const plannedUpdate =
+        marker === null || marker === "unreadable"
+          ? marker
+          : { ...marker, inForce: activePlannedMaintenance(marker, Date.now()) !== null };
       console.log(
         JSON.stringify(
           board === null
-            ? { monitor: "NotRunning" }
+            ? { monitor: "NotRunning", plannedUpdate }
             : {
                 observedAt: board.observedAt,
                 active: board.active.map((item) => ({
@@ -363,8 +416,41 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
                   raisedAt: item.raisedAt,
                 })),
                 lastSuccessfulBackupAt: board.lastSuccessfulBackupAt,
+                plannedUpdate,
               },
         ),
+      );
+    } else if (command === "maintenance start") {
+      const options = parseOptions(rest, ["--reason", "--minutes", "--by"]);
+      if (options["--reason"] === undefined) throw Error("PILOT_MAINTENANCE_REASON_INVALID");
+      const marker = await startPlannedMaintenance(runtimeDirectory, {
+        reason: options["--reason"],
+        ...(options["--by"] === undefined ? {} : { startedBy: options["--by"] }),
+        minutes:
+          options["--minutes"] === undefined
+            ? PLANNED_MAINTENANCE_MAX_MINUTES
+            : /^\d{1,2}$/u.test(options["--minutes"])
+              ? Number(options["--minutes"])
+              : NaN,
+      });
+      const ops = await ensureOpsDirectory(runtimeDirectory);
+      await createAlertLog(path.join(ops, ALERT_LOG_FILE))({
+        event: "maintenance_started",
+        expiresAt: marker.expiresAt,
+      });
+      console.log(
+        `PILOT_MAINTENANCE_STARTED until ${marker.expiresAt} (store-down alerts wait until then; end it when the pages load)`,
+      );
+    } else if (command === "maintenance end" && rest.length === 0) {
+      const removed = await endPlannedMaintenance(runtimeDirectory);
+      if (removed) {
+        const ops = await ensureOpsDirectory(runtimeDirectory);
+        await createAlertLog(path.join(ops, ALERT_LOG_FILE))({ event: "maintenance_stopped" });
+      }
+      console.log(
+        removed
+          ? "PILOT_MAINTENANCE_ENDED (alerts are back to normal from the next check)"
+          : "PILOT_MAINTENANCE_NOT_ACTIVE",
       );
     } else if (command === "generate-offsite-key" && rest.length === 0) {
       const config = await loadPilotOpsConfig(runtimeDirectory);

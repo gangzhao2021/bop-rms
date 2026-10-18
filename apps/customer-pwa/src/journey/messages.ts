@@ -459,11 +459,6 @@ export const orderStatusText = Object.freeze({
   receivedNoChange: "If nothing changes after a minute, give your order number to a staff member.",
   invalidHeading: "Order link is invalid",
   invalid: "Use the exact link provided after checkout.",
-  notFoundHeading: "We can’t show this order here yet",
-  notFoundJustPaid:
-    "If you just paid, your order can take a few seconds to appear. Try again in a moment.",
-  notFoundThisPhone:
-    "This page only opens orders placed on this phone or browser. If it still doesn’t open, ask a staff member with your order number.",
   disabledHeading: "Order tracking is disabled",
   unavailableHeading: "Order status isn’t available",
   unavailable: "We couldn’t load your order status. Please try again.",

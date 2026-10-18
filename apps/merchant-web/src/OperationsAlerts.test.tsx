@@ -15,6 +15,7 @@ const view = (change: Partial<OperationsAlertView> = {}): OperationsAlertView =>
   recentlyCleared: [],
   outbound: { email: false, webhooks: 0, heartbeat: false },
   lastSuccessfulBackupAt: "2026-10-15T08:30:00.000Z",
+  plannedUpdate: null,
   ...change,
 });
 const critical = {
@@ -79,6 +80,33 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
       }),
     });
     expect(html.indexOf("No recent backup")).toBeLessThan(html.indexOf("Store system is not"));
+  });
+  it("WP-2423 (2026-10-18): a planned update shows a calm notice, not an outage", () => {
+    const plannedUpdate = {
+      startedAt: "2026-10-15T11:58:00.000Z",
+      expiresAt: "2026-10-15T12:13:00.000Z",
+    };
+    const html = render({ kind: "Ready", value: view({ plannedUpdate }) });
+    expect(html).toContain("System update in progress — ordering may pause for a few minutes.");
+    expect(html).toContain("Started Oct 15, 2026, 7:58 AM.");
+    expect(html).toContain("after Oct 15, 2026, 8:13 AM, this card shows an urgent alert");
+    expect(html).not.toContain("Everything is working.");
+    expect(html).not.toContain("overview-card--alerts-critical");
+    expect(html).not.toContain("overview-card--alerts-warning");
+    expect(html).not.toContain("Urgent");
+    // A real problem raised meanwhile (or before the update) still shows with its urgency.
+    const both = render({ kind: "Ready", value: view({ plannedUpdate, active: [critical] }) });
+    expect(both).toContain("System update in progress");
+    expect(both).toContain("overview-card--alerts-critical");
+    expect(both).toContain("Customer ordering page is not loading");
+    // Older servers send no planned-update entry; a malformed one is refused.
+    const older: Record<string, unknown> = { ...view() };
+    delete older.plannedUpdate;
+    expect(parseOperationsAlertView(older).plannedUpdate).toBe(null);
+    expect(parseOperationsAlertView(view({ plannedUpdate })).plannedUpdate).toEqual(plannedUpdate);
+    expect(() =>
+      parseOperationsAlertView({ ...view(), plannedUpdate: { startedAt: "soon" } }),
+    ).toThrow("OPERATIONS_ALERTS_UNAVAILABLE");
   });
   it("refuses a view with unknown fields or severities", () => {
     expect(() => parseOperationsAlertView({ ...view(), extra: 1 })).toThrow();

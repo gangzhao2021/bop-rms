@@ -1946,6 +1946,35 @@ docker compose -f compose.pilot.yaml exec ops node tooling/environment/pilot-ops
 `test-alert` sends one "test alert" message to every configured channel and prints `Delivered` or
 `Failed` with a fixed code per channel. Run it after any channel change and monthly.
 
+### Planned updates (deploys and planned restarts, 2026-10-18)
+
+Recreating the `pilot` container stops the customer page, staff screens and supervisor for a few
+minutes. Without a planned-update window that raises "Customer ordering page is not loading"
+(urgent) on the Home and on every outbound channel. Every deploy or planned restart therefore
+opens a window first and closes it once the pages load:
+
+1. **Build first, while the old version keeps serving** (a build can take over 10 minutes and the
+   window is at most 15): `docker compose -f compose.pilot.yaml build pilot`.
+2. **Start the window** (uses the freshly built image, so it also works the first time):
+   `docker compose -f compose.pilot.yaml run --rm --no-deps ops node tooling/environment/pilot-ops.mjs maintenance start "$PILOT_RUNTIME_DIRECTORY" --reason "deploy <revision>"`.
+   Optional `--minutes 1-15` (default 15) and `--by <name>`. Starting again replaces the window.
+3. Apply migrations or grants if the change needs them, then recreate:
+   `docker compose -f compose.pilot.yaml up -d pilot ops`.
+4. **Wait until the API and customer page answer**, then **end the window**:
+   `docker compose -f compose.pilot.yaml exec ops node tooling/environment/pilot-ops.mjs maintenance end "$PILOT_RUNTIME_DIRECTORY"`.
+   `status` shows the window as `plannedUpdate` (with `inForce`).
+
+During the window the Home "Store system" card shows "System update in progress — ordering may
+pause for a few minutes", with when it started and when it ends, and nothing is sent outbound for
+the store pages, the supervisor or supervised services. Payment, settlement, backup, certificate and
+disk alerts are never held, and a problem raised before the window stays on the Home. The window
+ends by itself after at most 15 minutes, so a forgotten `end` cannot hide an outage; a failure that
+is still there when the window ends (or is ended) is raised **at once**, because its 2 minutes have
+already passed. Do not end the window before the pages load: that raises the urgent alert. Guests
+who open the menu during the window meet the existing "couldn't load / try again" messages; staff
+taking orders at that moment use the store outage procedure until the pages load. An unplanned
+restart (outage recovery) does not open a window: those alerts are real.
+
 ### Scheduled backups
 
 Daily at `backup.localTime` in the Store's time zone (after the business day closes; 04:30 by
@@ -2014,6 +2043,10 @@ anything that stops ordering; the pilot operator fixes the cause.
 | <a id="alert-disk-low"></a>Disk space is running low                                 | Under 15% or 5 GB free ("Urgent" under 5% or 1 GB) on a named folder or the database disk                                                                                                                                                                   | Nothing in store until it is full                                                                                                                                                                                                                                                                                            | Remove old logs and old local backups beyond `keep`; `docker system df` for the database volume; add storage                                                                                                                              |
 | <a id="alert-monitor-source"></a>Some checks could not run                           | A source could not be read for 5+ minutes (for example the database for payment checks)                                                                                                                                                                     | Treat the named checks as unknown                                                                                                                                                                                                                                                                                            | `ops/alerts.log`; database and runtime directory permissions                                                                                                                                                                              |
 | <a id="alert-channel-delivery"></a>Alert messages are not being delivered            | An email or phone channel has failed for 30+ minutes                                                                                                                                                                                                        | Owner: watch the Home card; check the account                                                                                                                                                                                                                                                                                | `ops/alerts.log` code; fix the account file; `test-alert`                                                                                                                                                                                 |
+
+The first five alerts (store system, customer page, staff screens, supervisor, background service)
+wait during a [planned update](#planned-updates-deploys-and-planned-restarts-2026-10-18) window and
+are raised at once if the problem is still there when it ends.
 
 If the Home card says "The alert monitor is not running" or "stopped reporting": nothing above is
 being checked. The pilot operator runs `docker compose -f compose.pilot.yaml up -d ops` and reads

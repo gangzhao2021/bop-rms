@@ -183,7 +183,7 @@ describe("CUST-ORDER-STATUS screen contract", () => {
     [{ status: "invalid-reference" }, "Order link is invalid"],
     [{ status: "permission-denied" }, "This order isn’t available on this phone"],
     [{ status: "table-order" }, "Another guest at your table placed this order"],
-    [{ status: "not-found" }, "We can’t show this order here yet"],
+    [{ status: "not-found" }, "This order isn’t available on this phone"],
     [{ status: "feature-disabled" }, "Order tracking is disabled"],
     [{ status: "unavailable" }, "Order status isn’t available"],
     [{ status: "offline", view: null }, "You’re offline"],
@@ -1195,11 +1195,16 @@ describe("WP-2423 Q10 plain guidance when the visit has ended", () => {
     expect(html).not.toContain(id(1));
     expect(findInternalText([staticText(html)])).toEqual([]);
   });
-  it("lets a just-paid customer retry instead of a dead end", () => {
+  it("f5ae43a5: a signed-in guest who did not place the order is told it isn't on this phone", () => {
+    // Another table's guest: the server answers "not found" (a guest who just paid gets "Order
+    // received" instead), so the page says the same as for a new phone, never "if you just paid".
     const html = render({ status: "not-found" });
-    expect(html).toContain("can take a few seconds to appear");
-    expect(html).toContain("Try again");
+    expect(html).toContain("This order isn’t available on this phone");
+    expect(html).toContain("give your order number to a staff member");
+    expect(html).toContain('href="/"');
+    expect(html).not.toMatch(/just paid|can’t show this order|few seconds/iu);
     expect(html).not.toMatch(/browser you used at checkout|access session/iu);
+    expect(findInternalText([staticText(html)])).toEqual([]);
   });
 });
 

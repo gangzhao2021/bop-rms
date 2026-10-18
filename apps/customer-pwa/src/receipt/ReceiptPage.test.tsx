@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ReceiptPage, receiptLineAmount } from "./ReceiptPage.js";
 import type { ReceiptController } from "./receipt-controller.js";
 import type { ReceiptState } from "./types.js";
+import { findInternalText, staticText } from "../../e2e/internal-text-patterns.js";
 
 const id = (n: number) => `018f8a00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 function ready(): ReceiptState {
@@ -92,13 +93,20 @@ describe("CUST-RECEIPT-SUPPORT screen contract", () => {
     [{ status: "invalid-reference" }, "Receipt link is invalid"],
     // WP-2423 (v15 3cd0f8dd M5): past the 24 h bound the receipt says so and where to get a copy.
     [{ status: "permission-denied" }, "This receipt is no longer available on this phone"],
-    [{ status: "not-found" }, "Receipt not found"],
+    [{ status: "not-found" }, "There’s no receipt for this order on this phone."],
     [{ status: "feature-disabled" }, "Digital receipt is disabled"],
     [{ status: "unavailable" }, "We couldn’t load your receipt"],
     [{ status: "offline", view: null }, "You’re offline"],
   ] as const)("renders bounded state %#", (state, message) =>
     expect(render(state)).toContain(message),
   );
+  it("f5ae43a5: says plainly that there is no receipt here and where to get a copy", () => {
+    const html = render({ status: "not-found" });
+    expect(html).toContain("Receipt not found");
+    expect(html).toContain("Ask a staff member if you need a copy.");
+    expect(html).not.toMatch(/authori[sz]ed/iu);
+    expect(findInternalText([staticText(html)])).toEqual([]);
+  });
 });
 
 describe("receipt adjustment display", () => {

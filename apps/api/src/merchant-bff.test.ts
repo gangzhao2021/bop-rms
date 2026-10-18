@@ -7144,6 +7144,7 @@ describe("WP-2423 Q13 operations alerts read route", () => {
     recentlyCleared: [],
     outbound: { email: false, webhooks: 0, heartbeat: false },
     lastSuccessfulBackupAt: null,
+    plannedUpdate: null,
   };
   it("passes only the session cookie and answers without caching", async () => {
     const read = vi.fn<Read>(async () => view);

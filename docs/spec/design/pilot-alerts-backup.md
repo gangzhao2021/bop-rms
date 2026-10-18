@@ -47,6 +47,39 @@
    篡改或错误密钥时不写任何输出。密钥由 `generate-offsite-key` 生成，Owner 必须另存一份（否则宿主丢失时副本无法读取）。
    S3 兼容对象存储（托管密钥）为 P4 外部关口，配置为 `s3` 时明确拒绝而不是假装可用。
 
+## 更正 1（2026-10-18）：计划内更新窗口
+
+**问题**：每次部署重建 `pilot` 容器时，顾客页、员工端与监督进程会停几分钟，监控照常在 2 分钟后报紧急
+"Customer ordering page is not loading"（v15 alerts.log：01:41:48 报警、01:46:45 解除，监控 01:43:30 停、
+01:43:36 起），计划内更新被当作故障通知店员与外发通道。真实故障仍须及时报警。
+
+**决定**：
+
+1. 部署流程在重建前用 `pilot-ops.mjs maintenance start <runtime> --reason <说明> [--minutes 1–15] [--by <名字>]`
+   写入 `ops/maintenance.json`（0600：`schemaVersion`、`startedBy`、`reason`、`startedAt`、`expiresAt`，窗口不超过
+   15 分钟，再次 start 覆盖），页面恢复后用 `maintenance end <runtime>` 删除。说明与名字只留在该文件与 `status`
+   输出中，不进入看板、消息或日志（日志只记 `maintenance_started/active/ended/expired/stopped` 与到期时刻）。
+2. 监控每轮读取标记；仅当格式正确、已开始、未到期且不超过 15 分钟时生效（格式错、超长、未来开始、读不到均不生效，
+   照常报警）。生效期间 `entry.api`、`entry.customer`、`entry.merchant`、`supervisor.silent`、`service.attention`
+   **尚未报出的**不报出，但仍从首次出现起计时；付款、结算、备份、证书、磁盘等其余告警从不暂缓；窗口前已报出的
+   告警保持显示，不被清除也不发"已解决"。
+3. 窗口结束（`end` 或自动到期）后，仍在失败的检查**立即**报出（其 2 分钟已过），不再等 2 分钟；窗口内恢复的不发任何消息。
+4. 看板新增 `maintenance: {startedAt, expiresAt} | null`；API 投影为 `plannedUpdate`（仅在未到期且监控在报告时给出，
+   兼容不含该字段的旧看板）；商户首页"Store system"卡片显示非紧急提示"System update in progress — ordering may
+   pause for a few minutes."、开始时刻与"到期后仍不能点单则显示紧急告警"，不显示"Everything is working."。
+5. 顾客端不加提示：重建期间顾客页由正在重启的同一进程提供，页面本身无法打开；已打开的页面遇到的是现有的
+   "couldn't load / try again"重试提示，没有能自然显示"正在更新"的位置，不为此新增接口或占位页。
+6. 运行手册部署步骤：先 `build`（旧版本继续服务），再 `run --rm --no-deps ops … maintenance start`（用新镜像，
+   首次部署也可用），然后 `up -d pilot ops`，API 与顾客页返回 200 后 `exec ops … maintenance end`。
+   非计划重启（故障恢复）不开窗口。
+
+**否决**：按时间段静默（部署时刻不固定，且会掩盖真实故障）；延长全部探测的报警延迟（真实故障报警变慢）；
+由监督进程的 `maintenance.lock` 推断（那是停止/恢复租约，部署重建时并不存在，且没有到期上限）。
+
+**验证**：`pilot-ops-maintenance.test.mjs`（标记校验；部署几分钟不发送且显示提示；超过窗口立即报警；提前结束立即报警；
+无标记/超长/读不到照常 2 分钟报警；付款告警不暂缓、窗口前告警保留；文件 0600 与参数拒绝；CLI start/status/end，Linux 镜像内）、
+API 投影与商户卡片单元测试、商户 `operations-alerts` 生产浏览器规格。
+
 ## 否决的方案
 
 - 告警状态放数据库：数据库宕机时恰恰最需要告警，且需要迁移与授权，收益只是多店场景（扩张时再建 Operations 投影）。

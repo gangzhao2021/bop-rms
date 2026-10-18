@@ -458,7 +458,12 @@ export function ReceiptPage({
       "This receipt is no longer available on this phone",
       "Receipts stay available on the phone that ordered for 24 hours after the visit started. Ask a staff member for a copy.",
     ],
-    "not-found": ["Receipt not found", "No authorized receipt was found."],
+    // WP-2423 (f5ae43a5 low): no receipt for this order on this phone (another guest's order,
+    // or none issued yet), said plainly.
+    "not-found": [
+      "Receipt not found",
+      "There’s no receipt for this order on this phone. A receipt shows on the phone that placed the order once it’s paid. Ask a staff member if you need a copy.",
+    ],
     "feature-disabled": ["Digital receipt is disabled", "Contact the Store for support."],
     unavailable: [
       "We couldn’t load your receipt",

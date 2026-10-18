@@ -30,6 +30,8 @@ export interface OperationsAlertView {
     readonly heartbeat: boolean;
   };
   readonly lastSuccessfulBackupAt: string | null;
+  /** WP-2423 (2026-10-18): a planned update in progress; store-down alerts wait during it. */
+  readonly plannedUpdate: { readonly startedAt: string; readonly expiresAt: string } | null;
 }
 export const OPERATIONS_ALERTS_REFRESH_MS = 60_000;
 
@@ -61,14 +63,26 @@ const alertKey = (value: unknown): string =>
   typeof value === "string" && /^[a-z]+\.[a-z_]+$/u.test(value) ? value : invalid();
 
 export function parseOperationsAlertView(value: unknown): OperationsAlertView {
-  const view = exact(value, [
+  const keys = [
     "monitor",
     "observedAt",
     "active",
     "recentlyCleared",
     "outbound",
     "lastSuccessfulBackupAt",
-  ]);
+  ];
+  // An older server sends no planned-update entry.
+  const view = exact(
+    value,
+    value !== null && typeof value === "object" && Object.hasOwn(value, "plannedUpdate")
+      ? [...keys, "plannedUpdate"]
+      : keys,
+  );
+  let plannedUpdate: OperationsAlertView["plannedUpdate"] = null;
+  if (view.plannedUpdate !== undefined && view.plannedUpdate !== null) {
+    const window = exact(view.plannedUpdate, ["startedAt", "expiresAt"]);
+    plannedUpdate = { startedAt: instant(window.startedAt), expiresAt: instant(window.expiresAt) };
+  }
   if (view.monitor !== "Reporting" && view.monitor !== "Silent" && view.monitor !== "NotRunning")
     return invalid();
   if (!Array.isArray(view.active) || !Array.isArray(view.recentlyCleared)) return invalid();
@@ -110,6 +124,7 @@ export function parseOperationsAlertView(value: unknown): OperationsAlertView {
     },
     lastSuccessfulBackupAt:
       view.lastSuccessfulBackupAt === null ? null : instant(view.lastSuccessfulBackupAt),
+    plannedUpdate,
   };
 }
 
@@ -237,27 +252,45 @@ export function OperationsAlertsCard({
             {read.value.observedAt === null ? "" : ` at ${at(read.value.observedAt)}`}. Problems are
             not being checked. Ask the pilot operator to restart it.
           </p>
-        ) : read.value.active.length === 0 ? (
-          <p className="system-alert__headline">Everything is working.</p>
         ) : (
-          <ul className="system-alerts">
-            {read.value.active.map((item) => (
-              <li key={item.key} className={"system-alert system-alert--" + item.severity}>
-                <p className="system-alert__title">
-                  <span className="system-alert__badge">
-                    {item.severity === "critical" ? "Urgent" : "Today"}
-                  </span>
-                  <strong>{item.title}</strong>
+          <>
+            {read.value.plannedUpdate !== null ? (
+              // WP-2423 (2026-10-18): a planned update is not an outage; if the store is still
+              // down when its window ends, the usual urgent alert follows at once.
+              <div className="system-alert system-alert--update">
+                <p className="system-alert__headline">
+                  System update in progress — ordering may pause for a few minutes.
                 </p>
-                <p>{item.summary}</p>
                 <p>
-                  <span className="system-alert__label">What to do: </span>
-                  {item.action}
+                  Started {at(read.value.plannedUpdate.startedAt)}. If guests or staff screens still
+                  can’t order after {at(read.value.plannedUpdate.expiresAt)}, this card shows an
+                  urgent alert.
                 </p>
-                <p className="system-alert__since">Since {at(item.raisedAt)}</p>
-              </li>
-            ))}
-          </ul>
+              </div>
+            ) : read.value.active.length === 0 ? (
+              <p className="system-alert__headline">Everything is working.</p>
+            ) : null}
+            {read.value.active.length === 0 ? null : (
+              <ul className="system-alerts">
+                {read.value.active.map((item) => (
+                  <li key={item.key} className={"system-alert system-alert--" + item.severity}>
+                    <p className="system-alert__title">
+                      <span className="system-alert__badge">
+                        {item.severity === "critical" ? "Urgent" : "Today"}
+                      </span>
+                      <strong>{item.title}</strong>
+                    </p>
+                    <p>{item.summary}</p>
+                    <p>
+                      <span className="system-alert__label">What to do: </span>
+                      {item.action}
+                    </p>
+                    <p className="system-alert__since">Since {at(item.raisedAt)}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         )}
       </div>
       {view !== null && view.monitor === "Reporting" ? (

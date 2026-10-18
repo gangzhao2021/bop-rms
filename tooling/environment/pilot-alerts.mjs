@@ -474,7 +474,27 @@ export function emptyAlertState() {
  * after it has held for its catalog `raiseAfterMs`; it is repeated only on escalation or after the
  * reminder interval, and clears only after being absent for `clearAfterMs` (no flapping spam).
  */
-export function advanceAlertState(previous, conditions, now, policy = DEFAULT_POLICY) {
+/**
+ * WP-2423 (2026-10-18): the alerts a planned update (the deploy's maintenance marker) holds back:
+ * the store entries, the supervisor's report and the supervised services all stop while the pilot
+ * container is recreated. Payment, settlement, backup, certificate and disk alerts never wait.
+ */
+export const PLANNED_MAINTENANCE_HELD_KEYS = Object.freeze([
+  "entry.api",
+  "entry.customer",
+  "entry.merchant",
+  "supervisor.silent",
+  "service.attention",
+]);
+
+export function advanceAlertState(
+  previous,
+  conditions,
+  now,
+  policy = DEFAULT_POLICY,
+  { held = [] } = {},
+) {
+  const holding = new Set(held);
   const state = globalThis.structuredClone(previous ?? emptyAlertState());
   const notifications = [];
   const stamp = new Date(now).toISOString();
@@ -502,6 +522,9 @@ export function advanceAlertState(previous, conditions, now, policy = DEFAULT_PO
     entry.absentSince = null;
     state.alerts[key] = entry;
     if (entry.raisedAt === null) {
+      // Held during a planned update: still tracked from its first sighting, so a failure that
+      // outlasts the update is raised in the first cycle after the window ends.
+      if (holding.has(key)) continue;
       if (now - Date.parse(entry.firstSeenAt) >= catalog.raiseAfterMs) {
         entry.raisedAt = stamp;
         entry.notifiedAt = stamp;
@@ -639,7 +662,7 @@ export function renderMessage(batch, { siteLabel, runbookBase, homeUrl = null })
  * The always-on local projection read by the merchant Home (owner read). Only catalog keys,
  * severities, instants and rendered catalog text.
  */
-export function buildAlertBoard(state, { observedAt, channels, backup }) {
+export function buildAlertBoard(state, { observedAt, channels, backup, maintenance = null }) {
   const active = Object.entries(state.alerts)
     .filter(([, entry]) => entry.raisedAt !== null)
     .map(([key, entry]) => ({
@@ -667,5 +690,10 @@ export function buildAlertBoard(state, { observedAt, channels, backup }) {
       .slice(-10),
     outboundChannels: channels,
     lastSuccessfulBackupAt: backup?.lastSuccessAt ?? null,
+    // WP-2423 (2026-10-18): a planned update in progress (its window only, never its note).
+    maintenance:
+      maintenance === null
+        ? null
+        : { startedAt: maintenance.startedAt, expiresAt: maintenance.expiresAt },
   };
 }

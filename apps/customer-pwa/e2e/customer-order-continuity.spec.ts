@@ -192,6 +192,41 @@ for (const viewport of [
       await noHorizontalOverflow(page);
     });
 
+    test("f5ae43a5: another table's guest opening this order is told it isn't on this phone", async ({
+      page,
+    }) => {
+      // Signed in at another table: the server answers plain "not found" for an order this guest
+      // did not place (a guest who just paid is answered "Order received" instead).
+      await bootstrap(page, { schemaVersion: 1, csrfToken: csrf, menuContext });
+      await page.route("**/api/v1/orders/*/status", (route) =>
+        route.fulfill({ status: 404, headers: json, body: "{}" }),
+      );
+      await page.route("**/api/v1/orders/*/receipt", (route) =>
+        route.fulfill({ status: 404, headers: json, body: "{}" }),
+      );
+      await page.goto("/orders/" + orderReference);
+      await expect(
+        page.getByRole("heading", {
+          name: "This order isn’t available on this phone",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(page.getByText("give your order number to a staff member")).toBeVisible();
+      await expect(page.getByText("If you just paid")).toHaveCount(0);
+      await expect(page.getByText("can’t show this order")).toHaveCount(0);
+      await expectNoInternalText(page);
+      await noHorizontalOverflow(page);
+      await page.goto("/orders/" + orderReference + "/receipt");
+      await expect(
+        page.getByRole("heading", { name: "Receipt not found", exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByText("There’s no receipt for this order on this phone.", { exact: false }),
+      ).toBeVisible();
+      await expect(page.getByText(/authori[sz]ed/iu)).toHaveCount(0);
+      await expectNoInternalText(page);
+    });
+
     test("46940b76 L5: another guest at the open table is sent to the table's page", async ({
       page,
     }) => {

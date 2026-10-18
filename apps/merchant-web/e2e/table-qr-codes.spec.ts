@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
 
 /** WP-2423 Q11 (Section 88 DIN-TABLE-LIST): print, replace and turn off table QR codes. */
 const id = (n: number) => "018f7800-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -103,6 +104,8 @@ test("@production Table QR codes: print one, replace a lost code at a seated tab
   // No internal codes or references on the page.
   await expect(page.locator("main")).not.toContainText(id(1));
   await expect(page.locator("main")).not.toContainText("DIN-TABLE-LIST");
+  // WP-2423 (2026-10-18): the row actions "Print", "Replace", "Turn off" are separate words.
+  await expectNoInternalText(page);
 
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });

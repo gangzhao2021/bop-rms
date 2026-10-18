@@ -1239,17 +1239,15 @@ export function OrderStatusPage({
         </section>
       ) : null}
       {state.status === "not-found" ? (
-        <section className="order-status__unavailable" role="alert">
-          <h2>{orderStatusText.notFoundHeading}</h2>
-          <p>{orderStatusText.notFoundJustPaid}</p>
-          <button
-            className="order-status__retry"
-            type="button"
-            onClick={() => void controller.refresh()}
-          >
-            {commonText.tryAgain}
-          </button>
-          <p>{orderStatusText.notFoundThisPhone}</p>
+        // WP-2423 (f5ae43a5 low): a signed-in guest who did not place this order (another table's
+        // guest) gets the same plain answer as a new phone. A guest who just paid is answered
+        // "Order received" by the server until the status is ready, so this is never their case.
+        <section className="order-status__card order-status__visit-ended" role="alert">
+          <h2>{orderStatusText.notThisPhone.heading}</h2>
+          <p>{orderStatusText.notThisPhone.body}</p>
+          <Link className="order-status__retry" to="/">
+            {orderStatusText.notThisPhone.start}
+          </Link>
         </section>
       ) : null}
       {state.status === "feature-disabled" ? (
