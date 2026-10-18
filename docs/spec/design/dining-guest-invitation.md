@@ -27,7 +27,7 @@
    `docs/security/rate-limit-abuse-baseline.json`。
 5. **客人文字**：码分两组大字显示（读屏逐位朗读），"Show this code to the person joining you. It works once and for 15 minutes
    (until HH:MM)."，"For someone else after them, make a new code. A new code replaces this one."；过期、已用、非桌主、换桌、
-   超限、离线各有说明，不出现内部代码或编号。码只在内存中，不进地址栏、存储、日志或审计；同一请求重放不再返回码（"Make a new one"）。
+   超限、离线各有说明，不出现内部代码或编号。码只在内存中，不进地址栏、存储、日志或审计；同一请求重放不再返回码（"Make a new one"）。码显示期间桌主手机每几秒（及页面重新可见时）按本机发码请求号查询该码是否仍有效、已被使用或已被替换/作废（回答不含码，只查本人记录），已用时显示"Someone joined with this code."并给"Make another code"，被替换时显示"This code was replaced. Make a new one."（v15 `42e95248` 实测，2026-10-17）。
    加入页与"已用/无效"提示改为"Ask staff, or the person who invited you, for a new one."。
 6. **记录与审计**：迁移 `2000_082_create_dining_guest_invitation_operation`（`@rms/dining`，只追加、门店 RLS、禁止改删，触发器核对
    发码人是当前桌主且在座、能力行与记录一致、10 分钟预算）：操作号、Session、桌主参与者、新能力快照（只有选择器哈希，没有码）。

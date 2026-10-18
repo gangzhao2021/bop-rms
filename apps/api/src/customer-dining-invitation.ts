@@ -17,6 +17,7 @@ import {
   parseDiningGuestInvitationCommand,
   parseDiningReference,
   type DiningCredentialPort,
+  type DiningGuestInvitationCodeState,
   type DiningGuestInvitationCommand,
 } from "@rms/dining";
 import type { RequestHandler, Response } from "express";
@@ -43,6 +44,19 @@ export type CustomerDiningInvitationResult =
   | { readonly status: "NotHost" }
   | { readonly status: "TableChanged" }
   | { readonly status: "TooManyInvitations"; readonly retryAt: string };
+
+/**
+ * What the Host's phone may learn about a code it showed, asked by that request's own reference
+ * (v15 42e95248): live, used by a guest who joined, replaced (staff or another Host phone made a
+ * newer one, or the table closed or moved), expired, or `Unknown` (not this guest's request).
+ */
+export type CustomerDiningInvitationCodeState = DiningGuestInvitationCodeState | "Unknown";
+
+export interface CustomerDiningInvitationRead {
+  readonly canInvite: boolean;
+  /** Present only when the read named the phone's own last request reference; never the code. */
+  readonly codeState?: CustomerDiningInvitationCodeState;
+}
 
 export interface CustomerDiningInvitationOptions {
   readonly scope: {
@@ -110,6 +124,10 @@ export function createCustomerDiningInvitation(options: CustomerDiningInvitation
           raw.operationReference === undefined
             ? null
             : String(parseDiningReference(raw.operationReference)),
+        issuedOperationReference:
+          raw.issuedOperationReference === undefined
+            ? null
+            : String(parseDiningReference(raw.issuedOperationReference)),
       };
     } catch {
       throw new CustomerDiningInvitationError("Invalid");
@@ -219,12 +237,27 @@ export function createCustomerDiningInvitation(options: CustomerDiningInvitation
     }
   }
   return Object.freeze({
-    async read(value: unknown): Promise<{ readonly canInvite: boolean }> {
-      const input = parse(value, ["sessionCredential", "csrfCredential"]);
-      // A read carries no operation; the reference only fills the closed command shape.
-      return run(input, options.newReference(), false, async (store, command) =>
-        Object.freeze({ canInvite: (await store.eligibility(command)) === "Allowed" }),
+    async read(value: unknown): Promise<CustomerDiningInvitationRead> {
+      const asked =
+        value !== null &&
+        typeof value === "object" &&
+        Object.prototype.hasOwnProperty.call(value, "issuedOperationReference");
+      const input = parse(
+        value,
+        asked
+          ? ["sessionCredential", "csrfCredential", "issuedOperationReference"]
+          : ["sessionCredential", "csrfCredential"],
       );
+      // A read carries no operation; the reference only fills the closed command shape.
+      return run(input, options.newReference(), false, async (store, command) => {
+        const canInvite = (await store.eligibility(command)) === "Allowed";
+        if (input.issuedOperationReference === null) return Object.freeze({ canInvite });
+        return Object.freeze({
+          canInvite,
+          codeState:
+            (await store.issuedCodeState(command, input.issuedOperationReference)) ?? "Unknown",
+        });
+      });
     },
     async issue(value: unknown): Promise<CustomerDiningInvitationResult> {
       const input = parse(value, ["sessionCredential", "csrfCredential", "operationReference"]);
@@ -329,19 +362,35 @@ export class CustomerDiningInvitationHandler {
   }
   read(): RequestHandler {
     return async (request, response) => {
-      let input: Credentials;
+      let input: Credentials & { issuedOperationReference?: string };
       try {
-        input = this.#credentials(request, false);
+        // The phone names the request that made the code it is showing (its own Idempotency-Key),
+        // never the code, so it can tell when that code was used or replaced.
+        const issued = request.get("x-dining-invitation-reference");
+        if (issued !== undefined && !reference.test(issued)) throw new Error("invalid reference");
+        input = {
+          ...this.#credentials(request, false),
+          ...(issued === undefined ? {} : { issuedOperationReference: issued }),
+        };
       } catch {
         reject(response, 400);
         return;
       }
       try {
         const result = await this.#port.read(input);
+        if (
+          input.issuedOperationReference !== undefined &&
+          !["Live", "Used", "Replaced", "Expired", "Unknown"].includes(result.codeState ?? "")
+        )
+          throw new CustomerDiningInvitationError("Unavailable");
         protect(response);
-        response
-          .status(200)
-          .json({ schemaVersion: 1, invitation: { canInvite: result.canInvite === true } });
+        response.status(200).json({
+          schemaVersion: 1,
+          invitation:
+            input.issuedOperationReference === undefined
+              ? { canInvite: result.canInvite === true }
+              : { canInvite: result.canInvite === true, codeState: result.codeState },
+        });
       } catch (error) {
         this.#failure(response, error);
       }

@@ -23,7 +23,9 @@ import {
   diningGuestInvitationIntent,
   evaluateDiningGuestInvitationAuthority,
   evaluateDiningGuestInvitationBudget,
+  evaluateDiningGuestInvitationCodeState,
   parseDiningGuestInvitationCommand,
+  type DiningGuestInvitationCodeState,
   type DiningGuestInvitationCommand,
   type DiningGuestInvitationRefusal,
 } from "../../domain/dining-guest-invitation.js";
@@ -164,6 +166,50 @@ export function createPostgresDiningGuestInvitationStore(
           command: accepted,
           session: current.session,
           participantStatus: current.participant.status,
+        });
+      });
+    },
+
+    /**
+     * What became of the code this same guest made with `issuedOperationReference` (no write, no
+     * lock). Only this guest's own operation in this Session is visible; another guest's request
+     * reference, or one not committed, reads as `null`. The answer never carries the code.
+     */
+    async issuedCodeState(
+      value: unknown,
+      issuedOperationReference: unknown,
+    ): Promise<DiningGuestInvitationCodeState | null> {
+      const accepted = command(value);
+      const operation = parseDiningReference(issuedOperationReference);
+      return runner.run(async (tx) => {
+        if ((await options.authorize(tx, accepted)) !== true)
+          throw new DiningSessionError("DINING_SESSION_PERMISSION_DENIED");
+        await context(tx);
+        const row = rows(
+          await tx.query(
+            "SELECT c.status AS status, c.capability_snapshot AS capability FROM rms_dining.dining_guest_invitation_operation o JOIN rms_dining.dining_join_capability c ON c.tenant_id=o.tenant_id AND c.brand_id=o.brand_id AND c.store_id=o.store_id AND c.session_id=o.session_id AND c.capability_id=o.capability_id WHERE o.tenant_id=$1 AND o.brand_id=$2 AND o.store_id=$3 AND o.session_id=$4 AND o.participant_id=$5 AND o.operation_id=$6",
+            [
+              tenant,
+              brand,
+              store,
+              accepted.diningSessionReference,
+              accepted.participantReference,
+              operation,
+            ],
+          ),
+        )[0];
+        if (!row) return null;
+        const capability = parseDiningJoinCapability(row.capability);
+        if (
+          row.status !== capability.status ||
+          String(capability.storeReference) !== store ||
+          String(capability.diningSessionReference) !== accepted.diningSessionReference
+        )
+          return fail();
+        return evaluateDiningGuestInvitationCodeState({
+          status: capability.status,
+          expiresAt: String(capability.expiresAt),
+          observedAt: accepted.observedAt,
         });
       });
     },

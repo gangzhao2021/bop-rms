@@ -142,3 +142,23 @@ export function diningGuestInvitationAvailableAt(input: {
   const oldestCounted = recent[recent.length - diningGuestInvitationMaximumPerWindow] as number;
   return parseDiningInstant(new Date(oldestCounted + diningGuestInvitationWindowMs).toISOString());
 }
+
+/**
+ * What became of a code the Host made (v15 42e95248 live run): the Host's phone asks by its own
+ * request reference and learns only this, never the code. `Replaced` covers every revocation
+ * (a newer code from staff or another Host phone, closing or a Table move).
+ */
+export type DiningGuestInvitationCodeState = "Live" | "Used" | "Replaced" | "Expired";
+
+export function evaluateDiningGuestInvitationCodeState(input: {
+  readonly status: "Active" | "Consumed" | "Revoked" | "Expired";
+  readonly expiresAt: string;
+  readonly observedAt: DiningInstant;
+}): DiningGuestInvitationCodeState {
+  if (input.status === "Consumed") return "Used";
+  if (input.status === "Revoked") return "Replaced";
+  if (input.status === "Expired") return "Expired";
+  return Date.parse(parseDiningInstant(input.expiresAt)) > Date.parse(input.observedAt)
+    ? "Live"
+    : "Expired";
+}

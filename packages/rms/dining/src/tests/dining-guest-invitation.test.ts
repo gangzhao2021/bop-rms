@@ -6,6 +6,7 @@ import {
   diningGuestInvitationWindowMs,
   evaluateDiningGuestInvitationAuthority,
   evaluateDiningGuestInvitationBudget,
+  evaluateDiningGuestInvitationCodeState,
   parseDiningGuestInvitationCommand,
   parseDiningInstant,
   parseDiningSession,
@@ -125,4 +126,17 @@ it("bounds guest issuance per Session per rolling window", () => {
   expect(() =>
     evaluateDiningGuestInvitationBudget({ issuedAt: ["yesterday"], observedAt: now }),
   ).toThrow();
+});
+
+it("tells the Host what became of a code without the code (v15 42e95248)", () => {
+  const observedAt = parseDiningInstant(at(30));
+  const state = (status: "Active" | "Consumed" | "Revoked" | "Expired", expiresAt = at(40)) =>
+    evaluateDiningGuestInvitationCodeState({ status, expiresAt, observedAt });
+  expect(state("Active")).toBe("Live");
+  expect(state("Consumed")).toBe("Used");
+  expect(state("Revoked")).toBe("Replaced");
+  expect(state("Expired")).toBe("Expired");
+  // An Active row past its 15 minutes is already expired for the guest.
+  expect(state("Active", at(30))).toBe("Expired");
+  expect(state("Active", at(29))).toBe("Expired");
 });

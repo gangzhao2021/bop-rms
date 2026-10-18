@@ -18,8 +18,19 @@ export type DiningInvitationIssue =
   | { readonly status: "TableChanged" }
   | { readonly status: "TooMany"; readonly retryAt: string | null };
 
+/**
+ * What became of the code this phone is showing (v15 42e95248): asked by the request reference
+ * that made it, never by the code. `Unknown` means the server does not know that request.
+ */
+export type DiningInvitationCodeState = "Live" | "Used" | "Replaced" | "Expired" | "Unknown";
+
 export interface DiningInvitationClient {
   canInvite(signal?: AbortSignal): Promise<boolean>;
+  /** Whether this guest may still invite, and the state of the code made by `operationReference`. */
+  codeState(
+    operationReference: string,
+    signal?: AbortSignal,
+  ): Promise<{ readonly canInvite: boolean; readonly codeState: DiningInvitationCodeState }>;
   /** One request per tap; repeat the same `operationReference` only to recover an unknown result. */
   issue(operationReference: string): Promise<DiningInvitationIssue>;
   newOperationReference(): string;
@@ -34,6 +45,13 @@ export class DiningInvitationClientError extends Error {
 
 const route = "/api/v1/dine-in/invitation";
 const credential = /^[A-Za-z0-9_-]{43}$/u;
+const codeStates: readonly DiningInvitationCodeState[] = [
+  "Live",
+  "Used",
+  "Replaced",
+  "Expired",
+  "Unknown",
+];
 const instant = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$/u;
 
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -101,6 +119,26 @@ export function createHttpDiningInvitationClient(
       if (body.schemaVersion !== 1 || typeof invitation.canInvite !== "boolean")
         throw new DiningInvitationClientError("unavailable");
       return invitation.canInvite;
+    },
+    async codeState(operationReference: string, signal?: AbortSignal) {
+      const response = await send({
+        method: "GET",
+        headers: { "x-dining-invitation-reference": operationReference },
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (response.status !== 200) throw new DiningInvitationClientError("unavailable");
+      const body = record(await json(response), ["schemaVersion", "invitation"]);
+      const invitation = record(body.invitation, ["canInvite", "codeState"]);
+      if (
+        body.schemaVersion !== 1 ||
+        typeof invitation.canInvite !== "boolean" ||
+        !codeStates.includes(invitation.codeState as DiningInvitationCodeState)
+      )
+        throw new DiningInvitationClientError("unavailable");
+      return Object.freeze({
+        canInvite: invitation.canInvite,
+        codeState: invitation.codeState as DiningInvitationCodeState,
+      });
     },
     async issue(operationReference: string): Promise<DiningInvitationIssue> {
       const response = await send({

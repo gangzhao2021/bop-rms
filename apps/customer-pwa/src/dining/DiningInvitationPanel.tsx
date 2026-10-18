@@ -16,13 +16,28 @@ export type DiningInvitationState =
   | { readonly status: "hidden" }
   | { readonly status: "ready" }
   | { readonly status: "issuing" }
-  | { readonly status: "issued"; readonly code: string; readonly expiresAt: string }
+  | {
+      readonly status: "issued";
+      readonly code: string;
+      readonly expiresAt: string;
+      /** The request that made this code; the phone asks about the code by it, never by the code. */
+      readonly operationReference?: string;
+    }
   | { readonly status: "expired" }
+  /** A guest joined with the code. */
+  | { readonly status: "used" }
+  /** Staff or another phone of the host made a newer code, so this one stopped working. */
+  | { readonly status: "replaced" }
+  /** This guest can no longer invite (table closing, host changed); the code stopped working. */
+  | { readonly status: "ended" }
   | { readonly status: "lost" }
   | { readonly status: "not-host" }
   | { readonly status: "table-changed" }
   | { readonly status: "too-many"; readonly retryAt: string | null }
   | { readonly status: "failed"; readonly offline: boolean };
+
+/** How often the host's phone checks the code it is showing while the page is visible. */
+export const diningInvitationCheckIntervalMs = 4_000;
 
 export function DiningInvitationPanel({
   client: provided,
@@ -54,6 +69,61 @@ export function DiningInvitationPanel({
     );
     return () => window.clearTimeout(timer);
   }, [state]);
+  // v15 42e95248: a code shown here can stop working elsewhere (a guest joined with it, staff or
+  // another phone made a newer one). Check every few seconds while it is shown and the page is
+  // visible, and as soon as the page is shown again, so the next guest is not told a dead code.
+  const issuedReference = state.status === "issued" ? (state.operationReference ?? null) : null;
+  useEffect(() => {
+    if (issuedReference === null) return;
+    const operation = issuedReference;
+    let stopped = false;
+    let inFlight: AbortController | null = null;
+    const check = () => {
+      if (stopped || inFlight !== null || document.visibilityState === "hidden") return;
+      const controller = new AbortController();
+      inFlight = controller;
+      client.codeState(operation, controller.signal).then(
+        (result) => {
+          inFlight = null;
+          if (stopped) return;
+          const next: DiningInvitationState | null = !result.canInvite
+            ? { status: "ended" }
+            : result.codeState === "Used"
+              ? { status: "used" }
+              : result.codeState === "Replaced"
+                ? { status: "replaced" }
+                : result.codeState === "Expired"
+                  ? { status: "expired" }
+                  : null;
+          if (next === null) return;
+          setState((current) =>
+            current.status === "issued" && current.operationReference === operation
+              ? next
+              : current,
+          );
+        },
+        // Offline or briefly unreachable: keep showing the code and check again shortly.
+        () => {
+          inFlight = null;
+        },
+      );
+    };
+    const timer = window.setInterval(check, diningInvitationCheckIntervalMs);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", check);
+    window.addEventListener("focus", check);
+    return () => {
+      stopped = true;
+      inFlight?.abort();
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", check);
+      window.removeEventListener("focus", check);
+    };
+  }, [client, issuedReference]);
   const make = useCallback(() => {
     if (busy.current) return;
     busy.current = true;
@@ -66,7 +136,12 @@ export function DiningInvitationPanel({
         (result) => {
           pending.current = null;
           if (result.status === "Issued")
-            setState({ status: "issued", code: result.code, expiresAt: result.expiresAt });
+            setState({
+              status: "issued",
+              code: result.code,
+              expiresAt: result.expiresAt,
+              operationReference: operation,
+            });
           else if (result.status === "Lost") setState({ status: "lost" });
           else if (result.status === "NotHost") setState({ status: "not-host" });
           else if (result.status === "TableChanged") setState({ status: "table-changed" });
@@ -159,6 +234,23 @@ export function DiningInvitationView({
           <p role="status">This code has expired. Make a new one if someone still needs to join.</p>
           {makeButton("Make a new code")}
         </>
+      ) : null}
+      {state.status === "used" ? (
+        <>
+          <p role="status">Someone joined with this code. For someone else, make another code.</p>
+          {makeButton("Make another code")}
+        </>
+      ) : null}
+      {state.status === "replaced" ? (
+        <>
+          <p role="status">This code was replaced. Make a new one.</p>
+          {makeButton("Make a new code")}
+        </>
+      ) : null}
+      {state.status === "ended" ? (
+        <p role="status">
+          This code no longer works. A staff member can give a code to someone joining.
+        </p>
       ) : null}
       {state.status === "lost" ? (
         <>

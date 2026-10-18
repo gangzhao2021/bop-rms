@@ -18,7 +18,16 @@ test.describe("@production guests invite each other at the table", () => {
   }, info) => {
     const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
     const issuedCode = "482913";
-    const table = { used: false, issued: 0, joined: 0 };
+    const nextCode = "591027";
+    const table = {
+      used: false,
+      issued: 0,
+      joined: 0,
+      keys: [] as string[],
+      usedKey: null as string | null,
+      replacedKey: null as string | null,
+      asked: 0,
+    };
     const errors: string[] = [];
 
     async function phone(name: string) {
@@ -115,23 +124,54 @@ test.describe("@production guests invite each other at the table", () => {
       await page.route("**/api/v1/dine-in/invitation", async (route) => {
         const request = route.request();
         if (request.method() === "GET") {
+          // The host's phone asks about the code it shows by the request that made it, never
+          // by the code itself.
+          const asked = request.headers()["x-dining-invitation-reference"];
+          if (asked === undefined) {
+            await route.fulfill({
+              status: 200,
+              headers: noStore,
+              json: { schemaVersion: 1, invitation: { canInvite } },
+            });
+            return;
+          }
+          expect(asked).toBe(table.keys.at(-1));
+          expect(request.url()).not.toMatch(/\?|482913|591027/u);
+          table.asked++;
           await route.fulfill({
             status: 200,
             headers: noStore,
-            json: { schemaVersion: 1, invitation: { canInvite } },
+            json: {
+              schemaVersion: 1,
+              invitation: {
+                canInvite,
+                codeState:
+                  asked === table.replacedKey
+                    ? "Replaced"
+                    : asked === table.usedKey
+                      ? "Used"
+                      : "Live",
+              },
+            },
           });
           return;
         }
         expect(canInvite).toBe(true);
-        expect(request.headers()["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/u);
+        const key = request.headers()["idempotency-key"] ?? "";
+        expect(key).toMatch(/^[0-9a-f-]{36}$/u);
         expect(request.postData()).toBe("{}");
+        table.keys.push(key);
         table.issued++;
         await route.fulfill({
           status: 201,
           headers: noStore,
           json: {
             schemaVersion: 1,
-            invitation: { status: "Issued", code: issuedCode, expiresAt },
+            invitation: {
+              status: "Issued",
+              code: table.issued === 1 ? issuedCode : nextCode,
+              expiresAt,
+            },
           },
         });
       });
@@ -143,6 +183,7 @@ test.describe("@production guests invite each other at the table", () => {
         const body = JSON.parse(request.postData() ?? "{}") as { joinCredential?: string };
         if (body.joinCredential === issuedCode && !table.used) {
           table.used = true;
+          table.usedKey = table.keys[0] ?? null;
           table.joined++;
           await route.fulfill({
             status: 200,
@@ -268,6 +309,22 @@ test.describe("@production guests invite each other at the table", () => {
       "This code was already used. Ask staff, or the person who invited you, for a new one.",
     );
     expect(table.joined).toBe(1);
+
+    // ── v15 42e95248: the host's phone learns, without a reload, that the code was used, and
+    // offers another; when staff (or another phone) replace that one, it says so.
+    await expect(invite.getByText("Someone joined with this code.", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(invite.getByText("482 913", { exact: true })).toHaveCount(0);
+    await invite.getByRole("button", { name: "Make another code" }).click();
+    await expect(invite.getByText("591 027", { exact: true })).toBeVisible();
+    table.replacedKey = table.keys[1] ?? null;
+    await expect(
+      invite.getByText("This code was replaced. Make a new one.", { exact: true }),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(invite.getByText("591 027", { exact: true })).toHaveCount(0);
+    await expect(invite.getByRole("button", { name: "Make a new code" })).toBeVisible();
+    expect(table.asked).toBeGreaterThanOrEqual(2);
 
     // ── Only the host sees the invite control.
     await goTo(guest.page, "/dine-in/session");

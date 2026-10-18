@@ -78,6 +78,28 @@ it("tells the guest whether they may invite, from their own Guest Session only",
   expect(f.read).toHaveBeenCalledTimes(1);
 });
 
+it("tells the Host what became of the code it shows, asked by its request key only", async () => {
+  const f = await setup({ read: async () => ({ canInvite: true, codeState: "Replaced" }) });
+  const response = await f.get({ "x-dining-invitation-reference": key });
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    invitation: { canInvite: true, codeState: "Replaced" },
+  });
+  expect(f.read).toHaveBeenCalledWith({
+    sessionCredential: "s".repeat(43),
+    csrfCredential: "c".repeat(43),
+    issuedOperationReference: key,
+  });
+  // A malformed reference (a code, say) never reaches the owner.
+  expect((await f.get({ "x-dining-invitation-reference": "482913" })).status).toBe(400);
+  expect(f.read).toHaveBeenCalledTimes(1);
+  // An owner answer outside the public states is not passed on.
+  const odd = await setup({ read: async () => ({ canInvite: true }) });
+  expect((await odd.get({ "x-dining-invitation-reference": key })).status).toBe(503);
+});
+
 it("issues a six-digit code once per request key and never echoes it again", async () => {
   const f = await setup({
     issue: async () => ({

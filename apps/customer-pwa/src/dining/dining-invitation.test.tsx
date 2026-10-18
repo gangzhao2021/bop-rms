@@ -69,6 +69,44 @@ describe("WP-2423 DEC-DINING-GUEST-INVITATION client", () => {
     await expect(client.issue(key)).rejects.toMatchObject({ code: "unavailable" });
   });
 
+  it("asks about the shown code by its request reference, never by the code", async () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    const request = vi.fn(async () =>
+      json({ schemaVersion: 1, invitation: { canInvite: true, codeState: "Used" } }, 200),
+    );
+    const client = createHttpDiningInvitationClient(request as unknown as typeof fetch);
+    await expect(client.codeState(key)).resolves.toEqual({ canInvite: true, codeState: "Used" });
+    const [url, init] = request.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/dine-in/invitation");
+    expect(init.method).toBe("GET");
+    expect(init.body).toBeUndefined();
+    expect(init.headers).toEqual({
+      accept: "application/json",
+      "x-csrf-token": "c".repeat(43),
+      "x-dining-invitation-reference": key,
+    });
+    for (const codeState of ["Live", "Replaced", "Expired", "Unknown"] as const) {
+      request.mockResolvedValueOnce(
+        json({ schemaVersion: 1, invitation: { canInvite: false, codeState } }, 200),
+      );
+      await expect(client.codeState(key)).resolves.toEqual({ canInvite: false, codeState });
+    }
+    // Anything else, including a code in the answer, is refused.
+    request.mockResolvedValueOnce(
+      json({ schemaVersion: 1, invitation: { canInvite: true, codeState: "Gone" } }, 200),
+    );
+    await expect(client.codeState(key)).rejects.toMatchObject({ code: "unavailable" });
+    request.mockResolvedValueOnce(
+      json(
+        { schemaVersion: 1, invitation: { canInvite: true, codeState: "Live", code: "482913" } },
+        200,
+      ),
+    );
+    await expect(client.codeState(key)).rejects.toMatchObject({ code: "unavailable" });
+    request.mockResolvedValueOnce(json({}, 404));
+    await expect(client.codeState(key)).rejects.toMatchObject({ code: "not-joined" });
+  });
+
   it("does not call the server without this browser's session", async () => {
     const request = vi.fn();
     const client = createHttpDiningInvitationClient(request as unknown as typeof fetch);
@@ -106,6 +144,9 @@ describe("WP-2423 DEC-DINING-GUEST-INVITATION panel", () => {
   it.each([
     [{ status: "expired" }, "This code has expired."],
     [{ status: "lost" }, "We couldn’t show that code. Make a new one."],
+    [{ status: "used" }, "Someone joined with this code. For someone else, make another code."],
+    [{ status: "replaced" }, "This code was replaced. Make a new one."],
+    [{ status: "ended" }, "This code no longer works. A staff member can give a code"],
     [{ status: "not-host" }, "Only the person who joined this table first can make codes."],
     [{ status: "table-changed" }, "Ask a staff member for a code for your new table."],
     [
@@ -118,5 +159,14 @@ describe("WP-2423 DEC-DINING-GUEST-INVITATION panel", () => {
     const html = render(state as DiningInvitationState);
     expect(html).toContain(text);
     expect(html).not.toMatch(/dining_invitation|Session|participant|capability/u);
+    // A code that stopped working is never left on screen.
+    expect(html).not.toContain("dining-invitation__digits");
+  });
+
+  it.each([
+    [{ status: "used" }, ">Make another code</button>"],
+    [{ status: "replaced" }, ">Make a new code</button>"],
+  ] as const)("offers the host the next code after %o", (state, button) => {
+    expect(render(state as DiningInvitationState)).toContain(button);
   });
 });
