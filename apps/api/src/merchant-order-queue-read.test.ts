@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   carried: vi.fn(),
   holding: vi.fn(),
   state: vi.fn(),
+  fence: vi.fn(),
 }));
 const id = (n: number) => `0190ee39-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 vi.mock("./dining-order-delivery-progress.js", async (original) => ({
@@ -18,6 +19,7 @@ vi.mock("./merchant-stock-holding-orders.js", () => ({
 }));
 vi.mock("@rms/ordering", () => ({
   parseOrderingInstant: (value: string) => value,
+  acquireOrderDispositionFence: mocks.fence,
   createPostgresMerchantOrderIndex: () => ({ list: mocks.list }),
   listStoreOrdersWithRoundsSince: mocks.carried,
   readOrderCreationQuoteVersion: async () => 2,
@@ -57,6 +59,8 @@ beforeEach(() => {
   mocks.holding.mockResolvedValue([]);
   mocks.state.mockReset();
   mocks.state.mockResolvedValue(null);
+  mocks.fence.mockReset();
+  mocks.fence.mockResolvedValue(undefined);
   mocks.list.mockReset();
   mocks.list.mockResolvedValue({ items: [indexItem(4)], nextAfterOrderReference: null });
 });
@@ -286,4 +290,36 @@ it("WP-2423: counts a table's items ready to serve in any round, as the Tables c
   });
   const result = await read();
   expect(result.items[0]).toMatchObject({ currentPhase: "Submitted", readyToServeItemCount: 1 });
+});
+
+it("WP-2423 (v15 2026-10-18, 40P01): fences every listed Order in ascending reference before reading any, keeping the list newest first", async () => {
+  const events: string[] = [];
+  mocks.fence.mockImplementation(async (_tx: unknown, input: { orderReference: string }) => {
+    events.push("fence " + input.orderReference);
+  });
+  mocks.state.mockImplementation(async (input: { orderReference: string }) => {
+    events.push("read " + input.orderReference);
+    return null;
+  });
+  // Newest first, as the Orders list reads them (the pickup queue reads the same Orders oldest
+  // first): fenced in list order, the two reads waited on each other's fence.
+  mocks.list.mockResolvedValue({
+    items: [indexItem(12), indexItem(10), indexItem(11)],
+    nextAfterOrderReference: null,
+  });
+  const result = await read();
+  expect(result.items.map((item) => item.orderReference)).toEqual([id(12), id(10), id(11)]);
+  expect(events).toEqual([
+    "fence " + id(10),
+    "fence " + id(11),
+    "fence " + id(12),
+    "read " + id(12),
+    "read " + id(10),
+    "read " + id(11),
+  ]);
+  expect(mocks.fence).toHaveBeenCalledWith(expect.anything(), {
+    brandReference: scope.brandReference,
+    storeReference: scope.storeReference,
+    orderReference: id(10),
+  });
 });

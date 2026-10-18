@@ -10,6 +10,7 @@ import {
   type EarlierOrderHoldingStock,
 } from "./merchant-stock-holding-orders.js";
 import {
+  acquireOrderDispositionFence,
   createPostgresMerchantOrderIndex,
   createPostgresOrderAcceptanceReader,
   createPostgresOrderCreationQueryStore,
@@ -177,6 +178,15 @@ export function createMerchantOrderQueueRead(options: {
           2,
         ),
       } as const;
+      // WP-2423 (v15 2026-10-18, 40P01): every listed Order's disposition fence is taken first, in
+      // ascending Order reference: the one order every read that fences several Orders uses (the
+      // pickup queue too). Fenced one by one in list order (newest first), this read deadlocked
+      // with the pickup queue fencing the same two Orders oldest first. Re-entrant: each Order's
+      // readers below take the fence again. The list keeps its order.
+      for (const orderReference of [...new Set(listed.map(({ item }) => item.orderReference))]
+        .map(String)
+        .sort())
+        await acquireOrderDispositionFence(transaction, { ...ownerScope, orderReference });
       const items = [];
       for (const { item, earlierDay } of listed) {
         // Match acceptance/payment writers: disposition fence before the header row lock.

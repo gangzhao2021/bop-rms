@@ -1,5 +1,25 @@
 import { createOutboxWorkload } from "./outbox-workload.js";
 
+/** Kitchen owner diagnostic codes that mean the source breaks an invariant (needs a person). */
+const SOURCE_FAULT = /^KITCHEN_[A-Z0-9_]+_(?:MISMATCH|INVALID)$/u;
+/** The most specific source-fault code on the cause chain, else the generic refresh code. */
+function refreshFailureCode(error: unknown): string {
+  try {
+    let current: unknown = error;
+    for (let depth = 0; depth < 6 && current !== null && typeof current === "object"; depth++) {
+      for (const key of ["code", "message"]) {
+        const value = Object.getOwnPropertyDescriptor(current, key)?.value as unknown;
+        if (typeof value === "string" && value.length <= 80 && SOURCE_FAULT.test(value))
+          return value;
+      }
+      current = Object.getOwnPropertyDescriptor(current, "cause")?.value as unknown;
+    }
+  } catch {
+    /* Untrusted errors must never break failure reporting. */
+  }
+  return "KITCHEN_QUEUE_REFRESH_UNAVAILABLE";
+}
+
 /** Schedules real bounded owner snapshot comparison/activation. Owner refresh
  * returns zero for unchanged source and one only after durable activation.
  */
@@ -25,8 +45,10 @@ export function createKitchenQueueWorkload(options: {
           if (result !== 0 && result !== 1) throw new Error("invalid refresh result");
           return result;
         } catch (error) {
-          // The cause keeps only what classification and safe logging read (code, SQLSTATE).
-          throw new Error("KITCHEN_QUEUE_REFRESH_UNAVAILABLE", { cause: error });
+          // The cause keeps only what classification and safe logging read (code, SQLSTATE). A
+          // source that breaks a Kitchen invariant is named (and needs a person: retrying cannot
+          // change the snapshot); a database failure keeps its SQLSTATE on the cause chain.
+          throw new Error(refreshFailureCode(error), { cause: error });
         }
       },
       async stop() {

@@ -77,4 +77,25 @@ describe("bounded Kitchen source snapshot", () => {
     });
     await expect(test.reader.read(test.transaction)).rejects.not.toThrow("private SQL details");
   });
+  it("keeps the diagnostic cause: a database SQLSTATE, or a named source mismatch", async () => {
+    const failed = harness();
+    failed.query.mockRejectedValue(Object.assign(new Error("deadlock"), { code: "40P01" }));
+    const database = await failed.reader.read(failed.transaction).catch((error: unknown) => error);
+    expect(database).toMatchObject({
+      code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE",
+      cause: { code: "40P01" },
+    });
+    const malformed = harness([null]);
+    const mismatch = await malformed.reader
+      .read(malformed.transaction)
+      .catch((error: unknown) => error);
+    expect(mismatch).toMatchObject({
+      code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE",
+      cause: { message: "KITCHEN_QUEUE_SOURCE_MISMATCH" },
+    });
+    const denied = harness();
+    denied.authorize.mockResolvedValue(false);
+    const refused = await denied.reader.read(denied.transaction).catch((error: unknown) => error);
+    expect((refused as Error).cause).toBeUndefined();
+  });
 });

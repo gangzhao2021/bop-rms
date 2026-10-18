@@ -82,8 +82,14 @@ export function createPostgresKitchenQueueSourceReader(options: {
         "AND y.store_id=k.store_id AND y.kitchen_ticket_id=k.kitchen_ticket_id AND y.status<>'Completed')) ";
   return {
     async read(transaction: ConsumerTransaction) {
+      // Diagnostics only (the public code stays DEPENDENCY_UNAVAILABLE): a database failure keeps
+      // its SQLSTATE on the cause, and a source fact that breaks a Kitchen invariant is marked
+      // KITCHEN_QUEUE_SOURCE_MISMATCH, so the worker log names the real cause instead of a bare
+      // UNAVAILABLE. Neither carries row values.
+      let phase: "authorize" | "query" | "verify" = "authorize";
       try {
         if ((await options.authorize(transaction)) !== true) return unavailable();
+        phase = "query";
         const result = await transaction.query(
           "SELECT clock_timestamp() AS as_of,COALESCE(jsonb_agg(s), '[]'::jsonb) AS tickets FROM (" +
             "SELECT t.kitchen_ticket_id,t.order_id,t.order_batch_id,t.source_event_id,t.status," +
@@ -98,7 +104,12 @@ export function createPostgresKitchenQueueSourceReader(options: {
             "FROM rms_kitchen.kitchen_order_item_ready_result WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=t.kitchen_ticket_id ORDER BY ready_result_id LIMIT $4) a) AS ready," +
             "(SELECT COALESCE(jsonb_agg(c),'[]'::jsonb) FROM (SELECT " +
             kitchenWorkCancellationColumns +
-            " FROM rms_kitchen.kitchen_work_cancellation WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=t.kitchen_ticket_id ORDER BY result_ticket_version LIMIT $4) c) AS cancellations " +
+            " FROM rms_kitchen.kitchen_work_cancellation WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=t.kitchen_ticket_id " +
+            // WP-2423 (v15 2026-10-18): qualified, because the column list returns
+            // `result_ticket_version::text AS result_ticket_version` and a bare name would sort that
+            // text ("10" < "9"): from ticket version 10 on the latest cancellation read as an older
+            // one and every refresh failed.
+            "ORDER BY kitchen_work_cancellation.result_ticket_version LIMIT $4) c) AS cancellations " +
             // DEC-KITCHEN-STALE-TICKETS: a ticket a manager closed leaves the live board.
             "FROM (SELECT * FROM rms_kitchen.kitchen_ticket k WHERE k.brand_id=$1 AND k.store_id=$2 AND k.status='Open' " +
             "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_ticket_closure c WHERE c.brand_id=k.brand_id " +
@@ -115,6 +126,7 @@ export function createPostgresKitchenQueueSourceReader(options: {
             ...(retireAfter === undefined ? [] : [retireAfter / 1000]),
           ],
         );
+        phase = "verify";
         if (result.rows.length !== 1 || !result.rows[0]) return unavailable();
         const snapshot = result.rows[0];
         const tickets = rows(snapshot.tickets, options.maxTickets).map((row) => {
@@ -318,9 +330,18 @@ export function createPostgresKitchenQueueSourceReader(options: {
           feed,
           options.lifecycleValidation.digests.sha256,
         );
+        phase = "authorize";
         if ((await options.authorize(transaction)) !== true) return unavailable();
         return feed;
-      } catch {
+      } catch (error) {
+        if (phase === "query")
+          throw new KitchenQueueProjectionError("KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE", {
+            cause: error,
+          });
+        if (phase === "verify")
+          throw new KitchenQueueProjectionError("KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE", {
+            cause: new Error("KITCHEN_QUEUE_SOURCE_MISMATCH", { cause: error }),
+          });
         return unavailable();
       }
     },

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { scanSqlOrdering } from "./scan.mjs";
+import { exportedConstants, scanSqlOrdering } from "./scan.mjs";
 
 // WP-2423 (v15 2026-10-16): `SELECT version::text AS version … ORDER BY version DESC LIMIT 1` sorts
 // the text output column, so version 9 reads as the latest from version 10 on (the Brand
@@ -150,6 +150,23 @@ describe("SQL ordering on text output columns", () => {
       `const columns = "id,qr_version::text AS qr_version";\nconst one = (w) => q("SELECT " + columns + " FROM t WHERE " + w);\none("x=$1 ORDER BY qr_version DESC LIMIT 1");`,
     );
     expect(fragment.map((hit) => hit.name)).toEqual(["qr_version"]);
+    // WP-2423 (v15 2026-10-18): a column list exported by another module.
+    const exported = exportedConstants(
+      `export const cancellationColumns =\n  "id," +\n  "result_ticket_version::text AS result_ticket_version";`,
+    );
+    const imported = scanSqlOrdering(
+      `import { cancellationColumns as columns } from "./store.js";\nq("(SELECT " +\n  columns +\n  " FROM c WHERE t=$1 ORDER BY result_ticket_version LIMIT $4)")`,
+      "",
+      exported,
+    );
+    expect(imported.map((hit) => hit.name)).toEqual(["result_ticket_version"]);
+    expect(
+      scanSqlOrdering(
+        `const columns = "id";\nq("SELECT " + columns + " FROM c ORDER BY result_ticket_version")`,
+        "",
+        exported,
+      ),
+    ).toEqual([]);
     const formatted = scanSqlOrdering(
       `q("SELECT to_char(changed_at AT TIME ZONE 'UTC','YYYY') AS changed_at FROM t ORDER BY changed_at")`,
     );
@@ -192,16 +209,20 @@ describe("SQL ordering on text output columns", () => {
           !/(^|\/)(dist|node_modules)\//.test(file) &&
           !file.startsWith("tooling/sql-ordering/"),
       );
-    const hits = [];
+    const texts = new Map();
+    const exported = new Map();
     for (const file of files) {
-      let text;
       try {
-        text = readFileSync(join(root, file), "utf8");
+        const text = readFileSync(join(root, file), "utf8");
+        texts.set(file, text);
+        for (const [name, value] of exportedConstants(text)) exported.set(name, value);
       } catch {
         continue;
       }
-      if (/ORDER\s+BY/i.test(text)) hits.push(...scanSqlOrdering(text, file));
     }
+    const hits = [];
+    for (const [file, text] of texts)
+      if (/ORDER\s+BY/i.test(text)) hits.push(...scanSqlOrdering(text, file, exported));
     const allowed = new Set(allowlist.map(([file, name]) => file + "\t" + name));
     const unreviewed = hits
       .filter((hit) => !allowed.has(hit.file + "\t" + hit.name))

@@ -142,10 +142,48 @@ function textAlias(segments, name) {
   });
 }
 
-/** Reports every top-level ORDER BY item that sorts a text alias by its bare name. */
-export function scanSqlOrdering(text, file = "") {
+/**
+ * Exported constants of a file (`export const NAME = …;`), so a column list one module exports
+ * and another interpolates is resolved too (WP-2423 v15 2026-10-18: the Kitchen queue reader
+ * sorted `result_ticket_version::text` from an imported column list).
+ */
+export function exportedConstants(text) {
+  const map = new Map();
+  for (const [name, value] of constants(text))
+    if (
+      new RegExp(String.raw`\bexport\s+(?:const|let|var)\s+${name.replace(/[$]/g, "\\$")}\b`).test(
+        text,
+      )
+    )
+      map.set(name, value);
+  return map;
+}
+
+/** Names this file imports with `import { a, b as c } from "…"` (local name → imported name). */
+function importedNames(text) {
+  const names = new Map();
+  for (const match of text.matchAll(/\bimport\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["'][^"']+["']/g))
+    for (const part of match[1].split(",")) {
+      const [imported, local = imported] = part
+        .replace(/^\s*type\s+/, "")
+        .split(/\s+as\s+/)
+        .map((value) => value.trim());
+      if (imported) names.set(local, imported);
+    }
+  return names;
+}
+
+/**
+ * Reports every top-level ORDER BY item that sorts a text alias by its bare name. `imported`
+ * maps exported constant names (from other files) to their text; only names this file imports
+ * are used.
+ */
+export function scanSqlOrdering(text, file = "", imported = new Map()) {
   const hits = [];
-  const consts = constants(text);
+  const consts = new Map();
+  for (const [local, name] of importedNames(text))
+    if (imported.has(name)) consts.set(local, imported.get(name));
+  for (const [name, value] of constants(text)) consts.set(name, value);
   const pattern = /\bORDER\s+BY\b/gi;
   for (let match; (match = pattern.exec(text));) {
     const at = match.index;

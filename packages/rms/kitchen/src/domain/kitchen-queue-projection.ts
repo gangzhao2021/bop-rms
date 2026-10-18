@@ -24,8 +24,12 @@ export const kitchenQueueProjectionErrorCodes = [
 export type KitchenQueueProjectionErrorCode = (typeof kitchenQueueProjectionErrorCodes)[number];
 
 export class KitchenQueueProjectionError extends Error {
-  constructor(readonly code: KitchenQueueProjectionErrorCode) {
-    super("kitchen queue is unavailable");
+  /** `cause` is diagnostic only (safe codes and SQLSTATE for worker logs); never serialized. */
+  constructor(
+    readonly code: KitchenQueueProjectionErrorCode,
+    options?: { readonly cause?: unknown },
+  ) {
+    super("kitchen queue is unavailable", options);
     this.name = "KitchenQueueProjectionError";
   }
 }

@@ -58,7 +58,8 @@ async function readFulfillmentItemCancellations(
     "SELECT " +
       fulfillmentItemCancellationColumns +
       " FROM rms_fulfillment.fulfillment_item_cancellation WHERE brand_id=$1 AND store_id=$2 AND fulfillment_id=$3 " +
-      "ORDER BY aggregate_version_after LIMIT 101",
+      // Qualified: the column list returns the version as text, which a bare name would sort.
+      "ORDER BY fulfillment_item_cancellation.aggregate_version_after LIMIT 101",
     [brand, store, fulfillment],
   );
   if (result.rows.length > 100) return unavailable();
@@ -392,10 +393,19 @@ export function createPostgresFulfillmentReadinessStore(options: {
         return unavailable();
       const scanned = candidates.slice(0, input.limit),
         items: PickupQueueReadItem[] = [];
+      // WP-2423 (v15 2026-10-18, 40P01): each pickup is locked (its Order's source fence, then the
+      // pickup) in ascending Order reference, the one order every read that locks several Orders
+      // uses (the Orders list too). Locked in page (pickup reference) order, this read deadlocked
+      // with an Orders list fencing the same two Orders newest first. The page keeps its order.
+      const locked = new Map<string, Awaited<ReturnType<typeof current>>>();
+      for (const order of [...new Set(scanned.map((row) => parseReadinessReference(row.order_id)))]
+        .map(String)
+        .sort())
+        locked.set(order, await current(tx, parseReadinessReference(order)));
       for (const row of scanned) {
         const fulfillment = parseReadinessReference(row.fulfillment_id),
           order = parseReadinessReference(row.order_id);
-        const result = await current(tx, order);
+        const result = locked.get(String(order));
         if (
           !result?.proof ||
           String(result.proof.source.fulfillmentReference) !== String(fulfillment)
