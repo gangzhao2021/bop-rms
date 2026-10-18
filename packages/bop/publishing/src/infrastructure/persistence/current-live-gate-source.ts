@@ -68,15 +68,21 @@ export function createPostgresCurrentLiveGateSource(options: {
       );
       if (candidates.length !== 1) return denied();
       const gate = parsePublishingReference(candidates[0]?.gate_reference);
+      // The version in force at `at`: the newest version recorded by then. A later appended
+      // version (a renewal, a reopen) governs only from its own changed_at, so historical reads
+      // (settlement backlog, past business days, refunds of earlier payments) keep the version
+      // that governed them. History whose version order disagrees with its time order has no
+      // defined version in force and is refused.
       const head = rows(
         await tx.query(
-          "SELECT gate_reference,gate_id,gate_version,environment,state,owner_reference,submitted_by_reference,approved_by_reference,decision_evidence_reference,last_reviewed_at,changed_at FROM bop_publishing.live_gate_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND gate_reference=$4 ORDER BY gate_version DESC LIMIT 1",
-          [tenant, brand, store, gate],
+          "SELECT h.gate_reference,h.gate_id,h.gate_version,h.environment,h.state,h.owner_reference,h.submitted_by_reference,h.approved_by_reference,h.decision_evidence_reference,h.last_reviewed_at,h.changed_at,EXISTS (SELECT 1 FROM bop_publishing.live_gate_version e WHERE e.brand_id=h.brand_id AND e.store_id=h.store_id AND e.gate_reference=h.gate_reference AND e.gate_version<h.gate_version AND e.changed_at>h.changed_at) AS out_of_order FROM bop_publishing.live_gate_version h WHERE h.tenant_id=$1 AND h.brand_id=$2 AND h.store_id=$3 AND h.gate_reference=$4 AND h.changed_at<=$5::timestamptz ORDER BY h.gate_version DESC LIMIT 1",
+          [tenant, brand, store, gate, at],
         ),
         1,
       )[0];
       if (
         !head ||
+        head.out_of_order !== false ||
         head.state !== "Approved" ||
         head.decision_evidence_reference !== decision ||
         head.environment !== "Production" ||

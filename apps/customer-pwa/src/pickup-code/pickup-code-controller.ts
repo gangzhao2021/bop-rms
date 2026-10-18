@@ -40,6 +40,7 @@ export type PickupCodeState =
     }
   | { readonly status: "loading" }
   | { readonly status: "not-ready" }
+  | { readonly status: "collected" }
   | { readonly status: "permission-denied" }
   | { readonly status: "not-found" }
   | { readonly status: "feature-disabled" }
@@ -128,7 +129,10 @@ function parseInstant(value: unknown): string {
 }
 
 export type PickupCodeResult =
-  { readonly status: "NotReady" } | PickupWithoutCodeView | PickupCodeView;
+  | { readonly status: "NotReady" }
+  | { readonly status: "Collected" }
+  | PickupWithoutCodeView
+  | PickupCodeView;
 
 export function parsePickupCodeResult(
   value: unknown,
@@ -147,7 +151,7 @@ export function parsePickupCodeResult(
   }
   const base = exact(
     value,
-    status === "NotReady"
+    status === "NotReady" || status === "Collected"
       ? ["schemaVersion", "status", "orderReference"]
       : status === "ReadyWithoutCode"
         ? ["schemaVersion", "status", "orderReference", "orderNumber", "reason"]
@@ -173,6 +177,7 @@ export function parsePickupCodeResult(
   )
     return invalid();
   if (base.status === "NotReady") return Object.freeze({ status: "NotReady" });
+  if (base.status === "Collected") return Object.freeze({ status: "Collected" });
   if (base.status === "ReadyWithoutCode") {
     if (
       base.orderNumber !== expectedOrderNumber ||
@@ -327,6 +332,12 @@ export function createPickupCodeController(
       if (result.status === "NotReady") {
         publish({ status: "not-ready" });
         scheduleFollow();
+        return;
+      }
+      // Final: the order was handed over; the order page turns to "collected" on its next check.
+      if (result.status === "Collected") {
+        followAttempt = 0;
+        publish({ status: "collected" });
         return;
       }
       if (result.status === "ReadyWithoutCode") {

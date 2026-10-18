@@ -80,7 +80,8 @@ export class PickupCapacityScheduleError extends Error {
 }
 
 const HOUR = 3_600_000;
-const QUARTER = 15 * 60_000;
+const MINUTE = 60_000;
+const QUARTER = 15 * MINUTE;
 /** At most this far ahead (two months) and this many new slots in one plan. */
 const MAXIMUM_HORIZON = 62 * 24 * HOUR;
 const MAXIMUM_CREATED = 4_000;
@@ -215,10 +216,18 @@ export function planPickupCapacitySchedule(
   const desiredLimit = (start: number, end: number) =>
     pickupSlotCapacityLimit(end - start, overlapsService(start, end), input.policy);
 
-  // Cut points: local hours, pickup opening/closing times and business-day starts.
-  const cuts = new Set<number>(localHourStarts(input.timeZone, observedAt, horizonUntil));
-  for (const [start, end] of windows) cuts.add(start).add(end);
-  for (const [, start] of days) cuts.add(start);
+  // Cut points: local hours, pickup opening/closing times and business-day starts. An opening or
+  // closing time less than a minute from a local hour or business-day start (hours that end at
+  // 23:59:59 meaning end of day) is not a cut of its own: it would leave a sliver of a slot with a
+  // capacity of 1. The neighbouring slot keeps the service it overlaps.
+  const fixedCuts = [
+    ...localHourStarts(input.timeZone, observedAt - HOUR, horizonUntil + HOUR),
+    ...days.map(([, start]) => start),
+  ];
+  const cuts = new Set<number>(fixedCuts.filter((at) => at > observedAt && at <= horizonUntil));
+  for (const [start, end] of windows)
+    for (const at of [start, end])
+      if (!fixedCuts.some((fixed) => Math.abs(fixed - at) < MINUTE)) cuts.add(at);
   const orderedCuts = [...cuts]
     .filter((at) => at > observedAt && at <= horizonUntil)
     .sort((a, b) => a - b);

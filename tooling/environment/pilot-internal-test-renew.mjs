@@ -605,6 +605,10 @@ export function formatRenewal(result) {
       lines.push(
         `    check at ${check.at} ${label}: ${staff(check.roster)}, launch gate ${check.launchGate}, tax ${check.tax}`,
       );
+    for (const check of db.checks.history?.after ?? [])
+      lines.push(
+        `    earlier check at ${check.at} (unchanged by the renewal): ${staff(check.roster)}, launch gate ${check.launchGate}, tax ${check.tax}`,
+      );
   }
   for (const change of result.changes)
     lines.push(`  ${change.file}  ${change.path}  ${change.from} -> ${change.to}`);

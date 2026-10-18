@@ -36,8 +36,12 @@ import { uuidV7 } from "./permission-catalog-install.mjs";
  * security applies exactly as for the services. Before and after the change the same transaction
  * checks the product read paths at an instant just after the old expiry (staff authority, launch
  * gate, current tax configuration); the transaction commits only when every check passes after
- * the change and the staff's authority is the same as now. A dry run performs it all and rolls
- * back, so it shows exactly what would change.
+ * the change and the staff's authority is the same as now. It also reads the same paths at
+ * instants before the renewal (just before it, one business day earlier, and the start of the
+ * launch gate history, which bounds the oldest open settlement day): the renewal must leave every
+ * one of those historical reads exactly as it was, so settlement backlog, past business days and
+ * refunds of earlier payments keep resolving. A dry run performs it all and rolls back, so it
+ * shows exactly what would change.
  */
 const require = createRequire(new URL("../../packages/database/package.json", import.meta.url));
 const pg = require("pg");
@@ -186,6 +190,21 @@ async function readChecks(tx, { scope, at, gates, requiredCodes, policy }) {
 }
 
 /**
+ * Instants before the renewal at which the read paths must be unchanged by it: just before it,
+ * one business day earlier, and one minute after the launch gate history starts (the oldest
+ * day a settlement can still be open for). Only instants inside that history are kept.
+ */
+export function historicalCheckInstants(at, historyStart) {
+  const now = Date.parse(at);
+  const start = historyStart instanceof Date ? historyStart.getTime() : Number.NaN;
+  const candidates = [now - 60_000, now - 86_400_000, start + 60_000];
+  return [...new Set(candidates)]
+    .filter((value) => Number.isFinite(value) && value < now && !(value < start))
+    .sort((left, right) => left - right)
+    .map((value) => new Date(value).toISOString());
+}
+
+/**
  * Runs the database renewal on a connected owner (migration) client. `profile`/`menu` are the
  * installation's current files; `from` is their common expiry and `to` the approved new end.
  */
@@ -246,6 +265,22 @@ export async function renewInternalTestDatabase(
         [scope.brandReference, scope.storeReference],
       )
     ).rows.map((row) => ({ decisionEvidenceReference: String(row.d) }));
+    const historyStart = (
+      await tx.query(
+        "SELECT min(changed_at) AS t FROM bop_publishing.live_gate_version WHERE brand_id=$1 AND store_id=$2 AND gate_id LIKE 'SYNTHETIC-%'",
+        [scope.brandReference, scope.storeReference],
+      )
+    ).rows[0]?.t;
+    const historyAt = historicalCheckInstants(at, historyStart);
+    // Historical reads use the evidence of the facts then in force (the installation's current files).
+    const history = (gates) =>
+      historyAt.reduce(
+        async (previous, instant) => [
+          ...(await previous),
+          await readChecks(tx, { scope, at: instant, gates, requiredCodes, policy: currentPolicy }),
+        ],
+        Promise.resolve([]),
+      );
     await asReader();
     const before = await readChecks(tx, {
       scope,
@@ -254,6 +289,7 @@ export async function renewInternalTestDatabase(
       requiredCodes,
       policy: currentPolicy,
     });
+    const historyBefore = await history(gatesBefore);
     const nowAuthority = await rosterAuthority(tx, scope, at);
     await asRenewal();
     const input = { ...scope, from, to, at, evidence, nextReference };
@@ -308,6 +344,7 @@ export async function renewInternalTestDatabase(
       requiredCodes,
       policy: afterPolicy,
     });
+    const historyAfter = await history(liveGates.gates);
     const summary = {
       database,
       role,
@@ -322,7 +359,12 @@ export async function renewInternalTestDatabase(
       taxConfigurationVersion,
       alreadyRenewed:
         membership.alreadyRenewed + permission.alreadyRenewed + liveGates.alreadyRenewed,
-      checks: { now: { at, roster: nowAuthority }, before, after },
+      checks: {
+        now: { at, roster: nowAuthority },
+        before,
+        after,
+        history: { before: historyBefore, after: historyAfter },
+      },
     };
     const changed =
       membership.changes.length +
@@ -336,6 +378,8 @@ export async function renewInternalTestDatabase(
       JSON.stringify(after.roster) !== JSON.stringify(nowAuthority)
     )
       unavailable("database-check-failed", { databaseSummary: summary });
+    if (JSON.stringify(historyAfter) !== JSON.stringify(historyBefore))
+      unavailable("database-history-check-failed", { databaseSummary: summary });
     if (dryRun || changed === 0) await client.query("ROLLBACK");
     else await client.query("COMMIT");
     return {

@@ -8,6 +8,7 @@ const ports = vi.hoisted(() => ({
   recoverCounterCode: vi.fn(),
   codeChecks: vi.fn(),
   counterOrders: vi.fn(),
+  handoff: vi.fn(),
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
@@ -18,7 +19,10 @@ vi.mock("./customer-order-status-read.js", () => ({
 }));
 vi.mock("@rms/fulfillment", async (original) => ({
   ...(await original<typeof import("@rms/fulfillment")>()),
-  createPostgresFulfillmentReadinessStore: () => ({ lockByOrder: ports.readiness }),
+  createPostgresFulfillmentReadinessStore: () => ({
+    lockByOrder: ports.readiness,
+    lockPickupHandoffByOrder: ports.handoff,
+  }),
   createPostgresPickupProofStore: () => ({
     lockByOrder: ports.proof,
     currentCounterCode: ports.counterCode,
@@ -124,9 +128,34 @@ describe("current Guest pickup proof read", () => {
       order: { orderType: "Pickup", orderNumber: "11", fulfillmentStatus: "Completed" },
     });
     await expect(createCustomerPickupCodeRead(options()).read(input)).resolves.toMatchObject({
-      status: "NotReady",
+      status: "Collected",
     });
     expect(ports.proof).not.toHaveBeenCalled();
+  });
+  it("says collected right after the handoff, before the order status follows (v15: was 503)", async () => {
+    // WP-2423 (v15 2026-10-18): Fulfillment refuses readiness for a handed-over order while
+    // Ordering's status still reads Ready for a moment; the guest saw "can't be shown right now".
+    ports.status.mockResolvedValue({
+      order: { orderType: "Pickup", orderNumber: "11", fulfillmentStatus: "Ready" },
+      sources: accepted,
+    });
+    ports.readiness.mockRejectedValue(new Error("FULFILLMENT_READINESS_DEPENDENCY_UNAVAILABLE"));
+    ports.handoff.mockResolvedValue({ source: { canonicalPhase: "Completed" } });
+    await expect(createCustomerPickupCodeRead(options()).read(input)).resolves.toEqual({
+      schemaVersion: 1,
+      status: "Collected",
+      orderReference: input.orderReference,
+    });
+    expect(ports.proof).not.toHaveBeenCalled();
+    // A part handover or any other refusal still fails closed.
+    ports.handoff.mockResolvedValue({ source: { canonicalPhase: "InProgress" } });
+    await expect(createCustomerPickupCodeRead(options()).read(input)).rejects.toThrow(
+      "FULFILLMENT_READINESS_DEPENDENCY_UNAVAILABLE",
+    );
+    ports.handoff.mockRejectedValue(new Error("other"));
+    await expect(createCustomerPickupCodeRead(options()).read(input)).rejects.toThrow(
+      "FULFILLMENT_READINESS_DEPENDENCY_UNAVAILABLE",
+    );
   });
   it("says not ready before the Store accepts, without reading fulfillment (v15: was 503)", async () => {
     // WP-2423 (v15 2026-10-17): no kitchen ticket yet. Fulfillment readiness exists only for a

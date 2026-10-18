@@ -190,6 +190,61 @@ describe("planPickupCapacitySchedule (DEC-PICKUP-CAPACITY-SCHEDULE)", () => {
     });
   });
 
+  it("treats hours that end at 23:59:59 as end of day, without a one-second slot", () => {
+    // TEST hours 00:00-23:59:59 local (EDT): service through the whole local day.
+    const plan = planPickupCapacitySchedule(
+      input({
+        observedAt: "2026-10-19T12:00:00.000Z",
+        horizonUntil: "2026-10-21T12:00:00.000Z",
+        serviceWindows: [
+          { startsAt: "2026-10-19T04:00:00.000Z", endsAt: "2026-10-20T03:59:59.000Z" },
+          { startsAt: "2026-10-20T04:00:00.000Z", endsAt: "2026-10-21T03:59:59.000Z" },
+          { startsAt: "2026-10-21T04:00:00.000Z", endsAt: "2026-10-22T03:59:59.000Z" },
+        ],
+      }),
+    );
+    expect(plan.create).toHaveLength(48);
+    plan.create.forEach((slot) => {
+      expect(Date.parse(slot.endsAt) - Date.parse(slot.startsAt)).toBe(HOUR);
+      expect(slot.capacityLimit).toBe(20);
+    });
+    expect(plan.create.find((slot) => slot.startsAt === "2026-10-20T03:00:00.000Z")).toMatchObject({
+      endsAt: "2026-10-20T04:00:00.000Z",
+    });
+    // Existing one-second slots from earlier runs stay as they are; nothing is moved or added.
+    const existing = asExisting(
+      planPickupCapacitySchedule(
+        input({
+          serviceWindows: [
+            { startsAt: "2026-10-19T12:00:00.000Z", endsAt: "2026-10-20T03:59:59.000Z" },
+          ],
+        }),
+      ),
+    ).map((slot) =>
+      slot.endsAt === "2026-10-20T04:00:00.000Z"
+        ? { ...slot, endsAt: "2026-10-20T03:59:59.000Z" }
+        : slot,
+    );
+    existing.push({
+      slotReference: "0198a700-0000-7000-8000-0000000000ff",
+      startsAt: "2026-10-20T03:59:59.000Z",
+      endsAt: "2026-10-20T04:00:00.000Z",
+      configVersion: 1,
+      capacityLimit: 1,
+      reserved: false,
+    });
+    const again = planPickupCapacitySchedule(
+      input({
+        existingSlots: existing,
+        serviceWindows: [
+          { startsAt: "2026-10-19T12:00:00.000Z", endsAt: "2026-10-20T03:59:59.000Z" },
+        ],
+      }),
+    );
+    expect(again.create).toHaveLength(0);
+    expect(again.coveredUntil).toBe("2026-10-20T12:00:00.000Z");
+  });
+
   it("lays 25 one-hour slots on the autumn daylight-saving day and 23 in spring", () => {
     const fall = planPickupCapacitySchedule(
       input({

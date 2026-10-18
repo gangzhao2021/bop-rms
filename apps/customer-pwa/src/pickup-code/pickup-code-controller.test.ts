@@ -79,6 +79,29 @@ describe("WP-1706 Pickup Code controller", () => {
     expect(controller.getState()).toEqual({ status: "not-ready" });
   });
 
+  it("shows a collected order as collected and stops checking (v15: was an error)", async () => {
+    let calls = 0;
+    const client: CustomerPickupCodeClient = {
+      load: async () => {
+        calls += 1;
+        return { schemaVersion: 1, status: "Collected", orderReference: id(1) };
+      },
+    };
+    const controller = createPickupCodeController(id(1), "1001", client, () => now);
+    await controller.reveal();
+    expect(controller.getState()).toEqual({ status: "collected" });
+    expect(calls).toBe(1);
+    expect(() =>
+      parsePickupCodeResult(
+        { schemaVersion: 1, status: "Collected", orderReference: id(1), proofValue: "x" },
+        id(1),
+        "1001",
+        now,
+      ),
+    ).toThrow();
+    controller.dispose();
+  });
+
   it("clears an accepted raw proof on offline and does nothing on reconnect", async () => {
     let calls = 0;
     const controller = createPickupCodeController(

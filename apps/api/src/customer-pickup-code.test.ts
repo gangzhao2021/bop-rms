@@ -103,6 +103,17 @@ it("conceals unauthorized order existence and fails safely when unconfigured", a
   const off = await setup(false);
   expect((await off.request()).status).toBe(503);
 });
+it("WP-2423: answers a collected order as collected, not as an error", async () => {
+  const f = await setup();
+  f.read.mockResolvedValue({ schemaVersion: 1, status: "Collected", orderReference: id });
+  const response = await f.request();
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    status: "Collected",
+    orderReference: id,
+  });
+});
 it("rejects a proof bound to a different order", async () => {
   const f = await setup();
   f.read.mockResolvedValue({

@@ -77,10 +77,10 @@ export class CustomerPickupCodeHandler {
       try {
         const view = await this.#port.read(input);
         if (view.orderReference !== input.orderReference) throw new Error("PICKUP_BINDING_INVALID");
-        if (view.status === "NotReady") {
+        if (view.status === "NotReady" || view.status === "Collected") {
           response
             .status(200)
-            .json({ schemaVersion: 1, status: "NotReady", orderReference: input.orderReference });
+            .json({ schemaVersion: 1, status: view.status, orderReference: input.orderReference });
           return;
         }
         // WP-2423: Ready with no usable code; staff hand it over in person (name or phone).

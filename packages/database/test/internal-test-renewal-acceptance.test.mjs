@@ -208,6 +208,18 @@ it("renews only the synthetic DEMO facts, refuses real rows, audits and is idemp
       });
       assert.equal(planned.checks.after.launchGate, "Accepted");
       assert.equal(planned.checks.after.tax, "Accepted");
+      // Earlier instants (just before, one business day before, start of the gate history) read
+      // exactly as before the renewal: the launch gate and tax then in force, the same staff.
+      const accepted = (checks) =>
+        checks.every(
+          (check) =>
+            check.launchGate === "Accepted" &&
+            check.tax === "Accepted" &&
+            Object.keys(check.roster).length === 2,
+        );
+      assert.equal(planned.checks.history.before.length, 3);
+      assert.equal(accepted(planned.checks.history.before), true);
+      assert.deepEqual(planned.checks.history.after, planned.checks.history.before);
       assert.deepEqual(await state(), initial);
 
       // Refusals: a real-looking member or a real role with the same expiry stops everything.
@@ -310,6 +322,9 @@ it("renews only the synthetic DEMO facts, refuses real rows, audits and is idemp
       // Idempotent: the same run again, and a run after the profile already names the new end.
       const again = await renew();
       assert.equal(again.status, "AlreadyRenewed");
+      // After the commit, reads at instants before the renewal still resolve (version 1 in force).
+      assert.equal(accepted(renewed.checks.history.after), true);
+      assert.equal(accepted(again.checks.history.before), true);
       assert.deepEqual(again.taxConfigurationVersion, renewed.taxConfigurationVersion);
       const resumed = await renew({ from: until });
       assert.equal(resumed.status, "AlreadyRenewed");

@@ -62,7 +62,9 @@ export function PickupCodePanel({
   return (
     <section className="pickup-code" aria-labelledby="pickup-code-heading">
       <h2 id="pickup-code-heading">
-        {state.status === "ready-without-code" ? "Pickup" : "Pickup code"}
+        {state.status === "ready-without-code" || state.status === "collected"
+          ? "Pickup"
+          : "Pickup code"}
       </h2>
       {state.status === "hidden" ? (
         autoReveal ? (
@@ -82,6 +84,7 @@ export function PickupCodePanel({
         )
       ) : null}
       {state.status === "loading" ? <p role="status">Checking your pickup code…</p> : null}
+      {state.status === "collected" ? <p role="status">Your order has been collected.</p> : null}
       {state.status === "not-ready" ? (
         <>
           <p role="status">

@@ -73,11 +73,21 @@ AND r.tax_configuration_version_id=v.tax_configuration_version_id),'[]'::jsonb)
 NOT EXISTS(SELECT 1 FROM (VALUES (b.updated_at),(v.created_at),(v.effective_from),(v.effective_until),
 (v.registration_evidence_valid_until),(v.professional_evidence_valid_until)) AS times(value)
 WHERE date_trunc('milliseconds',times.value)<>times.value) AS precise
-FROM rms_pricing.tax_configuration b JOIN rms_pricing.tax_configuration_version v
-ON v.tax_configuration_version_id=b.current_version_id AND v.tax_configuration_id=b.tax_configuration_id
-AND v.brand_id=b.brand_id AND v.store_id=b.store_id
+FROM rms_pricing.tax_configuration b JOIN rms_pricing.tax_configuration_version h
+ON h.tax_configuration_version_id=b.current_version_id AND h.tax_configuration_id=b.tax_configuration_id
+AND h.brand_id=b.brand_id AND h.store_id=b.store_id
+JOIN rms_pricing.tax_configuration_version v
+ON v.tax_configuration_id=b.tax_configuration_id AND v.brand_id=b.brand_id AND v.store_id=b.store_id
+AND v.tax_configuration_version_id=CASE WHEN b.updated_at<=$4::timestamptz THEN b.current_version_id ELSE (
+SELECT p.tax_configuration_version_id FROM rms_pricing.tax_configuration_version p
+WHERE p.tax_configuration_id=b.tax_configuration_id AND p.brand_id=b.brand_id AND p.store_id=b.store_id
+AND h.created_at>$4::timestamptz AND p.version_number<h.version_number AND p.created_at<=$4::timestamptz
+ORDER BY p.version_number DESC LIMIT 1) END
 WHERE b.brand_id=$1 AND b.store_id=$2 AND b.tax_configuration_id=$3 AND v.lifecycle='Published'
-AND b.created_at<=$4::timestamptz AND b.updated_at<=$4::timestamptz AND v.created_at<=$4::timestamptz`;
+AND b.created_at<=$4::timestamptz AND v.created_at<=$4::timestamptz
+AND NOT EXISTS(SELECT 1 FROM rms_pricing.tax_configuration_version e
+WHERE e.tax_configuration_id=b.tax_configuration_id AND e.brand_id=b.brand_id AND e.store_id=b.store_id
+AND e.version_number<v.version_number AND e.created_at>v.created_at)`;
 
 export interface CurrentTaxEvidenceSource {
   load(
@@ -97,7 +107,15 @@ export interface CurrentTaxEvidenceSource {
   }> | null>;
 }
 
-/** Owner read only. Complete evidence must come from its authority, never Published defaults. */
+/** Owner read only. Complete evidence must come from its authority, never Published defaults.
+ *
+ * Reads the version in force at observedAt. While the head has not changed since observedAt that
+ * is the head. When the head moved after observedAt (a renewal, a new authoring version), it is
+ * the newest earlier version created by observedAt: every head change inserts the version it
+ * points to at the same instant (authoring, internal-test renewal), so that version was the head
+ * then. Version order that disagrees with creation order has no defined version in force and is
+ * refused; the Published, evidence and effective-period checks still apply at observedAt.
+ */
 export function createPostgresCurrentTaxConfigurationStore(
   runner: PriceQuoteQueryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
