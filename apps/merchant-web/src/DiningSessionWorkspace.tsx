@@ -171,6 +171,27 @@ export function guestRoundPaymentNotice(
 }
 
 /**
+ * WP-2423 abandoned payment: what staff can do about the unpaid rounds, beside the table's details
+ * (after `guestRoundPaymentNotice`), only where the notice doesn't already say it. Null while the
+ * rounds are being cancelled automatically, or when the notice already tells this person what to do
+ * (an unconfirmed payment: ask the guest, then cancel).
+ */
+export function guestRoundCancelHint(
+  table: StaffDiningTable,
+  now: number,
+  canCancel: boolean,
+): string | null {
+  const first = table.guestRoundsAwaitingPayment[0];
+  if (first === undefined) return null;
+  if (table.guestRoundsAwaitingPayment.some((round) => isPaymentUnconfirmed(round.payBy, now)))
+    return canCancel ? null : "Only a manager can cancel it, here or on the Orders page.";
+  if (Date.parse(first.payBy) <= now) return null;
+  return canCancel
+    ? "If the guest won't pay for it, cancel it now."
+    : "If the guest won't pay for it, a manager can cancel it here or on the Orders page.";
+}
+
+/**
  * WP-2423 (v15 2026-10-16): paid rounds at this table that staff have not accepted (oldest first).
  * They are never cancelled or refunded automatically, so the table says how long the oldest has
  * waited: plain at first, a warning from 5 minutes, urgent from 10. Null when nothing waits.
@@ -699,13 +720,12 @@ export function DiningSessionWorkspace({
                 {(() => {
                   // WP-2423 abandoned payment: unpaid guest rounds, and cancelling them now.
                   const notice = guestRoundPaymentNotice(selected, now, timeZone);
+                  const hint = guestRoundCancelHint(selected, now, canCancelUnpaidRounds);
                   return notice === null ? null : (
                     <section aria-label="Unpaid rounds">
                       <p className="order-accept-by" data-tier={notice.tier} role="note">
                         {notice.text}
-                        {canCancelUnpaidRounds
-                          ? " If the guest won't pay for it, cancel it now."
-                          : " If the guest won't pay for it, a manager can cancel it here or on the Orders page."}
+                        {hint === null ? null : " " + hint}
                       </p>
                       {canCancelUnpaidRounds
                         ? selected.guestRoundsAwaitingPayment.map((round) => (

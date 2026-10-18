@@ -205,6 +205,8 @@ it("always composes the unpaid pickup closure with the paid outcome System actor
   expect(expiry).toHaveBeenCalledWith("resources", "observer", {
     systemActorReference: config.actors.paidOutcome,
     providerAccountReference: config.providerAccountReference,
+    // WP-2423 abandoned pickup payment: closed Orders' open card payments are settled with it.
+    createSimulatedProvider: expect.any(Function),
   });
 });
 it("WP-2423 Q10: always composes the daily contact retention removal with its health observer", async () => {

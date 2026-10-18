@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { URL } from "node:url";
 import pg from "pg";
-import { it } from "vitest";
+import { it, vi } from "vitest";
 import {
   createInventoryItem,
   transitionInventoryItem,
@@ -18,7 +18,15 @@ import {
   createPostgresPaidAcceptanceLapseClosure,
   loadPickupPaymentWindowClosure,
 } from "../../rms/ordering/src/index.ts";
-import { createPickupPaymentWindowClosure } from "../../../apps/api/src/pickup-payment-window-closure.ts";
+import {
+  createPickupClosedPaymentSweep,
+  createPickupPaymentWindowClosure,
+} from "../../../apps/api/src/pickup-payment-window-closure.ts";
+import {
+  createPaymentProviderSnapshot,
+  createPostgresPaymentIntentCreationStore,
+} from "../../rms/payment/src/index.ts";
+import { createInternalOpenPaymentResolution } from "../../../tooling/environment/pilot-open-payment-resolution.mjs";
 import { createPaidWithoutFulfillableInventoryRelease } from "../../../apps/api/src/paid-without-fulfillable-inventory-release.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -903,6 +911,127 @@ it("closes unpaid pickup orders after the payment window, returns their stock on
       assert.deepEqual(unconfirmed.inventory, { status: "Released", entryCount: 1 });
       assert.deepEqual(await stock(), { onHand: "10", reserved: "4" });
       assert.deepEqual(await discover(), [open.refs.order]);
+
+      // WP-2423 abandoned pickup payment: the closed Order's card payment is then settled with the
+      // Provider through the pilot's open-payment resolution (as for an unpaid dine-in round): the
+      // attempt the guest never confirmed is cancelled there, so an old payment page can no longer
+      // charge them, and recorded as failed. Nothing is charged; the Order stays cancelled.
+      const providerIntent = "pi_DEMOsynthetic0001";
+      let providerState = { status: "RequiresCustomerAction", at: null };
+      const providerCalls = [];
+      const providerSnapshot = (request) =>
+        createPaymentProviderSnapshot({
+          kind: "Snapshot",
+          context: request.context,
+          providerIntentReference: providerIntent,
+          providerTransactionReference: null,
+          paymentMethod: "OnlineCard",
+          captureMode: "Automatic",
+          status: providerState.status,
+          requestedAmount: { amountMinor: 1130n, currencyCode: "CAD" },
+          authorizedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+          capturedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+          refundedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+          observedAt: providerState.at ?? new Date().toISOString(),
+          evidenceDigest: hash(["provider", providerState.status]),
+        });
+      const simulatedProvider = async () => ({
+        adapter: {
+          retrieveIntent: async (request) => {
+            providerCalls.push("retrieve");
+            return providerSnapshot(request);
+          },
+          cancelIntent: async (request) => {
+            providerCalls.push("cancel:" + request.idempotencyKey);
+            if (providerState.status === "RequiresCustomerAction")
+              providerState = { status: "Cancelled", at: new Date().toISOString() };
+            return providerSnapshot(request);
+          },
+        },
+        readTerminalOccurrence: async () => ({
+          status: providerState.status,
+          occurredAt: providerState.at,
+        }),
+        close: () => undefined,
+      });
+      vi.stubEnv("NODE_ENV", "development");
+      vi.stubEnv("BOP_PILOT_ENVIRONMENT", undefined);
+      const resolution = createInternalOpenPaymentResolution(
+        {
+          scope: { brandReference: brand, storeReference: store },
+          now: () => new Date().toISOString(),
+          transactions: { run: scoped },
+          publicProfile: { binding: { tenantReference: tenant } },
+          credentials: {
+            reference: () =>
+              Date.now()
+                .toString(16)
+                .padStart(12, "0")
+                .replace(/^(.{8})(.{4})$/u, "$1-$2") +
+              "-7000-8000-" +
+              (references++).toString(16).padStart(12, "0"),
+          },
+        },
+        { createSimulatedProvider: simulatedProvider, providerAccountReference: provider },
+      );
+      const expiredOpen = () =>
+        scoped((tx) =>
+          createPostgresPaymentIntentCreationStore(
+            { run: (work) => work(tx) },
+            { brandReference: brand, storeReference: store },
+            { now: () => new Date().toISOString(), generateObservationReference: () => id(997) },
+          ).listExpiredOpenOperations({
+            observedAt: new Date().toISOString(),
+            after: null,
+            limit: 10,
+          }),
+        );
+      // Payment lists the expired, never-settled online payment (restricted role, own tables only).
+      assert.deepEqual(await expiredOpen(), [
+        { paymentOperationReference: abandoned.refs.payment, orderReference: abandoned.refs.order },
+      ]);
+      const outcomes = [];
+      const sweep = createPickupClosedPaymentSweep({
+        scope: { brandReference: brand, storeReference: store },
+        transactions: { run: scoped },
+        now: () => new Date().toISOString(),
+        pageSize: 10,
+        authorize: async () => allowed,
+        resolve: (operation) => resolution.resolve(operation),
+        onOutcome: (outcome) => outcomes.push(outcome),
+      });
+      // Authority loss asks nobody.
+      allowed = false;
+      await assert.rejects(sweep.runOnce());
+      allowed = true;
+      assert.deepEqual(providerCalls, []);
+      assert.equal(await sweep.runOnce(), 1);
+      assert.deepEqual(outcomes, [{ status: "Failed", notCompleted: true }]);
+      assert.deepEqual(providerCalls, ["retrieve", "cancel:cancel-abandoned:" + id(691)]);
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT terminal_outcome,failure_reason,retry_disposition,authoritative_source,amount_minor FROM rms_payment.payment_terminal_fact WHERE payment_attempt_id=$1",
+            [id(691)],
+          )
+        ).rows,
+        [
+          {
+            terminal_outcome: "Failed",
+            failure_reason: "Cancelled",
+            retry_disposition: "Never",
+            authoritative_source: "ProviderRetrieval",
+            amount_minor: null,
+          },
+        ],
+      );
+      // Settled payments drop out: the next sweep asks nobody; the Order stays closed, stock returned.
+      assert.deepEqual(await expiredOpen(), []);
+      assert.equal(await sweep.runOnce(), 0);
+      assert.equal(providerCalls.length, 2);
+      assert.deepEqual(await discover(), [open.refs.order]);
+      assert.deepEqual(await stock(), { onHand: "10", reserved: "4" });
+      vi.unstubAllEnvs();
 
       // History stays append-only; another Store cannot see or close the Order.
       await scoped(async (tx) => {

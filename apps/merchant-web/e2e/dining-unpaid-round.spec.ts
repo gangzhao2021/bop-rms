@@ -225,6 +225,8 @@ test("@production WP-2423: Tables hands an unconfirmed card payment to the manag
   await tile.getByRole("button", { name: "Select DEMO-03", exact: true }).click();
   const unpaid = page.getByRole("region", { name: "Unpaid rounds" });
   await expect(unpaid).toContainText("Ask the guest whether their card was charged.");
+  // The notice already says to cancel once the guest confirms; no generic sentence repeats it.
+  await expect(unpaid).not.toContainText("If the guest won't pay for it");
   await expect(unpaid).not.toContainText(/[0-9a-f]{8}-[0-9a-f]{4}-7|_[A-Z]|UNPAID/u);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });

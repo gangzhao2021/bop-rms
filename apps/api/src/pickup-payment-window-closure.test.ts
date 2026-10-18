@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import {
+  createPickupClosedPaymentSweep,
   createPickupPaymentWindowClosure,
   createPickupPaymentWindowDispatcher,
 } from "./pickup-payment-window-closure.js";
@@ -14,6 +15,8 @@ const m = vi.hoisted(() => ({
   discover: vi.fn(),
   release: vi.fn(),
   releaseOptions: vi.fn(),
+  expiredOpen: vi.fn(),
+  closedByWindow: vi.fn(),
 }));
 vi.mock("@rms/fulfillment", () => ({
   createPostgresAsapCapacityStore: () => ({
@@ -38,11 +41,14 @@ vi.mock("@rms/payment", () => ({
       return { paymentIntentReference: null };
     },
   }),
-  createPostgresPaymentIntentCreationStore: () => ({
+  createPostgresPaymentIntentCreationStore: (runner: {
+    run(work: (tx: unknown) => Promise<unknown>): Promise<unknown>;
+  }) => ({
     resolveOperation: async () => {
       m.order.push("payment");
       return m.intent();
     },
+    listExpiredOpenOperations: (query: unknown) => runner.run(async () => m.expiredOpen(query)),
   }),
   // Like Payment's own store: exactly its scope shape, or PAYMENT_INTENT_INPUT_INVALID.
   createPostgresPaymentTerminalStore: (_runner: unknown, scope: object) => {
@@ -58,6 +64,8 @@ vi.mock("@rms/payment", () => ({
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
   createPostgresPickupPaymentWindowCandidates: () => ({ discover: m.discover }),
+  loadPickupPaymentWindowClosure: async (_tx: unknown, scope: unknown, order: string) =>
+    m.closedByWindow(scope, order),
   createPostgresPickupPaymentWindowClosure: (options: unknown) => {
     m.closureOptions(options);
     return {
@@ -374,4 +382,121 @@ it("retries a persistently failing Order with a doubling delay instead of every 
   expect(close).toHaveBeenCalledTimes(7);
   expect(failures).toHaveLength(6);
   expect(failures.join()).not.toContain("private");
+});
+
+it("settles the open card payments of pickups closed by their payment window, backing off while the Provider can't", async () => {
+  let at = Date.parse("2026-09-21T06:00:00.000Z");
+  const now = () => new Date(at).toISOString();
+  // Payment lists two expired open payments: a closed pickup's and a dine-in round's.
+  m.expiredOpen.mockResolvedValue([
+    { paymentOperationReference: id(201), orderReference: id(301) },
+    { paymentOperationReference: id(202), orderReference: id(302) },
+  ]);
+  m.closedByWindow.mockImplementation(async (_scope: unknown, order: string) =>
+    order === id(301) ? { closedAt: expiresAt } : null,
+  );
+  const resolve = vi.fn().mockResolvedValue({ status: "Unavailable" });
+  const outcomes: unknown[] = [];
+  let allowed = true;
+  const tx = {};
+  const sweep = createPickupClosedPaymentSweep({
+    scope: { brandReference: id(2), storeReference: id(3) },
+    transactions: { run: async (work) => work(tx as never) },
+    now,
+    pageSize: 10,
+    authorize: async (transaction, observedAt) =>
+      transaction === tx && observedAt === now() && allowed,
+    resolve,
+    onOutcome: (outcome) => outcomes.push(outcome),
+  });
+  expect(await sweep.runOnce()).toBe(1);
+  expect(m.expiredOpen).toHaveBeenCalledWith({ observedAt: now(), after: null, limit: 10 });
+  expect(m.closedByWindow).toHaveBeenCalledWith(
+    { brandReference: id(2), storeReference: id(3) },
+    id(301),
+  );
+  // Only the pickup closed by its window is settled; the dine-in round keeps its own path.
+  expect(resolve.mock.calls).toEqual([[id(201)]]);
+  // Provider unreachable: asked again after a minute, then two, never on every poll.
+  at += 15_000;
+  expect(await sweep.runOnce()).toBe(0);
+  at += 45_000;
+  expect(await sweep.runOnce()).toBe(1);
+  at += 60_000;
+  expect(await sweep.runOnce()).toBe(0);
+  // Settled (cancelled at the Provider and recorded as failed): no more backoff kept.
+  resolve.mockResolvedValue({ status: "Failed", notCompleted: true });
+  at += 60_000;
+  expect(await sweep.runOnce()).toBe(1);
+  expect(outcomes.at(-1)).toEqual({ status: "Failed", notCompleted: true });
+  expect(resolve).toHaveBeenCalledTimes(3);
+  // Lost authority asks nobody.
+  allowed = false;
+  at += 3_600_000;
+  await expect(sweep.runOnce()).rejects.toThrow("PICKUP_PAYMENT_WINDOW_CLOSURE_UNAVAILABLE");
+  expect(resolve).toHaveBeenCalledTimes(3);
+  expect(() =>
+    createPickupClosedPaymentSweep({
+      scope: { brandReference: id(2), storeReference: id(3) },
+      transactions: { run: async (work) => work(tx as never) },
+      now,
+      pageSize: 0,
+      authorize: async () => true,
+      resolve,
+    }),
+  ).toThrow("PICKUP_CLOSED_PAYMENT_SWEEP_CONFIG_INVALID");
+});
+
+it("pages through Payment's expired open payments with a cursor", async () => {
+  const page = (from: number, n: number) =>
+    Array.from({ length: n }, (_, k) => ({
+      paymentOperationReference: id(400 + from + k),
+      orderReference: id(500 + from + k),
+    }));
+  m.expiredOpen.mockReset();
+  m.expiredOpen.mockResolvedValueOnce(page(0, 2)).mockResolvedValueOnce(page(2, 1));
+  m.closedByWindow.mockResolvedValue({ closedAt: expiresAt });
+  const resolve = vi.fn().mockResolvedValue({ status: "Paid" });
+  const sweep = createPickupClosedPaymentSweep({
+    scope: { brandReference: id(2), storeReference: id(3) },
+    transactions: { run: async (work) => work({} as never) },
+    now: () => "2026-09-21T06:00:00.000Z",
+    pageSize: 2,
+    authorize: async () => true,
+    resolve,
+  });
+  await sweep.runOnce();
+  await sweep.runOnce();
+  expect(m.expiredOpen.mock.calls.map(([query]) => (query as { after: unknown }).after)).toEqual([
+    null,
+    id(401),
+  ]);
+  expect(resolve).toHaveBeenCalledTimes(3);
+});
+
+it("runs the closed-payment sweep after the closures without letting its failure block them", async () => {
+  const failures: string[] = [];
+  const order: string[] = [];
+  const discover = vi.fn().mockResolvedValue([{ orderReference: id(100), link }]);
+  const close = vi.fn(async () => {
+    order.push("close");
+    return { status: "NotDue" as const, windowEndsAt: expiresAt };
+  });
+  const runOnce = vi.fn(async () => {
+    order.push("payments");
+    return 2;
+  });
+  const dispatcher = createPickupPaymentWindowDispatcher({
+    closure: { discover, close },
+    now: () => "2026-09-21T06:00:00.000Z",
+    pageSize: 10,
+    onFailure: (code) => failures.push(code),
+    closedPayments: { runOnce },
+  });
+  expect(await dispatcher.runOnce()).toBe(3);
+  expect(order).toEqual(["close", "payments"]);
+  runOnce.mockRejectedValue(new Error("PICKUP_PAYMENT_WINDOW_CLOSURE_UNAVAILABLE"));
+  expect(await dispatcher.runOnce()).toBe(1);
+  expect(close).toHaveBeenCalledTimes(2);
+  expect(failures).toEqual(["PICKUP_PAYMENT_WINDOW_CLOSURE_UNAVAILABLE"]);
 });

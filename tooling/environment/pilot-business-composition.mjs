@@ -175,7 +175,10 @@ export function composeConfiguredBusinessWorker({
       createInternalPickupPaymentExpiryWorkload: (r, observer) =>
         f.createInternalPickupPaymentExpiryWorkload(r, observer, {
           systemActorReference: config.actors.paidOutcome,
+          // WP-2423 abandoned pickup payment: a closed Order's open card payment is settled with
+          // the (TEST-ONLY simulated) Provider, like an unpaid dine-in round's.
           ...account,
+          createSimulatedProvider: provider,
         }),
       createInternalDiningCheckoutExpiryWorkload: (r, observer) =>
         f.createInternalDiningCheckoutExpiryWorkload(r, observer, account),

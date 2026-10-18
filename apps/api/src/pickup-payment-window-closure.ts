@@ -9,12 +9,14 @@ import {
 import {
   createPostgresPickupPaymentWindowCandidates,
   createPostgresPickupPaymentWindowClosure,
+  loadPickupPaymentWindowClosure,
   parseOrderCapacityLink,
   parseOrderingInstant,
   parseOrderingReference,
   type OrderCapacityLink,
   type PickupPaymentWindowEvidence,
 } from "@rms/ordering";
+import type { OpenPaymentAttemptResolution } from "./open-payment-attempt-resolution.js";
 import {
   createSubmissionInventoryRelease,
   type SubmissionInventoryReleaseResult,
@@ -241,6 +243,92 @@ export function createPickupPaymentWindowClosure(options: {
 }
 
 /**
+ * WP-2423 abandoned pickup payment: a pickup Order the System closed because its payment window
+ * ended has its card payment settled with the Provider, the same way an unpaid dine-in round is
+ * (DEC-DINING-ABANDONED-PAYMENT): an attempt the guest never confirmed is cancelled at the Provider
+ * (so an old payment page can no longer charge the guest) and recorded as failed (`Cancelled`); a
+ * payment that did go through is recorded and refunded by the existing paid-outcome path.
+ *
+ * Payment lists its online payments whose window ended with no recorded outcome; Ordering confirms
+ * each was closed by the payment window (dine-in rounds keep their own resolution). Discovery
+ * commits before the Provider is asked; the resolution re-reads Payment under its own fences. A
+ * payment the Provider can't settle yet (processing, unreachable) is asked again with a doubling
+ * delay (1 minute up to 1 hour), never on every poll.
+ */
+export function createPickupClosedPaymentSweep(options: {
+  scope: { brandReference: string; storeReference: string };
+  transactions: { run<T>(work: (transaction: ConsumerTransaction) => Promise<T>): Promise<T> };
+  now(): string;
+  pageSize: number;
+  authorize(transaction: ConsumerTransaction, observedAt: string): Promise<boolean>;
+  resolve(paymentOperationReference: string): Promise<OpenPaymentAttemptResolution>;
+  onOutcome?(outcome: OpenPaymentAttemptResolution): void;
+}) {
+  const scope = Object.freeze({
+    brandReference: String(parseOrderingReference(options.scope.brandReference)),
+    storeReference: String(parseOrderingReference(options.scope.storeReference)),
+  });
+  if (!Number.isInteger(options.pageSize) || options.pageSize < 1 || options.pageSize > 100)
+    throw new TypeError("PICKUP_CLOSED_PAYMENT_SWEEP_CONFIG_INVALID");
+  let cursor: string | null = null;
+  const firstRetryMs = 60_000,
+    maxRetryMs = 3_600_000;
+  const waiting = new Map<string, { waitMs: number; dueAt: number }>();
+  return Object.freeze({
+    async runOnce(): Promise<number> {
+      const observedAt = parseOrderingInstant(options.now());
+      const page = await options.transactions.run(async (transaction) => {
+        if ((await options.authorize(transaction, observedAt)) !== true) return fail();
+        const found = await createPostgresPaymentIntentCreationStore(
+          { run: async (work) => work(transaction) },
+          scope,
+          { now: options.now, generateObservationReference: fail },
+        ).listExpiredOpenOperations({ observedAt, after: cursor, limit: options.pageSize });
+        const closed: string[] = [];
+        for (const candidate of found)
+          if (
+            (await loadPickupPaymentWindowClosure(
+              transaction,
+              scope,
+              String(candidate.orderReference),
+            )) !== null
+          )
+            closed.push(String(candidate.paymentOperationReference));
+        if ((await options.authorize(transaction, observedAt)) !== true) return fail();
+        return Object.freeze({
+          closed,
+          last: found.at(-1)?.paymentOperationReference ?? null,
+          full: found.length === options.pageSize,
+        });
+      });
+      let processed = 0;
+      for (const operation of page.closed) {
+        const at = Date.parse(options.now());
+        const prior = waiting.get(operation);
+        if (prior !== undefined && at < prior.dueAt) continue;
+        const outcome = await options.resolve(operation);
+        if (outcome.status === "Processing" || outcome.status === "Unavailable") {
+          const waitMs =
+            prior === undefined ? firstRetryMs : Math.min(prior.waitMs * 2, maxRetryMs);
+          waiting.set(operation, { waitMs, dueAt: at + waitMs });
+        } else waiting.delete(operation);
+        options.onOutcome?.(outcome);
+        processed++;
+      }
+      cursor = page.full ? String(page.last) : null;
+      return processed;
+    },
+  });
+}
+
+/** A coded error (owner or database) reports its code; a plain Error its UPPER_SNAKE message. */
+function failureCode(error: unknown): string {
+  const coded = (error as { code?: unknown } | null)?.code;
+  const code = typeof coded === "string" ? coded : error instanceof Error ? error.message : "";
+  return /^[A-Z0-9_]{1,80}$/u.test(code) ? code : "UNAVAILABLE";
+}
+
+/**
  * Polling dispatcher: discovery commits before each closure transaction. A failing Order is
  * reported (without identifiers) and never blocks the others; it is retried with a doubling delay
  * (1 minute up to 1 hour) instead of on every poll, and the delay resets once it stops failing.
@@ -251,6 +339,8 @@ export function createPickupPaymentWindowDispatcher(options: {
   pageSize: number;
   onOutcome?(outcome: PickupPaymentWindowClosureOutcome): void;
   onFailure?(code: string): void;
+  /** Settles the card payments of Orders already closed (see `createPickupClosedPaymentSweep`). */
+  closedPayments?: Pick<ReturnType<typeof createPickupClosedPaymentSweep>, "runOnce">;
 }) {
   if (!Number.isInteger(options.pageSize) || options.pageSize < 1 || options.pageSize > 100)
     throw new TypeError("PICKUP_PAYMENT_WINDOW_DISPATCHER_CONFIG_INVALID");
@@ -284,14 +374,17 @@ export function createPickupPaymentWindowDispatcher(options: {
       } catch (error) {
         const waitMs = prior === undefined ? firstRetryMs : Math.min(prior.waitMs * 2, maxRetryMs);
         failing.set(key, { waitMs, dueAt: at + waitMs });
-        // A coded error (owner or database) reports its code; a plain Error its UPPER_SNAKE message.
-        const coded = (error as { code?: unknown } | null)?.code;
-        const code =
-          typeof coded === "string" ? coded : error instanceof Error ? error.message : "";
-        options.onFailure?.(/^[A-Z0-9_]{1,80}$/u.test(code) ? code : "UNAVAILABLE");
+        options.onFailure?.(failureCode(error));
       }
       processed++;
     }
+    if (!stopping && options.closedPayments !== undefined)
+      try {
+        processed += await options.closedPayments.runOnce();
+      } catch (error) {
+        // Never blocks the closures; reported like a failing Order, without identifiers.
+        options.onFailure?.(failureCode(error));
+      }
     if (!stopping) {
       // A completed full scan forgets Orders that are no longer candidates (closed or paid).
       if (page.length !== options.pageSize && cursor === null) {

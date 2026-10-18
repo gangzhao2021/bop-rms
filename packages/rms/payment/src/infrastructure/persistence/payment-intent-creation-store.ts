@@ -170,6 +170,52 @@ export function createPostgresPaymentIntentCreationStore(
         });
       });
     },
+    /**
+     * WP-2423 abandoned pickup payment: discovery only. Online card payments whose payment window
+     * (`capacity_expires_at`) has ended while their latest attempt still has no recorded outcome,
+     * in payment operation order after `after`. The caller decides from the Order's owner whether
+     * the Provider should be asked (and the attempt cancelled); a result never authorizes that.
+     */
+    listExpiredOpenOperations(value: unknown) {
+      return safe(async () => {
+        const raw = exactPaymentObject(value, ["observedAt", "after", "limit"]);
+        const at = parsePaymentInstant(raw.observedAt),
+          after = raw.after === null ? null : parsePaymentReference(raw.after),
+          limit = raw.limit;
+        if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 100)
+          return fail("PAYMENT_INTENT_INPUT_INVALID");
+        return runner.run(async (tx) => {
+          await context(tx);
+          const result = await tx.query(
+            `SELECT i.payment_operation_id::text AS operation,i.order_id::text AS "order"
+            FROM rms_payment.payment_intent i
+            JOIN LATERAL (SELECT pa.payment_attempt_id FROM rms_payment.payment_attempt pa
+              WHERE pa.payment_intent_id=i.payment_intent_id AND pa.brand_id=i.brand_id AND pa.store_id=i.store_id
+              ORDER BY pa.attempt_number DESC LIMIT 1) a ON true
+            WHERE i.brand_id=$1 AND i.store_id=$2 AND i.payment_method='OnlineCard'
+              AND i.creation_status='ProviderCreatePending' AND i.capacity_expires_at<=$3::timestamptz
+              AND ($4::uuid IS NULL OR i.payment_operation_id>$4::uuid)
+              AND NOT EXISTS (SELECT 1 FROM rms_payment.payment_terminal_fact t
+                WHERE t.brand_id=i.brand_id AND t.store_id=i.store_id AND t.payment_attempt_id=a.payment_attempt_id)
+            ORDER BY i.payment_operation_id LIMIT $5`,
+            [brand, store, at, after, limit],
+          );
+          const rows: unknown = (result as { rows?: unknown } | null)?.rows;
+          if (!Array.isArray(rows) || rows.length > limit) return fail();
+          let previous = after;
+          return Object.freeze(
+            rows.map((row: unknown) => {
+              const item = exactPaymentObject(row, ["operation", "order"]);
+              const paymentOperationReference = parsePaymentReference(item.operation),
+                orderReference = parsePaymentReference(item.order);
+              if (previous !== null && paymentOperationReference <= previous) return fail();
+              previous = paymentOperationReference;
+              return Object.freeze({ paymentOperationReference, orderReference });
+            }),
+          );
+        });
+      });
+    },
     claim(value: unknown) {
       return safe(async () => {
         const raw = exactPaymentObject(value, ["record", "audit"]);

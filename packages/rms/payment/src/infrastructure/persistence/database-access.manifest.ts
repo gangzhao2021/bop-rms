@@ -719,6 +719,22 @@ const databaseAccessManifestInput = {
         "packages/rms/payment/src/infrastructure/persistence/payment-intent-creation-store.ts",
     },
     {
+      id: "payment-intent-store.read.payment_terminal_fact",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_payment",
+        table: "payment_terminal_fact",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/payment",
+      },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/payment-intent-creation-store.ts",
+      readPattern: "owner-repository",
+    },
+    {
       id: "payment-intent-store.read.payment_intent_operation_record",
       operation: "read",
       mechanism: "repository",

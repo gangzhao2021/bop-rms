@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import {
   elapsedText,
+  guestRoundCancelHint,
   guestRoundPaymentNotice,
   paidRoundAcceptanceNotice,
   longOpenSessionMinutes,
@@ -175,4 +176,45 @@ it("WP-2423: warns on the table while a paid round waits for staff to accept it"
     tier: "ok",
     text: "Round 3 paid 2 min ago · accept it on the Orders page to send it to the kitchen",
   });
+});
+
+it("WP-2423 abandoned payment: says how to cancel an unpaid round only where the notice doesn't already", () => {
+  const payBy = "2027-03-01T13:30:00.000Z";
+  const round = (n: number, due: string) => ({
+    orderReference: "01909988-0000-7000-8000-00000000001" + String(n),
+    orderBatchReference: "01909988-0000-7000-8000-00000000002" + String(n),
+    roundNumber: n,
+    payBy: due,
+  });
+  const waiting: StaffDiningTable = {
+    ...table,
+    currentDiningSessionReference: "01909988-0000-7000-8000-000000000002",
+    elapsedMinutes: 20,
+    guestRoundsAwaitingPayment: [round(1, payBy)],
+  };
+  const at = (offsetMs: number) => Date.parse(payBy) + offsetMs;
+  expect(guestRoundCancelHint(table, now, true)).toBeNull();
+  // Still within the payment window: the notice says how to pay; the hint how to cancel.
+  expect(guestRoundCancelHint(waiting, at(-60_000), true)).toBe(
+    "If the guest won't pay for it, cancel it now.",
+  );
+  expect(guestRoundCancelHint(waiting, at(-60_000), false)).toBe(
+    "If the guest won't pay for it, a manager can cancel it here or on the Orders page.",
+  );
+  // Being cancelled automatically: nothing to add.
+  expect(guestRoundCancelHint(waiting, at(0), true)).toBeNull();
+  // Unconfirmed: the notice already says "ask the guest, then cancel the round" — no repeat for a
+  // manager; staff who can't cancel are told who can.
+  const unconfirmed = guestRoundPaymentNotice(waiting, at(5 * 60_000), "America/Toronto");
+  expect(unconfirmed?.text).toContain("If it wasn't, cancel the round");
+  expect(guestRoundCancelHint(waiting, at(5 * 60_000), true)).toBeNull();
+  expect(guestRoundCancelHint(waiting, at(5 * 60_000), false)).toBe(
+    "Only a manager can cancel it, here or on the Orders page.",
+  );
+  // One unconfirmed round among later ones still being paid: the unconfirmed instruction leads.
+  const mixed = {
+    ...waiting,
+    guestRoundsAwaitingPayment: [round(1, payBy), round(2, "2027-03-01T14:30:00.000Z")],
+  };
+  expect(guestRoundCancelHint(mixed, at(5 * 60_000), true)).toBeNull();
 });

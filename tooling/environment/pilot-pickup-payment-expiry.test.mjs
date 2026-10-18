@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 const d = vi.hoisted(() => ({
   closure: vi.fn(),
   dispatcher: vi.fn(),
+  sweep: vi.fn(),
   workload: vi.fn(),
 }));
 vi.mock("../../apps/api/dist/pickup-payment-window-closure.js", () => ({
@@ -14,12 +15,17 @@ vi.mock("../../apps/api/dist/pickup-payment-window-closure.js", () => ({
     d.dispatcher(options);
     return { runOnce: vi.fn(), stop: vi.fn() };
   },
+  createPickupClosedPaymentSweep: (options) => {
+    d.sweep(options);
+    return { runOnce: vi.fn() };
+  },
 }));
 vi.mock("../../apps/worker/dist/outbox-workload.js", () => ({
   createOutboxWorkload: d.workload,
   supervisedCycleFailures: { supervised: true },
 }));
 import {
+  createInternalPickupClosedPaymentSweep,
   createInternalPickupPaymentExpiry,
   createInternalPickupPaymentExpiryWorkload,
 } from "./pilot-pickup-payment-expiry.mjs";
@@ -118,4 +124,55 @@ it("polls through the dispatcher and reports stock left or failures without iden
     },
   ]);
   error.mockRestore();
+});
+it("settles closed orders' open card payments with the simulated Provider when it is bound", async () => {
+  const f = fixture();
+  const resolve = vi.fn(async () => ({ status: "Failed", notCompleted: true }));
+  const createResolution = vi.fn(() => ({ resolve }));
+  const provider = vi.fn();
+  // Without a Provider binding there is nothing to ask.
+  expect(createInternalPickupClosedPaymentSweep(f.resources, options, { createResolution })).toBe(
+    null,
+  );
+  const sweep = createInternalPickupClosedPaymentSweep(
+    f.resources,
+    { ...options, createSimulatedProvider: provider },
+    { createResolution },
+  );
+  expect(sweep).toEqual({ runOnce: expect.any(Function) });
+  expect(createResolution).toHaveBeenCalledWith(f.resources, {
+    createSimulatedProvider: provider,
+    providerAccountReference: ref(8),
+  });
+  const composed = d.sweep.mock.calls[0][0];
+  expect(composed).toMatchObject({
+    scope: f.scope,
+    transactions: f.resources.transactions,
+    now: f.resources.now,
+    pageSize: 10,
+  });
+  expect(await composed.resolve(ref(40))).toEqual({ status: "Failed", notCompleted: true });
+  expect(resolve).toHaveBeenCalledWith(ref(40));
+  expect(await composed.authorize({}, "2026-09-21T00:00:00.000Z")).toBe(true);
+  expect(await composed.authorize({}, "2026-09-21T00:00:01.000Z")).toBe(false);
+  const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  composed.onOutcome({ status: "Failed", notCompleted: true });
+  composed.onOutcome({ status: "Paid" });
+  composed.onOutcome({ status: "Processing" });
+  expect(error.mock.calls.map(([line]) => JSON.parse(line))).toEqual([
+    { event: "INTERNAL_OPEN_PAYMENT_UNRESOLVED", status: "Processing" },
+  ]);
+  error.mockRestore();
+  // The workload hands the sweep to the closure dispatcher.
+  const service = { discover: vi.fn(), close: vi.fn() };
+  createInternalPickupPaymentExpiryWorkload(f.resources, vi.fn(), options, {
+    createService: () => service,
+    createPaymentSweep: () => sweep,
+  });
+  expect(d.dispatcher.mock.calls.at(-1)[0]).toMatchObject({
+    closure: service,
+    closedPayments: sweep,
+  });
+  f.resources.now.mockReturnValue("2026-09-22T00:00:00.000Z");
+  expect(await composed.authorize({}, "2026-09-21T00:00:00.000Z")).toBe(false);
 });
