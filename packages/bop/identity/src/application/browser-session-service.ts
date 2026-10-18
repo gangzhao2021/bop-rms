@@ -18,7 +18,11 @@ import {
   type BrowserSessionConfiguration,
   type RawBrowserCredential,
 } from "../contracts/browser-session.js";
-import { createIdentityActor, parseCanonicalInstant } from "../contracts/identity-actor.js";
+import {
+  createIdentityActor,
+  IdentityContractError,
+  parseCanonicalInstant,
+} from "../contracts/identity-actor.js";
 import type { BrowserSessionStorePort } from "./ports/browser-session-store-port.js";
 import type { OidcProviderPort } from "./ports/oidc-provider-port.js";
 import type {
@@ -43,6 +47,22 @@ export interface BrowserCookieMutation {
   readonly descriptor: BrowserCookieDescriptor;
   readonly value: RawBrowserCredential | "";
   readonly clear: boolean;
+}
+
+// Translate only Domain Session usability refusals at the browser service boundary.
+// Store, credential, provider and other Domain failures retain their original semantics.
+function assertBrowserSessionUsable(session: AuthenticationSession, observedAt: unknown): void {
+  try {
+    assertSessionUsable(session, observedAt);
+  } catch (error) {
+    if (
+      error instanceof IdentityContractError &&
+      (error.code === "SESSION_REVOKED" || error.code === "SESSION_EXPIRED")
+    ) {
+      throw new BrowserSessionError("BROWSER_SESSION_DENIED");
+    }
+    throw error;
+  }
 }
 
 const encodeSecrets = (value: Readonly<Record<string, string>>): string => JSON.stringify(value);
@@ -257,7 +277,7 @@ export class BrowserSessionService {
     const sessionCookie = parseRawBrowserCredential(sessionCookieInput);
     const record = await this.#store.resolveSession(this.#hasher.hash(sessionCookie));
     if (record === null) throw new BrowserSessionError("BROWSER_SESSION_DENIED");
-    assertSessionUsable(record.session, observedAt);
+    assertBrowserSessionUsable(record.session, observedAt);
     if (record.session.actor.actorReference === null) {
       throw new BrowserSessionError("BROWSER_SESSION_DENIED");
     }
@@ -286,11 +306,53 @@ export class BrowserSessionService {
     if (record === null || !this.#hasher.equals(supplied, record.csrfSelectorHash)) {
       throw new BrowserSessionError("BROWSER_SESSION_DENIED");
     }
-    assertSessionUsable(record.session, this.#observedAt());
+    assertBrowserSessionUsable(record.session, this.#observedAt());
     if (record.session.sessionReference !== bootstrap.session.sessionReference) {
       throw new BrowserSessionError("BROWSER_SESSION_DENIED");
     }
     return record.session;
+  }
+
+  /**
+   * WP-2423 Q18: genuine staff activity (a user action, or an operational screen the browser
+   * reports as visible) on a Session; with `extend: false` only its current deadlines are read.
+   * The idle deadline slides at most once per write interval and never past the absolute deadline.
+   * Throws `BROWSER_SESSION_ENDED` only for a Session that has genuinely ended,
+   * `BROWSER_SESSION_DENIED` for a wrong CSRF credential and `BROWSER_SESSION_UNAVAILABLE` when the
+   * Session could not be checked right now.
+   */
+  async recordActivity(
+    input: { readonly sessionCookie: unknown; readonly csrf: unknown },
+    extend = true,
+  ): Promise<AuthenticationSession> {
+    const selectorHash = this.#hasher.hash(parseRawBrowserCredential(input.sessionCookie));
+    const csrfSelectorHash = this.#hasher.hash(parseRawBrowserCredential(input.csrf));
+    const observedAt = this.#observedAt();
+    const record = this.#store.recordActivity;
+    if (record !== undefined) {
+      const result = await record.call(this.#store, {
+        selectorHash,
+        csrfSelectorHash,
+        observedAt,
+        extend,
+      });
+      return result.session;
+    }
+    // A store with fixed deadlines: classify the plain read the same way.
+    let current: Awaited<ReturnType<BrowserSessionStorePort["resolveSession"]>>;
+    try {
+      current = await this.#store.resolveSession(selectorHash);
+    } catch {
+      throw new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE");
+    }
+    if (current === null) throw new BrowserSessionError("BROWSER_SESSION_ENDED");
+    if (!this.#hasher.equals(csrfSelectorHash, current.csrfSelectorHash))
+      throw new BrowserSessionError("BROWSER_SESSION_DENIED");
+    try {
+      return assertSessionUsable(current.session, observedAt);
+    } catch {
+      throw new BrowserSessionError("BROWSER_SESSION_ENDED");
+    }
   }
 
   async rotate(
@@ -308,7 +370,7 @@ export class BrowserSessionService {
     if (current === null || current.session.actor.actorReference === null) {
       throw new BrowserSessionError("BROWSER_SESSION_DENIED");
     }
-    assertSessionUsable(current.session, observedAt);
+    assertBrowserSessionUsable(current.session, observedAt);
     const currentContext = `${this.#configuration.environment}:session:${current.session.sessionReference}:${current.session.actor.actorReference}`;
     const secrets = decodeSecrets(
       await this.#envelopes.decrypt(current.encryptedSecrets, currentContext),

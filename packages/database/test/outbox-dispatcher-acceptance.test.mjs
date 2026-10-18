@@ -1,15 +1,23 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
 import { it } from "vitest";
 import {
   appendEventInTransaction,
   claimOutboxBatch,
+  consumeEventInTransaction,
   markOutboxFailed,
   markOutboxPublished,
 } from "../../bop/eventing/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { createPersistentConsumerWorker } from "../../../apps/worker/src/persistent-consumer-worker.ts";
+import {
+  isPilotDispatchScope,
+  pilotDispatchScopes,
+  pilotUnsubscribedEventTypes,
+} from "../../../tooling/environment/pilot-event-routing.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -294,4 +302,169 @@ async function proveDispatcher(context) {
 
 it("proves the WP-0031 dispatcher and WP-2023 rejection/crash failure recovery contract", async () => {
   await withIsolatedDatabase({ caseId: "dispatcher", root }, proveDispatcher);
+}, 180_000);
+
+/** WP-2423 5e: the pilot business worker's routing, against real PostgreSQL under a restricted role. */
+async function provePilotBrandEventRouting(context) {
+  const admin = new Client(context.clientConfig);
+  const role = `bop_wp2423_routing_${context.runId}`;
+  const opened = new Set();
+  await admin.connect();
+  try {
+    await admin.query(`CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`);
+    await admin.query(`GRANT USAGE ON SCHEMA platform_eventing, platform_helpers TO ${role}`);
+    await admin.query(`GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO ${role}`);
+    await admin.query(`GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA platform_helpers TO ${role}`);
+    await admin.query(`GRANT SELECT ON TABLE platform_eventing.outbox_event TO ${role}`);
+    await admin.query(
+      `GRANT UPDATE (published_at,attempt_count,last_error_code,lease_token,lease_owner,lease_expires_at,available_at,ordering_released_at) ON platform_eventing.outbox_event TO ${role}`,
+    );
+    await admin.query(
+      `GRANT SELECT,INSERT,UPDATE ON platform_eventing.consumer_inbox,platform_eventing.delivery_attempt,platform_eventing.dead_letter_item,platform_eventing.consumer_retry_schedule TO ${role}`,
+    );
+    const store = { brandReference: brandA, storeReference: storeA };
+    // A Store manager marks an item sold out: the rule is Brand configuration, so its event has no Store.
+    const availability = eventId("31");
+    await seed(
+      admin,
+      event(availability, {
+        eventType: "AvailabilityRuleCreated",
+        producerModule: "@rms/catalog",
+        aggregateType: "AvailabilityRule",
+        aggregateId: "018f1f48-7b5d-7cd1-8a1b-123456789abc",
+      }),
+    );
+    // A Brand-scoped event with a catalog consumer the pilot has not declared undeployed.
+    const undeclared = eventId("32");
+    await seed(
+      admin,
+      event(undeclared, {
+        eventType: "SyntheticChanged",
+        aggregateId: "018f1f48-7b5d-7cd2-8a1b-123456789abc",
+      }),
+    );
+    const order = eventId("33");
+    await seed(
+      admin,
+      event(order, {
+        eventType: "SyntheticStoreChanged",
+        storeId: storeA,
+        aggregateId: "018f1f48-7b5d-7cd3-8a1b-123456789abc",
+      }),
+    );
+    const registration = Object.freeze({
+      consumerName: "synthetic.store-reader:v1",
+      consumerVersion: 1,
+      eventType: "SyntheticStoreChanged",
+      schemaVersions: [1],
+      ownerModule: "@bop/eventing",
+      tenantScope: "store",
+      ordering: "aggregate",
+      sideEffect: "record_synthetic_store_read",
+      replaySafe: true,
+      handler: async () => ({ status: "completed" }),
+    });
+    let sequence = 1;
+    const next = () => "0190ce01-0000-7000-8000-" + (sequence++).toString(16).padStart(12, "0");
+    const identities = new Map();
+    const identity = (key) => {
+      if (!identities.has(key))
+        identities.set(key, {
+          attemptId: next(),
+          deadLetterId: next(),
+          idempotencyKey: next(),
+          scheduleId: next(),
+        });
+      return identities.get(key);
+    };
+    const runtime = createPersistentConsumerWorker({
+      connections: {
+        acquire: async () => {
+          const client = new Client(context.clientConfig);
+          await client.connect();
+          opened.add(client);
+          await client.query(`SET ROLE ${role}`);
+          return {
+            query: (text, values) => client.query(text, [...values]),
+            release: async () => {
+              opened.delete(client);
+              await client.end();
+            },
+          };
+        },
+      },
+      eventing: {
+        authorizeScope: async (requested) => isPilotDispatchScope(requested, store),
+        now: () => new Date().toISOString(),
+        random: () => 0.5,
+        outboxIdentities: (id, attempt) => identity("outbox:" + id + ":" + attempt),
+        consumerIdentities: (input) =>
+          identity(input.consumerName + ":" + input.eventId + ":" + input.attemptNumber),
+      },
+      services: [
+        {
+          registration,
+          consume: (tx, envelope) => consumeEventInTransaction(tx, registration, envelope),
+        },
+      ],
+      scopes: pilotDispatchScopes(store),
+      acknowledgedWithoutSubscribers: pilotUnsubscribedEventTypes([registration]),
+      leaseOwner: "wp2423_pilot_routing",
+      newLeaseToken: next,
+      config: { batchMaximum: 10, perScopeMaximum: 5, adapterConcurrency: 1 },
+      pollIntervalMs: 25,
+      drainDeadlineMs: 25000,
+    });
+    const state = async () =>
+      Object.fromEntries(
+        (
+          await admin.query(
+            "SELECT event_id::text, published_at IS NOT NULL AS published, attempt_count FROM platform_eventing.outbox_event WHERE event_id = ANY($1::uuid[])",
+            [[availability, undeclared, order]],
+          )
+        ).rows.map((row) => [row.event_id, row]),
+      );
+    try {
+      await runtime.workload.start();
+      let rows = await state();
+      for (let attempt = 0; attempt < 200; attempt++) {
+        rows = await state();
+        if (
+          rows[availability].published &&
+          rows[order].published &&
+          rows[undeclared].attempt_count > 0
+        )
+          break;
+        await delay(25);
+      }
+      // Before WP-2423 5e the Brand-scoped event stayed unclaimed (attempt 0) forever.
+      assert.deepEqual(rows[availability], {
+        event_id: availability,
+        published: true,
+        attempt_count: 1,
+      });
+      assert.deepEqual(rows[order], { event_id: order, published: true, attempt_count: 1 });
+      // An undeclared Brand event is claimed and rejected, so it is visible, never silently published.
+      assert.equal(rows[undeclared].published, false);
+      assert.ok(rows[undeclared].attempt_count >= 1);
+      const inbox = await admin.query(
+        "SELECT consumer_name, event_id::text, status FROM platform_eventing.consumer_inbox WHERE event_id = ANY($1::uuid[]) ORDER BY consumer_name",
+        [[availability, undeclared, order]],
+      );
+      assert.deepEqual(inbox.rows, [
+        { consumer_name: "synthetic.store-reader:v1", event_id: order, status: "completed" },
+      ]);
+    } finally {
+      await runtime.workload.stop();
+    }
+  } finally {
+    for (const client of opened) await client.end().catch(() => undefined);
+    await admin.query(`DROP OWNED BY ${role}`).catch(() => undefined);
+    await admin.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);
+    await admin.end();
+  }
+}
+
+it("publishes the pilot's Brand-scoped authoring events instead of leaving them pending (WP-2423 5e)", async () => {
+  await withIsolatedDatabase({ caseId: "pilotrouting", root }, provePilotBrandEventRouting);
 }, 180_000);

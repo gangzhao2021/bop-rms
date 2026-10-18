@@ -1,3 +1,5 @@
+import { CartError, CartReplacementPendingError } from "@rms/ordering";
+import { checkoutHoldRetrySeconds } from "./customer-checkout-hold.js";
 import type { Request, RequestHandler, Response } from "express";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -12,6 +14,7 @@ class GuestSessionError extends Error {}
 export const customerCartRoutes = Object.freeze({
   create: "/api/v1/carts",
   current: "/bff/customer/cart",
+  replacement: "/api/v1/carts/:cart_id/replacement",
   read: "/api/v1/carts/:cart_id",
   addItem: "/api/v1/carts/:cart_id/items",
   updateItem: "/api/v1/carts/:cart_id/items/:cart_item_id",
@@ -86,10 +89,36 @@ export type CustomerCartPortResult =
   | { readonly status: "Found" | "Applied" | "Current"; readonly view: CustomerCartView }
   | { readonly status: "SessionExpired" | "NotFound" | "IdempotencyConflict" }
   | { readonly status: "VersionConflict"; readonly currentVersion: number }
-  | { readonly status: "SelectionInvalid"; readonly issueCodes: readonly string[] }
+  | {
+      readonly status: "SelectionInvalid";
+      readonly issueCodes: readonly string[];
+      /** WP-2423 (`ITEM_SHORT`): how many of the item the Store's stock can make (0: none). */
+      readonly available?: number;
+    }
   | { readonly status: "LifecycleExpired" | "LifecycleAbandoned" }
   | { readonly status: "RateLimited"; readonly retryAfterSeconds: number }
+  /** WP-2423: briefly unavailable (for example a table Cart expiry still being recorded). */
+  | { readonly status: "RetryLater"; readonly retryAfterSeconds: number }
+  /** WP-2423: the table's last checkout is still being processed; retry shortly. */
+  | {
+      readonly status: "OrderProcessing";
+      /** Seconds until the wait ends when it is time-bounded; null when it has no known end. */
+      readonly retryAfterSeconds: number | null;
+    }
+  /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is checking out this Cart
+   * version until heldUntil; nothing was changed. */
+  | { readonly status: "CheckoutInProgress"; readonly heldUntil: string }
   | { readonly status: "Unavailable" };
+
+export interface CustomerCartReplacementPort {
+  replace(input: {
+    readonly sessionCredential: string;
+    readonly csrfCredential: string;
+    readonly operationReference: string;
+    readonly previousCartReference: string;
+    readonly expectedCartVersion: number;
+  }): Promise<unknown>;
+}
 
 export interface CustomerCartPort {
   createCart(input: CustomerCartMutationContext): Promise<CustomerCartPortResult>;
@@ -140,9 +169,24 @@ type ErrorCode =
   | "cart_idempotency_conflict"
   | "cart_selection_invalid"
   | "cart_expired"
+  | "cart_replacement_forbidden"
+  | "cart_replacement_unavailable"
   | "cart_abandoned"
   | "cart_rate_limited"
+  | "cart_order_processing"
+  | "cart_checkout_in_progress"
   | "cart_service_unavailable";
+
+/**
+ * WP-2423: seconds until a time-bounded wait for the table's last checkout ends (at least 1, at
+ * most an hour), or null when the wait has no known end, so the guest is never promised a time.
+ */
+export function orderProcessingRetrySeconds(pendingUntil: string | null, now: string) {
+  if (pendingUntil === null) return null;
+  const remaining = Date.parse(pendingUntil) - Date.parse(now);
+  if (!Number.isFinite(remaining)) return null;
+  return Math.min(3600, Math.max(1, Math.ceil(remaining / 1000)));
+}
 
 const errors = Object.freeze({
   cart_request_invalid: { status: 400, messageKey: "customer.cart.request_invalid" },
@@ -152,8 +196,17 @@ const errors = Object.freeze({
   cart_idempotency_conflict: { status: 409, messageKey: "customer.cart.idempotency_conflict" },
   cart_selection_invalid: { status: 422, messageKey: "customer.cart.selection_invalid" },
   cart_expired: { status: 409, messageKey: "customer.cart.expired" },
+  cart_replacement_forbidden: { status: 403, messageKey: "customer.cart.replacement_forbidden" },
+  cart_replacement_unavailable: {
+    status: 409,
+    messageKey: "customer.cart.replacement_unavailable",
+  },
   cart_abandoned: { status: 409, messageKey: "customer.cart.abandoned" },
   cart_rate_limited: { status: 429, messageKey: "customer.cart.rate_limited" },
+  // WP-2423: the table's last checkout may still create an order or charge; retry shortly.
+  cart_order_processing: { status: 409, messageKey: "customer.cart.order_processing" },
+  // DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is paying for this Cart.
+  cart_checkout_in_progress: { status: 409, messageKey: "customer.cart.checkout_in_progress" },
   cart_service_unavailable: { status: 503, messageKey: "customer.cart.service_unavailable" },
 } as const);
 
@@ -202,6 +255,12 @@ function canonicalInstant(value: unknown): string {
 function positive(value: unknown, maximum = 100): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > maximum)
     throw new TypeError("positive integer required");
+  return Number(value);
+}
+
+function count(value: unknown, maximum: number): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > maximum)
+    throw new TypeError("count required");
   return Number(value);
 }
 
@@ -435,7 +494,11 @@ function responseControls(response: Response): void {
 function sendError(
   response: Response,
   errorCode: ErrorCode,
-  details?: { readonly currentVersion?: number; readonly issueCodes?: readonly string[] },
+  details?: {
+    readonly currentVersion?: number;
+    readonly issueCodes?: readonly string[];
+    readonly available?: number;
+  },
 ): void {
   const contract = errors[errorCode];
   response.status(contract.status).json({
@@ -448,7 +511,12 @@ function sendError(
   });
 }
 
-function handleResult(response: Response, result: CustomerCartPortResult, created = false): void {
+function handleResult(
+  response: Response,
+  result: CustomerCartPortResult,
+  created: boolean,
+  now: () => string,
+): void {
   if (result.status === "Found" || result.status === "Applied" || result.status === "Current") {
     try {
       const view = publicView(result.view);
@@ -458,6 +526,22 @@ function handleResult(response: Response, result: CustomerCartPortResult, create
     } catch {
       sendError(response, "cart_service_unavailable");
     }
+    return;
+  }
+  if (result.status === "CheckoutInProgress") {
+    response.setHeader("Retry-After", String(checkoutHoldRetrySeconds(result.heldUntil, now())));
+    sendError(response, "cart_checkout_in_progress");
+    return;
+  }
+  if (result.status === "OrderProcessing") {
+    if (result.retryAfterSeconds !== null)
+      response.setHeader("Retry-After", String(positive(result.retryAfterSeconds, 3600)));
+    sendError(response, "cart_order_processing");
+    return;
+  }
+  if (result.status === "RetryLater") {
+    response.setHeader("Retry-After", String(positive(result.retryAfterSeconds, 60)));
+    sendError(response, "cart_service_unavailable");
     return;
   }
   if (result.status === "RateLimited") {
@@ -482,7 +566,12 @@ function handleResult(response: Response, result: CustomerCartPortResult, create
     result.status === "VersionConflict"
       ? { currentVersion: positive(result.currentVersion, 999_999_999) }
       : result.status === "SelectionInvalid"
-        ? { issueCodes: codes(result.issueCodes) }
+        ? {
+            issueCodes: codes(result.issueCodes),
+            ...(result.available === undefined
+              ? {}
+              : { available: count(result.available, 999_999_999) }),
+          }
         : undefined,
   );
 }
@@ -490,10 +579,11 @@ function handleResult(response: Response, result: CustomerCartPortResult, create
 async function invoke(
   response: Response,
   operation: Promise<CustomerCartPortResult>,
-  created = false,
+  created: boolean,
+  now: () => string,
 ): Promise<void> {
   try {
-    handleResult(response, await operation, created);
+    handleResult(response, await operation, created, now);
   } catch {
     sendError(response, "cart_service_unavailable");
   }
@@ -515,19 +605,28 @@ export class CustomerCartHandler {
   readonly #allowedOrigin: string;
   readonly #now: () => string;
   readonly #port: CustomerCartPort;
+  readonly #replacement: CustomerCartReplacementPort | undefined;
+  readonly #invoke = (
+    response: Response,
+    operation: Promise<CustomerCartPortResult>,
+    created = false,
+  ) => invoke(response, operation, created, this.#now);
 
   constructor({
     allowedOrigin,
     now = () => new Date().toISOString(),
     port,
+    replacement,
   }: {
     readonly allowedOrigin: string;
     readonly now?: () => string;
     readonly port: CustomerCartPort;
+    readonly replacement?: CustomerCartReplacementPort;
   }) {
     this.#allowedOrigin = parseOrigin(allowedOrigin);
     this.#now = now;
     this.#port = port;
+    this.#replacement = replacement;
   }
 
   #context(request: Request): CustomerCartContext {
@@ -559,9 +658,81 @@ export class CustomerCartHandler {
       try {
         const input = this.#mutation(request);
         body(request, []);
-        await invoke(response, this.#port.createCart(input), true);
+        await this.#invoke(response, this.#port.createCart(input), true);
       } catch (error) {
         this.#requestError(response, error);
+      }
+    };
+  }
+
+  replace(): RequestHandler {
+    return async (request, response) => {
+      responseControls(response);
+      let input: Parameters<CustomerCartReplacementPort["replace"]>[0];
+      try {
+        const context = this.#mutation(request);
+        body(request, []);
+        input = {
+          sessionCredential: context.guestCredential,
+          csrfCredential: context.csrfCredential,
+          operationReference: context.operationReference,
+          previousCartReference: scalar(request.params.cart_id, uuidV7),
+          expectedCartVersion: versionHeader(request),
+        };
+      } catch (error) {
+        this.#requestError(response, error);
+        return;
+      }
+      if (this.#replacement === undefined) {
+        sendError(response, "cart_service_unavailable");
+        return;
+      }
+      try {
+        const raw = closed(await this.#replacement.replace(input), [
+          "operationReference",
+          "previousCartReference",
+          "cartReference",
+          "occurredAt",
+          "expiresAt",
+        ]);
+        const receipt = {
+          schemaVersion: 1,
+          operationReference: scalar(raw.operationReference, uuidV7),
+          previousCartReference: scalar(raw.previousCartReference, uuidV7),
+          cartReference: scalar(raw.cartReference, uuidV7),
+          occurredAt: canonicalInstant(raw.occurredAt),
+          expiresAt: canonicalInstant(raw.expiresAt),
+        };
+        if (
+          receipt.operationReference !== input.operationReference ||
+          receipt.previousCartReference !== input.previousCartReference ||
+          receipt.cartReference === input.previousCartReference ||
+          Date.parse(receipt.expiresAt) - Date.parse(receipt.occurredAt) !== 86400000
+        )
+          throw new Error("invalid replacement receipt");
+        response.setHeader("Location", `/api/v1/carts/${receipt.cartReference}`);
+        // This is an operation receipt, not a current Cart version/ETag.
+        response.status(200).type("application/json").end(JSON.stringify(receipt));
+      } catch (error) {
+        const mapping = {
+          CART_PERMISSION_DENIED: "cart_session_expired",
+          CART_REPLACEMENT_FORBIDDEN: "cart_replacement_forbidden",
+          CART_VERSION_CONFLICT: "cart_version_conflict",
+          CART_IDEMPOTENCY_CONFLICT: "cart_idempotency_conflict",
+          CART_LIFECYCLE_UNAVAILABLE: "cart_replacement_unavailable",
+          CART_EXPIRED: "cart_expired",
+          CART_REPLACEMENT_CHECKOUT_PENDING: "cart_order_processing",
+        } as const;
+        if (error instanceof CartReplacementPendingError) {
+          const seconds = orderProcessingRetrySeconds(error.pendingUntil, this.#now());
+          if (seconds !== null) response.setHeader("Retry-After", String(seconds));
+        }
+        sendError(
+          response,
+          error instanceof CartError && error.code in mapping
+            ? mapping[error.code as keyof typeof mapping]
+            : "cart_service_unavailable",
+        );
       }
     };
   }
@@ -571,7 +742,22 @@ export class CustomerCartHandler {
       responseControls(response);
       try {
         sameOriginRead(request);
-        await invoke(response, this.#port.getCurrentCart(this.#context(request)));
+        const operation = this.#port.getCurrentCart(this.#context(request));
+        let result: CustomerCartPortResult;
+        try {
+          result = await operation;
+        } catch {
+          sendError(response, "cart_service_unavailable");
+          return;
+        }
+        // WP-2423: a guest with no active Cart is an ordinary state, not an error. Answer it
+        // explicitly so guest pages don't log a failed request on every visit. An expired table
+        // Cart is still replaced on the next add (DEC-DINING-CART-TIMEOUT-CONTINUATION).
+        if (result.status === "NotFound") {
+          response.status(200).json({ schemaVersion: 1, cart: null });
+          return;
+        }
+        await this.#invoke(response, Promise.resolve(result));
       } catch (error) {
         this.#requestError(response, error);
       }
@@ -583,7 +769,7 @@ export class CustomerCartHandler {
       responseControls(response);
       try {
         sameOriginRead(request);
-        await invoke(
+        await this.#invoke(
           response,
           this.#port.getCart({
             ...this.#context(request),
@@ -606,7 +792,7 @@ export class CustomerCartHandler {
           "optionSelections",
           "customerNote",
         ]);
-        await invoke(
+        await this.#invoke(
           response,
           this.#port.addItem({
             ...this.#mutation(request),
@@ -629,7 +815,7 @@ export class CustomerCartHandler {
       responseControls(response);
       try {
         const raw = body(request, ["quantity", "optionSelections", "customerNote"]);
-        await invoke(
+        await this.#invoke(
           response,
           this.#port.updateItem({
             ...this.#mutation(request),
@@ -651,7 +837,7 @@ export class CustomerCartHandler {
     return async (request, response) => {
       responseControls(response);
       try {
-        await invoke(
+        await this.#invoke(
           response,
           this.#port.removeItem({
             ...this.#mutation(request),

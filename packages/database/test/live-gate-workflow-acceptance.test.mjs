@@ -1,3 +1,4 @@
+import { createPostgresCurrentLiveGateSource } from "../../bop/publishing/src/index.ts";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +55,68 @@ async function prove(context) {
       0,
     );
     await admin.query("RESET ROLE");
+    await admin.query(
+      "GRANT UPDATE ON bop_publishing.live_gate_version,bop_publishing.live_gate_requirement TO " +
+        role,
+    );
+    await admin.query(
+      "INSERT INTO bop_publishing.live_gate_version VALUES ($1,'STORE-LIVE-GATE-CA-ON-TOR-001',$2,$3,$4,2,'Production','Approved',$5,$6,$7,$8,$9,$9,'ConfigurationMetadata')",
+      [id(1), id(2), id(3), id(4), id(5), id(6), id(8), id(9), at],
+    );
+    let authorized = true;
+    const options = {
+      tenantReference: id(2),
+      brandReference: id(3),
+      storeReference: id(4),
+      decisionEvidenceReference: id(9),
+      requiredRequirementCodes: ["IDR_0037_PREMISES"],
+      authorize: async () => authorized,
+    };
+    const read = createPostgresCurrentLiveGateSource(options);
+    async function readAt(when, source = read) {
+      await admin.query("BEGIN");
+      try {
+        await admin.query("SET LOCAL ROLE " + role);
+        return await source({ query: (sql, values) => admin.query(sql, [...values]) }, when);
+      } finally {
+        await admin.query("ROLLBACK");
+      }
+    }
+    await assert.rejects(readAt(at), /LIVE_GATE_CURRENT_UNAVAILABLE/u);
+    await admin.query(
+      "INSERT INTO bop_publishing.live_gate_requirement VALUES ($1,$2,$3,$4,2,'LEGAL_STORE','IDR_0037_PREMISES',$5,true,'Accepted',$6,1,$7,NULL,'ConfigurationMetadata')",
+      [id(20), id(3), id(4), id(1), id(5), id(21), "2026-08-15T15:00:00.000Z"],
+    );
+    assert.equal((await readAt(at)).version, 2);
+    await assert.rejects(readAt("2026-08-15T15:00:00.000Z"), /LIVE_GATE_CURRENT_UNAVAILABLE/u);
+    await assert.rejects(
+      readAt(
+        at,
+        createPostgresCurrentLiveGateSource({
+          ...options,
+          requiredRequirementCodes: ["IDR_0037_PREMISES", "MISSING_REQUIREMENT"],
+        }),
+      ),
+      /LIVE_GATE_CURRENT_UNAVAILABLE/u,
+    );
+    await assert.rejects(
+      readAt(
+        at,
+        createPostgresCurrentLiveGateSource({
+          ...options,
+          storeReference: id(40),
+        }),
+      ),
+      /LIVE_GATE_CURRENT_UNAVAILABLE/u,
+    );
+    authorized = false;
+    await assert.rejects(readAt(at), /LIVE_GATE_CURRENT_UNAVAILABLE/u);
+    authorized = true;
+    await admin.query(
+      "INSERT INTO bop_publishing.live_gate_version VALUES ($1,'STORE-LIVE-GATE-CA-ON-TOR-001',$2,$3,$4,3,'Production','Reopened',$5,$6,NULL,NULL,NULL,$7,'ConfigurationMetadata')",
+      [id(1), id(2), id(3), id(4), id(5), id(6), "2026-08-15T14:30:00.000Z"],
+    );
+    await assert.rejects(readAt("2026-08-15T14:30:00.000Z"), /LIVE_GATE_CURRENT_UNAVAILABLE/u);
   } finally {
     await admin.query("RESET ROLE").catch(() => undefined);
     await admin.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);

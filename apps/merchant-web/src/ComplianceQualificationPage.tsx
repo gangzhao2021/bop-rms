@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   ComplianceQualificationPageError,
@@ -46,7 +47,8 @@ export function ComplianceQualification({ view }: { readonly view: ComplianceQua
           <p className="bop-eyebrow">CMP-QUALIFICATION · Compliance</p>
           <h1>Permits and Qualifications</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
         {view.permissions.mayAddVerifiedRecord ? <button>Add verified record</button> : null}

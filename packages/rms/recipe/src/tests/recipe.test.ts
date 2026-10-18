@@ -84,6 +84,15 @@ describe("Recipe domain", () => {
     const child = { ...recipe({ version: 2 }), recipeReference: id(50), versionReference: id(51) };
     expect(validateRecipeGraph(recipe({ sub: child }), [child])).toBe(true);
   });
+  it("rejects cross-brand and duplicate pinned graph versions", () => {
+    const child = { ...recipe({ version: 2 }), recipeReference: id(50), versionReference: id(51) };
+    const root = recipe({ sub: child });
+    for (const graph of [[{ ...child, brandReference: id(99) }], [child, child], [child, root]]) {
+      expect(() => validateRecipeGraph(root, graph)).toThrowError(
+        expect.objectContaining({ code: "RECIPE_GRAPH_UNRESOLVED" }),
+      );
+    }
+  });
   it("rejects direct cycles and unverified published allergen evidence", () => {
     const cyclic = recipe();
     const cyclicIngredient = cyclic.ingredients.at(0);

@@ -12,7 +12,6 @@ import {
   type CatalogReference,
 } from "../domain/product.js";
 import type {
-  CatalogResolvedSelectionRule,
   CatalogSelectionValidationPorts,
   CurrentCatalogSelectionSnapshot,
 } from "./ports/selection-validation-ports.js";
@@ -57,6 +56,22 @@ function exact(value: unknown, keys: readonly string[]): Readonly<Record<string,
   }
 }
 
+/** Copy only dense data elements; never dispatch methods supplied on a collection. */
+function collection(value: unknown): readonly unknown[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return invalid();
+  const length = Object.getOwnPropertyDescriptor(value, "length")?.value;
+  if (!Number.isSafeInteger(length) || length < 0 || length > 100) return invalid();
+  if (Reflect.ownKeys(value).length !== length + 1) return invalid();
+  const result: unknown[] = [];
+  for (let index = 0; index < length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable)
+      return invalid();
+    result.push(descriptor.value);
+  }
+  return Object.freeze(result);
+}
+
 function positive(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 999)
     return invalid();
@@ -64,16 +79,14 @@ function positive(value: unknown): number {
 }
 
 function references(value: unknown): readonly CatalogReference[] {
-  if (!Array.isArray(value) || value.length > 100) return invalid();
-  const result = Object.freeze(value.map(parseCatalogReference));
+  const result = Object.freeze(collection(value).map(parseCatalogReference));
   if (new Set(result).size !== result.length) return invalid();
   return result;
 }
 
 function selections(value: unknown): readonly CatalogSelectionQuantity[] {
-  if (!Array.isArray(value) || value.length > 100) return invalid();
   const result = Object.freeze(
-    value.map((candidate) => {
+    collection(value).map((candidate) => {
       const raw = exact(candidate, ["optionReference", "quantity"]);
       return Object.freeze({
         optionReference: parseCatalogReference(raw.optionReference),
@@ -96,8 +109,10 @@ function input(value: unknown): ValidateCatalogSelectionInput {
     "observedAt",
   ]);
   if (
-    !["Api", "Pos", "Qr", "Web"].includes(String(raw.sourceChannel)) ||
-    !["DineIn", "Pickup"].includes(String(raw.orderType))
+    typeof raw.sourceChannel !== "string" ||
+    !["Api", "Pos", "Qr", "Web"].includes(raw.sourceChannel) ||
+    typeof raw.orderType !== "string" ||
+    !["DineIn", "Pickup"].includes(raw.orderType)
   )
     return invalid();
   return Object.freeze({
@@ -111,7 +126,7 @@ function input(value: unknown): ValidateCatalogSelectionInput {
   });
 }
 
-function rule(value: CatalogResolvedSelectionRule) {
+function rule(value: unknown) {
   const raw = exact(value, [
     "bindingReference",
     "optionSetVersionReference",
@@ -128,9 +143,8 @@ function rule(value: CatalogResolvedSelectionRule) {
     : invalid();
   if (minimumQuantity < 0 || maximumQuantity < minimumQuantity || maximumQuantity > 99_900)
     return invalid();
-  if (!Array.isArray(raw.options) || raw.options.length > 100) return invalid();
   const options = Object.freeze(
-    raw.options.map((option) => {
+    collection(raw.options).map((option) => {
       const candidate = exact(option, [
         "optionReference",
         "maximumQuantity",
@@ -191,6 +205,25 @@ function hasTriggerCycle(rules: readonly ReturnType<typeof rule>[]) {
   return rules.some((candidate) => visit(candidate.bindingReference));
 }
 
+function parsedRules(value: unknown) {
+  const rules = Object.freeze(collection(value).map(rule));
+  const options = rules.flatMap((candidate) => candidate.options);
+  const optionReferences = new Set(options.map((option) => option.optionReference));
+  if (
+    new Set(rules.map((candidate) => candidate.bindingReference)).size !== rules.length ||
+    optionReferences.size !== options.length ||
+    hasTriggerCycle(rules) ||
+    rules.some((candidate) =>
+      candidate.activationOptionReferences.some((reference) => !optionReferences.has(reference)),
+    ) ||
+    options.some((option) =>
+      option.conflictOptionReferences.some((reference) => !optionReferences.has(reference)),
+    )
+  )
+    return invalid();
+  return rules;
+}
+
 function snapshot(value: CurrentCatalogSelectionSnapshot, expected: ValidateCatalogSelectionInput) {
   const raw = exact(value, [
     "brandReference",
@@ -209,19 +242,11 @@ function snapshot(value: CurrentCatalogSelectionSnapshot, expected: ValidateCata
     "resolvedAt",
     "rules",
   ]);
-  if (
-    raw.availability !== "Available" ||
-    raw.freshnessStatus !== "Fresh" ||
-    !Array.isArray(raw.rules) ||
-    raw.rules.length > 100
-  )
-    return invalid();
+  if (raw.availability !== "Available" || raw.freshnessStatus !== "Fresh") return invalid();
   const effectiveFrom = parseCatalogInstant(raw.effectiveFrom);
   const effectiveUntil =
     raw.effectiveUntil === null ? null : parseCatalogInstant(raw.effectiveUntil);
-  const rules = Object.freeze(raw.rules.map(rule));
-  const options = rules.flatMap((candidate) => candidate.options);
-  const optionReferences = new Set(options.map((option) => option.optionReference));
+  const rules = parsedRules(raw.rules);
   if (
     parseCatalogReference(raw.brandReference) !== expected.brandReference ||
     parseCatalogReference(raw.storeReference) !== expected.storeReference ||
@@ -230,16 +255,7 @@ function snapshot(value: CurrentCatalogSelectionSnapshot, expected: ValidateCata
     parseCatalogReference(raw.sellableReference) !== expected.sellableReference ||
     parseCatalogInstant(raw.resolvedAt) !== expected.observedAt ||
     Date.parse(expected.observedAt) < Date.parse(effectiveFrom) ||
-    (effectiveUntil !== null && Date.parse(expected.observedAt) >= Date.parse(effectiveUntil)) ||
-    new Set(rules.map((candidate) => candidate.bindingReference)).size !== rules.length ||
-    optionReferences.size !== options.length ||
-    hasTriggerCycle(rules) ||
-    rules.some((candidate) =>
-      candidate.activationOptionReferences.some((reference) => !optionReferences.has(reference)),
-    ) ||
-    options.some((option) =>
-      option.conflictOptionReferences.some((reference) => !optionReferences.has(reference)),
-    )
+    (effectiveUntil !== null && Date.parse(expected.observedAt) >= Date.parse(effectiveUntil))
   )
     return invalid();
   return Object.freeze({
@@ -342,4 +358,152 @@ export function createCatalogSelectionValidationService(ports: CatalogSelectionV
       return validate(parsed, snapshot(resolved, parsed));
     },
   });
+}
+
+export interface CatalogReviewOptionSelection {
+  readonly bindingReference: CatalogReference;
+  readonly optionReference: CatalogReference;
+  readonly quantity: number;
+}
+
+/** Complete review coverage only. Budget exhaustion never returns a partial list.
+ * No current publication/availability or customer authorization is inferred.
+ */
+export function enumerateCatalogReviewSelections(
+  rulesInput: unknown,
+  budget: {
+    maximumConfigurations: number;
+    maximumSearchSteps: number;
+  },
+): readonly (readonly CatalogReviewOptionSelection[])[] {
+  if (
+    !Number.isSafeInteger(budget.maximumConfigurations) ||
+    budget.maximumConfigurations < 1 ||
+    budget.maximumConfigurations > 10000 ||
+    !Number.isSafeInteger(budget.maximumSearchSteps) ||
+    budget.maximumSearchSteps < 1 ||
+    budget.maximumSearchSteps > 1000000
+  )
+    return invalid();
+  const rules = parsedRules(rulesInput);
+  const owner = new Map(
+    rules.flatMap((candidate) =>
+      candidate.options.map(
+        (option) => [option.optionReference, candidate.bindingReference] as const,
+      ),
+    ),
+  );
+  const pending = [...rules].sort((a, b) => a.bindingReference.localeCompare(b.bindingReference));
+  const ordered: (typeof rules)[number][] = [];
+  const done = new Set<CatalogReference>();
+  while (pending.length) {
+    const index = pending.findIndex((candidate) =>
+      candidate.activationOptionReferences.every((reference) =>
+        done.has(owner.get(reference) as CatalogReference),
+      ),
+    );
+    if (index < 0) return invalid();
+    const candidate = pending.splice(index, 1)[0];
+    if (!candidate) return invalid();
+    ordered.push(candidate);
+    done.add(candidate.bindingReference);
+  }
+  const selected = new Map<CatalogReference, CatalogReviewOptionSelection>();
+  const options = new Map(
+    rules.flatMap((candidate) =>
+      candidate.options.map((option) => [option.optionReference, option] as const),
+    ),
+  );
+  const configurations: (readonly CatalogReviewOptionSelection[])[] = [];
+  let steps = 0;
+  const tick = () => {
+    if (++steps > budget.maximumSearchSteps)
+      throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+  };
+  const choices = ordered.map((candidate) =>
+    [...candidate.options].sort((a, b) => a.optionReference.localeCompare(b.optionReference)),
+  );
+  type Task =
+    | { kind: "group"; groupIndex: number }
+    | { kind: "option"; groupIndex: number; index: number; total: number; quantity: number }
+    | { kind: "remove"; reference: CatalogReference };
+  const tasks: Task[] = [{ kind: "group", groupIndex: 0 }];
+  while (tasks.length) {
+    tick();
+    const task = tasks.pop();
+    if (!task) return invalid();
+    if (task.kind === "remove") {
+      selected.delete(task.reference);
+      continue;
+    }
+    const candidate = ordered[task.groupIndex];
+    if (task.kind === "group") {
+      if (!candidate) {
+        if (configurations.length >= budget.maximumConfigurations)
+          throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+        configurations.push(
+          Object.freeze(
+            [...selected.values()].sort((a, b) =>
+              a.optionReference.localeCompare(b.optionReference),
+            ),
+          ),
+        );
+        continue;
+      }
+      const active =
+        candidate.activationOptionReferences.length === 0 ||
+        candidate.activationOptionReferences.some((reference) => selected.has(reference));
+      tasks.push(
+        active
+          ? { kind: "option", groupIndex: task.groupIndex, index: 0, total: 0, quantity: 0 }
+          : { kind: "group", groupIndex: task.groupIndex + 1 },
+      );
+      continue;
+    }
+    if (!candidate) return invalid();
+    const groupChoices = choices[task.groupIndex];
+    if (!groupChoices) return invalid();
+    const option = groupChoices[task.index];
+    if (!option) {
+      if (task.total >= candidate.minimumQuantity)
+        tasks.push({ kind: "group", groupIndex: task.groupIndex + 1 });
+      continue;
+    }
+    const maximum = Math.min(option.maximumQuantity, candidate.maximumQuantity - task.total);
+    if (task.quantity < maximum) tasks.push({ ...task, quantity: task.quantity + 1 });
+    const remainingMaximum = groupChoices
+      .slice(task.index + 1)
+      .reduce((sum, item) => sum + item.maximumQuantity, 0);
+    if (task.total + task.quantity + remainingMaximum < candidate.minimumQuantity) continue;
+    if (task.quantity > 0) {
+      // The existing live selection contract permits at most 100 selected options.
+      if (
+        selected.size >= 100 ||
+        [...selected.keys()].some(
+          (reference) =>
+            option.conflictOptionReferences.includes(reference) ||
+            options.get(reference)?.conflictOptionReferences.includes(option.optionReference),
+        )
+      )
+        continue;
+      selected.set(
+        option.optionReference,
+        Object.freeze({
+          bindingReference: candidate.bindingReference,
+          optionReference: option.optionReference,
+          quantity: task.quantity,
+        }),
+      );
+      tasks.push({ kind: "remove", reference: option.optionReference });
+    }
+    tasks.push({
+      kind: "option",
+      groupIndex: task.groupIndex,
+      index: task.index + 1,
+      total: task.total + task.quantity,
+      quantity: 0,
+    });
+  }
+  if (!configurations.length) throw new CatalogError("CATALOG_LIFECYCLE_CONFLICT");
+  return Object.freeze(configurations);
 }

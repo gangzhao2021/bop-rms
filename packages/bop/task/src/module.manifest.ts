@@ -18,6 +18,7 @@ const moduleManifestInput = {
   ownedDatabase: {
     schema: "bop_task",
     tables: [
+      "task_version",
       "support_case_version",
       "diagnostic_access_grant",
       "diagnostic_access_revocation",

@@ -493,4 +493,268 @@ describe("WP-0121 Media contract", () => {
     expect(result).not.toHaveProperty("objectEvidenceReference");
     expect(result).not.toHaveProperty("url");
   });
+
+  describe("bounded public access boundary", () => {
+    function accessInput(kind: "Pinned" | "Dynamic" = "Pinned", use = "Published") {
+      return {
+        tenantContext: context(),
+        reference: createMediaReference({
+          kind,
+          assetId: parseAssetReference(ids.asset),
+          assetVersionId: kind === "Pinned" ? parseAssetVersionReference(ids.assetVersion) : null,
+        }),
+        use: use as "Published",
+      };
+    }
+    const unavailable = { allowed: false, reason: "MEDIA_UNAVAILABLE", assetVersionId: null };
+
+    it.each(["Unknown", "", null, 7])("refuses unknown use %s before source reads", async (use) => {
+      const harness = ports();
+      const input = { ...accessInput(), use };
+      await expect(authorizeMediaAccess(input as never, harness.value)).resolves.toEqual(
+        unavailable,
+      );
+      expect(harness.value.read.loadAsset).not.toHaveBeenCalled();
+      expect(harness.value.authorization.authorize).not.toHaveBeenCalled();
+    });
+
+    it.each(["tenantContext", "reference", "use"])(
+      "does not execute request %s getters",
+      async (field) => {
+        const harness = ports();
+        const getter = vi.fn(() => {
+          throw new Error("unexpected getter");
+        });
+        const input = Object.defineProperty(accessInput(), field, {
+          enumerable: true,
+          get: getter,
+        });
+        await expect(authorizeMediaAccess(input, harness.value)).resolves.toEqual(unavailable);
+        expect(getter).not.toHaveBeenCalled();
+        expect(harness.value.read.loadAsset).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["extra", "symbol", "prototype"])("refuses non-contract request %s", async (shape) => {
+      const input = accessInput();
+      if (shape === "extra") Object.assign(input, { url: "synthetic" });
+      if (shape === "symbol") Object.defineProperty(input, Symbol("extra"), { value: true });
+      if (shape === "prototype") Object.setPrototypeOf(input, { extra: true });
+      const harness = ports();
+      await expect(authorizeMediaAccess(input, harness.value)).resolves.toEqual(unavailable);
+      expect(harness.value.read.loadAsset).not.toHaveBeenCalled();
+    });
+
+    it.each(["asset", "versions", "version"])("bounds %s source failures", async (stage) => {
+      const harness = ports();
+      const failure = new Error("synthetic source failure");
+      if (stage === "asset") vi.mocked(harness.value.read.loadAsset).mockRejectedValueOnce(failure);
+      if (stage === "versions")
+        vi.mocked(harness.value.read.loadVersions).mockRejectedValueOnce(failure);
+      if (stage === "version")
+        vi.mocked(harness.value.read.loadVersion).mockRejectedValueOnce(failure);
+      await expect(
+        authorizeMediaAccess(
+          accessInput(
+            stage === "versions" ? "Dynamic" : "Pinned",
+            stage === "versions" ? "Draft" : "Published",
+          ),
+          harness.value,
+        ),
+      ).resolves.toEqual(unavailable);
+    });
+
+    it.each([scope(ids.otherStore), scope(ids.store, ids.otherBrand)])(
+      "refuses foreign scope before grant or version reads",
+      async (foreign) => {
+        const harness = ports({ currentAsset: asset({}, foreign) });
+        await expect(authorizeMediaAccess(accessInput(), harness.value)).resolves.toEqual(
+          unavailable,
+        );
+        expect(harness.value.authorization.authorize).not.toHaveBeenCalled();
+        expect(harness.value.read.loadVersion).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["asset", "version"])("parses %s source without executing accessors", async (stage) => {
+      const harness = ports();
+      const getter = vi.fn(() => {
+        throw new Error("unexpected getter");
+      });
+      if (stage === "asset") {
+        const body = Object.defineProperty({ ...asset() }, "scope", {
+          enumerable: true,
+          get: getter,
+        });
+        vi.mocked(harness.value.read.loadAsset).mockResolvedValueOnce(body);
+      } else {
+        const body = Object.defineProperty({ ...version() }, "checkState", {
+          enumerable: true,
+          get: getter,
+        });
+        vi.mocked(harness.value.read.loadVersion).mockResolvedValueOnce(body);
+      }
+      await expect(authorizeMediaAccess(accessInput(), harness.value)).resolves.toEqual(
+        unavailable,
+      );
+      expect(getter).not.toHaveBeenCalled();
+    });
+
+    it.each(["hole", "getter", "extra", "body"])(
+      "refuses malformed Dynamic version collection %s",
+      async (shape) => {
+        const harness = ports();
+        const getter = vi.fn(() => version());
+        const body: MediaAssetVersion[] = [version()];
+        if (shape === "hole") delete body[0];
+        if (shape === "getter") Object.defineProperty(body, "0", { enumerable: true, get: getter });
+        if (shape === "extra") Object.assign(body, { url: "synthetic" });
+        if (shape === "body") body[0] = { ...version(), checkState: "Unknown" } as never;
+        vi.mocked(harness.value.read.loadVersions).mockResolvedValueOnce(body);
+        await expect(
+          authorizeMediaAccess(accessInput("Dynamic", "Draft"), harness.value),
+        ).resolves.toEqual(unavailable);
+        expect(getter).not.toHaveBeenCalled();
+      },
+    );
+
+    it("retains Dynamic Draft uniqueness and non-Draft pinning", async () => {
+      await expect(
+        authorizeMediaAccess(accessInput("Dynamic", "Draft"), ports().value),
+      ).resolves.toMatchObject({ allowed: true, assetVersionId: ids.assetVersion });
+      await expect(authorizeMediaAccess(accessInput("Dynamic"), ports().value)).resolves.toEqual({
+        allowed: false,
+        reason: "PINNED_REFERENCE_REQUIRED",
+        assetVersionId: null,
+      });
+      await expect(
+        authorizeMediaAccess(
+          accessInput("Dynamic", "Draft"),
+          ports({ currentVersions: [version(), version()] }).value,
+        ),
+      ).resolves.toEqual(unavailable);
+    });
+
+    it.each([
+      version({ checkState: "Quarantined" }),
+      version({ checkState: "Rejected" }),
+      version({ checkState: "ProcessingFailed" }),
+      version({ readinessState: "Pending" }),
+      version({ readinessState: "Failed" }),
+      version({ assetId: parseAssetReference(ids.owner) }),
+      version({ assetVersionId: parseAssetVersionReference(ids.providerVersion) }),
+    ])("keeps non-ready or mismatched pinned versions unavailable", async (body) => {
+      const harness = ports();
+      vi.mocked(harness.value.read.loadVersion).mockResolvedValueOnce(body);
+      await expect(authorizeMediaAccess(accessInput(), harness.value)).resolves.toEqual(
+        unavailable,
+      );
+    });
+
+    it("rechecks current permission after the awaited version read", async () => {
+      const harness = ports();
+      let withdrawn = false;
+      vi.mocked(harness.value.read.loadVersion).mockImplementationOnce(async () => {
+        withdrawn = true;
+        return version();
+      });
+      vi.mocked(harness.value.authorization.authorize).mockImplementation(async (request) => {
+        if (withdrawn) throw new Error("synthetic permission withdrawn");
+        return allowDecision(request);
+      });
+      await expect(authorizeMediaAccess(accessInput(), harness.value)).resolves.toEqual(
+        unavailable,
+      );
+      expect(harness.value.authorization.authorize).toHaveBeenCalledTimes(2);
+    });
+
+    it("refuses a returned current Deny decision after version loading", async () => {
+      let calls = 0;
+      const harness = ports({
+        decision: (request) => {
+          calls += 1;
+          const decision = allowDecision(request);
+          return calls === 1 ? decision : Object.freeze({ ...decision, effect: "Deny" });
+        },
+      });
+      await expect(authorizeMediaAccess(accessInput(), harness.value)).resolves.toEqual(
+        unavailable,
+      );
+      expect(harness.value.read.loadVersion).toHaveBeenCalledOnce();
+      expect(harness.value.authorization.authorize).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      "asset missing",
+      "asset malformed",
+      "asset identity",
+      "version missing",
+      "versions missing",
+    ])("keeps %s unavailable", async (failure) => {
+      const harness = ports();
+      if (failure === "asset missing")
+        vi.mocked(harness.value.read.loadAsset).mockResolvedValueOnce(null);
+      if (failure === "asset malformed")
+        vi.mocked(harness.value.read.loadAsset).mockResolvedValueOnce({
+          ...asset(),
+          mediaKind: "Unknown",
+        } as never);
+      if (failure === "asset identity")
+        vi.mocked(harness.value.read.loadAsset).mockResolvedValueOnce(
+          asset({ assetId: parseAssetReference(ids.owner) }),
+        );
+      if (failure === "version missing")
+        vi.mocked(harness.value.read.loadVersion).mockResolvedValueOnce(null);
+      if (failure === "versions missing")
+        vi.mocked(harness.value.read.loadVersions).mockResolvedValueOnce(null as never);
+      await expect(
+        authorizeMediaAccess(
+          accessInput(
+            failure === "versions missing" ? "Dynamic" : "Pinned",
+            failure === "versions missing" ? "Draft" : "Published",
+          ),
+          harness.value,
+        ),
+      ).resolves.toEqual(unavailable);
+    });
+
+    it("captures use before reads so mutation cannot turn Published into Draft", async () => {
+      const harness = ports();
+      const input = accessInput("Dynamic");
+      vi.mocked(harness.value.read.loadAsset).mockImplementationOnce(async () => {
+        Object.assign(input, { use: "Draft" });
+        return asset();
+      });
+      await expect(authorizeMediaAccess(input, harness.value)).resolves.toEqual({
+        allowed: false,
+        reason: "PINNED_REFERENCE_REQUIRED",
+        assetVersionId: null,
+      });
+    });
+
+    it("detaches references and Asset scope before asynchronous grant and source reads", async () => {
+      const harness = ports();
+      const input = { ...accessInput(), reference: { ...accessInput().reference } };
+      const body = { ...asset(), scope: { ...scope() } };
+      vi.mocked(harness.value.read.loadAsset).mockImplementationOnce(async () => {
+        Object.assign(input.reference, { assetVersionId: ids.providerVersion });
+        return body;
+      });
+      vi.mocked(harness.value.read.loadVersion).mockImplementationOnce(async () => {
+        Object.assign(body.scope, { storeReference: ids.otherStore });
+        return version();
+      });
+      await expect(authorizeMediaAccess(input, harness.value)).resolves.toEqual({
+        allowed: true,
+        reason: "REFERENCE_ALLOWED",
+        assetVersionId: ids.assetVersion,
+      });
+      expect(harness.value.read.loadVersion).toHaveBeenCalledWith(ids.assetVersion);
+      expect(harness.value.authorization.authorize).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          resourceScope: expect.objectContaining({ storeReference: ids.store }),
+        }),
+      );
+    });
+  });
 });

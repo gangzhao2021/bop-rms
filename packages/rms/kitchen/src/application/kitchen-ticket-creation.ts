@@ -37,6 +37,7 @@ import type {
   KitchenTicketCommitResult,
   KitchenTicketCreationEffect,
   KitchenTicketCreationPorts,
+  KitchenTicketEffectValidationPorts,
   KitchenTicketIdentityResolution,
   KitchenTicketSemanticIdentity,
   KitchenStableReferencePurpose,
@@ -129,7 +130,7 @@ function canonical(value: unknown): string {
     .join(",")}}`;
 }
 
-function digest(ports: KitchenTicketCreationPorts, binding: string) {
+function digest(ports: KitchenTicketEffectValidationPorts, binding: string) {
   try {
     return parseKitchenTicketDigest(ports.digests.sha256(binding));
   } catch {
@@ -138,7 +139,7 @@ function digest(ports: KitchenTicketCreationPorts, binding: string) {
 }
 
 function reference(
-  ports: KitchenTicketCreationPorts,
+  ports: KitchenTicketEffectValidationPorts,
   purpose: KitchenStableReferencePurpose,
   identity: unknown,
 ) {
@@ -725,7 +726,7 @@ function effectMatchesTicket(effect: Omit<KitchenTicketCreationEffect, "effectDi
 }
 
 function effectReferencesMatchDerivation(
-  ports: KitchenTicketCreationPorts,
+  ports: KitchenTicketEffectValidationPorts,
   effect: Omit<KitchenTicketCreationEffect, "effectDigest">,
 ): boolean {
   const { ticket, action, audit, event } = effect;
@@ -821,7 +822,7 @@ function reconstructEffectSnapshots(ticket: KitchenTicket): {
 }
 
 function effectSnapshotDigestsMatch(
-  ports: KitchenTicketCreationPorts,
+  ports: KitchenTicketEffectValidationPorts,
   ticket: KitchenTicket,
 ): boolean {
   const snapshots = reconstructEffectSnapshots(ticket);
@@ -854,9 +855,9 @@ function effectSnapshotDigestsMatch(
   );
 }
 
-function parseEffect(
+export function parseKitchenTicketCreationEffect(
   value: unknown,
-  ports: KitchenTicketCreationPorts,
+  ports: KitchenTicketEffectValidationPorts,
   onMalformed: () => never = dependency,
 ): KitchenTicketCreationEffect {
   const raw = safeObject(
@@ -916,7 +917,7 @@ function createEffect(
     return dependency();
   }
   const withoutDigest = Object.freeze({ receipt, ticket, action, audit, event });
-  return parseEffect(
+  return parseKitchenTicketCreationEffect(
     { ...withoutDigest, effectDigest: digest(ports, effectBinding(withoutDigest)) },
     ports,
   );
@@ -978,7 +979,7 @@ function concurrentEffectBinding(
   });
 }
 
-function effectsMatchSemantic(
+export function kitchenCreationEffectsMatchSemantic(
   left: KitchenTicketCreationEffect,
   right: KitchenTicketCreationEffect,
 ): boolean {
@@ -1024,7 +1025,7 @@ async function repositoryResolution(
   }
   if (resolution.status === "Conflict") return conflict();
   if (resolution.status === "NotFound") return Object.freeze({ status: "NotFound" as const });
-  const effect = parseEffect(resolution.effect, ports, conflict);
+  const effect = parseKitchenTicketCreationEffect(resolution.effect, ports, conflict);
   if (!effectMatchesIdentity(effect, identity)) return conflict();
   return Object.freeze({ status: "Resolved" as const, effect });
 }
@@ -1048,7 +1049,7 @@ async function recoverCommitUnknown(
 ): Promise<KitchenTicketCreationResult> {
   const recovered = await repositoryResolution(ports, identity);
   if (recovered.status === "NotFound") return dependency();
-  if (!effectsMatchSemantic(recovered.effect, expected)) return conflict();
+  if (!kitchenCreationEffectsMatchSemantic(recovered.effect, expected)) return conflict();
   return result("AlreadyCreated", recovered.effect);
 }
 
@@ -1113,13 +1114,16 @@ export function createKitchenTicketCreationService(ports: KitchenTicketCreationP
       } catch {
         return recoverCommitUnknown(ports, identity, expected);
       }
-      const stored = parseEffect(commit.effect, ports, conflict);
+      const stored = parseKitchenTicketCreationEffect(commit.effect, ports, conflict);
       if (commit.status === "Conflict") {
         if (effectsMatchExact(stored, expected)) return dependency();
         return conflict();
       }
       if (commit.status === "Created" && !effectsMatchExact(stored, expected)) return conflict();
-      if (commit.status === "AlreadyCreated" && !effectsMatchSemantic(stored, expected))
+      if (
+        commit.status === "AlreadyCreated" &&
+        !kitchenCreationEffectsMatchSemantic(stored, expected)
+      )
         return conflict();
       return result(commit.status, stored);
     },

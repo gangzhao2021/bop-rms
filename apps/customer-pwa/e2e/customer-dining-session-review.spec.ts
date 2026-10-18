@@ -1,0 +1,372 @@
+import { expect, test, type Page } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
+
+// WP-2423 Q8: synthetic HTTP views exercise the production CUST-DINE-IN-SESSION page; these
+// fixtures grant no real membership and contain no real Store, guest or payment data.
+const id = (n: number) => `018f2330-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+const cad = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+const session = {
+  schemaVersion: 1,
+  session: {
+    tableLabel: "12",
+    orderNumber: "1042",
+    checkedAt: "2026-10-13T18:00:00.000Z",
+    rounds: [
+      {
+        roundNumber: 1,
+        orderedBy: "You",
+        submittedAt: "2026-10-13T17:40:00.000Z",
+        status: "Serving",
+        payment: "Paid",
+        cancelsAt: null,
+        storeCancellationReason: null,
+        items: [
+          {
+            displayName: "Synthetic tonkotsu ramen with extra chashu",
+            quantity: 2,
+            servedQuantity: 1,
+            cancelled: false,
+            lineTotal: cad("3398"),
+          },
+          {
+            displayName: "Synthetic green tea",
+            quantity: 1,
+            servedQuantity: 0,
+            cancelled: true,
+            lineTotal: cad("339"),
+          },
+        ],
+        itemsTotal: cad("3737"),
+      },
+      {
+        roundNumber: 2,
+        orderedBy: "AnotherGuest",
+        submittedAt: "2026-10-13T17:55:00.000Z",
+        status: "PaymentFailed",
+        payment: "Failed",
+        cancelsAt: "2026-10-13T18:25:00.000Z",
+        storeCancellationReason: null,
+        items: [
+          {
+            displayName: "Synthetic gyoza",
+            quantity: 1,
+            servedQuantity: 0,
+            cancelled: false,
+            lineTotal: cad("904"),
+          },
+        ],
+        itemsTotal: cad("904"),
+      },
+    ],
+    summary: {
+      paid: cad("4282"),
+      refunded: cad("0"),
+      refundPending: cad("339"),
+      due: cad("904"),
+    },
+  },
+};
+
+async function expectNoHorizontalOverflow(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    )
+    .toBe(true);
+}
+
+async function enterTable(page: Page, onSession: () => { status: number; json: unknown }) {
+  await page.route("**/bff/customer/entry", (route) =>
+    route.fulfill({
+      status: 201,
+      headers: { "cache-control": "no-store" },
+      json: {
+        schemaVersion: 2,
+        status: "Established",
+        brandDisplayName: "Synthetic Brand",
+        storeDisplayName: "Synthetic Noodle Bar",
+        publicStoreReference: id(6),
+        publicTableReference: id(7),
+        channel: "DineIn",
+        operatingState: "Open",
+        availableServiceModes: ["DineIn"],
+        locale: "en-CA",
+        contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+        csrfToken: "s".repeat(43),
+      },
+    }),
+  );
+  await page.route("**/api/v1/dine-in/session", (route) => {
+    expect(route.request().method()).toBe("GET");
+    expect(route.request().headers()["x-csrf-token"]).toBe("s".repeat(43));
+    expect(new URL(route.request().url()).search).toBe("");
+    const { status, json } = onSession();
+    return route.fulfill({ status, headers: { "cache-control": "no-store" }, json });
+  });
+  // WP-2423 DEC-DINING-GUEST-INVITATION: this guest is not the table's host (no invite control).
+  await page.route("**/api/v1/dine-in/invitation", (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { "cache-control": "no-store" },
+      json: { schemaVersion: 1, invitation: { canInvite: false } },
+    }),
+  );
+  await page.goto("/#qr=aaa.bbb.ccc");
+  await expect(
+    page.getByRole("heading", { name: "Synthetic Noodle Bar", exact: true }),
+  ).toBeVisible();
+  // Same-document navigation retains the real Entry CSRF context, as after joining the table.
+  await page.evaluate(() => {
+    history.pushState(null, "", "/menu");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await page
+    .getByRole("navigation", { name: "Customer journey" })
+    .getByRole("link", { name: "Your table" })
+    .click();
+  await expect(page).toHaveURL(/\/dine-in\/session$/u);
+}
+
+test.describe("@production CUST-DINE-IN-SESSION table view", () => {
+  test.use({ serviceWorkers: "block" });
+
+  test("shows the table's rounds, statuses and amounts at responsive widths", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    await enterTable(page, () => ({ status: 200, json: session }));
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Your table · 12" })).toBeVisible();
+    await expect(main.getByText("Order 1042", { exact: true })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "Round 1 · Ordered by you" })).toBeVisible();
+    await expect(
+      main.getByRole("heading", { name: "Round 2 · Ordered by another guest" }),
+    ).toBeVisible();
+    await expect(main.getByText("Being served", { exact: true })).toBeVisible();
+    await expect(main.getByText("Served 1 of 2", { exact: true })).toBeVisible();
+    await expect(main.getByText("On hold until paid", { exact: true })).toBeVisible();
+    await expect(main.getByText(/This round will be cancelled at/u)).toBeVisible();
+    const summary = main.getByRole("region", { name: "Table total" });
+    await expect(summary.getByText("$42.82", { exact: true })).toBeVisible();
+    await expect(summary.getByText("$9.04", { exact: true })).toBeVisible();
+    await expect(summary.getByText("$3.39", { exact: true })).toBeVisible();
+    // No internal codes or references reach the guest.
+    await expect(main.getByText(/AnotherGuest|PaymentFailed|RefundPending|018f2330/u)).toHaveCount(
+      0,
+    );
+    await expect(main.getByRole("link", { name: "Order more from the menu" })).toHaveAttribute(
+      "href",
+      "/menu",
+    );
+
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+      await expectNoHorizontalOverflow(page);
+      for (const card of await main.locator(".order-status__card").all()) {
+        const box = await card.boundingBox();
+        if (box === null) throw new Error("table card missing");
+        expect(box.width).toBeLessThanOrEqual(width - 16);
+      }
+      const header = await page.locator(".bop-shell__header").boundingBox();
+      if (header === null) throw new Error("Customer frame is incomplete");
+      expect(header.width).toBe(width);
+      if (width !== 320)
+        await page.screenshot({
+          path: `test-results/customer-dining-session-${width}.png`,
+          fullPage: true,
+        });
+    }
+    expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
+    expect(errors).toEqual([]);
+  });
+
+  test("WP-2423 D5: lists item prices before tax, then subtotal, tax and total per round and table", async ({
+    page,
+  }) => {
+    // Ramen $30.07 + $3.91 tax = $33.98; tea $3.00 + $0.39 = $3.39; gyoza $8.00 + $1.04 = $9.04.
+    const [round1, round2] = session.session.rounds;
+    if (round1 === undefined || round2 === undefined) throw new Error("fixture");
+    const priced = {
+      schemaVersion: 1,
+      session: {
+        ...session.session,
+        rounds: [
+          {
+            ...round1,
+            items: [
+              { ...round1.items[0], priceBeforeTax: cad("3007") },
+              { ...round1.items[1], priceBeforeTax: cad("300") },
+            ],
+            subtotal: cad("3307"),
+            tax: cad("430"),
+          },
+          {
+            ...round2,
+            items: [{ ...round2.items[0], priceBeforeTax: cad("800") }],
+            subtotal: cad("800"),
+            tax: cad("104"),
+          },
+        ],
+        summary: {
+          ...session.session.summary,
+          ordered: { subtotal: cad("4107"), tax: cad("534"), total: cad("4641") },
+        },
+      },
+    };
+    await enterTable(page, () => ({ status: 200, json: priced }));
+    const main = page.getByRole("main");
+    const round = main.getByRole("article", { name: "Round 1 · Ordered by you" });
+    await expect(round.getByText("$30.07", { exact: true })).toBeVisible();
+    await expect(round.getByText("$3.00", { exact: true })).toBeVisible();
+    await expect(round.locator(".order-status__money")).toContainText("Subtotal$33.07");
+    await expect(round.locator(".order-status__money")).toContainText("Tax$4.30");
+    await expect(round.locator(".order-status__total")).toHaveText("Round total$37.37");
+    const summary = main.getByRole("region", { name: "Table total" });
+    await expect(summary.locator(".order-status__money")).toContainText("Subtotal$41.07");
+    await expect(summary.locator(".order-status__money")).toContainText("Tax$5.34");
+    await expect(summary.locator(".order-status__money")).toContainText("Total ordered$46.41");
+    // What the table paid and still owes is the same as before.
+    await expect(summary.getByText("$42.82", { exact: true })).toBeVisible();
+    await expect(summary.getByText("$9.04", { exact: true })).toBeVisible();
+    await expect(summary).toContainText("Item prices are before tax.");
+    await expectNoInternalText(page);
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expectNoHorizontalOverflow(page);
+    }
+    await page.screenshot({
+      path: "test-results/customer-dining-session-priced-320.png",
+      fullPage: true,
+    });
+  });
+
+  // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): a round staff entered for the table.
+  test("shows rounds staff entered for the table and how they are paid", async ({ page }) => {
+    const [round1] = session.session.rounds;
+    if (round1 === undefined) throw new Error("fixture");
+    const staffRound = (roundNumber: number, status: string, payment: string) => ({
+      ...round1,
+      roundNumber,
+      orderedBy: "Staff",
+      submittedAt: "2026-10-13T17:58:00.000Z",
+      status,
+      payment,
+      items: [
+        {
+          displayName: "Synthetic shoyu ramen",
+          quantity: 1,
+          servedQuantity: 0,
+          cancelled: false,
+          lineTotal: cad("2034"),
+        },
+      ],
+      itemsTotal: cad("2034"),
+    });
+    await enterTable(page, () => ({
+      status: 200,
+      json: {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          rounds: [
+            round1,
+            staffRound(2, "Queued", "Paid"),
+            staffRound(3, "AwaitingPayment", "Awaiting"),
+          ],
+          summary: { ...session.session.summary, due: cad("2034") },
+        },
+      },
+    }));
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Round 2 · Entered by staff" })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "Round 3 · Entered by staff" })).toBeVisible();
+    const awaiting = main.getByRole("article", { name: "Round 3 · Entered by staff" });
+    await expect(awaiting).toContainText(
+      "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it.",
+    );
+    await expect(
+      main.getByRole("article", { name: "Round 2 · Entered by staff" }).getByText("Paid", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expectNoInternalText(page);
+    await expect(
+      main.getByText(/\bStaff\b(?! entered)|StoreCardMachine|AwaitingPayment/u),
+    ).toHaveCount(0);
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+      await expectNoHorizontalOverflow(page);
+    }
+    await page.screenshot({
+      path: "test-results/customer-dining-session-staff-round-390.png",
+      fullPage: true,
+    });
+  });
+
+  // WP-2423 Q26: the kitchen is making a dish again; the table is told which one, in plain words.
+  test("tells the table which dish is being remade", async ({ page }) => {
+    const [round1] = session.session.rounds;
+    const [ramen, tea] = round1?.items ?? [];
+    if (round1 === undefined || ramen === undefined || tea === undefined)
+      throw new Error("fixture");
+    await enterTable(page, () => ({
+      status: 200,
+      json: {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          rounds: [
+            {
+              ...round1,
+              items: [
+                { ...ramen, beingRemade: true },
+                { ...tea, displayName: "Synthetic gyoza", cancelled: false, servedQuantity: 1 },
+              ],
+            },
+          ],
+          summary: { ...session.session.summary, due: cad("0") },
+        },
+      },
+    }));
+    const round = page.getByRole("main").getByRole("article", { name: "Round 1 · Ordered by you" });
+    const remade = round.getByRole("listitem").filter({ hasText: "Synthetic tonkotsu ramen" });
+    await expect(remade).toContainText("Being remade · we'll bring it to your table shortly");
+    // The dish being remade does not also claim it was served; the other dish still does.
+    await expect(remade).not.toContainText("Served");
+    await expect(round.getByRole("listitem").filter({ hasText: "Synthetic gyoza" })).toContainText(
+      "Served 1 of 1",
+    );
+    await expect(round.getByText(/Being remade/u)).toHaveCount(1);
+    await expectNoInternalText(page);
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+      await expectNoHorizontalOverflow(page);
+    }
+    await page.screenshot({
+      path: "test-results/customer-dining-session-remake-320.png",
+      fullPage: true,
+    });
+  });
+
+  test("asks a guest who has not joined to join first", async ({ page }) => {
+    await enterTable(page, () => ({ status: 404, json: { schemaVersion: 1 } }));
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Join your table first" })).toBeVisible();
+    await expect(main.getByText("Round 1", { exact: false })).toHaveCount(0);
+  });
+
+  test("recovers after a failed load with Try again", async ({ page }) => {
+    let response: { status: number; json: unknown } = { status: 503, json: { schemaVersion: 1 } };
+    await enterTable(page, () => response);
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "We couldn’t load your table" })).toBeVisible();
+    response = { status: 200, json: session };
+    await main.getByRole("button", { name: "Try again" }).click();
+    await expect(main.getByRole("heading", { name: "Round 1 · Ordered by you" })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "We couldn’t load your table" })).toHaveCount(0);
+  });
+});

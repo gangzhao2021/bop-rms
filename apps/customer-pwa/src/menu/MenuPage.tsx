@@ -1,9 +1,21 @@
-import { AppFrame } from "@bop-rms/ui";
+import {
+  activeMenuOptionRules,
+  defaultMenuOptionSelections,
+  selectedMenuOptions,
+} from "./option-configuration.js";
+import { createBrowserPickupCartClient } from "../cart/pickup-cart-client.js";
+import { CustomerPage } from "../journey/CustomerPage.js";
+import { formatDecimalMoney } from "../journey/format.js";
+import { cartIssueMessage } from "../journey/messages.js";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { FormEvent } from "react";
 import { Link, useParams } from "react-router";
 import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
-import type { CartItemDraft } from "../cart/types.js";
+import {
+  checkoutInProgressMessage,
+  orderProcessingMessage,
+  type CartItemDraft,
+} from "../cart/types.js";
 import {
   createConfigureController,
   type ConfigureController,
@@ -14,6 +26,8 @@ import type {
   CustomerMenuClient,
   MenuJourneyContext,
   MenuLoadResult,
+  MenuOptionRule,
+  MenuPhoto,
   MenuSellable,
   MenuView,
 } from "./types.js";
@@ -24,11 +38,23 @@ type ScreenState =
   | Readonly<{ kind: "Loading" }>
   | MenuLoadResult;
 
+/** How many items are in the current cart; null when unknown. */
+export type CartCountLoader = () => Promise<number | null>;
+
 interface MenuPageProps {
   readonly context?: MenuJourneyContext | undefined;
   readonly client?: CustomerMenuClient | undefined;
   readonly readOnlyNotice?: React.ReactNode | undefined;
+  /** Injected for previews; the browser loader reads the Store cart otherwise. */
+  readonly cartCount?: CartCountLoader | undefined;
 }
+
+const browserCartCount: CartCountLoader = async () => {
+  const cart = await createBrowserCustomerCartClient().loadCurrent();
+  return cart === null || cart.cart.lifecycle.status !== "Active"
+    ? 0
+    : cart.cart.items.reduce((total, item) => total + item.quantity, 0);
+};
 
 function useClient(
   context: MenuJourneyContext | undefined,
@@ -46,7 +72,7 @@ function useClient(
 
 function useMenuLoad(
   client: CustomerMenuClient | null,
-  input: Readonly<{ searchTerm?: string }> | null = {},
+  input: Readonly<{ searchTerm?: string; sectionReference?: string }> | null = {},
 ) {
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<ScreenState>(() =>
@@ -81,7 +107,25 @@ function useMenuLoad(
   return { state, heading, retry: () => setRevision((value) => value + 1) };
 }
 
-export function MenuBrowsePage({ context, client, readOnlyNotice }: MenuPageProps) {
+/** One choice only: shown as radio buttons. */
+const singleChoice = (rule: MenuOptionRule) =>
+  rule.maximumSelections === 1 && rule.options.every((option) => option.maximumQuantity === 1);
+/** "choose 1", "choose up to 3 (optional)", "choose 1 to 2". */
+function choiceText(rule: MenuOptionRule): string {
+  const { minimumSelections: min, maximumSelections: max } = rule;
+  if (min === max) return `choose ${max}`;
+  if (min === 0) return `optional, up to ${max}`;
+  return `choose ${min} to ${max}`;
+}
+/** "+ $0.75", "No extra charge", or a note that the quote will price it. */
+function optionPriceText(price: MenuOptionRule["options"][number]["price"]): string {
+  if (price === null) return "Price shown in your final quote";
+  if (/^0+(\.0+)?$/u.test(price.amount)) return "No extra charge";
+  const amount = formatDecimalMoney(price.amount, price.currency);
+  return amount === null ? "Price shown in your final quote" : `+ ${amount}`;
+}
+
+export function MenuBrowsePage({ context, client, readOnlyNotice, cartCount }: MenuPageProps) {
   const resolvedClient = useClient(context, client);
   const input = useMemo(() => ({}), []);
   const loaded = useMenuLoad(resolvedClient, input);
@@ -92,21 +136,35 @@ export function MenuBrowsePage({ context, client, readOnlyNotice }: MenuPageProp
       mode="browse"
       onRetry={loaded.retry}
       readOnlyNotice={readOnlyNotice}
+      cartCount={cartCount}
       state={loaded.state}
     />
   );
 }
 
-export function MenuSearchPage({ context, client, readOnlyNotice }: MenuPageProps) {
+export function MenuSearchPage({ context, client, readOnlyNotice, cartCount }: MenuPageProps) {
   const resolvedClient = useClient(context, client);
   const [draft, setDraft] = useState("");
+  const [sectionDraft, setSectionDraft] = useState("");
   const [term, setTerm] = useState<string | null>(null);
-  const input = useMemo(() => (term === null ? null : { searchTerm: term }), [term]);
+  const [section, setSection] = useState<string | null>(null);
+  const sectionInput = useMemo(() => ({}), []);
+  const sections = useMenuLoad(resolvedClient, sectionInput);
+  const input = useMemo(() => {
+    if (term === null && section === null) return null;
+    return {
+      ...(term === null ? {} : { searchTerm: term }),
+      ...(section === null ? {} : { sectionReference: section }),
+    };
+  }, [section, term]);
   const loaded = useMenuLoad(resolvedClient, input);
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const normalized = normalizeMenuSearch(draft);
-    if (normalized !== null) setTerm(normalized);
+    if (normalized !== null || sectionDraft !== "") {
+      setTerm(normalized);
+      setSection(sectionDraft || null);
+    }
   };
   return (
     <MenuScreen
@@ -115,30 +173,63 @@ export function MenuSearchPage({ context, client, readOnlyNotice }: MenuPageProp
       mode="search"
       onRetry={loaded.retry}
       readOnlyNotice={readOnlyNotice}
+      cartCount={cartCount}
       search={
-        <form className="menu-search" role="search" onSubmit={submit}>
-          <label htmlFor="menu-search-input">Search the menu</label>
-          <div>
-            <input
-              id="menu-search-input"
-              maxLength={100}
-              value={draft}
-              onChange={(event) => setDraft(event.currentTarget.value)}
-            />
-            <button type="submit" disabled={normalizeMenuSearch(draft) === null}>
-              Search
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setDraft("");
-                setTerm(null);
-              }}
-            >
-              Clear
-            </button>
-          </div>
-        </form>
+        <section className="menu-search-view">
+          <form className="menu-search" role="search" onSubmit={submit}>
+            <label className="sr-only" htmlFor="menu-search-input">
+              Search the menu
+            </label>
+            <div className="menu-search-primary">
+              <input
+                id="menu-search-input"
+                maxLength={100}
+                placeholder="Search menu items"
+                value={draft}
+                onChange={(event) => setDraft(event.currentTarget.value)}
+              />
+              <button
+                type="submit"
+                disabled={normalizeMenuSearch(draft) === null && sectionDraft === ""}
+              >
+                Search
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft("");
+                  setSectionDraft("");
+                  setTerm(null);
+                  setSection(null);
+                }}
+              >
+                Clear
+              </button>
+            </div>
+            <div className="menu-search-section">
+              <label htmlFor="menu-search-section">Menu section</label>
+              <select
+                id="menu-search-section"
+                value={sectionDraft}
+                disabled={sections.state.kind !== "Found"}
+                onChange={(event) => setSectionDraft(event.currentTarget.value)}
+              >
+                <option value="">All sections</option>
+                {sections.state.kind === "Found"
+                  ? sections.state.menu.sections.map((item) => (
+                      <option key={item.sectionReference} value={item.sectionReference}>
+                        {item.name}
+                      </option>
+                    ))
+                  : null}
+              </select>
+            </div>
+            <p className="menu-search-boundary">
+              Dietary tags are not provided by this menu. Availability is shown on each result; ask
+              staff for dietary help.
+            </p>
+          </form>
+        </section>
       }
       searchTerm={term}
       state={loaded.state}
@@ -180,6 +271,7 @@ export interface MenuScreenProps {
   readonly mode: "browse" | "search" | "detail";
   readonly onRetry?: (() => void) | undefined;
   readonly readOnlyNotice?: React.ReactNode | undefined;
+  readonly cartCount?: CartCountLoader | undefined;
   readonly search?: React.ReactNode | undefined;
   readonly searchTerm?: string | null | undefined;
   readonly state: ScreenState;
@@ -192,41 +284,53 @@ export function MenuScreen({
   mode,
   onRetry,
   readOnlyNotice,
+  cartCount,
   search,
   searchTerm,
   state,
 }: MenuScreenProps) {
-  const title =
-    mode === "search"
-      ? "Search menu"
-      : mode === "detail" && detail
-        ? detail.name
-        : state.kind === "Found"
-          ? state.menu.name
-          : "Menu";
+  // The page title never changes when the menu arrives, so a long item name cannot wrap late and
+  // push the page down; the item's own heading carries its name.
+  const title = mode === "search" ? "Search menu" : "Menu";
   return (
-    <AppFrame
-      title={title}
-      description={
+    <CustomerPage
+      step="menu"
+      className={`customer-menu-screen customer-menu-screen--${mode}`}
+      store={
         context
-          ? `${context.brandDisplayName} · ${context.storeDisplayName}`
-          : "A location QR code is required"
+          ? {
+              storeName: context.storeDisplayName,
+              brandName: context.brandDisplayName,
+              serviceMode: context.channel,
+            }
+          : undefined
       }
     >
+      <div className="menu-page-intro">
+        <h2>{title}</h2>
+      </div>
       <nav className="menu-navigation" aria-label="Menu">
-        <Link to="/menu">Browse menu</Link>
-        <Link to="/menu/search">Search</Link>
-        <Link to="/cart">Cart</Link>
+        {mode === "search" ? (
+          <div className="menu-navigation__links menu-navigation__links--search">
+            <Link to="/menu">← Back to menu</Link>
+          </div>
+        ) : (
+          <Link aria-label="Search menu" className="menu-navigation__search" to="/menu/search">
+            Search menu
+          </Link>
+        )}
       </nav>
       {state.kind === "MissingContext" ? null : search}
-      {state.kind !== "MissingContext" &&
-      mode === "search" &&
-      searchTerm !== null &&
-      searchTerm !== undefined ? (
-        <p className="menu-search-result">Search results for “{searchTerm}”</p>
+      {state.kind === "Found" && mode === "search" ? (
+        <section className="menu-search-summary" aria-label="Search results">
+          <h2>Search results</h2>
+          {searchTerm ? <p>Matched term · {searchTerm}</p> : null}
+        </section>
       ) : null}
       <div className="menu-content" aria-live="polite" aria-busy={state.kind === "Loading"}>
         <MenuState
+          key={context ? `${context.publicStoreReference}:${context.channel}` : "missing-context"}
+          channel={context?.channel}
           detail={detail}
           headingRef={headingRef}
           mode={mode}
@@ -235,8 +339,40 @@ export function MenuScreen({
           state={state}
         />
       </div>
-      <AllergenHelp />
-    </AppFrame>
+      {/* Shown with the loaded content, not under the short loading notice: placed there it would
+          be pushed down when the menu or item arrives (a visible layout shift). */}
+      {state.kind === "PermissionDenied" || state.kind === "Loading" ? null : <AllergenHelp />}
+      {context && mode !== "detail" ? <MenuCartBar load={cartCount ?? browserCartCount} /> : null}
+    </CustomerPage>
+  );
+}
+
+/** U6: the cart is one tap away from anywhere on the menu, with its live line count. */
+function MenuCartBar({ load }: { readonly load: CartCountLoader }) {
+  const [count, setCount] = useState<number | null>(null);
+  useEffect(() => {
+    let active = true;
+    load()
+      .then((value) => {
+        if (active) setCount(value);
+      })
+      .catch(() => {
+        if (active) setCount(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [load]);
+  if (count === null || count === 0) return null;
+  return (
+    <div className="menu-cart-bar">
+      <Link className="menu-cart-bar__link" to="/cart">
+        <span>View cart</span>
+        <span className="menu-cart-bar__count" aria-label={`${count} items in cart`}>
+          {count}
+        </span>
+      </Link>
+    </div>
   );
 }
 
@@ -263,18 +399,24 @@ function Retry({ onRetry }: { readonly onRetry?: (() => void) | undefined }) {
 }
 
 function MenuState({
+  channel,
   detail,
   headingRef,
   mode,
   onRetry,
   readOnlyNotice,
   state,
-}: Omit<MenuScreenProps, "context" | "search" | "searchTerm">) {
+}: Omit<MenuScreenProps, "context" | "search" | "searchTerm"> & {
+  readonly channel?: MenuJourneyContext["channel"] | undefined;
+}) {
   if (state.kind === "MissingContext")
     return (
       <section className="menu-state" role="alert">
         <Heading headingRef={headingRef}>Scan the location QR code</Heading>
-        <p>Your Store and service context is not available. Scan again to open the current menu.</p>
+        <p>
+          We don’t know which location you’re ordering from. Scan the QR code again to open the
+          menu.
+        </p>
         <Link className="menu-action" to="/">
           Return to entry
         </Link>
@@ -282,9 +424,9 @@ function MenuState({
     );
   if (state.kind === "IdleSearch")
     return (
-      <section className="menu-state" role="status">
+      <section className="menu-state menu-state--idle-search" role="status">
         <Heading headingRef={headingRef}>Search this menu</Heading>
-        <p>Enter a published item name or approved search term.</p>
+        <p>Type an item name to find it on today’s menu.</p>
       </section>
     );
   if (state.kind === "Loading")
@@ -292,6 +434,22 @@ function MenuState({
       <section className="menu-state" role="status">
         <Heading headingRef={headingRef}>Loading the current menu</Heading>
         <p>Checking the latest published items…</p>
+      </section>
+    );
+  if (state.kind === "PermissionDenied")
+    return (
+      <section
+        className="menu-state menu-state--warning menu-state--permission-denied"
+        role="alert"
+      >
+        <Heading headingRef={headingRef}>This menu can’t be opened</Heading>
+        <p>
+          Your current session can’t access this menu. Scan the location QR code again or ask staff
+          for help.
+        </p>
+        <Link className="menu-action" to="/">
+          Return to entry
+        </Link>
       </section>
     );
   if (state.kind === "Offline")
@@ -336,50 +494,62 @@ function MenuState({
     );
   if (detail)
     return (
-      <SellableDetail sellable={detail} headingRef={headingRef} readOnlyNotice={readOnlyNotice} />
+      <SellableDetail
+        channel={channel}
+        sellable={detail}
+        headingRef={headingRef}
+        readOnlyNotice={readOnlyNotice}
+      />
     );
-  return <MenuContents menu={state.menu} headingRef={headingRef} />;
+  return <MenuContents menu={state.menu} headingRef={headingRef} mode={mode} />;
 }
 
 function MenuContents({
   menu,
   headingRef,
+  mode,
 }: {
   readonly menu: MenuView;
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
+  readonly mode: MenuScreenProps["mode"];
 }) {
   const count = menu.sections.reduce((total, section) => total + section.sellables.length, 0);
   if (count === 0)
     return (
-      <section className="menu-state">
+      <section className="menu-state menu-state--empty">
         <Heading headingRef={headingRef}>No items available</Heading>
         <p>The current published menu has no matching items.</p>
       </section>
     );
   return (
     <>
-      <Heading headingRef={headingRef}>{menu.name}</Heading>
-      <nav className="menu-sections" aria-label="Menu sections">
-        {menu.sections.map((section) => (
-          <a key={section.sectionReference} href={`#section-${section.sectionReference}`}>
-            {section.name}
-          </a>
-        ))}
-      </nav>
-      <p className="menu-filter-boundary">
-        Showing available items only. Dietary filters are not available in this published menu;
-        review allergen disclosures and ask staff for assistance.
-      </p>
+      {mode === "browse" ? <Heading headingRef={headingRef}>{menu.name}</Heading> : null}
+      {mode === "browse" ? (
+        <nav className="menu-sections" aria-label="Menu sections">
+          {menu.sections.map((section) => (
+            <a key={section.sectionReference} href={`#section-${section.sectionReference}`}>
+              {section.name}
+            </a>
+          ))}
+        </nav>
+      ) : null}
       {menu.sections.map((section) => (
         <section
           className="menu-section"
           key={section.sectionReference}
-          aria-labelledby={`section-${section.sectionReference}`}
+          aria-label={mode === "search" ? `Results in ${section.name}` : undefined}
+          aria-labelledby={mode === "browse" ? `section-${section.sectionReference}` : undefined}
         >
-          <h3 id={`section-${section.sectionReference}`}>{section.name}</h3>
+          {mode === "browse" ? (
+            <h3 id={`section-${section.sectionReference}`}>{section.name}</h3>
+          ) : null}
           <div className="menu-grid">
             {section.sellables.map((item) => (
-              <SellableCard key={item.sellableReference} sellable={item} />
+              <SellableCard
+                key={item.sellableReference}
+                sellable={item}
+                {...(mode === "search" ? { sectionName: section.name } : {})}
+              />
             ))}
           </div>
         </section>
@@ -388,97 +558,222 @@ function MenuContents({
   );
 }
 
-function SellableCard({ sellable }: { readonly sellable: MenuSellable }) {
+function SellableCard({
+  sellable,
+  sectionName,
+}: {
+  readonly sellable: MenuSellable;
+  readonly sectionName?: string | undefined;
+}) {
+  const soldOut = sellable.availability === "SoldOut";
+  const [photo, photoFailed] = useShownPhoto(sellable.photo);
   return (
-    <article className="menu-card">
-      <div className="menu-media" aria-label="Image not available">
-        Image not available
-      </div>
-      <h4>{sellable.name}</h4>
-      {sellable.presentationRole !== "Standard" ? (
-        <p className="menu-badge">
-          {sellable.presentationRole === "Sponsored"
-            ? "Sponsored item"
-            : sellable.presentationRole === "Promotional"
-              ? "Promotional item"
-              : "Featured item"}
-        </p>
-      ) : null}
-      <p>Available now</p>
-      <p>Price confirmed in your final quote</p>
-      <AllergenSummary sellable={sellable} />
-      <Link className="menu-action" to={`/menu/items/${sellable.sellableReference}`}>
-        View {sellable.name}
+    <article
+      className={`menu-card${soldOut ? " menu-card--sold-out" : ""}${photo === null ? "" : " menu-card--with-photo"}`}
+    >
+      <Link
+        aria-label={`View ${sellable.name}`}
+        className="menu-card__link"
+        to={`/menu/items/${sellable.sellableReference}`}
+      >
+        <span className="menu-card__body">
+          <h4>{sellable.name}</h4>
+          {sellable.presentationRole !== "Standard" ? (
+            <span className="menu-badge">
+              {sellable.presentationRole === "Sponsored"
+                ? "Sponsored"
+                : sellable.presentationRole === "Promotional"
+                  ? "Promotion"
+                  : "Featured"}
+            </span>
+          ) : null}
+          {sellable.description === null ? null : (
+            <span className="menu-card__description">{sellable.description}</span>
+          )}
+          {sectionName ? (
+            <span className="menu-result-section">
+              <span>Section</span>
+              {sectionName}
+            </span>
+          ) : null}
+          <span className="menu-card__allergens">
+            {sellable.allergens.length === 0 ? (
+              <span>No allergen-free claim is made. Ask staff.</span>
+            ) : (
+              sellable.allergens.map((item, index) => (
+                <span key={`${item.classification}-${item.name}`}>
+                  {index > 0 ? " · " : ""}
+                  <span>
+                    {item.classification === "Contains" ? "Contains" : "Cross-contact possible"}:{" "}
+                    {item.name}
+                  </span>
+                </span>
+              ))
+            )}
+          </span>
+        </span>
+        <span className="menu-card__aside">
+          <span
+            className={`menu-card__price${sellable.price === null ? " menu-card__price--pending" : ""}`}
+          >
+            {priceLine(sellable)}
+          </span>
+          {soldOut ? <span className="menu-sold-out">Sold out</span> : null}
+        </span>
+        {photo === null ? null : (
+          <MenuPhotoPicture
+            className="menu-card__media"
+            decorative
+            onError={photoFailed}
+            photo={photo}
+            sizes="88px"
+            widths={[320, 640]}
+          />
+        )}
       </Link>
     </article>
   );
 }
 
+function srcSet(photo: MenuPhoto, contentType: string, widths: readonly number[]): string {
+  return photo.renditions
+    .filter((item) => item.contentType === contentType && widths.includes(item.width))
+    .map((item) => `${item.url} ${item.width}w`)
+    .join(", ");
+}
+
+/**
+ * The photo to show, or null when there is none, it has no JPEG fallback, or it failed to load.
+ * A failed photo is dropped with its layout (no empty box, no broken-image icon); a menu reload
+ * brings new photo objects and so tries again.
+ */
+function useShownPhoto(photo: MenuPhoto | null): readonly [MenuPhoto | null, () => void] {
+  const [failed, setFailed] = useState<MenuPhoto | null>(null);
+  const shown =
+    photo !== null &&
+    photo !== failed &&
+    photo.renditions.some((item) => item.contentType === "image/jpeg")
+      ? photo
+      : null;
+  return [shown, () => setFailed(photo)];
+}
+
+/** The published product photo in a fixed aspect-ratio box, so nothing shifts while it loads. */
+function MenuPhotoPicture({
+  photo,
+  className,
+  sizes,
+  widths,
+  onError,
+  decorative = false,
+  priority = false,
+}: {
+  readonly photo: MenuPhoto;
+  readonly className: string;
+  readonly sizes: string;
+  readonly widths: readonly number[];
+  readonly onError: () => void;
+  readonly decorative?: boolean;
+  readonly priority?: boolean;
+}) {
+  const jpegs = photo.renditions.filter(
+    (item) => item.contentType === "image/jpeg" && widths.includes(item.width),
+  );
+  const fallback = jpegs[0] ?? photo.renditions.find((item) => item.contentType === "image/jpeg");
+  if (fallback === undefined) return null;
+  const webp = srcSet(photo, "image/webp", widths);
+  const jpeg = srcSet(photo, "image/jpeg", widths);
+  return (
+    <span className={className} {...(decorative ? { "aria-hidden": true } : {})}>
+      <picture>
+        {webp === "" ? null : <source type="image/webp" srcSet={webp} sizes={sizes} />}
+        <img
+          alt={decorative ? "" : photo.altText}
+          decoding="async"
+          height={photo.height}
+          loading={priority ? "eager" : "lazy"}
+          sizes={sizes}
+          src={fallback.url}
+          srcSet={jpeg === "" ? undefined : jpeg}
+          width={photo.width}
+          onError={onError}
+          {...(priority ? { fetchPriority: "high" as const } : {})}
+        />
+      </picture>
+    </span>
+  );
+}
+
+/** WP-2423 8.6: the Store's base price; options and tax are added in the final quote. */
+function priceLine(sellable: MenuSellable): string {
+  if (sellable.price === null) return "Priced at checkout";
+  // Decimal text from the server; never converted to a binary number.
+  const amount = formatDecimalMoney(sellable.price.amount, sellable.price.currency);
+  if (amount === null) return "Priced at checkout";
+  return sellable.optionRules.length === 0 ? amount : `From ${amount}`;
+}
+function AvailabilityLine({ sellable }: { readonly sellable: MenuSellable }) {
+  return sellable.availability === "SoldOut" ? (
+    <p className="menu-sold-out">Sold out</p>
+  ) : (
+    <p className="menu-available">Available now</p>
+  );
+}
+
 function SellableDetail({
+  channel,
   sellable,
   headingRef,
   readOnlyNotice,
 }: {
+  readonly channel?: MenuJourneyContext["channel"] | undefined;
   readonly sellable: MenuSellable;
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
   readonly readOnlyNotice?: React.ReactNode | undefined;
 }) {
-  const [configuring, setConfiguring] = useState(false);
+  const [photo, photoFailed] = useShownPhoto(sellable.photo);
   return (
-    <article className="sellable-detail">
-      <Link to="/menu">← Back to menu</Link>
-      <div className="menu-media menu-media--detail" aria-label="Image not available">
-        Image not available
-      </div>
-      <Heading headingRef={headingRef}>{sellable.name}</Heading>
-      <p className="menu-available">Available now</p>
-      <dl>
-        <div>
-          <dt>Price</dt>
-          <dd>Confirmed in your final quote</dd>
-        </div>
-        <div>
-          <dt>Tax</dt>
-          <dd>Calculated in your final quote</dd>
-        </div>
-        <div>
-          <dt>Portion or variant</dt>
-          <dd>No published detail available</dd>
-        </div>
-        <div>
-          <dt>Options</dt>
-          <dd>
-            {sellable.optionRules.length === 0
-              ? "No choices required"
-              : `${sellable.optionRules.length} option group${sellable.optionRules.length === 1 ? "" : "s"}`}
-            {sellable.optionRules.length > 0 ? (
-              <ul>
-                {sellable.optionRules.map((rule, index) => (
-                  <li key={`${rule.minimumSelections}-${rule.maximumSelections}-${index}`}>
-                    Choose {rule.minimumSelections}–{rule.maximumSelections} from{" "}
-                    {rule.options.length}
-                    {rule.options.some((option) => option.selectedByDefault)
-                      ? `; ${rule.options.filter((option) => option.selectedByDefault).length} selected by default`
-                      : ""}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </dd>
-        </div>
-      </dl>
-      <AllergenSummary sellable={sellable} />
-      {readOnlyNotice ? (
-        <div className="menu-readonly-boundary" role="status">
-          {readOnlyNotice}
-        </div>
-      ) : configuring ? (
-        <SellableConfigurator key={sellable.sellableReference} sellable={sellable} />
-      ) : (
-        <button className="menu-action" type="button" onClick={() => setConfiguring(true)}>
-          {sellable.optionRules.length === 0 ? "Add to cart" : "Configure and add"}
-        </button>
+    <article className={`sellable-detail${photo === null ? "" : " sellable-detail--with-photo"}`}>
+      <Link className="sellable-detail__back" to="/menu">
+        ← Back to menu
+      </Link>
+      {photo === null ? null : (
+        <MenuPhotoPicture
+          className="sellable-detail__media"
+          onError={photoFailed}
+          photo={photo}
+          priority
+          sizes="(min-width: 960px) 45vw, (min-width: 736px) 640px, calc(100vw - 64px)"
+          widths={[640, 1280]}
+        />
       )}
+      <div className="sellable-detail__content">
+        <div className="sellable-detail__heading">
+          <Heading headingRef={headingRef}>{sellable.name}</Heading>
+          <p className="sellable-detail__price">
+            {priceLine(sellable)}
+            {sellable.price === null ? null : <span> plus tax</span>}
+          </p>
+        </div>
+        {sellable.description === null ? null : (
+          <p className="sellable-detail__description">{sellable.description}</p>
+        )}
+        {sellable.availability === "SoldOut" ? <AvailabilityLine sellable={sellable} /> : null}
+        <AllergenSummary sellable={sellable} />
+        {readOnlyNotice ? (
+          <div className="menu-readonly-boundary" role="status">
+            {readOnlyNotice}
+          </div>
+        ) : sellable.availability === "SoldOut" ? (
+          <p role="status">Sold out at this store right now. Please choose another item.</p>
+        ) : (
+          <SellableConfigurator
+            channel={channel}
+            key={sellable.sellableReference}
+            sellable={sellable}
+          />
+        )}
+      </div>
     </article>
   );
 }
@@ -492,22 +787,37 @@ function configurationIssues(
   const issues: string[] = [];
   if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100)
     issues.push("Quantity must be between 1 and 100.");
-  sellable.optionRules.forEach((rule, index) => {
+  const activeRules = activeMenuOptionRules(sellable.optionRules, selected);
+  const activeReferences = new Set(
+    activeRules.flatMap((rule) => rule.options.map((option) => option.optionReference)),
+  );
+  activeRules.forEach((rule, index) => {
     const count = rule.options.reduce(
       (total, option) => total + (selected.get(option.optionReference) ?? 0),
       0,
     );
     if (count < rule.minimumSelections)
-      issues.push(`Choice group ${index + 1} requires at least ${rule.minimumSelections}.`);
+      issues.push(
+        `${rule.name ?? `Choice group ${index + 1}`} requires at least ${rule.minimumSelections}.`,
+      );
     if (count > rule.maximumSelections)
-      issues.push(`Choice group ${index + 1} allows at most ${rule.maximumSelections}.`);
+      issues.push(
+        `${rule.name ?? `Choice group ${index + 1}`} allows at most ${rule.maximumSelections}.`,
+      );
     rule.options.forEach((option) => {
       const optionQuantity = selected.get(option.optionReference) ?? 0;
+      if (
+        selected.has(option.optionReference) &&
+        (!Number.isSafeInteger(optionQuantity) || optionQuantity < 1)
+      )
+        issues.push("Selected option quantities must be positive whole numbers.");
       if (optionQuantity > Math.min(option.maximumQuantity, 100))
         issues.push(`${option.name} allows at most ${Math.min(option.maximumQuantity, 100)}.`);
       if (
         optionQuantity > 0 &&
-        option.conflictOptionReferences.some((reference) => (selected.get(reference) ?? 0) > 0)
+        option.conflictOptionReferences.some(
+          (reference) => activeReferences.has(reference) && (selected.get(reference) ?? 0) > 0,
+        )
       )
         issues.push(`${option.name} conflicts with another selected choice.`);
     });
@@ -515,7 +825,7 @@ function configurationIssues(
   if (note !== note.normalize("NFC") || note.length > 500)
     issues.push("Preparation note must be 500 characters or fewer.");
   if (/\b(?:allerg(?:y|ic|ies)|anaphyla\w*|medical|medication|celiac|intoleran\w*)\b/iu.test(note))
-    issues.push("Do not put allergy or medical information in the preparation note; ask Staff.");
+    issues.push("Do not put allergy or medical information in the preparation note; ask staff.");
   return Object.freeze(issues);
 }
 
@@ -540,31 +850,52 @@ function ConfigureStatus({
   if (state.status === "added")
     return (
       <div className="configure-status configure-status--success" role="status">
-        <p>Added to the server cart.</p>
+        <p>Added to your cart.</p>
+        {state.earlierCartCleared === true ? (
+          <p>
+            Your table&apos;s earlier cart timed out, so items that hadn&apos;t been ordered were
+            cleared. Orders already placed are not affected.
+          </p>
+        ) : null}
         <Link className="menu-action" to="/cart">
-          Review cart
+          View cart
         </Link>
+        <Link to="/menu">Keep browsing</Link>
       </div>
     );
   const copy = {
     offline: "You’re offline. Nothing was queued or replayed.",
     "session-expired": "Your Store session expired. Scan the location QR code again.",
     conflict: "Your cart changed. Review the current cart before trying again.",
-    validation: "The server rejected this changed, conflicting or unavailable configuration.",
+    validation: "This item can’t be ordered as selected. Review your choices.",
     "rate-limited": `Please wait${"retryAfterSeconds" in state && state.retryAfterSeconds !== null ? ` ${state.retryAfterSeconds} seconds` : ""} before trying again.`,
-    expired: "This cart expired. Return to the menu and start a current cart.",
+    expired:
+      "Your table’s cart timed out and a new one couldn’t be started just now. Wait a moment, then add the item again.",
     abandoned: "This cart is closed and cannot accept another item.",
-    unavailable: "Cart service is unavailable. No success was assumed.",
-    "outcome-unknown": "The network ended before the server outcome was confirmed.",
+    "order-processing": orderProcessingMessage(
+      "retryAfterSeconds" in state ? state.retryAfterSeconds : null,
+    ),
+    "checkout-in-progress": checkoutInProgressMessage(
+      "retryAfterSeconds" in state ? state.retryAfterSeconds : null,
+    ),
+    unavailable: "We couldn’t add this right now. Please try again.",
+    "outcome-unknown": "The connection dropped before we could confirm. Retry to check.",
   } as const;
   return (
     <div className="configure-status configure-status--error" role="alert">
       <p>{copy[state.status]}</p>
       {"issueCodes" in state
-        ? state.issueCodes.map((issue) => <p key={issue}>Issue: {issue}</p>)
+        ? state.issueCodes
+            .map(cartIssueMessage)
+            .filter((issue): issue is string => issue !== null)
+            .map((issue) => <p key={issue}>{issue}</p>)
         : null}
       {state.canRetry ? (
-        <button type="button" onClick={() => void controller.retry()}>
+        <button
+          type="button"
+          disabled={state.status === "offline"}
+          onClick={() => void controller.retry()}
+        >
           Retry the same operation
         </button>
       ) : null}
@@ -575,14 +906,23 @@ function ConfigureStatus({
 }
 
 export function SellableConfigurator({
+  channel,
   sellable,
   controller: provided,
 }: {
+  readonly channel?: MenuJourneyContext["channel"] | undefined;
   readonly sellable: MenuSellable;
   readonly controller?: ConfigureController | undefined;
 }) {
   const [controller] = useState(
-    () => provided ?? createConfigureController({ client: createBrowserCustomerCartClient() }),
+    () =>
+      provided ??
+      createConfigureController({
+        client:
+          channel === "Pickup"
+            ? createBrowserPickupCartClient()
+            : createBrowserCustomerCartClient(),
+      }),
   );
   const state = useSyncExternalStore(
     controller.subscribe,
@@ -591,18 +931,13 @@ export function SellableConfigurator({
   );
   const [quantity, setQuantity] = useState(1);
   const [note, setNote] = useState("");
-  const [selected, setSelected] = useState<ReadonlyMap<string, number>>(
-    () =>
-      new Map(
-        sellable.optionRules.flatMap((rule) =>
-          rule.options
-            .filter((option) => option.selectedByDefault)
-            .map((option) => [option.optionReference, 1] as const),
-        ),
-      ),
+  const [selected, setSelected] = useState<ReadonlyMap<string, number>>(() =>
+    defaultMenuOptionSelections(sellable.optionRules),
   );
+  const activeRules = activeMenuOptionRules(sellable.optionRules, selected);
   const issues = configurationIssues(sellable, selected, quantity, note);
   const busy = state.status === "pending";
+  const unresolved = state.status === "outcome-unknown" || state.status === "offline";
   useEffect(() => {
     const offline = () => controller.setOnline(false);
     const online = () => controller.setOnline(true);
@@ -615,32 +950,22 @@ export function SellableConfigurator({
   }, [controller]);
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (issues.length > 0 || busy || state.status === "added") return;
+    if (issues.length > 0 || busy || unresolved || state.status === "added") return;
     const draft: CartItemDraft = Object.freeze({
       quantity,
-      optionSelections: Object.freeze(
-        sellable.optionRules.flatMap((rule) =>
-          rule.options
-            .filter((option) => selected.has(option.optionReference))
-            .map((option) =>
-              Object.freeze({
-                optionReference: option.optionReference,
-                quantity: selected.get(option.optionReference) ?? 1,
-              }),
-            ),
-        ),
-      ),
+      optionSelections: selectedMenuOptions(sellable.optionRules, selected),
       customerNote: note.trim() === "" ? null : note.normalize("NFC").trim(),
     });
     void controller.submit(sellable.sellableReference, draft);
   };
   return (
     <form className="sellable-configurator" aria-labelledby="configure-heading" onSubmit={submit}>
-      <h3 id="configure-heading">Configure {sellable.name}</h3>
-      <p>
-        Published choices are confirmed by the server. Incremental prices are unavailable and final
-        amounts appear only in a valid Quote.
-      </p>
+      <h3 id="configure-heading">
+        {sellable.optionRules.length === 0 ? "Add to your order" : "Make it yours"}
+      </h3>
+      {sellable.optionRules.length === 0 ? null : (
+        <p>Prices shown are what each choice adds now; tax is added at checkout.</p>
+      )}
       <label htmlFor="configure-quantity">Quantity</label>
       <input
         id="configure-quantity"
@@ -649,25 +974,30 @@ export function SellableConfigurator({
         max={100}
         inputMode="numeric"
         value={quantity}
-        disabled={busy || state.status === "added"}
+        disabled={busy || unresolved || state.status === "added"}
         onChange={(event) => setQuantity(event.currentTarget.valueAsNumber)}
       />
-      {sellable.optionRules.map((rule, groupIndex) => (
+      {activeRules.map((rule, groupIndex) => (
         <fieldset key={`${rule.minimumSelections}-${rule.maximumSelections}-${groupIndex}`}>
           <legend>
-            Choice group {groupIndex + 1} — select {rule.minimumSelections} to{" "}
-            {rule.maximumSelections}
+            {rule.name ?? `Choice group ${groupIndex + 1}`} — {choiceText(rule)}
           </legend>
           {rule.options.map((option) => (
             <div className="configure-option" key={option.optionReference}>
               <label>
                 <input
-                  type="checkbox"
+                  type={singleChoice(rule) ? "radio" : "checkbox"}
+                  name={`configure-group-${groupIndex}`}
                   checked={selected.has(option.optionReference)}
-                  disabled={busy || state.status === "added"}
+                  disabled={busy || unresolved || state.status === "added"}
                   onChange={() => {
                     const next = new Map(selected);
-                    if (next.has(option.optionReference)) next.delete(option.optionReference);
+                    if (singleChoice(rule)) {
+                      // Choosing one replaces the group's other choice.
+                      for (const other of rule.options) next.delete(other.optionReference);
+                      next.set(option.optionReference, 1);
+                    } else if (next.has(option.optionReference))
+                      next.delete(option.optionReference);
                     else next.set(option.optionReference, 1);
                     setSelected(next);
                   }}
@@ -684,7 +1014,7 @@ export function SellableConfigurator({
                     max={Math.min(option.maximumQuantity, 100)}
                     inputMode="numeric"
                     value={selected.get(option.optionReference)}
-                    disabled={busy || state.status === "added"}
+                    disabled={busy || unresolved || state.status === "added"}
                     onChange={(event) => {
                       const next = new Map(selected);
                       next.set(option.optionReference, event.currentTarget.valueAsNumber);
@@ -693,7 +1023,7 @@ export function SellableConfigurator({
                   />
                 </label>
               ) : null}
-              <span>Incremental price confirmed in the final Quote</span>
+              <span>{optionPriceText(option.price)}</span>
             </div>
           ))}
         </fieldset>
@@ -703,13 +1033,13 @@ export function SellableConfigurator({
         id="configure-note"
         maxLength={500}
         value={note}
-        disabled={busy || state.status === "added"}
+        disabled={busy || unresolved || state.status === "added"}
         aria-describedby="configure-note-help"
         onChange={(event) => setNote(event.currentTarget.value)}
       />
       <p id="configure-note-help">
         Plain preparation requests only. Do not enter allergy, medical or other sensitive details;
-        ask Staff for assistance.
+        ask staff for assistance.
       </p>
       {issues.length > 0 ? (
         <div className="configure-issues" role="alert">
@@ -721,7 +1051,7 @@ export function SellableConfigurator({
       <button
         className="menu-action"
         type="submit"
-        disabled={issues.length > 0 || busy || state.status === "added"}
+        disabled={issues.length > 0 || busy || unresolved || state.status === "added"}
       >
         Add to cart
       </button>
@@ -746,7 +1076,6 @@ function AllergenSummary({ sellable }: { readonly sellable: MenuSellable }) {
           ))}
         </ul>
       )}
-      <p>Ask staff for allergen assistance before ordering.</p>
     </div>
   );
 }
@@ -754,10 +1083,10 @@ function AllergenSummary({ sellable }: { readonly sellable: MenuSellable }) {
 function AllergenHelp() {
   return (
     <aside className="menu-help" aria-labelledby="menu-help-heading">
-      <h2 id="menu-help-heading">Accessibility and allergen help</h2>
+      <h2 id="menu-help-heading">Allergies or accessibility?</h2>
       <p>
-        Ask staff for an accessible ordering option or allergen assistance. The menu never promises
-        that an item is allergen-free.
+        Ask staff before ordering. The menu never promises that an item is allergen-free, and staff
+        can take your order another way.
       </p>
     </aside>
   );

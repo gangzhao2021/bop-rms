@@ -17,3 +17,72 @@ export * from "./contracts/price-quote.js";
 export * from "./domain/price-quote.js";
 export * from "./contracts/price-quote-lifecycle.js";
 export * from "./domain/price-quote-lifecycle.js";
+export * from "./domain/price-quote-snapshot-codec.js";
+export * from "./infrastructure/persistence/price-quote-query-store.js";
+export * from "./infrastructure/persistence/price-quote-store.js";
+export * from "./domain/price-quote-request.js";
+export * from "./infrastructure/persistence/price-quote-request-store.js";
+export * from "./infrastructure/persistence/current-price-book-store.js";
+export * from "./application/current-price-book-quote.js";
+export * from "./infrastructure/persistence/current-tax-configuration-store.js";
+export * from "./infrastructure/persistence/current-quote-service.js";
+
+export * from "./domain/option-price.js";
+
+export * from "./domain/configured-price-quote.js";
+export * from "./infrastructure/persistence/current-option-price-store.js";
+
+export * from "./infrastructure/persistence/current-configured-quote-service.js";
+
+export { allocateOrdinaryRefundFromQuote } from "./domain/ordinary-refund-quote-allocation.js";
+
+export * from "./infrastructure/persistence/price-book-repository.js";
+
+export * from "./contracts/price-book-reference-source.js";
+export * from "./infrastructure/persistence/price-book-reference-source-store.js";
+
+export * from "./contracts/option-price-reference-source.js";
+export * from "./infrastructure/persistence/option-price-reference-source-store.js";
+
+export * from "./contracts/promotion-reference-source.js";
+export * from "./infrastructure/persistence/promotion-reference-source-store.js";
+
+export * from "./contracts/configuration-reference-matches.js";
+
+export * from "./contracts/tax-configuration-reference-source.js";
+export * from "./infrastructure/persistence/tax-configuration-reference-source-store.js";
+
+export * from "./contracts/tax-classification-reference-matches.js";
+
+export * from "./contracts/brand-tax-reference-source.js";
+export * from "./infrastructure/persistence/brand-tax-reference-source-store.js";
+
+export * from "./contracts/configuration-reference-source.js";
+export * from "./infrastructure/persistence/configuration-reference-source-store.js";
+
+export * from "./contracts/product-publication-reference-request-v2.js";
+export * from "./contracts/option-price-authoring.js";
+export * from "./infrastructure/persistence/option-price-authoring-store.js";
+export * from "./contracts/tax-config-authoring.js";
+export * from "./infrastructure/persistence/tax-config-authoring-store.js";
+
+export {
+  createTaxPublicationCandidate,
+  parseTaxPublicationCandidateContent,
+  parseTaxPublicationCandidate,
+  assertTaxPublicationCandidateDraft,
+  matchTaxPublicationCandidatePublishedSnapshot,
+  type TaxPublicationSourceRuleBinding,
+  type TaxPublicationRegistrationMaterial,
+  type TaxPublicationCandidateContent,
+  type TaxPublicationCandidate,
+} from "./contracts/tax-config-publication-candidate.js";
+export * from "./contracts/tax-config-material.js";
+export * from "./infrastructure/persistence/tax-config-material-store.js";
+export * from "./contracts/tax-config-candidate-authoring.js";
+export * from "./infrastructure/persistence/tax-config-candidate-store.js";
+export * from "./contracts/tax-config-candidate-fixture-comparison.js";
+export * from "./infrastructure/persistence/store-tax-classification-store.js";
+export * from "./infrastructure/persistence/store-price-book-assignment-store.js";
+// WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): mark of a sole-operator price book publication.
+export * from "./infrastructure/persistence/price-book-sole-operator-store.js";

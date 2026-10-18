@@ -46,8 +46,212 @@ const registration = (
 });
 
 describe("Event Catalog source", () => {
+  it("keeps prepared candidate events scoped and free of qualification or material content", () => {
+    const entry = eventCatalog.find((value) => value.eventType === "TaxConfigCandidatePrepared");
+    if (!entry) throw new Error("Missing candidate history event");
+    expect(entry).toMatchObject({
+      tenantScope: "store",
+      dataClassification: "indirect_identifier",
+      consumers: ["pricing.tax-config-candidate-history:v1"],
+    });
+    const payload = {
+      configurationReference: "01902407-0000-7000-8000-000000000001",
+      targetVersionReference: "01902407-0000-7000-8000-000000000002",
+      contentDigest: `sha256:${"a".repeat(64)}`,
+      preparedAt: "2026-10-06T10:00:00.000Z",
+    };
+    expect(entry.payloadSchema.safeParse(payload).success).toBe(true);
+    for (const extra of [
+      { qualification: "Verified" },
+      { content: {} },
+      { registrationMaterialReference: payload.configurationReference },
+    ])
+      expect(entry.payloadSchema.safeParse({ ...payload, ...extra }).success).toBe(false);
+    expect(
+      entry.payloadSchema.safeParse({ ...payload, targetVersionReference: "not-an-id" }).success,
+    ).toBe(false);
+  });
+
+  it.each(["TaxConfigMaterialCreated", "TaxConfigMaterialReplaced"])(
+    "keeps %s material history free of confidential report content and qualification claims",
+    (eventType) => {
+      const entry = eventCatalog.find((value) => value.eventType === eventType);
+      if (!entry) throw new Error("Missing material history registration");
+      expect(entry).toMatchObject({
+        tenantScope: "store",
+        dataClassification: "indirect_identifier",
+        consumers: ["pricing.tax-config-material-history:v1"],
+      });
+      const payload = {
+        materialReference: "01902407-0000-7000-8000-000000000001",
+        versionReference: "01902407-0000-7000-8000-000000000002",
+        materialKind: "ProfessionalReport",
+        revision: 1,
+        contentDigest: `sha256:${"a".repeat(64)}`,
+        recordedAt: "2026-10-01T16:00:00.000Z",
+      };
+      expect(entry.payloadSchema.safeParse(payload).success).toBe(true);
+      for (const extra of [
+        { declaredIssuer: { displayName: "Synthetic issuer" } },
+        { qualification: "Verified" },
+        { content: {} },
+      ])
+        expect(entry.payloadSchema.safeParse({ ...payload, ...extra }).success).toBe(false);
+      expect(entry.payloadSchema.safeParse({ ...payload, revision: 0 }).success).toBe(false);
+    },
+  );
+  it.each([
+    ["OptionPriceDraftCreated", "Draft"],
+    ["OptionPriceDraftReplaced", "Draft"],
+    ["OptionPriceVersionPublished", "Published"],
+    ["OptionPriceArchived", "Archived"],
+  ])(
+    "registers closed %s provenance for genuine owner history consumption",
+    (eventType, lifecycle) => {
+      const entry = eventCatalog.find((value) => value.eventType === eventType);
+      if (!entry) throw new Error("missing OptionPrice event registration");
+      expect(entry).toMatchObject({
+        ownerModule: "@rms/pricing",
+        tenantScope: "brand",
+        dataClassification: "indirect_identifier",
+        consumers: ["pricing.option-price-authoring-history:v1"],
+      });
+      const id = "01902407-0000-7000-8000-000000000001";
+      const payload = {
+        ruleReference: id,
+        versionReference: id,
+        brandReference: id,
+        bindingReference: id,
+        optionReference: id,
+        aggregateVersion: 2,
+        lifecycle,
+        currencyCode: "CAD",
+        snapshotDigest: `sha256:${"a".repeat(64)}`,
+        occurredAt: "2026-10-05T12:00:00.000Z",
+      };
+      expect(entry.payloadSchema.safeParse(payload).success).toBe(true);
+      for (const malformed of [
+        { ...payload, unitAmountMinor: "125" },
+        { ...payload, aggregateVersion: "2" },
+        { ...payload, aggregateVersion: Number.MAX_SAFE_INTEGER + 1 },
+        { ...payload, lifecycle: lifecycle === "Draft" ? "Published" : "Draft" },
+        { ...payload, occurredAt: "2026-10-05T12:00:00Z" },
+        { ...payload, bindingReference: undefined },
+      ])
+        expect(entry.payloadSchema.safeParse(malformed).success).toBe(false);
+    },
+  );
+
+  it("registers minimal Product source commit Events and rejects full Draft payloads", () => {
+    const product = eventCatalog.find((entry) => entry.eventType === "ProductCreated");
+    expect(product).toMatchObject({
+      producerModule: "@rms/catalog",
+      tenantScope: "brand",
+      dataClassification: "indirect_identifier",
+      consumers: ["catalog.product-search-projection:v1"],
+    });
+    const id = "01902407-0000-7000-8000-000000000001";
+    const payload = {
+      productReference: id,
+      productVersionReference: id,
+      aggregateVersion: "1",
+      lifecycle: "Draft",
+      changedSkuReference: null,
+      sourceRevision: "1",
+      operationReference: id,
+      snapshotDigest: "sha256:" + "a".repeat(64),
+    };
+    expect(product?.payloadSchema.safeParse(payload).success).toBe(true);
+    for (const invalid of [
+      { ...payload, draft: { localizedNames: { "en-CA": "hidden" } } },
+      { ...payload, sourceRevision: 1 },
+      { ...payload, aggregateVersion: "01" },
+      { ...payload, changedSkuReference: "opaque" },
+    ])
+      expect(product?.payloadSchema.safeParse(invalid).success).toBe(false);
+  });
+  it.each(["OptionSetDraftCreated", "OptionSetDraftReplaced"])(
+    "bounds %s provenance without leaking content or readiness",
+    (eventType) => {
+      const option = eventCatalog.find((e) => e.eventType === eventType);
+      const reference = "01902421-0000-7000-8000-000000000001";
+      const payload = {
+        tenantReference: reference,
+        optionSetReference: reference,
+        versionReference: reference,
+        aggregateVersion: 2,
+        operationReference: reference,
+        contentDigest: "sha256:" + "a".repeat(64),
+        configurationDigest: "sha256:" + "b".repeat(64),
+      };
+      expect(option?.payloadSchema.safeParse(payload).success).toBe(true);
+      expect(option?.stability).toBe("experimental");
+      for (const invalid of [
+        { ...payload, draft: {} },
+        { ...payload, referenceEligibility: "Ready" },
+        { ...payload, optionSetReference: "opaque" },
+        { ...payload, aggregateVersion: 2147483648 },
+        { ...payload, contentDigest: "invalid" },
+      ])
+        expect(option?.payloadSchema.safeParse(invalid).success).toBe(false);
+    },
+  );
+  it("bounds internal sealed provenance without asserting publication eligibility", () => {
+    const schema = eventCatalog.find(
+      (e) => e.eventType === "OptionSetContentSealed",
+    )?.payloadSchema;
+    const reference = "01902421-0000-7000-8000-000000000001";
+    const payload = {
+      tenantReference: reference,
+      optionSetReference: reference,
+      versionReference: reference,
+      successorDraftVersionReference: reference,
+      aggregateVersion: 2,
+      operationReference: reference,
+      contentDigest: "sha256:" + "a".repeat(64),
+      configurationDigest: "sha256:" + "b".repeat(64),
+      recordDigest: "sha256:" + "c".repeat(64),
+    };
+    expect(schema?.safeParse(payload).success).toBe(true);
+    for (const invalid of [
+      { ...payload, eligibility: "Published" },
+      { ...payload, editorContent: {} },
+      { ...payload, successorDraftVersionReference: "opaque" },
+      { ...payload, recordDigest: "invalid" },
+    ])
+      expect(schema?.safeParse(invalid).success).toBe(false);
+  });
+  it.each(["OptionSetReviewContentRecorded", "OptionSetPublicationReleaseRecorded"])(
+    "keeps %s a minimal record fact without content or approval claims",
+    (eventType) => {
+      const entry = eventCatalog.find((event) => event.eventType === eventType);
+      expect(entry).toMatchObject({
+        ownerModule: "@rms/catalog",
+        producerModule: "@rms/catalog",
+        tenantScope: "brand",
+        schemaVersion: 1,
+        consumers: ["catalog.option-set-record-history:v1"],
+        replaySemantics: "idempotent",
+      });
+      const payload = {
+        operationReference: "01902421-0000-7000-8000-000000000001",
+        recordDigest: "sha256:" + "a".repeat(64),
+      };
+      expect(entry?.payloadSchema.safeParse(payload).success).toBe(true);
+      for (const invalid of [
+        { ...payload, editorContent: {} },
+        { ...payload, approval: "Accepted" },
+        { ...payload, eligibility: "Ready" },
+        { ...payload, operationReference: "opaque" },
+        { ...payload, recordDigest: "invalid" },
+        { recordDigest: payload.recordDigest },
+        { operationReference: payload.operationReference },
+      ])
+        expect(entry?.payloadSchema.safeParse(invalid).success).toBe(false);
+    },
+  );
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(98);
+    expect(eventCatalog).toHaveLength(144);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     for (const eventType of [
       "DeviceActivated",
@@ -78,6 +282,16 @@ describe("Event Catalog source", () => {
       dataClassification: "indirect_identifier",
       replaySemantics: "idempotent",
     });
+    // WP-2423 / DEC-PILOT-BATCH-PHASE-01: a pickup closed as not collected ends the Order phase.
+    expect(byType.get("PickupNotCollected")).toMatchObject({
+      schemaVersion: 1,
+      ownerModule: "@rms/fulfillment",
+      producerModule: "@rms/fulfillment",
+      consumers: ["ordering.pickup-not-collected:v1"],
+      tenantScope: "store",
+      dataClassification: "indirect_identifier",
+      replaySemantics: "idempotent",
+    });
     expect(byType.get("KitchenWorkCreated")).toMatchObject({
       eventType: "KitchenWorkCreated",
       schemaVersion: 1,
@@ -97,7 +311,7 @@ describe("Event Catalog source", () => {
       ["KitchenItemCompleted", "kitchen.queue-item-completed-projection:v1"],
       ["KitchenItemProgressRecorded", "kitchen.queue-item-progress-projection:v1"],
       ["KitchenWorkAccepted", "kitchen.queue-work-accepted-projection:v1"],
-      ["KitchenWorkStarted", "kitchen.queue-work-started-projection:v1"],
+      ["KitchenWorkCancelled", "kitchen.queue-work-cancelled-projection:v1"],
     ] as const) {
       expect(byType.get(eventType)).toMatchObject({
         eventType,
@@ -115,6 +329,14 @@ describe("Event Catalog source", () => {
         replacement: null,
       });
     }
+    // WP-2423 / DEC-PILOT-BATCH-PHASE-01: Ordering merges Kitchen progress into the Order phase.
+    expect(byType.get("KitchenWorkStarted")).toMatchObject({
+      ownerModule: "@rms/kitchen",
+      consumers: ["kitchen.queue-work-started-projection:v1", "ordering.kitchen-progress:v1"],
+      tenantScope: "store",
+      dataClassification: "personal",
+      replaySemantics: "idempotent",
+    });
     for (const [eventType, consumer] of [
       ["KitchenItemReady", "fulfillment.kitchen-item-ready:v1"],
       ["KitchenOrderReady", "fulfillment.kitchen-order-ready:v1"],
@@ -125,7 +347,7 @@ describe("Event Catalog source", () => {
         ownerModule: "@rms/kitchen",
         producerModule: "@rms/kitchen",
         stability: "stable",
-        consumers: [consumer],
+        consumers: [consumer, "ordering.kitchen-progress:v1"],
         tenantScope: "store",
         dataClassification: "indirect_identifier",
         compatibility: "additive",
@@ -333,6 +555,13 @@ describe("Event Catalog source", () => {
       "BundleDraftReplaced:v1",
       "BundleLifecycleChanged:v1",
       "BundleVersionPublished:v1",
+      "CategoryArchived:v1",
+      "CategoryCreated:v1",
+      "CategoryDeactivated:v1",
+      "CategoryMoved:v1",
+      "CategoryReordered:v1",
+      "CategoryRestored:v1",
+      "CategoryUpdated:v1",
       "CleaningVerificationFailed:v1",
       "ComplianceCaseCancelled:v1",
       "ComplianceCaseClosed:v1",
@@ -363,7 +592,10 @@ describe("Event Catalog source", () => {
       "KitchenItemProgressRecorded:v1",
       "KitchenItemReady:v1",
       "KitchenOrderReady:v1",
+      "KitchenReworkCreated:v1",
+      "KitchenTicketClosed:v1",
       "KitchenWorkAccepted:v1",
+      "KitchenWorkCancelled:v1",
       "KitchenWorkCreated:v1",
       "KitchenWorkStarted:v1",
       "LicenseExpired:v1",
@@ -376,21 +608,53 @@ describe("Event Catalog source", () => {
       "MetricDefinitionPublished:v1",
       "MetricDefinitionReviewSubmitted:v1",
       "MetricDeprecated:v1",
+      "OptionPriceArchived:v1",
+      "OptionPriceDraftCreated:v1",
+      "OptionPriceDraftReplaced:v1",
+      "OptionPriceVersionPublished:v1",
+      "OptionSetContentSealed:v1",
+      "OptionSetDraftCreated:v1",
+      "OptionSetDraftReplaced:v1",
+      "OptionSetPublicationReleaseRecorded:v1",
+      "OptionSetReviewContentRecorded:v1",
       "OrderAmended:v1",
+      "OrderCancelled:v1",
       "OrderConfirmed:v1",
       "OrderCreated:v1",
+      "OrderSubmitted:v1",
       "PaymentFailed:v1",
       "PaymentRefunded:v1",
       "PaymentSucceeded:v1",
+      "PickupNotCollected:v1",
       "PriceBookArchived:v1",
       "PriceBookDraftCreated:v1",
       "PriceBookDraftReplaced:v1",
       "PriceBookVersionPublished:v1",
+      "ProductActivated:v1",
+      "ProductArchived:v1",
+      "ProductContentRegistryVersionRecorded:v1",
+      "ProductCreated:v1",
+      "ProductDiscontinued:v1",
+      "ProductDraftUpdated:v1",
       "ProductionBatchCompleted:v1",
       "ProductionBatchObservationRecorded:v1",
       "ProductionBatchPlanned:v1",
       "ProductionBatchQuarantined:v1",
       "ProductionBatchStarted:v1",
+      "ProductPublicationWarningsAcknowledged:v1",
+      "ProductRestored:v1",
+      "ProductResumed:v1",
+      "ProductReviewSubmitted:v1",
+      "ProductSuspended:v1",
+      "ProductTaxClassificationRegistryVersionRecorded:v1",
+      "ProductValidationCompleted:v1",
+      "ProductVersionApproved:v1",
+      "ProductVersionPublished:v1",
+      "ProductVersionPublishRescheduled:v1",
+      "ProductVersionPublishScheduleCancelled:v1",
+      "ProductVersionPublishScheduled:v1",
+      "ProductVersionRejected:v1",
+      "ProductVersionSuperseded:v1",
       "PromotionArchived:v1",
       "PromotionDraftCreated:v1",
       "PromotionDraftReplaced:v1",
@@ -416,8 +680,12 @@ describe("Event Catalog source", () => {
       "ReportRunQueued:v1",
       "ReportRunStateRecorded:v1",
       "ReportScheduleVersionRecorded:v1",
+      "SellingUnitRegistryVersionRecorded:v1",
+      "TaxConfigCandidatePrepared:v1",
       "TaxConfigDraftCreated:v1",
       "TaxConfigDraftReplaced:v1",
+      "TaxConfigMaterialCreated:v1",
+      "TaxConfigMaterialReplaced:v1",
       "TaxConfigPublished:v1",
       "TemperatureExcursionDetected:v1",
     ]);
@@ -541,6 +809,125 @@ describe("Event Catalog source", () => {
         detectedAt: "2026-08-14T18:00:00.000Z",
       }).success,
     ).toBe(true);
+  });
+
+  it("keeps the kitchen rework payload closed, reasoned and free of staff notes", () => {
+    const entry = eventCatalog.find((candidate) => candidate.eventType === "KitchenReworkCreated");
+    if (entry === undefined) throw new Error("EVENT_CATALOG_REGISTRATION_MISSING");
+    expect(entry).toMatchObject({
+      ownerModule: "@rms/kitchen",
+      consumers: ["inventory.kitchen-rework-waste:v1"],
+      tenantScope: "store",
+      dataClassification: "personal",
+      replaySemantics: "idempotent",
+    });
+    const reference = (n: number) => `018f9910-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+    const payload = {
+      kitchenReworkItemReference: reference(1),
+      kitchenTicketReference: reference(2),
+      originalKitchenWorkItemReference: reference(3),
+      orderReference: reference(4),
+      orderBatchReference: reference(5),
+      orderItemReference: reference(6),
+      reasonCode: "DROPPED",
+      quantity: 1,
+      wasteApplies: true,
+      createdAt: "2026-10-14T12:00:00.000Z",
+    };
+    expect(entry.payloadSchema.safeParse(payload).success).toBe(true);
+    for (const invalid of [
+      { ...payload, reasonCode: "CUSTOMER_REQUEST" },
+      { ...payload, quantity: 0 },
+      { ...payload, note: "left on the pass" },
+      { ...payload, actorReference: reference(7) },
+    ])
+      expect(entry.payloadSchema.safeParse(invalid).success).toBe(false);
+    expect(JSON.stringify(payloadJsonSchema(entry.payloadSchema))).not.toMatch(
+      /actor|customerReference|guest|note|health|allergen/iu,
+    );
+  });
+
+  it("keeps the stale kitchen ticket closure payload closed and free of staff or guest facts", () => {
+    const entry = eventCatalog.find((candidate) => candidate.eventType === "KitchenTicketClosed");
+    if (entry === undefined) throw new Error("EVENT_CATALOG_REGISTRATION_MISSING");
+    expect(entry).toMatchObject({
+      ownerModule: "@rms/kitchen",
+      consumers: [
+        "inventory.kitchen-ticket-closed-consumption:v1",
+        "kitchen.queue-ticket-closed-projection:v1",
+        "ordering.kitchen-progress:v1",
+      ],
+      tenantScope: "store",
+      dataClassification: "personal",
+      replaySemantics: "idempotent",
+    });
+    const reference = (n: number) => `018f9910-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+    const payload = {
+      kitchenTicketReference: reference(1),
+      orderReference: reference(2),
+      orderBatchReference: reference(3),
+      reasonCode: "ALREADY_SERVED",
+      foodMade: true,
+      orderBusinessDate: "2026-10-09",
+      ticketVersion: "4",
+      openWorkItems: [
+        {
+          kitchenWorkItemReference: reference(4),
+          orderItemReference: reference(5),
+          status: "Queued",
+          requiredQuantity: 2,
+          completedQuantity: 0,
+        },
+      ],
+      closedAt: "2026-10-14T12:00:00.000Z",
+    };
+    expect(entry.payloadSchema.safeParse(payload).success).toBe(true);
+    for (const invalid of [
+      { ...payload, reasonCode: "REFUNDED" },
+      { ...payload, orderBusinessDate: "Oct 9" },
+      { ...payload, note: "guest left" },
+      { ...payload, actorReference: reference(6) },
+      { ...payload, openWorkItems: [{ ...payload.openWorkItems[0], status: "Cancelled" }] },
+    ])
+      expect(entry.payloadSchema.safeParse(invalid).success).toBe(false);
+    expect(JSON.stringify(payloadJsonSchema(entry.payloadSchema))).not.toMatch(
+      /actor|customerReference|guest|note|health|allergen|amount|refund/iu,
+    );
+  });
+
+  it("keeps the staff batch cancellation payload closed and item-bounded", () => {
+    const entry = eventCatalog.find((candidate) => candidate.eventType === "KitchenWorkCancelled");
+    if (entry === undefined) throw new Error("EVENT_CATALOG_REGISTRATION_MISSING");
+    const reference = (n: number) => `018f9910-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+    const payload = {
+      kitchenTicketReference: reference(1),
+      orderReference: reference(2),
+      orderBatchReference: reference(3),
+      orderCancellationReference: reference(4),
+      ticketVersion: "4",
+      reasonCode: "ORDER_CANCELLED_BEFORE_PREPARATION",
+      workItems: [
+        {
+          kitchenWorkItemReference: reference(5),
+          orderItemReference: reference(6),
+          fromStatus: "Queued",
+          toStatus: "Cancelled",
+          workItemVersion: "3",
+        },
+      ],
+      cancelledAt: "2026-10-11T12:00:00.000Z",
+    };
+    expect(entry.payloadSchema.safeParse(payload).success).toBe(true);
+    for (const invalid of [
+      { ...payload, workItems: [] },
+      { ...payload, reasonCode: "CUSTOMER_REQUEST" },
+      { ...payload, workItems: [{ ...payload.workItems[0], fromStatus: "In Progress" }] },
+      { ...payload, actorReference: reference(7) },
+    ])
+      expect(entry.payloadSchema.safeParse(invalid).success).toBe(false);
+    expect(JSON.stringify(payloadJsonSchema(entry.payloadSchema))).not.toMatch(
+      /actor|customer|note|health|allergen/iu,
+    );
   });
 
   it("keeps lifecycle payloads truthful, minimal and closed", () => {
@@ -939,7 +1326,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(107);
+    expect(eventConsumerContracts).toHaveLength(158);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();
@@ -1057,4 +1444,142 @@ describe("Event Catalog generation", () => {
     expect(document).toBeDefined();
     expect(diagnostics.filter(({ severity }) => severity === 0)).toEqual([]);
   }, 15_000);
+});
+
+it("keeps submitted Batch payload bounded and independent of payment or release", () => {
+  const entry = eventCatalog.find((event) => event.eventType === "OrderSubmitted");
+  expect(entry?.stability).toBe("experimental");
+  const payload = {
+    orderReference: "0190ed31-0000-7000-8000-000000000001",
+    orderBatchReference: "0190ed31-0000-7000-8000-000000000002",
+    submissionReference: "0190ed31-0000-7000-8000-000000000003",
+    sourceSnapshotDigest: "sha256:" + "a".repeat(64),
+    itemCount: 1,
+    batchSequence: 2,
+  };
+  expect(entry?.payloadSchema.safeParse(payload).success).toBe(true);
+  for (const patch of [
+    { batchSequence: 0 },
+    { itemCount: 101 },
+    { paymentStatus: "Paid" },
+    { guestName: "Synthetic" },
+  ])
+    expect(entry?.payloadSchema.safeParse({ ...payload, ...patch }).success).toBe(false);
+});
+
+it.each([
+  "CategoryCreated",
+  "CategoryUpdated",
+  "CategoryMoved",
+  "CategoryReordered",
+  "CategoryDeactivated",
+  "CategoryArchived",
+  "CategoryRestored",
+])("closes Category source event %s without content or Actor labels", (eventType) => {
+  const entry = eventCatalog.find((item) => item.eventType === eventType);
+  if (!entry) throw new Error("CATEGORY_EVENT_NOT_REGISTERED");
+  expect(entry).toMatchObject({
+    ownerModule: "@rms/catalog",
+    schemaVersion: 1,
+    tenantScope: "brand",
+    consumers: ["catalog.category-source:v1"],
+  });
+  const value = {
+    categoryReference: "01909900-0000-7000-8000-000000000001",
+    aggregateVersion: "1",
+    lifecycle: "Draft",
+    operationReference: "01909900-0000-7000-8000-000000000002",
+    sourceRevision: "1",
+    snapshotDigest: "sha256:" + "1".repeat(64),
+  };
+  expect(entry.payloadSchema.safeParse(value).success).toBe(true);
+  for (const changed of [
+    { ...value, localizedNames: {} },
+    { ...value, sourceRevision: "0" },
+    { ...value, aggregateVersion: "01" },
+    { ...value, lifecycle: "Published" },
+  ])
+    expect(entry.payloadSchema.safeParse(changed).success).toBe(false);
+});
+
+it("registers all nine Product publication facts with strict minimal payloads", () => {
+  const types = [
+    "ProductValidationCompleted",
+    "ProductReviewSubmitted",
+    "ProductVersionApproved",
+    "ProductVersionRejected",
+    "ProductVersionPublishScheduled",
+    "ProductVersionPublishRescheduled",
+    "ProductVersionPublishScheduleCancelled",
+    "ProductVersionPublished",
+    "ProductVersionSuperseded",
+  ];
+  const reference = "01902420-0000-7000-8000-000000000001",
+    digest = "sha256:" + "a".repeat(64);
+  const payload = {
+    tenantReference: reference,
+    productReference: reference,
+    productVersionReference: reference,
+    resultDraftVersionReference: reference,
+    aggregateVersion: "5",
+    lifecycle: "Active",
+    changedSkuReference: null,
+    sourceRevision: "1",
+    operationReference: reference,
+    snapshotDigest: digest,
+    publicationVersion: 1,
+    publicationState: "Draft",
+    action: "Validate",
+    scopeDigest: digest,
+    periodDigest: digest,
+    contentDigest: digest,
+    configurationDigest: digest,
+    scheduleReference: null,
+    scheduleVersion: 0,
+    successorDraftVersionReference: null,
+    supersededByVersionReference: null,
+  };
+  for (const type of types) {
+    const entry = eventCatalog.find((e) => e.eventType === type);
+    expect(entry?.ownerModule).toBe("@rms/catalog");
+    expect(entry?.dataClassification).toBe("indirect_identifier");
+    expect(entry?.payloadSchema.safeParse(payload).success).toBe(true);
+    expect(
+      entry?.payloadSchema.safeParse({ ...payload, localizedNames: { "en-CA": "Private content" } })
+        .success,
+    ).toBe(false);
+    expect(entry?.payloadSchema.safeParse({ ...payload, publicationVersion: 0 }).success).toBe(
+      false,
+    );
+  }
+});
+
+it("bounds independent warning acknowledgement metadata without exposing complete evidence", () => {
+  const schema = eventCatalog.find(
+    (e) => e.eventType === "ProductPublicationWarningsAcknowledged",
+  )?.payloadSchema;
+  const id = "01902421-0000-7000-8000-000000000001";
+  const digest = "sha256:" + "a".repeat(64);
+  const payload = {
+    tenantReference: id,
+    productReference: id,
+    productVersionReference: id,
+    operationReference: id,
+    productAggregateVersion: 7,
+    reportOperationReference: id,
+    reportDigest: digest,
+    warningBindingDigest: digest,
+    receiptDigest: digest,
+    warningCodes: ["ChangeImpact"],
+  };
+  expect(schema?.safeParse(payload).success).toBe(true);
+  for (const patch of [
+    { productAggregateVersion: 0 },
+    { warningCodes: [] },
+    { warningCodes: ["HardErrorsCleared"] },
+    { findings: [] },
+    { receipt: {} },
+    { reportDigest: "bad" },
+  ])
+    expect(schema?.safeParse({ ...payload, ...patch }).success).toBe(false);
 });

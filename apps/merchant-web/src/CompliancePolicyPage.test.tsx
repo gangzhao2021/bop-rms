@@ -104,6 +104,8 @@ describe("WP-2178 Compliance Policy screens", () => {
     expect(html).toContain("ALLERGEN SAFETY");
     expect(html).toContain("Evidence requirements 1");
     expect(html).toContain("Controls 1");
+    expect(html).toContain("Eastern Time (Toronto");
+    expect(html).not.toContain("America/Toronto");
     expect(html).toContain("Map Evidence / Controls");
     expect(html).toContain("Request review");
     expect(html).not.toContain("regulatory legal prose");

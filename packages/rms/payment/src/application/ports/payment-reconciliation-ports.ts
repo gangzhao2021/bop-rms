@@ -1,5 +1,6 @@
 import type {
   PaymentProviderOutcome,
+  PaymentProviderSnapshot,
   RetrieveIntentRequest,
 } from "../../contracts/payment-provider-adapter.js";
 import type { PaymentTerminalObservation } from "../payment-terminal-fact.js";
@@ -59,7 +60,25 @@ export interface PaymentReconciliationPorts {
   readonly provider: {
     retrieveIntent(request: RetrieveIntentRequest): Promise<PaymentProviderOutcome>;
   };
+  readonly observations: {
+    record(input: {
+      readonly observationReference: string;
+      readonly paymentIntentReference: string;
+      readonly snapshot: PaymentProviderSnapshot;
+    }): Promise<{
+      readonly status: "Recorded" | "AlreadyRecorded";
+      readonly observationReference: string;
+    }>;
+  };
   readonly terminal: {
+    /** Authoritative occurrence, not the time a reconciliation query observed it. */
+    occurrence(input: {
+      readonly candidate: PaymentOperationalReconciliationCandidate;
+      readonly snapshot: PaymentProviderSnapshot;
+    }): Promise<{
+      readonly status: "Captured" | "Failed" | "Cancelled";
+      readonly occurredAt: string;
+    }>;
     record(observation: PaymentTerminalObservation): Promise<{
       readonly status: "Created" | "AlreadyCommitted";
       readonly paymentTransactionReference: string;

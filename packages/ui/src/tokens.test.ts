@@ -31,4 +31,7 @@ describe("BOP Pilot Neutral tokens", () => {
     expect(css).toContain(".bop-skip-link");
     expect(css).not.toMatch(/https?:\/\//i);
   });
+  it("defines the shared spacing token consumed by both web surfaces", () => {
+    expect(css).toMatch(/--bop-space-5:\s*1\.25rem;/u);
+  });
 });

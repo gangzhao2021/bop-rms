@@ -1,6 +1,10 @@
 import type { PoolClient } from "pg";
 import { describe, expect, it, vi } from "vitest";
-import { createTenantTransactionRunner, type DatabaseTransaction } from "./transaction-runner.js";
+import {
+  createTenantTransactionRunner,
+  isRetryableTransactionConflict,
+  type DatabaseTransaction,
+} from "./transaction-runner.js";
 
 const scope = { brandId: "018f3f7a-8b1c-7a11-8d01-000000000041" };
 function fixture(failure?: string) {
@@ -30,7 +34,10 @@ describe("WP-2212 pooled transaction runner", () => {
         return 42;
       }),
     ).toBe(42);
-    expect(f.query.mock.calls.map(([sql]) => sql)).toContain("SET LOCAL lock_timeout = '2s'");
+    expect(f.query.mock.calls.map(([sql]) => sql)).toContain(
+      "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
+        "SET LOCAL idle_in_transaction_session_timeout = '5s'",
+    );
     expect(f.query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
     expect(f.release).toHaveBeenCalledWith(false);
     await expect(escaped?.query("SELECT 1", [])).rejects.toMatchObject({
@@ -54,23 +61,66 @@ describe("WP-2212 pooled transaction runner", () => {
     ).toThrow();
     expect(f.connect).not.toHaveBeenCalled();
   });
-  it.each(["SELECT secret", "COMMIT", "SET LOCAL statement_timeout = '5s'", "release"])(
-    "bounds %s failure without retry",
-    async (failure) => {
-      const f = fixture(failure);
-      const error = await f.runner
-        .run(async (t) => {
-          await t.query("SELECT secret", []);
-        })
-        .catch((e: unknown) => e);
-      expect(error).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_FAILED" });
-      expect(error).not.toHaveProperty("cause");
-      expect(String(error)).not.toContain("private");
-      expect(f.connect).toHaveBeenCalledTimes(1);
-      expect(f.release).toHaveBeenCalledTimes(1);
-      if (failure !== "release") expect(f.release).toHaveBeenCalledWith(true);
+  it.each([
+    "SELECT secret",
+    "COMMIT",
+    "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
+      "SET LOCAL idle_in_transaction_session_timeout = '5s'",
+    "release",
+  ])("bounds %s failure without retry", async (failure) => {
+    const f = fixture(failure);
+    const error = await f.runner
+      .run(async (t) => {
+        await t.query("SELECT secret", []);
+      })
+      .catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_FAILED" });
+    expect(error).not.toHaveProperty("cause");
+    expect(String(error)).not.toContain("private");
+    expect(f.connect).toHaveBeenCalledTimes(1);
+    expect(f.release).toHaveBeenCalledTimes(1);
+    if (failure !== "release") expect(f.release).toHaveBeenCalledWith(true);
+  });
+  it.each([
+    ["COMMIT", "Connection terminated unexpectedly", "08006"],
+    [
+      "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
+        "SET LOCAL idle_in_transaction_session_timeout = '5s'",
+      "Client has encountered a connection error and is not queryable",
+      "08006",
+    ],
+    ["COMMIT", "private SQL/bind failure", null],
+  ])(
+    "WP-2423 (v15 2026-10-17): %s failing with %j keeps SQLSTATE %s for retry decisions",
+    async (failure, message, sqlState) => {
+      const f = fixture();
+      f.query.mockImplementation(async (sql: string) => {
+        if (sql === failure) throw new Error(message);
+        return { rows: [] };
+      });
+      const error = await f.runner.run(async () => undefined).catch((e: unknown) => e);
+      expect(error).toMatchObject({
+        code: "TENANT_DATABASE_TRANSACTION_FAILED",
+        diagnostic: { sqlState, constraint: null, table: null, closed: false },
+      });
+      expect(JSON.stringify(error)).not.toContain(message);
     },
   );
+  it("WP-2423: a swallowed query failure keeps that query's SQLSTATE", async () => {
+    const f = fixture();
+    f.query.mockImplementation(async (sql: string) => {
+      if (sql === "SELECT lost") throw new Error("Connection terminated unexpectedly");
+      return { rows: [] };
+    });
+    await expect(
+      f.runner.run(async (t) => {
+        await t.query("SELECT lost", []).catch(() => undefined);
+      }),
+    ).rejects.toMatchObject({
+      code: "TENANT_DATABASE_TRANSACTION_FAILED",
+      diagnostic: { sqlState: "08006" },
+    });
+  });
   it("does not commit a caught query failure", async () => {
     const f = fixture("SELECT secret");
     await expect(
@@ -81,6 +131,133 @@ describe("WP-2212 pooled transaction runner", () => {
     ).rejects.toThrow();
     expect(f.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
     expect(f.release).toHaveBeenCalledWith(true);
+  });
+  it.each(["55P03", "40001", "40P01"])(
+    "reports a %s conflict as retryable even when the action rewraps it",
+    async (code) => {
+      const f = fixture();
+      f.query.mockImplementation(async (sql: string) => {
+        if (sql === "LOCK TABLE x") throw Object.assign(new Error("private"), { code });
+        return { rows: [] };
+      });
+      const failure = await f.runner
+        .run(async (t) => {
+          try {
+            await t.query("LOCK TABLE x", []);
+          } catch {
+            throw new Error("domain wrapper");
+          }
+        })
+        .catch((error: unknown) => error);
+      expect(isRetryableTransactionConflict(failure)).toBe(true);
+      expect(String((failure as Error).message)).not.toContain("private");
+      expect(f.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
+    },
+  );
+  it("names only safe identifiers of a failed statement (SQLSTATE, constraint, table)", async () => {
+    const f = fixture();
+    f.query.mockImplementation(async (sql: string) => {
+      if (sql === "INSERT x")
+        throw Object.assign(new Error("private value 'secret'"), {
+          code: "23505",
+          constraint: "order_revision_pk",
+          table: "order_revision",
+          detail: "Key (id)=(secret) already exists.",
+        });
+      return { rows: [] };
+    });
+    let seen: unknown;
+    let escaped: DatabaseTransaction | undefined;
+    await f.runner
+      .run(async (t) => {
+        escaped = t;
+        await t.query("INSERT x", []).catch((error: unknown) => {
+          seen = error;
+          throw error;
+        });
+      })
+      .catch(() => undefined);
+    expect(seen).toMatchObject({
+      code: "TENANT_DATABASE_TRANSACTION_FAILED",
+      diagnostic: {
+        sqlState: "23505",
+        constraint: "order_revision_pk",
+        table: "order_revision",
+        closed: false,
+      },
+    });
+    expect(JSON.stringify(seen)).not.toContain("secret");
+    await expect(escaped?.query("SELECT 1", [])).rejects.toMatchObject({
+      diagnostic: { sqlState: null, constraint: null, table: null, closed: true },
+    });
+  });
+  it("keeps the caller's own error after a failed query, with the SQLSTATE riding along", async () => {
+    const f = fixture();
+    f.query.mockImplementation(async (sql: string) => {
+      if (sql === "SELECT denied")
+        throw Object.assign(new Error("permission denied for table secret_table"), {
+          code: "42501",
+        });
+      return { rows: [] };
+    });
+    class DomainError extends Error {
+      readonly code = "ORDER_STATUS_DEPENDENCY_UNAVAILABLE";
+    }
+    const thrown = await f.runner
+      .run(async (t) => {
+        await t.query("SELECT denied", []).catch(() => {
+          throw new DomainError();
+        });
+      })
+      .catch((error: unknown) => error);
+    expect(thrown).toBeInstanceOf(DomainError);
+    expect(
+      Object.getOwnPropertyDescriptor(thrown, Symbol.for("bop.database.failure"))?.value,
+    ).toMatchObject({ sqlState: "42501" });
+    // Not enumerable: never serialized into a payload or log by accident.
+    expect(Object.keys(thrown as object)).not.toContain("sqlState");
+    expect(JSON.stringify(thrown)).not.toContain("42501");
+  });
+  it("refuses a second query while one is in flight and rolls the transaction back", async () => {
+    const f = fixture();
+    let release: (() => void) | undefined;
+    f.query.mockImplementation(async (sql: string) => {
+      if (sql === "SELECT slow")
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      return { rows: [] };
+    });
+    let second: unknown;
+    const failure = await f.runner
+      .run(async (t) => {
+        const first = t.query("SELECT slow", []);
+        second = await t.query("SELECT other", []).catch((error: unknown) => error);
+        release?.();
+        await first;
+      })
+      .catch((error: unknown) => error);
+    expect(second).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY" });
+    expect(failure).toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY" });
+    expect(f.query.mock.calls.map(([sql]) => sql)).not.toContain("SELECT other");
+    expect(f.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
+  });
+  it("allows the same queries one after another", async () => {
+    const f = fixture();
+    expect(
+      await f.runner.run(async (t) => {
+        await t.query("SELECT 1", []);
+        await t.query("SELECT 2", []);
+        return "done";
+      }),
+    ).toBe("done");
+  });
+  it("keeps other failures non-retryable", async () => {
+    const f = fixture("SELECT secret");
+    const failure = await f.runner
+      .run((t) => t.query("SELECT secret", []))
+      .catch((error: unknown) => error);
+    expect(isRetryableTransactionConflict(failure)).toBe(false);
   });
   it("does not invoke scope accessors", async () => {
     const f = fixture();
@@ -110,5 +287,33 @@ describe("WP-2212 pooled transaction runner", () => {
     finish();
     expect(f.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
     expect(f.release).toHaveBeenCalledWith(true);
+  });
+});
+describe("WP-2423 repeated scope settings and held locks", () => {
+  it("answers repeats inside one transaction without a round trip, never across transactions", async () => {
+    const f = fixture();
+    const scopeSql = "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)";
+    const lockSql = "SELECT pg_advisory_xact_lock(hashtextextended($1,0))";
+    const store = "018f3f7a-8b1c-7a11-8d01-000000000042";
+    const ran = () =>
+      f.query.mock.calls.filter(([sql]) => sql === scopeSql || sql === lockSql).length;
+    await f.runner.run(async (transaction) => {
+      // The runner installed the brand and an empty Store before the callback.
+      await transaction.query(scopeSql, [scope.brandId, ""]);
+      expect(ran()).toBe(0);
+      await transaction.query(scopeSql, [scope.brandId, store]);
+      await transaction.query(scopeSql, [scope.brandId, store]);
+      await transaction.query(lockSql, ["k"]);
+      await transaction.query(lockSql, ["k"]);
+      expect(ran()).toBe(2);
+      await transaction.query("ROLLBACK TO SAVEPOINT s", []);
+      await transaction.query(lockSql, ["k"]);
+      await transaction.query(scopeSql, [scope.brandId, store]);
+      expect(ran()).toBe(4);
+    });
+    await f.runner.run(async (transaction) => {
+      await transaction.query(lockSql, ["k"]);
+    });
+    expect(ran()).toBe(5);
   });
 });

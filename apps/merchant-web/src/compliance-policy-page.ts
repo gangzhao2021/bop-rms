@@ -1,3 +1,4 @@
+import { createContractParsers } from "./contract-parsers.js";
 export type CompliancePolicyPageErrorCode =
   | "PermissionDenied"
   | "NotFound"
@@ -94,11 +95,9 @@ export interface CompliancePolicyView {
     readonly retiredAt: string | null;
   }[];
 }
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const codePattern = /^[A-Z][A-Z0-9_.:-]{0,63}$/u;
 const unsigned = /^(?:0|[1-9][0-9]{0,8})$/u;
 const decimalPattern = /^-?(?:0|[1-9][0-9]{0,17})(?:\.[0-9]{1,9})?$/u;
-const instantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const fail = (): never => {
   throw new CompliancePolicyPageError("Unavailable");
 };
@@ -118,23 +117,12 @@ function object(value: unknown, fields: readonly string[]) {
     return fail();
   return value as Record<string, unknown>;
 }
-const oneOf = <T extends string>(value: unknown, values: readonly T[]): T =>
-  typeof value === "string" && values.includes(value as T) ? (value as T) : fail();
-const reference = (value: unknown) =>
-  typeof value === "string" && uuid.test(value) ? value : fail();
+const { oneOf, reference, instant, bool } = createContractParsers(fail);
 const nullableReference = (value: unknown) => (value === null ? null : reference(value));
 const code = (value: unknown) =>
   typeof value === "string" && codePattern.test(value) ? value : fail();
 const nullableCode = (value: unknown) => (value === null ? null : code(value));
-const instant = (value: unknown) =>
-  typeof value === "string" &&
-  instantPattern.test(value) &&
-  Number.isFinite(Date.parse(value)) &&
-  new Date(Date.parse(value)).toISOString() === value
-    ? value
-    : fail();
 const nullableInstant = (value: unknown) => (value === null ? null : instant(value));
-const bool = (value: unknown) => (typeof value === "boolean" ? value : fail());
 const positive = (value: unknown) =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : fail();
 const count = (value: unknown) =>

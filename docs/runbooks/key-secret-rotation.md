@@ -1,0 +1,12 @@
+# Key and secret rotation procedure
+
+Authority: Handoff 87.8 and the [KMS/Audit/Archive policy](../security/kms-audit-archive-evidence-policy.json). Use the [evidence template](key-secret-rotation-evidence-template.md). This guide authorizes no live account or credential change.
+
+1. Security coordinator names applicable approval, operator, purpose/environment, current version and dependent services/archives/holds. Identify safe restricted key/version references, decrypt/verify consumers, rollout sequence, stop conditions and alerts. A missing dependency or recovery path stops rotation.
+2. Preserve purpose/environment separation and dedicated P256 sign/verify keys. Symmetric keys use annual automatic rotation; asymmetric keys rotate annually or on compromise with verify-only `kid` overlap. Validate old retained signatures/decryption as well as new writes before changing dependent consumers.
+3. Secrets Manager rotates at 90 days or shorter; nonrotatable secrets receive 180-day review. Use dual-read/single-write version transition. Pepper overlap is at most 24 hours, or use announced global revocation. Record the chosen accepted path and affected Session/recovery behavior; never expose secret material in evidence.
+4. Validate authorized new reads/writes, retained historical reads/verifications, consumer convergence and unusual-decrypt/access alerts. On failure stop advancement, retain required reading/verifying capability and escalate. Do not blindly resume old writes or revoke a version while dependencies still require it; the environment's approved recovery decision controls that action.
+5. Deletion needs two-person approval, a minimum 30-day deletion window and confirmation that archive/hold dependencies do not block it. An active dependency blocks deletion. Preserve linked correction/refund/void history and applicable retention; rotation is not authority to rewrite append-only evidence.
+6. Record actual version transition, overlap bounds, verification, alerts, reviewer and unresolved consumers in restricted storage. Daily Audit chain/signature and source-manifest/archive verification continue; verifier failure freezes high-risk exports. Quarterly cross-tenant-safe restore sampling remains separately evidenced.
+
+The policy's control list and static tests express accepted requirements. They do not prove rotation, historical decryptability, retention, alert delivery or deletion approvals occurred.

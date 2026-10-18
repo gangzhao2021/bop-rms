@@ -1,6 +1,6 @@
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u;
-const opaqueProof = /^[A-Za-z0-9_-]{22}$/u;
+const opaqueProof = /^[A-Za-z0-9_-]{21}[AQgw]$/u;
 const humanCode = /^\d{6}$/u;
 
 export interface PickupCodeView {
@@ -13,12 +13,31 @@ export interface PickupCodeView {
   readonly generation: number;
   readonly proofKind: "Opaque" | "HumanCode";
   readonly proofValue: string;
+  /** WP-2423: the six-digit code the guest reads to staff; null for a proof issued before codes. */
+  readonly counterCode: string | null;
   readonly observedAt: string;
   readonly expiresAt: string;
 }
 
+/**
+ * WP-2423: the order is ready but has no code to show. `CounterOrder`: staff took it at the
+ * counter; `CodePending`: the code is still being issued; `CodeUnavailable`: its time window
+ * ended or code checks were locked. Staff hand the order over after checking name or phone.
+ */
+export type PickupWithoutCodeReason = "CounterOrder" | "CodePending" | "CodeUnavailable";
+export interface PickupWithoutCodeView {
+  readonly status: "ReadyWithoutCode";
+  readonly orderNumber: string;
+  readonly reason: PickupWithoutCodeReason;
+}
+
 export type PickupCodeState =
   | { readonly status: "hidden" }
+  | {
+      readonly status: "ready-without-code";
+      readonly orderNumber: string;
+      readonly reason: PickupWithoutCodeReason;
+    }
   | { readonly status: "loading" }
   | { readonly status: "not-ready" }
   | { readonly status: "permission-denied" }
@@ -31,6 +50,7 @@ export type PickupCodeState =
   | { readonly status: "ready"; readonly view: PickupCodeView; readonly refreshing: boolean };
 
 export interface CustomerPickupCodeClient {
+  subscribeContextChange?(listener: () => void): () => void;
   load(orderReference: string): Promise<unknown>;
 }
 
@@ -107,7 +127,8 @@ function parseInstant(value: unknown): string {
   return value;
 }
 
-export type PickupCodeResult = { readonly status: "NotReady" } | PickupCodeView;
+export type PickupCodeResult =
+  { readonly status: "NotReady" } | PickupWithoutCodeView | PickupCodeView;
 
 export function parsePickupCodeResult(
   value: unknown,
@@ -128,19 +149,22 @@ export function parsePickupCodeResult(
     value,
     status === "NotReady"
       ? ["schemaVersion", "status", "orderReference"]
-      : [
-          "schemaVersion",
-          "status",
-          "orderReference",
-          "orderNumber",
-          "storeDisplayName",
-          "pickupInstruction",
-          "generation",
-          "proofKind",
-          "proofValue",
-          "observedAt",
-          "expiresAt",
-        ],
+      : status === "ReadyWithoutCode"
+        ? ["schemaVersion", "status", "orderReference", "orderNumber", "reason"]
+        : [
+            "schemaVersion",
+            "status",
+            "orderReference",
+            "orderNumber",
+            "storeDisplayName",
+            "pickupInstruction",
+            "generation",
+            "proofKind",
+            "proofValue",
+            "counterCode",
+            "observedAt",
+            "expiresAt",
+          ],
   );
   if (
     base.schemaVersion !== 1 ||
@@ -149,6 +173,20 @@ export function parsePickupCodeResult(
   )
     return invalid();
   if (base.status === "NotReady") return Object.freeze({ status: "NotReady" });
+  if (base.status === "ReadyWithoutCode") {
+    if (
+      base.orderNumber !== expectedOrderNumber ||
+      (base.reason !== "CounterOrder" &&
+        base.reason !== "CodePending" &&
+        base.reason !== "CodeUnavailable")
+    )
+      return invalid();
+    return Object.freeze({
+      status: "ReadyWithoutCode",
+      orderNumber: expectedOrderNumber,
+      reason: base.reason,
+    });
+  }
   if (
     base.status !== "Ready" ||
     base.orderNumber !== expectedOrderNumber ||
@@ -159,7 +197,9 @@ export function parsePickupCodeResult(
     (base.proofKind !== "Opaque" && base.proofKind !== "HumanCode") ||
     typeof base.proofValue !== "string" ||
     (base.proofKind === "Opaque" && !opaqueProof.test(base.proofValue)) ||
-    (base.proofKind === "HumanCode" && !humanCode.test(base.proofValue))
+    (base.proofKind === "HumanCode" && !humanCode.test(base.proofValue)) ||
+    (base.counterCode !== null &&
+      (typeof base.counterCode !== "string" || !humanCode.test(base.counterCode)))
   )
     return invalid();
   const observedAt = parseInstant(base.observedAt);
@@ -184,6 +224,7 @@ export function parsePickupCodeResult(
     generation: base.generation as number,
     proofKind: base.proofKind,
     proofValue: base.proofValue,
+    counterCode: base.counterCode as string | null,
     observedAt,
     expiresAt,
   });
@@ -197,7 +238,22 @@ export interface PickupCodeController {
   setOnline(value: boolean): void;
   dispose(): void;
   subscribe(listener: () => void): () => void;
+  /**
+   * WP-2423: the order is Ready, so the code is issued within seconds. While following, a
+   * not-ready or briefly unavailable answer is checked again on a short backoff until the code
+   * arrives, instead of waiting for the next order status refresh.
+   */
+  followUntilReady?(active: boolean): void;
 }
+
+/**
+ * Retry delays after a not-ready or unavailable answer while following; the last one repeats. The
+ * code is normally issued a second or two after the order turns Ready, so the first checks are
+ * every second (v15 2026-10-16: 2 s then 3 s left the guest waiting ~4 s after the code existed).
+ */
+export const pickupCodeFollowDelaysMs: readonly number[] = Object.freeze([
+  1_000, 1_000, 1_000, 2_000, 3_000, 5_000, 8_000, 15_000,
+]);
 
 export function createPickupCodeController(
   orderReference: string,
@@ -210,7 +266,15 @@ export function createPickupCodeController(
   let stopped = false;
   let request = 0;
   let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+  let following = false;
+  let followAttempt = 0;
+  let followTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearFollow = () => {
+    if (followTimer) clearTimeout(followTimer);
+    followTimer = null;
+  };
   const listeners = new Set<() => void>();
+  let unsubscribeContext: (() => void) | undefined;
   const clearExpiry = () => {
     if (expiryTimer) clearTimeout(expiryTimer);
     expiryTimer = null;
@@ -221,10 +285,25 @@ export function createPickupCodeController(
   };
   const clearProof = (next: PickupCodeState) => {
     request += 1;
+    clearFollow();
     clearExpiry();
     publish(next);
   };
-  const query = async () => {
+  const scheduleFollow = () => {
+    clearFollow();
+    if (!following || stopped || !online) return;
+    const delay =
+      pickupCodeFollowDelaysMs[Math.min(followAttempt, pickupCodeFollowDelaysMs.length - 1)] ??
+      15_000;
+    followAttempt += 1;
+    followTimer = setTimeout(() => {
+      followTimer = null;
+      if (following && !stopped) void query(true);
+    }, delay);
+  };
+  /** A quiet follow-up keeps the current not-ready text on screen instead of flashing "checking". */
+  const query = async (quiet = false): Promise<void> => {
+    clearFollow();
     if (stopped || !reference.test(orderReference) || !/^[1-9][0-9]{0,18}$/u.test(orderNumber)) {
       clearProof({ status: "unavailable" });
       return;
@@ -234,8 +313,8 @@ export function createPickupCodeController(
       return;
     }
     const token = ++request;
-    if (state.status === "ready") publish({ ...state, refreshing: true });
-    else publish({ status: "loading" });
+    clearExpiry();
+    if (!quiet) publish({ status: "loading" });
     try {
       const result = parsePickupCodeResult(
         await client.load(orderReference),
@@ -247,8 +326,20 @@ export function createPickupCodeController(
       clearExpiry();
       if (result.status === "NotReady") {
         publish({ status: "not-ready" });
+        scheduleFollow();
         return;
       }
+      if (result.status === "ReadyWithoutCode") {
+        publish({
+          status: "ready-without-code",
+          orderNumber: result.orderNumber,
+          reason: result.reason,
+        });
+        // A code still being issued is followed until it arrives; the other reasons are final.
+        if (result.reason === "CodePending") scheduleFollow();
+        return;
+      }
+      followAttempt = 0;
       publish({ status: "ready", view: result, refreshing: false });
       const delay = Date.parse(result.expiresAt) - clock();
       expiryTimer = setTimeout(() => clearProof({ status: "expired" }), Math.max(0, delay));
@@ -267,30 +358,63 @@ export function createPickupCodeController(
                     : "unavailable"
             : "unavailable";
         clearProof({ status });
+        if (status === "unavailable") scheduleFollow();
       }
     }
   };
   return Object.freeze({
     getState: () => state,
-    reveal: query,
-    refresh: query,
+    reveal: () => query(),
+    refresh: () => query(),
     close() {
       clearProof({ status: "hidden" });
     },
     setOnline(value: boolean) {
       online = value;
-      if (!value) clearProof({ status: "offline" });
+      if (!value) {
+        clearFollow();
+        clearProof({ status: "offline" });
+      } else if (following && state.status === "offline") void query();
+    },
+    followUntilReady(active: boolean) {
+      if (following === active) return;
+      following = active;
+      followAttempt = 0;
+      clearFollow();
+      if (
+        active &&
+        (state.status === "not-ready" ||
+          state.status === "unavailable" ||
+          (state.status === "ready-without-code" && state.reason === "CodePending"))
+      )
+        scheduleFollow();
     },
     dispose() {
       stopped = true;
+      following = false;
+      clearFollow();
       request += 1;
       clearExpiry();
+      unsubscribeContext?.();
+      unsubscribeContext = undefined;
       listeners.clear();
       state = { status: "hidden" };
     },
     subscribe(listener: () => void) {
+      if (stopped) return () => undefined;
       listeners.add(listener);
-      return () => listeners.delete(listener);
+      if (listeners.size === 1)
+        unsubscribeContext = client.subscribeContextChange?.(() =>
+          clearProof({ status: "permission-denied" }),
+        );
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) {
+          unsubscribeContext?.();
+          unsubscribeContext = undefined;
+          clearProof({ status: "hidden" });
+        }
+      };
     },
   });
 }

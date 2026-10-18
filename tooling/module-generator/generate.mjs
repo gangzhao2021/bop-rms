@@ -162,9 +162,15 @@ function renderPackageJson(manifest) {
     version: "0.0.0",
     private: true,
     type: "module",
-    exports: { ".": { types: "./src/index.ts", import: "./src/index.ts" } },
+    exports: {
+      ".": {
+        types: "./src/index.ts",
+        development: "./src/index.ts",
+        default: `./dist/packages/${manifest.layer.toLowerCase()}/${manifest.moduleName}/src/index.js`,
+      },
+    },
     scripts: {
-      build: "tsc --project tsconfig.json",
+      build: "tsc --project tsconfig.build.json",
       "format:check": "prettier --check . --ignore-path ../../../.prettierignore",
       lint: "eslint src",
       test: "vitest run --passWithNoTests",
@@ -181,6 +187,24 @@ function renderTsconfig() {
       extends: "../../../tsconfig.base.json",
       compilerOptions: { lib: ["ES2024"], types: ["node"] },
       include: ["src/**/*.ts"],
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function renderTsconfigBuild() {
+  return `${JSON.stringify(
+    {
+      extends: "./tsconfig.json",
+      compilerOptions: {
+        noEmit: false,
+        outDir: "dist",
+        rootDir: "../../..",
+        declaration: false,
+        declarationMap: false,
+      },
+      exclude: ["src/**/*.test.ts", "src/tests/**"],
     },
     null,
     2,
@@ -274,6 +298,7 @@ async function writeGeneratedTree(stagingRoot, manifest) {
     ["README.md", await renderReadme(manifest)],
     ["package.json", renderPackageJson(manifest)],
     ["tsconfig.json", renderTsconfig()],
+    ["tsconfig.build.json", renderTsconfigBuild()],
     ["src/index.ts", 'export { moduleManifest } from "./module.manifest.js";\n'],
     ["src/module.manifest.ts", renderManifest(manifest)],
   ]);

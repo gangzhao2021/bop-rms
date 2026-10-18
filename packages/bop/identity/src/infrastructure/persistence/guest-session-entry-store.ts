@@ -90,6 +90,25 @@ export function createPostgresGuestSessionEntryStore(
   runner: GuestSessionEntryTransactionRunner,
   scope: Readonly<{ brandReference: string; storeReference: string }>,
 ): GuestSessionEntryStore {
+  return createGuestEntryStore(runner, scope, false);
+}
+
+/** Caller must lend its write transaction and retain the Guest row lock through
+ * the authorized action. Acquire before Dining/Cart locks; no credentials returned.
+ * Lifecycle/credential/CSRF/current binding checks still belong to GuestSessionService.
+ */
+export function createPostgresFencedGuestSessionEntryStore(
+  runner: GuestSessionEntryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+): GuestSessionEntryStore {
+  return createGuestEntryStore(runner, scope, true);
+}
+
+function createGuestEntryStore(
+  runner: GuestSessionEntryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  fenceResolve: boolean,
+): GuestSessionEntryStore {
   const brand = parseOpaqueUuidV7(scope.brandReference, "IDENTITY_INPUT_INVALID");
   const store = parseOpaqueUuidV7(scope.storeReference, "IDENTITY_INPUT_INVALID");
 
@@ -398,11 +417,10 @@ export function createPostgresGuestSessionEntryStore(
         const selector = parseGuestSelectorHash(selectorInput);
         return await run(async (transaction) => {
           const found = record(
-            await transaction.query(`${select} AND session_selector_hash = decode($3, 'hex')`, [
-              brand,
-              store,
-              selector,
-            ]),
+            await transaction.query(
+              `${select} AND session_selector_hash = decode($3, 'hex')${fenceResolve ? " FOR UPDATE" : ""}`,
+              [brand, store, selector],
+            ),
           );
           if (found !== null && found.sessionSelectorHash !== selector) throw unavailable();
           return found;

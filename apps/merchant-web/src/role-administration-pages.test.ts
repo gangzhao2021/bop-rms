@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { roleEditorFixture, roleListFixture } from "./role-administration-pages.fixtures.js";
 import {
+  createRoleAdministrationPageClient,
   parseRoleAdministrationPageView,
   parseRoleAdministrationRouteReference,
 } from "./role-administration-pages.js";
@@ -32,5 +33,25 @@ describe("WP-2195 IAM Role screen contracts", () => {
     expect(() => parseRoleAdministrationPageView(selfApproved, "IAM-ROLE-EDITOR")).toThrow(
       "ROLE_ADMIN_PAGE_INVALID",
     );
+  });
+});
+
+describe("WP-2423 role command refusals", () => {
+  it("tells a PIN sign-in refusal apart from a missing permission", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ error: "full_sign_in_required" }, { status: 403 }))
+      .mockResolvedValueOnce(Response.json({ error: "forbidden" }, { status: 403 }));
+    const client = createRoleAdministrationPageClient("c".repeat(43), fetcher);
+    const request = {
+      operation: "Activate",
+      roleReference: "01909974-0000-7000-8000-000000000001",
+      expectedVersion: 1,
+      operationReference: "01909974-0000-7000-8000-000000000002",
+      reasonCode: "ROLE_ACTIVATED",
+      draft: null,
+    } as unknown as Parameters<typeof client.command>[0];
+    await expect(client.command(request)).rejects.toMatchObject({ code: "FullSignInRequired" });
+    await expect(client.command(request)).rejects.toMatchObject({ code: "PermissionDenied" });
   });
 });

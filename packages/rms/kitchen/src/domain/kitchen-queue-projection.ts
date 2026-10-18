@@ -224,8 +224,40 @@ export interface KitchenQueueAutomaticReadyProof {
   readonly projectionProofDigest: KitchenDigest;
 }
 
+/** WP-2423 Q6: one proof per work item cancelled by staff before the kitchen started it. */
+export interface KitchenQueueCancellationProof {
+  readonly kind: "Cancellation";
+  readonly brandReference: KitchenReference;
+  readonly storeReference: KitchenReference;
+  readonly ticketReference: KitchenReference;
+  readonly workItemReference: KitchenReference;
+  readonly orderItemReference: KitchenReference;
+  readonly operationReference: KitchenReference;
+  readonly cancellationOperationReference: KitchenReference;
+  readonly orderCancellationReference: KitchenReference;
+  readonly actionCode: "KITCHEN_WORK_CANCELLED";
+  readonly purpose: "KitchenOrderCancellation";
+  readonly reasonCode: "ORDER_CANCELLED_BEFORE_PREPARATION";
+  readonly sourceChannel: "MERCHANT_WEB";
+  readonly actor: Readonly<{ readonly type: "User"; readonly actorReference: KitchenReference }>;
+  readonly expectedTicketVersion: bigint;
+  readonly committedTicketVersion: bigint;
+  readonly expectedWorkItemVersion: bigint;
+  readonly committedWorkItemVersion: bigint;
+  readonly beforeStatus: "Queued" | "Held";
+  readonly afterStatus: "Cancelled";
+  readonly occurredAt: KitchenInstant;
+  readonly evidenceDigest: KitchenDigest;
+  readonly auditReference: KitchenReference;
+  readonly eventReference: KitchenReference;
+  readonly projectionProofDigest: KitchenDigest;
+}
+
 export type KitchenQueueLifecycleProjectionProof =
-  KitchenQueueLifecycleEventProof | KitchenQueueManualReadyProof | KitchenQueueAutomaticReadyProof;
+  | KitchenQueueLifecycleEventProof
+  | KitchenQueueManualReadyProof
+  | KitchenQueueAutomaticReadyProof
+  | KitchenQueueCancellationProof;
 
 export interface KitchenQueueLifecycleProofBundle {
   readonly ticketReference: KitchenReference;
@@ -1362,6 +1394,97 @@ function parseAutomaticReadyProof(
   return proof;
 }
 
+function parseCancellationProof(
+  value: unknown,
+  sha256: KitchenQueueDigestPort,
+): KitchenQueueCancellationProof {
+  const raw = exact(value, [
+    "kind",
+    "brandReference",
+    "storeReference",
+    "ticketReference",
+    "workItemReference",
+    "orderItemReference",
+    "operationReference",
+    "cancellationOperationReference",
+    "orderCancellationReference",
+    "actionCode",
+    "purpose",
+    "reasonCode",
+    "sourceChannel",
+    "actor",
+    "expectedTicketVersion",
+    "committedTicketVersion",
+    "expectedWorkItemVersion",
+    "committedWorkItemVersion",
+    "beforeStatus",
+    "afterStatus",
+    "occurredAt",
+    "evidenceDigest",
+    "auditReference",
+    "eventReference",
+    "projectionProofDigest",
+  ]);
+  if (
+    raw.kind !== "Cancellation" ||
+    raw.actionCode !== "KITCHEN_WORK_CANCELLED" ||
+    raw.purpose !== "KitchenOrderCancellation" ||
+    raw.reasonCode !== "ORDER_CANCELLED_BEFORE_PREPARATION" ||
+    raw.sourceChannel !== "MERCHANT_WEB" ||
+    (raw.beforeStatus !== "Queued" && raw.beforeStatus !== "Held") ||
+    raw.afterStatus !== "Cancelled"
+  )
+    return invalid();
+  const expectedTicketVersion = positiveBigint(raw.expectedTicketVersion);
+  const committedTicketVersion = positiveBigint(raw.committedTicketVersion);
+  const expectedWorkItemVersion = positiveBigint(raw.expectedWorkItemVersion);
+  const committedWorkItemVersion = positiveBigint(raw.committedWorkItemVersion);
+  if (
+    committedTicketVersion !== expectedTicketVersion + 1n ||
+    committedWorkItemVersion !== expectedWorkItemVersion + 1n
+  )
+    return invalid();
+  const proof = Object.freeze({
+    kind: "Cancellation" as const,
+    brandReference: reference(raw.brandReference),
+    storeReference: reference(raw.storeReference),
+    ticketReference: reference(raw.ticketReference),
+    workItemReference: reference(raw.workItemReference),
+    orderItemReference: reference(raw.orderItemReference),
+    operationReference: reference(raw.operationReference),
+    cancellationOperationReference: reference(raw.cancellationOperationReference),
+    orderCancellationReference: reference(raw.orderCancellationReference),
+    actionCode: "KITCHEN_WORK_CANCELLED" as const,
+    purpose: "KitchenOrderCancellation" as const,
+    reasonCode: "ORDER_CANCELLED_BEFORE_PREPARATION" as const,
+    sourceChannel: "MERCHANT_WEB" as const,
+    actor: proofActor(raw.actor, "User") as KitchenQueueCancellationProof["actor"],
+    expectedTicketVersion,
+    committedTicketVersion,
+    expectedWorkItemVersion,
+    committedWorkItemVersion,
+    beforeStatus: raw.beforeStatus as KitchenQueueCancellationProof["beforeStatus"],
+    afterStatus: "Cancelled" as const,
+    occurredAt: instant(raw.occurredAt),
+    evidenceDigest: digest(raw.evidenceDigest),
+    auditReference: reference(raw.auditReference),
+    eventReference: reference(raw.eventReference),
+    projectionProofDigest: digest(raw.projectionProofDigest),
+  });
+  if (
+    new Set([
+      proof.operationReference,
+      proof.cancellationOperationReference,
+      proof.orderCancellationReference,
+      proof.auditReference,
+      proof.eventReference,
+    ]).size !== 5 ||
+    proof.projectionProofDigest !== canonicalDigest(sha256, normalizedProofValue(proof))
+  )
+    return invalid();
+  return proof;
+}
+
 function parseLifecycleProof(
   value: unknown,
   sha256: KitchenQueueDigestPort,
@@ -1373,14 +1496,51 @@ function parseLifecycleProof(
       ? parseManualReadyProof(value, sha256)
       : snapshot.kind === "AutomaticReady"
         ? parseAutomaticReadyProof(value, sha256)
-        : invalid();
+        : snapshot.kind === "Cancellation"
+          ? parseCancellationProof(value, sha256)
+          : invalid();
+}
+
+type KitchenQueueReadyProof = KitchenQueueManualReadyProof | KitchenQueueAutomaticReadyProof;
+
+function isReadyProof(
+  proof: KitchenQueueLifecycleProjectionProof,
+): proof is KitchenQueueReadyProof {
+  return proof.kind === "ManualReady" || proof.kind === "AutomaticReady";
 }
 
 function lifecycleProofOccurredAt(proof: KitchenQueueLifecycleProjectionProof): KitchenInstant {
-  return proof.kind === "Event" ? proof.occurredAt : proof.readyAt;
+  return isReadyProof(proof) ? proof.readyAt : proof.occurredAt;
 }
 
-function parseLifecycleProofBundle(
+/** Identifiers each proof owns. One staff cancellation shares its batch operation, Audit and
+ * Event across its item proofs, so those are owned once per cancellation operation. */
+function ownedProofReferences(
+  proofs: readonly KitchenQueueLifecycleProjectionProof[],
+): readonly KitchenReference[] {
+  const cancellationOperations = new Set<KitchenReference>();
+  return proofs.flatMap((proof) => {
+    if (proof.kind === "Cancellation") {
+      if (cancellationOperations.has(proof.cancellationOperationReference))
+        return [proof.operationReference];
+      cancellationOperations.add(proof.cancellationOperationReference);
+      return [
+        proof.operationReference,
+        proof.cancellationOperationReference,
+        proof.auditReference,
+        proof.eventReference,
+      ];
+    }
+    return [
+      proof.operationReference,
+      proof.auditReference,
+      ...(proof.eventReference === null ? [] : [proof.eventReference]),
+      ...(isReadyProof(proof) ? [proof.readyResultReference] : []),
+    ];
+  });
+}
+
+export function parseLifecycleProofBundle(
   value: unknown,
   sha256: KitchenQueueDigestPort,
 ): KitchenQueueLifecycleProofBundle {
@@ -1407,7 +1567,7 @@ function parseLifecycleProofBundle(
   const readyResultCount = integer(raw.readyResultCount, 0, Number.MAX_SAFE_INTEGER);
   if (
     operationCount !== proofs.length ||
-    readyResultCount !== proofs.filter((proof) => proof.kind !== "Event").length ||
+    readyResultCount !== proofs.filter(isReadyProof).length ||
     proofs.some((proof) => proof.ticketReference !== ticketReference) ||
     new Set(proofs.map((proof) => proof.operationReference)).size !== proofs.length ||
     new Set(
@@ -1415,13 +1575,27 @@ function parseLifecycleProofBundle(
     ).size !== proofs.length
   )
     return invalid();
-  const ownedReferences = proofs.flatMap((proof) => [
-    proof.operationReference,
-    proof.auditReference,
-    ...(proof.eventReference === null ? [] : [proof.eventReference]),
-    ...(proof.kind === "Event" ? [] : [proof.readyResultReference]),
-  ]);
+  const ownedReferences = ownedProofReferences(proofs);
   if (new Set(ownedReferences).size !== ownedReferences.length) return invalid();
+  const cancellations = proofs.filter(
+    (proof): proof is KitchenQueueCancellationProof => proof.kind === "Cancellation",
+  );
+  if (
+    cancellations.some((proof) =>
+      cancellations.some(
+        (other) =>
+          other.cancellationOperationReference === proof.cancellationOperationReference &&
+          (other.orderCancellationReference !== proof.orderCancellationReference ||
+            other.auditReference !== proof.auditReference ||
+            other.eventReference !== proof.eventReference ||
+            other.evidenceDigest !== proof.evidenceDigest ||
+            other.occurredAt !== proof.occurredAt ||
+            other.actor.actorReference !== proof.actor.actorReference),
+      ),
+    ) ||
+    new Set(cancellations.map((proof) => proof.workItemReference)).size !== cancellations.length
+  )
+    return invalid();
   const primary = proofs.filter((proof) => proof.kind !== "AutomaticReady");
   if (
     primary.some((proof, index) => {
@@ -1573,7 +1747,10 @@ function reconcileLifecycleTicket(
         observedReferences.has(proof.operationReference) ||
         observedReferences.has(proof.auditReference) ||
         (proof.eventReference !== null && observedReferences.has(proof.eventReference)) ||
-        (proof.kind !== "Event" && observedReferences.has(proof.readyResultReference)),
+        (isReadyProof(proof) && observedReferences.has(proof.readyResultReference)) ||
+        (proof.kind === "Cancellation" &&
+          (observedReferences.has(proof.cancellationOperationReference) ||
+            observedReferences.has(proof.orderCancellationReference))),
     )
   )
     return invalid();
@@ -1583,9 +1760,14 @@ function reconcileLifecycleTicket(
         proof.kind === "Event" && proof.workItemReference === item.workItemReference,
     );
     const readyProofs = bundle.proofs.filter(
-      (proof): proof is KitchenQueueManualReadyProof | KitchenQueueAutomaticReadyProof =>
-        proof.kind !== "Event" && proof.orderItemReference === item.orderItemReference,
+      (proof): proof is KitchenQueueReadyProof =>
+        isReadyProof(proof) && proof.orderItemReference === item.orderItemReference,
     );
+    const cancellationProofs = bundle.proofs.filter(
+      (proof): proof is KitchenQueueCancellationProof =>
+        proof.kind === "Cancellation" && proof.workItemReference === item.workItemReference,
+    );
+    const cancellation = cancellationProofs[0];
     const accept = eventProofs.filter((proof) => proof.eventType === "KitchenWorkAccepted");
     let expectedStatus: KitchenQueueWorkItemStatus = "Queued";
     let expectedCompletedQuantity = 0;
@@ -1626,10 +1808,27 @@ function reconcileLifecycleTicket(
       }
       priorFactAt = proof.occurredAt;
     }
+    // A cancellation replaces only work that never started and is the item's last fact.
+    if (cancellation !== undefined) {
+      if (
+        cancellationProofs.length !== 1 ||
+        readyProofs.length !== 0 ||
+        cancellation.beforeStatus !== expectedStatus ||
+        cancellation.orderItemReference !== item.orderItemReference ||
+        cancellation.expectedWorkItemVersion !== BigInt(eventProofs.length + 1) ||
+        eventProofs.some(
+          (proof) => proof.committedTicketVersion >= cancellation.committedTicketVersion,
+        ) ||
+        Date.parse(cancellation.occurredAt) < Date.parse(priorFactAt) ||
+        Date.parse(cancellation.occurredAt) > Date.parse(ticket.updatedAt)
+      )
+        return invalid();
+      expectedStatus = "Cancelled";
+    }
     if (
       accept.length > 1 ||
       readyProofs.length > 1 ||
-      item.workItemVersion !== BigInt(eventProofs.length + 1) ||
+      item.workItemVersion !== BigInt(eventProofs.length + cancellationProofs.length + 1) ||
       item.acceptedAt !== expectedAcceptedAt ||
       (includeReady && item.orderItemReadyAt !== (readyProofs[0]?.readyAt ?? null)) ||
       item.status !== expectedStatus ||
@@ -1743,9 +1942,7 @@ function parseKitchenQueueLifecycleSourceFeed(
     tickets.some((ticket) => Date.parse(ticket.updatedAt) > Date.parse(baseQueueFeed.asOfUtc)) ||
     proofBundles.some((bundle) =>
       bundle.proofs.some(
-        (proof) =>
-          Date.parse(proof.kind === "Event" ? proof.occurredAt : proof.readyAt) >
-          Date.parse(baseQueueFeed.asOfUtc),
+        (proof) => Date.parse(lifecycleProofOccurredAt(proof)) > Date.parse(baseQueueFeed.asOfUtc),
       ),
     )
   )
@@ -1759,12 +1956,7 @@ function parseKitchenQueueLifecycleSourceFeed(
     })
     .sort((left, right) => compareAscii(left.ticket.ticketReference, right.ticket.ticketReference));
   const allProofs = orderedTickets.flatMap(({ proofBundle }) => proofBundle.proofs);
-  const ownedReferences = allProofs.flatMap((proof) => [
-    proof.operationReference,
-    proof.auditReference,
-    ...(proof.eventReference === null ? [] : [proof.eventReference]),
-    ...(proof.kind === "Event" ? [] : [proof.readyResultReference]),
-  ]);
+  const ownedReferences = ownedProofReferences(allProofs);
   const observedReferences = new Set(
     orderedTickets.flatMap(({ ticket, proofBundle }) => [
       ticket.brandReference,
@@ -2660,9 +2852,14 @@ export function createKitchenQueueItemView(value: unknown): KitchenQueueItemView
   });
 }
 
-function resultMetadata(generationValue: unknown): KitchenQueueResultMetadata {
+function resultMetadata(
+  generationValue: unknown,
+  continuation = false,
+): KitchenQueueResultMetadata {
   const generation = parseKitchenQueueGeneration(generationValue);
-  if (generation.generationStatus !== "Active") return invalid();
+  // A continuation page belongs to the generation its first page came from, which may since have
+  // been retired by a kitchen step (the board reads one consistent snapshot).
+  if (generation.generationStatus !== (continuation ? "Retired" : "Active")) return invalid();
   return Object.freeze({
     projectionName: generation.projectionName,
     projectionVersion: generation.projectionVersion,
@@ -2696,8 +2893,9 @@ export function buildKitchenQueueListResult(input: {
   readonly generation: unknown;
   readonly rows: readonly unknown[];
   readonly nextCursor: unknown | null;
+  readonly continuation?: true;
 }): KitchenQueueListResult {
-  const metadata = resultMetadata(input.generation);
+  const metadata = resultMetadata(input.generation, input.continuation === true);
   const items = exactArray(input.rows, 0, Number.MAX_SAFE_INTEGER).map(createKitchenQueueItemView);
   return Object.freeze({
     projectionName: metadata.projectionName,

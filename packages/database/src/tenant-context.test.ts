@@ -152,6 +152,37 @@ describe("transaction-local Tenant database context", () => {
       expect(client.trace.some((item) => item.text === "ROLLBACK")).toBe(true);
     }
   });
+  it("WP-2423 (v15 2026-10-17): reports a setup or COMMIT on a lost connection as 08006", async () => {
+    for (const failure of ["BEGIN", "SELECT set_config('bop.store_id', $1, true)", "COMMIT"]) {
+      const client = new FakeClient();
+      client.query = async (text: string, values?: readonly unknown[]) => {
+        client.trace.push({ text, ...(values === undefined ? {} : { values }) });
+        if (text === failure) throw new Error("Connection terminated unexpectedly");
+        return { rows: [], rowCount: 0 } as unknown as QueryResult;
+      };
+      await expect(
+        withTenantContextTransaction(pool(client), { brandId: BRAND }, async () => undefined),
+      ).rejects.toMatchObject({
+        code: "TENANT_DATABASE_TRANSACTION_FAILED",
+        diagnostic: { sqlState: "08006", constraint: null, table: null, closed: false },
+      });
+      expect(client.destroyed).toBe(true);
+    }
+    // A server-side SQLSTATE is kept as is; an unrecognised failure stays without one.
+    const timedOut = new FakeClient();
+    timedOut.query = async (text: string) => {
+      if (text === "COMMIT") throw Object.assign(new Error("private"), { code: "25P03" });
+      return { rows: [], rowCount: 0 } as unknown as QueryResult;
+    };
+    await expect(
+      withTenantContextTransaction(pool(timedOut), { brandId: BRAND }, async () => undefined),
+    ).rejects.toMatchObject({ diagnostic: { sqlState: "25P03" } });
+    const unknown = new FakeClient();
+    unknown.failOn = "COMMIT";
+    await expect(
+      withTenantContextTransaction(pool(unknown), { brandId: BRAND }, async () => undefined),
+    ).rejects.toMatchObject({ diagnostic: { sqlState: null } });
+  });
   it("discards rollback failures and preserves even an undefined callback rejection", async () => {
     const client = new FakeClient();
     client.failOn = "ROLLBACK";

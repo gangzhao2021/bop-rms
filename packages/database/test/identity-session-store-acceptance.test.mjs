@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { verifyPlatformBrowserSession } from "../test-support/platform-browser-session.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -29,12 +30,26 @@ async function prove(context) {
       { table_name: "api_client_credential_metadata" },
       { table_name: "api_client_operation" },
       { table_name: "authentication_session" },
+      { table_name: "browser_brand_session_selection" },
+      { table_name: "browser_session_selection" },
+      { table_name: "guest_binding_preparation" },
+      { table_name: "guest_dining_binding_preparation" },
+      { table_name: "guest_entry_admission" },
       { table_name: "guest_session" },
       { table_name: "guest_session_operation" },
       { table_name: "oidc_authorization_transaction" },
+      { table_name: "platform_actor_directory_head" },
+      { table_name: "platform_actor_directory_revision" },
       { table_name: "session_revocation_request" },
+      { table_name: "staff_pin_attempt" },
+      { table_name: "staff_pin_credential" },
+      { table_name: "staff_pin_session" },
+      { table_name: "store_sign_in_device" },
+      { table_name: "workforce_account_binding" },
       { table_name: "workforce_invitation" },
       { table_name: "workforce_mfa_status" },
+      { table_name: "workforce_mfa_step_up" },
+      { table_name: "workforce_onboarding_operation" },
       { table_name: "workforce_recovery_case" },
     ]);
 
@@ -269,12 +284,30 @@ async function prove(context) {
     );
 
     const columns = await client.query(
-      `SELECT column_name
+      `SELECT table_name, column_name
        FROM information_schema.columns
        WHERE table_schema = 'bop_identity'
        ORDER BY table_name, ordinal_position`,
     );
-    const columnNames = columns.rows.map(({ column_name }) => column_name);
+    // Workforce onboarding "state" is a constrained lifecycle enum, not an OAuth state secret.
+    const onboardingState = await client.query(
+      `SELECT pg_get_constraintdef(oid) AS definition
+       FROM pg_constraint
+       WHERE conrelid = 'bop_identity.workforce_onboarding_operation'::regclass AND contype = 'c'`,
+    );
+    assert(
+      onboardingState.rows.some(({ definition }) =>
+        /^CHECK \(\(state = ANY \(ARRAY\['Prepared'::text, 'DispatchClaimed'::text, 'ProviderUnknown'::text, 'ProviderObserved'::text, 'Expired'::text, 'Rejected'::text\]\)\)\)$/u.test(
+          definition,
+        ),
+      ),
+    );
+    const columnNames = columns.rows
+      .filter(
+        ({ table_name, column_name }) =>
+          !(table_name === "workforce_onboarding_operation" && column_name === "state"),
+      )
+      .map(({ column_name }) => column_name);
     for (const prohibited of [
       "cookie",
       "csrf_token",
@@ -303,23 +336,91 @@ async function prove(context) {
     );
     assert.deepEqual(acl.rows, [{ count: 0 }]);
     const rls = await client.query(
-      `SELECT count(*)::int AS count
+      `SELECT relname
        FROM pg_class
-       WHERE relnamespace = 'bop_identity'::regnamespace AND relrowsecurity`,
+       WHERE relnamespace = 'bop_identity'::regnamespace AND relrowsecurity
+       ORDER BY relname`,
     );
-    assert.deepEqual(rls.rows, [{ count: 6 }]);
-    const dynamicObjects = await client.query(
-      `SELECT
-         (SELECT count(*)::int FROM pg_proc
-          WHERE pronamespace = 'bop_identity'::regnamespace) AS functions,
-         (SELECT count(*)::int FROM pg_trigger
-          WHERE tgrelid IN (
-            'bop_identity.authentication_session'::regclass,
-            'bop_identity.oidc_authorization_transaction'::regclass,
-            'bop_identity.guest_session'::regclass
-          ) AND NOT tgisinternal) AS triggers`,
+    assert.deepEqual(
+      rls.rows.map(({ relname }) => relname),
+      [
+        "api_client",
+        "api_client_access_version",
+        "api_client_credential_metadata",
+        "api_client_operation",
+        "browser_brand_session_selection",
+        "browser_session_selection",
+        "guest_binding_preparation",
+        "guest_dining_binding_preparation",
+        "guest_entry_admission",
+        "guest_session",
+        "guest_session_operation",
+        "platform_actor_directory_head",
+        "platform_actor_directory_revision",
+        "staff_pin_attempt",
+        "staff_pin_credential",
+        "staff_pin_session",
+        "store_sign_in_device",
+        "workforce_account_binding",
+        "workforce_mfa_step_up",
+        "workforce_onboarding_operation",
+      ],
     );
-    assert.deepEqual(dynamicObjects.rows, [{ functions: 3, triggers: 0 }]);
+    const functions = await client.query(
+      `SELECT proname
+       FROM pg_proc
+       WHERE pronamespace = 'bop_identity'::regnamespace
+       ORDER BY proname`,
+    );
+    assert.deepEqual(
+      functions.rows.map(({ proname }) => proname),
+      [
+        "check_staff_pin_attempt",
+        "check_staff_pin_session",
+        "enforce_api_client_revision",
+        "guard_staff_pin_credential_update",
+        "guard_store_sign_in_device_update",
+        "platform_actor_directory_complete",
+        "platform_actor_directory_head_guard",
+        "platform_actor_directory_immutable",
+        "platform_actor_directory_import_admit",
+        "platform_actor_directory_import_capable",
+        "platform_actor_directory_read",
+        "platform_actor_directory_revision_guard",
+        "reject_api_client_history_update",
+        "reject_browser_brand_selection_mutation",
+        "reject_guest_session_operation_mutation",
+        "reject_staff_pin_history_mutation",
+        "reject_workforce_mfa_step_up_mutation",
+        "validate_guest_binding_preparation",
+        "validate_guest_dining_binding_preparation",
+        "workforce_account_binding_acceptance_admit",
+        "workforce_account_binding_complete",
+        "workforce_account_binding_guard",
+        "workforce_account_binding_immutable",
+        "workforce_account_binding_import_admit",
+        "workforce_account_binding_import_capable",
+        "workforce_account_binding_read",
+        "workforce_account_invitation_read",
+        "workforce_onboarding_instant",
+        "workforce_onboarding_invitation_read",
+        "workforce_onboarding_operation_admit",
+        "workforce_onboarding_operation_complete",
+        "workforce_onboarding_operation_guard",
+        "workforce_onboarding_operation_immutable",
+        "workforce_onboarding_scope",
+      ],
+    );
+    const triggers = await client.query(
+      `SELECT count(*)::int AS triggers
+       FROM pg_trigger
+       WHERE tgrelid IN (
+         'bop_identity.authentication_session'::regclass,
+         'bop_identity.oidc_authorization_transaction'::regclass,
+         'bop_identity.guest_session'::regclass
+       ) AND NOT tgisinternal`,
+    );
+    assert.deepEqual(triggers.rows, [{ triggers: 0 }]);
 
     await client.query(
       `CREATE ROLE ${deniedRole} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`,
@@ -338,4 +439,8 @@ async function prove(context) {
 
 it("proves Identity session constraints, one-time consume and least privilege", async () => {
   await withIsolatedDatabase({ caseId: "identity_session", root }, prove);
+});
+
+it("persists privileged Platform Sessions with fresh same-session TOTP and atomic stepup", async () => {
+  await withIsolatedDatabase({ caseId: "platform_session", root }, verifyPlatformBrowserSession);
 });

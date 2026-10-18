@@ -263,3 +263,67 @@ export function moveActiveDiningSession(
     }),
   });
 }
+
+/** Staff start retains the supplied assignment fact while advancing the occupied Table aggregate. */
+export function assignStartedDiningSession(
+  sessionInput: DiningSession,
+  tableInput: DiningTable,
+  expectedAssignmentVersion: number,
+): DiningTable {
+  const session = parseDiningSession(sessionInput);
+  const table = createDiningTable(tableInput);
+  if (
+    !Number.isSafeInteger(expectedAssignmentVersion) ||
+    expectedAssignmentVersion < 1 ||
+    table.aggregateVersion !== expectedAssignmentVersion ||
+    session.tableAssignmentVersion !== expectedAssignmentVersion ||
+    session.brandReference !== table.brandReference ||
+    session.storeReference !== table.storeReference ||
+    session.tableReference !== table.tableReference ||
+    session.phase !== "Active" ||
+    session.version !== 1 ||
+    session.hostParticipantReference !== null ||
+    table.observedAt < table.createdAt ||
+    session.startedAt < table.observedAt ||
+    table.activeDiningSessionReference !== null ||
+    table.lifecycle !== "Published" ||
+    table.operationalState !== "Available"
+  )
+    return fail("DINING_TABLE_SESSION_CONFLICT");
+  return createDiningTable({
+    ...table,
+    activeDiningSessionReference: session.diningSessionReference,
+    aggregateVersion: table.aggregateVersion + 1,
+    observedAt: session.startedAt,
+  });
+}
+
+/** Release only the exact closed occupant. Recovery and retries must use the owning
+ * operation receipt; an empty table or later occupant is not another release. */
+export function releaseClosedDiningSession(
+  sessionInput: DiningSession,
+  tableInput: DiningTable,
+  observedAtInput: DiningInstant,
+): DiningTable {
+  const session = parseDiningSession(sessionInput),
+    table = createDiningTable(tableInput),
+    observedAt = parseDiningInstant(observedAtInput);
+  if (
+    session.phase !== "Closed" ||
+    session.brandReference !== table.brandReference ||
+    session.storeReference !== table.storeReference ||
+    session.tableReference !== table.tableReference ||
+    table.activeDiningSessionReference !== session.diningSessionReference ||
+    table.lifecycle !== "Published" ||
+    session.tableAssignmentVersion >= table.aggregateVersion ||
+    observedAt < table.observedAt ||
+    observedAt < session.startedAt
+  )
+    return fail("DINING_TABLE_SESSION_CONFLICT");
+  return createDiningTable({
+    ...table,
+    activeDiningSessionReference: null,
+    aggregateVersion: table.aggregateVersion + 1,
+    observedAt,
+  });
+}

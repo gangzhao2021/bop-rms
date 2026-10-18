@@ -14,6 +14,7 @@ const expectedNamespaces = [
   ["0300", "0300-bop-governance"],
   ["0400", "0400-bop-operations"],
   ["1000", "1000-rms-store"],
+  ["1001", "1001-rms-dining"],
   ["1100", "1100-rms-catalog"],
   ["1101", "1101-rms-catalog-category-menu"],
   ["1102", "1102-rms-catalog-option-set"],
@@ -30,7 +31,42 @@ const expectedNamespaces = [
   ["1600", "1600-rms-device"],
   ["1700", "1700-rms-fulfillment"],
   ["1800", "1800-rms-reporting"],
+  ["1900", "1900-rms-inventory"],
+  ["2000", "2000-release-001"],
 ] as const;
+/**
+ * DEC-MIGRATION-RELEASE-ORDER: the module namespaces are closed at their last pre-release sequence.
+ * Every later migration, whatever its owner, goes into the current release namespace (2000 and up),
+ * so the global (namespace, sequence) order is the release order and an upgraded database never
+ * meets a pending migration below its applied high-water mark. Ownership still comes from the
+ * header owner and schema, never from the namespace.
+ */
+const closedModuleNamespaceCeilings = new Map<number, number>([
+  [0, 24],
+  [100, 0],
+  [200, 34],
+  [300, 10],
+  [400, 19],
+  [1000, 13],
+  [1001, 13],
+  [1100, 18],
+  [1101, 3],
+  [1102, 8],
+  [1103, 2],
+  [1104, 4],
+  [1105, 1],
+  [1106, 3],
+  [1107, 3],
+  [1200, 17],
+  [1250, 10],
+  [1300, 36],
+  [1400, 24],
+  [1500, 11],
+  [1600, 8],
+  [1700, 12],
+  [1800, 6],
+  [1900, 16],
+]);
 const namespaceByDirectory = new Map<string, string>(
   expectedNamespaces.map(([namespace, directory]) => [directory, namespace]),
 );
@@ -55,13 +91,17 @@ const platformOwners = new Map([
 const businessOwners = new Map([
   ["bop_feature_control", "@bop/feature-control"],
   ["bop_publishing", "@bop/publishing"],
+  ["bop_media", "@bop/media"],
   ["bop_task", "@bop/task"],
+  ["bop_notification", "@bop/notification"],
   ["bop_identity", "@bop/identity"],
   ["bop_membership", "@bop/membership"],
   ["bop_permission", "@bop/permission"],
+  ["bop_workflow", "@bop/workflow"],
   ["bop_tenant", "@bop/tenant"],
   ["bop_operating_entity", "@bop/operating-entity"],
   ["rms_store", "@rms/store"],
+  ["rms_dining", "@rms/dining"],
   ["rms_catalog", "@rms/catalog"],
   ["rms_pricing", "@rms/pricing"],
   ["rms_recipe", "@rms/recipe"],
@@ -71,6 +111,7 @@ const businessOwners = new Map([
   ["rms_device", "@rms/printing-device"],
   ["rms_fulfillment", "@rms/fulfillment"],
   ["rms_reporting", "@rms/business-intelligence"],
+  ["rms_inventory", "@rms/inventory"],
 ]);
 const metadataKeys = [
   "bop-rms-migration",
@@ -214,6 +255,46 @@ function parsePositiveInteger(
   return value;
 }
 
+/** Preserve executable tokens while masking quoted data and SQL comments. */
+function executableSql(sql: string): string {
+  const output = sql.split("");
+  const blank = (from: number, to: number) => {
+    for (let index = from; index < to; index++) if (output[index] !== "\n") output[index] = " ";
+  };
+  let index = 0;
+  while (index < sql.length) {
+    const start = index;
+    if (sql.startsWith("--", index)) {
+      while (index < sql.length && sql[index] !== "\n") index++;
+      blank(start, index);
+    } else if (sql.startsWith("/*", index)) {
+      let depth = 1;
+      index += 2;
+      while (index < sql.length && depth > 0) {
+        if (sql.startsWith("/*", index)) {
+          depth++;
+          index += 2;
+        } else if (sql.startsWith("*/", index)) {
+          depth--;
+          index += 2;
+        } else index++;
+      }
+      blank(start, index);
+    } else if (sql[index] === "'" || sql[index] === '"') {
+      const quote = sql[index];
+      const escaped = quote === "'" && /(?:^|[^A-Za-z0-9_$])[eE]$/u.test(sql.slice(0, index));
+      index++;
+      while (index < sql.length) {
+        if (escaped && sql[index] === "\\") index += 2;
+        else if (sql[index] === quote && sql[index + 1] === quote) index += 2;
+        else if (sql[index++] === quote) break;
+      }
+      blank(start, Math.min(index, sql.length));
+    } else index++;
+  }
+  return output.join("");
+}
+
 function validateSql(
   sql: string,
   file: string,
@@ -241,12 +322,25 @@ function validateSql(
       ),
     );
   const withoutFunctionBodies = body.replace(
-    /\bCREATE\s+FUNCTION\b[\s\S]*?\bAS\s+(\$[A-Za-z0-9_]*\$)[\s\S]*?\1\s*;/giu,
+    /\bCREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\b[\s\S]*?\bAS\s+(\$[A-Za-z0-9_]*\$)[\s\S]*?\1\s*;/giu,
     "CREATE FUNCTION AS $$function-body$$;",
   );
+  let caseDepth = 0;
+  const transactionTokens = executableSql(withoutFunctionBodies).replace(
+    /\bCASE\b|\bEND(?:\s+CASE)?\b/giu,
+    (token) => {
+      if (token.toUpperCase() === "CASE") caseDepth++;
+      else if (caseDepth > 0) {
+        caseDepth--;
+        return " ".repeat(token.length);
+      }
+      return token;
+    },
+  );
   if (
-    /\b(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT|SAVEPOINT)\b/iu.test(
-      withoutFunctionBodies,
+    /(?:^|;)\s*DO\b/iu.test(transactionTokens) ||
+    /\b(?:BEGIN|START\s+TRANSACTION|COMMIT|ROLLBACK|ABORT|SAVEPOINT)\b|\bEND(?:\s+(?:WORK|TRANSACTION))?\s*(?:;|$)/iu.test(
+      transactionTokens,
     )
   )
     diagnostics.push(
@@ -262,7 +356,7 @@ function validateSql(
     const currentStatement = body.slice(body.lastIndexOf(";", match.index) + 1, match.index);
     const acceptedFunctionSetting =
       statement === "SET search_path = pg_catalog" &&
-      /\bCREATE\s+FUNCTION\b/iu.test(currentStatement);
+      /\bCREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\b/iu.test(currentStatement);
     if (!acceptedFunctionSetting)
       diagnostics.push(
         diagnostic(
@@ -282,7 +376,7 @@ function validateSql(
         metadataKeys.length + 1,
       ),
     );
-  if (/\$\{|\{\{|(?<!:):[A-Za-z][A-Za-z0-9_]*/u.test(body))
+  if (/\$\{|\{\{/u.test(body) || /(?<!:):[A-Za-z][A-Za-z0-9_]*/u.test(executableSql(body)))
     diagnostics.push(
       diagnostic(
         "MIGRATION_METADATA_INVALID",
@@ -317,15 +411,117 @@ function validateSql(
     if (
       match[1] !== metadata.schema &&
       !(
+        ((file ===
+          "migrations/0200-bop-identity-tenancy/0200_030_create_brand_template_reference_read.sql" &&
+          metadata.owner === "@bop/tenant" &&
+          metadata.schema === "bop_tenant") ||
+          (file ===
+            "migrations/0200-bop-identity-tenancy/0200_031_create_membership_brand_discovery_read.sql" &&
+            metadata.owner === "@bop/membership" &&
+            metadata.schema === "bop_membership") ||
+          (file ===
+            "migrations/0400-bop-operations/0400_019_create_brand_template_publication_read.sql" &&
+            metadata.owner === "@bop/publishing" &&
+            metadata.schema === "bop_publishing")) &&
+        match[1] === "platform_helpers" &&
+        match[2] === "is_uuid_v7" &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
+        file ===
+          "migrations/0400-bop-operations/0400_018_create_platform_publishing_mutation.sql" &&
+        metadata.owner === "@bop/publishing" &&
+        metadata.schema === "bop_publishing" &&
+        match[1] === "platform_audit" &&
+        match[2] === "matches_platform_template_publishing_audit" &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
+        file ===
+          "migrations/0200-bop-identity-tenancy/0200_027_create_platform_actor_directory.sql" &&
+        metadata.owner === "@bop/identity" &&
+        metadata.schema === "bop_identity" &&
+        match[1] === "platform_audit" &&
+        match[2] === "matches_platform_actor_directory_audit" &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
         [
+          "migrations/0200-bop-identity-tenancy/0200_028_create_workforce_account_binding.sql",
+          "migrations/0200-bop-identity-tenancy/0200_033_alter_workforce_account_binding_acceptance.sql",
+        ].includes(file) &&
+        metadata.owner === "@bop/identity" &&
+        metadata.schema === "bop_identity" &&
+        match[1] === "platform_audit" &&
+        match[2] === "matches_workforce_account_binding_audit" &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
+        file ===
+          "migrations/0200-bop-identity-tenancy/0200_032_create_workforce_onboarding_operation.sql" &&
+        metadata.owner === "@bop/identity" &&
+        metadata.schema === "bop_identity" &&
+        match[1] === "platform_audit" &&
+        match[2] === "matches_workforce_onboarding_operation_audit" &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
+        // WP-2423 (v15 2026-10-16): the sole-operator approval guards call the Organization
+        // owner's database read of the Brand's sole-operator setting (2000_066), never its table.
+        ((file ===
+          "migrations/2000-release-001/2000_067_alter_store_configuration_sole_operator_setting_guard.sql" &&
+          metadata.owner === "@rms/store" &&
+          metadata.schema === "rms_store") ||
+          (file ===
+            "migrations/2000-release-001/2000_068_alter_receipt_template_sole_operator_setting_guard.sql" &&
+            metadata.owner === "@rms/printing-device" &&
+            metadata.schema === "rms_device") ||
+          (file ===
+            "migrations/2000-release-001/2000_070_alter_price_book_sole_operator_setting_guard.sql" &&
+            metadata.owner === "@rms/pricing" &&
+            metadata.schema === "rms_pricing") ||
+          (file ===
+            "migrations/2000-release-001/2000_071_alter_catalog_sole_operator_setting_guard.sql" &&
+            metadata.owner === "@rms/catalog" &&
+            metadata.schema === "rms_catalog") ||
+          (file ===
+            "migrations/2000-release-001/2000_072_alter_recipe_review_sole_operator_setting_guard.sql" &&
+            metadata.owner === "@rms/recipe" &&
+            metadata.schema === "rms_recipe") ||
+          (file ===
+            "migrations/2000-release-001/2000_073_alter_ordinary_refund_sole_operator_setting_guard.sql" &&
+            metadata.owner === "@rms/payment" &&
+            metadata.schema === "rms_payment") ||
+          (file ===
+            "migrations/2000-release-001/2000_074_create_option_price_sole_operator_approval.sql" &&
+            metadata.owner === "@rms/pricing" &&
+            metadata.schema === "rms_pricing")) &&
+        match[1] === "bop_tenant" &&
+        (match[2] === "hold_brand_sole_operator_on" || match[2] === "brand_sole_operator_was_on") &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
+        file === "migrations/0300-bop-governance/0300_010_create_platform_permission.sql" &&
+        metadata.owner === "@bop/permission" &&
+        metadata.schema === "bop_permission" &&
+        match[1] === "platform_audit" &&
+        match[2] === "matches_platform_permission_audit" &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
+        [
+          "platform_projection",
           "platform_audit",
           "platform_eventing",
           "bop_feature_control",
           "bop_publishing",
+          "bop_media",
           "bop_task",
+          "bop_notification",
           "bop_identity",
           "bop_membership",
           "bop_permission",
+          "bop_workflow",
           "bop_tenant",
           "bop_operating_entity",
           "rms_catalog",
@@ -338,6 +534,8 @@ function validateSql(
           "rms_device",
           "rms_reporting",
           "rms_store",
+          "rms_dining",
+          "rms_inventory",
         ].includes(metadata.schema) && acceptedForeignReferences.has(`${match[1]}.${match[2]}`)
       )
     )
@@ -656,6 +854,17 @@ export async function readMigrationCatalog(root: string): Promise<MigrationCatal
       left.sequence - right.sequence ||
       left.relativePath.localeCompare(right.relativePath, "en"),
   );
+  for (const migration of migrations) {
+    const ceiling = closedModuleNamespaceCeilings.get(migration.namespace);
+    if (ceiling !== undefined && migration.sequence > ceiling)
+      diagnostics.push(
+        diagnostic(
+          "MIGRATION_NAMESPACE_CLOSED",
+          migration.relativePath,
+          "module namespaces are closed; add the migration to the current release namespace",
+        ),
+      );
+  }
   const orders = new Map<string, string>();
   for (const migration of migrations) {
     const order = `${migration.namespace}:${migration.sequence}`;

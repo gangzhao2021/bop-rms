@@ -1,0 +1,3407 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kds_operator_shift_event",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner option A/A1 2026-10-07"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kds_operator_shift_event",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner option A/A1 2026-10-07"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kds_operator_handover",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner option A/A1 2026-10-07"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kds_operator_handover",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner option A/A1 2026-10-07"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_permission",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_permission",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_decision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_decision",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_administration_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "permission_grant",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner DEC-PERM-CATALOG A 2026-10-07: Store role administration"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_assignment_change",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PERM-CATALOG A 2026-10-07: Store staff role assignment"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_assignment_change",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PERM-CATALOG A 2026-10-07: Store staff role assignment"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_assignment_change_decision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PERM-CATALOG A 2026-10-07: Store staff role assignment"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_assignment_change_decision",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PERM-CATALOG A 2026-10-07: Store staff role assignment"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_assignment",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PERM-CATALOG A 2026-10-07: Store staff role assignment"
+    },
+    {
+      "type": "table",
+      "schema": "bop_membership",
+      "object": "member_profile_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PERM-CATALOG A 2026-10-07: Store staff role assignment"
+    },
+    {
+      "type": "table",
+      "schema": "bop_membership",
+      "object": "member_profile_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PERM-CATALOG A 2026-10-07: Store staff role assignment"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "item_stock_exposure",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 2026-10-07: Inventory Item administration (archive and unit guard)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_site",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_site",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_site_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_site_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "storage_location",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "storage_location",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "storage_location_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "storage_location_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_place_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_place_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-LOCATIONS 2026-10-07: Stock Site and Storage Location administration"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_lot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_lot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "opening_count",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "opening_count",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "opening_count_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "opening_count_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "opening_count_posting",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "opening_count_posting",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_account",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_balance",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_movement",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_movement",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-OPENING 2026-10-07: Store opening count and opening balance posting"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_receipt",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-DIRECT-RECEIPT 2026-10-07: Store direct receipts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_receipt",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-DIRECT-RECEIPT 2026-10-07: Store direct receipts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_receipt_void",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-DIRECT-RECEIPT 2026-10-07: Store direct receipts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_receipt_void",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-DIRECT-RECEIPT 2026-10-07: Store direct receipts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_scope_binding",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_scope_binding_end",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_scope_binding_end",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_version_presentation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_version_presentation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_authoring_review",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_authoring_review",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_reference_binding",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_reference_binding",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_reference_generation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_reference_generation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_reference_generation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_count_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_waste",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-WASTE 2026-10-07: Store waste records"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_waste",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-WASTE 2026-10-07: Store waste records"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_waste_review",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-WASTE 2026-10-07: Store waste records"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "store_waste_review",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-INV-WASTE 2026-10-07: Store waste records"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sku",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sku",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sku",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_version_category_assignment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_version_category_assignment",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_option",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_sku_scope",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_channel",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_operation_snapshot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_operation_snapshot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_source_commit",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_source_commit",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_source_head",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_source_head",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_source_head",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_publication_revision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-CAT-PRODUCT-ADMIN 2026-10-07: Brand Products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_entry",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "store_price_book_assignment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "store_price_book_assignment",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "store_price_book_assignment_end",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "store_price_book_assignment_end",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-PRICE-STORE-ASSIGNMENT 2026-10-07: price books and Store price book"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_version",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (MAINTAIN only for menu review SHARE locks)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_entry",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_entry",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_entry",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (MAINTAIN only for menu review SHARE locks)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_source_evidence",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_source_evidence",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_source_evidence",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (MAINTAIN only for menu review SHARE locks)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_source_assertion",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_source_assertion",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (UPDATE only for menu review SHARE locks; update rules do nothing)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_source_assertion",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-ALLERGEN-DECLARATIONS 2026-10-08: allergen registry and ingredient declarations (MAINTAIN only for menu review SHARE locks)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sellable_placement",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sellable_placement",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sellable_placement",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "sellable_placement",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section_category",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section_category",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section_category",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_section_category",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_store",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_store",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_store",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_store",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_channel",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_channel",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_channel",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_channel",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_order_type",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_order_type",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_order_type",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_version_order_type",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_operation_snapshot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_operation_snapshot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_review_content",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_revision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "routine",
+      "schema": "rms_catalog",
+      "object": "rms_catalog.menu_version_submitted(uuid)",
+      "column": null,
+      "privilege": "EXECUTE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu drafts and revisions"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_revision",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_release",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_release",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_release_effective_period",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_release_effective_period",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_release_effective_end",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: a published revision ends the release it supersedes"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_release_effective_end",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: a published revision ends the release it supersedes"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_operation_snapshot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_publication_operation_snapshot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_allergen_validation_evidence",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_allergen_validation_evidence",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_sellable_allergen_disclosure",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_sellable_allergen_disclosure",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_review_content",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_reference_generation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_reference_generation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_reference_generation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_checkpoint",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_checkpoint",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_generation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_generation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_section",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_section",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_sellable",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_sellable",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_version",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_conflict",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_option",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_sku_scope",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_channel",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: MAINTAIN only for menu review SHARE locks on option sources"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule_operation_snapshot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "availability_rule_operation_snapshot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 8.5 2026-10-08: Store item availability (offer, sold out, back in stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_conflict",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_conflict",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_operation_snapshot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "option_set_operation_snapshot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_option",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_sku_scope",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_option_binding_channel",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4 2026-10-08: Brand option sets authored through the Catalog Option Set service and bound to products"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_authoring_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_authoring_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "routine",
+      "schema": "rms_pricing",
+      "object": "rms_pricing.option_price_authoring_operation_available(platform_helpers.uuid_v7,platform_helpers.uuid_v7)",
+      "column": null,
+      "privilege": "EXECUTE",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "option_recipe_change",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "option_recipe_change",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "option_recipe_change_review",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "option_recipe_change_review",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "option_recipe_change_publication",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "option_recipe_change_publication",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_modifier_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 slice 4.4 2026-10-08: option recipe changes expanded into reviewed, published Recipe modifier rules"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_refund_status_projection",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-08 (investigate dead letters, then retry): the catalogued payment.status-projection consumer of PaymentRefunded records Provider-confirmed refund status"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_refund_status_projection",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-08 (investigate dead letters, then retry): the catalogued payment.status-projection consumer of PaymentRefunded records Provider-confirmed refund status"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_in_person_verification",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (按你建议做: uncollected and late pickup policy): staff record an in-person check before handing over an order whose pickup code expired or was never sent"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_in_person_verification",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (按你建议做: uncollected and late pickup policy): staff record an in-person check before handing over an order whose pickup code expired or was never sent"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_not_collected_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (按你建议做: uncollected pickup policy): a manager closes a ready pickup nobody collected after the one-hour hold; no automatic refund"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_not_collected_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (按你建议做: uncollected pickup policy): a manager closes a ready pickup nobody collected after the one-hour hold; no automatic refund"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "unmatched_capture_refund_request",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (继续开启长时间任务: P6 settle the CAD 22.60 unmatched capture): a manager requests and a different person approves the full Provider refund of a capture that matches no payment or Order"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "unmatched_capture_refund_request",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (继续开启长时间任务: P6 settle the CAD 22.60 unmatched capture): a manager requests and a different person approves the full Provider refund of a capture that matches no payment or Order"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "unmatched_capture_refund_approval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (继续开启长时间任务: P6 settle the CAD 22.60 unmatched capture): a manager requests and a different person approves the full Provider refund of a capture that matches no payment or Order"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "unmatched_capture_refund_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (继续开启长时间任务: P6 settle the CAD 22.60 unmatched capture): a manager requests and a different person approves the full Provider refund of a capture that matches no payment or Order"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "unmatched_capture_refund_outcome",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (继续开启长时间任务: P6 settle the CAD 22.60 unmatched capture): a manager requests and a different person approves the full Provider refund of a capture that matches no payment or Order"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "unmatched_capture_refund_outcome",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-09 (继续开启长时间任务: P6 settle the CAD 22.60 unmatched capture): a manager requests and a different person approves the full Provider refund of a capture that matches no payment or Order"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_reconciliation_resolution",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 reconciliation): a later matching settlement check of a business day resolves that day's earlier difference, append-only with an audit record"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "payment_reconciliation_resolution",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 reconciliation): a later matching settlement check of a business day resolves that day's earlier difference, append-only with an audit record"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 pause and resume online ordering): a store manager or owner records a time-limited pause of new online orders and its resume; append-only operation and pause/resume content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_pause_content",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 pause and resume online ordering): a store manager or owner records a time-limited pause of new online orders and its resume; append-only operation and pause/resume content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_resume_content",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 pause and resume online ordering): a store manager or owner records a time-limited pause of new online orders and its resume; append-only operation and pause/resume content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_authoring_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_weekly_service_period",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception_content",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception_interval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_publication_content",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_review_snapshot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_review_snapshot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_review_snapshot",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_original_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content (the authoring insert's integrity check reads the original-operation history)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_termination_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-11 (继续: Q12 close unpaid pickup orders after the payment window and release their stock)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_staff_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (继续: Q6 staff cancels a paid order or batch before the kitchen starts; full refund incl. tip; stock released)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_staff_cancellation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (继续: Q6 staff cancels a paid order or batch before the kitchen starts; full refund incl. tip; stock released)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (继续: Q6 staff cancels a paid order or batch before the kitchen starts; full refund incl. tip; stock released)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_cancellation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (继续: Q6 staff cancels a paid order or batch before the kitchen starts; full refund incl. tip; stock released)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_staff_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "worker",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (继续: Q6 staff cancels a paid order or batch before the kitchen starts; full refund incl. tip; stock released) (worker readers of dine-in batch state, revision position and compensation discovery read the staff cancellation, like order_batch_checkout_cancellation)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_item_staff_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (按你建议做: Q6 staff cancels items not yet started; refund of exactly those items)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_item_staff_cancellation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (按你建议做: Q6 staff cancels items not yet started; refund of exactly those items)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_item_staff_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "worker",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (按你建议做: Q6 staff cancels items not yet started; refund of exactly those items) (worker readers of order revision position, initial execution history and dine-in item state read the item cancellation, like order_staff_cancellation)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_item_cancellation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (按你建议做: Q6 staff cancels items not yet started; refund of exactly those items)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment_item_cancellation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 Owner 2026-10-10 (批准订单取消流程) / 2026-10-11 (按你建议做: Q6 staff cancels items not yet started; refund of exactly those items)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "workforce_mfa_step_up",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-12 in session (\"批准\") (WP-2423 Q5): DEC-REFUND-ESCALATION-PILOT escalated refund approval and MFA step-up; staff re-verify a second factor and a different Owner/Finance member records the independent approval"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "workforce_mfa_step_up",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-12 in session (\"批准\") (WP-2423 Q5): DEC-REFUND-ESCALATION-PILOT escalated refund approval and MFA step-up; staff re-verify a second factor and a different Owner/Finance member records the independent approval"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-12 in session (\"批准\") (WP-2423 Q5): DEC-REFUND-ESCALATION-PILOT escalated refund approval and MFA step-up; staff re-verify a second factor and a different Owner/Finance member records the independent approval"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_decline",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-12 in session (\"批准 继续\") (WP-2423 Q5): an Owner/Finance member declines an ordinary refund nothing was prepared for, releasing its occupancy (RF-D04); a refund reason \"Other\" keeps a short Confidential staff note for the approver"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_decline",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-12 in session (\"批准 继续\") (WP-2423 Q5): an Owner/Finance member declines an ordinary refund nothing was prepared for, releasing its occupancy (RF-D04); a refund reason \"Other\" keeps a short Confidential staff note for the approver"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_request_note",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-12 in session (\"批准 继续\") (WP-2423 Q5): an Owner/Finance member declines an ordinary refund nothing was prepared for, releasing its occupancy (RF-D04); a refund reason \"Other\" keeps a short Confidential staff note for the approver"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "ordinary_refund_request_note",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-12 in session (\"批准 继续\") (WP-2423 Q5): an Owner/Finance member declines an ordinary refund nothing was prepared for, releasing its occupancy (RF-D04); a refund reason \"Other\" keeps a short Confidential staff note for the approver"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "brand_sole_operator_setting",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19): Brand sole-operator setting (DEC-SOLE-OPERATOR-APPROVAL)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "brand_sole_operator_setting",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19): Brand sole-operator setting (DEC-SOLE-OPERATOR-APPROVAL)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book_sole_operator_approval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19 step 2): price book published by its author as sole operator (DEC-SOLE-OPERATOR-APPROVAL step 2)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book_sole_operator_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19 step 2): price book published by its author as sole operator (DEC-SOLE-OPERATOR-APPROVAL step 2)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_sole_operator_approval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19 step 2): menu approved by its submitter as sole operator (DEC-SOLE-OPERATOR-APPROVAL step 2)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_sole_operator_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19 step 2): menu approved by its submitter as sole operator (DEC-SOLE-OPERATOR-APPROVAL step 2)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_proposal",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19 step 2): allergen roster recorded by one person and approved by another (DEC-SOLE-OPERATOR-APPROVAL step 2)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "allergen_registry_proposal",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q19 step 2): allergen roster recorded by one person and approved by another (DEC-SOLE-OPERATOR-APPROVAL step 2)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "counter_order_entry",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q7): DEC-COUNTER-PAYMENT-RECORD — staff take a pickup order at the counter (or enter a paper order after an outage) and record the payment or refund the Store's own card machine made; the order queue, day-end settlement and worker consumers read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "counter_order_entry",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q7): DEC-COUNTER-PAYMENT-RECORD — staff take a pickup order at the counter (or enter a paper order after an outage) and record the payment or refund the Store's own card machine made; the order queue, day-end settlement and worker consumers read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "card_machine_payment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q7): DEC-COUNTER-PAYMENT-RECORD — staff take a pickup order at the counter (or enter a paper order after an outage) and record the payment or refund the Store's own card machine made; the order queue, day-end settlement and worker consumers read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "card_machine_payment",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q7): DEC-COUNTER-PAYMENT-RECORD — staff take a pickup order at the counter (or enter a paper order after an outage) and record the payment or refund the Store's own card machine made; the order queue, day-end settlement and worker consumers read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "card_machine_refund",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q7): DEC-COUNTER-PAYMENT-RECORD — staff take a pickup order at the counter (or enter a paper order after an outage) and record the payment or refund the Store's own card machine made; the order queue, day-end settlement and worker consumers read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "card_machine_refund",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-13 in session (\"批准\") (WP-2423 Q7): DEC-COUNTER-PAYMENT-RECORD — staff take a pickup order at the counter (or enter a paper order after an outage) and record the payment or refund the Store's own card machine made; the order queue, day-end settlement and worker consumers read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "checkout_contact_redaction",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"按建议，批准\") (WP-2423 Q10): customer order continuity — staff read of removed-contact evidence; 30-day contact removal run by the pilot worker under the api role (database accepts only the contact-clearing update)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "checkout_contact_redaction",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"按建议，批准\") (WP-2423 Q10): customer order continuity — staff read of removed-contact evidence; 30-day contact removal run by the pilot worker under the api role (database accepts only the contact-clearing update)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "checkout_details_record",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"按建议，批准\") (WP-2423 Q10): customer order continuity — staff read of removed-contact evidence; 30-day contact removal run by the pilot worker under the api role (database accepts only the contact-clearing update)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_table_qr_issue",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"批准\") (WP-2423 Q11): table QR codes — record each code staff issue (INSERT, append-only, with its IssueQr table operation) and read codes for the Table QR codes page, printing and guest entry (SELECT); see DEC-TABLE-QR-ISSUANCE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_table_qr_issue",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"批准\") (WP-2423 Q11): table QR codes — record each code staff issue (INSERT, append-only, with its IssueQr table operation) and read codes for the Table QR codes page, printing and guest entry (SELECT); see DEC-TABLE-QR-ISSUANCE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_presence_session",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"我都批准，之后不需要问我\") (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_presence_session",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"我都批准，之后不需要问我\") (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_presence_session",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"我都批准，之后不需要问我\") (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_acceptance_hold",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"我都批准，之后不需要问我\") (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_acceptance_hold",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"我都批准，之后不需要问我\") (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_acceptance_hold_resolution",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"我都批准，之后不需要问我\") (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_acceptance_hold_resolution",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner approved 2026-10-14 in session (\"我都批准，之后不需要问我\") (WP-2423 Q9-G1): DEC-OUTAGE-ACCEPTANCE-HOLD — signed-in staff screens record Store presence (bounded: one period row extended at most once a minute; history kept, no delete) and the pilot worker (api role) records append-only holds of paid pickup orders whose deadline passed while the Store was offline, their back-online deadline and a manager's refund decision; the Orders page and customer order page read them"
+    },
+    {
+      "type": "column",
+      "schema": "rms_payment",
+      "object": "payment_status_projection",
+      "column": "is_active",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q20): DEC-PAYMENT-CARD-RETRY — when a customer pays with another card after a decline, the payment status projection consumer (api role) retires the failed attempt's projection (is_active only; the immutable snapshot row is kept) and records the later attempt's outcome"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_rework_item",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q26): DEC-KITCHEN-REWORK (Handoff Section 26.6) — kitchen staff remake a finished dish as a new append-only Rework work item linked to the original (which keeps its result) with reason, actor and time; the pilot API (api role) records the rework, its operations, audit and KitchenReworkCreated event, the kitchen board and pickup queue read open remakes, and the Inventory consumer (api role) records the first dish as Store waste"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_rework_item",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q26): DEC-KITCHEN-REWORK (Handoff Section 26.6) — kitchen staff remake a finished dish as a new append-only Rework work item linked to the original (which keeps its result) with reason, actor and time; the pilot API (api role) records the rework, its operations, audit and KitchenReworkCreated event, the kitchen board and pickup queue read open remakes, and the Inventory consumer (api role) records the first dish as Store waste"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_rework_item",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q26): DEC-KITCHEN-REWORK (Handoff Section 26.6) — kitchen staff remake a finished dish as a new append-only Rework work item linked to the original (which keeps its result) with reason, actor and time; the pilot API (api role) records the rework, its operations, audit and KitchenReworkCreated event, the kitchen board and pickup queue read open remakes, and the Inventory consumer (api role) records the first dish as Store waste"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_rework_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q26): DEC-KITCHEN-REWORK (Handoff Section 26.6) — kitchen staff remake a finished dish as a new append-only Rework work item linked to the original (which keeps its result) with reason, actor and time; the pilot API (api role) records the rework, its operations, audit and KitchenReworkCreated event, the kitchen board and pickup queue read open remakes, and the Inventory consumer (api role) records the first dish as Store waste"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_rework_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q26): DEC-KITCHEN-REWORK (Handoff Section 26.6) — kitchen staff remake a finished dish as a new append-only Rework work item linked to the original (which keeps its result) with reason, actor and time; the pilot API (api role) records the rework, its operations, audit and KitchenReworkCreated event, the kitchen board and pickup queue read open remakes, and the Inventory consumer (api role) records the first dish as Store waste"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_ticket_closure",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 kitchen stale tickets): DEC-KITCHEN-STALE-TICKETS (Handoff Section 26.1/26.4) — a manager closes a kitchen ticket left open from an earlier business day with a reason (already served, cancelled elsewhere, not made) as one append-only closure row with actor, time and both business days; the pilot API (api role) records the closure, its audit and KitchenTicketClosed event, the kitchen queue refresh and board read exclude closed tickets, and nothing is refunded or cancelled"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_ticket_closure",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 kitchen stale tickets): DEC-KITCHEN-STALE-TICKETS (Handoff Section 26.1/26.4) — a manager closes a kitchen ticket left open from an earlier business day with a reason (already served, cancelled elsewhere, not made) as one append-only closure row with actor, time and both business days; the pilot API (api role) records the closure, its audit and KitchenTicketClosed event, the kitchen queue refresh and board read exclude closed tickets, and nothing is refunded or cancelled"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_receipt_profile",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16): DEC-RECEIPT-TAX-AND-PRIVACY — the Store Owner enters the GST/HST, QST and PST registration numbers printed on customer receipts and the Store's privacy notice link as append-only versions with actor, time and audit; the pilot API (api role) records the Owner's change, reads the current version when issuing a receipt (frozen into the new receipt only), and shows the privacy link at checkout, on the order page and on receipts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_receipt_profile",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16): DEC-RECEIPT-TAX-AND-PRIVACY — the Store Owner enters the GST/HST, QST and PST registration numbers printed on customer receipts and the Store's privacy notice link as append-only versions with actor, time and audit; the pilot API (api role) records the Owner's change, reads the current version when issuing a receipt (frozen into the new receipt only), and shows the privacy link at checkout, on the order page and on receipts"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_draft_revision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_draft_revision",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_draft_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_draft_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_reference_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_reference_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_reference_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_setup_reference_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "store_payment_configuration_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "store_payment_configuration_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "store_payment_configuration_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "store_payment_configuration_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_draft_revision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_draft_revision",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_draft_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_draft_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_artifact_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_artifact_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_artifact_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_artifact_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_tax_classification_registry_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q15/Q16 store setup)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_counter_code",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 pickup code): the six-digit pickup code staff can type at the counter (keyed hashes only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_counter_code",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 pickup code): the six-digit pickup code staff can type at the counter (keyed hashes only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_code_check_rejection",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 pickup code): wrong pickup code checks, five lock code checks for that order (never the code typed)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_code_check_rejection",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 pickup code): wrong pickup code checks, five lock code checks for that order (never the code typed)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "store_sign_in_device",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "store_sign_in_device",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "store_sign_in_device",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_credential",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_credential",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_credential",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_attempt",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_attempt",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_session",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_session",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 staff PIN, Owner chose A)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "staff_dining_round_entry",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q7 staff dine-in): DEC-STAFF-DINE-IN-ROUND — staff enter a dine-in round for a table on behalf of guests who can't or won't use a phone (or a paper round after an outage) through the ordinary table guest path; this append-only record names the staff member, the table and session, and is read by the order queue, kitchen, the guests' table view and the card-machine payment of the round"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "staff_dining_round_entry",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q7 staff dine-in): DEC-STAFF-DINE-IN-ROUND — staff enter a dine-in round for a table on behalf of guests who can't or won't use a phone (or a paper round after an outage) through the ordinary table guest path; this append-only record names the staff member, the table and session, and is read by the order queue, kitchen, the guests' table view and the card-machine payment of the round"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_tax_classification_registry_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Brand Owner adds, renames and retires the Brand's tax classifications in the product (append-only registry versions)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_submission",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Owner sends receipt templates for review and publishes them in Store setup, and publishing a Store setup checks the receipt template's published content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_submission",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Owner sends receipt templates for review and publishes them in Store setup, and publishing a Store setup checks the receipt template's published content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_submit_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Owner sends receipt templates for review and publishes them in Store setup, and publishing a Store setup checks the receipt template's published content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_submit_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Owner sends receipt templates for review and publishes them in Store setup, and publishing a Store setup checks the receipt template's published content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_lifecycle_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Owner sends receipt templates for review and publishes them in Store setup, and publishing a Store setup checks the receipt template's published content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_lifecycle_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): the Owner sends receipt templates for review and publishes them in Store setup, and publishing a Store setup checks the receipt template's published content"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_original_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): each Store setup publication step (create, send, approve, publish) records its original request so a lost answer can be recovered"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_sole_operator_approval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator store configuration): Owner decision 2026-10-16 (\"扩展独营自批（推荐）\") — an Owner running the Store alone approves their own Store configuration from Store setup, marked as sole operator"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_sole_operator_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator store configuration): Owner decision 2026-10-16 (\"扩展独营自批（推荐）\") — an Owner running the Store alone approves their own Store configuration from Store setup, marked as sole operator"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_withdrawal",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator store configuration): v15 live check D2/D3 — a Store configuration change that is not published is withdrawn by its author or declined by an approver (append-only record), and no change silently replaces another person's open change"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_withdrawal",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator store configuration): v15 live check D2/D3 — a Store configuration change that is not published is withdrawn by its author or declined by an approver (append-only record), and no change silently replaces another person's open change"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_sole_operator_approval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): Owner decision 2026-10-16 (\"扩展独营自批（推荐）\") covers the receipt template as part of Store configuration publication — an Owner running the Store alone approves their own receipt template, marked as sole operator"
+    },
+    {
+      "type": "table",
+      "schema": "rms_device",
+      "object": "digital_receipt_template_sole_operator_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 store setup publication): Owner decision 2026-10-16 (\"扩展独营自批（推荐）\") covers the receipt template as part of Store configuration publication — an Owner running the Store alone approves their own receipt template, marked as sole operator"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_sole_operator_approval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator): Owner decision 2026-10-10 DEC-SOLE-OPERATOR-APPROVAL covers price changes — an option price published by its author as sole operator, marked like price books (v15 run 2026-10-16)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_sole_operator_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 sole operator): Owner decision 2026-10-10 DEC-SOLE-OPERATOR-APPROVAL covers price changes — an option price published by its author as sole operator, marked like price books (v15 run 2026-10-16)"
+    },
+    {
+      "type": "schema",
+      "schema": "bop_feature_control",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 feature control read): the api evaluates Store capability decisions (session navigation, Store capability page) with the owning Feature Control read; without the read every staff session read logged 42501 (v15 run 2026-10-16). Read only; no feature control rows are written"
+    },
+    {
+      "type": "table",
+      "schema": "bop_feature_control",
+      "object": "control_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 feature control read): the api evaluates Store capability decisions (session navigation, Store capability page) with the owning Feature Control read; without the read every staff session read logged 42501 (v15 run 2026-10-16). Read only; no feature control rows are written"
+    },
+    {
+      "type": "table",
+      "schema": "bop_feature_control",
+      "object": "control_dependency",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 feature control read): the api evaluates Store capability decisions (session navigation, Store capability page) with the owning Feature Control read; without the read every staff session read logged 42501 (v15 run 2026-10-16). Read only; no feature control rows are written"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_kitchen_progress_fact",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): the business worker records the Kitchen preparation facts Ordering consumes (ordering.kitchen-progress:v1) and the guest order status read merges them into the Order phase (Accepted / In Progress / Ready). Append-only; no update or delete; no actor or personal data"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_kitchen_progress_fact",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): the business worker records the Kitchen preparation facts Ordering consumes (ordering.kitchen-progress:v1) and the guest order status read merges them into the Order phase (Accepted / In Progress / Ready). Append-only; no update or delete; no actor or personal data"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_not_collected_publication",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): closing a ready pickup as not collected records its one PickupNotCollected event in the same transaction, and the order progress catch-up publishes closures recorded before the event existed. Append-only; no update or delete; references and times only, no actor or personal data"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "pickup_not_collected_publication",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): closing a ready pickup as not collected records its one PickupNotCollected event in the same transaction, and the order progress catch-up publishes closures recorded before the event existed. Append-only; no update or delete; references and times only, no actor or personal data"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_pickup_not_collected_fact",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): the business worker records the PickupNotCollected closures Ordering consumes (ordering.pickup-not-collected:v1) and the guest order status read merges them into a terminal Order phase. Append-only; no update or delete; no actor or personal data"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_pickup_not_collected_fact",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Order phase, DEC-PILOT-BATCH-PHASE-01, defect 2026-10-17): the business worker records the PickupNotCollected closures Ordering consumes (ordering.pickup-not-collected:v1) and the guest order status read merges them into a terminal Order phase. Append-only; no update or delete; no actor or personal data"
+    },
+    {
+      "type": "schema",
+      "schema": "bop_media",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api",
+      "approval": "WP-2423 menu descriptions and photos: Owner standing approval 2026-10-14"
+    },
+    {
+      "type": "table",
+      "schema": "bop_media",
+      "object": "product_image",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "WP-2423 menu descriptions and photos: Owner standing approval 2026-10-14"
+    },
+    {
+      "type": "table",
+      "schema": "bop_media",
+      "object": "product_image",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "WP-2423 menu descriptions and photos: Owner standing approval 2026-10-14"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_guest_invitation_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 DEC-DINING-GUEST-INVITATION, 2026-10-17): the table's Host invites the next guest from their own phone; this append-only record names the Host participant, the Session and the new one-time join code it issued (never the code itself), and its recent rows bound guest issuance to 10 per Session per 10 minutes"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_guest_invitation_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 DEC-DINING-GUEST-INVITATION, 2026-10-17): the table's Host invites the next guest from their own phone; this append-only record names the Host participant, the Session and the new one-time join code it issued (never the code itself), and its recent rows bound guest issuance to 10 per Session per 10 minutes"
+    }
+  ]
+}

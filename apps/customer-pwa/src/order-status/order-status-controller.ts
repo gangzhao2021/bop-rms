@@ -1,10 +1,24 @@
-import type { OrderStatusState, OrderStatusView, RealtimeAvailability } from "./types.js";
+import { parsePrivacyNoticeUrl } from "../journey/PrivacyNotice.js";
+import { parseStoreContact } from "../journey/StoreContact.js";
+import type {
+  OrderReceivedView,
+  OrderStatusSources,
+  OrderStatusState,
+  OrderStatusView,
+  RealtimeAvailability,
+  StaffCancellationReason,
+} from "./types.js";
 
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u;
 
 export type OrderStatusClientErrorCode =
-  "permission_denied" | "not_found" | "feature_disabled" | "service_unavailable";
+  | "permission_denied"
+  | "not_found"
+  /** WP-2423 (46940b76 L5): the Order of this guest's open table, placed by another guest. */
+  | "table_order"
+  | "feature_disabled"
+  | "service_unavailable";
 
 export class OrderStatusClientError extends Error {
   readonly code: OrderStatusClientErrorCode;
@@ -23,6 +37,7 @@ export interface OrderStatusSubscriptionCallbacks {
 }
 
 export interface CustomerOrderStatusClient {
+  subscribeContextChange?(listener: () => void): () => void;
   load(orderReference: string): Promise<unknown>;
   subscribe(orderReference: string, callbacks: OrderStatusSubscriptionCallbacks): () => void;
 }
@@ -85,6 +100,7 @@ function parseReference(value: unknown): string {
 function parseInstant(value: unknown): string {
   if (typeof value !== "string" || !instant.test(value) || !Number.isFinite(Date.parse(value)))
     return invalid();
+  if (new Date(value).toISOString().slice(0, 19) !== value.slice(0, 19)) return invalid();
   return value;
 }
 
@@ -133,6 +149,687 @@ function parseBatch(value: unknown) {
   });
 }
 
+function parseSources(
+  value: unknown,
+  batches: OrderStatusView["order"]["batches"],
+  submittedAt: string,
+  orderType: string,
+): OrderStatusSources {
+  const raw = exact(value, [
+    "checkedAt",
+    "kitchen",
+    "payments",
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "dining")
+      ? ["dining"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "pickup")
+      ? ["pickup"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "unpaidCancellation")
+      ? ["unpaidCancellation"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "staffCancellations")
+      ? ["staffCancellations"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "itemCancellations")
+      ? ["itemCancellations"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "batchPayments")
+      ? ["batchPayments"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "unpaidCancellations")
+      ? ["unpaidCancellations"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "storeContact")
+      ? ["storeContact"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "storeAcceptance")
+      ? ["storeAcceptance"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "contactDetails")
+      ? ["contactDetails"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "privacyNoticeUrl")
+      ? ["privacyNoticeUrl"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "remakes")
+      ? ["remakes"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "tips")
+      ? ["tips"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "itemPrices")
+      ? ["itemPrices"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "refunds")
+      ? ["refunds"]
+      : []),
+  ]);
+  const checkedAt = parseInstant(raw.checkedAt);
+  if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
+  const sourceInstant = (value: unknown) => {
+    const parsed = parseInstant(value);
+    if (Date.parse(parsed) < Date.parse(submittedAt) || Date.parse(parsed) > Date.parse(checkedAt))
+      return invalid();
+    return parsed;
+  };
+  let dining: OrderStatusSources["dining"];
+  if (Object.hasOwn(raw, "dining")) {
+    if (orderType !== "DineIn") return invalid();
+    const entry = exact(raw.dining, ["items"]);
+    const members = batches.flatMap((batch) =>
+      batch.items.map((item) => ({
+        ...item,
+        orderBatchReference: batch.orderBatchReference,
+      })),
+    );
+    if (!Array.isArray(entry.items) || entry.items.length !== members.length) return invalid();
+    const seen = new Set<string>();
+    const items = entry.items.map((value: unknown) => {
+      const fact = exact(value, ["orderItemReference", "orderBatchReference", "servedQuantity"]);
+      const orderItemReference = parseReference(fact.orderItemReference);
+      const orderBatchReference = parseReference(fact.orderBatchReference);
+      const member = members.find(
+        (item) =>
+          item.orderItemReference === orderItemReference &&
+          item.orderBatchReference === orderBatchReference,
+      );
+      if (
+        !member ||
+        seen.has(orderItemReference) ||
+        typeof fact.servedQuantity !== "number" ||
+        !Number.isSafeInteger(fact.servedQuantity) ||
+        fact.servedQuantity < 0 ||
+        fact.servedQuantity > member.quantity
+      )
+        return invalid();
+      seen.add(orderItemReference);
+      return Object.freeze({
+        orderItemReference,
+        orderBatchReference,
+        servedQuantity: fact.servedQuantity,
+      });
+    });
+    dining = Object.freeze({ items: Object.freeze(items) });
+  }
+  // WP-2423 Q6: batches the Store cancelled after payment (the key is present only when non-empty).
+  let staffCancellations: OrderStatusSources["staffCancellations"];
+  if (Object.hasOwn(raw, "staffCancellations")) {
+    if (
+      !Array.isArray(raw.staffCancellations) ||
+      raw.staffCancellations.length < 1 ||
+      raw.staffCancellations.length > batches.length
+    )
+      return invalid();
+    const expected = new Set(batches.map((batch) => batch.orderBatchReference));
+    const seen = new Set<string>();
+    staffCancellations = Object.freeze(
+      raw.staffCancellations.map((value: unknown) => {
+        const entry = exact(value, [
+          "orderBatchReference",
+          "cancelledAt",
+          "reason",
+          "refundStatus",
+        ]);
+        const orderBatchReference = parseReference(entry.orderBatchReference);
+        if (
+          !expected.has(orderBatchReference) ||
+          seen.has(orderBatchReference) ||
+          !["CustomerRequest", "SoldOut", "StoreError", "DuplicateOrder", "GuestLeft"].includes(
+            String(entry.reason),
+          ) ||
+          !["Pending", "Refunded"].includes(String(entry.refundStatus))
+        )
+          return invalid();
+        seen.add(orderBatchReference);
+        return Object.freeze({
+          orderBatchReference,
+          cancelledAt: sourceInstant(entry.cancelledAt),
+          reason: entry.reason as StaffCancellationReason,
+          refundStatus: entry.refundStatus as "Pending" | "Refunded",
+        });
+      }),
+    );
+  }
+  // WP-2423 Q6 step 2: items the Store cancelled one by one; each item at most once.
+  let itemCancellations: OrderStatusSources["itemCancellations"];
+  if (Object.hasOwn(raw, "itemCancellations")) {
+    const itemCount = batches.reduce((sum, batch) => sum + batch.items.length, 0);
+    if (!Array.isArray(raw.itemCancellations) || raw.itemCancellations.length > itemCount)
+      return invalid();
+    const currency = batches[0]?.items[0]?.lineTotal.currencyCode;
+    const seen = new Set<string>();
+    itemCancellations = Object.freeze(
+      raw.itemCancellations.map((value: unknown) => {
+        const entry = exact(value, [
+          "orderBatchReference",
+          "orderItemReferences",
+          "cancelledAt",
+          "reason",
+          "refundStatus",
+          "refundAmount",
+        ]);
+        const orderBatchReference = parseReference(entry.orderBatchReference);
+        const batch = batches.find((item) => item.orderBatchReference === orderBatchReference);
+        if (
+          !batch ||
+          !Array.isArray(entry.orderItemReferences) ||
+          entry.orderItemReferences.length < 1 ||
+          entry.orderItemReferences.length > batch.items.length ||
+          !["CustomerRequest", "SoldOut", "StoreError", "DuplicateOrder", "GuestLeft"].includes(
+            String(entry.reason),
+          ) ||
+          !["Pending", "Refunded"].includes(String(entry.refundStatus))
+        )
+          return invalid();
+        const orderItemReferences = Object.freeze(
+          entry.orderItemReferences.map((item: unknown) => {
+            const orderItemReference = parseReference(item);
+            if (
+              seen.has(orderItemReference) ||
+              !batch.items.some((line) => line.orderItemReference === orderItemReference)
+            )
+              return invalid();
+            seen.add(orderItemReference);
+            return orderItemReference;
+          }),
+        );
+        const refundAmount = parseMoney(entry.refundAmount);
+        if (refundAmount.amountMinor < 0n || refundAmount.currencyCode !== currency)
+          return invalid();
+        return Object.freeze({
+          orderBatchReference,
+          orderItemReferences,
+          cancelledAt: sourceInstant(entry.cancelledAt),
+          reason: entry.reason as StaffCancellationReason,
+          refundStatus: entry.refundStatus as "Pending" | "Refunded",
+          refundAmount,
+        });
+      }),
+    );
+  }
+  const staffCancelled = new Set(
+    staffCancellations?.map((entry) => entry.orderBatchReference) ?? [],
+  );
+  let kitchen: OrderStatusSources["kitchen"] = null;
+  if (raw.kitchen !== null) {
+    const entry = exact(raw.kitchen, ["batches"]);
+    if (
+      !Array.isArray(entry.batches) ||
+      entry.batches.length === 0 ||
+      entry.batches.length > batches.length
+    )
+      return invalid();
+    const expected = new Set(batches.map((batch) => batch.orderBatchReference));
+    const seen = new Set<string>();
+    const values = entry.batches.map((value: unknown) => {
+      const batch = exact(value, ["orderBatchReference", "status", "updatedAt"]);
+      const orderBatchReference = parseReference(batch.orderBatchReference);
+      if (
+        !expected.has(orderBatchReference) ||
+        seen.has(orderBatchReference) ||
+        !(
+          ["Queued", "InProgress", "Ready"].includes(String(batch.status)) ||
+          (batch.status === "Cancelled" && staffCancelled.has(orderBatchReference))
+        )
+      )
+        return invalid();
+      seen.add(orderBatchReference);
+      return Object.freeze({
+        orderBatchReference,
+        status: batch.status as "Queued" | "InProgress" | "Ready" | "Cancelled",
+        updatedAt: sourceInstant(batch.updatedAt),
+      });
+    });
+    kitchen = Object.freeze({ batches: Object.freeze(values) });
+  }
+  let payments: OrderStatusSources["payments"] = null;
+  if (raw.payments !== null) {
+    if (!Array.isArray(raw.payments) || raw.payments.length > 100) return invalid();
+    payments = Object.freeze(
+      raw.payments.map((value: unknown) => {
+        // WP-2423 (v15 3cd0f8dd H1): a round paid on the Store's card machine names its round.
+        const machine =
+          value !== null && typeof value === "object" && Object.hasOwn(value, "method");
+        const payment = exact(value, [
+          "status",
+          "occurredAt",
+          "amount",
+          "freshnessStatus",
+          ...(machine ? ["method", "orderBatchReference"] : []),
+        ]);
+        if (
+          !["Succeeded", "Failed"].includes(String(payment.status)) ||
+          !["Fresh", "Stale", "Rebuilding", "Failed"].includes(String(payment.freshnessStatus)) ||
+          (machine &&
+            (payment.method !== "CardMachine" ||
+              payment.status !== "Succeeded" ||
+              !batches.some(
+                (batch) => batch.orderBatchReference === String(payment.orderBatchReference),
+              )))
+        )
+          return invalid();
+        const amount = payment.amount === null ? null : parseMoney(payment.amount);
+        if (
+          (payment.status === "Succeeded" &&
+            (amount === null || amount.amountMinor <= 0n || amount.currencyCode !== "CAD")) ||
+          (payment.status === "Failed" && amount !== null)
+        )
+          return invalid();
+        return Object.freeze({
+          status: payment.status as "Succeeded" | "Failed",
+          occurredAt: sourceInstant(payment.occurredAt),
+          amount,
+          freshnessStatus: payment.freshnessStatus as OrderStatusView["freshnessStatus"],
+          ...(machine
+            ? {
+                method: "CardMachine" as const,
+                orderBatchReference: parseReference(payment.orderBatchReference),
+              }
+            : {}),
+        });
+      }),
+    );
+  }
+  // WP-2423: a pickup the Store closed as not collected (Pickup only, within the source window).
+  let pickup: OrderStatusSources["pickup"];
+  if (Object.hasOwn(raw, "pickup")) {
+    if (orderType !== "Pickup") return invalid();
+    pickup =
+      raw.pickup === null
+        ? null
+        : Object.freeze({
+            notCollectedAt: sourceInstant(exact(raw.pickup, ["notCollectedAt"]).notCollectedAt),
+          });
+  }
+  // WP-2423 Q12: a pickup cancelled because its payment window ended unpaid (Pickup only).
+  let unpaidCancellation: OrderStatusSources["unpaidCancellation"];
+  if (Object.hasOwn(raw, "unpaidCancellation")) {
+    if (orderType !== "Pickup") return invalid();
+    unpaidCancellation =
+      raw.unpaidCancellation === null
+        ? null
+        : Object.freeze({
+            cancelledAt: sourceInstant(exact(raw.unpaidCancellation, ["cancelledAt"]).cancelledAt),
+          });
+  }
+  // WP-2423 Q9-G1: a paid pickup the Store did not accept in time (refunded automatically), or one
+  // held because the Store was offline (Pickup only).
+  let storeAcceptance: OrderStatusSources["storeAcceptance"];
+  if (Object.hasOwn(raw, "storeAcceptance")) {
+    if (orderType !== "Pickup") return invalid();
+    const candidate: unknown = raw.storeAcceptance;
+    const state =
+      candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
+        ? (candidate as Record<string, unknown>).state
+        : undefined;
+    if (state === "AwaitingStore") {
+      exact(candidate, ["state"]);
+      storeAcceptance = Object.freeze({ state: "AwaitingStore" as const });
+    } else if (state === "NotAccepted") {
+      const entry = exact(candidate, ["state", "closedAt", "refundStatus"]);
+      if (entry.refundStatus !== "Pending" && entry.refundStatus !== "Refunded") return invalid();
+      storeAcceptance = Object.freeze({
+        state: "NotAccepted" as const,
+        closedAt: sourceInstant(entry.closedAt),
+        refundStatus: entry.refundStatus,
+      });
+    } else return invalid();
+  }
+  // WP-2423: dine-in rounds cancelled because their payment failed (present only when non-empty).
+  let unpaidCancellations: OrderStatusSources["unpaidCancellations"];
+  if (Object.hasOwn(raw, "unpaidCancellations")) {
+    if (
+      orderType !== "DineIn" ||
+      !Array.isArray(raw.unpaidCancellations) ||
+      raw.unpaidCancellations.length < 1 ||
+      raw.unpaidCancellations.length > batches.length
+    )
+      return invalid();
+    const seen = new Set<string>();
+    unpaidCancellations = Object.freeze(
+      raw.unpaidCancellations.map((value: unknown) => {
+        // WP-2423: `byStore` (a manager's cancellation) is absent from an older server.
+        const withByStore =
+          value !== null && typeof value === "object" && Object.hasOwn(value, "byStore");
+        const entry = exact(value, [
+          "orderBatchReference",
+          "cancelledAt",
+          ...(withByStore ? ["byStore"] : []),
+        ]);
+        const orderBatchReference = parseReference(entry.orderBatchReference);
+        if (
+          (withByStore && typeof entry.byStore !== "boolean") ||
+          !batches.some((batch) => batch.orderBatchReference === orderBatchReference) ||
+          seen.has(orderBatchReference) ||
+          staffCancelled.has(orderBatchReference)
+        )
+          return invalid();
+        seen.add(orderBatchReference);
+        return Object.freeze({
+          orderBatchReference,
+          cancelledAt: sourceInstant(entry.cancelledAt),
+          ...(withByStore ? { byStore: entry.byStore === true } : {}),
+        });
+      }),
+    );
+  }
+  // WP-2423: each dine-in round's payment; a failed, not yet cancelled round has its cancel time.
+  let batchPayments: OrderStatusSources["batchPayments"];
+  if (Object.hasOwn(raw, "batchPayments")) {
+    if (
+      orderType !== "DineIn" ||
+      !Array.isArray(raw.batchPayments) ||
+      raw.batchPayments.length < 1 ||
+      raw.batchPayments.length > batches.length
+    )
+      return invalid();
+    const cancelled = new Set(unpaidCancellations?.map((entry) => entry.orderBatchReference));
+    const seen = new Set<string>();
+    batchPayments = Object.freeze(
+      raw.batchPayments.map((value: unknown) => {
+        const entry = exact(value, ["orderBatchReference", "status", "cancelsAt"]);
+        const orderBatchReference = parseReference(entry.orderBatchReference);
+        const cancelsAt = entry.cancelsAt === null ? null : parseInstant(entry.cancelsAt);
+        if (
+          !batches.some((batch) => batch.orderBatchReference === orderBatchReference) ||
+          seen.has(orderBatchReference) ||
+          !["Succeeded", "Failed", "Awaiting"].includes(String(entry.status)) ||
+          (cancelsAt !== null &&
+            (entry.status !== "Failed" ||
+              cancelled.has(orderBatchReference) ||
+              Date.parse(cancelsAt) <= Date.parse(submittedAt)))
+        )
+          return invalid();
+        seen.add(orderBatchReference);
+        return Object.freeze({
+          orderBatchReference,
+          status: entry.status as "Succeeded" | "Failed" | "Awaiting",
+          cancelsAt,
+        });
+      }),
+    );
+  }
+  // WP-2423 Q26: items of this order the kitchen is remaking; each item at most once.
+  let remakes: OrderStatusSources["remakes"];
+  if (Object.hasOwn(raw, "remakes")) {
+    const items = new Map(
+      batches.flatMap((batch) =>
+        batch.items.map((item) => [item.orderItemReference, item] as const),
+      ),
+    );
+    if (!Array.isArray(raw.remakes) || raw.remakes.length < 1 || raw.remakes.length > items.size)
+      return invalid();
+    const seen = new Set<string>();
+    remakes = Object.freeze(
+      raw.remakes.map((value: unknown) => {
+        const entry = exact(value, ["orderItemReference", "quantity"]);
+        const orderItemReference = parseReference(entry.orderItemReference);
+        if (
+          !items.has(orderItemReference) ||
+          seen.has(orderItemReference) ||
+          !Number.isSafeInteger(entry.quantity) ||
+          Number(entry.quantity) < 1 ||
+          Number(entry.quantity) > 999
+        )
+          return invalid();
+        seen.add(orderItemReference);
+        return Object.freeze({ orderItemReference, quantity: Number(entry.quantity) });
+      }),
+    );
+  }
+  // WP-2423 D5: every shown item's price before tax and its tax, adding up to its total.
+  let itemPrices: OrderStatusSources["itemPrices"];
+  if (Object.hasOwn(raw, "itemPrices")) {
+    const items = new Map(
+      batches.flatMap((batch) =>
+        batch.items.map((item) => [item.orderItemReference, item] as const),
+      ),
+    );
+    if (!Array.isArray(raw.itemPrices) || raw.itemPrices.length !== items.size) return invalid();
+    const seen = new Set<string>();
+    itemPrices = Object.freeze(
+      raw.itemPrices.map((value: unknown) => {
+        const has = (key: string) =>
+          value !== null && typeof value === "object" && Object.hasOwn(value, key);
+        const entry = exact(value, [
+          "orderItemReference",
+          "subtotal",
+          "tax",
+          ...(has("options") ? ["options"] : []),
+          ...(has("customerNote") ? ["customerNote"] : []),
+        ]);
+        const orderItemReference = parseReference(entry.orderItemReference);
+        const item = items.get(orderItemReference);
+        const subtotal = parseMoney(entry.subtotal);
+        const tax = parseMoney(entry.tax);
+        // WP-2423: chosen options (what each added, within the item's price) and the guest's note.
+        if (
+          has("options") &&
+          (!Array.isArray(entry.options) || entry.options.length < 1 || entry.options.length > 100)
+        )
+          return invalid();
+        const options = has("options")
+          ? Object.freeze(
+              (entry.options as unknown[]).map((candidate) => {
+                const option = exact(candidate, ["displayName", "quantity", "amount"]);
+                const amount = parseMoney(option.amount);
+                if (
+                  typeof option.displayName !== "string" ||
+                  option.displayName.trim() !== option.displayName ||
+                  option.displayName.length < 1 ||
+                  option.displayName.length > 200 ||
+                  !Number.isSafeInteger(option.quantity) ||
+                  (option.quantity as number) < 1 ||
+                  (option.quantity as number) > 999 ||
+                  amount.amountMinor < 0n ||
+                  amount.currencyCode !== subtotal.currencyCode
+                )
+                  return invalid();
+                return Object.freeze({
+                  displayName: option.displayName,
+                  quantity: option.quantity as number,
+                  amount,
+                });
+              }),
+            )
+          : undefined;
+        if (
+          has("customerNote") &&
+          (typeof entry.customerNote !== "string" ||
+            entry.customerNote.length < 1 ||
+            entry.customerNote.length > 500)
+        )
+          return invalid();
+        if (
+          item === undefined ||
+          seen.has(orderItemReference) ||
+          subtotal.amountMinor < 0n ||
+          tax.amountMinor < 0n ||
+          subtotal.currencyCode !== item.lineTotal.currencyCode ||
+          tax.currencyCode !== item.lineTotal.currencyCode ||
+          (options ?? []).reduce((sum, option) => sum + option.amount.amountMinor, 0n) >
+            subtotal.amountMinor
+        )
+          return invalid();
+        seen.add(orderItemReference);
+        return Object.freeze({
+          orderItemReference,
+          subtotal,
+          tax,
+          ...(options === undefined ? {} : { options }),
+          ...(has("customerNote") ? { customerNote: entry.customerNote as string } : {}),
+        });
+      }),
+    );
+  }
+  // WP-2423 (v15 aa3d9fac D2): each paid round's tip, a round of this order at most once.
+  let tips: OrderStatusSources["tips"];
+  if (Object.hasOwn(raw, "tips")) {
+    const rounds = new Set(batches.map((batch) => batch.orderBatchReference));
+    if (!Array.isArray(raw.tips) || raw.tips.length > rounds.size) return invalid();
+    const seen = new Set<string>();
+    tips = Object.freeze(
+      raw.tips.map((value: unknown) => {
+        const entry = exact(value, ["orderBatchReference", "amount"]);
+        const orderBatchReference = parseReference(entry.orderBatchReference);
+        const amount = parseMoney(entry.amount);
+        if (
+          !rounds.has(orderBatchReference) ||
+          seen.has(orderBatchReference) ||
+          amount.amountMinor < 0n
+        )
+          return invalid();
+        seen.add(orderBatchReference);
+        return Object.freeze({ orderBatchReference, amount });
+      }),
+    );
+  }
+  // WP-2423 (v15 3cd0f8dd M3): confirmed refunds as the latest receipt states them; each entry
+  // names only items of this order and the entries never exceed what was refunded.
+  let refunds: OrderStatusSources["refunds"];
+  if (Object.hasOwn(raw, "refunds")) {
+    const entry = exact(raw.refunds, ["refunded", "entries"]);
+    const refunded = parseMoney(entry.refunded);
+    const items = new Set(
+      batches.flatMap((batch) => batch.items.map((item) => item.orderItemReference)),
+    );
+    if (
+      refunded.amountMinor <= 0n ||
+      refunded.currencyCode !== "CAD" ||
+      !Array.isArray(entry.entries) ||
+      entry.entries.length > 200
+    )
+      return invalid();
+    const entries = Object.freeze(
+      entry.entries.map((value: unknown) => {
+        const refund = exact(value, ["kind", "orderItemReferences", "total", "tip"]);
+        if (
+          !["Refund", "ItemCancellation", "RoundRefund", "Other"].includes(String(refund.kind)) ||
+          !Array.isArray(refund.orderItemReferences) ||
+          refund.orderItemReferences.length > 200
+        )
+          return invalid();
+        const orderItemReferences = Object.freeze(
+          refund.orderItemReferences.map((item: unknown) => {
+            const orderItemReference = parseReference(item);
+            if (!items.has(orderItemReference)) return invalid();
+            return orderItemReference;
+          }),
+        );
+        const total = parseMoney(refund.total);
+        const tip = parseMoney(refund.tip);
+        if (
+          total.amountMinor <= 0n ||
+          tip.amountMinor < 0n ||
+          tip.amountMinor > total.amountMinor ||
+          total.currencyCode !== refunded.currencyCode ||
+          tip.currencyCode !== refunded.currencyCode
+        )
+          return invalid();
+        return Object.freeze({
+          kind: refund.kind as NonNullable<
+            OrderStatusSources["refunds"]
+          >["entries"][number]["kind"],
+          orderItemReferences,
+          total,
+          tip,
+        });
+      }),
+    );
+    if (entries.reduce((sum, refund) => sum + refund.total.amountMinor, 0n) > refunded.amountMinor)
+      return invalid();
+    refunds = Object.freeze({ refunded, entries });
+  }
+  return Object.freeze({
+    checkedAt,
+    kitchen,
+    payments,
+    ...(refunds === undefined ? {} : { refunds }),
+    ...(tips === undefined ? {} : { tips }),
+    ...(remakes === undefined ? {} : { remakes }),
+    ...(itemPrices === undefined ? {} : { itemPrices }),
+    ...(dining ? { dining } : {}),
+    ...(pickup === undefined ? {} : { pickup }),
+    ...(unpaidCancellation === undefined ? {} : { unpaidCancellation }),
+    ...(staffCancellations === undefined ? {} : { staffCancellations }),
+    ...(itemCancellations === undefined ? {} : { itemCancellations }),
+    ...(batchPayments === undefined ? {} : { batchPayments }),
+    ...(unpaidCancellations === undefined ? {} : { unpaidCancellations }),
+    ...(storeAcceptance === undefined ? {} : { storeAcceptance }),
+    // WP-2423 Q16: contact still held (never its value) and the Store's privacy notice.
+    ...(Object.hasOwn(raw, "contactDetails")
+      ? {
+          contactDetails: ["Stored", "Removed", "NotGiven"].includes(String(raw.contactDetails))
+            ? (raw.contactDetails as "Stored" | "Removed" | "NotGiven")
+            : invalid(),
+        }
+      : {}),
+    ...(Object.hasOwn(raw, "privacyNoticeUrl")
+      ? {
+          privacyNoticeUrl: (() => {
+            try {
+              return parsePrivacyNoticeUrl(raw.privacyNoticeUrl);
+            } catch {
+              return invalid();
+            }
+          })(),
+        }
+      : {}),
+    // WP-2423 Q10: the Store's published phone and address.
+    ...(Object.hasOwn(raw, "storeContact")
+      ? {
+          storeContact: (() => {
+            try {
+              return parseStoreContact(raw.storeContact);
+            } catch {
+              return invalid();
+            }
+          })(),
+        }
+      : {}),
+  });
+}
+
+/**
+ * WP-2423 (v15 2026-10-16): the API's "order received" answer, for the guest's own order whose
+ * status is still being prepared. Only the order number and type are shown.
+ */
+export function parseOrderReceived(value: unknown, expectedReference: string): OrderReceivedView {
+  const raw = exact(value, [
+    "kind",
+    "orderReference",
+    "orderNumber",
+    "orderType",
+    "submittedAt",
+    "checkedAt",
+  ]);
+  if (
+    raw.kind !== "Received" ||
+    parseReference(raw.orderReference) !== expectedReference ||
+    typeof raw.orderNumber !== "string" ||
+    !/^[1-9][0-9]{0,18}$/u.test(raw.orderNumber) ||
+    (raw.orderType !== "DineIn" && raw.orderType !== "Pickup")
+  )
+    return invalid();
+  const submittedAt = parseInstant(raw.submittedAt);
+  const checkedAt = parseInstant(raw.checkedAt);
+  if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
+  return Object.freeze({
+    kind: "Received",
+    orderReference: expectedReference,
+    orderNumber: raw.orderNumber,
+    orderType: raw.orderType,
+    submittedAt,
+    checkedAt,
+  });
+}
+
+const isReceived = (value: unknown) =>
+  value !== null &&
+  typeof value === "object" &&
+  Object.getOwnPropertyDescriptor(value, "kind")?.value === "Received";
+
 export function parseOrderStatusView(value: unknown, expectedReference: string): OrderStatusView {
   const raw = exact(value, [
     "projectionName",
@@ -141,6 +838,9 @@ export function parseOrderStatusView(value: unknown, expectedReference: string):
     "projectedAt",
     "freshnessStatus",
     "order",
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "sources")
+      ? ["sources"]
+      : []),
   ]);
   if (
     raw.projectionName !== "ordering_order_status_v1" ||
@@ -166,7 +866,15 @@ export function parseOrderStatusView(value: unknown, expectedReference: string):
     typeof order.orderNumber !== "string" ||
     !/^[1-9][0-9]{0,18}$/u.test(order.orderNumber) ||
     !["DineIn", "Pickup"].includes(String(order.orderType)) ||
-    !["Submitted", "Fulfilled"].includes(String(order.canonicalPhase)) ||
+    ![
+      "Submitted",
+      "Accepted",
+      "In Progress",
+      "Ready",
+      "Fulfilled",
+      "Rejected",
+      "Cancelled",
+    ].includes(String(order.canonicalPhase)) ||
     order.paymentStatus !== "NotReported" ||
     order.kitchenStatus !== "Unavailable" ||
     !["Unavailable", "Completed"].includes(String(order.fulfillmentStatus)) ||
@@ -186,8 +894,11 @@ export function parseOrderStatusView(value: unknown, expectedReference: string):
     new Set(batches.map((batch) => batch.orderBatchReference)).size !== batches.length ||
     batches.some((batch) => Date.parse(batch.submittedAt) < Date.parse(submittedAt)) ||
     currencies.size !== 1 ||
+    // A pickup is Fulfilled only with its recorded collection. A dine-in Order has no Fulfillment
+    // completion: it is Fulfilled once every remaining item was served (DEC-PILOT-BATCH-PHASE-01).
     (order.fulfillmentStatus === "Unavailable" &&
-      (order.canonicalPhase !== "Submitted" || fulfilledAt !== null)) ||
+      ((order.canonicalPhase === "Fulfilled" && order.orderType !== "DineIn") ||
+        fulfilledAt !== null)) ||
     (order.fulfillmentStatus === "Completed" &&
       (order.canonicalPhase !== "Fulfilled" ||
         fulfilledAt === null ||
@@ -200,11 +911,16 @@ export function parseOrderStatusView(value: unknown, expectedReference: string):
     sourceCheckpoint: parseReference(raw.sourceCheckpoint),
     projectedAt: parseInstant(raw.projectedAt),
     freshnessStatus: raw.freshnessStatus as OrderStatusView["freshnessStatus"],
+    ...(Object.hasOwn(raw, "sources")
+      ? {
+          sources: parseSources(raw.sources, batches, submittedAt, String(order.orderType)),
+        }
+      : {}),
     order: Object.freeze({
       orderReference: expectedReference,
       orderNumber: order.orderNumber,
       orderType: order.orderType as "DineIn" | "Pickup",
-      canonicalPhase: order.canonicalPhase as "Submitted" | "Fulfilled",
+      canonicalPhase: order.canonicalPhase as OrderStatusView["order"]["canonicalPhase"],
       paymentStatus: "NotReported",
       kitchenStatus: "Unavailable",
       fulfillmentStatus: order.fulfillmentStatus as "Unavailable" | "Completed",
@@ -234,9 +950,11 @@ export function createOrderStatusController(
     : { status: "invalid-reference" };
   let online = typeof navigator === "undefined" || navigator.onLine !== false;
   let stopped = false;
+  let lifecycle = 0;
   let request = 0;
   let realtime: RealtimeAvailability = "connecting";
   let unsubscribeRealtime: (() => void) | null = null;
+  let unsubscribeContext: (() => void) | null = null;
   const listeners = new Set<() => void>();
   const publish = (next: OrderStatusState) => {
     state = next;
@@ -246,6 +964,23 @@ export function createOrderStatusController(
     state.status === "ready" || state.status === "offline" ? state.view : null;
   const loadCanonical = async () => {
     if (stopped || !reference.test(orderReference)) return;
+    if (!unsubscribeContext && client.subscribeContextChange) {
+      let active = true;
+      const release = client.subscribeContextChange(() => {
+        if (!active || stopped) return;
+        lifecycle += 1;
+        request += 1;
+        realtime = "unavailable";
+        const releaseRealtime = unsubscribeRealtime;
+        unsubscribeRealtime = null;
+        publish({ status: "permission-denied" });
+        releaseRealtime?.();
+      });
+      unsubscribeContext = () => {
+        active = false;
+        release();
+      };
+    }
     const retained = currentView();
     if (!online) {
       publish({ status: "offline", view: retained });
@@ -253,9 +988,19 @@ export function createOrderStatusController(
     }
     const token = ++request;
     if (retained) publish({ status: "ready", view: retained, realtime, refreshing: true });
-    else publish({ status: "loading" });
+    // While the order is "received", a re-check keeps that message instead of flashing "loading".
+    else if (state.status !== "received") publish({ status: "loading" });
     try {
-      const view = parseOrderStatusView(await client.load(orderReference), orderReference);
+      const loaded = await client.load(orderReference);
+      if (isReceived(loaded)) {
+        const received = parseOrderReceived(loaded, orderReference);
+        if (stopped || !online || token !== request) return;
+        // A status already shown is kept; the projection never goes back to missing.
+        if (retained) publish({ status: "ready", view: retained, realtime, refreshing: false });
+        else publish({ status: "received", received });
+        return;
+      }
+      const view = parseOrderStatusView(loaded, orderReference);
       if (!stopped && online && token === request)
         publish({ status: "ready", view, realtime, refreshing: false });
     } catch (error) {
@@ -266,9 +1011,11 @@ export function createOrderStatusController(
             ? "permission-denied"
             : error.code === "not_found"
               ? "not-found"
-              : error.code === "feature_disabled"
-                ? "feature-disabled"
-                : "unavailable";
+              : error.code === "table_order"
+                ? "table-order"
+                : error.code === "feature_disabled"
+                  ? "feature-disabled"
+                  : "unavailable";
         publish({ status: mapped });
       } else publish({ status: "unavailable" });
     }
@@ -279,18 +1026,20 @@ export function createOrderStatusController(
   };
   const startRealtime = () => {
     if (!online || stopped || !reference.test(orderReference) || unsubscribeRealtime) return;
+    const activeLifecycle = lifecycle;
+    const active = () => online && !stopped && activeLifecycle === lifecycle;
     try {
       const candidate = client.subscribe(orderReference, {
         onOpen: () => {
-          if (!online || stopped) return;
+          if (!active()) return;
           updateRealtime("available");
           void loadCanonical();
         },
         onHint: () => {
-          if (online && !stopped) void loadCanonical();
+          if (active()) void loadCanonical();
         },
         onError: () => {
-          if (online && !stopped) updateRealtime("unavailable");
+          if (active()) updateRealtime("unavailable");
         },
       });
       if (typeof candidate !== "function") {
@@ -306,14 +1055,18 @@ export function createOrderStatusController(
     getState: () => state,
     async load() {
       if (!reference.test(orderReference)) return;
+      stopped = false;
+      const activeLifecycle = lifecycle;
       await loadCanonical();
-      startRealtime();
+      if (!stopped && activeLifecycle === lifecycle) startRealtime();
     },
     refresh: loadCanonical,
     setOnline(value: boolean) {
       online = value;
       if (!value) {
+        lifecycle += 1;
         request += 1;
+        realtime = "unavailable";
         unsubscribeRealtime?.();
         unsubscribeRealtime = null;
         publish({ status: "offline", view: currentView() });
@@ -321,10 +1074,16 @@ export function createOrderStatusController(
     },
     dispose() {
       stopped = true;
+      lifecycle += 1;
       request += 1;
       unsubscribeRealtime?.();
       unsubscribeRealtime = null;
+      unsubscribeContext?.();
+      unsubscribeContext = null;
       listeners.clear();
+      state = reference.test(orderReference)
+        ? { status: "loading" }
+        : { status: "invalid-reference" };
     },
     subscribe(listener: () => void) {
       listeners.add(listener);

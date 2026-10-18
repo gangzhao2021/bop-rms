@@ -192,15 +192,19 @@ async function prove(context) {
       1,
     );
 
+    // Raw evidence that has not reached its expiry cannot be deleted. Anchored to the real clock
+    // (the database trigger compares with now()), so the receipt stays unexpired on any run date.
+    const receivedAt = Math.floor(Date.now() / 1000) * 1000 - 60_000;
+    const at = (offset) => new Date(receivedAt + offset).toISOString();
     const future = await insertReceipt(client, {
       receipt: id(20),
       event: "evt_SYNTHETIC1305",
       digest: sha("e"),
-      providerCreatedAt: "2026-08-03T16:55:00.000Z",
-      receivedAt: "2026-08-03T17:00:00.000Z",
-      signatureTimestamp: "2026-08-03T16:59:59.000Z",
-      rawExpiresAt: "2026-09-02T17:00:00.000Z",
-      dedupeExpiresAt: "2026-11-01T17:00:00.000Z",
+      providerCreatedAt: at(-300_000),
+      receivedAt: at(0),
+      signatureTimestamp: at(-1000),
+      rawExpiresAt: at(30 * 86_400_000),
+      dedupeExpiresAt: at(90 * 86_400_000),
     });
     await client.query(
       `DELETE FROM rms_payment.provider_webhook_raw_evidence WHERE webhook_receipt_id=$1`,

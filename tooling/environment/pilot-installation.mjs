@@ -1,0 +1,584 @@
+import {
+  createCurrencyMetadataSnapshot,
+  parsePricingReference,
+} from "../../packages/rms/pricing/src/index.ts";
+import { open, realpath, lstat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { join, isAbsolute } from "node:path";
+import process from "node:process";
+import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
+import { validateRefundRoleMapping } from "./pilot-refund-role-mapping.mjs";
+import { Buffer } from "node:buffer";
+const unavailable = () => {
+  throw new Error("PILOT_INSTALLATION_UNAVAILABLE");
+};
+const exact = (value, keys) =>
+  value !== null &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  Object.keys(value).sort().join(",") === [...keys].sort().join(",");
+const identifier = (value) => typeof value === "string" && /^[a-z][a-z0-9_]{0,62}$/u.test(value);
+export async function loadPilotInstallation(directory) {
+  try {
+    if (
+      !isPilotRuntime({ test: true }) ||
+      !isAbsolute(directory) ||
+      (await realpath(directory)) !== directory
+    )
+      return unavailable();
+    const state = await lstat(directory);
+    if (
+      !state.isDirectory() ||
+      state.isSymbolicLink() ||
+      state.uid !== process.getuid() ||
+      (state.mode & 0o777) !== 0o700
+    )
+      return unavailable();
+    const read = async (name) => {
+      const file = join(directory, name);
+      const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        const stat = await handle.stat();
+        if (
+          !stat.isFile() ||
+          stat.uid !== process.getuid() ||
+          (stat.mode & 0o777) !== 0o600 ||
+          stat.size > 1048576
+        )
+          return unavailable();
+        const buffer = Buffer.alloc(1048577);
+        let size = 0;
+        while (size < buffer.length) {
+          const { bytesRead } = await handle.read(buffer, size, buffer.length - size, null);
+          if (bytesRead === 0) break;
+          size += bytesRead;
+        }
+        if (size > 1048576) return unavailable();
+        return JSON.parse(buffer.subarray(0, size).toString("utf8"));
+      } finally {
+        await handle.close();
+      }
+    };
+    const config = await read("installation.json");
+    if (
+      !exact(config, ["schemaVersion", "environment", "database", "port", "roles"]) ||
+      config.schemaVersion !== 1 ||
+      !matchesPilotEnvironment(config.environment, { test: true }) ||
+      !identifier(config.database) ||
+      !Number.isSafeInteger(config.port) ||
+      config.port < 1 ||
+      config.port > 65535 ||
+      !exact(config.roles, ["api", "worker"]) ||
+      !identifier(config.roles.api) ||
+      !identifier(config.roles.worker) ||
+      config.roles.api === config.roles.worker
+    )
+      return unavailable();
+    const load = async (name) => {
+      try {
+        const value = await read(name);
+        if (
+          !matchesPilotEnvironment(value?.environment, { test: true }) ||
+          value.database !== config.database
+        )
+          return unavailable();
+        return value;
+      } catch {
+        return unavailable();
+      }
+    };
+    return Object.freeze({
+      database: config.database,
+      connection: Object.freeze({
+        host: "127.0.0.1",
+        port: config.port,
+        database: config.database,
+        user: (service) => {
+          if (!["api", "worker"].includes(service)) return unavailable();
+          return config.roles[service];
+        },
+        passwordFile: (service) => {
+          if (!["api", "worker"].includes(service)) return unavailable();
+          return join(directory, service + "-password");
+        },
+      }),
+      loadDiningExceptionWorker: async () => {
+        try {
+          const value = await load("dining-exception-worker.json");
+          const profile = await load("internal-test-profile.json");
+          const ref = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+          if (
+            !exact(value, [
+              "schemaVersion",
+              "environment",
+              "database",
+              "providerAccountReference",
+              "scope",
+            ]) ||
+            value.schemaVersion !== 1 ||
+            typeof value.providerAccountReference !== "string" ||
+            !ref.test(value.providerAccountReference) ||
+            !exact(value.scope, ["tenantReference", "brandReference", "storeReference"]) ||
+            Object.entries(value.scope).some(
+              ([key, reference]) =>
+                typeof reference !== "string" ||
+                !ref.test(reference) ||
+                profile.binding?.[key] !== reference,
+            )
+          )
+            return unavailable();
+          return Object.freeze({
+            providerAccountReference: value.providerAccountReference,
+            scope: Object.freeze({ ...value.scope }),
+          });
+        } catch {
+          return unavailable();
+        }
+      },
+      loadKitchenWorker: async () => {
+        try {
+          const value = await load("kitchen-queue-worker.json");
+          const profile = await load("internal-test-profile.json");
+          const ref = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+          if (
+            !exact(value, [
+              "schemaVersion",
+              "environment",
+              "database",
+              "actorReference",
+              "scope",
+            ]) ||
+            value.schemaVersion !== 1 ||
+            typeof value.actorReference !== "string" ||
+            !ref.test(value.actorReference) ||
+            !exact(value.scope, ["tenantReference", "brandReference", "storeReference"]) ||
+            Object.entries(value.scope).some(
+              ([key, reference]) =>
+                typeof reference !== "string" ||
+                !ref.test(reference) ||
+                profile.binding?.[key] !== reference,
+            )
+          )
+            return unavailable();
+          return Object.freeze({
+            actorReference: value.actorReference,
+            scope: Object.freeze({ ...value.scope }),
+          });
+        } catch {
+          return unavailable();
+        }
+      },
+      loadBusinessWorker: async () => {
+        try {
+          const value = await load("business-worker.json");
+          const profile = await load("internal-test-profile.json");
+          const ref = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+          if (
+            !exact(value, [
+              "schemaVersion",
+              "environment",
+              "database",
+              "providerAccountReference",
+              "actors",
+              "scope",
+              ...(Object.hasOwn(value, "workloads") ? ["workloads"] : []),
+            ]) ||
+            value.schemaVersion !== 1 ||
+            (Object.hasOwn(value, "workloads") &&
+              (!exact(value.workloads, ["batchCancellation", "compensation"]) ||
+                Object.values(value.workloads).some((v) => typeof v !== "boolean"))) ||
+            typeof value.providerAccountReference !== "string" ||
+            !ref.test(value.providerAccountReference) ||
+            !exact(value.actors, ["paidOutcome", "orderCompletion", "kitchenQueue"]) ||
+            Object.values(value.actors).some((v) => typeof v !== "string" || !ref.test(v)) ||
+            !exact(value.scope, ["tenantReference", "brandReference", "storeReference"]) ||
+            Object.entries(value.scope).some(
+              ([key, v]) => typeof v !== "string" || !ref.test(v) || profile.binding?.[key] !== v,
+            )
+          )
+            return unavailable();
+          return Object.freeze({
+            providerAccountReference: value.providerAccountReference,
+            actors: Object.freeze({ ...value.actors }),
+            workloads: Object.freeze(
+              value.workloads
+                ? { ...value.workloads }
+                : { batchCancellation: false, compensation: false },
+            ),
+            scope: Object.freeze({ ...value.scope }),
+          });
+        } catch {
+          return unavailable();
+        }
+      },
+      loadWorkflow: async (kind) => {
+        try {
+          if (!["Pickup", "DineIn", "AdditionalRelease"].includes(kind)) return unavailable();
+          const value = await load("internal-test-workflow-" + kind + ".json");
+          const profile = await load("internal-test-profile.json");
+          if (
+            !exact(value.scope, ["tenantReference", "brandReference", "storeReference"]) ||
+            Object.entries(value.scope).some(
+              ([key, v]) => typeof v !== "string" || profile.binding?.[key] !== v,
+            )
+          )
+            return unavailable();
+          return value;
+        } catch {
+          return unavailable();
+        }
+      },
+      loadCancellationWorkflow: async () => {
+        try {
+          const value = await load("cancellation-workflow-draft-result.json"),
+            profile = await load("internal-test-profile.json");
+          if (
+            !exact(value.scope, ["tenantReference", "brandReference", "storeReference"]) ||
+            Object.entries(value.scope).some(
+              ([key, v]) => typeof v !== "string" || profile.binding?.[key] !== v,
+            ) ||
+            !["UnpaidDineInBatchCancellation", "InternalTestBatchCancellation"].includes(
+              value.definition?.purposeCode,
+            )
+          )
+            return unavailable();
+          return value;
+        } catch {
+          return unavailable();
+        }
+      },
+      loadReceiptTemplate: async () => {
+        try {
+          const value = await read("internal-test-receipt-template.json");
+          const ref = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+          if (
+            !matchesPilotEnvironment(value?.environment, { test: true }) ||
+            [value.templateReference, value.familyReference, value.versionReference].some(
+              (v) => typeof v !== "string" || !ref.test(v),
+            )
+          )
+            return unavailable();
+          return value;
+        } catch {
+          return unavailable();
+        }
+      },
+      loadCustomerRuntime: async () => {
+        try {
+          const value = await load("customer-runtime.json");
+          const profile = await load("internal-test-profile.json");
+          const ref = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+          if (
+            !exact(value, [
+              "schemaVersion",
+              "environment",
+              "database",
+              "providerAccountReference",
+              "controlReference",
+              "cart",
+              "scope",
+              "diningTableFiles",
+            ]) ||
+            value.schemaVersion !== 1 ||
+            [value.providerAccountReference, value.controlReference].some(
+              (v) => typeof v !== "string" || !ref.test(v),
+            ) ||
+            !exact(value.cart, [
+              "policyVersionReference",
+              "idleTimeoutSeconds",
+              "absoluteTimeoutSeconds",
+            ]) ||
+            typeof value.cart.policyVersionReference !== "string" ||
+            !ref.test(value.cart.policyVersionReference) ||
+            !Number.isSafeInteger(value.cart.idleTimeoutSeconds) ||
+            value.cart.idleTimeoutSeconds < 1 ||
+            !Number.isSafeInteger(value.cart.absoluteTimeoutSeconds) ||
+            value.cart.absoluteTimeoutSeconds < value.cart.idleTimeoutSeconds ||
+            !exact(value.scope, ["tenantReference", "brandReference", "storeReference"]) ||
+            Object.entries(value.scope).some(
+              ([key, v]) => typeof v !== "string" || !ref.test(v) || profile.binding?.[key] !== v,
+            ) ||
+            !Array.isArray(value.diningTableFiles) ||
+            value.diningTableFiles.length < 1 ||
+            value.diningTableFiles.length > 100 ||
+            new Set(value.diningTableFiles).size !== value.diningTableFiles.length ||
+            value.diningTableFiles.some(
+              (v) =>
+                typeof v !== "string" ||
+                !/^internal-test-dining-table(?:-[0-9]{2})?\.json$/u.test(v),
+            )
+          )
+            return unavailable();
+          return Object.freeze({
+            ...value,
+            cart: Object.freeze({ ...value.cart }),
+            scope: Object.freeze({ ...value.scope }),
+            diningTableFiles: Object.freeze([...value.diningTableFiles]),
+          });
+        } catch {
+          return unavailable();
+        }
+      },
+      loadCustomerData: async (name) => {
+        try {
+          if (
+            !["internal-test-inventory.json", "internal-test-merchant.json"].includes(name) &&
+            (typeof name !== "string" ||
+              !/^internal-test-dining-table(?:-[0-9]{2})?\.json$/u.test(name))
+          )
+            return unavailable();
+          const value = await load(name),
+            profile = await load("internal-test-profile.json");
+          if (
+            ["tenantReference", "brandReference", "storeReference"].some(
+              (key) =>
+                typeof value.scope?.[key] !== "string" ||
+                value.scope[key] !== profile.binding?.[key],
+            )
+          )
+            return unavailable();
+          return value;
+        } catch {
+          return unavailable();
+        }
+      },
+      loadMerchantRuntime: async () => {
+        try {
+          const value = await load("merchant-runtime.json"),
+            profile = await load("internal-test-profile.json");
+          const ref = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+          const product = value.schemaVersion === 2 ? value.product : undefined,
+            hasAuthoringSources =
+              product !== null &&
+              typeof product === "object" &&
+              Object.hasOwn(product, "authoringSources"),
+            authoringSources = hasAuthoringSources ? product.authoringSources : undefined,
+            hasOptionSetPublicationSources =
+              product !== null &&
+              typeof product === "object" &&
+              Object.hasOwn(product, "optionSetPublicationSources"),
+            optionSetPublicationSources = hasOptionSetPublicationSources
+              ? product.optionSetPublicationSources
+              : undefined,
+            hasOptionPriceSources =
+              product !== null &&
+              typeof product === "object" &&
+              Object.hasOwn(product, "optionPriceSources"),
+            optionPriceSources = hasOptionPriceSources ? product.optionPriceSources : undefined,
+            positiveVersion = (v) => Number.isSafeInteger(v) && v >= 1 && v <= 2147483647;
+          if (
+            !exact(value, [
+              "schemaVersion",
+              "environment",
+              "database",
+              "scope",
+              "roleMapping",
+              "workstation",
+              ...(value.schemaVersion === 2 ? ["product"] : []),
+            ]) ||
+            ![1, 2].includes(value.schemaVersion) ||
+            !exact(value.scope, ["tenantReference", "brandReference", "storeReference"]) ||
+            Object.entries(value.scope).some(
+              ([key, v]) => typeof v !== "string" || !ref.test(v) || profile.binding?.[key] !== v,
+            ) ||
+            !exact(value.workstation, ["deviceReference", "pickupLocationReference"]) ||
+            Object.values(value.workstation).some((v) => typeof v !== "string" || !ref.test(v)) ||
+            // WP-2423 Q5: only catalog Store/Brand role codes, each in one refund group.
+            !(() => {
+              try {
+                validateRefundRoleMapping(value.roleMapping);
+                return true;
+              } catch {
+                return false;
+              }
+            })() ||
+            (value.schemaVersion === 2 &&
+              (!exact(product, [
+                "contentPolicy",
+                "maximumApprovalValiditySeconds",
+                ...(hasAuthoringSources ? ["authoringSources"] : []),
+                ...(hasOptionSetPublicationSources ? ["optionSetPublicationSources"] : []),
+                ...(hasOptionPriceSources ? ["optionPriceSources"] : []),
+              ]) ||
+                !exact(product.contentPolicy, [
+                  "configurationVersionReference",
+                  "expectedBrandVersion",
+                  "policyReference",
+                  "policyVersion",
+                ]) ||
+                typeof product.contentPolicy.configurationVersionReference !== "string" ||
+                !ref.test(product.contentPolicy.configurationVersionReference) ||
+                !positiveVersion(product.contentPolicy.expectedBrandVersion) ||
+                typeof product.contentPolicy.policyReference !== "string" ||
+                !ref.test(product.contentPolicy.policyReference) ||
+                !positiveVersion(product.contentPolicy.policyVersion) ||
+                (hasAuthoringSources &&
+                  (!exact(authoringSources, [
+                    "configurationVersionReference",
+                    "expectedBrandVersion",
+                    "policyReference",
+                    "policyVersion",
+                    "allergenRegistryVersionReference",
+                  ]) ||
+                    typeof authoringSources.configurationVersionReference !== "string" ||
+                    !ref.test(authoringSources.configurationVersionReference) ||
+                    !positiveVersion(authoringSources.expectedBrandVersion) ||
+                    typeof authoringSources.policyReference !== "string" ||
+                    !ref.test(authoringSources.policyReference) ||
+                    !positiveVersion(authoringSources.policyVersion) ||
+                    (authoringSources.allergenRegistryVersionReference !== null &&
+                      (typeof authoringSources.allergenRegistryVersionReference !== "string" ||
+                        !ref.test(authoringSources.allergenRegistryVersionReference))))) ||
+                (hasOptionSetPublicationSources &&
+                  (!exact(optionSetPublicationSources, [
+                    "brandConfigurationVersionReference",
+                    "expectedBrandVersion",
+                    "policyReference",
+                    "policyVersion",
+                    "optionSetPolicyFamilyReference",
+                    "mediaScope",
+                  ]) ||
+                    [
+                      "brandConfigurationVersionReference",
+                      "policyReference",
+                      "optionSetPolicyFamilyReference",
+                    ].some(
+                      (key) =>
+                        typeof optionSetPublicationSources[key] !== "string" ||
+                        !ref.test(optionSetPublicationSources[key]),
+                    ) ||
+                    !positiveVersion(optionSetPublicationSources.expectedBrandVersion) ||
+                    !positiveVersion(optionSetPublicationSources.policyVersion) ||
+                    !exact(optionSetPublicationSources.mediaScope, [
+                      "kind",
+                      "brandReference",
+                      "storeReference",
+                    ]) ||
+                    optionSetPublicationSources.mediaScope.brandReference !==
+                      value.scope.brandReference ||
+                    !(
+                      (optionSetPublicationSources.mediaScope.kind === "Brand" &&
+                        optionSetPublicationSources.mediaScope.storeReference === null) ||
+                      (optionSetPublicationSources.mediaScope.kind === "Store" &&
+                        optionSetPublicationSources.mediaScope.storeReference ===
+                          value.scope.storeReference)
+                    ))) ||
+                !Number.isSafeInteger(product.maximumApprovalValiditySeconds) ||
+                product.maximumApprovalValiditySeconds < 1 ||
+                product.maximumApprovalValiditySeconds > 86400))
+          )
+            return unavailable();
+          const selectedOptionPriceSources = hasOptionPriceSources
+            ? (() => {
+                if (
+                  !exact(optionPriceSources, [
+                    "currencyMetadata",
+                    "publicationPolicyFamilyReference",
+                  ])
+                )
+                  return unavailable();
+                return Object.freeze({
+                  currencyMetadata: createCurrencyMetadataSnapshot(
+                    optionPriceSources.currencyMetadata,
+                  ),
+                  publicationPolicyFamilyReference: parsePricingReference(
+                    optionPriceSources.publicationPolicyFamilyReference,
+                  ),
+                });
+              })()
+            : undefined;
+          return Object.freeze({
+            ...value,
+            scope: Object.freeze({ ...value.scope }),
+            workstation: Object.freeze({ ...value.workstation }),
+            roleMapping: validateRefundRoleMapping(value.roleMapping),
+            ...(product === undefined
+              ? {}
+              : {
+                  product: Object.freeze({
+                    ...product,
+                    contentPolicy: Object.freeze({ ...product.contentPolicy }),
+                    ...(hasOptionPriceSources
+                      ? { optionPriceSources: selectedOptionPriceSources }
+                      : {}),
+                    ...(hasAuthoringSources
+                      ? { authoringSources: Object.freeze({ ...authoringSources }) }
+                      : {}),
+                    ...(hasOptionSetPublicationSources
+                      ? {
+                          optionSetPublicationSources: Object.freeze({
+                            ...optionSetPublicationSources,
+                            mediaScope: Object.freeze({
+                              ...optionSetPublicationSources.mediaScope,
+                            }),
+                          }),
+                        }
+                      : {}),
+                  }),
+                }),
+          });
+        } catch {
+          return unavailable();
+        }
+      },
+      loadTaskQueue: async () => {
+        try {
+          const value = await load("internal-test-task-queue.json"),
+            profile = await load("internal-test-profile.json");
+          if (
+            ["tenantReference", "brandReference", "storeReference"].some(
+              (key) => typeof value[key] !== "string" || value[key] !== profile.binding?.[key],
+            )
+          )
+            return unavailable();
+          return value;
+        } catch {
+          return unavailable();
+        }
+      },
+      loadDailySettlementCoverage: async () => {
+        const value = await load("daily-settlement-coverage.json"),
+          profile = await load("internal-test-profile.json");
+        if (
+          !exact(value, ["schemaVersion", "environment", "database", "scope", "firstWindow"]) ||
+          value.schemaVersion !== 1 ||
+          !exact(value.scope, ["tenantReference", "brandReference", "storeReference"]) ||
+          Object.entries(value.scope).some(
+            ([key, reference]) => reference !== profile.binding?.[key],
+          ) ||
+          !exact(value.firstWindow, [
+            "businessDate",
+            "startsAt",
+            "endsAt",
+            "configurationReference",
+            "configurationVersion",
+            "contentDigest",
+          ]) ||
+          !/^\d{4}-\d{2}-\d{2}$/u.test(value.firstWindow.businessDate) ||
+          !Number.isSafeInteger(value.firstWindow.configurationVersion) ||
+          value.firstWindow.configurationVersion < 1 ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+            value.firstWindow.configurationReference,
+          ) ||
+          !/^sha256:[a-f0-9]{64}$/u.test(value.firstWindow.contentDigest) ||
+          [value.firstWindow.startsAt, value.firstWindow.endsAt].some(
+            (at) =>
+              typeof at !== "string" ||
+              !Number.isFinite(Date.parse(at)) ||
+              new Date(at).toISOString() !== at,
+          ) ||
+          value.firstWindow.startsAt >= value.firstWindow.endsAt
+        )
+          return unavailable();
+        return Object.freeze({
+          scope: Object.freeze({ ...value.scope }),
+          firstWindow: Object.freeze({ ...value.firstWindow }),
+        });
+      },
+      loadProfile: () => load("internal-test-profile.json"),
+      loadMenu: () => load("internal-test-menu.json"),
+    });
+  } catch {
+    return unavailable();
+  }
+}

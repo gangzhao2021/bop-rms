@@ -1,6 +1,11 @@
 {
   "schemaVersion": 1,
-  "authority": ["BOP-RMS Handoff 86.9", "BOP-RMS Handoff 87.10.1", "BOP-RMS Handoff 87.10.2"],
+  "authority": [
+    "BOP-RMS Handoff 86.9",
+    "BOP-RMS Handoff 87.10.1",
+    "BOP-RMS Handoff 87.10.2",
+    "Repository-accepted WP-2234 and WP-2240 credential handoff"
+  ],
   "unknownClassification": "Confidential",
   "prohibitedData": ["PAN", "CVV", "raw-authentication-credential"],
   "necessaryCookies": [
@@ -30,6 +35,38 @@
       "sameSite": "Lax",
       "path": "/",
       "domain": null
+    },
+    {
+      "name": "__Host-bop-platform-auth",
+      "purpose": "platform-oauth-transaction",
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "path": "/",
+      "domain": null
+    },
+    {
+      "name": "__Host-bop-platform",
+      "purpose": "platform-operator-session",
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "path": "/",
+      "domain": null
+    },
+    {
+      "name": "__Host-bop-store-device",
+      "purpose": "registered-store-tablet-for-staff-pin-switch",
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Strict",
+      "path": "/",
+      "domain": null,
+      "persistence": "400-days-browser-maximum",
+      "serverAuthority": "Identity store sign-in device registration; only an HMAC-SHA256 of the secret is stored and revocation is server-side",
+      "sourceFiles": ["apps/api/src/merchant-staff-pin-http.ts"],
+      "design": "docs/spec/design/staff-session-continuity.md",
+      "webStorage": false
     }
   ],
   "prohibitedTracking": [
@@ -126,5 +163,37 @@
       "legalHoldExtends": false
     }
   ],
-  "externalEvidenceRequired": true
+  "externalEvidenceRequired": true,
+  "necessaryCookieFamilies": [
+    {
+      "prefix": "__Host-bop-guest-candidate-",
+      "suffixFormat": "uuid-v7-operation-reference",
+      "purpose": "guest-binding-candidate-handoff",
+      "sourceFiles": ["apps/api/src/customer-cart-binding.ts"],
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "path": "/",
+      "domain": null,
+      "persistence": "browser-session",
+      "serverAuthority": "Identity preparation and Session deadlines",
+      "clearOn": "successful activation or completion of the same operation",
+      "webStorage": false
+    },
+    {
+      "prefix": "__Host-bop-guest-dining-candidate-",
+      "suffixFormat": "uuid-v7-operation-reference",
+      "purpose": "guest-dining-binding-candidate-handoff",
+      "sourceFiles": ["apps/api/src/customer-dining-binding.ts"],
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "path": "/",
+      "domain": null,
+      "persistence": "browser-session",
+      "serverAuthority": "Identity preparation and Session deadlines",
+      "clearOn": "successful activation or completion of the same operation",
+      "webStorage": false
+    }
+  ]
 }

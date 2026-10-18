@@ -1,0 +1,291 @@
+import { beforeEach, expect, it, vi } from "vitest";
+import { createMerchantOrdinaryRefundRequest } from "./merchant-ordinary-refund-request.js";
+const d = vi.hoisted(() => ({
+  cards: (): unknown => ({
+    loadByIntent: async () => null,
+    loadByBatch: async () => null,
+  }),
+  resolve: vi.fn(),
+  workforce: vi.fn(),
+  compose: vi.fn(),
+  record: vi.fn(),
+  capture: vi.fn(),
+  cancelledRound: vi.fn(),
+}));
+vi.mock("./merchant-round-cancellation-refund.js", () => ({
+  createRoundCancellationRefundSource: () => d.cancelledRound,
+}));
+vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
+vi.mock("./merchant-workforce-authority-source.js", () => ({
+  createMerchantWorkforcePermissionSource: () => d.workforce,
+}));
+vi.mock("@rms/payment", async (original) => ({
+  ...(await original<object>()),
+  // WP-2423 item 4: no card-machine payment unless a test says so.
+  createPostgresCardMachinePaymentStore: () => d.cards(),
+  createPostgresOrdinaryRefundRequestRuntime: d.compose,
+  createPostgresCapturedBatchPaymentSource: () => ({ load: d.capture }),
+}));
+const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+type Options = Parameters<typeof createMerchantOrdinaryRefundRequest>[0];
+const at = "2026-09-20T12:00:00.000Z";
+function setup() {
+  const tx = {},
+    allowed = vi.fn(async () => true);
+  const current = {
+    selected: { tenantReference: id(1) },
+    context: { brand: { brandReference: id(2) }, resolvedAt: at },
+    store: { storeReference: id(3) },
+    actorReference: id(4),
+    allowed,
+  };
+  d.resolve.mockResolvedValue(current);
+  const run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work(tx));
+  const authorize = vi.fn(async () => ({ sessionReference: id(5) }));
+  const configure = vi.fn(async () => ({
+    providerAccountReference: id(6),
+    environment: "Test" as const,
+    roleMapping: { Manager: ["manager"], Owner: ["owner"], Finance: [] },
+  }));
+  const operation = createMerchantOrdinaryRefundRequest({
+    persistence: { transactions: { run } } as unknown as Options["persistence"],
+    authentication: { authorize } as unknown as Options["authentication"],
+    resolveConfiguration: configure,
+    newAuditReference: () => id(7),
+    retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+    retentionPolicyVersion: 1,
+  });
+  const input = {
+    sessionCookie: "synthetic-cookie",
+    csrf: "synthetic-csrf",
+    command: {
+      orderReference: id(8),
+      requestReference: id(9),
+      operationReference: id(10),
+      expectedClaimVersion: 0,
+      reasonCode: "CUSTOMER_REQUEST",
+      items: [{ orderBatchReference: id(11), orderItemReference: id(12), quantity: 1 }],
+    },
+  };
+  return { tx, allowed, run, authorize, configure, operation, input };
+}
+beforeEach(() => {
+  vi.clearAllMocks();
+  d.cancelledRound.mockResolvedValue(false);
+  d.capture.mockResolvedValue({
+    paymentEvent: { eventId: id(14) },
+    paymentIntentReference: id(15),
+  });
+  d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["manager"] });
+  d.record.mockImplementation(async (_tx, value) => ({
+    status: "Created",
+    claimVersion: 1,
+    request: {
+      ...value,
+      currencyCode: "CAD",
+      amountMinor: 1130n,
+      payments: [
+        {
+          paymentAttemptReference: id(13),
+          items: [
+            {
+              components: {
+                netAmountMinor: 1000n,
+                taxAmountMinor: 130n,
+                tipAmountMinor: 0n,
+                serviceChargeAmountMinor: 0n,
+                serviceChargeTaxAmountMinor: 0n,
+              },
+            },
+          ],
+        },
+      ],
+      auditReference: id(7),
+      internal: "hidden",
+    },
+  }));
+  d.compose.mockImplementation((options) => {
+    const run = async (tx: unknown, value: Record<string, unknown>) => {
+      if (!(await options.authorize(tx, { ...options.scope, ...value, observedAt: options.now() })))
+        throw new Error("DENIED");
+      return d.record(tx, value);
+    };
+    return Object.assign(run, {
+      preview: async (tx: unknown, value: Record<string, unknown>) => ({
+        ...(await run(tx, value)),
+        status: "Previewed",
+        claimVersion: 0,
+      }),
+    });
+  });
+});
+it("binds authenticated Manager and current Store, computes server time, and limits output", async () => {
+  const f = setup();
+  expect(await f.operation(f.input)).toEqual({
+    status: "Created",
+    requestReference: id(9),
+    operationReference: id(10),
+    claimVersion: 1,
+    currencyCode: "CAD",
+    amountMinor: "1130",
+    paymentAttemptReferences: [id(13)],
+    approvalRequired: null,
+    escalationReasons: [],
+    approveAlone: false,
+  });
+  expect(d.resolve).toHaveBeenCalledWith(
+    f.tx,
+    f.input.sessionCookie,
+    "payment.refund.request",
+    id(5),
+  );
+  expect(d.record.mock.calls[0]?.[1]).toEqual({ ...f.input.command, actorReference: id(4) });
+  const opts = d.compose.mock.calls[0]?.[0];
+  expect(opts.now()).toBe(at);
+  expect(
+    await opts.authorize(
+      {},
+      { ...opts.scope, orderReference: id(8), actorReference: id(99), observedAt: at },
+    ),
+  ).toBe(false);
+});
+it.each(["actorReference", "amountMinor", "requestedAt", "auditReference", "roleMapping"])(
+  "rejects injected %s before entering a transaction",
+  async (key) => {
+    const f = setup();
+    await expect(
+      f.operation({ ...f.input, command: { ...f.input.command, [key]: id(99) } }),
+    ).rejects.toThrow();
+    expect(f.run).not.toHaveBeenCalled();
+  },
+);
+it("rejects authentication failure before transaction", async () => {
+  const f = setup();
+  f.authorize.mockRejectedValue(new Error("denied"));
+  await expect(f.operation(f.input)).rejects.toThrow();
+  expect(f.run).not.toHaveBeenCalled();
+});
+it("requires Manager eligibility even when action policy allows Owner", async () => {
+  const f = setup();
+  d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["owner"] });
+  await expect(f.operation(f.input)).rejects.toThrow();
+  expect(d.record).not.toHaveBeenCalled();
+});
+it("rechecks authority before commit", async () => {
+  const f = setup();
+  // WP-2423: a permission withdrawn or Session ended during the request records nothing; the
+  // refusal is raised inside the transaction callback after the write, so it rolls back.
+  f.allowed.mockResolvedValueOnce(true).mockResolvedValue(false);
+  await expect(f.operation(f.input)).rejects.toThrow("ORDINARY_REFUND_REQUEST_DENIED");
+  expect(d.record).toHaveBeenCalledTimes(1);
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+});
+
+it("WP-2423: resolves the requester in full twice and their role once plus once before commit", async () => {
+  const f = setup();
+  await f.operation(f.input);
+  expect(d.resolve).toHaveBeenCalledTimes(1);
+  expect(f.allowed).toHaveBeenCalledTimes(2);
+  expect(d.workforce).toHaveBeenCalledTimes(2);
+  // A role withdrawn during the request refuses it before commit.
+  d.workforce
+    .mockResolvedValueOnce({ decision: { effect: "Allow" }, activeRoleCodes: ["manager"] })
+    .mockResolvedValueOnce({ decision: { effect: "Deny" }, activeRoleCodes: [] });
+  await expect(f.operation(f.input)).rejects.toThrow("ORDINARY_REFUND_REQUEST_DENIED");
+});
+
+it("previews server component amounts without reporting a committed request", async () => {
+  const f = setup();
+  expect(await f.operation.preview(f.input)).toEqual({
+    status: "Previewed",
+    requestReference: id(9),
+    operationReference: id(10),
+    claimVersion: 0,
+    currencyCode: "CAD",
+    amountMinor: "1130",
+    paymentAttemptReferences: [id(13)],
+    approvalRequired: null,
+    escalationReasons: [],
+    approveAlone: false,
+    components: {
+      netAmountMinor: "1000",
+      taxAmountMinor: "130",
+      tipAmountMinor: "0",
+      serviceChargeAmountMinor: "0",
+      serviceChargeTaxAmountMinor: "0",
+    },
+  });
+});
+
+it("WP-2423 Q5: accepts only the listed reasons and reports why approval is needed", async () => {
+  for (const reasonCode of ["OTHER", "SYNTHETIC_FREE_CODE", "customer_request"]) {
+    const f = setup();
+    await expect(
+      f.operation({ ...f.input, command: { ...f.input.command, reasonCode } }),
+    ).rejects.toThrow("ORDINARY_REFUND_REQUEST_DENIED");
+    expect(f.run).not.toHaveBeenCalled();
+  }
+  const f = setup();
+  d.record.mockImplementationOnce(async (_tx, value) => ({
+    status: "Created",
+    claimVersion: 1,
+    escalation: {
+      requiresIndependentApproval: true,
+      reasons: ["MoreThan24Hours", "OrderOrdinaryTotalAboveCad100"],
+    },
+    request: {
+      ...value,
+      currencyCode: "CAD",
+      amountMinor: 12000n,
+      payments: [{ paymentAttemptReference: id(13), items: [] }],
+    },
+  }));
+  const result = await f.operation({
+    ...f.input,
+    command: { ...f.input.command, reasonCode: "QUALITY_ISSUE" },
+  });
+  expect(result).toMatchObject({
+    approvalRequired: true,
+    escalationReasons: ["MoreThan24Hours", "OrderOrdinaryTotalAboveCad100"],
+  });
+  expect(d.record.mock.calls[0]?.[1]).toMatchObject({ reasonCode: "QUALITY_ISSUE" });
+});
+
+it("WP-2423 Q5: Other requires a short note and no other reason carries one", async () => {
+  for (const command of [
+    { reasonCode: "OTHER", note: "" },
+    { reasonCode: "OTHER", note: "x".repeat(201) },
+    { reasonCode: "WRONG_ITEM", note: "Not allowed" },
+  ]) {
+    const f = setup();
+    await expect(
+      f.operation({ ...f.input, command: { ...f.input.command, ...command } }),
+    ).rejects.toThrow("ORDINARY_REFUND_REQUEST_DENIED");
+    expect(f.run).not.toHaveBeenCalled();
+  }
+  const f = setup();
+  await f.operation({
+    ...f.input,
+    command: { ...f.input.command, reasonCode: "OTHER", note: " Customer left early " },
+  });
+  expect(d.record.mock.calls[0]?.[1]).toMatchObject({
+    reasonCode: "OTHER",
+    note: " Customer left early ",
+  });
+});
+
+it("WP-2423: refuses an item refund on a round its cancellation refunds whole", async () => {
+  const f = setup();
+  d.cancelledRound.mockResolvedValue(true);
+  await expect(f.operation(f.input)).rejects.toThrow(
+    "ORDINARY_REFUND_ROUND_REFUNDED_BY_CANCELLATION",
+  );
+  await expect(f.operation.preview(f.input)).rejects.toThrow(
+    "ORDINARY_REFUND_ROUND_REFUNDED_BY_CANCELLATION",
+  );
+  expect(d.cancelledRound).toHaveBeenCalledWith({
+    orderBatchReference: id(11),
+    paymentEventReference: id(14),
+  });
+  expect(d.record).not.toHaveBeenCalled();
+});

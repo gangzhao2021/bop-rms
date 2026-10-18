@@ -1,3 +1,7 @@
+import {
+  parseRecipePublicationEvidence,
+  type RecipePublicationEvidence,
+} from "../domain/publication-review.js";
 import { validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
 import { revalidateTenantContext } from "@bop/permission";
 import {
@@ -78,7 +82,9 @@ function event(action: RecipeAction, aggregate: RecipeSnapshot, at: string): Rec
   });
 }
 interface Authorization {
+  readonly publicationEvidence: unknown;
   readonly brand: RecipeReference;
+  readonly actor: RecipeReference;
   readonly author: RecipeReference | null;
   readonly costReviewer: RecipeReference | null;
   readonly foodReviewer: RecipeReference | null;
@@ -118,7 +124,9 @@ async function authorize(
     )
       throw new Error("denied");
     return {
+      publicationEvidence: evidence.publicationEvidence,
       brand: parseRecipeReference(context.brand.brandReference),
+      actor: parseRecipeReference(actor),
       author:
         evidence.draftAuthorActorReference === null
           ? null
@@ -169,15 +177,6 @@ export function createRecipeService(ports: RecipePorts) {
       const candidate = createRecipeSnapshot(input.candidate);
       if (candidate.createdAt !== at) invalid();
       const intent = parseRecipeDigest(ports.references.hashIntent(JSON.stringify(input)));
-      const prior = await ports.repository.resolveOperation(operationReference).catch(dependency);
-      if (prior !== null) {
-        if (!ports.references.equals(prior.operationIntentHash, intent))
-          throw new RecipeWorkflowError("RECIPE_IDEMPOTENCY_CONFLICT");
-        return Object.freeze({
-          status: "AlreadyApplied" as const,
-          aggregate: createRecipeSnapshot(prior.aggregate),
-        });
-      }
       const auth = await authorize(
         ports,
         input.action,
@@ -187,6 +186,26 @@ export function createRecipeService(ports: RecipePorts) {
       );
       if (candidate.brandReference !== auth.brand)
         throw new RecipeWorkflowError("RECIPE_PERMISSION_DENIED");
+      const prior = await ports.repository.resolveOperation(operationReference).catch(dependency);
+      if (prior !== null) {
+        if (
+          prior.actorReference !== auth.actor ||
+          !ports.references.equals(prior.operationIntentHash, intent)
+        )
+          throw new RecipeWorkflowError("RECIPE_IDEMPOTENCY_CONFLICT");
+        const recovered = createRecipeSnapshot(prior.aggregate);
+        if (
+          recovered.brandReference !== auth.brand ||
+          recovered.recipeReference !== candidate.recipeReference ||
+          prior.operationReference !== operationReference ||
+          prior.action !== input.action
+        )
+          throw new RecipeWorkflowError("RECIPE_DEPENDENCY_UNAVAILABLE");
+        return Object.freeze({
+          status: "AlreadyApplied" as const,
+          aggregate: recovered,
+        });
+      }
       const current = await ports.repository.load(candidate.recipeReference).catch(dependency);
       if (input.action === "CreateDraft") {
         if (
@@ -235,6 +254,7 @@ export function createRecipeService(ports: RecipePorts) {
       }
       const facts = await ports.facts.validate(candidate).catch(dependency);
       if (!facts.referencesValid) throw new RecipeWorkflowError("RECIPE_EVIDENCE_INCOMPLETE");
+      let publicationEvidence: RecipePublicationEvidence | null = null;
       if (input.action === "Publish") {
         const reviewers = [auth.costReviewer, auth.foodReviewer];
         if (
@@ -248,6 +268,19 @@ export function createRecipeService(ports: RecipePorts) {
           !facts.costEvidenceVerified
         )
           throw new RecipeWorkflowError("RECIPE_DUAL_REVIEW_REQUIRED");
+        try {
+          publicationEvidence = parseRecipePublicationEvidence(auth.publicationEvidence, candidate);
+          if (
+            publicationEvidence.draftAuthorActorReference !== auth.author ||
+            publicationEvidence.reviews.find((r) => r.reviewKind === "Cost")
+              ?.reviewerActorReference !== auth.costReviewer ||
+            publicationEvidence.reviews.find((r) => r.reviewKind === "FoodSafety")
+              ?.reviewerActorReference !== auth.foodReviewer
+          )
+            throw new Error("review binding");
+        } catch {
+          throw new RecipeWorkflowError("RECIPE_DUAL_REVIEW_REQUIRED");
+        }
         validateRecipeGraph(candidate, facts.graphSnapshots);
         calculateRecipe(candidate);
       }
@@ -255,6 +288,8 @@ export function createRecipeService(ports: RecipePorts) {
         action: input.action,
         operationReference,
         operationIntentHash: intent,
+        actorReference: auth.actor,
+        publicationEvidence,
         aggregate: candidate,
         event: event(input.action, candidate, at),
       });
@@ -270,6 +305,7 @@ export function createRecipeService(ports: RecipePorts) {
               .catch(dependency);
       const aggregate = createRecipeSnapshot(saved.aggregate);
       if (
+        saved.actorReference !== auth.actor ||
         saved.action !== record.action ||
         saved.operationReference !== record.operationReference ||
         !ports.references.equals(saved.operationIntentHash, record.operationIntentHash) ||

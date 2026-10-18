@@ -1,3 +1,4 @@
+import { createContractParsers } from "./contract-parsers.js";
 export type ProviderIntegrationPageErrorCode =
   | "PermissionDenied"
   | "NotFound"
@@ -73,7 +74,6 @@ export interface ProviderIntegrationView {
 }
 const REF = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const CODE = /^[A-Z][A-Z0-9_.:-]{0,63}$/u;
-const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const fail = (): never => {
   throw new ProviderIntegrationPageError("Unavailable");
 };
@@ -93,23 +93,13 @@ function exact(value: unknown, fields: readonly string[]) {
     return fail();
   return value as Record<string, unknown>;
 }
-const oneOf = <T extends string>(value: unknown, values: readonly T[]): T =>
-  typeof value === "string" && values.includes(value as T) ? (value as T) : fail();
+const { oneOf, instant, count, bool } = createContractParsers(fail);
 const ref = (value: unknown) => (typeof value === "string" && REF.test(value) ? value : fail());
 const nullableRef = (value: unknown) => (value === null ? null : ref(value));
 const code = (value: unknown) => (typeof value === "string" && CODE.test(value) ? value : fail());
 const nullableCode = (value: unknown) => (value === null ? null : code(value));
-const instant = (value: unknown) =>
-  typeof value === "string" &&
-  INSTANT.test(value) &&
-  new Date(Date.parse(value)).toISOString() === value
-    ? value
-    : fail();
 const nullableInstant = (value: unknown) => (value === null ? null : instant(value));
-const count = (value: unknown) =>
-  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : fail();
 const nullableCount = (value: unknown) => (value === null ? null : count(value));
-const bool = (value: unknown) => (typeof value === "boolean" ? value : fail());
 const providers = ["STRIPE_CANADA", "AWS_COGNITO_CA", "AWS_S3_CA", "AWS_SES_CA"] as const;
 const statuses = ["Draft", "Disabled", "Enabled", "Degraded", "KillSwitched"] as const;
 const owners = {

@@ -19,6 +19,7 @@ export interface ScreenRecord {
   permission_ref: string;
   projection_ref: string;
   action_summary: string;
+  search_filter_sort_export: string;
   command_refs: string[];
   work_package_mode: "resolved" | "inherited";
   work_packages: string[];
@@ -100,6 +101,28 @@ export function validateRegistry(registry: ScreenRegistry, schema: object): Vali
       errors.push(`missing resolved work package on ${screen.screen_id}`);
     if (!screen.phase || !screen.feature_gate)
       errors.push(`missing phase/feature gate on ${screen.screen_id}`);
+    const inheritsContract = [
+      screen.phase,
+      screen.feature_gate,
+      screen.action_summary,
+      screen.search_filter_sort_export,
+      screen.work_package_mode,
+      screen.permission_ref,
+      screen.projection_ref,
+    ].some((value) => /(?:^|[.])inherit(?:ed|s)(?:[ _]|$)/i.test(value ?? ""));
+    if (inheritsContract && screen.route_mode === "standalone")
+      errors.push(`unsupported standalone inheritance on ${screen.screen_id}`);
+    if (
+      inheritsContract &&
+      !screen.parent_screen_ids?.length &&
+      !(screen.route_mode === "alias" && screen.alias_of) &&
+      !(
+        (screen.route_mode === "embedded" || screen.route_mode === "contextual") &&
+        screen.allowed_family &&
+        families.has(screen.allowed_family)
+      )
+    )
+      errors.push(`unresolved inheritance source on ${screen.screen_id}`);
     if (
       (screen.route_mode === "embedded" || screen.route_mode === "contextual") &&
       !screen.parent_screen_ids?.length &&
@@ -145,6 +168,24 @@ export function validateRegistry(registry: ScreenRegistry, schema: object): Vali
     visitState.set(id, "visited");
   }
   for (const screen of registry.screens ?? []) visit(screen.screen_id, []);
+  const parentState = new Map<string, "visiting" | "visited">();
+  function visitParents(id: string, path: string[]) {
+    const screen = byId.get(id);
+    if (!screen) return;
+    if (parentState.get(id) === "visiting") {
+      errors.push(`inheritance cycle ${[...path, id].join(" -> ")}`);
+      return;
+    }
+    if (parentState.get(id) === "visited") return;
+    parentState.set(id, "visiting");
+    const sources = [
+      ...(screen.parent_screen_ids ?? []),
+      ...(screen.route_mode === "alias" && screen.alias_of ? [screen.alias_of] : []),
+    ];
+    for (const source of sources) visitParents(source, [...path, id]);
+    parentState.set(id, "visited");
+  }
+  for (const screen of registry.screens ?? []) visitParents(screen.screen_id, []);
   return { valid: errors.length === 0, errors };
 }
 

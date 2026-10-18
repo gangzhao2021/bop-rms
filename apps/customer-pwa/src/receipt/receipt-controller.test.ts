@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseReceiptView } from "./receipt-controller.js";
+import {
+  createReceiptController,
+  ReceiptClientError,
+  parseReceiptView,
+} from "./receipt-controller.js";
 
 const id = (n: number) => `018f8a00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 function payload() {
@@ -66,5 +70,367 @@ describe("receipt response parser", () => {
     });
     expect(() => parseReceiptView(candidate, id(1))).toThrow("invalid receipt");
     expect(invoked).toBe(false);
+  });
+});
+
+describe("receipt request lifetime", () => {
+  it("retains history but requires a fresh read for live fields after reconnecting", async () => {
+    let calls = 0;
+    const financial = {
+      observedAt: "2026-08-12T14:00:00.000Z",
+      currencyCode: "CAD",
+      capturedMinor: "1130",
+      confirmedRefundMinor: "0",
+      pendingRefundMinor: "600",
+      unresolvedAttemptCount: 1,
+    };
+    const controller = createReceiptController(id(1), {
+      async load() {
+        calls += 1;
+        return {
+          ...payload(),
+          financial,
+          deliveryStatus: "Pending",
+          cancellationEligible: true,
+        };
+      },
+    });
+    await controller.load();
+    const original = controller.getState();
+    expect(original.status).toBe("ready");
+    if (original.status !== "ready") throw new Error("receipt was not loaded");
+
+    controller.setOnline(false);
+    expect(controller.getState()).toMatchObject({
+      status: "offline",
+      view: {
+        freshnessStatus: "Stale",
+        financial: null,
+        deliveryStatus: "Unavailable",
+        supportEligible: false,
+        cancellationEligible: false,
+      },
+    });
+    controller.setOnline(true);
+    const reconnected = controller.getState();
+    expect(reconnected.status).toBe("ready");
+    if (reconnected.status !== "ready") throw new Error("history was not retained");
+    expect(reconnected.view.records).toBe(original.view.records);
+    expect(reconnected.view.freshnessStatus).toBe("Stale");
+    expect(reconnected.view.financial).toBeNull();
+    expect(reconnected.view.supportEligible).toBe(false);
+    expect(calls).toBe(1);
+    expect(original.view.freshnessStatus).toBe("Fresh");
+    expect(original.view.financial?.pendingRefundMinor).toBe(600n);
+
+    await controller.load();
+    expect(calls).toBe(2);
+    expect(controller.getState()).toMatchObject({
+      status: "ready",
+      view: {
+        freshnessStatus: "Fresh",
+        financial: { pendingRefundMinor: 600n },
+        deliveryStatus: "Pending",
+        supportEligible: true,
+        cancellationEligible: true,
+      },
+    });
+  });
+
+  it("does not restore an old receipt after current access is denied", async () => {
+    let permitted = true;
+    const controller = createReceiptController(id(1), {
+      async load() {
+        if (!permitted) throw new ReceiptClientError("permission_denied");
+        return payload();
+      },
+    });
+    await controller.load();
+    expect(controller.getState().status).toBe("ready");
+    permitted = false;
+    await controller.load();
+    expect(controller.getState().status).toBe("permission-denied");
+    controller.setOnline(false);
+    expect(controller.getState()).toEqual({ status: "offline", view: null });
+    controller.setOnline(true);
+    expect(controller.getState().status).toBe("unavailable");
+  });
+
+  it("discards in-flight responses when the page goes offline", async () => {
+    let resolve!: (value: unknown) => void;
+    const controller = createReceiptController(id(1), {
+      load: () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    });
+    const loading = controller.load();
+    controller.setOnline(false);
+    resolve(payload());
+    await loading;
+    expect(controller.getState()).toEqual({ status: "offline", view: null });
+    controller.setOnline(true);
+    expect(controller.getState().status).toBe("unavailable");
+  });
+
+  it("does not let an older response undo the newest denial", async () => {
+    let resolve!: (value: unknown) => void;
+    let calls = 0;
+    const controller = createReceiptController(id(1), {
+      load() {
+        calls += 1;
+        if (calls === 1)
+          return new Promise((done) => {
+            resolve = done;
+          });
+        return Promise.reject(new ReceiptClientError("permission_denied"));
+      },
+    });
+    const older = controller.load();
+    await controller.load();
+    resolve(payload());
+    await older;
+    expect(controller.getState().status).toBe("permission-denied");
+    controller.setOnline(false);
+    expect(controller.getState()).toEqual({ status: "offline", view: null });
+  });
+});
+
+describe("receipt adjustments", () => {
+  it("preserves old snapshots without adding adjustment fields", () => {
+    expect(parseReceiptView(payload(), id(1)).records[0]?.snapshot).not.toHaveProperty(
+      "adjustments",
+    );
+  });
+  it.each([
+    "valid",
+    "missing-fee",
+    "extra",
+    "negative",
+    "overflow",
+    "currency",
+    "excess-discount",
+    "wrong-total",
+  ] as const)("validates adjustments: %s", (kind) => {
+    const input = payload();
+    const record = input.records[0];
+    if (!record) throw new Error("missing fixture");
+    const discount = { amountMinor: "100", currencyCode: "CAD" };
+    const fee = { amountMinor: "50", currencyCode: "CAD" };
+    const adjustments: Record<string, unknown> = { discount, fee };
+    record.snapshot.total.amountMinor = "1080";
+    if (kind === "missing-fee") delete adjustments.fee;
+    if (kind === "extra") adjustments.extra = true;
+    if (kind === "negative") discount.amountMinor = "-1";
+    if (kind === "overflow") fee.amountMinor = "9223372036854775808";
+    if (kind === "currency") fee.currencyCode = "USD";
+    if (kind === "excess-discount") discount.amountMinor = "1001";
+    if (kind === "wrong-total") record.snapshot.total.amountMinor = "1081";
+    Object.assign(record.snapshot, { adjustments });
+    if (kind === "valid")
+      expect(parseReceiptView(input, id(1)).records[0]?.snapshot.adjustments).toEqual({
+        discount: { amountMinor: 100n, currencyCode: "CAD" },
+        fee: { amountMinor: 50n, currencyCode: "CAD" },
+      });
+    else expect(() => parseReceiptView(input, id(1))).toThrow("invalid receipt");
+  });
+});
+
+it("keeps the complete issuer legal name and rejects an oversized source", () => {
+  const candidate = payload();
+  const record = candidate.records[0];
+  if (!record) throw new Error("missing synthetic receipt");
+  record.snapshot.operatingEntityDisplayName = "S".repeat(200);
+  expect(parseReceiptView(candidate, id(1)).records[0]?.snapshot.operatingEntityDisplayName).toBe(
+    "S".repeat(200),
+  );
+  record.snapshot.operatingEntityDisplayName += "S";
+  expect(() => parseReceiptView(candidate, id(1))).toThrow("invalid receipt");
+});
+
+const financialPayload = () => ({
+  observedAt: "2026-09-21T13:00:00.000Z",
+  currencyCode: "CAD",
+  capturedMinor: "1130",
+  confirmedRefundMinor: "100",
+  pendingRefundMinor: "600",
+  unresolvedAttemptCount: 1,
+});
+it("parses optional financial facts separately and preserves old responses", () => {
+  expect(parseReceiptView(payload(), id(1)).financial).toBeUndefined();
+  expect(parseReceiptView({ ...payload(), financial: null }, id(1)).financial).toBeNull();
+  const result = parseReceiptView({ ...payload(), financial: financialPayload() }, id(1));
+  expect(result.financial?.pendingRefundMinor).toBe(600n);
+  expect(result.records[0]?.snapshot.refundedTotal.amountMinor).toBe(0n);
+});
+it.each([
+  { capturedMinor: "1" },
+  { pendingRefundMinor: "-1" },
+  { capturedMinor: "9223372036854775808" },
+  { unresolvedAttemptCount: -1 },
+  { observedAt: "2026-02-30T13:00:00.000Z" },
+  { currencyCode: "cad" },
+  { secret: "unrecognized" },
+])("rejects malformed financial data %j", (change) => {
+  expect(() =>
+    parseReceiptView({ ...payload(), financial: { ...financialPayload(), ...change } }, id(1)),
+  ).toThrow();
+});
+
+describe("WP-2423 D5: item prices before tax", () => {
+  const amount = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  const priced = (lineSubtotal: unknown) => {
+    const body = payload();
+    const snapshot = body.records[0]?.snapshot;
+    const line = snapshot?.lines[0];
+    if (!snapshot || !line) throw new Error("fixture");
+    Object.assign(line, { lineTotal: amount("1130"), lineSubtotal });
+    return body;
+  };
+  it("reads each item's price before tax when the version froze it", () => {
+    const parsed = parseReceiptView(priced(amount("1000")), id(1));
+    expect(parsed.records[0]?.snapshot.lines[0]?.lineSubtotal?.amountMinor).toBe(1000n);
+    expect(parsed.records[0]?.snapshot.lines[0]?.lineTotal.amountMinor).toBe(1130n);
+  });
+  it("rejects item prices that don't add up to the subtotal", () => {
+    expect(() => parseReceiptView(priced(amount("999")), id(1))).toThrow("invalid receipt");
+    expect(() =>
+      parseReceiptView(priced({ amountMinor: "1000", currencyCode: "USD" }), id(1)),
+    ).toThrow("invalid receipt");
+  });
+});
+
+describe("WP-2423: chosen option lines", () => {
+  const amount = (amountMinor: string, currencyCode = "CAD") => ({ amountMinor, currencyCode });
+  const withOptions = (options: unknown, lineSubtotal: unknown = amount("1000")) => {
+    const body = payload();
+    const line = body.records[0]?.snapshot.lines[0];
+    if (!line) throw new Error("fixture");
+    Object.assign(line, { lineTotal: amount("1130"), lineSubtotal, options });
+    return body;
+  };
+  const whipped = { displayName: "Whipped cream", quantity: 1, amount: amount("50") };
+  it("reads each option with what it added", () => {
+    const parsed = parseReceiptView(withOptions([whipped]), id(1));
+    expect(parsed.records[0]?.snapshot.lines[0]?.options).toEqual([
+      {
+        displayName: "Whipped cream",
+        quantity: 1,
+        amount: { amountMinor: 50n, currencyCode: "CAD" },
+      },
+    ]);
+  });
+  it("reads versions without options as issued", () => {
+    expect(parseReceiptView(payload(), id(1)).records[0]?.snapshot.lines[0]).not.toHaveProperty(
+      "options",
+    );
+  });
+  it.each([
+    ["empty", []],
+    ["above the item price", [{ ...whipped, amount: amount("1001") }]],
+    ["another currency", [{ ...whipped, amount: amount("50", "USD") }]],
+    ["an unknown field", [{ ...whipped, optionReference: id(9) }]],
+  ])("rejects options that are %s", (_label, options) => {
+    expect(() => parseReceiptView(withOptions(options), id(1))).toThrow("invalid receipt");
+  });
+  it("rejects options on a line without its price before tax", () => {
+    const body = payload();
+    const line = body.records[0]?.snapshot.lines[0];
+    if (!line) throw new Error("fixture");
+    Object.assign(line, { options: [whipped] });
+    expect(() => parseReceiptView(body, id(1))).toThrow("invalid receipt");
+  });
+});
+
+describe("WP-2423 (v15 3cd0f8dd) refunds, tenders and ended visits", () => {
+  const amount = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  const refunded = (refunds: unknown[], total = "565") => {
+    const value = payload();
+    const original = value.records[0];
+    if (original === undefined) throw new Error("fixture");
+    return {
+      ...value,
+      records: [
+        original,
+        {
+          ...original,
+          recordReference: id(9),
+          version: 2,
+          kind: "Refund",
+          reasonCode: "PAYMENT_REFUND_STATUS_CHANGED",
+          snapshot: {
+            ...original.snapshot,
+            paymentStatus: "PartiallyRefunded",
+            refundedTotal: amount(total),
+            refunds,
+          },
+        },
+      ],
+    };
+  };
+  const refund = {
+    kind: "ItemCancellation",
+    lines: [
+      { lineReference: id(4), displayName: "Synthetic bowl", quantity: 1, amount: amount("500") },
+    ],
+    tax: amount("65"),
+    tip: amount("0"),
+    other: amount("0"),
+    total: amount("565"),
+    newInThisVersion: true,
+  };
+  it("reads what each refund returned and refuses refunds that don't add up", () => {
+    const parsed = parseReceiptView(refunded([refund]), id(1));
+    expect(parsed.records[1]?.snapshot.refunds?.[0]?.total.amountMinor).toBe(565n);
+    expect(parsed.records[0]?.snapshot.refunds).toBeUndefined();
+    expect(() => parseReceiptView(refunded([refund], "600"), id(1))).toThrow("invalid receipt");
+    expect(() =>
+      parseReceiptView(refunded([{ ...refund, total: amount("566") }], "566"), id(1)),
+    ).toThrow("invalid receipt");
+    expect(() =>
+      parseReceiptView(
+        refunded([{ ...refund, lines: [{ ...refund.lines[0], lineReference: id(77) }] }]),
+        id(1),
+      ),
+    ).toThrow("invalid receipt");
+  });
+  it("reads how the order was paid and an ended visit's bound", () => {
+    const parsed = parseReceiptView(
+      {
+        ...payload(),
+        financial: {
+          observedAt: "2026-08-12T14:10:00.000Z",
+          currencyCode: "CAD",
+          capturedMinor: "1667",
+          confirmedRefundMinor: "0",
+          pendingRefundMinor: "0",
+          unresolvedAttemptCount: 0,
+          paidOnlineMinor: "1130",
+          paidOnCardMachineMinor: "537",
+        },
+        visitEnded: { receiptAvailableUntil: "2026-08-13T12:00:00.000Z" },
+      },
+      id(1),
+    );
+    expect(parsed.financial?.paidOnCardMachineMinor).toBe(537n);
+    expect(parsed.visitEnded?.receiptAvailableUntil).toBe("2026-08-13T12:00:00.000Z");
+    expect(() =>
+      parseReceiptView(
+        {
+          ...payload(),
+          financial: {
+            observedAt: "2026-08-12T14:10:00.000Z",
+            currencyCode: "CAD",
+            capturedMinor: "1667",
+            confirmedRefundMinor: "0",
+            pendingRefundMinor: "0",
+            unresolvedAttemptCount: 0,
+            paidOnlineMinor: "1130",
+            paidOnCardMachineMinor: "500",
+          },
+        },
+        id(1),
+      ),
+    ).toThrow("invalid receipt");
   });
 });

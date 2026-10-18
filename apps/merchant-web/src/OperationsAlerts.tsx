@@ -1,0 +1,352 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useStaffSessionLive } from "./staff-session-reads.js";
+import { storeTime } from "./StoreTime.js";
+
+/**
+ * WP-2423 Q13 (DEC-PILOT-ALERTS-BACKUP): store system alerts on the Home for the Owner and Store
+ * Manager — store system down, background services needing a person, payment and settlement
+ * problems, backups, certificate and disk space. The text is the monitor's plain-language catalog.
+ */
+export interface OperationsAlert {
+  readonly key: string;
+  readonly severity: "critical" | "warning";
+  readonly title: string;
+  readonly summary: string;
+  readonly action: string;
+  readonly raisedAt: string;
+}
+export interface OperationsAlertView {
+  readonly monitor: "Reporting" | "Silent" | "NotRunning";
+  readonly observedAt: string | null;
+  readonly active: readonly OperationsAlert[];
+  readonly recentlyCleared: readonly {
+    readonly key: string;
+    readonly title: string;
+    readonly clearedAt: string;
+  }[];
+  readonly outbound: {
+    readonly email: boolean;
+    readonly webhooks: number;
+    readonly heartbeat: boolean;
+  };
+  readonly lastSuccessfulBackupAt: string | null;
+}
+export const OPERATIONS_ALERTS_REFRESH_MS = 60_000;
+
+const invalid = (): never => {
+  throw new Error("OPERATIONS_ALERTS_UNAVAILABLE");
+};
+/** The server answered 403: this staff member's role does not handle store system alerts. */
+export const OPERATIONS_ALERTS_NOT_PERMITTED = "OPERATIONS_ALERTS_NOT_PERMITTED";
+const notPermitted = (): never => {
+  throw new Error(OPERATIONS_ALERTS_NOT_PERMITTED);
+};
+const exact = (value: unknown, keys: readonly string[]): Record<string, unknown> =>
+  value &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  Object.keys(value).length === keys.length &&
+  keys.every((key) => Object.hasOwn(value, key))
+    ? (value as Record<string, unknown>)
+    : invalid();
+const instant = (value: unknown): string =>
+  typeof value === "string" &&
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/u.test(value) &&
+  Number.isFinite(Date.parse(value))
+    ? value
+    : invalid();
+const text = (value: unknown, max: number): string =>
+  typeof value === "string" && value.length > 0 && value.length <= max ? value : invalid();
+const alertKey = (value: unknown): string =>
+  typeof value === "string" && /^[a-z]+\.[a-z_]+$/u.test(value) ? value : invalid();
+
+export function parseOperationsAlertView(value: unknown): OperationsAlertView {
+  const view = exact(value, [
+    "monitor",
+    "observedAt",
+    "active",
+    "recentlyCleared",
+    "outbound",
+    "lastSuccessfulBackupAt",
+  ]);
+  if (view.monitor !== "Reporting" && view.monitor !== "Silent" && view.monitor !== "NotRunning")
+    return invalid();
+  if (!Array.isArray(view.active) || !Array.isArray(view.recentlyCleared)) return invalid();
+  const outbound = exact(view.outbound, ["email", "webhooks", "heartbeat"]);
+  if (
+    typeof outbound.email !== "boolean" ||
+    typeof outbound.heartbeat !== "boolean" ||
+    !Number.isSafeInteger(outbound.webhooks) ||
+    (outbound.webhooks as number) < 0
+  )
+    return invalid();
+  return {
+    monitor: view.monitor,
+    observedAt: view.observedAt === null ? null : instant(view.observedAt),
+    active: view.active.map((item: unknown) => {
+      const entry = exact(item, ["key", "severity", "title", "summary", "action", "raisedAt"]);
+      if (entry.severity !== "critical" && entry.severity !== "warning") return invalid();
+      return {
+        key: alertKey(entry.key),
+        severity: entry.severity,
+        title: text(entry.title, 120),
+        summary: text(entry.summary, 600),
+        action: text(entry.action, 400),
+        raisedAt: instant(entry.raisedAt),
+      };
+    }),
+    recentlyCleared: view.recentlyCleared.map((item: unknown) => {
+      const entry = exact(item, ["key", "title", "clearedAt"]);
+      return {
+        key: alertKey(entry.key),
+        title: text(entry.title, 120),
+        clearedAt: instant(entry.clearedAt),
+      };
+    }),
+    outbound: {
+      email: outbound.email,
+      webhooks: outbound.webhooks as number,
+      heartbeat: outbound.heartbeat,
+    },
+    lastSuccessfulBackupAt:
+      view.lastSuccessfulBackupAt === null ? null : instant(view.lastSuccessfulBackupAt),
+  };
+}
+
+export function createOperationsAlertsClient(fetcher: typeof fetch = fetch) {
+  return Object.freeze({
+    async load(signal?: AbortSignal): Promise<OperationsAlertView> {
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) controller.abort();
+      const timer = setTimeout(abort, 15000);
+      try {
+        const response = await fetcher("/merchant/operations-alerts", {
+          method: "GET",
+          credentials: "same-origin",
+          cache: "no-store",
+          redirect: "error",
+          signal: controller.signal,
+          headers: { Accept: "application/json" },
+        });
+        // An older server refuses such a role with 403 instead.
+        if (response.status === 403) return notPermitted();
+        if (
+          !response.ok ||
+          response.headers.get("cache-control") !== "no-store" ||
+          !response.headers.get("content-type")?.toLowerCase().startsWith("application/json")
+        )
+          return invalid();
+        const body = await response.text();
+        if (controller.signal.aborted || body.length > 262144) return invalid();
+        const parsed: unknown = JSON.parse(body);
+        // WP-2423: the server's ordinary answer for a role that does not handle these alerts.
+        if (
+          parsed !== null &&
+          typeof parsed === "object" &&
+          Object.keys(parsed).length === 1 &&
+          (parsed as { permitted?: unknown }).permitted === false
+        )
+          return notPermitted();
+        return parseOperationsAlertView(parsed);
+      } catch (error) {
+        if (error instanceof Error && error.message === OPERATIONS_ALERTS_NOT_PERMITTED)
+          throw error;
+        return invalid();
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+      }
+    },
+  });
+}
+
+export type OperationsAlertsRead =
+  | { readonly kind: "Loading" }
+  | { readonly kind: "Ready"; readonly value: OperationsAlertView }
+  | { readonly kind: "Unavailable" }
+  /** The role does not handle store system alerts (403): the card is not shown at all. */
+  | { readonly kind: "NotPermitted" };
+
+function outboundNote(outbound: OperationsAlertView["outbound"]): string {
+  const channels = [
+    ...(outbound.email ? ["email"] : []),
+    ...(outbound.webhooks > 0 ? ["phone or message alerts"] : []),
+  ];
+  return channels.length === 0
+    ? "Alerts appear only on this screen: no email or phone alerts are set up yet."
+    : `The Owner is also alerted by ${channels.join(" and ")}.`;
+}
+
+/** The pure card, so every state can be rendered and checked without a network. */
+export function OperationsAlertsCard({
+  read,
+  timeZone,
+  busy = false,
+  onRefresh,
+}: {
+  readonly read: OperationsAlertsRead;
+  readonly timeZone?: string | undefined;
+  readonly busy?: boolean;
+  readonly onRefresh?: (() => void) | undefined;
+}) {
+  if (read.kind === "NotPermitted") return null;
+  const at = (iso: string) => storeTime(iso, timeZone, true);
+  const view = read.kind === "Ready" ? read.value : null;
+  const critical =
+    view !== null &&
+    (view.monitor !== "Reporting" || view.active.some((item) => item.severity === "critical"));
+  const warning = view !== null && !critical && view.active.length > 0;
+  return (
+    <section
+      className={
+        "overview-card overview-card--alerts" +
+        (critical
+          ? " overview-card--alerts-critical"
+          : warning
+            ? " overview-card--alerts-warning"
+            : "")
+      }
+      aria-labelledby="system-alerts-heading"
+    >
+      <header>
+        <h3 id="system-alerts-heading">Store system</h3>
+        {onRefresh ? (
+          <button type="button" onClick={onRefresh} disabled={busy}>
+            Check again
+          </button>
+        ) : null}
+      </header>
+      <div aria-live="polite">
+        {read.kind === "Loading" ? (
+          <p role="status">Checking the store system…</p>
+        ) : read.kind === "Unavailable" ? (
+          <p role="status">
+            System alerts could not be read. Check again in a moment; if this stays, ask the pilot
+            operator to check the store system.
+          </p>
+        ) : read.value.monitor === "NotRunning" ? (
+          <p className="system-alert__headline">
+            The alert monitor is not running, so problems with the store system, backups and
+            certificate are not being checked. Ask the pilot operator to start it.
+          </p>
+        ) : read.value.monitor === "Silent" ? (
+          <p className="system-alert__headline">
+            The alert monitor stopped reporting
+            {read.value.observedAt === null ? "" : ` at ${at(read.value.observedAt)}`}. Problems are
+            not being checked. Ask the pilot operator to restart it.
+          </p>
+        ) : read.value.active.length === 0 ? (
+          <p className="system-alert__headline">Everything is working.</p>
+        ) : (
+          <ul className="system-alerts">
+            {read.value.active.map((item) => (
+              <li key={item.key} className={"system-alert system-alert--" + item.severity}>
+                <p className="system-alert__title">
+                  <span className="system-alert__badge">
+                    {item.severity === "critical" ? "Urgent" : "Today"}
+                  </span>
+                  <strong>{item.title}</strong>
+                </p>
+                <p>{item.summary}</p>
+                <p>
+                  <span className="system-alert__label">What to do: </span>
+                  {item.action}
+                </p>
+                <p className="system-alert__since">Since {at(item.raisedAt)}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {view !== null && view.monitor === "Reporting" ? (
+        <>
+          {view.recentlyCleared.length > 0 ? (
+            <p className="system-alert__resolved">
+              Resolved recently:{" "}
+              {view.recentlyCleared
+                .slice(-3)
+                .reverse()
+                .map((item) => `${item.title} (${at(item.clearedAt)})`)
+                .join("; ")}
+            </p>
+          ) : null}
+          <p className="overview-updated">
+            {view.lastSuccessfulBackupAt === null
+              ? "No backup recorded yet"
+              : `Last backup ${at(view.lastSuccessfulBackupAt)}`}
+            {view.observedAt === null
+              ? ""
+              : ` · Last checked ${storeTime(view.observedAt, timeZone)}`}
+          </p>
+          <p className="overview-updated">{outboundNote(view.outbound)}</p>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * Reads the alert board while the Home is open and visible. The server decides who sees it
+ * (operations.order-exception.manage): its "not permitted" answer (WP-2423; a 403 from an older
+ * server) hides the card and stops reading, so front-of-house staff never poll it again and no
+ * refusal shows in their browser.
+ */
+export function OperationsAlerts({
+  timeZone,
+  fetcher,
+}: {
+  readonly timeZone?: string | undefined;
+  readonly fetcher?: typeof fetch | undefined;
+}) {
+  const [client] = useState(() => createOperationsAlertsClient(fetcher));
+  const [read, setRead] = useState<OperationsAlertsRead>({ kind: "Loading" });
+  const [busy, setBusy] = useState(false);
+  const active = useRef<AbortController | null>(null);
+  const stopped = useRef(false);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const load = useCallback(async () => {
+    if (stopped.current) return;
+    active.current?.abort();
+    const controller = new AbortController();
+    active.current = controller;
+    setBusy(true);
+    try {
+      const value = await client.load(controller.signal);
+      if (!controller.signal.aborted) setRead({ kind: "Ready", value });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (error instanceof Error && error.message === OPERATIONS_ALERTS_NOT_PERMITTED) {
+        stopped.current = true;
+        if (timer.current !== null) clearInterval(timer.current);
+        timer.current = null;
+        setRead({ kind: "NotPermitted" });
+      } else setRead({ kind: "Unavailable" });
+    } finally {
+      if (!controller.signal.aborted) setBusy(false);
+    }
+  }, [client]);
+  // v15 cbff9d6f: no reads once this screen's sign-in has ended; again at once if it is live.
+  const live = useStaffSessionLive();
+  useEffect(() => {
+    if (!live) return;
+    void load();
+    timer.current = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, OPERATIONS_ALERTS_REFRESH_MS);
+    return () => {
+      if (timer.current !== null) clearInterval(timer.current);
+      timer.current = null;
+      active.current?.abort();
+    };
+  }, [live, load]);
+  return (
+    <OperationsAlertsCard
+      read={read}
+      timeZone={timeZone}
+      busy={busy}
+      onRefresh={() => void load()}
+    />
+  );
+}

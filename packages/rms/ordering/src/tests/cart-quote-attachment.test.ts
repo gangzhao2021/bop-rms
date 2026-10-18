@@ -1,8 +1,10 @@
+import { createDiningCartQuoteService } from "../application/dining-cart-quote-service.js";
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { GuestSession } from "@bop/identity";
 import type { PriceQuoteSnapshot } from "@rms/pricing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createCartQuoteAttachmentService } from "../application/cart-quote-attachment-service.js";
+import { createPickupCartQuoteService } from "../application/pickup-cart-quote-service.js";
 import type {
   CartQuoteAttachmentPorts,
   PricingCartInput,
@@ -220,9 +222,12 @@ function fixture(
       },
     },
     authorization: {
-      async authorize() {
+      async authorize(input) {
         if (options.denied) return null;
-        return { guestSession: options.guest ?? guest(), audit: options.audit ?? audit() };
+        return {
+          guestSession: options.guest ?? guest(),
+          audit: options.audit ?? audit({ occurredAt: input.observedAt }),
+        };
       },
     },
     references: { hashIntent: hash, equals: (left, right) => left === right },
@@ -242,6 +247,7 @@ function fixture(
     },
   };
   return {
+    ports,
     service: createCartQuoteAttachmentService(ports),
     pricingCalls: () => pricingCalls,
     pricingInput: () => pricingInput,
@@ -257,6 +263,424 @@ function input(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+function pickupFixture() {
+  const state = fixture();
+  const scope = { brandReference: ids.brand, storeReference: ids.store };
+  const sessions = { authorize: vi.fn(async () => guest()) };
+  const binding = { current: vi.fn(async (): Promise<CartAggregate | null> => cart()) };
+  const pricing = { quoteCart: vi.fn(state.ports.pricing.quoteCart) };
+  const auditFactory = vi.fn((value: { observedAt: string }) =>
+    audit({ occurredAt: value.observedAt }),
+  );
+  const now = vi.fn(() => requestedAt);
+  const history = vi.spyOn(state.ports.repository, "resolveOperation");
+  const persist = state.ports.repository.attach;
+  const write = vi.spyOn(state.ports.repository, "attach");
+  const service = createPickupCartQuoteService({
+    scope,
+    sessions,
+    binding,
+    pricing,
+    audit: auditFactory,
+    repository: state.ports.repository,
+    references: state.ports.references,
+    now,
+  });
+  return {
+    ...state,
+    scope,
+    sessions,
+    binding,
+    pricing,
+    auditFactory,
+    now,
+    history,
+    persist,
+    write,
+    service,
+  };
+}
+function pickupInput(overrides: Record<string, unknown> = {}) {
+  return {
+    sessionCredential: "a".repeat(43),
+    csrfCredential: "b".repeat(43),
+    cartReference: ids.cart,
+    expectedCartVersion: 4,
+    operationReference: ids.operation,
+    ...overrides,
+  };
+}
+
+describe("WP-2329 fresh expiry before Quote persistence", () => {
+  it.each([
+    ["2026-08-02T15:04:59.999Z", true],
+    ["2026-08-02T15:05:00.000Z", false],
+    ["2026-08-02T15:05:00.001Z", false],
+  ] as const)("checks Quote expiry after slow Pricing at %s", async (instant, allowed) => {
+    const state = pickupFixture();
+    state.pricing.quoteCart.mockImplementationOnce(async () => {
+      state.now.mockReturnValue(instant);
+      return quote();
+    });
+    if (allowed) {
+      expect((await state.service.attach(pickupInput())).status).toBe("Attached");
+      expect(state.write).toHaveBeenCalledTimes(1);
+    } else {
+      await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+        code: "CART_QUOTE_EXPIRED",
+      });
+      expect(state.write).not.toHaveBeenCalled();
+    }
+  });
+  it.each(["before Pricing", "during Pricing"])(
+    "denies Cart expiry %s without a write",
+    async (stage) => {
+      const state = pickupFixture();
+      const expire = () => state.now.mockReturnValue("2026-08-02T15:30:00.000Z");
+      if (stage === "before Pricing") {
+        vi.spyOn(state.ports.repository, "loadCart").mockImplementationOnce(async () => {
+          expire();
+          return cart();
+        });
+      } else {
+        state.pricing.quoteCart.mockImplementationOnce(async () => {
+          expire();
+          return quote();
+        });
+      }
+      await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+        code: "CART_EXPIRED",
+      });
+      expect(state.write).not.toHaveBeenCalled();
+      if (stage === "before Pricing") expect(state.pricing.quoteCart).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("WP-2328 current Pickup Quote authority", () => {
+  it.each(["history", "Cart", "Pricing"])(
+    "denies revocation during %s before attachment",
+    async (stage) => {
+      const state = pickupFixture();
+      const revoke = () =>
+        state.sessions.authorize.mockRejectedValue(new Error("synthetic revoked"));
+      if (stage === "history")
+        state.history.mockImplementationOnce(async () => {
+          revoke();
+          return null;
+        });
+      if (stage === "Cart")
+        vi.spyOn(state.ports.repository, "loadCart").mockImplementationOnce(async () => {
+          revoke();
+          return cart();
+        });
+      if (stage === "Pricing")
+        state.pricing.quoteCart.mockImplementationOnce(async () => {
+          revoke();
+          return quote();
+        });
+      await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+        code: "CART_PERMISSION_DENIED",
+      });
+      expect(state.write).not.toHaveBeenCalled();
+      if (stage !== "Pricing") expect(state.pricing.quoteCart).not.toHaveBeenCalled();
+    },
+  );
+  it("denies changed Session version after Pricing returns", async () => {
+    const state = pickupFixture();
+    state.pricing.quoteCart.mockImplementationOnce(async () => {
+      state.sessions.authorize.mockResolvedValue(guest({ version: 2 }));
+      return quote();
+    });
+    await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(state.write).not.toHaveBeenCalled();
+  });
+  it("denies backwards time after Pricing returns", async () => {
+    const state = pickupFixture();
+    state.pricing.quoteCart.mockImplementationOnce(async () => {
+      state.now.mockReturnValue("2026-08-02T14:59:59.000Z");
+      return quote();
+    });
+    await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(state.write).not.toHaveBeenCalled();
+  });
+  it("denies revoked original-history disclosure", async () => {
+    const state = pickupFixture();
+    const first = await state.service.attach(pickupInput());
+    state.history.mockImplementationOnce(async () => {
+      state.sessions.authorize.mockRejectedValue(new Error("synthetic revoked"));
+      return first.attachment;
+    });
+    await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(state.pricing.quoteCart).toHaveBeenCalledTimes(1);
+    expect(state.write).toHaveBeenCalledTimes(1);
+  });
+  it("retains a committed attachment after post-write denial and recovers without duplicate effects", async () => {
+    const state = pickupFixture();
+    const persist = state.persist;
+    state.write.mockImplementationOnce(async (command) => {
+      const result = await persist(command);
+      state.sessions.authorize.mockRejectedValue(new Error("synthetic revoked"));
+      return result;
+    });
+    await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    state.sessions.authorize.mockResolvedValue(guest());
+    expect((await state.service.attach(pickupInput())).status).toBe("AlreadyAttached");
+    expect(state.pricing.quoteCart).toHaveBeenCalledTimes(1);
+    expect(state.write).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("WP-2260 authorized Pickup Quote entry", () => {
+  it("copies scope without I/O and sends fresh server identity only after authorization", async () => {
+    const state = pickupFixture();
+    expect(state.sessions.authorize).not.toHaveBeenCalled();
+    expect(state.binding.current).not.toHaveBeenCalled();
+    expect(state.now).not.toHaveBeenCalled();
+    state.scope.storeReference = id(999);
+    const checkedAt = "2026-08-02T15:00:01.000Z";
+    state.now.mockReturnValue(checkedAt).mockReturnValueOnce(requestedAt);
+    const result = await state.service.attach(pickupInput());
+    expect(result.status).toBe("Attached");
+    expect(result.attachment.attachedAt).toBe(checkedAt);
+    expect(state.sessions.authorize).toHaveBeenNthCalledWith(1, {
+      sessionCredential: "a".repeat(43),
+      csrfCredential: "b".repeat(43),
+      observedAt: requestedAt,
+    });
+    expect(state.sessions.authorize).toHaveBeenNthCalledWith(2, {
+      sessionCredential: "a".repeat(43),
+      csrfCredential: "b".repeat(43),
+      observedAt: checkedAt,
+    });
+    expect(state.pricing.quoteCart).toHaveBeenCalledWith(
+      expect.objectContaining({ requestedAt: checkedAt, storeReference: ids.store }),
+      { operationReference: ids.operation, guestSessionReference: ids.session },
+    );
+    expect(state.auditFactory).toHaveBeenCalledWith({
+      action: "AttachQuote",
+      brandReference: ids.brand,
+      storeReference: ids.store,
+      sessionReference: ids.session,
+      cartReference: ids.cart,
+      operationReference: ids.operation,
+      observedAt: checkedAt,
+    });
+  });
+
+  it.each([
+    { expectedCartVersion: 0 },
+    { expectedCartVersion: 2147483648 },
+    { expectedCartVersion: 1.5 },
+    { csrfCredential: "bad" },
+    { sessionCredential: "bad" },
+    { cartReference: "bad" },
+    { operationReference: "bad" },
+    { requestedAt },
+    { amount: 1 },
+  ])("rejects invalid or additional input before I/O (%j)", async (change) => {
+    const state = pickupFixture();
+    await expect(state.service.attach(pickupInput(change))).rejects.toMatchObject({
+      code: "CART_INPUT_INVALID",
+    });
+    expect(state.now).not.toHaveBeenCalled();
+    expect(state.sessions.authorize).not.toHaveBeenCalled();
+    expect(state.history).not.toHaveBeenCalled();
+  });
+
+  it("rejects getters without evaluating them and preserves copied input through awaits", async () => {
+    const state = pickupFixture();
+    const getter = vi.fn(() => ids.cart);
+    const accessor = pickupInput();
+    Object.defineProperty(accessor, "cartReference", { get: getter, enumerable: true });
+    await expect(state.service.attach(accessor)).rejects.toMatchObject({
+      code: "CART_INPUT_INVALID",
+    });
+    expect(getter).not.toHaveBeenCalled();
+    const raw = pickupInput();
+    state.sessions.authorize.mockImplementationOnce(async () => {
+      raw.cartReference = id(990);
+      raw.csrfCredential = "c".repeat(43);
+      raw.operationReference = id(991);
+      return guest();
+    });
+    expect((await state.service.attach(raw)).attachment.operationReference).toBe(ids.operation);
+    expect(state.sessions.authorize).toHaveBeenLastCalledWith(
+      expect.objectContaining({ csrfCredential: "b".repeat(43) }),
+    );
+  });
+
+  it.each(["first", "second"])(
+    "denies %s authorization failure before history access",
+    async (stage) => {
+      const state = pickupFixture();
+      if (stage === "second") state.sessions.authorize.mockResolvedValueOnce(guest());
+      state.sessions.authorize.mockRejectedValueOnce(new Error("synthetic private cause"));
+      await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+        code: "CART_PERMISSION_DENIED",
+      });
+      expect(state.history).not.toHaveBeenCalled();
+      expect(state.pricing.quoteCart).not.toHaveBeenCalled();
+      expect(state.write).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { sessionReference: id(90) },
+    { publicStoreReference: id(90) },
+    { qrReference: id(90) },
+    { qrRevocationVersion: 2 },
+    { brandReference: id(90) },
+    { storeReference: id(90) },
+  ])("denies changed current Session identity (%j)", async (change) => {
+    const state = pickupFixture();
+    state.sessions.authorize
+      .mockResolvedValueOnce(guest())
+      .mockResolvedValueOnce(guest(change as Partial<GuestSession>));
+    await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(state.history).not.toHaveBeenCalled();
+    expect(state.write).not.toHaveBeenCalled();
+  });
+
+  it.each([null, "another"])(
+    "reauthorizes missing or another binding before uniform absence (%s)",
+    async (kind) => {
+      const state = pickupFixture();
+      state.binding.current.mockResolvedValue(kind === null ? null : cart());
+      await expect(
+        state.service.attach(pickupInput(kind === null ? {} : { cartReference: id(901) })),
+      ).rejects.toMatchObject({ code: "CART_UNAVAILABLE" });
+      expect(state.sessions.authorize).toHaveBeenCalledTimes(2);
+      expect(state.history).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { brandReference: id(88) },
+    { storeReference: id(88) },
+    { createdByActorReference: id(88) },
+    { updatedAt: "2026-08-02T15:01:00.000Z" },
+  ])("rejects untrusted bound Cart facts (%j)", async (change) => {
+    const state = pickupFixture();
+    state.binding.current.mockResolvedValue({ ...cart(), ...change } as CartAggregate);
+    await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(state.history).not.toHaveBeenCalled();
+  });
+
+  it.each(["invalid", "backwards", "binding", "audit"])(
+    "redacts %s dependency failure",
+    async (stage) => {
+      const state = pickupFixture();
+      if (stage === "invalid") state.now.mockReturnValue("invalid");
+      if (stage === "backwards")
+        state.now.mockReturnValueOnce(requestedAt).mockReturnValueOnce("2026-08-02T14:59:59.000Z");
+      if (stage === "binding")
+        state.binding.current.mockRejectedValue(new Error("synthetic private cause"));
+      if (stage === "audit")
+        state.auditFactory.mockImplementation(() => {
+          throw new Error("synthetic private cause");
+        });
+      const attempt = state.service.attach(pickupInput());
+      await expect(attempt).rejects.toMatchObject({
+        code: "CART_DEPENDENCY_UNAVAILABLE",
+      });
+      await expect(attempt).rejects.not.toThrow("synthetic private cause");
+      expect(state.write).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reauthorizes original history without calling Pricing or renewing Quote expiry", async () => {
+    const state = pickupFixture();
+    const first = await state.service.attach(pickupInput());
+    state.now.mockReturnValue("2026-08-02T15:05:00.000Z");
+    const replay = await state.service.attach(pickupInput());
+    expect(replay).toEqual({ status: "AlreadyAttached", attachment: first.attachment });
+    expect(state.sessions.authorize).toHaveBeenCalledTimes(9);
+    expect(state.pricing.quoteCart).toHaveBeenCalledTimes(1);
+    state.sessions.authorize.mockRejectedValue(new Error("revoked"));
+    await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(state.history).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains version and selected-option denial without Pricing calls", async () => {
+    const state = pickupFixture();
+    await expect(
+      state.service.attach(pickupInput({ expectedCartVersion: 3 })),
+    ).rejects.toMatchObject({ code: "CART_VERSION_CONFLICT" });
+    const selected = cart({
+      items: cart().items.map((item) => ({
+        ...item,
+        optionSelections: [{ optionReference: id(202) as never, quantity: 1 }],
+      })),
+    });
+    vi.spyOn(state.ports.repository, "loadCart").mockResolvedValue(selected);
+    state.binding.current.mockResolvedValue(selected);
+    await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_QUOTE_INVALID",
+    });
+    expect(state.pricing.quoteCart).not.toHaveBeenCalled();
+    expect(state.write).not.toHaveBeenCalled();
+  });
+
+  it("isolates concurrent Pricing operation identities", async () => {
+    const state = pickupFixture();
+    const results = await Promise.all([
+      state.service.attach(pickupInput()),
+      state.service.attach(pickupInput({ operationReference: id(920) })),
+    ]);
+    expect(results.map((result) => result.attachment.operationReference)).toEqual([
+      ids.operation,
+      id(920),
+    ]);
+    const calls = state.pricing.quoteCart.mock.calls as unknown as readonly [
+      PricingCartInput,
+      { operationReference: string; guestSessionReference: string },
+    ][];
+    expect(calls.map((call) => call[1].operationReference).sort()).toEqual(
+      [ids.operation, id(920)].sort(),
+    );
+    expect(
+      calls.every(
+        (call) => Object.isFrozen(call[1]) && call[1].guestSessionReference === ids.session,
+      ),
+    ).toBe(true);
+  });
+
+  it.each(["older", "changed", "future"])(
+    "rejects %s repository facts after binding lookup",
+    async (kind) => {
+      const state = pickupFixture();
+      const loaded = cart(
+        kind === "older"
+          ? { aggregateVersion: 3 }
+          : kind === "future"
+            ? { updatedAt: "2026-08-02T15:01:00.000Z" as never }
+            : { items: cart().items.map((item) => ({ ...item, quantity: 3 })) },
+      );
+      vi.spyOn(state.ports.repository, "loadCart").mockResolvedValue(loaded);
+      await expect(state.service.attach(pickupInput())).rejects.toMatchObject({
+        code: "CART_DEPENDENCY_UNAVAILABLE",
+      });
+      expect(state.pricing.quoteCart).not.toHaveBeenCalled();
+      expect(state.write).not.toHaveBeenCalled();
+    },
+  );
+});
 
 describe("WP-1203 Cart Quote attachment", () => {
   it("attaches an exact server Quote and replays without reloading Pricing", async () => {
@@ -298,8 +722,46 @@ describe("WP-1203 Cart Quote attachment", () => {
     });
     await state.service.attach(input());
     await expect(
-      state.service.attach(input({ requestedAt: "2026-08-02T15:00:01.000Z" })),
+      state.service.attach(
+        input({ expectedCartVersion: 5, requestedAt: "2026-08-02T15:00:01.000Z" }),
+      ),
     ).rejects.toMatchObject({ code: "CART_IDEMPOTENCY_CONFLICT" });
+  });
+
+  it("WP-2225 replays the original attachment after time advances without renewing its Quote", async () => {
+    const state = fixture();
+    const first = await state.service.attach(input());
+    expect(first.attachment.operationIntentHash).toBe(
+      hash(`AttachQuote:${JSON.stringify(input())}`),
+    );
+    const original = structuredClone(first.attachment);
+    const retry = await state.service.attach(input({ requestedAt: "2026-08-02T15:00:01.000Z" }));
+    expect(retry).toEqual({ status: "AlreadyAttached", attachment: original });
+    // Replay is historical evidence, not a fresh Quote or an extension of price validity.
+    const afterQuoteExpiry = await state.service.attach(
+      input({ requestedAt: "2026-08-02T15:05:00.000Z" }),
+    );
+    expect(afterQuoteExpiry.attachment).toEqual(original);
+    expect(state.pricingCalls()).toBe(1);
+    await expect(
+      state.service.attach(input({ requestedAt: "2026-08-02T18:00:00.000Z" })),
+    ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    expect(state.pricingCalls()).toBe(1);
+  });
+
+  it("WP-2225 checks current authorization and Audit evidence on delayed replay", async () => {
+    const options: { denied?: boolean; audit?: AppendAuditRecordInput } = {};
+    const state = fixture(options);
+    await state.service.attach(input());
+    options.audit = audit();
+    await expect(
+      state.service.attach(input({ requestedAt: "2026-08-02T15:00:01.000Z" })),
+    ).rejects.toMatchObject({ code: "CART_DEPENDENCY_UNAVAILABLE" });
+    options.denied = true;
+    await expect(
+      state.service.attach(input({ requestedAt: "2026-08-02T15:00:01.000Z" })),
+    ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    expect(state.pricingCalls()).toBe(1);
   });
 
   it("fails closed for empty or legacy unvalidated Carts", async () => {
@@ -312,6 +774,95 @@ describe("WP-1203 Cart Quote attachment", () => {
     await expect(fixture({ cart: legacy }).service.attach(input())).rejects.toMatchObject({
       code: "CART_QUOTE_INVALID",
     });
+  });
+
+  it.each([1, 2])("WP-2259 denies %i selected options before Pricing or writes", async (count) => {
+    const source = cart();
+    const selected = cart({
+      items: source.items.map((item) => ({
+        ...item,
+        optionSelections: Array.from({ length: count }, (_, index) => ({
+          optionReference: id(200 + index) as never,
+          quantity: 1,
+        })),
+      })),
+    });
+    const original = structuredClone(selected);
+    const state = fixture({ cart: selected });
+    const write = vi.spyOn(state.ports.repository, "attach");
+    await expect(state.service.attach(input())).rejects.toMatchObject({
+      code: "CART_QUOTE_INVALID",
+    });
+    expect(state.pricingCalls()).toBe(0);
+    expect(write).not.toHaveBeenCalled();
+    expect(selected).toEqual(original);
+  });
+
+  it("WP-2259 denies the entire mixed Cart without pricing its plain items", async () => {
+    const plain = cart().items[0];
+    if (plain === undefined) throw new Error("synthetic Cart item missing");
+    const selected = cart({
+      items: [
+        plain,
+        {
+          ...plain,
+          cartItemReference: id(201) as never,
+          optionSelections: [{ optionReference: id(202) as never, quantity: 2 }],
+        },
+      ],
+    });
+    const state = fixture({ cart: selected });
+    const write = vi.spyOn(state.ports.repository, "attach");
+    await expect(state.service.attach(input())).rejects.toMatchObject({
+      code: "CART_QUOTE_INVALID",
+    });
+    expect(state.pricingCalls()).toBe(0);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it.each(["permission", "version"] as const)(
+    "WP-2259 preserves %s failure priority",
+    async (kind) => {
+      const selected = cart({
+        items: cart().items.map((item) => ({
+          ...item,
+          optionSelections: [{ optionReference: id(202) as never, quantity: 1 }],
+        })),
+      });
+      const state = fixture({ cart: selected, denied: kind === "permission" });
+      const write = vi.spyOn(state.ports.repository, "attach");
+      await expect(
+        state.service.attach(input({ expectedCartVersion: kind === "version" ? 3 : 4 })),
+      ).rejects.toMatchObject({
+        code: kind === "permission" ? "CART_PERMISSION_DENIED" : "CART_VERSION_CONFLICT",
+      });
+      expect(state.pricingCalls()).toBe(0);
+      expect(write).not.toHaveBeenCalled();
+    },
+  );
+
+  it("WP-2259 keeps original authorized replay when a later Cart has options", async () => {
+    const state = fixture();
+    const original = await state.service.attach(input());
+    const selected = cart({
+      aggregateVersion: 5,
+      items: cart().items.map((item) => ({
+        ...item,
+        optionSelections: [{ optionReference: id(202) as never, quantity: 1 }],
+      })),
+    });
+    const load = vi.spyOn(state.ports.repository, "loadCart").mockResolvedValue(selected);
+    const write = vi.spyOn(state.ports.repository, "attach");
+    const replay = await state.service.attach(input({ requestedAt: "2026-08-02T15:05:00.000Z" }));
+    expect(replay).toEqual({ status: "AlreadyAttached", attachment: original.attachment });
+    expect(load).not.toHaveBeenCalled();
+    expect(state.pricingCalls()).toBe(1);
+    await expect(
+      state.service.attach(input({ expectedCartVersion: 5, operationReference: id(203) })),
+    ).rejects.toMatchObject({ code: "CART_QUOTE_INVALID" });
+    expect(write).not.toHaveBeenCalled();
+    expect(state.pricingCalls()).toBe(1);
+    expect((await state.service.attach(input())).attachment).toEqual(original.attachment);
   });
 
   it("fails closed for legacy, due and terminal Cart lifecycle", async () => {
@@ -388,5 +939,218 @@ describe("WP-1203 Cart Quote attachment", () => {
       fixture({ quote: hostile as unknown as PriceQuoteSnapshot }).service.attach(input()),
     ).rejects.toMatchObject({ code: "CART_QUOTE_INVALID" });
     expect(executed).toBe(false);
+  });
+});
+
+describe("WP-2239 scoped and concurrent Quote persistence", () => {
+  it("denies a substituted Cart before revealing version or calling Pricing", async () => {
+    const state = fixture();
+    vi.spyOn(state.ports.repository, "loadCart").mockResolvedValue(
+      cart({ cartReference: id(90) as never, aggregateVersion: 99, items: [] }),
+    );
+    await expect(state.service.attach(input())).rejects.toMatchObject({ code: "CART_UNAVAILABLE" });
+    expect(state.pricingCalls()).toBe(0);
+  });
+  it("checks scope before version and lifecycle", async () => {
+    const state = fixture();
+    vi.spyOn(state.ports.repository, "loadCart").mockResolvedValue(
+      cart({ storeReference: id(90) as never, aggregateVersion: 99 }),
+    );
+    await expect(state.service.attach(input())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(state.pricingCalls()).toBe(0);
+  });
+  it("denies a substituted operation on replay", async () => {
+    const state = fixture();
+    const first = await state.service.attach(input());
+    vi.spyOn(state.ports.repository, "resolveOperation").mockResolvedValue({
+      ...first.attachment,
+      operationReference: id(90) as never,
+    });
+    await expect(state.service.attach(input())).rejects.toMatchObject({
+      code: "CART_IDEMPOTENCY_CONFLICT",
+    });
+  });
+  it("accepts the exact concurrent winner when the losing request generated a different Quote", async () => {
+    const state = fixture();
+    const first = await state.service.attach(input());
+    vi.spyOn(state.ports.repository, "resolveOperation").mockResolvedValue(null);
+    vi.spyOn(state.ports.pricing, "quoteCart").mockResolvedValue(quote({ quoteReference: id(90) }));
+    vi.spyOn(state.ports.repository, "attach").mockResolvedValue(first.attachment);
+    const next = await state.service.attach(input({ requestedAt: "2026-08-02T15:00:01.000Z" }));
+    expect(next.attachment).toEqual(first.attachment);
+  });
+  it.each(["scope", "guest", "line"])("rejects a substituted stored %s", async (kind) => {
+    const state = fixture();
+    const original = state.ports.repository.attach;
+    vi.spyOn(state.ports.repository, "attach").mockImplementation(async (value) => {
+      const saved = await original(value);
+      if (kind === "scope") return { ...saved, storeReference: id(90) as never };
+      if (kind === "guest") return { ...saved, guestSessionReference: id(90) as never };
+      return {
+        ...saved,
+        lines: saved.lines.map((line) => ({ ...line, quantity: line.quantity + 1 })),
+      };
+    });
+    await expect(state.service.attach(input())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+});
+
+function diningQuoteFixture() {
+  const diningSession = id(80),
+    participant = id(81);
+  const currentCart = cart({
+    orderType: "DineIn",
+    diningSessionReference: diningSession as never,
+    createdByActorReference: id(82) as never,
+    items: cart().items.map((item) => ({
+      ...item,
+      addedByParticipantReference: participant as never,
+    })),
+  });
+  const state = fixture({ cart: currentCart });
+  const sessions = {
+    authorize: vi.fn(async (value: { sessionCredential: unknown; csrfCredential: unknown }) => {
+      if (value.sessionCredential !== "a".repeat(43) || value.csrfCredential !== "b".repeat(43))
+        throw new Error("synthetic denial");
+      return guest({
+        channel: "DineIn",
+        diningState: "DiningBound",
+        publicTableReference: id(83),
+        diningSessionReference: diningSession,
+        diningParticipantReference: participant,
+      } as Partial<GuestSession>);
+    }),
+  };
+  const now = vi.fn(() => requestedAt);
+  const participation = {
+    resolve: vi.fn(
+      async () =>
+        ({
+          schemaVersion: 1,
+          brandReference: ids.brand,
+          storeReference: ids.store,
+          diningSessionReference: diningSession,
+          participantReference: participant,
+          tableReference: id(84),
+          tableAssignmentVersion: 1,
+          diningSessionVersion: 1,
+          participantVersion: 1,
+          observedAt: now(),
+        }) as unknown,
+    ),
+  };
+  const pricing = { quoteCart: vi.fn(state.ports.pricing.quoteCart) };
+  const write = vi.spyOn(state.ports.repository, "attach");
+  const load = vi.spyOn(state.ports.repository, "loadCart");
+  const history = vi.spyOn(state.ports.repository, "resolveOperation");
+  const service = createDiningCartQuoteService({
+    scope: { brandReference: ids.brand, storeReference: ids.store },
+    sessions,
+    participation,
+    now,
+    repository: state.ports.repository,
+    pricing,
+    references: state.ports.references,
+    audit: (descriptor) => audit({ occurredAt: descriptor.observedAt }),
+  });
+  return { service, sessions, participation, pricing, write, load, history, now, currentCart };
+}
+describe("current-authorized Dining Quote", () => {
+  it("quotes a shared Cart and replays its original attachment without repricing", async () => {
+    const f = diningQuoteFixture();
+    const first = await f.service.attach(pickupInput());
+    expect(first.status).toBe("Attached");
+    expect(first.attachment.guestSessionReference).toBe(ids.session);
+    expect(f.currentCart.createdByActorReference).not.toBe(ids.session);
+    f.now.mockReturnValue("2026-08-02T15:00:01.000Z");
+    expect((await f.service.attach(pickupInput())).status).toBe("AlreadyAttached");
+    expect(f.pricing.quoteCart).toHaveBeenCalledTimes(1);
+    expect(f.write).toHaveBeenCalledTimes(1);
+  });
+  it("rejects invalid CSRF before touching Cart or Pricing", async () => {
+    const f = diningQuoteFixture();
+    await expect(
+      f.service.attach(pickupInput({ csrfCredential: "c".repeat(43) })),
+    ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    expect(f.load).not.toHaveBeenCalled();
+    expect(f.pricing.quoteCart).not.toHaveBeenCalled();
+  });
+  it("rejects Cart from a different DiningSession", async () => {
+    const f = diningQuoteFixture();
+    f.load.mockResolvedValue({ ...f.currentCart, diningSessionReference: id(90) as never });
+    await expect(f.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.pricing.quoteCart).not.toHaveBeenCalled();
+    expect(f.write).not.toHaveBeenCalled();
+  });
+  it("requires current participation even for an original replay", async () => {
+    const f = diningQuoteFixture();
+    await f.service.attach(pickupInput());
+    f.participation.resolve.mockResolvedValue(null);
+    await expect(f.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(f.write).toHaveBeenCalledTimes(1);
+    expect(f.pricing.quoteCart).toHaveBeenCalledTimes(1);
+  });
+  it("rejects participant loss during Pricing before attachment write", async () => {
+    const f = diningQuoteFixture();
+    f.pricing.quoteCart.mockImplementation(async () => {
+      f.participation.resolve.mockResolvedValue(null);
+      return quote();
+    });
+    await expect(f.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(f.write).not.toHaveBeenCalled();
+  });
+  it("rejects a table assignment version change during Pricing", async () => {
+    const f = diningQuoteFixture();
+    const original = await f.participation.resolve();
+    f.pricing.quoteCart.mockImplementation(async () => {
+      f.participation.resolve.mockResolvedValue({
+        ...(original as object),
+        tableAssignmentVersion: 2,
+      });
+      return quote();
+    });
+    await expect(f.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(f.write).not.toHaveBeenCalled();
+  });
+  it("rechecks Quote expiry after slow Pricing", async () => {
+    const f = diningQuoteFixture();
+    f.pricing.quoteCart.mockImplementation(async () => {
+      f.now.mockReturnValue("2026-08-02T15:05:00.000Z");
+      return quote();
+    });
+    await expect(f.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_QUOTE_EXPIRED",
+    });
+    expect(f.write).not.toHaveBeenCalled();
+  });
+  it("rejects the wrong Cart version before Pricing", async () => {
+    const f = diningQuoteFixture();
+    await expect(f.service.attach(pickupInput({ expectedCartVersion: 5 }))).rejects.toMatchObject({
+      code: "CART_VERSION_CONFLICT",
+    });
+    expect(f.pricing.quoteCart).not.toHaveBeenCalled();
+  });
+  it("rejects clock regression after Pricing", async () => {
+    const f = diningQuoteFixture();
+    f.pricing.quoteCart.mockImplementation(async () => {
+      f.now.mockReturnValue("2026-08-02T14:59:59.999Z");
+      return quote();
+    });
+    await expect(f.service.attach(pickupInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(f.write).not.toHaveBeenCalled();
   });
 });

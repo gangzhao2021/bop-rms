@@ -68,6 +68,7 @@ function found(): CustomerMenuQueryResult {
               availability: "Available",
               optionRules: [
                 {
+                  name: "Milk",
                   bindingReference: "018f7500-0000-7000-8000-00000000000b" as never,
                   optionSetVersionReference: "018f7500-0000-7000-8000-00000000000c" as never,
                   minimumSelections: 0,
@@ -115,6 +116,8 @@ function found(): CustomerMenuQueryResult {
                 taxInclusive: null,
                 reason: "FINAL_QUOTE_REQUIRED",
               },
+              description: null,
+              photo: null,
             },
           ],
         },
@@ -223,6 +226,52 @@ describe("WP-1026 Customer Menu REST API", () => {
     expect(JSON.stringify(await malformed.json())).not.toContain("raw-secret");
   });
 
+  it("serializes the published description and photo sizes (WP-2423)", async () => {
+    const catalog = new MutablePort();
+    const value = found();
+    if (value.status !== "Found") throw new Error("fixture");
+    const sellable = value.menu.sections[0]?.sellables[0];
+    if (sellable === undefined) throw new Error("fixture");
+    const rendition = {
+      url: "/media/images/" + "b".repeat(64) + ".webp",
+      contentType: "image/webp" as const,
+      width: 640,
+      height: 480,
+    };
+    catalog.result = {
+      ...value,
+      menu: {
+        ...value.menu,
+        sections: [
+          {
+            ...value.menu.sections[0],
+            sellables: [
+              {
+                ...sellable,
+                description: "Espresso with steamed milk.",
+                photo: {
+                  altText: "Latte in a white cup",
+                  width: 1280,
+                  height: 960,
+                  renditions: [{ ...rendition, internalObjectKey: "raw-key" }],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const response = await fetch(url(await listen(catalog)));
+    const body = (await response.json()) as {
+      menu: { sections: { sellables: Record<string, unknown>[] }[] };
+    };
+    expect(body.menu.sections[0]?.sellables[0]).toMatchObject({
+      description: "Espresso with steamed milk.",
+      photo: { altText: "Latte in a white cup", width: 1280, height: 960, renditions: [rendition] },
+    });
+    expect(JSON.stringify(body)).not.toContain("raw-key");
+  });
+
   it("serializes an allowlisted DTO and drops unexpected internal adapter fields", async () => {
     const catalog = new MutablePort();
     catalog.result = { ...found(), internalDatabaseFact: "raw-secret" };
@@ -230,4 +279,46 @@ describe("WP-1026 Customer Menu REST API", () => {
     expect(response.status).toBe(200);
     expect(JSON.stringify(await response.json())).not.toContain("raw-secret");
   });
+});
+
+it("transmits explicit quantity semantics and defaults without channel internals", async () => {
+  const value = found();
+  if (value.status !== "Found") throw new Error("fixture");
+  const rule = value.menu.sections[0]?.sellables[0]?.optionRules[0];
+  const option = rule?.options[0];
+  if (!rule || !option) throw new Error("fixture");
+  Object.assign(rule, {
+    semanticsVersion: 2,
+    activationOptionReferences: [],
+    minimumSelections: 2,
+    maximumSelections: 3,
+    defaultOptionReferences: [option.optionReference],
+  });
+  Object.assign(option, { maximumQuantity: 3, selectedByDefault: true, defaultQuantity: 2 });
+  const catalog = new MutablePort();
+  catalog.result = value;
+  const port = await listen(catalog);
+  const result = await fetch(url(port));
+  expect(result.status).toBe(200);
+  const body = await result.json();
+  expect(body).toMatchObject({
+    menu: {
+      sections: [
+        {
+          sellables: [
+            {
+              optionRules: [
+                {
+                  semanticsVersion: 2,
+                  activationOptionReferences: [],
+                  options: [{ defaultQuantity: 2 }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(JSON.stringify(body)).not.toContain('"channelCodes"');
 });

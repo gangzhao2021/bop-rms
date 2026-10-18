@@ -12,3 +12,74 @@ export * from "./domain/resolve-business-date.js";
 export * from "./contracts/store-configuration-administration.js";
 export * from "./application/ports/store-configuration-administration-ports.js";
 export * from "./application/store-configuration-administration-service.js";
+
+export * from "./infrastructure/persistence/business-date-source.js";
+
+export * from "./infrastructure/persistence/exception-content-source.js";
+
+export { createPostgresStoreWeeklyScheduleSource } from "./infrastructure/persistence/weekly-schedule-source.js";
+
+export { createPostgresStorePauseHistorySource } from "./infrastructure/persistence/pause-history-source.js";
+
+export * from "./infrastructure/store-operating-status-reader.js";
+
+export * from "./infrastructure/persistence/publication-content-source.js";
+
+export * from "./infrastructure/current-publication-proof.js";
+
+export * from "./infrastructure/persistence/service-control-store.js";
+
+export * from "./infrastructure/persistence/configuration-authoring-store.js";
+
+export * from "./infrastructure/persistence/publication-materializer.js";
+
+export * from "./infrastructure/configuration-administration.js";
+
+export * from "./infrastructure/persistence/review-snapshot-store.js";
+
+export * from "./infrastructure/configuration-review.js";
+
+export * from "./infrastructure/approval-preparation.js";
+
+export * from "./infrastructure/configuration-publication.js";
+export { createPostgresStoreReceiptConfigurationSource } from "./infrastructure/receipt-configuration-source.js";
+
+export * from "./infrastructure/persistence/public-store-profile-store.js";
+
+export * from "./infrastructure/public-profile-authority.js";
+
+export * from "./infrastructure/persistence/public-store-profile-timing-store.js";
+
+export * from "./contracts/store-setup-draft.js";
+
+export * from "./contracts/store-setup-operation.js";
+export * from "./contracts/store-setup-service-mode-preparation.js";
+export * from "./infrastructure/persistence/store-setup-draft-store.js";
+
+export * from "./contracts/store-setup-reference.js";
+export * from "./infrastructure/persistence/store-setup-reference-store.js";
+
+export * from "./contracts/store-setup-fee-context-preparation.js";
+
+export * from "./contracts/store-fee-context.js";
+export * from "./contracts/store-configuration-publication-content.js";
+
+export * from "./infrastructure/configuration-v2-preparation.js";
+
+export * from "./contracts/store-configuration-original.js";
+export * from "./infrastructure/persistence/store-configuration-original-store.js";
+// WP-2423 DEC-SOLE-OPERATOR-APPROVAL: Store configuration approved by its own author as sole operator.
+export * from "./infrastructure/persistence/store-configuration-sole-operator-store.js";
+// WP-2423 (v15 D2/D3): withdrawal or decline of a Store configuration that is not published.
+export * from "./infrastructure/persistence/store-configuration-withdrawal-store.js";
+
+// WP-2423 Q9-G1 (DEC-OUTAGE-ACCEPTANCE-HOLD): whether the Store's staff are online.
+export * from "./infrastructure/persistence/store-presence-store.js";
+
+// WP-2423 Q15/Q16 (DEC-RECEIPT-TAX-AND-PRIVACY): receipt registration numbers and privacy link.
+export * from "./contracts/store-receipt-profile.js";
+export * from "./infrastructure/persistence/store-receipt-profile-store.js";
+
+// WP-2423 store name (DEC-STORE-CUSTOMER-NAME): the Owner publishes the Store's public profile.
+export * from "./contracts/public-store-profile-edit.js";
+export * from "./infrastructure/public-store-profile-publisher.js";

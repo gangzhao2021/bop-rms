@@ -1,4 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router";
 import {
@@ -56,7 +57,9 @@ function Screen({ view }: { readonly view: FeatureAdminView }) {
         <div>
           <p className="bop-eyebrow">{view.screenId}</p>
           <h2>Capability and Feature Control</h2>
-          <p>Source as of {view.sourceAsOf}</p>
+          <p>
+            Source as of <SourceTime instant={view.sourceAsOf} />
+          </p>
         </div>
         <button
           disabled={

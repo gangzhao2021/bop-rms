@@ -1,9 +1,57 @@
 import type { Pool } from "pg";
 import {
   TenantContextDatabaseError,
+  tenantContextDatabaseDiagnostic,
   withTenantContextTransaction,
   type TenantDatabaseScope,
 } from "./tenant-context.js";
+import { createTransactionStatementMemo } from "./transaction-statement-memo.js";
+
+const retryableSqlStates: ReadonlySet<string> = new Set(["55P03", "40001", "40P01"]);
+function sqlState(error: unknown): string {
+  const code =
+    error !== null && typeof error === "object"
+      ? Object.getOwnPropertyDescriptor(error, "code")?.value
+      : undefined;
+  return typeof code === "string" ? code : "";
+}
+/** True for a transaction that failed only because of a lock or serialization conflict. */
+export function isRetryableTransactionConflict(error: unknown): boolean {
+  return (
+    error instanceof TenantContextDatabaseError &&
+    error.code === "TENANT_DATABASE_TRANSACTION_CONFLICT"
+  );
+}
+
+/**
+ * WP-2423 (v15 2026-10-14): one transaction is one connection, and its queries must run one at a
+ * time. A second query while one is in flight (for example `Promise.all` over owner ports sharing
+ * the transaction) is refused with TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY and the whole
+ * transaction rolls back, everywhere except production, where the driver still queues it.
+ */
+function refuseConcurrentQueries(): boolean {
+  return process.env.NODE_ENV !== "production";
+}
+
+/** Read by `customerFailureCode` (apps/api); holds only the sanitized diagnostic. */
+const databaseFailureKey = Symbol.for("bop.database.failure");
+function attachFailureDiagnostic(
+  error: unknown,
+  diagnostic: ReturnType<typeof tenantContextDatabaseDiagnostic>,
+): void {
+  if (
+    error === null ||
+    typeof error !== "object" ||
+    !Object.isExtensible(error) ||
+    Object.getOwnPropertyDescriptor(error, databaseFailureKey) !== undefined
+  )
+    return;
+  Object.defineProperty(error, databaseFailureKey, { value: diagnostic, enumerable: false });
+}
+
+const transactionLimits =
+  "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
+  "SET LOCAL idle_in_transaction_session_timeout = '5s'";
 
 export interface DatabaseTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
@@ -35,27 +83,69 @@ export function createTenantTransactionRunner(
     run: (action) =>
       withTenantContextTransaction(pool, fixedScope, async (client) => {
         try {
-          await client.query("SET LOCAL statement_timeout = '5s'");
-          await client.query("SET LOCAL lock_timeout = '2s'");
-          await client.query("SET LOCAL idle_in_transaction_session_timeout = '5s'");
-        } catch {
-          throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
+          // One round trip for the three limits (a parameterless multi-statement simple query).
+          await client.query(transactionLimits);
+        } catch (error) {
+          throw new TenantContextDatabaseError(
+            "TENANT_DATABASE_TRANSACTION_FAILED",
+            tenantContextDatabaseDiagnostic(error),
+          );
         }
         let active = true;
         let failed = false;
+        let conflicted = false;
+        let conflictDiagnostic: ReturnType<typeof tenantContextDatabaseDiagnostic> | null = null;
+        let failureDiagnostic: ReturnType<typeof tenantContextDatabaseDiagnostic> | null = null;
+        let concurrent = false;
         let pending = 0;
+        // The scope settings withTenantContextTransaction installed before this callback; repeats
+        // of them, and of locks this transaction already holds, are answered without a round trip.
+        const memo = createTransactionStatementMemo({
+          "bop.brand_id": fixedScope.brandId,
+          "bop.store_id": typeof fixedScope.storeId === "string" ? fixedScope.storeId : "",
+        });
         try {
           const result = await action(
             Object.freeze({
               async query(sql: string, values: readonly unknown[]) {
                 if (!active)
-                  throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
+                  throw new TenantContextDatabaseError(
+                    "TENANT_DATABASE_TRANSACTION_FAILED",
+                    tenantContextDatabaseDiagnostic(undefined, true),
+                  );
+                if (pending > 0 && refuseConcurrentQueries()) {
+                  failed = true;
+                  concurrent = true;
+                  throw new TenantContextDatabaseError(
+                    "TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY",
+                  );
+                }
+                if (pending === 0) {
+                  const answered = memo.answer(sql, values);
+                  if (answered !== null) return answered;
+                }
                 pending += 1;
                 try {
-                  return await client.query(sql, [...values]);
-                } catch {
+                  const result = await client.query(sql, [...values]);
+                  memo.observe(sql, values);
+                  return result;
+                } catch (error) {
+                  memo.forget();
                   failed = true;
-                  throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
+                  // Lock timeout, serialization failure and deadlock leave nothing committed; the
+                  // caller may rerun the whole idempotent transaction. No SQL detail is exposed.
+                  const diagnostic = tenantContextDatabaseDiagnostic(error);
+                  failureDiagnostic ??= diagnostic;
+                  if (retryableSqlStates.has(sqlState(error))) {
+                    conflicted = true;
+                    conflictDiagnostic ??= diagnostic;
+                  }
+                  throw new TenantContextDatabaseError(
+                    conflicted
+                      ? "TENANT_DATABASE_TRANSACTION_CONFLICT"
+                      : "TENANT_DATABASE_TRANSACTION_FAILED",
+                    diagnostic,
+                  );
                 } finally {
                   pending -= 1;
                 }
@@ -63,8 +153,32 @@ export function createTenantTransactionRunner(
             }),
           );
           if (failed || pending !== 0)
-            throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_FAILED");
+            throw new TenantContextDatabaseError(
+              concurrent
+                ? "TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY"
+                : conflicted
+                  ? "TENANT_DATABASE_TRANSACTION_CONFLICT"
+                  : "TENANT_DATABASE_TRANSACTION_FAILED",
+              // The swallowed query's SQLSTATE, so a lost connection still reads as retryable.
+              conflicted ? conflictDiagnostic : concurrent ? null : failureDiagnostic,
+            );
           return result;
+        } catch (error) {
+          // Whatever the action made of it, a conflicted transaction is reported as retryable,
+          // and concurrent use of the transaction as the programming error it is.
+          if (concurrent)
+            throw new TenantContextDatabaseError("TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY");
+          // The first conflict's SQLSTATE stays visible to logging (lock timeout vs serialization).
+          if (conflicted)
+            throw new TenantContextDatabaseError(
+              "TENANT_DATABASE_TRANSACTION_CONFLICT",
+              conflictDiagnostic,
+            );
+          // A caller that turned a failed query into its own error keeps that error; the first
+          // failure's SQLSTATE rides along (non-enumerable) so a 503 can be logged with its cause.
+          if (failed && failureDiagnostic !== null)
+            attachFailureDiagnostic(error, failureDiagnostic);
+          throw error;
         } finally {
           active = false;
         }

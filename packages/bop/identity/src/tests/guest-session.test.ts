@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createGuestSessionCredentialProvider,
   assertGuestSessionUsable,
   createGuestSession,
   createGuestSessionRecord,
@@ -14,6 +15,9 @@ import {
   type GuestSessionCredentialPort,
   type GuestSessionRecord,
   type GuestSessionStorePort,
+  guestSessionAbsoluteLifetimeMs,
+  guestSessionCookieMaxAgeSeconds,
+  serializeGuestSessionCookie,
 } from "../index.js";
 
 const ids = {
@@ -59,6 +63,7 @@ const evidence = (overrides: Record<string, unknown> = {}) => ({
 });
 
 const diningEvidence = (overrides: Record<string, unknown> = {}) => ({
+  guestSessionReference: ids.session,
   decision: "Allowed",
   admissionReference: ids.diningAdmission,
   operationReference: ids.nextOperation,
@@ -260,6 +265,7 @@ const fixture = (
   const store = new MemoryStore();
   const credentials = new SyntheticCredentials();
   const admissionCalls: unknown[] = [];
+  const diningAdmissionCalls: unknown[] = [];
   const service = new GuestSessionService({
     admission: {
       async consume(command) {
@@ -268,7 +274,8 @@ const fixture = (
       },
     },
     diningAdmission: {
-      async consume() {
+      async consume(command) {
+        diningAdmissionCalls.push(command);
         return diningAdmissionValue as never;
       },
     },
@@ -277,7 +284,7 @@ const fixture = (
     credentials,
     now: () => now,
   });
-  return { service, store, credentials, admissionCalls };
+  return { service, store, credentials, admissionCalls, diningAdmissionCalls };
 };
 
 const issue = async (service: GuestSessionService) => {
@@ -531,8 +538,8 @@ describe("Guest Session contract", () => {
     ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
   });
 
-  it("atomically binds a DineIn guest to the consumed Dining admission and rotates both credentials", async () => {
-    const { service } = fixture();
+  it("binds exact Guest admission evidence and rotates both credentials", async () => {
+    const { service, diningAdmissionCalls } = fixture();
     await issue(service);
     const bound = await service.bindDining({
       sessionCredential,
@@ -541,6 +548,14 @@ describe("Guest Session contract", () => {
       operationReference: ids.nextOperation,
       requestedAt: "2026-07-29T12:01:00.000Z",
     });
+    expect(diningAdmissionCalls).toEqual([
+      {
+        guestSessionReference: ids.session,
+        admissionReference: ids.diningAdmission,
+        operationReference: ids.nextOperation,
+        requestedAt: "2026-07-29T12:01:00.000Z",
+      },
+    ]);
     expect(bound).toMatchObject({
       status: "Issued",
       sessionCredential: nextSessionCredential,
@@ -580,6 +595,7 @@ describe("Guest Session contract", () => {
         requestedAt: "2026-07-29T12:01:00.000Z",
       }),
     ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+    expect(diningAdmissionCalls).toHaveLength(1);
   });
 
   it("fails Dining binding closed for mismatched or stale server admission evidence", async () => {
@@ -600,6 +616,59 @@ describe("Guest Session contract", () => {
         }),
       ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
     }
+  });
+
+  it.each([
+    ["foreign", ids.nextSession],
+    ["malformed", "invalid"],
+    ["null", null],
+    ["number", 17],
+    ["missing", undefined],
+  ])(
+    "WP-2279 refuses %s Guest evidence without generating credentials or rotating state",
+    async (label, guest) => {
+      const admission = diningEvidence({ guestSessionReference: guest });
+      if (label === "missing") Reflect.deleteProperty(admission, "guestSessionReference");
+      const { service, store, credentials, diningAdmissionCalls } = fixture(
+        parseGuestAdmissionEvidence(evidence()),
+        "Current",
+        admission,
+      );
+      await issue(service);
+      const before = store.records.get(hash("a"));
+      await expect(
+        service.bindDining({
+          sessionCredential,
+          expectedVersion: 1,
+          diningAdmissionReference: ids.diningAdmission,
+          operationReference: ids.nextOperation,
+          requestedAt: "2026-07-29T12:01:00.000Z",
+        }),
+      ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+      expect(diningAdmissionCalls).toHaveLength(1);
+      expect(store.records.size).toBe(1);
+      expect(store.records.get(hash("a"))).toEqual(before);
+      expect(store.operations.size).toBe(1);
+      expect(
+        credentials.purposes.filter((purpose) => purpose === "Session" || purpose === "Csrf"),
+      ).toEqual(["Session", "Csrf"]);
+    },
+  );
+  it("WP-2279 refuses client-selected Guest identity before calling admission", async () => {
+    const { service, store, diningAdmissionCalls } = fixture();
+    await issue(service);
+    await expect(
+      service.bindDining({
+        sessionCredential,
+        expectedVersion: 1,
+        diningAdmissionReference: ids.diningAdmission,
+        operationReference: ids.nextOperation,
+        guestSessionReference: ids.session,
+        requestedAt: "2026-07-29T12:01:00.000Z",
+      } as never),
+    ).rejects.toMatchObject({ code: "GUEST_SESSION_INPUT_INVALID" });
+    expect(diningAdmissionCalls).toEqual([]);
+    expect(store.records.size).toBe(1);
   });
 
   it("returns a bounded replay without reissuing raw credentials and rejects changed intent", async () => {
@@ -670,5 +739,149 @@ describe("Guest Session contract", () => {
         expect(String((error as Error).message)).not.toContain(sessionCredential);
       }
     }
+  });
+});
+
+async function recoveryFixture(
+  overrides: Record<string, unknown> = {},
+  binding = "Current",
+  observedAt = now,
+) {
+  const store = new MemoryStore();
+  const credentials = createGuestSessionCredentialProvider(new Uint8Array(32).fill(17));
+  await store.create({
+    record: createGuestSessionRecord({
+      session: session(overrides),
+      sessionSelectorHash: credentials.hashCredential("Session", sessionCredential),
+      csrfSelectorHash: credentials.hashCredential("Csrf", csrfCredential),
+      operationReference: ids.operation,
+      operationIntentHash: credentials.hashOperationIntent("test"),
+    }),
+  });
+  const service = new GuestSessionService({
+    store,
+    credentials,
+    admission: { consume: async () => null },
+    binding: { validate: async () => (binding === "Current" ? "Current" : "Unavailable") },
+    now: () => observedAt,
+  });
+  return { service, store, credentials };
+}
+it("recovers foreground CSRF without touching lifetime or persisting credentials", async () => {
+  const f = await recoveryFixture();
+  const before = JSON.stringify([...f.store.records.values()]);
+  const recovered = await f.service.recoverForegroundCsrf({ sessionCredential });
+  expect(recovered).not.toBe(csrfCredential);
+  expect(await f.service.recoverForegroundCsrf({ sessionCredential })).toBe(recovered);
+  expect(
+    (await f.service.authorize({ sessionCredential, csrfCredential: recovered })).sessionReference,
+  ).toBe(ids.session);
+  expect((await f.service.authorize({ sessionCredential, csrfCredential })).sessionReference).toBe(
+    ids.session,
+  );
+  expect(f.store.touches).toBe(0);
+  expect(JSON.stringify([...f.store.records.values()])).toBe(before);
+  expect(before).not.toContain(recovered);
+  await expect(
+    f.service.authorize({
+      sessionCredential,
+      csrfCredential: f.credentials.deriveForegroundCsrf?.(nextSessionCredential),
+    }),
+  ).rejects.toThrow(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+});
+it("rejects recovery and derived authorization for expired, revoked or unavailable binding", async () => {
+  for (const [changes, binding, at] of [
+    [{}, "Current", "2026-07-29T16:00:00.000Z"],
+    [{ status: "Revoked", revocationReason: "Logout", revokedAt: now, version: 2 }, "Current", now],
+    [{}, "Unavailable", now],
+  ] as const) {
+    const f = await recoveryFixture(changes, binding, at);
+    await expect(f.service.recoverForegroundCsrf({ sessionCredential })).rejects.toThrow(
+      new GuestSessionError("GUEST_SESSION_UNAVAILABLE"),
+    );
+    await expect(
+      f.service.authorize({
+        sessionCredential,
+        csrfCredential: f.credentials.deriveForegroundCsrf?.(sessionCredential),
+      }),
+    ).rejects.toThrow(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  }
+});
+
+describe("WP-2423 (v15 3cd0f8dd M5) ended visit receipt access", () => {
+  it("lets a closed or idle visit read its receipt until the absolute expiry, nothing longer", async () => {
+    // The table was closed (binding no longer current) and the guest left hours ago (idle).
+    for (const [binding, at] of [
+      ["Unavailable", now],
+      ["Current", "2026-07-29T20:00:00.000Z"],
+      ["Unavailable", "2026-07-30T11:59:59.999Z"],
+    ] as const) {
+      const f = await recoveryFixture({}, binding, at);
+      const before = JSON.stringify([...f.store.records.values()]);
+      await expect(f.service.recoverForegroundCsrf({ sessionCredential })).rejects.toThrow(
+        new GuestSessionError("GUEST_SESSION_UNAVAILABLE"),
+      );
+      const ended = await f.service.recoverEndedVisitCsrf({ sessionCredential });
+      expect(ended.session.sessionReference).toBe(ids.session);
+      expect(ended.csrfCredential).toBe(f.credentials.deriveForegroundCsrf?.(sessionCredential));
+      // Ordering and every other action still require a current visit.
+      await expect(
+        f.service.authorize({ sessionCredential, csrfCredential: ended.csrfCredential }),
+      ).rejects.toThrow(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+      expect(
+        (
+          await f.service.authorizeEndedVisit({
+            sessionCredential,
+            csrfCredential: ended.csrfCredential,
+          })
+        ).sessionReference,
+      ).toBe(ids.session);
+      // Read only: nothing renewed or stored.
+      expect(f.store.touches).toBe(0);
+      expect(JSON.stringify([...f.store.records.values()])).toBe(before);
+    }
+  });
+  it("refuses a signed-out or revoked visit, a wrong CSRF and anything past the 24 h bound", async () => {
+    for (const [changes, at] of [
+      [{}, "2026-07-30T12:00:00.000Z"],
+      [{ status: "Revoked", revocationReason: "Logout", revokedAt: now, version: 2 }, now],
+      [{ status: "Revoked", revocationReason: "Rotated", revokedAt: now, version: 2 }, now],
+    ] as const) {
+      const f = await recoveryFixture(changes, "Unavailable", at);
+      await expect(f.service.recoverEndedVisitCsrf({ sessionCredential })).rejects.toThrow(
+        new GuestSessionError("GUEST_SESSION_UNAVAILABLE"),
+      );
+      await expect(
+        f.service.authorizeEndedVisit({ sessionCredential, csrfCredential }),
+      ).rejects.toThrow(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+    }
+    const f = await recoveryFixture({}, "Unavailable", now);
+    await expect(
+      f.service.authorizeEndedVisit({
+        sessionCredential,
+        csrfCredential: f.credentials.deriveForegroundCsrf?.(nextSessionCredential),
+      }),
+    ).rejects.toThrow(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+    await expect(
+      f.service.recoverEndedVisitCsrf({ sessionCredential: nextSessionCredential }),
+    ).rejects.toThrow(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  });
+});
+
+describe("WP-2423 Q10 Guest cookie continuity", () => {
+  it("keeps the cookie across a browser restart for exactly the absolute Session lifetime", () => {
+    const credential = "S".repeat(43);
+    expect(guestSessionCookieMaxAgeSeconds).toBe(guestSessionAbsoluteLifetimeMs / 1000);
+    expect(guestSessionCookieMaxAgeSeconds).toBe(86_400);
+    expect(serializeGuestSessionCookie(credential as never)).toBe(
+      `__Host-bop-guest=${credential}; Path=/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax`,
+    );
+    // Never a Domain attribute; never an Expires date derived from a client clock.
+    expect(serializeGuestSessionCookie(credential as never)).not.toMatch(/Domain|Expires/u);
+  });
+
+  it("refuses to serialize anything but a canonical raw credential", () => {
+    for (const value of ["", "short", "S".repeat(42) + ";", "S".repeat(44)])
+      expect(() => serializeGuestSessionCookie(value as never)).toThrow(GuestSessionError);
   });
 });

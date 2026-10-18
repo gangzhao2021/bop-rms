@@ -1,3 +1,5 @@
+import { SessionPaymentResultPage } from "./SessionPaymentResultPage.js";
+import { SessionPaymentPage } from "./SessionPaymentPage.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router";
 import {
@@ -6,8 +8,9 @@ import {
   type PaymentController,
 } from "./payment-controller.js";
 import type { PaymentMode } from "./types.js";
+import type { CustomerStoreContext } from "../journey/CustomerPage.js";
 
-export function PaymentPage({
+function LegacyPaymentPage({
   mode,
   controller: provided,
 }: {
@@ -117,5 +120,19 @@ export function PaymentPage({
       </section>
       <Link to="/checkout">Back to checkout</Link>
     </main>
+  );
+}
+
+export function PaymentPage(props: {
+  readonly mode: PaymentMode;
+  readonly controller?: PaymentController;
+  readonly store?: CustomerStoreContext | undefined;
+}) {
+  if (props.controller !== undefined)
+    return <LegacyPaymentPage mode={props.mode} controller={props.controller} />;
+  return props.mode === "handoff" ? (
+    <SessionPaymentPage store={props.store} />
+  ) : (
+    <SessionPaymentResultPage store={props.store} />
   );
 }

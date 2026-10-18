@@ -289,7 +289,7 @@ function reasonFor(action: KitchenWorkLifecycleAction): KitchenWorkLifecycleReas
   return "EXPO_MARKED_READY";
 }
 
-function digest(ports: KitchenWorkLifecyclePorts, binding: string): string {
+function digest(ports: KitchenWorkLifecycleEffectValidationPorts, binding: string): string {
   try {
     return parseKitchenTicketDigest(ports.digests.sha256(binding));
   } catch {
@@ -298,7 +298,7 @@ function digest(ports: KitchenWorkLifecyclePorts, binding: string): string {
 }
 
 function nextReference(
-  ports: KitchenWorkLifecyclePorts,
+  ports: KitchenWorkLifecycleEffectValidationPorts,
   purpose: KitchenWorkLifecycleReferencePurpose,
 ): string {
   try {
@@ -309,7 +309,7 @@ function nextReference(
 }
 
 function stableReference(
-  ports: KitchenWorkLifecyclePorts,
+  ports: KitchenWorkLifecycleEffectValidationPorts,
   purpose: KitchenWorkLifecycleStableReferencePurpose,
   identity: unknown,
 ): string {
@@ -347,7 +347,7 @@ function parseCommit(value: KitchenWorkLifecycleCommit): KitchenWorkLifecycleCom
 }
 
 function sameCommandIntent(
-  ports: KitchenWorkLifecyclePorts,
+  ports: KitchenWorkLifecycleEffectValidationPorts,
   command: KitchenWorkLifecycleCommand,
   storedIntentDigest: string,
 ): boolean {
@@ -731,7 +731,7 @@ function parseReadyResult(value: unknown): KitchenOrderItemReadyResult {
 
 function parseReadyPublication(
   value: unknown,
-  ports: KitchenWorkLifecyclePorts,
+  ports: KitchenWorkLifecycleEffectValidationPorts,
 ): KitchenReadyPublication {
   const raw = exact(value, [
     "publicationReference",
@@ -924,7 +924,7 @@ function sameCanonical(left: unknown, right: unknown): boolean {
 
 function effectSemantics(
   effect: Omit<KitchenWorkLifecycleEffect, "effectDigest">,
-  ports: KitchenWorkLifecyclePorts,
+  ports: KitchenWorkLifecycleEffectValidationPorts,
 ): boolean {
   try {
     const {
@@ -1350,7 +1350,10 @@ function effectSemantics(
   }
 }
 
-function parseEffect(value: unknown, ports: KitchenWorkLifecyclePorts): KitchenWorkLifecycleEffect {
+export function parseKitchenWorkLifecycleEffect(
+  value: unknown,
+  ports: KitchenWorkLifecycleEffectValidationPorts,
+): KitchenWorkLifecycleEffect {
   const raw = exact(value, [
     "command",
     "intentDigest",
@@ -1960,6 +1963,8 @@ async function buildEffect(
   intentDigest: string,
   observedAt: string,
 ): Promise<KitchenWorkLifecycleEffect> {
+  // WP-2423 Q6: staff cancelled this work before it started; it accepts no further command.
+  if (source.target.workItemStatus === "Cancelled") return precondition();
   validatePredecessors(source, command);
   let admission: KitchenStartAdmissionDecision | null = null;
   let expo: KitchenExpoPolicyDecision | null = null;
@@ -2361,7 +2366,7 @@ async function buildEffect(
     ...withoutDigest,
     effectDigest: digest(ports, effectBinding(withoutDigest)),
   });
-  return parseEffect(effect, ports);
+  return parseKitchenWorkLifecycleEffect(effect, ports);
 }
 
 async function authorize(
@@ -2441,7 +2446,7 @@ export function createKitchenWorkLifecycleService(ports: KitchenWorkLifecyclePor
             return dependency();
           }
           if (resolution.status === "Found") {
-            const stored = parseEffect(resolution.effect, ports);
+            const stored = parseKitchenWorkLifecycleEffect(resolution.effect, ports);
             if (
               stored.operation.idempotencyKey !== command.idempotencyKey ||
               stored.operation.brandReference !== command.brandReference ||
@@ -2452,8 +2457,19 @@ export function createKitchenWorkLifecycleService(ports: KitchenWorkLifecyclePor
               return dependency();
             if (!sameCommandIntent(ports, command, stored.intentDigest)) return conflict();
             const expiry = stored.operation.replayExpiresAt;
-            if (Date.parse(observedAt) < Date.parse(stored.operation.occurredAt))
-              return dependency();
+            if (Date.parse(observedAt) < Date.parse(stored.operation.occurredAt)) {
+              // WP-2423: a duplicate authorized before the original committed (a double tap or a
+              // network retry) waits on the idempotency fence and then finds it. Only a clock that
+              // is still earlier than the original now is a regression.
+              let current: string;
+              try {
+                current = parseKitchenTicketInstant(ports.clock.now());
+              } catch {
+                return dependency();
+              }
+              if (Date.parse(current) < Date.parse(stored.operation.occurredAt))
+                return dependency();
+            }
             if (expiry === null || Date.parse(observedAt) >= Date.parse(expiry)) return conflict();
             return stored.result;
           }
@@ -2504,7 +2520,7 @@ export function createKitchenWorkLifecycleService(ports: KitchenWorkLifecyclePor
             throw error;
           }
           if (commit.status === "Conflict") return conflict();
-          const committed = parseEffect(commit.effect, ports);
+          const committed = parseKitchenWorkLifecycleEffect(commit.effect, ports);
           if (committed.effectDigest !== effect.effectDigest) return dependency();
           return committed.result;
         });
@@ -2522,3 +2538,8 @@ export function createKitchenWorkLifecycleService(ports: KitchenWorkLifecyclePor
     },
   });
 }
+
+export type KitchenWorkLifecycleEffectValidationPorts = Pick<
+  KitchenWorkLifecyclePorts,
+  "references" | "digests"
+>;

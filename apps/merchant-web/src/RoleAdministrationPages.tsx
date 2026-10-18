@@ -1,41 +1,353 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router";
+import { SourceTime } from "./StoreTime.js";
+import { newOperationReference } from "./operation-reference.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { FULL_SIGN_IN_REQUIRED_TEXT, needsFullSignIn } from "./full-sign-in.js";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router";
 import {
   RoleAdministrationPageError,
   parseRoleAdministrationPageView,
   parseRoleAdministrationRouteReference,
   unavailableRoleAdministrationPageClient,
+  rolePermissionLabel,
+  roleScopeLabels,
+  roleStatusLabels,
+  roleTypeLabels,
+  type RoleAdministrationItemView,
+  type RoleAdministrationOperation,
   type RoleAdministrationPageClient,
   type RoleAdministrationPageErrorCode,
   type RoleAdministrationPageView,
+  type RoleCatalogEntryView,
+  type RoleCommandRequest,
 } from "./role-administration-pages.js";
+import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 type State =
   | { readonly kind: "Loading" | RoleAdministrationPageErrorCode }
   | { readonly kind: "Found"; readonly view: RoleAdministrationPageView };
+const copy = {
+  Loading: "Loading authorized role metadata…",
+  PermissionDenied: actionAccessDeniedText,
+  FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
+  NotFound: "The requested role is unavailable in this scope.",
+  FeatureDisabled: "Role administration is disabled.",
+  Stale: "The projection is stale. Refresh before acting.",
+  Conflict: "The role or policy changed, or the role is still assigned. Refresh and try again.",
+  CommandFailed: "The change was refused. No role or permission outcome was inferred.",
+  Offline: "Offline. Your change was not confirmed; retry sends the same request again.",
+  Unavailable: "Role administration metadata is unavailable.",
+} as const;
+const operationLabels: Record<RoleAdministrationOperation, string> = {
+  Duplicate: "Duplicate as custom role",
+  SaveDraft: "Save draft",
+  Submit: "Submit for approval",
+  Approve: "Approve",
+  Reject: "Reject",
+  Activate: "Activate",
+  Deactivate: "Deactivate",
+};
+const reasonCodes: Record<RoleAdministrationOperation, string> = {
+  Duplicate: "ROLE_CREATED",
+  SaveDraft: "ROLE_DRAFT_SAVED",
+  Submit: "ROLE_SUBMITTED",
+  Approve: "ROLE_APPROVED",
+  Reject: "ROLE_REJECTED",
+  Activate: "ROLE_ACTIVATED",
+  Deactivate: "ROLE_DEACTIVATED",
+};
 function Status({ state }: { readonly state: Exclude<State["kind"], "Found"> }) {
-  const copy = {
-    Loading: "Loading authorized role metadata…",
-    PermissionDenied: "Access Admin permission is required.",
-    NotFound: "The requested role is unavailable in this scope.",
-    FeatureDisabled: "Role administration is disabled.",
-    Stale: "The projection is stale. Refresh before acting.",
-    Conflict: "The policy version changed. Refresh and compare again.",
-    CommandFailed: "No role or permission outcome was inferred.",
-    Offline: "Offline read-only. Role actions are disabled.",
-    Unavailable: "Role administration metadata is unavailable.",
-  } as const;
   return (
     <StatePanel
-      heading={state === "Loading" ? "Loading roles" : "Role administration unavailable"}
+      heading={
+        state === "Loading"
+          ? "Loading roles"
+          : state === "PermissionDenied"
+            ? noAccessHeading
+            : "Role administration unavailable"
+      }
       tone={state === "Loading" ? "neutral" : "error"}
       status
     >
-      <p>{copy[state]}</p>
+      <p>{state === "PermissionDenied" ? pageAccessDeniedText : copy[state]}</p>
     </StatePanel>
   );
 }
-function Screen({ view }: { readonly view: RoleAdministrationPageView }) {
+function PermissionPicker({
+  catalog,
+  selected,
+  onChange,
+}: {
+  readonly catalog: readonly RoleCatalogEntryView[];
+  readonly selected: ReadonlySet<string>;
+  readonly onChange: (next: ReadonlySet<string>) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const groups = useMemo(() => {
+    const matching = catalog.filter((entry) =>
+      `${entry.action} ${entry.description}`.toLowerCase().includes(query.trim().toLowerCase()),
+    );
+    return [...new Set(matching.map((entry) => entry.group))].map((group) => ({
+      group,
+      entries: matching.filter((entry) => entry.group === group),
+    }));
+  }, [catalog, query]);
+  return (
+    <fieldset>
+      <legend>Permissions ({selected.size} selected)</legend>
+      <label>
+        Search permissions
+        <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
+      </label>
+      {groups.map(({ group, entries }) => (
+        <fieldset key={group}>
+          <legend>{group}</legend>
+          {entries.map((entry) => (
+            <label key={entry.action} style={{ display: "block" }}>
+              <input
+                type="checkbox"
+                checked={selected.has(entry.action)}
+                onChange={(event) => {
+                  const next = new Set(selected);
+                  if (event.currentTarget.checked) next.add(entry.action);
+                  else next.delete(entry.action);
+                  onChange(next);
+                }}
+              />{" "}
+              {entry.description}
+              {entry.highRisk ? <strong> · High risk</strong> : null}
+            </label>
+          ))}
+        </fieldset>
+      ))}
+    </fieldset>
+  );
+}
+function Editor({
+  view,
+  role,
+  client,
+  csrf,
+  reload,
+}: {
+  readonly view: RoleAdministrationPageView;
+  readonly role: RoleAdministrationItemView;
+  readonly client: RoleAdministrationPageClient;
+  readonly csrf: string;
+  readonly reload: () => void;
+}) {
+  const navigate = useNavigate();
+  const catalogActions = useMemo(() => new Set(view.catalog.map((entry) => entry.action)), [view]);
+  const current = useMemo(
+    () => new Set(role.permissions.map((item) => item.action).filter((a) => catalogActions.has(a))),
+    [role, catalogActions],
+  );
+  const [name, setName] = useState(role.name),
+    [description, setDescription] = useState(role.description),
+    [selected, setSelected] = useState<ReadonlySet<string>>(current),
+    [duplicate, setDuplicate] = useState<{ code: string; name: string } | null>(null),
+    [pending, setPending] = useState<RoleCommandRequest | null>(null),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState<RoleAdministrationPageErrorCode | null>(null);
+  const run = useCallback(
+    async (request: RoleCommandRequest) => {
+      if (!client.command) return;
+      setPending(request);
+      setBusy(true);
+      setError(null);
+      try {
+        const result = await client.command(request);
+        setPending(null);
+        if (request.operation === "Duplicate")
+          navigate(`/app/organization/roles/${result.roleReference}`);
+        else reload();
+      } catch (failure) {
+        setError(failure instanceof RoleAdministrationPageError ? failure.code : "Unavailable");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [client, navigate, reload],
+  );
+  const request = (operation: RoleAdministrationOperation): RoleCommandRequest => ({
+    operation,
+    roleReference: role.roleReference,
+    expectedVersion: role.version,
+    operationReference: newOperationReference(),
+    reasonCode: reasonCodes[operation],
+    draft:
+      operation === "SaveDraft"
+        ? { displayName: name, description, actions: [...selected].sort() }
+        : operation === "Duplicate" && duplicate
+          ? {
+              code: duplicate.code,
+              displayName: duplicate.name,
+              description: `Custom role based on ${role.name}`,
+              actions: [...selected].sort(),
+            }
+          : null,
+  });
+  const editable = role.operations.includes("SaveDraft");
+  const canDuplicate = role.operations.includes("Duplicate");
+  return (
+    <div className="detail-section-grid">
+      {editable || duplicate ? (
+        <StatePanel heading={duplicate ? "New custom role" : "Edit draft"}>
+          {duplicate ? (
+            <>
+              <label>
+                Role code (lowercase, e.g. shift_lead)
+                <input
+                  value={duplicate.code}
+                  pattern="[a-z][a-z0-9_]{1,62}[a-z0-9]"
+                  onChange={(event) =>
+                    setDuplicate({ ...duplicate, code: event.currentTarget.value })
+                  }
+                />
+              </label>
+              <label>
+                Role name
+                <input
+                  value={duplicate.name}
+                  onChange={(event) =>
+                    setDuplicate({ ...duplicate, name: event.currentTarget.value })
+                  }
+                />
+              </label>
+            </>
+          ) : (
+            <>
+              <label>
+                Role name
+                <input value={name} onChange={(event) => setName(event.currentTarget.value)} />
+              </label>
+              <label>
+                Description
+                <input
+                  value={description}
+                  onChange={(event) => setDescription(event.currentTarget.value)}
+                />
+              </label>
+            </>
+          )}
+          <PermissionPicker catalog={view.catalog} selected={selected} onChange={setSelected} />
+          <p>
+            Legacy combined permissions are added automatically when every permission they cover is
+            selected.
+          </p>
+          {duplicate ? (
+            <>
+              <button
+                disabled={
+                  busy ||
+                  !/^[a-z][a-z0-9_]{1,62}[a-z0-9]$/u.test(duplicate.code) ||
+                  !duplicate.name.trim()
+                }
+                onClick={() => void run(request("Duplicate"))}
+              >
+                Create draft role
+              </button>{" "}
+              <button disabled={busy} onClick={() => setDuplicate(null)}>
+                Cancel
+              </button>
+            </>
+          ) : null}
+        </StatePanel>
+      ) : (
+        <StatePanel heading="Permission groups">
+          <ul>
+            {role.permissions.map((permission) => (
+              <li key={permission.action}>
+                <strong>
+                  {rolePermissionLabel(permission.action, view.catalog, permission.group)}
+                </strong>
+                {rolePermissionLabel(permission.action, view.catalog, permission.group) ===
+                permission.group
+                  ? ""
+                  : ` · ${permission.group}`}
+                {permission.highRisk ? " · High risk" : ""}
+              </li>
+            ))}
+          </ul>
+        </StatePanel>
+      )}
+      <StatePanel heading="Approval and history">
+        <p>Submitted by {role.submittedBy ?? "Not submitted"}</p>
+        <p>Approved by {role.approvedBy ?? "Independent approval pending"}</p>
+        <ul>
+          {role.history.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+        {role.type === "System" ? (
+          <p>System template role: its permissions follow the released template.</p>
+        ) : null}
+        {role.memberCount > 0 && role.status === "Active" ? (
+          <p>Reassign the {role.memberCount} staff holding this role before deactivating it.</p>
+        ) : null}
+        {role.status === "InReview" && !role.operations.includes("Approve") ? (
+          <p>Another administrator must approve this change.</p>
+        ) : null}
+        <div role="group" aria-label="Role actions">
+          {role.operations
+            .filter((operation) => operation !== "Duplicate")
+            .map((operation) => (
+              <button
+                key={operation}
+                disabled={busy || duplicate !== null}
+                onClick={() => void run(request(operation))}
+              >
+                {operationLabels[operation]}
+              </button>
+            ))}{" "}
+          {canDuplicate && !duplicate ? (
+            <button
+              disabled={busy}
+              onClick={() => {
+                setSelected(current);
+                setDuplicate({ code: "", name: "" });
+              }}
+            >
+              {operationLabels.Duplicate}
+            </button>
+          ) : null}
+        </div>
+        {error && needsFullSignIn(error) ? (
+          <StatePanel heading="Confirm it's you" status>
+            <FullSignInPrompt csrf={csrf} />
+            {pending ? (
+              <button disabled={busy} onClick={() => void run(pending)}>
+                Try again
+              </button>
+            ) : null}
+          </StatePanel>
+        ) : error ? (
+          <StatePanel heading="Change not applied" tone="error" status>
+            <p>{copy[error]}</p>
+            {pending && error === "Offline" ? (
+              <button disabled={busy} onClick={() => void run(pending)}>
+                Retry
+              </button>
+            ) : (
+              <button onClick={reload}>Refresh</button>
+            )}
+          </StatePanel>
+        ) : null}
+      </StatePanel>
+    </div>
+  );
+}
+export function RoleAdministrationScreen({
+  view,
+  client,
+  csrf,
+  reload,
+}: {
+  readonly view: RoleAdministrationPageView;
+  readonly client: RoleAdministrationPageClient;
+  readonly csrf: string;
+  readonly reload: () => void;
+}) {
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState("All");
   const roles = useMemo(
@@ -49,42 +361,51 @@ function Screen({ view }: { readonly view: RoleAdministrationPageView }) {
       ),
     [query, status, view.roles],
   );
+  const editor = view.screenId === "IAM-ROLE-EDITOR";
   return (
     <AppFrame
-      title={view.screenId === "IAM-ROLE-LIST" ? "Roles" : "Role editor"}
-      description={`${view.screenId} · ${view.freshness} · ${view.completeness}`}
+      title={editor ? "Role editor" : "Roles"}
+      description={[
+        editor ? "Edit a role and its permissions" : "Roles and permissions",
+        view.freshness === "Stale" ? "may be out of date" : null,
+        view.completeness === "Partial" ? "some roles not shown" : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")}
     >
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">{view.screenId}</p>
+          <p className="bop-eyebrow">{editor ? "Role editor" : "Roles"}</p>
           <h2>Role and permission governance</h2>
-          <p>Source as of {view.sourceAsOf}</p>
+          <p>
+            Source as of <SourceTime instant={view.sourceAsOf} />
+          </p>
+          {!editor && view.mayManage ? (
+            <p>
+              To create a custom role, open a role and duplicate it, then adjust its permissions.
+            </p>
+          ) : null}
         </div>
-        <button
-          disabled={
-            !view.mayManage || view.freshness !== "Fresh" || view.completeness !== "Complete"
-          }
-        >
-          Create custom role
-        </button>
       </header>
-      <div className="list-filters" role="search">
-        <label>
-          Role or permission
-          <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
-        </label>
-        <label>
-          Status
-          <select value={status} onChange={(event) => setStatus(event.currentTarget.value)}>
-            <option>All</option>
-            <option>Draft</option>
-            <option>InReview</option>
-            <option>Approved</option>
-            <option>Active</option>
-            <option>Deactivated</option>
-          </select>
-        </label>
-      </div>
+      {editor ? null : (
+        <div className="list-filters" role="search">
+          <label>
+            Role or permission
+            <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
+          </label>
+          <label>
+            Status
+            <select value={status} onChange={(event) => setStatus(event.currentTarget.value)}>
+              <option value="All">All</option>
+              {Object.entries(roleStatusLabels).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
       {roles.length === 0 ? (
         <StatePanel heading="No matching roles" status>
           <p>Change the safe filters.</p>
@@ -97,47 +418,28 @@ function Screen({ view }: { readonly view: RoleAdministrationPageView }) {
               tone={role.permissions.some((item) => item.highRisk) ? "offline" : "neutral"}
             >
               <p>
-                <strong>{role.status}</strong> · {role.scope} · {role.type} · version {role.version}
+                <strong>{roleStatusLabels[role.status]}</strong> · {roleScopeLabels[role.scope]} ·{" "}
+                {roleTypeLabels[role.type]} · version {role.version}
               </p>
               <p>{role.description}</p>
               <p>
                 {role.memberCount} active assignments · {role.permissions.length} permissions
               </p>
-              {view.screenId === "IAM-ROLE-LIST" ? (
-                <Link to={`/app/organization/roles/${role.roleReference}`}>View and compare</Link>
-              ) : null}
+              {editor ? (
+                <Link to="/app/organization/roles">Back to roles</Link>
+              ) : (
+                <Link to={`/app/organization/roles/${role.roleReference}`}>View and manage</Link>
+              )}
             </StatePanel>
-            {view.screenId === "IAM-ROLE-EDITOR" ? (
-              <div className="detail-section-grid">
-                <StatePanel heading="Permission groups">
-                  <ul>
-                    {role.permissions.map((permission) => (
-                      <li key={permission.action}>
-                        <strong>{permission.action}</strong> · {permission.group}
-                        {permission.highRisk ? " · High risk" : ""}
-                        {permission.dependencies.length
-                          ? ` · requires ${permission.dependencies.join(", ")}`
-                          : ""}
-                      </li>
-                    ))}
-                  </ul>
-                </StatePanel>
-                <StatePanel heading="Approval and history">
-                  <p>Submitted by {role.submittedBy ?? "Not submitted"}</p>
-                  <p>Approved by {role.approvedBy ?? "Independent approval pending"}</p>
-                  <ul>
-                    {role.history.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                  <button
-                    disabled
-                    title="Requires exact permission, reason, expected version, independent approval and dependency revalidation"
-                  >
-                    Save / compare / submit / approve / activate
-                  </button>
-                </StatePanel>
-              </div>
+            {editor ? (
+              <Editor
+                key={`${role.roleReference}:${role.version}`}
+                view={view}
+                role={role}
+                client={client}
+                csrf={csrf}
+                reload={reload}
+              />
             ) : null}
           </section>
         ))
@@ -148,12 +450,16 @@ function Screen({ view }: { readonly view: RoleAdministrationPageView }) {
 function Page({
   screenId,
   client,
+  csrf,
 }: {
   readonly screenId: RoleAdministrationPageView["screenId"];
   readonly client: RoleAdministrationPageClient;
+  readonly csrf: string;
 }) {
   const { id } = useParams();
   const [state, setState] = useState<State>({ kind: "Loading" });
+  const [generation, setGeneration] = useState(0);
+  const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
     let active = true,
       request: Promise<unknown>;
@@ -182,20 +488,30 @@ function Page({
     return () => {
       active = false;
     };
-  }, [client, id, screenId]);
-  return state.kind === "Found" ? <Screen view={state.view} /> : <Status state={state.kind} />;
+  }, [client, id, screenId, generation]);
+  return state.kind === "Found" ? (
+    <RoleAdministrationScreen view={state.view} client={client} csrf={csrf} reload={reload} />
+  ) : (
+    <Status state={state.kind} />
+  );
 }
 export function RoleListPage({
   client = unavailableRoleAdministrationPageClient,
+  csrf = "",
 }: {
   readonly client?: RoleAdministrationPageClient;
+  /** Session token for the "Verify it's you" step on a PIN sign-in. */
+  readonly csrf?: string;
 }) {
-  return <Page screenId="IAM-ROLE-LIST" client={client} />;
+  return <Page screenId="IAM-ROLE-LIST" client={client} csrf={csrf} />;
 }
 export function RoleEditorPage({
   client = unavailableRoleAdministrationPageClient,
+  csrf = "",
 }: {
   readonly client?: RoleAdministrationPageClient;
+  /** Session token for the "Verify it's you" step on a PIN sign-in. */
+  readonly csrf?: string;
 }) {
-  return <Page screenId="IAM-ROLE-EDITOR" client={client} />;
+  return <Page screenId="IAM-ROLE-EDITOR" client={client} csrf={csrf} />;
 }

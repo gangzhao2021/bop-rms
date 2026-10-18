@@ -9,11 +9,12 @@ import {
   type PaymentInstant,
 } from "./payment-intent-creation.js";
 import {
+  equivalentPaymentReconciliationResult,
   parsePaymentReconciliationRunInput,
+  parsePaymentReconciliationRunResult,
   parseOperationalReconciliationCandidate,
   parseSettlementReconciliationCandidate,
   PaymentReconciliationError,
-  paymentReconciliationOutcomes,
   type PaymentOperationalReconciliationCandidate,
   type PaymentReconciliationCheck,
   type PaymentReconciliationDifferenceReason,
@@ -38,6 +39,16 @@ function dependency(): never {
   return fail("PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE");
 }
 
+function currentTime(ports: PaymentReconciliationPorts, minimum: PaymentInstant) {
+  try {
+    const now = parsePaymentInstant(ports.clock.now());
+    if (Date.parse(now) < Date.parse(minimum)) return dependency();
+    return now;
+  } catch {
+    return dependency();
+  }
+}
+
 function sameRun(left: PaymentReconciliationRunInput, right: PaymentReconciliationRunInput) {
   return (
     left.runReference === right.runReference &&
@@ -57,31 +68,10 @@ function resultLooksSafe(
   run: PaymentReconciliationRunInput,
 ) {
   try {
-    return (
-      result !== null &&
-      typeof result === "object" &&
-      result.status === "Completed" &&
-      sameRun(result.run, run) &&
-      Array.isArray(result.checks) &&
-      Array.isArray(result.exceptions) &&
-      result.checks.length <= run.maxCandidates &&
-      result.checks.every(
-        (check) =>
-          check.runReference === run.runReference &&
-          check.brandReference === run.brandReference &&
-          check.storeReference === run.storeReference &&
-          paymentReconciliationOutcomes.includes(check.outcome),
-      )
-    );
+    return sameRun(parsePaymentReconciliationRunResult(result).run, run);
   } catch {
     return false;
   }
-}
-
-function fingerprint(value: unknown) {
-  return JSON.stringify(value, (_key, candidate) =>
-    typeof candidate === "bigint" ? candidate.toString() : candidate,
-  );
 }
 
 function zeroCounts() {
@@ -238,6 +228,7 @@ async function operationalCheck(
       exception: null,
     };
   }
+  checkedAt = currentTime(ports, checkedAt);
   let outcome;
   try {
     outcome = parsePaymentProviderOutcome(rawOutcome);
@@ -245,6 +236,7 @@ async function operationalCheck(
     return dependency();
   }
   if (
+    outcome.context.environment !== candidate.environment ||
     outcome.context.brandReference !== run.brandReference ||
     outcome.context.storeReference !== run.storeReference ||
     outcome.context.paymentAttemptReference !== candidate.paymentAttemptReference ||
@@ -296,7 +288,21 @@ async function operationalCheck(
   if (!internalTerminal && providerTerminal) {
     let observationReference;
     try {
+      const occurrence = await ports.terminal.occurrence({ candidate, snapshot: outcome });
+      const occurredAt = parsePaymentInstant(occurrence.occurredAt);
+      if (occurrence.status !== outcome.status || occurredAt > outcome.observedAt)
+        return dependency();
       observationReference = parsePaymentReference(ports.references.generate("Observation"));
+      const recorded = await ports.observations.record({
+        observationReference,
+        paymentIntentReference: candidate.paymentIntentReference,
+        snapshot: outcome,
+      });
+      if (
+        !["Recorded", "AlreadyRecorded"].includes(recorded.status) ||
+        recorded.observationReference !== observationReference
+      )
+        return dependency();
       const terminalResult = await ports.terminal.record({
         observationReference,
         causationReference: run.runReference,
@@ -319,7 +325,7 @@ async function operationalCheck(
               ? "Cancelled"
               : "ProviderRejected",
         retryDisposition: outcome.status === "Captured" ? null : "Never",
-        occurredAt: parsePaymentInstant(outcome.observedAt),
+        occurredAt,
         evidenceDigest: parsePaymentDigest(outcome.evidenceDigest),
       });
       if (
@@ -531,11 +537,15 @@ export function createPaymentReconciliationService(ports: PaymentReconciliationP
             if (outcome.exception !== null) exceptions.push(outcome.exception);
           }
         }
+        for (const check of checks) {
+          completedAt = currentTime(ports, check.checkedAt);
+        }
+        completedAt = currentTime(ports, completedAt);
         const counts = zeroCounts();
         for (const check of checks) counts[check.outcome] += 1;
         if (Object.values(counts).reduce((sum, count) => sum + count, 0) !== checks.length)
           return dependency();
-        const result: PaymentReconciliationRunResult = Object.freeze({
+        const result = parsePaymentReconciliationRunResult({
           run,
           status: "Completed",
           completedAt,
@@ -547,7 +557,7 @@ export function createPaymentReconciliationService(ports: PaymentReconciliationP
         if (committed.status === "Conflict") return fail("PAYMENT_RECONCILIATION_RUN_CONFLICT");
         if (
           !resultLooksSafe(committed.result, run) ||
-          fingerprint(committed.result) !== fingerprint(result)
+          !equivalentPaymentReconciliationResult(result, committed.result)
         )
           return fail("PAYMENT_RECONCILIATION_RUN_CONFLICT");
         return Object.freeze({ status: committed.status, result: committed.result });

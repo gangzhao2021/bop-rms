@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   ComplianceRecallPageError,
@@ -50,7 +51,8 @@ export function ComplianceRecallCase({ view }: { readonly view: ComplianceRecall
           <p className="bop-eyebrow">RECALL-CASE · Restricted Food Safety</p>
           <h1>{item.recallType} Case</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
       </header>

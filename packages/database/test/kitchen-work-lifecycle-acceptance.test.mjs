@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import { exercisePaidKitchenLifecycle } from "../test-support/kitchen-paid-lifecycle.mjs";
+import { createHash } from "node:crypto";
+import { exerciseKitchenWorkLifecycleStore } from "../test-support/kitchen-work-lifecycle-store.mjs";
+import { exerciseKitchenWorkCancellation } from "../test-support/kitchen-work-cancellation.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { createPostgresKitchenWorkLifecycleStore } from "../../rms/kitchen/src/index.ts";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -1095,14 +1100,355 @@ async function prove(context) {
       ),
       /row-level security/u,
     );
+
+    await client.query("RESET ROLE");
+    const lifecycleSource = source(6000);
+    await seedSource(client, lifecycleSource);
+    await exerciseKitchenWorkLifecycleStore(client, lifecycleSource, id);
+    const manualReadySource = source(6100);
+    await seedSource(client, manualReadySource);
+    await exerciseKitchenWorkLifecycleStore(
+      client,
+      manualReadySource,
+      (n) => id(n + 10000),
+      "Enabled",
+    );
+
+    // Two real normalized items and independent connections; Ordering eligibility is synthetic
+    // here. Restricted-role real Ordering/payment composition is covered by Pickup/Dining tests.
+    const multi = source(6200);
+    await seedSource(client, multi);
+    const firstItem = (
+      await client.query(
+        "SELECT * FROM rms_kitchen.kitchen_work_item WHERE kitchen_work_item_id=$1",
+        [multi.workItemId],
+      )
+    ).rows[0];
+    const secondItem = {
+      ...firstItem,
+      kitchen_work_item_id: id(6211),
+      order_item_id: id(6214),
+      source_item_ordinal: 2,
+    };
+    // pg decodes JSONB; insertRow requires serialized JSON values for array columns.
+    for (const [key, value] of Object.entries(secondItem))
+      if (key.endsWith("_json")) secondItem[key] = JSON.stringify(value);
+    await insertRow(client, "kitchen_work_item", secondItem);
+    const ownerRole = (await client.query("SELECT current_user AS role")).rows[0].role;
+    await exercisePaidKitchenLifecycle({
+      admin: client,
+      role: '"' + ownerRole.replaceAll('"', '""') + '"',
+      runner: () => ({
+        run: async (work) => {
+          const connection = new Client(context.clientConfig);
+          await connection.connect();
+          try {
+            await connection.query("BEGIN");
+            const result = await work({ query: (sql, values) => connection.query(sql, values) });
+            await connection.query("COMMIT");
+            return result;
+          } catch (error) {
+            await connection.query("ROLLBACK");
+            throw error;
+          } finally {
+            await connection.end();
+          }
+        },
+      }),
+      scope: { brandReference: multi.brandId, storeReference: multi.storeId },
+      ticket: {
+        ticketReference: multi.ticketId,
+        // The customer status read (added after this case) needs the batch's Order identity.
+        orderReference: multi.orderId,
+        orderBatchReference: multi.orderBatchId,
+        createdAt,
+        correlationReference: multi.correlationId,
+        sourceEvidenceDigest: sha("3"),
+        workItems: [
+          {
+            workItemReference: multi.workItemId,
+            orderItemReference: multi.orderItemId,
+            requiredQuantity: firstItem.required_quantity,
+          },
+          {
+            workItemReference: id(6211),
+            orderItemReference: id(6214),
+            requiredQuantity: secondItem.required_quantity,
+          },
+        ],
+      },
+      source: { resolve: async () => ({ evidenceDigest: sha("3") }) },
+      sourceQuery: {},
+      hash: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+      references: {
+        derive: (purpose, identity) => {
+          const digest = createHash("sha256")
+            .update(purpose + identity)
+            .digest("hex");
+          return (
+            "0198acdc-" +
+            digest.slice(0, 4) +
+            "-7" +
+            digest.slice(4, 7) +
+            "-8" +
+            digest.slice(7, 10) +
+            "-" +
+            digest.slice(10, 22)
+          );
+        },
+      },
+      id: (n) => id(n + 20000),
+    });
+
+    // WP-2423 Q6: staff cancel paid batches before the kitchen starts them.
+    await client.query("RESET ROLE");
+    await exerciseKitchenWorkCancellation({
+      admin: client,
+      context,
+      role: `bop_q6_cancel_${context.runId}`,
+      id,
+      seed: async (base, itemCount) => {
+        const value = source(base);
+        await seedSource(client, value);
+        const first = (
+          await client.query(
+            "SELECT * FROM rms_kitchen.kitchen_work_item WHERE kitchen_work_item_id=$1",
+            [value.workItemId],
+          )
+        ).rows[0];
+        for (let ordinal = 2; ordinal <= itemCount; ordinal++) {
+          const next = {
+            ...first,
+            kitchen_work_item_id: id(base + ordinal * 10 + 1),
+            order_item_id: id(base + ordinal * 10 + 4),
+            source_item_ordinal: ordinal,
+          };
+          for (const [key, column] of Object.entries(next))
+            if (key.endsWith("_json")) next[key] = JSON.stringify(column);
+          await insertRow(client, "kitchen_work_item", next);
+        }
+        return value;
+      },
+    });
+
+    // Storage-column binding only; service codec tests separately validate the full semantic effect.
+    await client.query("RESET ROLE");
+    const recordedSource = source(3000);
+    await seedSource(client, recordedSource);
+    const recordedOperation = acceptOperation(
+      recordedSource,
+      id(4000),
+      "stored-lifecycle-record-0001",
+      {
+        audit_id: id(4001),
+        outbox_event_id: id(4002),
+        correlation_id: id(4003),
+      },
+    );
+    const paths = {
+      "operation.operationReference": "kitchen_work_lifecycle_operation_id",
+      "operation.brandReference": "brand_id",
+      "operation.storeReference": "store_id",
+      "operation.ticketReference": "kitchen_ticket_id",
+      "operation.workItemReference": "kitchen_work_item_id",
+      "operation.orderItemReference": "order_item_id",
+      "operation.idempotencyKey": "idempotency_key",
+      "operation.intentDigest": "intent_digest",
+      effectDigest: "effect_digest",
+      "operation.auditReference": "audit_id",
+      "operation.eventReference": "outbox_event_id",
+      "operation.expectedTicketVersion": "expected_ticket_version",
+      "operation.resultTicketVersion": "result_ticket_version",
+      "operation.expectedWorkItemVersion": "expected_work_item_version",
+      "operation.resultWorkItemVersion": "result_work_item_version",
+      "command.idempotencyKey": "idempotency_key",
+    };
+    const stored = { recordVersion: 1, effect: {} };
+    for (const [path, column] of Object.entries(paths)) {
+      const parts = path.split(".");
+      let target = stored.effect;
+      for (const part of parts.slice(0, -1)) target = target[part] ??= {};
+      const value = recordedOperation[column];
+      target[parts.at(-1)] = value === undefined || value === null ? null : String(value);
+    }
+    for (const [path] of Object.entries(paths)) {
+      const changed = globalThis.structuredClone(stored);
+      const parts = path.split(".");
+      let target = changed.effect;
+      for (const part of parts.slice(0, -1)) target = target[part];
+      target[parts.at(-1)] = "changed";
+      await assert.rejects(
+        insertRow(client, "kitchen_work_lifecycle_operation", {
+          ...recordedOperation,
+          effect_record_json: JSON.stringify(changed),
+        }),
+        /kitchen_work_lifecycle_effect_record_binding_check/u,
+      );
+    }
+    for (const changed of [{}, { ...stored, recordVersion: 2 }, { ...stored, unexpected: true }]) {
+      await assert.rejects(
+        insertRow(client, "kitchen_work_lifecycle_operation", {
+          ...recordedOperation,
+          effect_record_json: JSON.stringify(changed),
+        }),
+        /kitchen_work_lifecycle_effect_record_binding_check/u,
+      );
+    }
+    await insertRow(client, "kitchen_work_lifecycle_operation", {
+      ...recordedOperation,
+      effect_record_json: JSON.stringify(stored),
+    });
+    const recovered = await client.query(
+      "SELECT effect_record_json FROM rms_kitchen.kitchen_work_lifecycle_operation WHERE kitchen_work_lifecycle_operation_id=$1",
+      [recordedOperation.kitchen_work_lifecycle_operation_id],
+    );
+    assert.deepEqual(recovered.rows[0].effect_record_json, stored);
+    await assert.rejects(
+      client.query(
+        "UPDATE rms_kitchen.kitchen_work_lifecycle_operation SET effect_record_json=NULL WHERE kitchen_work_lifecycle_operation_id=$1",
+        [recordedOperation.kitchen_work_lifecycle_operation_id],
+      ),
+      /append-only/u,
+    );
   } finally {
     await client.query(`RESET ROLE`).catch(() => undefined);
     await client.query(`DROP OWNED BY ${role}`).catch(() => undefined);
     await client.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);
+    await client.query(`DROP OWNED BY bop_q6_cancel_${context.runId}`).catch(() => undefined);
+    await client.query(`DROP ROLE IF EXISTS bop_q6_cancel_${context.runId}`).catch(() => undefined);
     await client.end().catch(() => undefined);
   }
 }
 
 it("proves the append-only Store-scoped Kitchen work lifecycle schema", async () => {
   await withIsolatedDatabase({ caseId: "kitchen_lifecycle", root }, prove);
+}, 180_000);
+
+it("a kitchen step never waits for the queue rebuild's foreign-key checks", async () => {
+  // WP-2423 (v15 2026-10-16): POST /merchant/kitchen/work answered 403 twice while the board read
+  // and the queue worker rebuilt the projection after the previous step. The rebuild inserts one
+  // projection row per work item; each insert's foreign-key check takes FOR KEY SHARE on that
+  // item. The step locked the ticket's items FOR UPDATE, which conflicts with FOR KEY SHARE, in
+  // another order than the rebuild: a deadlock (or a lock timeout), reported as a transaction
+  // conflict and mapped to "request_denied". A step changes no key column, so it locks
+  // FOR NO KEY UPDATE: the rebuild's checks pass, and steps on one ticket still exclude each other.
+  await withIsolatedDatabase({ caseId: "kitchen_step_rebuild", root }, async (context) => {
+    const admin = new pg.Client(context.clientConfig);
+    const step = new pg.Client(context.clientConfig);
+    const competing = new pg.Client(context.clientConfig);
+    await Promise.all([admin.connect(), step.connect(), competing.connect()]);
+    const role = "bop_kitchen_step_" + context.runId;
+    let roleCreated = false;
+    try {
+      const value = source(8200);
+      await seedSource(admin, value);
+      const first = (
+        await admin.query(
+          "SELECT * FROM rms_kitchen.kitchen_work_item WHERE kitchen_work_item_id=$1",
+          [value.workItemId],
+        )
+      ).rows[0];
+      const second = {
+        ...first,
+        kitchen_work_item_id: id(8211),
+        order_item_id: id(8214),
+        source_item_ordinal: 2,
+      };
+      for (const [key, column] of Object.entries(second))
+        if (key.endsWith("_json")) second[key] = JSON.stringify(column);
+      await insertRow(admin, "kitchen_work_item", second);
+      // The pilot API's grants for a kitchen step, under a role that does not bypass RLS.
+      await admin.query(
+        `CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT`,
+      );
+      roleCreated = true;
+      await admin.query(`GRANT USAGE ON SCHEMA rms_kitchen,platform_helpers TO ${role}`);
+      await admin.query(
+        `GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),
+           platform_helpers.current_store_id(),platform_helpers.is_uuid_v7(uuid) TO ${role}`,
+      );
+      await admin.query(
+        `GRANT SELECT ON rms_kitchen.kitchen_ticket,rms_kitchen.kitchen_work_item,
+           rms_kitchen.kitchen_work_lifecycle_operation,rms_kitchen.kitchen_order_item_ready_result,
+           rms_kitchen.kitchen_work_cancellation TO ${role}`,
+      );
+      await admin.query(
+        `GRANT UPDATE ON rms_kitchen.kitchen_ticket,rms_kitchen.kitchen_work_item TO ${role}`,
+      );
+      const repository = createPostgresKitchenWorkLifecycleStore({
+        brandReference: value.brandId,
+        storeReference: value.storeId,
+        references: { next: () => id(8299), derive: () => id(8298) },
+        digests: { sha256: (text) => "sha256:" + createHash("sha256").update(text).digest("hex") },
+        authorize: async () => true,
+        validateCurrentSource: async () => true,
+      });
+      const command = {
+        action: "AcceptKitchenWorkItem",
+        idempotencyKey: "kitchen-step-rebuild-" + value.ticketId,
+        actorReference: id(8290),
+        brandReference: value.brandId,
+        storeReference: value.storeId,
+        ticketReference: value.ticketId,
+        workItemReference: value.workItemId,
+        orderItemReference: value.orderItemId,
+        expectedTicketVersion: "1",
+        expectedWorkItemVersion: "1",
+        correlationReference: value.correlationId,
+      };
+      const begin = async (client, timeout) => {
+        await client.query("BEGIN");
+        await client.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [value.brandId, value.storeId],
+        );
+        await client.query(`SET LOCAL ROLE ${role}`);
+        await client.query(`SET LOCAL lock_timeout='${timeout}'`);
+      };
+      const load = (client) =>
+        repository.loadSourceForUpdate({
+          command,
+          transaction: { query: (sql, values) => client.query(sql, [...values]) },
+        });
+      // Test-only stand-in for the queue worker: the exact lock PostgreSQL's foreign-key check
+      // takes for a projection row of the second item (owner connection; RI runs as the owner).
+      const keyShare = (workItem) =>
+        admin.query(
+          "SELECT 1 FROM ONLY rms_kitchen.kitchen_work_item x WHERE brand_id=$1 AND store_id=$2 " +
+            "AND kitchen_ticket_id=$3 AND kitchen_work_item_id=$4 FOR KEY SHARE OF x",
+          [value.brandId, value.storeId, value.ticketId, workItem],
+        );
+      await admin.query("BEGIN");
+      await admin.query("SET LOCAL lock_timeout='1s'");
+      await keyShare(second.kitchen_work_item_id);
+      // The step loads (and locks) its ticket while the rebuild holds the second item.
+      await begin(step, "1s");
+      const loaded = await load(step);
+      assert.equal(loaded.target.workItemReference, value.workItemId);
+      // The rebuild goes on to the first item, which the step now holds: no wait, no deadlock.
+      await keyShare(value.workItemId);
+      // The step's own write (a non-key column) does not wait for the rebuild either.
+      await step.query(
+        "UPDATE rms_kitchen.kitchen_work_item SET updated_at=updated_at WHERE kitchen_work_item_id=$1",
+        [value.workItemId],
+      );
+      await admin.query("COMMIT");
+      // A second step on the same ticket still waits for the first (steps never interleave).
+      await begin(competing, "300ms");
+      await assert.rejects(load(competing), { code: "55P03" });
+      await competing.query("ROLLBACK");
+      await step.query("ROLLBACK");
+    } finally {
+      for (const client of [admin, step, competing]) {
+        await client.query("ROLLBACK").catch(() => undefined);
+      }
+      if (roleCreated) {
+        await admin.query(`DROP OWNED BY ${role}`).catch(() => undefined);
+        await admin.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);
+      }
+      await Promise.all(
+        [admin.end(), step.end(), competing.end()].map((p) => p.catch(() => undefined)),
+      );
+    }
+  });
 }, 180_000);

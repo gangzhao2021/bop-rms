@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
+import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import {
   DeliveryTrackingError,
   parseCustomerDeliveryTracking,
@@ -22,7 +23,6 @@ export function DeliveryTrackingContent({ view }: { readonly view: CustomerDeliv
         </section>
       ) : null}
       <section aria-labelledby="delivery-progress">
-        <p className="cart-page__eyebrow">CUST-DELIVERY-STATUS</p>
         <h2 id="delivery-progress">{view.status}</h2>
         <p>
           {view.eta
@@ -53,8 +53,10 @@ export function DeliveryTrackingContent({ view }: { readonly view: CustomerDeliv
 }
 export function DeliveryStatusPage({
   client = unavailableCustomerDeliveryTrackingClient,
+  store,
 }: {
   readonly client?: CustomerDeliveryTrackingClient;
+  readonly store?: CustomerStoreContext | undefined;
 }) {
   const { orderReference = "" } = useParams(),
     [state, setState] = useState<State>({ kind: "Loading" });
@@ -81,19 +83,24 @@ export function DeliveryStatusPage({
     };
   }, [client, orderReference]);
   return (
-    <main id="main-content" className="order-status">
-      <header>
-        <h1>Track your delivery</h1>
-        <p>Your authorized Guest Session—not this reference alone—grants access.</p>
-      </header>
+    <CustomerPage
+      step="other"
+      store={store}
+      orderReference={orderReference}
+      className="order-status delivery-status"
+    >
+      <PageHeading eyebrow="Delivery" title="Track your delivery" />
       {state.kind === "Loading" ? (
-        <section role="status">
+        <section className="order-status__card" role="status">
           <h2>Loading delivery status</h2>
         </section>
       ) : null}
       {state.kind !== "Loading" && state.kind !== "Ready" ? (
-        <section role="alert">
-          <h2>
+        <section className="order-status__unavailable delivery-status__unavailable" role="alert">
+          <span className="order-status__unavailable-icon" aria-hidden="true">
+            !
+          </span>
+          <h2 id="delivery-unavailable-heading">
             {state.kind === "PermissionDenied"
               ? "Delivery access denied"
               : state.kind === "FeatureDisabled"
@@ -104,11 +111,13 @@ export function DeliveryStatusPage({
                     ? "Delivery not found"
                     : "Delivery status unavailable"}
           </h2>
-          <p>No courier, location or proof fact is inferred.</p>
+          <p>No courier, location or proof details are available.</p>
         </section>
       ) : null}
       {state.kind === "Ready" ? <DeliveryTrackingContent view={state.view} /> : null}
-      <Link to={`/orders/${orderReference}`}>Back to order status</Link>
-    </main>
+      <Link className="order-status__back" to={`/orders/${orderReference}`}>
+        Back to order status
+      </Link>
+    </CustomerPage>
   );
 }

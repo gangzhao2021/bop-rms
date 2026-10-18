@@ -2,7 +2,10 @@ import type { GuestSession } from "@bop/identity";
 import type { CatalogSelectionValidationResult } from "@rms/catalog";
 import { describe, expect, it } from "vitest";
 import { createCheckoutValidationService } from "../application/checkout-validation-service.js";
-import type { CheckoutValidationPorts } from "../application/ports/checkout-validation-ports.js";
+import type {
+  CheckoutStockLine,
+  CheckoutValidationPorts,
+} from "../application/ports/checkout-validation-ports.js";
 import {
   CheckoutValidationError,
   type CheckoutFulfillmentValidationResult,
@@ -218,9 +221,17 @@ function fixture(
     fulfillment?: CheckoutFulfillmentValidationResult;
     failDependency?: "authorization" | "cart" | "quote" | "catalog" | "fulfillment";
     badHash?: boolean;
+    stock?: (lines: readonly CheckoutStockLine[]) => boolean;
+    catalogFor?: (sellableReference: string) => CatalogSelectionValidationResult;
   } = {},
 ) {
-  const calls = { cart: 0, quote: 0, catalog: [] as unknown[], fulfillment: [] as unknown[] };
+  const calls = {
+    cart: 0,
+    quote: 0,
+    catalog: [] as unknown[],
+    fulfillment: [] as unknown[],
+    stock: [] as (readonly CheckoutStockLine[])[],
+  };
   const currentCart = options.cart === undefined ? cart() : options.cart;
   const currentQuote = options.quote === undefined ? quote() : options.quote;
   const ports: CheckoutValidationPorts = {
@@ -234,6 +245,7 @@ function fixture(
       async validateSelection(input) {
         calls.catalog.push(input);
         if (options.failDependency === "catalog") throw new Error("synthetic");
+        if (options.catalogFor) return options.catalogFor(String(input.sellableReference));
         return options.catalog ?? acceptedCatalog();
       },
     },
@@ -245,6 +257,16 @@ function fixture(
       },
     },
     references: { hashIntent: options.badHash ? () => "invalid" : hash },
+    ...(options.stock === undefined
+      ? {}
+      : {
+          stock: {
+            async covers(request: { lines: readonly CheckoutStockLine[] }) {
+              calls.stock.push(request.lines);
+              return (options.stock as NonNullable<typeof options.stock>)(request.lines);
+            },
+          },
+        }),
     repository: {
       async loadCart() {
         calls.cart += 1;
@@ -458,4 +480,161 @@ describe("WP-1220 Checkout Validation", () => {
       await rejects(fixture({ failDependency }).service, "CHECKOUT_DEPENDENCY_UNAVAILABLE");
     },
   );
+});
+
+describe("WP-2423 Checkout Validation on a shared transaction (v15 2026-10-14)", () => {
+  it("checks a multi-line Cart one line at a time, never two owner calls at once", async () => {
+    const base = cart();
+    const first = base.items[0];
+    if (first === undefined) throw new Error("synthetic line missing");
+    const second = { ...first, cartItemReference: id(70) as never, quantity: 1 };
+    const twoLines = cart({ items: [first, second] });
+    const baseQuote = quote();
+    const firstLine = baseQuote.lines[0];
+    if (firstLine === undefined) throw new Error("synthetic quote line missing");
+    const twoLineQuote = quote({
+      lines: [firstLine, { ...firstLine, lineReference: id(70) as never, quantity: 1 }],
+    });
+    let inFlight = 0;
+    let overlapped = false;
+    const f = fixture({ cart: twoLines, quote: twoLineQuote });
+    const original = f.calls;
+    const ports = {
+      authorization: { authorize: async () => ({ guestSession: guest() }) },
+      catalog: {
+        async validateSelection(selection: unknown) {
+          original.catalog.push(selection);
+          inFlight += 1;
+          if (inFlight > 1) overlapped = true;
+          // A real owner check awaits its transaction; give a concurrent caller the chance.
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          inFlight -= 1;
+          if (overlapped) throw new Error("concurrent use of one transaction");
+          return acceptedCatalog();
+        },
+      },
+      fulfillment: { validate: async () => acceptedFulfillment() },
+      references: { hashIntent: hash },
+      repository: { loadCart: async () => twoLines, loadQuote: async () => twoLineQuote },
+    } as unknown as CheckoutValidationPorts;
+    const result = await createCheckoutValidationService(ports).validate(input());
+    expect(result.catalogLines.map((line) => line.cartItemReference)).toEqual([ids.item, id(70)]);
+    expect(original.catalog).toHaveLength(2);
+    expect(overlapped).toBe(false);
+  });
+});
+
+describe("WP-2423 checkout stock shortage", () => {
+  const latte = id(80),
+    mocha = id(81),
+    latteLine = id(82),
+    mochaLine = id(83);
+  const line = (reference: string, sellable: string, quantity: number) => ({
+    cartItemReference: reference,
+    cartReference: ids.cart,
+    sellableReference: sellable,
+    quantity,
+    optionSelections: [],
+    customerNote: null,
+    catalogSelectionEvidence: {
+      menuVersionReference: ids.menuVersion,
+      productVersionReference: ids.productVersion,
+      catalogChannelCode: "PILOT_CHANNEL",
+      catalogOrderTypeCode: "PILOT_ORDER_TYPE",
+      ruleEvidence: [
+        { bindingReference: ids.binding, optionSetVersionReference: ids.optionSetVersion },
+      ],
+      validatedAt: "2026-08-02T14:30:00.000Z",
+    },
+    addedByActorReference: ids.session,
+    addedByParticipantReference: null,
+    addedAt: "2026-08-02T14:30:00.000Z",
+  });
+  const quoteLine = (reference: string, sellable: string, quantity: number) => ({
+    lineReference: reference,
+    sellableReference: sellable,
+    productVersionReference: ids.productVersion,
+    menuVersionReference: ids.menuVersion,
+    quantity,
+  });
+  /** Synthetic stock: each latte and mocha takes one cup of the same milk. */
+  const milk = (cups: number) => (lines: readonly CheckoutStockLine[]) =>
+    lines.reduce((sum, entry) => sum + entry.quantity, 0) <= cups;
+  const shared = (latteCups: number, mochaCups: number) => ({
+    cart: cart({
+      items: [line(latteLine, latte, latteCups), line(mochaLine, mocha, mochaCups)] as never,
+    }),
+    quote: quote({
+      lines: [
+        quoteLine(latteLine, latte, latteCups),
+        quoteLine(mochaLine, mocha, mochaCups),
+      ] as never,
+    }),
+    catalogFor: (sellable: string) => acceptedCatalog({ sellableReference: sellable }),
+  });
+
+  it("passes a Cart the stock covers, asking Inventory once for the whole Cart", async () => {
+    const { service, calls } = fixture({ ...shared(1, 1), stock: milk(2) });
+    await expect(service.validate(input())).resolves.toMatchObject({ cartReference: ids.cart });
+    expect(calls.stock).toHaveLength(1);
+    expect(calls.stock[0]?.map((entry) => entry.cartItemReference)).toEqual([latteLine, mochaLine]);
+  });
+
+  it("names two drinks sharing one milk that together exceed it, before fulfillment or payment", async () => {
+    const { service, calls } = fixture({ ...shared(2, 2), stock: milk(3) });
+    const error = await service.validate(input()).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(CheckoutValidationError);
+    expect(error).toMatchObject({
+      code: "CHECKOUT_STOCK_SHORT",
+      // The most recently added item is lowered first; the latte stays as ordered.
+      line: { cartItemReference: mochaLine, available: 1, sharedStock: true },
+    });
+    expect(calls.fulfillment).toHaveLength(0);
+  });
+
+  it("says how many are left when one item alone is short (same item on two lines counted together)", async () => {
+    const second = id(84);
+    const { service } = fixture({
+      cart: cart({
+        items: [line(latteLine, latte, 1), line(second, latte, 1)] as never,
+      }),
+      quote: quote({
+        lines: [quoteLine(latteLine, latte, 1), quoteLine(second, latte, 1)] as never,
+      }),
+      catalogFor: (sellable: string) => acceptedCatalog({ sellableReference: sellable }),
+      stock: milk(1),
+    });
+    await expect(service.validate(input())).rejects.toMatchObject({
+      code: "CHECKOUT_STOCK_SHORT",
+      line: { cartItemReference: latteLine, available: 1, sharedStock: false },
+    });
+  });
+
+  it("reports a sold-out item the Catalog refuses with nothing left, and an off-menu item as unavailable", async () => {
+    const soldOut = fixture({
+      catalog: { status: "Rejected", reason: "SELLABLE_UNAVAILABLE" } as never,
+      stock: () => false,
+    });
+    await expect(soldOut.service.validate(input())).rejects.toMatchObject({
+      code: "CHECKOUT_STOCK_SHORT",
+      line: { cartItemReference: ids.item, available: 0, sharedStock: false },
+    });
+    const offMenu = fixture({
+      catalog: { status: "Rejected", reason: "SELLABLE_UNAVAILABLE" } as never,
+      stock: () => true,
+    });
+    await expect(offMenu.service.validate(input())).rejects.toMatchObject({
+      code: "CHECKOUT_ITEM_UNAVAILABLE",
+      line: { cartItemReference: ids.item, available: null },
+    });
+  });
+
+  it("treats an unreadable stock answer as a dependency failure, never as covered", async () => {
+    const { service } = fixture({
+      stock: () => {
+        throw new Error("synthetic");
+      },
+    });
+    await rejects(service, "CHECKOUT_DEPENDENCY_UNAVAILABLE");
+  });
 });

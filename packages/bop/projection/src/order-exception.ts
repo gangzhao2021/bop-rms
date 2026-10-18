@@ -14,7 +14,7 @@ export interface OrderExceptionSource {
   readonly tenantReference: string;
   readonly brandReference: string;
   readonly storeReference: string;
-  readonly orderReference: string;
+  readonly orderReference: string | null;
   readonly paymentReference: string | null;
   readonly diningReference: string | null;
   readonly kind: ExceptionKind;
@@ -149,7 +149,10 @@ export function parseOrderExceptionSource(value: unknown): OrderExceptionSource 
     (kind === "DiningUnpaidBatch") !== (sourceOwner === "Dining") ||
     (sourceOwner === "Dining" &&
       (raw.providerState !== "NotApplicable" || raw.paymentReference !== null)) ||
-    (sourceOwner === "Payment" && raw.paymentReference === null) ||
+    (sourceOwner === "Payment" &&
+      kind !== "PaymentReconciliationDifference" &&
+      raw.paymentReference === null) ||
+    (kind !== "PaymentReconciliationDifference" && raw.orderReference === null) ||
     (raw.sourceStatus === "Final") !== (raw.resolutionEvidenceReference !== null)
   )
     return fail("INPUT_INVALID");
@@ -158,7 +161,7 @@ export function parseOrderExceptionSource(value: unknown): OrderExceptionSource 
     tenantReference: ref(raw.tenantReference),
     brandReference: ref(raw.brandReference),
     storeReference: ref(raw.storeReference),
-    orderReference: ref(raw.orderReference),
+    orderReference: optionalRef(raw.orderReference),
     paymentReference: optionalRef(raw.paymentReference),
     diningReference: optionalRef(raw.diningReference),
     kind,
@@ -175,7 +178,9 @@ export function parseOrderExceptionSource(value: unknown): OrderExceptionSource 
   });
 }
 
-export function buildOrderExceptionProjection(input: {
+export interface OrderExceptionProjectionInput {
+  /** Trusted server evidence from a complete current owner-source comparison, never a client flag. */
+  readonly currentSourceCheck?: "Complete";
   readonly tenantReference: string;
   readonly brandReference: string;
   readonly storeReference: string;
@@ -185,22 +190,83 @@ export function buildOrderExceptionProjection(input: {
   readonly freshnessStatus: "Fresh" | "Stale";
   readonly sources: readonly unknown[];
   readonly deriveProjectionReference: (sourceReference: string) => string;
-}): OrderExceptionProjection {
+  /**
+   * DEC-EXCEPTION-CONFIRMED-REFUND-DUE (WP-2423, 2026-10-17): when an open paid-without-fulfillable
+   * case's refund is already Provider-confirmed, only the store's reconciliation check remains, due
+   * by the end of the Store business day the case opened in. Keyed by source reference; the value
+   * is that day's end (trusted server resolution of the Store's time zone and business-day start).
+   * Any other case, or a case without an entry, keeps the 15-minute due time.
+   */
+  readonly refundCheckDueAt?: ReadonlyMap<string, string>;
+}
+
+/** An open paid-without-fulfillable case whose refund the Provider has already confirmed. */
+export function isConfirmedRefundAwaitingCheck(
+  source: Pick<OrderExceptionSource, "kind" | "providerState" | "sourceStatus">,
+): boolean {
+  return (
+    source.kind === "PaidWithoutFulfillableOrder" &&
+    source.providerState === "Confirmed" &&
+    source.sourceStatus === "Open"
+  );
+}
+
+/** Activation gate: a late Critical source cannot activate as a valid projection. */
+export function buildOrderExceptionProjection(
+  input: OrderExceptionProjectionInput,
+): OrderExceptionProjection {
+  return projectOrderExceptions(input, true);
+}
+
+/** Read recovery after a complete current source check (Section 88.22).
+ * This does not activate a projection or certify historical first-visibility SLA.
+ * Without that check, late sources remain visible only in a degraded read.
+ */
+export function readOrderExceptionProjection(
+  input: OrderExceptionProjectionInput,
+): OrderExceptionProjection {
+  if (input.currentSourceCheck === "Complete" && input.freshnessStatus === "Fresh")
+    return projectOrderExceptions(input, false);
+  try {
+    return buildOrderExceptionProjection(input);
+  } catch (error) {
+    if (!(error instanceof OrderExceptionProjectionError) || error.code !== "SLA_MISSED")
+      throw error;
+    return projectOrderExceptions({ ...input, freshnessStatus: "Stale" }, false);
+  }
+}
+
+function projectOrderExceptions(
+  input: OrderExceptionProjectionInput,
+  enforceActivationSla: boolean,
+): OrderExceptionProjection {
   const tenantReference = ref(input.tenantReference);
   const brandReference = ref(input.brandReference);
   const storeReference = ref(input.storeReference);
   const checkpointReference = ref(input.checkpointReference);
   const projectedAt = instant(input.projectedAt);
   if (
+    (input.currentSourceCheck !== undefined && input.currentSourceCheck !== "Complete") ||
     !/^\d{4}-\d{2}-\d{2}$/u.test(input.businessDate) ||
     !["Fresh", "Stale"].includes(input.freshnessStatus) ||
     !Array.isArray(input.sources) ||
-    input.sources.length > 500
+    input.sources.length > 2000
   )
     return fail("INPUT_INVALID");
   const sources = input.sources.map(parseOrderExceptionSource);
   if (new Set(sources.map((source) => source.sourceReference)).size !== sources.length)
     return fail("INPUT_INVALID");
+  const refundCheckDueAt = input.refundCheckDueAt ?? new Map<string, string>();
+  if (!(refundCheckDueAt instanceof Map)) return fail("INPUT_INVALID");
+  for (const [reference, dueAt] of refundCheckDueAt) {
+    const source = sources.find((candidate) => candidate.sourceReference === reference);
+    if (
+      !source ||
+      !isConfirmedRefundAwaitingCheck(source) ||
+      Date.parse(instant(dueAt)) <= Date.parse(source.createdAt)
+    )
+      return fail("INPUT_INVALID");
+  }
   const rows = sources.map((source) => {
     if (
       source.tenantReference !== tenantReference ||
@@ -208,8 +274,14 @@ export function buildOrderExceptionProjection(input: {
       source.storeReference !== storeReference
     )
       return fail("SCOPE_MISMATCH");
+    if (
+      input.currentSourceCheck === "Complete" &&
+      (source.createdAt > source.updatedAt || source.updatedAt > projectedAt)
+    )
+      return fail("INPUT_INVALID");
     const lag = Date.parse(projectedAt) - Date.parse(source.createdAt);
-    if (source.severity === "Critical" && lag > 900_000) return fail("SLA_MISSED");
+    if (enforceActivationSla && source.severity === "Critical" && lag > 900_000)
+      return fail("SLA_MISSED");
     const resolved = source.sourceStatus === "Final";
     return Object.freeze({
       ...source,
@@ -219,7 +291,9 @@ export function buildOrderExceptionProjection(input: {
       acknowledgedAt: null,
       assignedAt: null,
       resolvedAt: resolved ? source.updatedAt : null,
-      dueAt: new Date(Date.parse(source.createdAt) + 900_000).toISOString(),
+      dueAt:
+        refundCheckDueAt.get(source.sourceReference) ??
+        new Date(Date.parse(source.createdAt) + 900_000).toISOString(),
     });
   });
   return Object.freeze({

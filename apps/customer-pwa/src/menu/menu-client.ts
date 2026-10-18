@@ -4,6 +4,7 @@ import type {
   MenuJourneyContext,
   MenuLoadResult,
   MenuOptionRule,
+  MenuPhoto,
   MenuSellable,
   MenuView,
 } from "./types.js";
@@ -14,6 +15,8 @@ const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const code = /^[A-Z][A-Z0-9_-]{0,63}$/u;
 const locale = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|\d{3})?$/u;
 const forbiddenLabel = /[\p{Cc}\p{Cf}<>{}[\]`*_#]/u;
+const forbiddenProse = /[\p{Cc}\p{Cf}<>{}]/u;
+const imagePath = /^\/media\/images\/[0-9a-f]{64}\.(?:jpg|webp)$/u;
 
 export interface CustomerMenuBoundary {
   readonly fetch: typeof globalThis.fetch;
@@ -57,6 +60,51 @@ function text(value: unknown): string {
   return value;
 }
 
+/** Staff-written plain prose (descriptions, photo alt text); punctuation allowed, markup not. */
+function prose(value: unknown, maximum: number): string {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > maximum ||
+    value !== value.normalize("NFC") ||
+    value !== value.trim() ||
+    forbiddenProse.test(value)
+  )
+    throw new TypeError("safe public prose required");
+  return value;
+}
+
+function photo(value: unknown): MenuPhoto | null {
+  if (value === null) return null;
+  const raw = exact(value, ["altText", "width", "height", "renditions"]);
+  if (!Array.isArray(raw.renditions) || raw.renditions.length < 1 || raw.renditions.length > 6)
+    throw new TypeError("photo renditions invalid");
+  const renditions = Object.freeze(
+    raw.renditions.map((candidate) => {
+      const rendition = exact(candidate, ["url", "contentType", "width", "height"]);
+      if (
+        typeof rendition.url !== "string" ||
+        !imagePath.test(rendition.url) ||
+        (rendition.contentType !== "image/jpeg" && rendition.contentType !== "image/webp") ||
+        rendition.url.endsWith(".jpg") !== (rendition.contentType === "image/jpeg")
+      )
+        throw new TypeError("photo rendition invalid");
+      return Object.freeze({
+        url: rendition.url,
+        contentType: rendition.contentType as "image/jpeg" | "image/webp",
+        width: positiveInteger(rendition.width),
+        height: positiveInteger(rendition.height),
+      });
+    }),
+  );
+  return Object.freeze({
+    altText: prose(raw.altText, 160),
+    width: positiveInteger(raw.width),
+    height: positiveInteger(raw.height),
+    renditions,
+  });
+}
+
 function reference(value: unknown): string {
   if (typeof value !== "string" || !uuidV7.test(value)) throw new TypeError("reference required");
   return value;
@@ -90,7 +138,13 @@ function referenceList(value: unknown): readonly string[] {
 }
 
 function optionRule(value: unknown): MenuOptionRule {
+  const quantity =
+    value !== null &&
+    typeof value === "object" &&
+    Object.getOwnPropertyDescriptor(value, "semanticsVersion")?.value === 2;
   const raw = exact(value, [
+    ...(quantity ? ["semanticsVersion", "activationOptionReferences"] : []),
+    "name",
     "bindingReference",
     "optionSetVersionReference",
     "minimumSelections",
@@ -109,6 +163,7 @@ function optionRule(value: unknown): MenuOptionRule {
   const options = Object.freeze(
     raw.options.map((candidate) => {
       const option = exact(candidate, [
+        ...(quantity ? ["defaultQuantity"] : []),
         "optionReference",
         "name",
         "maximumQuantity",
@@ -117,6 +172,16 @@ function optionRule(value: unknown): MenuOptionRule {
         "incrementalPrice",
       ]);
       const optionReference = reference(option.optionReference);
+      const defaultQuantity = quantity
+        ? selectionInteger(option.defaultQuantity)
+        : option.selectedByDefault
+          ? 1
+          : 0;
+      if (
+        defaultQuantity > Number(option.maximumQuantity) ||
+        option.selectedByDefault !== defaultQuantity > 0
+      )
+        throw new TypeError("default quantity invalid");
       const conflictOptionReferences = referenceList(option.conflictOptionReferences);
       const incrementalPrice = exact(option.incrementalPrice, [
         "status",
@@ -130,10 +195,19 @@ function optionRule(value: unknown): MenuOptionRule {
         Number(option.maximumQuantity) > 999 ||
         typeof option.selectedByDefault !== "boolean" ||
         conflictOptionReferences.includes(optionReference) ||
-        incrementalPrice.status !== "Unavailable" ||
-        incrementalPrice.amount !== null ||
-        incrementalPrice.currency !== null ||
-        incrementalPrice.reason !== "PRICING_NOT_INTEGRATED"
+        !(
+          (incrementalPrice.status === "Available" &&
+            typeof incrementalPrice.amount === "string" &&
+            /^\d{1,9}(\.\d{1,4})?$/u.test(incrementalPrice.amount) &&
+            typeof incrementalPrice.currency === "string" &&
+            /^[A-Z]{3}$/u.test(incrementalPrice.currency) &&
+            incrementalPrice.reason === null) ||
+          (incrementalPrice.status === "Unavailable" &&
+            incrementalPrice.amount === null &&
+            incrementalPrice.currency === null &&
+            (incrementalPrice.reason === "PRICING_NOT_INTEGRATED" ||
+              incrementalPrice.reason === "PRICE_NOT_SET"))
+        )
       )
         throw new TypeError("option invalid");
       return Object.freeze({
@@ -142,23 +216,45 @@ function optionRule(value: unknown): MenuOptionRule {
         maximumQuantity: Number(option.maximumQuantity),
         conflictOptionReferences,
         selectedByDefault: option.selectedByDefault,
+        ...(quantity ? { defaultQuantity } : {}),
+        price:
+          incrementalPrice.status === "Available"
+            ? Object.freeze({
+                amount: String(incrementalPrice.amount),
+                currency: String(incrementalPrice.currency),
+              })
+            : null,
       });
     }),
   );
   if (
     minimumSelections > maximumSelections ||
-    maximumSelections > enabled.length ||
+    maximumSelections >
+      (quantity
+        ? options.reduce((sum, option) => sum + option.maximumQuantity, 0)
+        : enabled.length) ||
+    (quantity &&
+      (maximumSelections > 99900 ||
+        options.reduce((sum, option) => sum + (option.defaultQuantity ?? 0), 0) <
+          minimumSelections ||
+        options.reduce((sum, option) => sum + (option.defaultQuantity ?? 0), 0) >
+          maximumSelections)) ||
     defaults.some((item) => !enabled.includes(item)) ||
     options.length !== enabled.length ||
     options.some(
       (option, index) =>
         option.optionReference !== enabled[index] ||
         option.selectedByDefault !== defaults.includes(option.optionReference) ||
-        option.conflictOptionReferences.some((item) => !enabled.includes(item)),
+        (!quantity && option.conflictOptionReferences.some((item) => !enabled.includes(item))),
     )
   )
     throw new TypeError("invalid option rule");
+  if (raw.name !== null && typeof raw.name !== "string") throw new TypeError("name invalid");
   return Object.freeze({
+    name: raw.name === null ? null : text(raw.name),
+    ...(quantity
+      ? { activationOptionReferences: referenceList(raw.activationOptionReferences) }
+      : {}),
     minimumSelections,
     maximumSelections,
     options,
@@ -202,6 +298,8 @@ function sellable(value: unknown): MenuSellable {
     "sellableReference",
     "productVersionReference",
     "name",
+    "description",
+    "photo",
     "presentationRole",
     "pinned",
     "availability",
@@ -215,29 +313,76 @@ function sellable(value: unknown): MenuSellable {
   if (
     !presentationRoles.includes(raw.presentationRole as never) ||
     typeof raw.pinned !== "boolean" ||
-    raw.availability !== "Available" ||
+    (raw.availability !== "Available" && raw.availability !== "SoldOut") ||
     !Array.isArray(raw.optionRules)
   )
     throw new TypeError("sellable invalid");
   const price = exact(raw.displayPrice, ["status", "amount", "currency", "reason"]);
   const tax = exact(raw.taxDisplayContext, ["status", "taxInclusive", "reason"]);
+  const priced =
+    price.status === "Available" &&
+    typeof price.amount === "string" &&
+    /^\d{1,9}(\.\d{1,4})?$/u.test(price.amount) &&
+    typeof price.currency === "string" &&
+    /^[A-Z]{3}$/u.test(price.currency) &&
+    price.reason === null;
+  const unpriced =
+    price.status === "Unavailable" &&
+    price.amount === null &&
+    price.currency === null &&
+    (price.reason === "PRICING_NOT_INTEGRATED" || price.reason === "PRICE_NOT_SET");
   if (
-    price.status !== "Unavailable" ||
-    price.amount !== null ||
-    price.currency !== null ||
-    price.reason !== "PRICING_NOT_INTEGRATED" ||
+    !(priced || unpriced) ||
     tax.status !== "Unavailable" ||
     tax.taxInclusive !== null ||
     tax.reason !== "FINAL_QUOTE_REQUIRED"
   )
     throw new TypeError("unsupported price or tax contract");
+  const optionRules = Object.freeze(raw.optionRules.map(optionRule));
+  if (optionRules.some((rule) => rule.activationOptionReferences !== undefined)) {
+    const owners = new Map<string, number>();
+    optionRules.forEach((rule, index) =>
+      rule.options.forEach((option) => {
+        if (owners.has(option.optionReference)) throw new TypeError("duplicate option");
+        owners.set(option.optionReference, index);
+      }),
+    );
+    const edges = optionRules.map((rule, index) => {
+      if (
+        rule.options.some((option) =>
+          option.conflictOptionReferences.some((ref) => !owners.has(ref)),
+        )
+      )
+        throw new TypeError("unknown conflict");
+      return (rule.activationOptionReferences ?? []).map((ref) => {
+        const parent = owners.get(ref);
+        if (parent === undefined || parent === index) throw new TypeError("invalid activation");
+        return parent;
+      });
+    });
+    const visiting = new Set<number>(),
+      visited = new Set<number>();
+    const visit = (index: number): void => {
+      if (visiting.has(index)) throw new TypeError("activation cycle");
+      if (visited.has(index)) return;
+      visiting.add(index);
+      for (const parent of edges[index] ?? []) visit(parent);
+      visiting.delete(index);
+      visited.add(index);
+    };
+    optionRules.forEach((_rule, index) => visit(index));
+  }
   return Object.freeze({
     sellableReference: reference(raw.sellableReference),
     name: text(raw.name),
+    description: raw.description === null ? null : prose(raw.description, 240),
+    photo: photo(raw.photo),
     presentationRole: raw.presentationRole as MenuSellable["presentationRole"],
     pinned: raw.pinned,
+    availability: raw.availability as MenuSellable["availability"],
+    price: priced ? { amount: price.amount as string, currency: price.currency as string } : null,
     allergens: allergenDisclosure(raw.allergenDisclosure),
-    optionRules: Object.freeze(raw.optionRules.map(optionRule)),
+    optionRules,
   });
 }
 
@@ -274,8 +419,8 @@ function parseFound(value: unknown, context: MenuJourneyContext): MenuView {
     "orderTypeCode",
     "effectiveAt",
   ]);
-  const expectedChannel = context.channel === "DineIn" ? "DINE_IN" : "PICKUP";
-  const expectedOrderType = context.channel === "DineIn" ? "TABLE_SERVICE" : "PICKUP";
+  const expectedChannel = "CUSTOMER_PWA";
+  const expectedOrderType = context.channel === "DineIn" ? "DINE_IN" : "PICKUP";
   if (
     reference(scope.publicStoreReference) !== context.publicStoreReference ||
     scope.channelCode !== expectedChannel ||
@@ -359,8 +504,8 @@ export function createCustomerMenuClient(
         return Object.freeze({ kind: "Unavailable" });
       if (!boundary.online()) return Object.freeze({ kind: "Offline" });
       const parameters = new URLSearchParams({
-        channel: context.channel === "DineIn" ? "DINE_IN" : "PICKUP",
-        orderType: context.channel === "DineIn" ? "TABLE_SERVICE" : "PICKUP",
+        channel: "CUSTOMER_PWA",
+        orderType: context.channel === "DineIn" ? "DINE_IN" : "PICKUP",
         locale: context.locale,
       });
       let normalizedSearch: string | null = null;
@@ -389,6 +534,7 @@ export function createCustomerMenuClient(
               referrerPolicy: "no-referrer",
             },
           );
+          if (response.status === 403) return Object.freeze({ kind: "PermissionDenied" });
           const payload: unknown = await response.json();
           if (response.status === 200)
             return Object.freeze({ kind: "Found", menu: parseFound(payload, context) });

@@ -35,10 +35,9 @@ export function ConnectivityBanner({
     >
       {state.status === "offline" ? (
         <>
-          <strong>You are offline.</strong>{" "}
+          <strong>You’re offline.</strong>{" "}
           <span>
-            Transaction and identity actions are unavailable. Nothing will run or replay in the
-            background.
+            Ordering and payment are paused until you reconnect. Nothing is sent in the background.
           </span>
         </>
       ) : (
@@ -46,7 +45,8 @@ export function ConnectivityBanner({
           <div>
             <strong>Connection restored.</strong>{" "}
             <span>
-              Review the current screen and retry explicitly. No action ran automatically.
+              Check this page, then try again if you need to. Nothing was sent while you were
+              offline.
             </span>
           </div>
           <button type="button" onClick={() => controller.dismissRestored()}>

@@ -78,3 +78,79 @@ describe("transactional receipt email renderer", () => {
     expect(invoked).toBe(false);
   });
 });
+
+describe("receipt adjustments", () => {
+  it.each([
+    ["en-CA", "Discount: -CA$2.00", "Fees: CA$0.50", "CA$9.80"],
+    ["fr-CA", "Remise: -2,00 $ CA", "Frais: 0,50 $ CA", "9,80 $ CA"],
+  ])(
+    "renders explicit discount and fees in both formats for %s",
+    (locale, discount, fee, total) => {
+      const output = renderReceiptEmail(
+        fixture({
+          locale,
+          adjustments: { discountMinor: 200n, feeMinor: 50n },
+          totalMinor: 980n,
+        }),
+      );
+      expect(output.text).toContain(discount);
+      expect(output.text).toContain(fee);
+      expect(output.text).toContain(total);
+      expect(output.html).toContain(discount.split(": ")[0]);
+      expect(output.html).toContain(fee.split(": ")[0]);
+      expect(output.html).toContain(total);
+    },
+  );
+
+  it("preserves legacy output without adjustment rows", () => {
+    const output = renderReceiptEmail(fixture());
+    expect(output.text).not.toMatch(/Discount|Fees/);
+    expect(output.html).not.toMatch(/Discount|Fees/);
+  });
+
+  it.each([
+    undefined,
+    null,
+    {},
+    { discountMinor: 0n },
+    { discountMinor: -1n, feeMinor: 0n },
+    { discountMinor: 1001n, feeMinor: 0n },
+    { discountMinor: 0n, feeMinor: 9223372036854775808n },
+    { discountMinor: 0, feeMinor: 0n },
+    { discountMinor: 0n, feeMinor: 0n, currencyCode: "USD" },
+    { discountMinor: 1n, feeMinor: 0n },
+  ])("rejects malformed pairs and inconsistent totals %#", (adjustments) => {
+    expect(() => renderReceiptEmail(fixture({ adjustments }))).toThrow(ReceiptEmailTemplateError);
+  });
+
+  it("does not invoke an adjustment accessor", () => {
+    let invoked = false;
+    const adjustments = { feeMinor: 0n };
+    Object.defineProperty(adjustments, "discountMinor", {
+      enumerable: true,
+      get() {
+        invoked = true;
+        return 0n;
+      },
+    });
+    expect(() => renderReceiptEmail(fixture({ adjustments }))).toThrow(ReceiptEmailTemplateError);
+    expect(invoked).toBe(false);
+  });
+});
+
+it("renders int64 money without rounding through a Number", () => {
+  const max = 9223372036854775807n;
+  const output = renderReceiptEmail(
+    fixture({
+      subtotalMinor: max,
+      taxMinor: 0n,
+      totalMinor: max,
+      adjustments: { discountMinor: 1n, feeMinor: 1n },
+      lines: [
+        { displayName: "Synthetic item", quantity: 1, amountMinor: max, currencyCode: "CAD" },
+      ],
+    }),
+  );
+  expect(output.text).toContain("CA$92233720368547758.07");
+  expect(output.html).toContain("CA$92233720368547758.07");
+});

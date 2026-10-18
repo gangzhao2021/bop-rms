@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "trust": {
+    "sourceCommit": null,
+    "workflowIdentity": null,
+    "builderIdentity": null,
+    "protectedRef": null,
+    "untrustedPullRequest": null
+  },
+  "image": {
+    "baseImage": null,
+    "baseDigest": null,
+    "resultDigest": null,
+    "platform": null
+  },
+  "runtime": {
+    "user": null,
+    "sourceControlMetadata": null,
+    "packageManagerCache": null,
+    "developmentDependencies": null,
+    "readOnlyRootFilesystem": null,
+    "linuxCapabilitiesDropped": null,
+    "boundedEphemeralTmp": null,
+    "publicSourceMaps": null
+  },
+  "tools": [
+    {
+      "name": "buildkit",
+      "immutablePin": null,
+      "reviewReference": null
+    },
+    {
+      "name": "sbom-generator",
+      "immutablePin": null,
+      "reviewReference": null
+    },
+    {
+      "name": "osv-scanner",
+      "immutablePin": null,
+      "reviewReference": null
+    },
+    {
+      "name": "gitleaks",
+      "immutablePin": null,
+      "reviewReference": null
+    },
+    {
+      "name": "semgrep",
+      "immutablePin": null,
+      "reviewReference": null
+    },
+    {
+      "name": "trivy",
+      "immutablePin": null,
+      "reviewReference": null
+    },
+    {
+      "name": "owasp-zap",
+      "immutablePin": null,
+      "reviewReference": null
+    },
+    {
+      "name": "cosign",
+      "immutablePin": null,
+      "reviewReference": null
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "spdx-sbom",
+      "status": null,
+      "subjectDigest": null,
+      "evidenceDigest": null
+    },
+    {
+      "name": "intoto-provenance",
+      "status": null,
+      "subjectDigest": null,
+      "evidenceDigest": null
+    },
+    {
+      "name": "osv-dependency",
+      "status": null,
+      "subjectDigest": null,
+      "evidenceDigest": null
+    },
+    {
+      "name": "gitleaks-history-and-release",
+      "status": null,
+      "subjectDigest": null,
+      "evidenceDigest": null
+    },
+    {
+      "name": "semgrep-sast",
+      "status": null,
+      "subjectDigest": null,
+      "evidenceDigest": null
+    },
+    {
+      "name": "trivy-container",
+      "status": null,
+      "subjectDigest": null,
+      "evidenceDigest": null
+    },
+    {
+      "name": "trivy-iac",
+      "status": null,
+      "subjectDigest": null,
+      "evidenceDigest": null
+    },
+    {
+      "name": "zap-authenticated-owned-routes",
+      "status": null,
+      "subjectDigest": null,
+      "evidenceDigest": null
+    },
+    {
+      "name": "third-party-notices",
+      "status": null,
+      "subjectDigest": null,
+      "evidenceDigest": null
+    }
+  ],
+  "findings": {
+    "exploitableCritical": null,
+    "exploitableHigh": null
+  },
+  "signing": {
+    "status": null,
+    "subjectDigest": null,
+    "kmsAsymmetric": null,
+    "keyAlgorithm": null,
+    "signatureAlgorithm": null
+  },
+  "registry": {
+    "tagImmutable": null,
+    "enhancedScanning": null
+  },
+  "promotion": {
+    "stagingDigest": null,
+    "productionDigest": null
+  }
+}
