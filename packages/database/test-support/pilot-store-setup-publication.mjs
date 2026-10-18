@@ -11,11 +11,16 @@ import { createEffectivePeriod } from "../../bop/effective-period/src/index.ts";
 import {
   createTaxConfigurationSnapshot,
   createCurrencyMetadataSnapshot,
+  createPostgresCurrentTaxConfigurationStore,
 } from "../../rms/pricing/src/index.ts";
 import { parseStoreConfigurationOrdinaryCommand } from "../../rms/store/src/index.ts";
 import { createMerchantBffRouter } from "../../../apps/api/dist/merchant-bff.js";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { createInternalStoreSetupBff } from "../../../tooling/environment/pilot-store-setup.mjs";
+import {
+  readInternalQuoteTaxConfiguration,
+  readInternalQuoteTaxReadiness,
+} from "../../../tooling/environment/pilot-configured-quote.mjs";
 import {
   createInternalStoreConfigurationOrdinary,
   readPublishedStoreConfiguration,
@@ -458,73 +463,82 @@ export async function exercisePilotStoreSetupPublication(input) {
       .slice(0, -1);
     const taxVersion = next(),
       taxDigest = hash({ profile: "TEST_ONLY_TAX", configurationReference: taxReference });
-    await seedTaxConfiguration(
-      admin,
-      createTaxConfigurationSnapshot({
-        configurationReference: taxReference,
-        versionReference: taxVersion,
-        brandReference: scope.brandReference,
-        storeReference: store,
-        stableCode: "TEST_ONLY_TAX",
-        aggregateVersion: 1,
-        versionNumber: 1,
-        snapshotDigest: taxDigest,
-        lifecycle: "Published",
-        jurisdictionCode: "CA-ON",
-        currencyMetadata: createCurrencyMetadataSnapshot({
-          currencyCode: "CAD",
-          minorUnitExponent: 2,
-          metadataVersion: 1,
-          metadataVersionReference: next(),
-          metadataDigest: hash({ currency: "CAD", testOnly: true }),
-        }),
-        effectivePeriod: createEffectivePeriod({
-          timeZone: "America/Toronto",
-          effectiveFrom: {
-            instant: installedAt,
-            localDateTime: local,
-            utcOffsetMinutes: offsetMinutes,
-          },
-          effectiveUntil: null,
-        }),
-        registrationEvidence: {
-          applicabilityReference: next(),
-          operatingEntityTaxReference: next(),
-          jurisdictionProfileReference: next(),
-          status: "Verified",
-          validUntil: until,
-        },
-        professionalEvidence: {
-          evidenceReference: next(),
-          snapshotReference: taxVersion,
-          snapshotDigest: taxDigest,
-          professionalReviewReference: next(),
-          fixtureSuiteReference: next(),
-          fixtureSuiteDigest: hash({ testOnly: "fixture" }),
-          result: "Pass",
-          reviewedAt: installedAt,
-          validUntil: until,
-        },
-        rules: [
-          {
-            ruleReference: next(),
-            taxClassificationReference: next(),
-            orderType: "Pickup",
-            chargeType: "Sellable",
-            taxComponentCode: "SYNTHETIC_TAX",
-            treatment: "Taxable",
-            rate: "0.13",
-            priceInclusion: "Exclusive",
-            roundingMode: "HalfUp",
-            calculationOrder: 1,
-            compoundOnPriorTax: false,
-            exceptionEvidenceReference: null,
-            receiptPresentationCode: "SYNTHETIC_TAX_LINE",
-          },
-        ],
-        createdAt: installedAt,
+    const taxSnapshot = createTaxConfigurationSnapshot({
+      configurationReference: taxReference,
+      versionReference: taxVersion,
+      brandReference: scope.brandReference,
+      storeReference: store,
+      stableCode: "TEST_ONLY_TAX",
+      aggregateVersion: 1,
+      versionNumber: 1,
+      snapshotDigest: taxDigest,
+      lifecycle: "Published",
+      jurisdictionCode: "CA-ON",
+      currencyMetadata: createCurrencyMetadataSnapshot({
+        currencyCode: "CAD",
+        minorUnitExponent: 2,
+        metadataVersion: 1,
+        metadataVersionReference: next(),
+        metadataDigest: hash({ currency: "CAD", testOnly: true }),
       }),
-      owner,
+      effectivePeriod: createEffectivePeriod({
+        timeZone: "America/Toronto",
+        effectiveFrom: {
+          instant: installedAt,
+          localDateTime: local,
+          utcOffsetMinutes: offsetMinutes,
+        },
+        effectiveUntil: null,
+      }),
+      registrationEvidence: {
+        applicabilityReference: next(),
+        operatingEntityTaxReference: next(),
+        jurisdictionProfileReference: next(),
+        status: "Verified",
+        validUntil: until,
+      },
+      professionalEvidence: {
+        evidenceReference: next(),
+        snapshotReference: taxVersion,
+        snapshotDigest: taxDigest,
+        professionalReviewReference: next(),
+        fixtureSuiteReference: next(),
+        fixtureSuiteDigest: hash({ testOnly: "fixture" }),
+        result: "Pass",
+        reviewedAt: installedAt,
+        validUntil: until,
+      },
+      rules: [
+        {
+          ruleReference: next(),
+          taxClassificationReference: next(),
+          orderType: "Pickup",
+          chargeType: "Sellable",
+          taxComponentCode: "SYNTHETIC_TAX",
+          treatment: "Taxable",
+          rate: "0.13",
+          priceInclusion: "Exclusive",
+          roundingMode: "HalfUp",
+          calculationOrder: 1,
+          compoundOnPriorTax: false,
+          exceptionEvidenceReference: null,
+          receiptPresentationCode: "SYNTHETIC_TAX_LINE",
+        },
+      ],
+      createdAt: installedAt,
+    });
+    await seedTaxConfiguration(admin, taxSnapshot, owner);
+
+    // WP-2423 (已知遗留 1): a quote takes the tax configuration the Store's configuration published
+    // and in force at the quote time names, never the operating file's. The installed configuration
+    // names the installer's reference (no Pricing record, as on v15), so while it is in force no
+    // quote is made even with the Store's real tax configuration in the file (fail closed).
+    const filePolicy = (configurationReference) => ({
+      taxConfiguration: { configurationReference },
+    });
+    assert.deepEqual(
+      await readInternalQuoteTaxConfiguration(resources, filePolicy(taxReference), now()),
+      { ready: false, reason: "TaxConfigurationMismatch" },
     );
 
     // Every check passes; the Owner sends it for approval and cannot approve their own change.
@@ -610,6 +624,38 @@ export async function exercisePilotStoreSetupPublication(input) {
     assert.equal(live.configuration.configurationReference, published.configurationReference);
     assert.deepEqual(live.configuration.weeklySchedule, weeklySchedule);
     assert.equal(live.contentDigest, storeConfigurationContentHash(live.configuration));
+    // The next quote takes the tax configuration the published configuration names (restricted
+    // role), and Pricing loads that configuration at the same instant: the snapshot a quote freezes.
+    const quoteAt = now();
+    assert.deepEqual(
+      await readInternalQuoteTaxConfiguration(resources, filePolicy(taxReference), quoteAt),
+      { ready: true, taxConfigurationReference: taxReference },
+    );
+    const quoteTax = await transactions.run((tx) =>
+      createPostgresCurrentTaxConfigurationStore(
+        { run: (work) => work(tx) },
+        { brandReference: scope.brandReference, storeReference: store },
+        taxSnapshot.currencyMetadata,
+        {
+          load: async () => ({
+            registrationEvidence: taxSnapshot.registrationEvidence,
+            professionalEvidence: taxSnapshot.professionalEvidence,
+          }),
+        },
+      ).load({ configurationReference: taxReference, observedAt: quoteAt }),
+    );
+    assert.equal(quoteTax.configurationReference, taxReference);
+    assert.equal(quoteTax.versionReference, taxVersion);
+    // An operating file naming another tax configuration than the published one: no quote.
+    assert.deepEqual(
+      await readInternalQuoteTaxConfiguration(resources, filePolicy(next()), now()),
+      { ready: false, reason: "TaxConfigurationMismatch" },
+    );
+    // The operations monitor's check reads the same, now.
+    assert.deepEqual(
+      await readInternalQuoteTaxReadiness(resources, async () => filePolicy(taxReference)),
+      { ready: true },
+    );
     // A restart composes publication again from the configuration that came from setup.
     await createInternalStoreConfigurationOrdinary(resources, {
       persistence: persistenceFor(session),

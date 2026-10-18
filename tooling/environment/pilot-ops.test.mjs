@@ -250,6 +250,8 @@ describe("WP-2423 Q13 observations", () => {
       retryingUpdates: { count: 2, oldestAgeMs: 20 * 60_000 },
       // No receipt template check composed: not checked (never reported as fine or failing).
       receiptTemplate: null,
+      // No order pricing check composed: not checked.
+      quoteTax: null,
       // No held-stock check composed: not checked.
       heldStock: null,
       // No pickup time check composed: not checked.

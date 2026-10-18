@@ -259,6 +259,20 @@ export async function readBusinessSignals({
       receiptTemplate = "unreadable";
     }
 
+  // WP-2423 DEC-STORE-SETUP-PUBLICATION: can an order be priced with the tax configuration the
+  // Store's published settings name (read only; ready/reason only)? null when not composed.
+  let quoteTax = null;
+  if (typeof dependencies.readQuoteTaxConfiguration === "function")
+    try {
+      const readiness = await dependencies.readQuoteTaxConfiguration(resources);
+      quoteTax =
+        readiness?.ready === true
+          ? { ready: true }
+          : { ready: false, reason: String(readiness?.reason ?? "TaxConfigurationMismatch") };
+    } catch {
+      quoteTax = "unreadable";
+    }
+
   // WP-2423 (2026-10-16 v15 stock leak): Orders of earlier business days still holding stock.
   // null when not composed; "unreadable" when the check itself failed.
   let heldStock = null;
@@ -308,6 +322,7 @@ export async function readBusinessSignals({
     stuckUpdates,
     retryingUpdates,
     receiptTemplate,
+    quoteTax,
     heldStock,
     pickupCapacity,
     reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },

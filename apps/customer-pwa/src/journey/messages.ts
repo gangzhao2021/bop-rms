@@ -223,7 +223,8 @@ export const checkoutText = Object.freeze({
   cartChanged: "Your cart changed. Refresh to price the current cart.",
   cartValidation:
     "Something in your cart can’t be ordered as selected. Review your cart, then refresh.",
-  pricingUnavailable: "We couldn’t price your order just now. Try again in a moment.",
+  pricingUnavailable:
+    "We couldn’t price your order just now. Try again in a moment; if it still doesn’t work, ask staff to take your order.",
   attentionHeading: "Checkout needs attention",
   offline: "You’re offline. Reconnect to continue; nothing will be submitted automatically.",
   pricingOutcomeUnknown:

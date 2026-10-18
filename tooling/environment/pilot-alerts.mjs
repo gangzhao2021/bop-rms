@@ -196,6 +196,21 @@ export const ALERT_CATALOG = Object.freeze({
       "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask the pilot operator to retry stuck updates.",
     runbook: "alert-receipts-template",
   },
+  // WP-2423 DEC-STORE-SETUP-PUBLICATION: quotes take the tax configuration the Store's published
+  // settings name; during the internal test it must be the one the test files carry evidence for,
+  // otherwise no order can be priced (money: never priced with a guessed tax configuration).
+  "pricing.tax_configuration": {
+    severity: "critical",
+    raiseAfterMs: 2 * MINUTE,
+    title: () => "Orders cannot be priced",
+    summary: (p) =>
+      p.reason === "StoreConfigurationUnavailable"
+        ? "The Store's published settings could not be read, so no new order can be priced, online or at the counter. Orders already paid are not affected."
+        : "The tax settings published in Store setup are not the ones this pilot is set up to charge, so no new order can be priced, online or at the counter. Orders already paid are not affected.",
+    action: () =>
+      'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask the pilot operator.',
+    runbook: "alert-pricing-tax-configuration",
+  },
   "reconciliation.differences": {
     severity: "warning",
     raiseAfterMs: 0,
@@ -313,6 +328,7 @@ const SOURCE_NAMES = Object.freeze({
   receipts: "the receipt template check",
   heldStock: "the check for orders holding stock",
   pickupCapacity: "the check for pickup times",
+  quoteTax: "the check that orders can be priced",
 });
 
 const PROBE_KEYS = Object.freeze({
@@ -386,6 +402,14 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
           business.receiptTemplate.reason === "StoreConfigurationUnavailable"
             ? "StoreConfigurationUnavailable"
             : "TemplateNotProven",
+      });
+    if (business.quoteTax === "unreadable") unreadable.push("quoteTax");
+    else if (business.quoteTax?.ready === false)
+      raise("pricing.tax_configuration", {
+        reason:
+          business.quoteTax.reason === "StoreConfigurationUnavailable"
+            ? "StoreConfigurationUnavailable"
+            : "TaxConfigurationMismatch",
       });
     if (business.heldStock === "unreadable") unreadable.push("heldStock");
     else if (pick(business.heldStock))

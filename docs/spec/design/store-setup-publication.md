@@ -119,7 +119,13 @@ v15 上 Store setup 第 8 步被隐藏：试点从未组合门店配置发布（
 
 ## 已知遗留
 
-- 试点报价仍由运营文件给出税务配置引用（与门店配置引用一致时无差异），列为既有缺口。
+- ~~试点报价仍由运营文件给出税务配置引用（与门店配置引用一致时无差异），列为既有缺口。~~ 已修正（2026-10-18）：
+  取餐、堂食各轮、柜台与店员代点的报价（`pilot-configured-quote.mjs`）按报价时刻经 Store 公开读取
+  `createPostgresStoreTaxConfigurationSource` 取当时已发布且生效的门店配置所记 `taxConfigurationReference`（经当前
+  Publishing release 证明），再由 Pricing 在同一时刻读取该税务配置；已冻结的报价快照不变（退款、收据照旧）。运营文件只
+  提供内部测试的登记/专业证据，两者不一致或门店配置读不到时不报价（失败即关闭，日志只记代码），运维监控每分钟检查，
+  持续 2 分钟在 Home 与外发渠道紧急告警"Orders cannot be priced"（店员纸单+刷卡机，店主第 8 步"Use the live Store's
+  settings"后送审发布，runbook `alert-pricing-tax-configuration`）；顾客结账与柜台的失败文字提示请店员/查看 Home。
 - ~~试点运行时出票固定使用运营文件中的收据模板（仅 V1 发布证明），门店配置改用其他模板后不会出票~~ 已按决定 14 修正
   （2026-10-16）。
 - ~~第 5 步"Saved templates"只列产品内编写的模板；门店改用自编模板后，安装器发布的原模板不再出现在下拉中（"Receipt

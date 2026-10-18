@@ -220,6 +220,8 @@ async function loadBusiness(runtimeDirectory) {
     receipt,
     heldStock,
     pickupCapacity,
+    quote,
+    pricing,
   ] = await Promise.all([
     import("./pilot-installation.mjs"),
     import("./pilot-configured-resources.mjs"),
@@ -228,6 +230,8 @@ async function loadBusiness(runtimeDirectory) {
     import("./pilot-receipt.mjs"),
     import("./pilot-held-stock.mjs"),
     import("./pilot-pickup-capacity-schedule.mjs"),
+    import("./pilot-configured-quote.mjs"),
+    import("./pilot-pricing-policy.mjs"),
   ]);
   const directory = path.resolve(runtimeDirectory);
   const installation = await loadPilotInstallation(directory);
@@ -241,6 +245,14 @@ async function loadBusiness(runtimeDirectory) {
       readReceiptTemplate: receipt.readInternalReceiptTemplateReadiness,
       readHeldStockOrders: heldStock.readInternalHeldStockOrders,
       readPickupCapacityHorizon: pickupCapacity.readInternalPickupCapacityHorizon,
+      readQuoteTaxConfiguration: (current) =>
+        quote.readInternalQuoteTaxReadiness(current, () =>
+          pricing.createInternalPricingPolicy({
+            loadProfile: installation.loadProfile,
+            loadMenu: installation.loadMenu,
+            expectedDatabaseName: installation.database,
+          }),
+        ),
     },
   };
 }

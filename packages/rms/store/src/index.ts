@@ -42,7 +42,10 @@ export * from "./infrastructure/configuration-review.js";
 export * from "./infrastructure/approval-preparation.js";
 
 export * from "./infrastructure/configuration-publication.js";
-export { createPostgresStoreReceiptConfigurationSource } from "./infrastructure/receipt-configuration-source.js";
+export {
+  createPostgresStoreReceiptConfigurationSource,
+  createPostgresStoreTaxConfigurationSource,
+} from "./infrastructure/receipt-configuration-source.js";
 
 export * from "./infrastructure/persistence/public-store-profile-store.js";
 

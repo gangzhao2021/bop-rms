@@ -162,6 +162,51 @@ describe("WP-2423 Q13 alert rules", () => {
       "the receipt template check",
     ]);
   });
+  it("WP-2423: says orders cannot be priced after 2 minutes when the published tax settings are not the pilot's", () => {
+    const o = healthy();
+    o.business.quoteTax = { ready: true };
+    expect(keys(evaluateAlertConditions(o))).toEqual([]);
+    o.business.quoteTax = { ready: false, reason: "TaxConfigurationMismatch" };
+    const c = evaluateAlertConditions(o);
+    expect(keys(c)).toEqual(["pricing.tax_configuration"]);
+    expect(c.get("pricing.tax_configuration").severity).toBe("critical");
+    const text = renderAlert(
+      "pricing.tax_configuration",
+      c.get("pricing.tax_configuration").params,
+    );
+    expect(text.title).toBe("Orders cannot be priced");
+    expect(text.summary).toContain("tax settings published in Store setup");
+    expect(text.action).toContain("on paper");
+    expect(text.action).toContain("step 8");
+    expect(text.runbook).toBe("alert-pricing-tax-configuration");
+    expect(text.summary.length).toBeLessThanOrEqual(600);
+    expect(text.action.length).toBeLessThanOrEqual(400);
+    expect(`${text.title} ${text.summary} ${text.action}`).not.toMatch(/[A-Z]{2,}_[A-Z]/u);
+    let { state, notifications } = advanceAlertState(emptyAlertState(), c, T0);
+    expect(notifications).toEqual([]);
+    ({ state, notifications } = advanceAlertState(state, c, T0 + 2 * MIN));
+    expect(notifications.map((n) => [n.kind, n.key])).toEqual([
+      ["raised", "pricing.tax_configuration"],
+    ]);
+    o.business.quoteTax = { ready: false, reason: "StoreConfigurationUnavailable" };
+    expect(
+      renderAlert(
+        "pricing.tax_configuration",
+        evaluateAlertConditions(o).get("pricing.tax_configuration").params,
+      ).summary,
+    ).toContain("published settings could not be read");
+    o.business.quoteTax = { ready: true };
+    ({ state, notifications } = advanceAlertState(state, evaluateAlertConditions(o), T0 + 3 * MIN));
+    expect(notifications).toEqual([]);
+    ({ notifications } = advanceAlertState(state, evaluateAlertConditions(o), T0 + 6 * MIN));
+    expect(notifications.map((n) => [n.kind, n.key])).toEqual([
+      ["cleared", "pricing.tax_configuration"],
+    ]);
+    o.business.quoteTax = "unreadable";
+    expect(evaluateAlertConditions(o).get("monitor.source").params.sources).toEqual([
+      "the check that orders can be priced",
+    ]);
+  });
   it("says no backup exists until the first one, and nothing about the supervisor during maintenance", () => {
     const o = healthy();
     o.backup = { lastSuccessAt: null };

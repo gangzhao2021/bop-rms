@@ -152,7 +152,8 @@ export function placeErrorText(
     case "OutcomeUnknown":
       return "No answer from the system. Send again — the same order is never created twice.";
     default:
-      return "The order could not be sent. Check the order and try again.";
+      // WP-2423: e.g. no order can be priced right now; Home shows the alert and what to do.
+      return "The order could not be sent. Check the order and try again. If it keeps failing, check Home for an alert and take the order on paper.";
   }
 }
 
