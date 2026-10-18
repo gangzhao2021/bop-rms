@@ -232,6 +232,7 @@ const dineIn = {
   unfulfillable: null,
   pickupNotCollected: false,
   kitchenPhase: null,
+  remakingItemCount: 0,
   acceptBy: null,
   acceptanceHold: null,
   awaitingPayment: false,
@@ -323,6 +324,7 @@ const heldPickup = {
   unfulfillable: null,
   pickupNotCollected: false,
   kitchenPhase: null,
+  remakingItemCount: 0,
   acceptBy: at(25),
   acceptanceHold: {
     holdReference: id(0x9029),
@@ -373,6 +375,7 @@ const earlierCounterPickup = {
   unfulfillable: null,
   pickupNotCollected: false,
   kitchenPhase: null,
+  remakingItemCount: 0,
   acceptBy: null,
   acceptanceHold: null,
   awaitingPayment: false,
