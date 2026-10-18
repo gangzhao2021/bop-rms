@@ -65,7 +65,7 @@ it("returns the day-end view with each owner answer and a re-checked scope", asy
   expect(f.authorize).toHaveBeenCalledTimes(2);
   expect(f.authorize.mock.calls[0]?.[1]).toEqual({
     sessionCookie: "cookie",
-    permission: "operations.order-exception.manage",
+    permission: "payment.settlement.read",
   });
 });
 it("rejects a malformed date, a different day than requested and a changed scope", async () => {

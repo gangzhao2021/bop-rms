@@ -68,6 +68,11 @@ export interface MerchantSettlementUnmatchedCharges {
   readonly refunded: MerchantSettlementAmount;
 }
 const businessDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
+/**
+ * WP-2423 (catalog v17, Owner "单独加权限（推荐）"): the day-end settlement read's own permission,
+ * apart from handling payment and order exceptions.
+ */
+export const merchantSettlementReadPermission = "payment.settlement.read" as const;
 /** WP-2423: the asked business day is before the Store's settlement records begin. */
 export const merchantSettlementNotCovered = "MERCHANT_SETTLEMENT_NOT_COVERED" as const;
 export class MerchantSettlementNotCoveredError extends Error {
@@ -94,7 +99,7 @@ export function createMerchantSettlementRead(options: {
     tx: ConsumerTransaction,
     input: {
       readonly sessionCookie: unknown;
-      readonly permission: "operations.order-exception.manage";
+      readonly permission: typeof merchantSettlementReadPermission;
     },
   ): Promise<MerchantSettlementScope | null>;
   storeLabel(tx: ConsumerTransaction, scope: MerchantSettlementScope): Promise<string>;
@@ -158,7 +163,7 @@ export function createMerchantSettlementRead(options: {
       };
       if (input.businessDate !== null && !businessDatePattern.test(input.businessDate))
         return unavailable();
-      const permission = "operations.order-exception.manage" as const;
+      const permission = merchantSettlementReadPermission;
       const scope = await options.authorize(tx, { sessionCookie: input.sessionCookie, permission });
       if (!scope) return unavailable();
       const storeLabel = await options.storeLabel(tx, scope);

@@ -5,6 +5,7 @@ import {
   createOwnNameClient,
   OWN_NAME_PROMPT,
   OWN_NAME_PURPOSE,
+  OWN_NAME_REQUIRED,
   OwnNameError,
   ownNameFailureText,
   ownNameProblem,
@@ -27,8 +28,14 @@ describe("Home asks a staff member without a name to add one", () => {
         onSubmit={() => undefined}
       />,
     );
-    expect(OWN_NAME_PROMPT).toBe("Add your name so your team sees who did what.");
+    // Owner 2026-10-18 ("必填（推荐）"): required, with the plain reason, and no way to dismiss it.
+    expect(OWN_NAME_PROMPT).toBe(
+      "Your store asks every staff member for their name. Orders, refunds and other records show it, so your team can see who did what.",
+    );
+    expect(OWN_NAME_REQUIRED).toBe("This stays here until you add your name.");
     expect(html).toContain(OWN_NAME_PROMPT);
+    expect(html).toContain(OWN_NAME_REQUIRED);
+    expect(html).not.toMatch(/dismiss|later|skip|not now/iu);
     expect(html).toContain(OWN_NAME_PURPOSE);
     expect(html).toContain('<label for="own-name-test-name">Your name</label>');
     expect(html).toContain('autoComplete="name"');

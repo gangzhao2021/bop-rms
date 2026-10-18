@@ -39,7 +39,7 @@ async function workspace(page: import("@playwright/test").Page) {
               screenId: "PAY-RECONCILIATION",
               label: "Settlement",
               href: "/app/operations/payment-reconciliation",
-              permission: "operations.order-exception.manage",
+              permission: "payment.settlement.read",
             },
           ],
         },

@@ -260,12 +260,13 @@ export async function createInternalMerchant(
                 permission: "dining.table.qr.manage",
               },
             ]),
-        // WP-2423 P1: day-end settlement for the Store Manager (Section 88 PAY-RECONCILIATION).
+        // WP-2423 P1: day-end settlement (Section 88 PAY-RECONCILIATION) under its own read
+        // permission (catalog v17): Owner and Store Manager.
         {
           screenId: "PAY-RECONCILIATION",
           label: "Settlement",
           href: "/app/operations/payment-reconciliation",
-          permission: "operations.order-exception.manage",
+          permission: "payment.settlement.read",
         },
         // v15 finding: open exceptions and payment differences (Owner, Store Manager); the store
         // system alerts send staff here, so the page must be reachable from the navigation.

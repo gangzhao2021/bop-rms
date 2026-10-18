@@ -16,6 +16,7 @@ import {
 } from "./merchant-transaction-authorization.js";
 import {
   createMerchantSettlementRead,
+  merchantSettlementReadPermission,
   type MerchantSettlementScope,
   type MerchantSettlementWindow,
 } from "./merchant-settlement-read.js";
@@ -36,8 +37,8 @@ const matches = (a: MerchantSettlementScope, b: MerchantSettlementScope) =>
 
 /**
  * WP-2423 P1: the day-end settlement read over the owner sources. The session's selected Store
- * is resolved in the same transaction as every read, under the exception-handling permission the
- * pilot gives Store Managers; Provider facts stay in Payment and only day totals leave.
+ * is resolved in the same transaction as every read, under the settlement read permission
+ * (`payment.settlement.read`, catalog v17); Provider facts stay in Payment and only day totals leave.
  */
 export function createPersistentMerchantSettlement(options: {
   persistence: PersistentMerchantBffOptions;
@@ -129,7 +130,7 @@ export function createPersistentMerchantSettlement(options: {
                 const value = await resolve(
                   original,
                   input.sessionCookie,
-                  "operations.order-exception.manage",
+                  merchantSettlementReadPermission,
                 );
                 if (!(await value.allowed())) return unavailable();
                 return Object.freeze({
@@ -144,7 +145,7 @@ export function createPersistentMerchantSettlement(options: {
                 const again = await resolve(
                   original,
                   input.sessionCookie,
-                  "operations.order-exception.manage",
+                  merchantSettlementReadPermission,
                 );
                 return (
                   matches(settlementScope(again), settlement) && (await again.allowed()) === true

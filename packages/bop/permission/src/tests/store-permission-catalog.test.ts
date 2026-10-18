@@ -130,6 +130,20 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
       storePermissionCatalog().find((entry) => entry.code === "kitchen.ticket.close_stale"),
     ).toMatchObject({ module: "kitchen", risk: "Medium" });
   });
+  it("lets only Store Manager and Owner read the day-end settlement, apart from exceptions (v17)", () => {
+    for (const role of ["store-manager", "owner"] as const)
+      expect(storeRoleTemplateActions(role), role).toContain("payment.settlement.read");
+    for (const role of ["front-of-house", "kitchen", "inventory-manager"] as const)
+      expect(storeRoleTemplateActions(role), role).not.toContain("payment.settlement.read");
+    for (const [role, codes] of Object.entries(brandRoleTemplates))
+      expect(codes, role).not.toContain("payment.settlement.read");
+    // Reading the day's money never implies handling exceptions: no legacy name maps onto it.
+    for (const replacements of Object.values(legacyPermissionReplacements))
+      expect(replacements).not.toContain("payment.settlement.read");
+    expect(
+      storePermissionCatalog().find((entry) => entry.code === "payment.settlement.read"),
+    ).toMatchObject({ module: "payment", risk: "Medium", specified: false });
+  });
   it("lets the Brand Owner and Menu Manager read fee classification choices (v14)", () => {
     for (const role of ["brand-owner", "menu-manager"] as const)
       expect(brandRoleTemplateActions(role), role).toContain("catalog.tax-classification.read");

@@ -480,7 +480,7 @@ test("@production Reports and Settlement never sign staff out when an activity r
       screenId: "PAY-RECONCILIATION",
       label: "Settlement",
       href: "/app/operations/payment-reconciliation",
-      permission: "operations.order-exception.manage",
+      permission: "payment.settlement.read",
     },
   ]);
   const server = await identity(page);

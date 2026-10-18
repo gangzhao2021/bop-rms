@@ -77,6 +77,20 @@
   `apply-assignment`；审计记录批准凭证编号。
 - 并发：权限读取会对权限表持共享锁直到请求结束，管理写入需要更强的锁。事务封装把锁超时、序列化冲突、死锁统一报告为
   可重试冲突（不暴露 SQL 细节），角色与员工命令整笔重试（最多 4 次、短退避），不加长锁等待以免阻塞点单与厨房请求。
+- 员工姓名必填（Owner 2026-10-18，"必填（推荐）"）：每位员工都须有姓名，订单、退款与各项记录据此显示"谁做的"。员工邀请目前经
+  Cognito/运营计划在产品外完成（外部关口），应用内邀请尚未建成；**建成时必须要求填写姓名，没有姓名不能发出邀请**。在此之前，未记录
+  姓名的员工登录后首页显示"Add your name"提示，说明原因并写明"This stays here until you add your name."，不可关闭，保存后才消失。
+
+## 日结页权限（2026-10-18，Owner"单独加权限（推荐）"）
+
+- 原状：日结页（Section 88 `PAY-RECONCILIATION`，`/app/operations/payment-reconciliation`）试点期借用
+  `operations.order-exception.manage`（处理付款与订单异常）作为页面、BFF 与导航权限。Section 88 该行的访问列只写
+  "Finance / Support"，未写明权限名；页面登记表中的 `payment.operate` 是导入工具按模块给出的缺省值（同 `RPT-OPS-DASHBOARD`
+  的 `reporting.read`），不在目录中。
+- 决定：权限目录 v17 新增 `payment.settlement.read`（读取门店日结：收款、退款、刷卡机与服务商对账结果；风险 Medium），
+  Owner 与 Store Manager 模板持有，前台、厨房、库存管理员与品牌模板不持有；不设旧名对照（查看当日资金不意味着能处理异常）。
+  日结页读取、BFF 与导航改用该权限；日结页上的异常处理动作（未匹配扣款退款、对账跟进）仍要求 `operations.order-exception.manage`。
+- 已开通门店需安装目录 v17 并把门店角色升级到 v17（只增 Owner 与 Store Manager 各 1 项授权）；品牌模板不变。
 
 ## 不改变
 

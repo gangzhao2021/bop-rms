@@ -10,6 +10,7 @@ import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
 import { createPersistentMerchantOrderExceptions } from "../../../apps/api/src/persistent-merchant-order-exceptions.ts";
 import { seedJourneyStorePublication } from "../test-support/dine-in-journey-seed.mjs";
+import { storeRoleTemplateActions } from "../../bop/permission/src/index.ts";
 
 const { Client } = pg;
 const id = (n) => "01a1e000-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -94,7 +95,8 @@ it("loads the open business day's settlement with card-machine payments, also wh
         scope: ownerScope,
         actor: id(10),
         at: now(),
-        extraPermissions: ["operations.order-exception.manage"],
+        // Catalog v17: the settlement read has its own permission; exceptions keep theirs.
+        extraPermissions: ["operations.order-exception.manage", "payment.settlement.read"],
       });
       await seedJourneyStorePublication({
         client: admin,
@@ -224,6 +226,50 @@ it("loads the open business day's settlement with card-machine payments, also wh
         captured: { count: 0, amountMinor: "0", currencyCode: "CAD" },
         refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" },
       });
+
+      // WP-2423 catalog v17 (Owner "单独加权限（推荐）"): who reads the day-end settlement is decided
+      // by payment.settlement.read as the Store role templates grant it — the Owner and Store
+      // Manager read the day, a cashier (Front of House) and staff holding only the exception
+      // permission are refused before any owner read.
+      const fixedActions = new Set(["merchant.access", "order.accept", "ordering.operate"]);
+      const staffSession = async (n, actions) =>
+        seedMerchantAcceptanceSession({
+          admin,
+          runner: transactions,
+          scope: ownerScope,
+          actor: id(600 + n),
+          at: now(),
+          extraPermissions: actions.filter((action) => !fixedActions.has(action)),
+          referencePrefix: "01a1e2" + String(n).padStart(2, "0"),
+          sessionReferencePrefix: "01a1e3" + String(n).padStart(2, "0"),
+        });
+      for (const [n, actions, allowed] of [
+        [1, storeRoleTemplateActions("owner"), true],
+        [2, storeRoleTemplateActions("store-manager"), true],
+        [3, storeRoleTemplateActions("front-of-house"), false],
+        [4, ["operations.order-exception.manage"], false],
+      ]) {
+        const staff = await staffSession(n, actions);
+        const answer = createPersistentMerchantSettlement({
+          persistence: {
+            ...staff.persistence,
+            transactions,
+            now,
+            publication: {
+              configurationType: "STORE_CONFIGURATION",
+              purposeCode: "STORE_CONFIGURATION",
+              requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
+            },
+          },
+          resolveConfiguration: async () => ({
+            providerAccountReference: id(20),
+            environment: "Test",
+          }),
+          settlementRunReference: async () => null,
+        })({ sessionCookie: staff.sessionCookie, businessDate: today });
+        if (allowed) assert.deepEqual((await answer).cardMachine, expected, "session " + n);
+        else await assert.rejects(answer, /MERCHANT_SETTLEMENT_UNAVAILABLE/u, "session " + n);
+      }
 
       // WP-2423 (v15 Sep 19 answered 403): a day before the Store's settlement records begin is
       // an answer naming the first covered day, after the caller's scope is resolved; the first

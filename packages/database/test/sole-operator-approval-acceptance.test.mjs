@@ -222,8 +222,10 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
             "payment.refund.request",
             "payment.refund.approve",
             "payment.refund.execute",
-            // WP-2423 Q14: the day-end settlement and the Store sales reports (step 12).
+            // WP-2423 Q14: the day-end settlement and the Store sales reports (step 12); the
+            // settlement read has its own permission since catalog v17.
             "operations.order-exception.manage",
+            "payment.settlement.read",
             "reporting.sales.read",
             "reporting.sales.export",
           ],

@@ -108,7 +108,7 @@ test("@production Settlement shows the day's totals, the run result and differen
               screenId: "PAY-RECONCILIATION",
               label: "Settlement",
               href: "/app/operations/payment-reconciliation",
-              permission: "operations.order-exception.manage",
+              permission: "payment.settlement.read",
             },
           ],
         },
@@ -225,7 +225,7 @@ test("@production WP-2423 Settlement explains an open day difference and a day r
               screenId: "PAY-RECONCILIATION",
               label: "Settlement",
               href: "/app/operations/payment-reconciliation",
-              permission: "operations.order-exception.manage",
+              permission: "payment.settlement.read",
             },
             {
               screenId: "OPS-ORDER-EXCEPTION",
@@ -352,7 +352,7 @@ test("@production WP-2423 Settlement keeps a day settled twice readable and answ
               screenId: "PAY-RECONCILIATION",
               label: "Settlement",
               href: "/app/operations/payment-reconciliation",
-              permission: "operations.order-exception.manage",
+              permission: "payment.settlement.read",
             },
           ],
         },
@@ -420,4 +420,54 @@ test("@production WP-2423 Settlement keeps a day settled twice readable and answ
   await page.getByRole("button", { name: "Show Sun, Sep 20" }).click();
   await expect(page.getByRole("heading", { name: "Business day: Sun, Sep 20" })).toBeVisible();
   expect(requested).toEqual(["2026-09-20", "2026-09-19", "2026-09-20"]);
+});
+
+// WP-2423 (catalog v17, Owner "单独加权限（推荐）"): Settlement has its own read permission. Staff
+// without it (a cashier: orders, pickup, tables) see no Settlement entry, and the page itself
+// answers the server's refusal as "No access" without any of the day's money.
+test("@production WP-2423 Settlement is hidden from staff without the settlement permission and fails closed", async ({
+  page,
+}) => {
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: { ...scope, timeZone: "America/Toronto" },
+          authorizedStores: [scope],
+          businessDate: "2026-09-22",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "OPS-ORDER-QUEUE",
+              label: "Orders",
+              href: "/operations/orders",
+              permission: "ordering.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  let reads = 0;
+  await page.route("**/merchant/settlement*", (route) => {
+    reads += 1;
+    return route.fulfill({ status: 403, headers, json: { error: "request_denied" } });
+  });
+  await page.goto("/app/operations/payment-reconciliation");
+  const workspace = page.getByRole("navigation", { name: "Workspace" });
+  await expect(workspace.getByRole("link", { name: "Orders" }).first()).toBeVisible();
+  await expect(workspace.getByRole("link", { name: "Settlement" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
+  await expect(
+    page.getByText("You don't have access to this page. Ask the owner or a manager."),
+  ).toBeVisible();
+  await expect(page.getByText("$1,234.50")).toHaveCount(0);
+  expect(reads).toBeGreaterThan(0);
+  await expectNoInternalText(page);
 });

@@ -48,8 +48,12 @@
  * publishing.draft.create and publishing.review.submit: it submits hours changes for review when the
  * Store's configuration came from Store setup (a Publishing review); it holds no catalog/pricing
  * permission, so it cannot submit menus or prices, and approving and publishing stay the Owner's.
+ * v17 (2026-10-18, WP-2423, Owner "单独加权限（推荐）"): payment.settlement.read reads the Store's
+ * day-end settlement (Section 88 PAY-RECONCILIATION: takings, refunds, card machine and the Provider
+ * statement check) apart from handling exceptions, so reading the day's money never implies
+ * resolving payment or order exceptions. Owner and Store Manager hold it.
  */
-export const storePermissionCatalogVersion = 16 as const;
+export const storePermissionCatalogVersion = 17 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -325,6 +329,12 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     ["payment.refund.request", "Request an ordinary refund within policy", "High"],
     ["payment.refund.approve", "Approve a refund above the requester's limit", "High"],
     ["payment.refund.execute", "Execute an approved refund", "High"],
+    // v17 (WP-2423): the day-end settlement page, apart from exception handling.
+    [
+      "payment.settlement.read",
+      "Read the Store's day-end settlement and payment statement check",
+      "Medium",
+    ],
   ]),
   ...define("operations", [
     ["operations.order_exception.manage", "Handle payment and order exceptions", "High"],
@@ -496,6 +506,8 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
       ]),
       "payment.refund.request",
       "payment.refund.execute",
+      // v17 (WP-2423): reads the day-end settlement.
+      "payment.settlement.read",
       ...pick([
         "inventory.item.read",
         "inventory.item.history.read",

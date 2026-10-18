@@ -603,7 +603,7 @@ export async function verifyPersistentMerchantBff({
               [
                 "PAY-RECONCILIATION",
                 "/app/operations/payment-reconciliation",
-                "operations.order-exception.manage",
+                "payment.settlement.read",
               ],
               ["RPT-OPS-DASHBOARD", "/app/reports/operations", "reporting.sales.read"],
               ["INV-ITEM-LIST", "/app/supply/items", "inventory.item.read"],
@@ -701,7 +701,11 @@ export async function verifyPersistentMerchantBff({
     const before = queryCount;
     const wide = await service().bootstrap(cookie.value);
     pilotNavigation = false;
-    assert.equal(wide.workspace.navigation.length, 7); // The synthetic role grants a few entries.
+    // The synthetic role grants a few entries. It holds the exception permission but not
+    // payment.settlement.read (catalog v17), so Exceptions is listed and Settlement is not.
+    assert.equal(wide.workspace.navigation.length, 6);
+    assert.ok(wide.workspace.navigation.some((entry) => entry.screenId === "OPS-ORDER-EXCEPTION"));
+    assert.ok(!wide.workspace.navigation.some((entry) => entry.screenId === "PAY-RECONCILIATION"));
     // One policy materialization per 16 actions, not one per entry: 177 statements before.
     assert.ok(queryCount - before <= 60, "session read used " + (queryCount - before));
   }

@@ -55,7 +55,7 @@ const pilotEntries: readonly (readonly [string, string, string, string, readonly
     "PAY-RECONCILIATION",
     "Settlement",
     "/app/operations/payment-reconciliation",
-    "operations.order-exception.manage",
+    "payment.settlement.read",
     ["owner", "store-manager"],
   ],
   [
@@ -396,7 +396,24 @@ test("@production Home asks a member with no name to add it, and thanks them onc
   const home = await pilotHome(page, "owner", () => problem, "Missing");
   await page.goto("/app");
   const prompt = page.getByRole("region", { name: "Add your name" });
-  await expect(prompt.getByText("Add your name so your team sees who did what.")).toBeVisible();
+  // Owner 2026-10-18 ("必填（推荐）"): the name is required; the prompt says why and stays until done.
+  await expect(
+    prompt.getByText(
+      "Your store asks every staff member for their name. Orders, refunds and other records show it, so your team can see who did what.",
+    ),
+  ).toBeVisible();
+  await expect(prompt.getByText("This stays here until you add your name.")).toBeVisible();
+  await expect(prompt.getByRole("button")).toHaveCount(1);
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Add your name" })).toBeVisible();
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(page.getByRole("region", { name: "Add your name" })).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/own-name-required-${width}.png` });
+  }
   await prompt.getByRole("button", { name: "Save name" }).click();
   await expect(prompt.getByRole("alert")).toBeVisible();
   expect(home.nameSaves).toHaveLength(0);

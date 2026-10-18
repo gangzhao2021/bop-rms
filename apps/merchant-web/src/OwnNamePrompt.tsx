@@ -6,6 +6,9 @@ import { newOperationReference } from "./operation-reference.js";
  * so lists, approvals and records show who did what. Only the name is collected; once it is
  * recorded a manager maintains it on the staff page. Nothing is shown when the member already has
  * a name, is not a member of this Store, or the read fails (the rest of Home is unaffected).
+ * Owner 2026-10-18 ("必填（推荐）"): a staff name is required. Until the in-app invite exists (it
+ * must then ask for the name), the prompt says so, cannot be dismissed and stays on Home until
+ * the name is saved.
  */
 export type OwnNameState =
   | { readonly name: "Missing"; readonly profileVersion: 0 }
@@ -28,7 +31,9 @@ export interface OwnNameClient {
 }
 
 export const OWN_NAME_PURPOSE = "Shown to your team so everyone can see who did what.";
-export const OWN_NAME_PROMPT = "Add your name so your team sees who did what.";
+export const OWN_NAME_PROMPT =
+  "Your store asks every staff member for their name. Orders, refunds and other records show it, so your team can see who did what.";
+export const OWN_NAME_REQUIRED = "This stays here until you add your name.";
 export const OWN_NAME_SAVED = "Thanks. Your team now sees your name.";
 
 const exact = (value: unknown, keys: readonly string[]): Record<string, unknown> => {
@@ -151,9 +156,13 @@ export function OwnNamePromptView({
     hint = idPrefix + "-hint",
     error = idPrefix + "-error";
   return (
-    <section className="overview-card own-name-prompt" aria-labelledby={idPrefix + "-heading"}>
+    <section
+      className="overview-card own-name-prompt own-name-prompt--required"
+      aria-labelledby={idPrefix + "-heading"}
+    >
       <h3 id={idPrefix + "-heading"}>Add your name</h3>
       <p>{OWN_NAME_PROMPT}</p>
+      <p className="own-name-prompt__required">{OWN_NAME_REQUIRED}</p>
       <form
         noValidate
         onSubmit={(event) => {

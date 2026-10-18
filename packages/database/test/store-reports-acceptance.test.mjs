@@ -116,6 +116,8 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
           "operations.order-exception.manage",
           "reporting.sales.read",
           "reporting.sales.export",
+          // Catalog v17: the day-end settlement the reports are compared with.
+          "payment.settlement.read",
         ],
       });
       // Synthetic test-only Store configuration: today's business day began three hours ago.

@@ -1146,7 +1146,7 @@ test("@production a kitchen display shows the kitchen only and keeps focus on th
               "PAY-RECONCILIATION",
               "Settlement",
               "/app/operations/payment-reconciliation",
-              "operations.order-exception.manage",
+              "payment.settlement.read",
             ),
             nav("RPT-OPS-DASHBOARD", "Reports", "/app/reports/operations", "reporting.sales.read"),
             nav("IAM-ROLE-LIST", "Roles", "/app/organization/roles", "identity.role.read"),

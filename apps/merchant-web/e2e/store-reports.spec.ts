@@ -41,7 +41,7 @@ test("@production Reports show sales, items, hours and tips for a period, downlo
               screenId: "PAY-RECONCILIATION",
               label: "Settlement",
               href: "/app/operations/payment-reconciliation",
-              permission: "operations.order-exception.manage",
+              permission: "payment.settlement.read",
             },
             {
               screenId: "RPT-OPS-DASHBOARD",

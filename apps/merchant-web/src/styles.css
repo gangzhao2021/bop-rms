@@ -9343,3 +9343,11 @@ body:has(.product-complete-draft) .bop-shell__header,
   color: var(--bop-color-text-muted);
   font-size: 13px;
 }
+/* Owner 2026-10-18: a staff name is required, so the prompt reads as something to do now. */
+.workspace-page .overview-card.own-name-prompt--required {
+  border-left: 4px solid var(--bop-color-warning);
+}
+.own-name-prompt__required {
+  margin: 0 0 var(--bop-space-2);
+  font-weight: 600;
+}
