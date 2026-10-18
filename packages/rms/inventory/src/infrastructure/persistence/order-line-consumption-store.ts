@@ -1,6 +1,7 @@
 import { planOrderLineKitchenEffects } from "../../domain/order-line-consumption.js";
 import { parseInventoryInstant, parseInventoryReference } from "../../domain/inventory-item.js";
 import { createPostgresStockReservationStore } from "./stock-reservation-store.js";
+import { coverStockUsedBeyondCount, type LedgerTransaction } from "./ledger-posting.js";
 import type {
   InventoryItemTransaction,
   InventoryItemTransactionRunner,
@@ -119,12 +120,30 @@ export function createPostgresOrderLineConsumptionStore(
               ? (Object.getOwnPropertyDescriptor(row, "version")?.value as unknown)
               : null;
           if (typeof ledger !== "string" || !/^[1-9][0-9]*$/u.test(ledger)) return fail();
+          // DEC-INV-COUNT-SHORT: a count may have found less than this Order holds. The dish was
+          // made, so what on-hand does not cover is recorded first as stock used beyond the count.
+          const covered =
+            effect.action === "Consume" && effect.quantity !== null
+              ? await coverStockUsedBeyondCount(
+                  tx as unknown as LedgerTransaction,
+                  { tenantReference: tenant, brandReference: brand, storeReference: store },
+                  {
+                    accountReference: effect.accountReference,
+                    quantity: effect.quantity,
+                    reservationReference: effect.reservation.reservationReference,
+                    actorReference: actor,
+                    occurredAt: postedAt,
+                    nextReference: () => parseInventoryReference(options.nextReference()),
+                    audit: input.audit,
+                  },
+                )
+              : null;
           const operationReference = parseInventoryReference(options.nextReference());
           const result = await reservations.commit({
             operationReference,
             accountReference: effect.accountReference,
             action: effect.action,
-            expectedLedgerVersion: Number(ledger),
+            expectedLedgerVersion: covered?.ledgerVersion ?? Number(ledger),
             quantity: effect.quantity,
             reservation: effect.reservation,
             movementReference:
@@ -157,6 +176,7 @@ export function createPostgresOrderLineConsumptionStore(
               accountReference: effect.accountReference,
               quantity: effect.quantity,
               reservationReference: effect.reservation.reservationReference,
+              ...(covered?.usedBeyondCount ? { usedBeyondCount: covered.usedBeyondCount } : {}),
             }),
           );
         }

@@ -729,6 +729,7 @@ describe("migration catalog", () => {
       "2000_085_alter_pickup_in_person_code_not_shown",
       "2000_086_alter_kitchen_rework_cancel",
       "2000_087_alter_store_waste_review_kitchen_remake",
+      "2000_088_alter_stock_count_short_against_orders",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

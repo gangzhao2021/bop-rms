@@ -8,11 +8,16 @@ const mocks = vi.hoisted(() => ({
   holding: vi.fn(),
   state: vi.fn(),
   fence: vi.fn(),
+  remakes: vi.fn(async (): Promise<unknown[]> => []),
 }));
 const id = (n: number) => `0190ee39-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 vi.mock("./dining-order-delivery-progress.js", async (original) => ({
   ...(await original<typeof import("./dining-order-delivery-progress.js")>()),
   createDiningOrderDeliveryProgress: () => ({ load: mocks.progress }),
+}));
+vi.mock("@rms/kitchen", async (original) => ({
+  ...(await original<object>()),
+  listOpenKitchenReworkItems: mocks.remakes,
 }));
 vi.mock("./merchant-stock-holding-orders.js", () => ({
   readEarlierOrdersHoldingStock: mocks.holding,
@@ -290,6 +295,43 @@ it("WP-2423: counts a table's items ready to serve in any round, as the Tables c
   });
   const result = await read();
   expect(result.items[0]).toMatchObject({ currentPhase: "Submitted", readyToServeItemCount: 1 });
+});
+
+it("WP-2423 (2026-10-18): a dish the kitchen is remaking is not ready to serve, as on the serving page", async () => {
+  mocks.state.mockResolvedValue({
+    orderVersion: 3,
+    batches: [{ orderBatchReference: id(5), sequence: 1, acceptance: {}, cancellation: null }],
+  });
+  mocks.progress.mockResolvedValue({
+    orderVersion: 3,
+    phase: "Ready",
+    items: [
+      { orderItemReference: id(20), phase: "Ready", orderedQuantity: 2, remainingQuantity: 2 },
+      { orderItemReference: id(21), phase: "Ready", orderedQuantity: 1, remainingQuantity: 1 },
+      { orderItemReference: id(22), phase: "Cancelled", orderedQuantity: 1, remainingQuantity: 0 },
+    ],
+  });
+  mocks.remakes.mockResolvedValueOnce([
+    { orderReference: id(4), orderItemReference: id(20), openQuantity: 1 },
+    { orderReference: id(4), orderItemReference: id(22), openQuantity: 1 },
+  ]);
+  const result = await read();
+  expect(mocks.remakes).toHaveBeenCalledWith(
+    expect.anything(),
+    { brandReference: id(2), storeReference: id(3) },
+    [id(4)],
+  );
+  expect(result.items[0]).toMatchObject({
+    currentPhase: "Ready",
+    readyToServeItemCount: 2,
+    remakingItemCount: 1,
+  });
+  // An unreadable remake list never blanks the Orders page: the delivery count stands.
+  mocks.remakes.mockRejectedValueOnce(new Error("unavailable"));
+  expect((await read()).items[0]).toMatchObject({
+    readyToServeItemCount: 3,
+    remakingItemCount: 0,
+  });
 });
 
 it("WP-2423 (v15 2026-10-18, 40P01): fences every listed Order in ascending reference before reading any, keeping the list newest first", async () => {

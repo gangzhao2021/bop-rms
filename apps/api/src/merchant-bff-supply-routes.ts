@@ -304,6 +304,7 @@ export function installMerchantSupplyRoutes(
     State: 409,
     LineInvalid: 422,
     Invalid: 400,
+    Unavailable: 503,
   } as const;
   const countFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantStockCountError)) {

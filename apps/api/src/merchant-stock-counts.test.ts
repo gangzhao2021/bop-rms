@@ -169,6 +169,9 @@ const d = vi.hoisted(() => ({
       ) => Promise<{ assignments: unknown[]; pending: unknown[] }>
     >(),
   waste: vi.fn(),
+  shortages: vi.fn(async (): Promise<unknown[]> => []),
+  orders: vi.fn(async (): Promise<unknown[]> => []),
+  lots: vi.fn(async (): Promise<Map<string, unknown>> => new Map()),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
 vi.mock("./merchant-stock-catalog.js", () => ({
@@ -190,6 +193,12 @@ vi.mock("@rms/inventory", async (original) => ({
   createPostgresStockCountPorts: d.ports,
   executeStockCountCommand: d.execute,
   listStockCounts: d.list,
+  listStoreStockShortages: d.shortages,
+  stockLotLabels: d.lots,
+}));
+vi.mock("@rms/ordering", async (original) => ({
+  ...(await original<object>()),
+  listStoreOrdersOfSubmissions: d.orders,
 }));
 type Options = Parameters<typeof createMerchantStockCounts>[0];
 type Authorize = (request: { action: string; permission: string }) => Promise<unknown>;
@@ -394,5 +403,135 @@ describe("WP-2423 stock count authorization", () => {
     f.authorizeActions.mockImplementationOnce(allowAll).mockResolvedValue(new Map());
     await expect(f.service.command(f.submit)).rejects.toMatchObject({ code: "PermissionDenied" });
     expect(d.execute).toHaveBeenCalledOnce();
+  });
+});
+
+describe("DEC-INV-COUNT-SHORT: counts that leave stock short against open orders", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const short = {
+    accountReference: id(40),
+    itemReference: id(41),
+    locationReference: id(42),
+    lotReference: id(43),
+    unitCode: "L",
+    onHand: "0.1",
+    reserved: "0.26",
+    shortQuantity: "0.16",
+    usedBeyondCount: "0",
+    holding: [
+      { submissionReference: id(44), quantity: "0.13" },
+      { submissionReference: id(45), quantity: "0.13" },
+    ],
+  };
+  const used = {
+    ...short,
+    accountReference: id(50),
+    itemReference: id(51),
+    lotReference: null,
+    onHand: "0",
+    reserved: "0",
+    shortQuantity: "0",
+    usedBeyondCount: "0.2",
+    holding: [],
+  };
+  it("lists short items with the open orders holding them, by number, and items used beyond the count", async () => {
+    const f = setup();
+    d.shortages.mockResolvedValue([short, used]);
+    d.lots.mockResolvedValue(new Map([[id(43), { lotCode: "MILK-1017", expiryDate: null }]]));
+    d.orders.mockResolvedValue([
+      {
+        submissionReference: id(44),
+        orderReference: id(46),
+        orderBatchReference: id(47),
+        orderNumber: "P-9",
+        orderType: "Pickup",
+        businessDate: "2026-10-18",
+        ended: false,
+      },
+      {
+        submissionReference: id(45),
+        orderReference: id(48),
+        orderBatchReference: id(49),
+        orderNumber: "T-11",
+        orderType: "DineIn",
+        businessDate: "2026-10-18",
+        ended: false,
+      },
+    ]);
+    const view = (await f.service.query({ ...f.input, countReference: null, before: null })) as {
+      shortages: unknown;
+    };
+    expect(d.orders).toHaveBeenCalledWith(
+      expect.anything(),
+      { brandReference: id(8), storeReference: id(9) },
+      [id(44), id(45)],
+    );
+    expect(view.shortages).toEqual([
+      {
+        itemReference: id(41),
+        locationReference: id(42),
+        lotCode: "MILK-1017",
+        unitCode: "L",
+        onHand: "0.1",
+        reserved: "0.26",
+        shortQuantity: "0.16",
+        usedBeyondCount: "0",
+        orders: [
+          {
+            orderReference: id(46),
+            orderNumber: "P-9",
+            orderType: "Pickup",
+            businessDate: "2026-10-18",
+            quantity: "0.13",
+            ended: false,
+          },
+          {
+            orderReference: id(48),
+            orderNumber: "T-11",
+            orderType: "DineIn",
+            businessDate: "2026-10-18",
+            quantity: "0.13",
+            ended: false,
+          },
+        ],
+      },
+      {
+        itemReference: id(51),
+        locationReference: id(42),
+        lotCode: null,
+        unitCode: "L",
+        onHand: "0",
+        reserved: "0",
+        shortQuantity: "0",
+        usedBeyondCount: "0.2",
+        orders: [],
+      },
+    ]);
+    // Internal references of accounts and Order rounds never reach the browser.
+    expect(JSON.stringify(view)).not.toContain(id(40));
+    expect(JSON.stringify(view)).not.toContain(id(44));
+  });
+  it("reports how many items a posted count left short", async () => {
+    const f = setup();
+    d.execute.mockResolvedValue({
+      outcome: "Applied",
+      count: { aggregateVersion: 9 },
+      movements: [{}],
+    });
+    d.shortages.mockResolvedValue([short, used]);
+    await expect(
+      f.service.command({
+        ...f.input,
+        body: { action: "ApproveAndPost", ...base, postOperationReference: id(7) },
+      }),
+    ).resolves.toEqual({ status: "Applied", version: 9, movements: 1, shortItems: 1 });
+  });
+  it("says Unavailable, not that the count changed, when its sources cannot be written", async () => {
+    const f = setup();
+    const { StockCountError } = await import("@rms/inventory");
+    d.execute.mockRejectedValueOnce(new StockCountError("STOCK_COUNT_DEPENDENCY_UNAVAILABLE"));
+    await expect(f.service.command(f.submit)).rejects.toMatchObject({ code: "Unavailable" });
+    d.execute.mockRejectedValueOnce(new StockCountError("STOCK_COUNT_CONFLICT"));
+    await expect(f.service.command(f.submit)).rejects.toMatchObject({ code: "Conflict" });
   });
 });

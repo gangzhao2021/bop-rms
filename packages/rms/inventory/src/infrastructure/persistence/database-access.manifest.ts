@@ -722,6 +722,15 @@ const databaseAccessManifestInput = {
       source: "packages/rms/inventory/src/infrastructure/persistence/stock-count-store.ts",
     },
     {
+      id: "stock-count-store.read.stock_reservation_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_inventory", table: "stock_reservation_version" },
+      principal: { kind: "module", id: "@rms/inventory" },
+      readPattern: "owner-repository",
+      source: "packages/rms/inventory/src/infrastructure/persistence/stock-count-store.ts",
+    },
+    {
       id: "stock-count-store.read.stock_lot",
       operation: "read",
       mechanism: "repository",

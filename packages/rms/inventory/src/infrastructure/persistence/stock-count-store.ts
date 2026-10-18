@@ -460,3 +460,108 @@ export async function stockLotLabels(
     ]),
   );
 }
+
+/**
+ * DEC-INV-COUNT-SHORT (2026-10-18): a stock account a manager has to act on after a count.
+ * `ShortForOrders`: the count found less than open Orders hold (available below zero); the rounds
+ * still holding some of it are listed. `UsedBeyondCount`: the kitchen since finished held dishes
+ * with more than was counted (recorded as USED_BEYOND_COUNT adjustments) and no count has covered
+ * the account since. Both clear on their own: the first once stock is received, orders are made or
+ * cancelled; the second once a count of the account is posted.
+ */
+export interface StockShortage {
+  readonly accountReference: string;
+  readonly itemReference: string;
+  readonly locationReference: string;
+  readonly lotReference: string | null;
+  readonly unitCode: string;
+  readonly onHand: string;
+  readonly reserved: string;
+  /** Held by open orders beyond what is on hand (0 when not short for orders). */
+  readonly shortQuantity: string;
+  /** Used beyond the count since the account was last counted (0 when none). */
+  readonly usedBeyondCount: string;
+  /** Order rounds (submissions) still holding some of this account, with what each holds. */
+  readonly holding: readonly { readonly submissionReference: string; readonly quantity: string }[];
+}
+const trimDecimal = (value: unknown): string => {
+  const text = String(value);
+  if (!/^-?\d+(?:\.\d+)?$/u.test(text)) return dependency();
+  const [whole = "0", fraction = ""] = text.split(".");
+  const kept = fraction.replace(/0+$/u, "");
+  return kept === "" ? whole : `${whole}.${kept}`;
+};
+/** The Store's stock accounts short against open orders or used beyond their count (read only). */
+export async function listStoreStockShortages(
+  tx: LedgerTransaction,
+  scope: StockCountScope,
+): Promise<readonly StockShortage[]> {
+  await scoped(tx, scope);
+  const rows = (
+    await tx.query(
+      `WITH used AS (
+         SELECT m.account_id,sum(m.base_quantity_delta) AS quantity
+         FROM rms_inventory.stock_movement m JOIN rms_inventory.stock_account a
+           ON a.tenant_id=m.tenant_id AND a.brand_id=m.brand_id AND a.store_id=m.store_id AND a.account_id=m.account_id
+         WHERE m.tenant_id=$1 AND m.brand_id=$2 AND m.store_id=$3 AND m.movement_type='Adjustment'
+           AND m.record_json->>'reasonCode'='USED_BEYOND_COUNT'
+           AND NOT EXISTS (SELECT 1 FROM rms_inventory.stock_count c JOIN rms_inventory.stock_count_version v
+               ON v.tenant_id=c.tenant_id AND v.brand_id=c.brand_id AND v.store_id=c.store_id
+                 AND v.count_id=c.count_id AND v.version=c.current_version
+             CROSS JOIN LATERAL jsonb_array_elements(v.count_json->'lines') l
+             WHERE c.tenant_id=m.tenant_id AND c.brand_id=m.brand_id AND c.store_id=m.store_id
+               AND c.location_id=a.location_id AND v.status='Posted'
+               AND l->>'itemReference'=a.item_id::text AND (l->>'lotReference') IS NOT DISTINCT FROM a.lot_id::text
+               AND (l->>'balanceVersion')::bigint>=m.ledger_version)
+         GROUP BY m.account_id)
+       SELECT a.account_id::text account,a.item_id::text item,a.location_id::text location,a.lot_id::text lot,
+         a.unit_code unit,b.on_hand::text on_hand,b.reserved::text reserved,
+         greatest(-b.available,0)::text short,coalesce(u.quantity,0)::text used,
+         coalesce((SELECT jsonb_agg(jsonb_build_object('submission',h.submission,'quantity',h.quantity::text)
+             ORDER BY h.submission)
+           FROM (SELECT v.submission_id::text submission,sum((v.snapshot_json->>'remainingQuantity')::numeric) quantity
+             FROM rms_inventory.stock_reservation_version v
+             WHERE v.tenant_id=a.tenant_id AND v.brand_id=a.brand_id AND v.store_id=a.store_id AND v.account_id=a.account_id
+               AND (v.snapshot_json->>'remainingQuantity')::numeric>0
+               AND NOT EXISTS (SELECT 1 FROM rms_inventory.stock_reservation_version n
+                 WHERE n.tenant_id=v.tenant_id AND n.brand_id=v.brand_id AND n.store_id=v.store_id
+                   AND n.reservation_id=v.reservation_id AND n.version>v.version)
+             GROUP BY v.submission_id) h),'[]'::jsonb) holding
+       FROM rms_inventory.stock_account a JOIN rms_inventory.stock_balance b
+         ON b.tenant_id=a.tenant_id AND b.brand_id=a.brand_id AND b.store_id=a.store_id AND b.account_id=a.account_id
+       LEFT JOIN used u ON u.account_id=a.account_id
+       WHERE a.tenant_id=$1 AND a.brand_id=$2 AND a.store_id=$3 AND (b.available<0 OR u.account_id IS NOT NULL)
+       ORDER BY a.item_id,a.location_id,a.lot_id NULLS FIRST LIMIT 200`,
+      [scope.tenantReference, scope.brandReference, scope.storeReference],
+    )
+  ).rows;
+  return Object.freeze(
+    rows.map((row) => {
+      const short = trimDecimal(row.short);
+      const holding = Array.isArray(row.holding) ? (row.holding as unknown[]) : dependency();
+      return Object.freeze({
+        accountReference: String(row.account),
+        itemReference: String(row.item),
+        locationReference: String(row.location),
+        lotReference: row.lot === null ? null : String(row.lot),
+        unitCode: String(row.unit),
+        onHand: trimDecimal(row.on_hand),
+        reserved: trimDecimal(row.reserved),
+        shortQuantity: short,
+        usedBeyondCount: trimDecimal(row.used),
+        // Only a short account names the orders; used-beyond is about the count, not an order.
+        holding: Object.freeze(
+          short === "0"
+            ? []
+            : holding.map((entry) => {
+                const value = entry as { submission?: unknown; quantity?: unknown };
+                return Object.freeze({
+                  submissionReference: String(value.submission),
+                  quantity: trimDecimal(value.quantity),
+                });
+              }),
+        ),
+      });
+    }),
+  );
+}

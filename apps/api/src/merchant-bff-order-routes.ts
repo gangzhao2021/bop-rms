@@ -97,6 +97,8 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
     ...(item.readyToServeItemCount === undefined
       ? {}
       : { readyToServeItemCount: item.readyToServeItemCount }),
+    // WP-2423 (2026-10-18): dine-in portions the kitchen is remaking ("Being remade").
+    ...(item.remakingItemCount === undefined ? {} : { remakingItemCount: item.remakingItemCount }),
     // WP-2423 (v15 2026-10-18): a pickup's kitchen state on the detail before Ordering records it.
     ...(item.kitchenPhase === undefined ? {} : { kitchenPhase: item.kitchenPhase }),
     observedAt: item.observedAt,

@@ -165,11 +165,38 @@ export function calculateReservationBalance(value: unknown): ReservationBalanceC
       quantity: decimal(quantity),
       before: snapshot(onHand, reserved, available, Number(before.ledgerVersion)),
       after: snapshot(nextOnHand, nextReserved, nextAvailable, Number(before.ledgerVersion) + 1),
+      // DEC-INV-COUNT-SHORT (2026-10-18): a posted count may leave stock short against open
+      // orders (available below zero). Releasing or consuming what an order already holds never
+      // makes that worse, so it needs no control; only a change that lowers availability below
+      // zero (a new reservation, consuming unreserved stock) or on-hand below zero does.
       requiredControl:
-        nextOnHand < 0n || nextAvailable < 0n
+        nextOnHand < 0n || (nextAvailable < 0n && nextAvailable < available)
           ? control[raw.negativeStockPolicy as NegativeStockPolicy]
           : "None",
     });
+  } catch (error) {
+    if (error instanceof ReservationBalanceError) throw error;
+    return invalid();
+  }
+}
+
+/**
+ * DEC-INV-COUNT-SHORT (2026-10-18): the quantity the kitchen used beyond the counted stock when it
+ * finishes a dish whose ingredients an Order already holds, or null when on-hand covers it. A count
+ * posted below what open orders hold keeps their reservations; the dish was made, so the stock
+ * existed (the count missed it, or supply arrived unrecorded). The ledger records the difference as
+ * its own Adjustment before the consumption, for a manager to check with a recount, and on-hand
+ * never goes below zero. Exact base-unit decimals; both inputs non-negative, quantity positive.
+ */
+export function stockUsedBeyondCount(input: {
+  readonly onHand: string;
+  readonly quantity: string;
+}): string | null {
+  try {
+    const onHand = fixed(input.onHand),
+      quantity = fixed(input.quantity);
+    if (onHand < 0n || quantity <= 0n) return invalid();
+    return onHand >= quantity ? null : decimal(quantity - onHand);
   } catch (error) {
     if (error instanceof ReservationBalanceError) throw error;
     return invalid();

@@ -15,6 +15,7 @@ import {
   type StockCountCommand,
   type StockCountErrorCode,
   type StockCountListView,
+  type StockShortageView,
 } from "./stock-count-pages.js";
 
 /** WP-2423 / DEC-INV-STOCK-COUNT: Store stock counts — blind counting, review and posting. */
@@ -22,7 +23,9 @@ const copy: Record<StockCountErrorCode | "Loading", string> = {
   Loading: "Loading stock counts…",
   PermissionDenied: "You do not have permission for this count action.",
   NotFound: "This count does not exist for the selected Store.",
-  Conflict: "The count changed meanwhile. Refresh and check before trying again.",
+  // Only an actual concurrent change: someone saved another step of this count first.
+  Conflict:
+    "Someone else changed this count meanwhile. Reload the page and check it before trying again.",
   AlreadyOpen: "This location already has an open count. Finish or cancel it first.",
   StockChanged:
     "Stock moved on the highlighted lines after they were counted (sales, receipts or waste). Send the count back; the counter refreshes those lines and counts them again.",
@@ -33,7 +36,8 @@ const copy: Record<StockCountErrorCode | "Loading", string> = {
   LineInvalid: "The highlighted count is not valid for the item's unit precision.",
   Invalid: "The request is not valid.",
   Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
-  Unavailable: "Stock counts are unavailable.",
+  Unavailable:
+    "This could not be done right now and nothing was changed. Try again in a moment; if it keeps failing, keep your count sheet and tell the manager.",
 };
 const countTypeText: Record<"Full" | "Cycle" | "Spot", string> = {
   Cycle: "Cycle count",
@@ -95,6 +99,101 @@ export function staffName(
   return (
     [...view.staff, ...(view.people ?? [])].find((item) => item.actorReference === reference)
       ?.label ?? "Staff member"
+  );
+}
+
+const quantityText = (quantity: string, unitCode: string) => `${quantity} ${unitText(unitCode)}`;
+/**
+ * DEC-INV-COUNT-SHORT (2026-10-18): what a manager acts on after a count. A count is posted even
+ * when it finds less than open orders already hold; those orders keep their ingredients and are
+ * listed here so staff can get more stock, make them with what is there, or cancel them. Items the
+ * kitchen then used beyond the count are listed until they are counted again.
+ */
+export function StockShortageNotice({
+  view,
+}: {
+  readonly view: {
+    readonly shortages?: readonly StockShortageView[];
+    readonly items: readonly { readonly itemReference: string; readonly name: string }[];
+    readonly locations: readonly { readonly locationReference: string; readonly name: string }[];
+  };
+}) {
+  const shortages = view.shortages ?? [];
+  if (shortages.length === 0) return null;
+  const name = (entry: StockShortageView) =>
+    (view.items.find((item) => item.itemReference === entry.itemReference)?.name ?? "Item") +
+    (entry.lotCode === null ? "" : ` (lot ${entry.lotCode})`);
+  const place = (entry: StockShortageView) =>
+    view.locations.find((item) => item.locationReference === entry.locationReference)?.name ??
+    "its location";
+  const short = shortages.filter((entry) => entry.shortQuantity !== "0");
+  const used = shortages.filter((entry) => entry.usedBeyondCount !== "0");
+  return (
+    <section className="detail-section" aria-labelledby="stock-shortage-heading">
+      {short.length > 0 ? (
+        <>
+          <h3 id="stock-shortage-heading">Counted less than open orders need</h3>
+          <p>
+            These orders were taken before the count and keep their ingredients. New orders
+            can&apos;t use these items until it is fixed. For each order: get more and record the
+            delivery under <Link to="/operations/receiving/new">Receiving</Link>, make it with what
+            you have and count the item again afterwards, or cancel it (the guest is refunded).
+          </p>
+          <ul>
+            {short.map((entry) => (
+              <li key={`${entry.itemReference}:${entry.locationReference}:${entry.lotCode ?? ""}`}>
+                <strong>{name(entry)}</strong> at {place(entry)}:{" "}
+                {quantityText(entry.onHand, entry.unitCode)} counted,{" "}
+                {quantityText(entry.reserved, entry.unitCode)} held for open orders —{" "}
+                <strong>short by {quantityText(entry.shortQuantity, entry.unitCode)}</strong>.
+                {entry.orders.length > 0 ? (
+                  <>
+                    {" "}
+                    Held by:{" "}
+                    {entry.orders.map((order, index) => (
+                      <span key={order.orderReference}>
+                        {index > 0 ? ", " : ""}
+                        <Link to={`/operations/orders/${order.orderReference}`}>
+                          Order {order.orderNumber}
+                        </Link>{" "}
+                        ({order.orderType === "DineIn" ? "dine-in" : "pickup"},{" "}
+                        {quantityText(order.quantity, entry.unitCode)}
+                        {order.ended
+                          ? ", already finished — release its ingredients on Orders"
+                          : ""}
+                        )
+                      </span>
+                    ))}
+                    .
+                  </>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {used.length > 0 ? (
+        <>
+          <h3 id={short.length > 0 ? undefined : "stock-shortage-heading"}>
+            Used more than was counted
+          </h3>
+          <p>
+            The kitchen finished orders with more than the last count found, so the count missed
+            some stock or a delivery was not recorded. Count these items again to correct the stock.
+          </p>
+          <ul>
+            {used.map((entry) => (
+              <li
+                key={`used:${entry.itemReference}:${entry.locationReference}:${entry.lotCode ?? ""}`}
+              >
+                <strong>{name(entry)}</strong> at {place(entry)}: used{" "}
+                {quantityText(entry.usedBeyondCount, entry.unitCode)} more than counted.
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </section>
   );
 }
 
@@ -160,6 +259,7 @@ export function StockCountListPage({
           </p>
         </div>
       </header>
+      <StockShortageNotice view={view} />
       {view.permissions.mayCreate ? (
         <form
           className="detail-section"
@@ -357,6 +457,7 @@ export function StockCountWorkbenchPage({
           <p>{copy[error.code]}</p>
         </StatePanel>
       ) : null}
+      {count.status === "Posted" ? <StockShortageNotice view={view} /> : null}
       {count.status === "Assigned" && isAssignee && view.permissions.mayCount ? (
         <button disabled={busy} onClick={() => void run([base("Start")])}>
           Start counting

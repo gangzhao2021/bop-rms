@@ -334,11 +334,15 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       value !== null && typeof value === "object" && Object.hasOwn(value, "heldStock");
     const withReady =
       value !== null && typeof value === "object" && Object.hasOwn(value, "readyToServeItemCount");
+    // WP-2423 (2026-10-18): dine-in portions the kitchen is remaking (absent from an older server).
+    const withRemaking =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "remakingItemCount");
     // WP-2423 (v15 2026-10-18): a pickup's kitchen state on the detail (absent from an older server).
     const withKitchen =
       value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenPhase");
     const item = exact(value, [
       ...(withReady ? ["readyToServeItemCount"] : []),
+      ...(withRemaking ? ["remakingItemCount"] : []),
       ...(withKitchen ? ["kitchenPhase"] : []),
       ...(withHeldStock ? ["heldStock"] : []),
       ...(withCounter ? ["counter"] : []),
@@ -420,6 +424,14 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     )
       return fail();
     const readyToServeItemCount = withReady ? Number(item.readyToServeItemCount) : null;
+    if (
+      withRemaking &&
+      (!Number.isSafeInteger(item.remakingItemCount) ||
+        Number(item.remakingItemCount) < 0 ||
+        (item.orderType !== "DineIn" && item.remakingItemCount !== 0))
+    )
+      return fail();
+    const remakingItemCount = withRemaking ? Number(item.remakingItemCount) : 0;
     const kitchenPhase = withKitchen ? item.kitchenPhase : null;
     if (
       kitchenPhase !== null &&
@@ -648,6 +660,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
        * Tables close dialog's rule); null from an older server.
        */
       readyToServeItemCount,
+      /** WP-2423 (2026-10-18): dine-in portions the kitchen is remaking (0 when none or unknown). */
+      remakingItemCount,
       /**
        * WP-2423 (v15 2026-10-18): what the kitchen shows for an accepted pickup on the order
        * detail ("InProgress" or "Ready") before Ordering records it; null otherwise.

@@ -1,10 +1,14 @@
 import {
   createDiningOrderDeliveryProgress,
   readyToServeQuantity,
+  remakingQuantity,
 } from "./dining-order-delivery-progress.js";
 import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
-import { createPostgresKitchenCustomerStatusReader } from "@rms/kitchen";
+import {
+  createPostgresKitchenCustomerStatusReader,
+  listOpenKitchenReworkItems,
+} from "@rms/kitchen";
 import { withOptionalRead } from "./merchant-round-business-date.js";
 import {
   readEarlierOrdersHoldingStock,
@@ -191,6 +195,31 @@ export function createMerchantOrderQueueRead(options: {
         .map(String)
         .sort())
         await acquireOrderDispositionFence(transaction, { ...ownerScope, orderReference });
+      // WP-2423 (2026-10-18): portions the kitchen is remaking at the listed tables (Kitchen's public
+      // Query, by Order item), so "ready to serve" here and on the Home matches the serving page:
+      // a dish being made again is not ready. Unreadable leaves the count as the delivery says.
+      const tables = [
+        ...new Set(
+          listed
+            .filter(({ item }) => item.orderType === "DineIn")
+            .map(({ item }) => String(item.orderReference)),
+        ),
+      ].slice(0, 200);
+      const remakes = new Map<string, Map<string, number>>();
+      for (const remake of tables.length === 0
+        ? []
+        : await withOptionalRead(
+            transaction,
+            () => listOpenKitchenReworkItems(transaction, ownerScope, tables),
+            [] as Awaited<ReturnType<typeof listOpenKitchenReworkItems>>,
+          )) {
+        const order = remakes.get(remake.orderReference) ?? new Map<string, number>();
+        order.set(
+          remake.orderItemReference,
+          (order.get(remake.orderItemReference) ?? 0) + remake.openQuantity,
+        );
+        remakes.set(remake.orderReference, order);
+      }
       const items = [];
       for (const { item, earlierDay } of listed) {
         // Match acceptance/payment writers: disposition fence before the header row lock.
@@ -260,6 +289,7 @@ export function createMerchantOrderQueueRead(options: {
                 kitchenPhase,
                 // Pickup readiness is a Fulfillment fact (the pickup queue), never served here.
                 readyToServeItemCount: 0,
+                remakingItemCount: 0,
                 batches: [
                   {
                     orderBatchReference: item.initialBatchReference,
@@ -328,6 +358,7 @@ export function createMerchantOrderQueueRead(options: {
                   version: cancelled?.orderVersion ?? null,
                   observedAt,
                   readyToServeItemCount: 0,
+                  remakingItemCount: 0,
                   kitchenPhase: null,
                   batches: [],
                 }
@@ -338,8 +369,16 @@ export function createMerchantOrderQueueRead(options: {
                   // A table's phase already follows the kitchen (delivery progress).
                   kitchenPhase: null,
                   // WP-2423: items the kitchen marked ready that nobody served yet, in any round —
-                  // the same delivery progress and rule as the Tables page's close dialog.
-                  readyToServeItemCount: readyToServeQuantity(progress?.items ?? []),
+                  // the same delivery progress and rule as the Tables page's close dialog, less
+                  // the portions the kitchen is remaking (2026-10-18).
+                  readyToServeItemCount: readyToServeQuantity(
+                    progress?.items ?? [],
+                    remakes.get(String(item.orderReference)),
+                  ),
+                  remakingItemCount: remakingQuantity(
+                    progress?.items ?? [],
+                    remakes.get(String(item.orderReference)) ?? new Map(),
+                  ),
                   batches: execution.batches.map((batch) => ({
                     orderBatchReference: batch.orderBatchReference,
                     sequence: batch.sequence,
@@ -393,6 +432,11 @@ export function createMerchantOrderQueueRead(options: {
             currentVersion: current.version,
             /** WP-2423: dine-in items ready at the pass and not yet served (0 for pickups). */
             readyToServeItemCount: current.readyToServeItemCount,
+            /**
+             * WP-2423 (2026-10-18): dine-in portions the kitchen is remaking (0 for pickups, whose
+             * remakes the pickup queue shows); the list reads "Being remade" for a ready table.
+             */
+            remakingItemCount: current.remakingItemCount,
             /**
              * WP-2423 (v15 2026-10-18): a pickup's kitchen state on the order detail while Ordering
              * has not recorded it yet (null otherwise, and always on the list).

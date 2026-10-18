@@ -792,3 +792,106 @@ test("@production WP-2423 v15: earlier-day orders still holding stock are listed
     },
   ]);
 });
+
+// WP-2423 (2026-10-18 v15): a table dish the kitchen is remaking was counted "ready to serve" on
+// the Home and its order read "Ready" on Orders, while the serving page said "Being remade".
+test("@production WP-2423: a table whose dish is being remade reads Being remade and is not counted ready to serve", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/**", (route) =>
+    route.fulfill({ status: 503, json: { error: "unavailable" } }),
+  );
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-18",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "HOME-OVERVIEW",
+              label: "Overview",
+              href: "/app",
+              permission: "merchant.access",
+            },
+            {
+              screenId: "OPS-ORDER-QUEUE",
+              label: "Orders",
+              href: "/operations/orders",
+              permission: "ordering.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const table = (n: number, extra: Record<string, unknown>) => ({
+    orderReference: id(n),
+    orderNumber: "T-" + n,
+    orderType: "DineIn",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-18T14:00:00.000Z",
+    observedAt: "2026-10-18T14:05:00.000Z",
+    initialBatchReference: id(50 + n),
+    batches: [
+      {
+        orderBatchReference: id(50 + n),
+        sequence: 1,
+        acceptanceStatus: "Accepted",
+        canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
+        canCancelItems: false,
+      },
+    ],
+    canRequestAcceptance: false,
+    currentPhase: "Ready",
+    currentVersion: 4,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+    ...extra,
+  });
+  await page.route("**/merchant/orders*", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        items: [
+          // The kitchen is remaking this table's only dish (dropped at the pass).
+          table(32, { readyToServeItemCount: 0, remakingItemCount: 1 }),
+          table(31, { readyToServeItemCount: 1, remakingItemCount: 0 }),
+        ],
+        nextAfterOrderReference: null,
+      },
+    }),
+  );
+  await page.goto("/operations/orders");
+  const remade = page.locator(".order-workbench-phase").filter({ hasText: "Being remade" });
+  await expect(remade).toHaveCount(1);
+  await expect(page.locator(".order-workbench-phase").filter({ hasText: /^Ready$/u })).toHaveCount(
+    1,
+  );
+  await expectNoInternalText(page);
+
+  await page.goto("/app");
+  const open = page.locator(".overview-counts li").filter({ hasText: "Open orders" });
+  await expect(open).toContainText("1 ready to serve");
+  await expectNoInternalText(page);
+});

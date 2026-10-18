@@ -1036,6 +1036,37 @@ it("WP-2423 v15 2026-10-18: an accepted pickup reads what the kitchen shows on t
   expect(() => read("Ready", { orderType: "DineIn" })).toThrow();
 });
 
+it("WP-2423 (2026-10-18): a table whose dish the kitchen is remaking reads Being remade", () => {
+  expect(
+    orderPhaseLabel({ orderType: "DineIn", currentPhase: "Ready", remakingItemCount: 1 }),
+  ).toBe("Being remade");
+  expect(
+    orderPhaseLabel({ orderType: "DineIn", currentPhase: "Fulfilled", remakingItemCount: 1 }),
+  ).toBe("Being remade");
+  expect(
+    orderPhaseLabel({ orderType: "DineIn", currentPhase: "InProgress", remakingItemCount: 1 }),
+  ).toBe("In progress");
+  expect(
+    orderPhaseLabel({ orderType: "DineIn", currentPhase: "Ready", remakingItemCount: 0 }),
+  ).toBe("Ready");
+  const table = currentOrderQueueFixture().items.find((item) => item.orderType === "DineIn");
+  if (table === undefined) throw new Error("fixture");
+  const read = (remakingItemCount: unknown, extra: Record<string, unknown> = {}) =>
+    parseCurrentOrderQueue({
+      items: [{ ...table, ...extra, remakingItemCount }],
+      nextAfterOrderReference: null,
+    }).items[0]?.remakingItemCount;
+  expect(read(2)).toBe(2);
+  // An older server sends none: nothing is being remade as far as the list knows.
+  expect(
+    parseCurrentOrderQueue({ items: [table], nextAfterOrderReference: null }).items[0]
+      ?.remakingItemCount,
+  ).toBe(0);
+  expect(() => read(-1)).toThrow();
+  expect(() => read(1.5)).toThrow();
+  expect(() => read(1, { orderType: "Pickup" })).toThrow();
+});
+
 it("WP-2423 Q10: shows who the pickup is for and how to reach them, only from the detail", () => {
   const phone = renderToStaticMarkup(
     <PickupContactPanel

@@ -7,6 +7,7 @@ import {
   createPostgresStockCountPorts,
   executeStockCountCommand,
   listStockCounts,
+  listStoreStockShortages,
   loadStockCount,
   openStockCountAt,
   StockCountError,
@@ -17,6 +18,8 @@ import {
   type StockCountAggregate,
 } from "@rms/inventory";
 import type { RoleAssignmentTransaction } from "@bop/permission";
+import type { ConsumerTransaction } from "@bop/eventing";
+import { listStoreOrdersOfSubmissions } from "@rms/ordering";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createStaffLabels } from "./merchant-staff-labels.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -44,7 +47,8 @@ export class MerchantStockCountError extends Error {
       | "NotIndependent"
       | "State"
       | "LineInvalid"
-      | "Invalid",
+      | "Invalid"
+      | "Unavailable",
     readonly lineReferences: readonly string[] = [],
   ) {
     super(code);
@@ -196,7 +200,9 @@ const serviceErrors: Record<StockCountError["code"], MerchantStockCountError["co
   STOCK_COUNT_INCOMPLETE: "Incomplete",
   STOCK_COUNT_SEGREGATION_REQUIRED: "NotIndependent",
   STOCK_COUNT_IDEMPOTENCY_CONFLICT: "Conflict",
-  STOCK_COUNT_DEPENDENCY_UNAVAILABLE: "Conflict",
+  // A failure to read or write the count's sources is not a concurrent change (v15 2026-10-18:
+  // a count below what open orders held showed "The count changed meanwhile").
+  STOCK_COUNT_DEPENDENCY_UNAVAILABLE: "Unavailable",
 };
 const permissionOf: Record<StockCountAction, string> = {
   Create: "inventory.count.manage",
@@ -235,6 +241,81 @@ export function redactStockCount(
       balanceVersion: undefined,
     })),
   };
+}
+
+/**
+ * DEC-INV-COUNT-SHORT (2026-10-18): what a manager must act on after a count — items a count found
+ * short against open orders (with those orders, by number) and items the kitchen then used beyond
+ * the count. Inventory names the accounts and the rounds holding them; Ordering maps the rounds to
+ * Orders. Read only, inside the caller's authorized transaction.
+ */
+export interface StockShortageView {
+  readonly itemReference: string;
+  readonly locationReference: string;
+  readonly lotCode: string | null;
+  readonly unitCode: string;
+  readonly onHand: string;
+  readonly reserved: string;
+  readonly shortQuantity: string;
+  readonly usedBeyondCount: string;
+  readonly orders: readonly {
+    readonly orderReference: string;
+    readonly orderNumber: string;
+    readonly orderType: "Pickup" | "DineIn";
+    readonly businessDate: string;
+    readonly quantity: string;
+    /** Ordering recorded the Order as ended although it still holds stock. */
+    readonly ended: boolean;
+  }[];
+}
+export async function readStockShortages(
+  tx: LedgerTransaction,
+  owner: { tenantReference: string; brandReference: string; storeReference: string },
+): Promise<readonly StockShortageView[]> {
+  const shortages = await listStoreStockShortages(tx, owner);
+  if (shortages.length === 0) return [];
+  const submissions = [
+    ...new Set(shortages.flatMap((entry) => entry.holding.map((h) => h.submissionReference))),
+  ].slice(0, 500);
+  const orders = new Map(
+    (
+      await listStoreOrdersOfSubmissions(
+        tx as unknown as ConsumerTransaction,
+        { brandReference: owner.brandReference, storeReference: owner.storeReference },
+        submissions,
+      )
+    ).map((order) => [order.submissionReference, order]),
+  );
+  const lots = await stockLotLabels(
+    tx,
+    owner,
+    shortages.flatMap((entry) => (entry.lotReference === null ? [] : [entry.lotReference])),
+  );
+  return shortages.map((entry) => ({
+    itemReference: entry.itemReference,
+    locationReference: entry.locationReference,
+    lotCode: entry.lotReference === null ? null : (lots.get(entry.lotReference)?.lotCode ?? null),
+    unitCode: entry.unitCode,
+    onHand: entry.onHand,
+    reserved: entry.reserved,
+    shortQuantity: entry.shortQuantity,
+    usedBeyondCount: entry.usedBeyondCount,
+    orders: entry.holding.flatMap((held) => {
+      const order = orders.get(held.submissionReference);
+      return order === undefined
+        ? []
+        : [
+            {
+              orderReference: String(order.orderReference),
+              orderNumber: order.orderNumber,
+              orderType: order.orderType,
+              businessDate: order.businessDate,
+              quantity: held.quantity,
+              ended: order.ended,
+            },
+          ];
+    }),
+  }));
 }
 
 export function createMerchantStockCounts(options: {
@@ -377,6 +458,8 @@ export function createMerchantStockCounts(options: {
             items: catalog.items,
             locations: catalog.locations,
             staff,
+            /** DEC-INV-COUNT-SHORT: items short against open orders or used beyond their count. */
+            shortages: await readStockShortages(ledger(tx), scope.owner),
           };
           if (input.countReference !== null) {
             const count = await loadStockCount(ledger(tx), scope.owner, input.countReference);
@@ -527,10 +610,16 @@ export function createMerchantStockCounts(options: {
                   countReference: body.countReference,
                   expectedVersion: approved.count.aggregateVersion,
                 });
+                // DEC-INV-COUNT-SHORT: the posted count may leave items short against open
+                // orders; the page then lists them with those orders.
+                const shortItems = (await listStoreStockShortages(ledger(tx), scope.owner)).filter(
+                  (entry) => entry.shortQuantity !== "0",
+                ).length;
                 return {
                   status: posted.outcome,
                   version: posted.count.aggregateVersion,
                   movements: posted.movements.length,
+                  shortItems,
                 };
               }
               default: {

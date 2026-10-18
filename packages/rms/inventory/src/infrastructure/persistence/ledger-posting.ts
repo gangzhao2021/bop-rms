@@ -1,4 +1,6 @@
+import { appendAuditRecordInTransaction } from "@bop/audit";
 import type { InventoryItemAggregate } from "../../domain/inventory-item.js";
+import { stockUsedBeyondCount } from "../../domain/reservation-balance.js";
 import type { StorageLocation } from "../../domain/stock-place.js";
 
 /**
@@ -189,8 +191,12 @@ export async function appendStockMovement(
   scope: LedgerScope,
   input: {
     readonly account: LedgerAccount;
-    readonly item: InventoryItemAggregate;
-    readonly location: StorageLocation;
+    /** Only the item's reference and base unit, and the location's reference, are recorded. */
+    readonly item: {
+      readonly itemReference: string;
+      readonly baseUnit: { readonly unitCode: string };
+    };
+    readonly location: { readonly locationReference: string };
     readonly lotReference: string | null;
     readonly expiryDate: string | null;
     readonly movementType:
@@ -274,4 +280,92 @@ export async function appendStockMovement(
     movementReference: movement,
     account: { ...input.account, ledgerVersion: version, onHand: afterOnHand },
   };
+}
+
+/** Reason on the Adjustment recording stock the kitchen used beyond the counted quantity. */
+export const stockUsedBeyondCountReason = "USED_BEYOND_COUNT";
+
+/**
+ * DEC-INV-COUNT-SHORT (2026-10-18): before the kitchen's consumption of `quantity` an Order holds on
+ * this account is posted, the part on-hand does not cover (a count found less than open orders
+ * held) is recorded as its own Adjustment (reason USED_BEYOND_COUNT, naming the reservation and the
+ * kitchen staff member), so the dish that was made is always booked, on-hand never goes below zero
+ * and the difference stays visible for a manager to check with a recount. Nothing is written when
+ * on-hand covers the quantity. Locks the balance row; returns the ledger version the consumption
+ * must expect. Caller owns the transaction, the Store scope settings and authorization.
+ */
+export async function coverStockUsedBeyondCount(
+  tx: LedgerTransaction,
+  scope: LedgerScope,
+  input: {
+    readonly accountReference: string;
+    readonly quantity: string;
+    readonly reservationReference: string;
+    readonly actorReference: string;
+    readonly occurredAt: string;
+    readonly nextReference: () => string;
+    readonly audit: Readonly<{
+      sourceChannel: string;
+      retentionPolicyCode: string;
+      retentionPolicyVersion: number;
+    }>;
+  },
+): Promise<{ readonly ledgerVersion: number; readonly usedBeyondCount: string | null }> {
+  const found = (
+    await tx.query(
+      `SELECT a.item_id::text AS item,a.location_id::text AS location,a.lot_id::text AS lot,a.expiry_date::text AS expiry,
+         a.unit_code AS unit,b.ledger_version::text AS version,b.on_hand::text AS on_hand,b.reserved::text AS reserved,
+         b.in_transit::text AS in_transit
+       FROM rms_inventory.stock_account a JOIN rms_inventory.stock_balance b
+         ON b.tenant_id=a.tenant_id AND b.brand_id=a.brand_id AND b.store_id=a.store_id AND b.account_id=a.account_id
+       WHERE a.tenant_id=$1 AND a.brand_id=$2 AND a.store_id=$3 AND a.account_id=$4 FOR UPDATE OF b`,
+      [scope.tenantReference, scope.brandReference, scope.storeReference, input.accountReference],
+    )
+  ).rows[0];
+  if (!found) throw new LedgerPostingError("LEDGER_ACCOUNT_NOT_FOUND");
+  const account: LedgerAccount = {
+    accountReference: input.accountReference,
+    ledgerVersion: Number(found.version),
+    onHand: String(found.on_hand),
+    reserved: String(found.reserved),
+    inTransit: String(found.in_transit),
+    opened: false,
+  };
+  const beyond = stockUsedBeyondCount({ onHand: account.onHand, quantity: input.quantity });
+  if (beyond === null) return { ledgerVersion: account.ledgerVersion, usedBeyondCount: null };
+  const auditReference = input.nextReference();
+  const posted = await appendStockMovement(tx, scope, {
+    account,
+    item: { itemReference: String(found.item), baseUnit: { unitCode: String(found.unit) } },
+    location: { locationReference: String(found.location) },
+    lotReference: found.lot === null ? null : String(found.lot),
+    expiryDate: found.expiry === null ? null : String(found.expiry),
+    movementType: "Adjustment",
+    delta: beyond,
+    businessSourceType: "INVENTORY_RESERVATION",
+    businessSourceReference: input.reservationReference,
+    reasonCode: stockUsedBeyondCountReason,
+    actorReference: input.actorReference,
+    occurredAt: input.occurredAt,
+    auditReference,
+    nextReference: input.nextReference,
+  });
+  await appendAuditRecordInTransaction(tx, {
+    auditId: auditReference,
+    brandId: scope.brandReference,
+    storeId: scope.storeReference,
+    actor: { type: "User", reference: input.actorReference },
+    actionCode: "INVENTORY_STOCK_USED_BEYOND_COUNT",
+    targetType: "InventoryReservation",
+    targetId: input.reservationReference,
+    afterSummary: { quantity: beyond },
+    reasonCode: stockUsedBeyondCountReason,
+    correlationId: posted.movementReference,
+    occurredAt: input.occurredAt,
+    sourceChannel: input.audit.sourceChannel,
+    dataClassification: "Internal",
+    retentionPolicyCode: input.audit.retentionPolicyCode,
+    retentionPolicyVersion: input.audit.retentionPolicyVersion,
+  });
+  return { ledgerVersion: posted.account.ledgerVersion, usedBeyondCount: beyond };
 }

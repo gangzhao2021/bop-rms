@@ -62,6 +62,30 @@ export interface StockCountSummaryView {
   readonly createdBy: string;
   readonly updatedAt: string;
 }
+/**
+ * DEC-INV-COUNT-SHORT (2026-10-18): an item a count found short against open orders (with those
+ * orders), or that the kitchen then used beyond the count. Quantities in the item's base unit.
+ */
+export interface StockShortageView {
+  readonly itemReference: string;
+  readonly locationReference: string;
+  readonly lotCode: string | null;
+  readonly unitCode: string;
+  readonly onHand: string;
+  readonly reserved: string;
+  /** Held by open orders beyond what is on hand ("0" when not short for orders). */
+  readonly shortQuantity: string;
+  /** Used by the kitchen beyond the count since it was last counted ("0" when none). */
+  readonly usedBeyondCount: string;
+  readonly orders: readonly {
+    readonly orderReference: string;
+    readonly orderNumber: string;
+    readonly orderType: "Pickup" | "DineIn";
+    readonly businessDate: string;
+    readonly quantity: string;
+    readonly ended: boolean;
+  }[];
+}
 interface Base {
   readonly sourceAsOf: string;
   readonly viewer: string;
@@ -86,6 +110,8 @@ interface Base {
   readonly staff: readonly { readonly actorReference: string; readonly label: string }[];
   /** People a count names who are not on the Store's staff list (a Brand Owner, a past member). */
   readonly people?: readonly { readonly actorReference: string; readonly label: string }[];
+  /** DEC-INV-COUNT-SHORT: absent from an older server. */
+  readonly shortages?: readonly StockShortageView[];
 }
 export interface StockCountListView extends Base {
   readonly screenId: "INV-COUNT-LIST";
@@ -189,6 +215,7 @@ const codes = new Set<StockCountErrorCode>([
   "State",
   "LineInvalid",
   "Invalid",
+  "Unavailable",
 ]);
 export function createStockCountClient(
   csrf: string,

@@ -93,12 +93,47 @@ export function servedOrderItemFacts(
 /**
  * WP-2423: items (quantities) the kitchen marked ready and nobody has served yet — waiting at the
  * pass. A partly served item stays Ready; cancelled items never count. The one rule the Tables
- * page (closing a table) and the Home's "ready to serve" both use.
+ * page (closing a table) and the Home's "ready to serve" both use. WP-2423 (2026-10-18): portions
+ * the kitchen is remaking (open remakes by Order item, Kitchen's public Query) are not ready to
+ * serve, as on the serving page.
  */
 export function readyToServeQuantity(
-  items: readonly { readonly phase: string; readonly remainingQuantity: number }[],
+  items: readonly {
+    readonly phase: string;
+    readonly remainingQuantity: number;
+    readonly orderItemReference?: string;
+  }[],
+  remaking: ReadonlyMap<string, number> = new Map(),
 ): number {
   return items
     .filter((item) => item.phase === "Ready" && item.remainingQuantity > 0)
-    .reduce((sum, item) => sum + item.remainingQuantity, 0);
+    .reduce(
+      (sum, item) =>
+        sum +
+        Math.max(
+          0,
+          item.remainingQuantity -
+            (item.orderItemReference === undefined
+              ? 0
+              : (remaking.get(item.orderItemReference) ?? 0)),
+        ),
+      0,
+    );
+}
+
+/** WP-2423 (2026-10-18): portions of an Order's items the kitchen is remaking (cancelled excluded). */
+export function remakingQuantity(
+  items: readonly {
+    readonly phase: string;
+    readonly orderedQuantity: number;
+    readonly orderItemReference: string;
+  }[],
+  remaking: ReadonlyMap<string, number>,
+): number {
+  return items.reduce((sum, item) => {
+    const open = remaking.get(item.orderItemReference);
+    return item.phase === "Cancelled" || open === undefined
+      ? sum
+      : sum + Math.min(open, item.orderedQuantity);
+  }, 0);
 }

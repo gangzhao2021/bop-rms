@@ -70,12 +70,14 @@ export function createPostgresStockCandidateSource(
           "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
           [tenant, brand, store],
         );
+        // DEC-INV-COUNT-SHORT: an account a count left short against open orders (available below
+        // zero) offers nothing to a new order.
         const candidates = rows(
           await tx.query(
             `
             SELECT a.account_id::text AS account,a.location_id::text AS location,a.lot_id::text AS lot,
               a.expiry_date::text AS expiry,a.unit_code AS unit,a.ledger_precision AS precision,
-              b.ledger_version::text AS version,b.available::text AS available,
+              b.ledger_version::text AS version,greatest(b.available,0)::text AS available,
               to_char(a.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created,
               to_char(m.first_received AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS received,
               to_char(m.last_movement AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS moved,

@@ -543,8 +543,17 @@ function OnlineRefundNote({
 export function orderPhaseLabel(
   order: Pick<CurrentOrderQueue["items"][number], "currentPhase" | "orderType"> & {
     readonly kitchenPhase?: CurrentOrderQueue["items"][number]["kitchenPhase"];
+    readonly remakingItemCount?: number;
   },
 ): string {
+  // WP-2423 (2026-10-18): a table whose dish the kitchen is making again is not ready (or served)
+  // as a whole, as the serving page and the guest's page say.
+  if (
+    order.orderType === "DineIn" &&
+    (order.remakingItemCount ?? 0) > 0 &&
+    (order.currentPhase === "Ready" || order.currentPhase === "Fulfilled")
+  )
+    return "Being remade";
   // WP-2423 (v15 2026-10-18): an accepted pickup reads what the kitchen shows now, as the
   // customer's page does, instead of "Accepted" until it is handed over.
   if (order.currentPhase === "Accepted" && order.kitchenPhase === "Ready")

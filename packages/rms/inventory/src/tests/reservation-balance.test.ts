@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { calculateReservationBalance } from "../domain/reservation-balance.js";
+import {
+  calculateReservationBalance,
+  stockUsedBeyondCount,
+} from "../domain/reservation-balance.js";
 
 const input = () => ({
   action: "Reserve",
@@ -108,6 +111,61 @@ describe("reservation balance arithmetic", () => {
       );
     },
   );
+  // DEC-INV-COUNT-SHORT: a count posted below what open orders hold leaves available negative.
+  it("lets orders that hold stock release or consume it while the count left stock short", () => {
+    const short = {
+      ...input().before,
+      onHand: "0.1",
+      reserved: "0.26",
+      available: "-0.16",
+    };
+    const released = calculateReservationBalance({
+      ...input(),
+      action: "Release",
+      quantity: "0.13",
+      before: short,
+    });
+    expect(released.requiredControl).toBe("None");
+    expect(released.after).toMatchObject({ onHand: "0.1", reserved: "0.13", available: "-0.03" });
+    const consumed = calculateReservationBalance({
+      ...input(),
+      action: "ConsumeReserved",
+      quantity: "0.1",
+      before: short,
+    });
+    expect(consumed.requiredControl).toBe("None");
+    expect(consumed.after).toMatchObject({ onHand: "0", reserved: "0.16", available: "-0.16" });
+    // Consuming more than is on hand still needs the item's control (on-hand would go negative).
+    expect(
+      calculateReservationBalance({
+        ...input(),
+        action: "ConsumeReserved",
+        quantity: "0.13",
+        before: short,
+      }).requiredControl,
+    ).toBe("Block");
+    // A new reservation, or using unreserved stock, can never deepen the shortage.
+    for (const action of ["Reserve", "ConsumeUnreserved"])
+      expect(
+        calculateReservationBalance({ ...input(), action, quantity: "0.01", before: short })
+          .requiredControl,
+      ).toBe("Block");
+  });
+  it("names exactly what the kitchen used beyond the counted stock", () => {
+    expect(stockUsedBeyondCount({ onHand: "0.3", quantity: "0.26" })).toBeNull();
+    expect(stockUsedBeyondCount({ onHand: "0.26", quantity: "0.26" })).toBeNull();
+    expect(stockUsedBeyondCount({ onHand: "0.1", quantity: "0.26" })).toBe("0.16");
+    expect(stockUsedBeyondCount({ onHand: "0", quantity: "0.000001" })).toBe("0.000001");
+    for (const bad of [
+      { onHand: "-0.1", quantity: "0.2" },
+      { onHand: "0.1", quantity: "0" },
+      { onHand: "0.1", quantity: "1e1" },
+      { onHand: 0.1, quantity: "0.2" },
+    ])
+      expect(() => stockUsedBeyondCount(bad as never)).toThrowError(
+        expect.objectContaining({ code: "INVENTORY_BALANCE_INVALID" }),
+      );
+  });
   it("rejects a stale expected balance version", () => {
     expect(() => calculateReservationBalance({ ...input(), expectedVersion: 2 })).toThrowError(
       expect.objectContaining({ code: "INVENTORY_BALANCE_CONFLICT" }),
