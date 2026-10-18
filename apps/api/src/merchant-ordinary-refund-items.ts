@@ -170,6 +170,13 @@ export function createMerchantOrdinaryRefundItems(options: {
             });
           if (!(await allowed())) return deny();
           const observedAt = String(current.context.resolvedAt);
+          // Canonical cross-owner lock order (acquireOrdinaryRefundRequestFences): the Order's
+          // Ordering rows before the Payment refund fence. v15 2026-10-18 (40P01): taken after
+          // the fence, this read deadlocked with a refund receipt being issued for the Order.
+          const order = await createPostgresReceiptOrderSource({ ...scope, authorize: allowed })(
+            businessTransaction,
+            { orderReference, observedAt },
+          );
           const context = await createPostgresOrdinaryRefundRequestContextSource({
             scope,
             // Read-only: the Order's refund fence only (canonical lock order, Payment request store).
@@ -181,10 +188,6 @@ export function createMerchantOrdinaryRefundItems(options: {
             observedAt,
           });
           if (context.existing !== null) return deny();
-          const order = await createPostgresReceiptOrderSource({ ...scope, authorize: allowed })(
-            businessTransaction,
-            { orderReference, observedAt },
-          );
           const captured = createPostgresCapturedBatchPaymentSource({
             scope: {
               brandReference: scope.brandReference,

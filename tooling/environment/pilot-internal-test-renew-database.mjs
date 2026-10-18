@@ -54,7 +54,15 @@ const unavailable = (reason, details = {}) => {
   throw error;
 };
 
-/** Least privilege of the renewal role (Owner standing approval 2026-10-14, WP-2423 renewal). */
+/**
+ * Least privilege of the renewal role (Owner standing approval 2026-10-14, WP-2423 renewal;
+ * narrowed 2026-10-18 under the same rules as the API role, docs/spec/pilot-acl-additions.json):
+ * a row lock needs UPDATE on one column only, `LOCK TABLE ... IN SHARE [ROW EXCLUSIVE] MODE`
+ * needs MAINTAIN (PostgreSQL 17+; MAINTAIN cannot change rows), and an UPDATE is granted only on
+ * the columns the renewal store writes. Append-only history (launch gate versions, tax versions,
+ * audit records) is SELECT and INSERT only. The tax reference triggers are SECURITY DEFINER and
+ * need nothing from this role.
+ */
 export const internalTestRenewalGrants = Object.freeze([
   ["schema", "bop_membership"],
   ["schema", "bop_permission"],
@@ -66,27 +74,60 @@ export const internalTestRenewalGrants = Object.freeze([
   ["routine", "platform_helpers.current_brand_id()"],
   ["routine", "platform_helpers.current_store_id()"],
   ["routine", "platform_helpers.is_uuid_v7(uuid)"],
-  ["table", "bop_membership.membership", "SELECT,UPDATE"],
-  ["table", "bop_membership.store_assignment", "SELECT,UPDATE"],
-  ["table", "bop_permission.policy_state", "SELECT,UPDATE"],
-  ["table", "bop_permission.role", "SELECT,UPDATE"],
-  ["table", "bop_permission.role_assignment", "SELECT,UPDATE"],
-  ["table", "bop_permission.permission_grant", "SELECT,UPDATE"],
+  // Membership validity: LOCK TABLE ... IN SHARE ROW EXCLUSIVE MODE, then the versioned change.
+  ["table", "bop_membership.membership", "SELECT,MAINTAIN"],
+  ["column", "bop_membership.membership", "UPDATE", ["effective_until", "version", "updated_at"]],
+  ["table", "bop_membership.store_assignment", "SELECT,MAINTAIN"],
+  [
+    "column",
+    "bop_membership.store_assignment",
+    "UPDATE",
+    ["effective_until", "version", "updated_at"],
+  ],
+  // Permission validity: the same table lock, a new policy snapshot, then the versioned change.
+  ["table", "bop_permission.policy_state", "SELECT,MAINTAIN"],
+  ["column", "bop_permission.policy_state", "UPDATE", ["snapshot_id", "version", "updated_at"]],
+  ["table", "bop_permission.role", "SELECT,MAINTAIN"],
+  ["column", "bop_permission.role", "UPDATE", ["effective_until", "version", "updated_at"]],
+  ["table", "bop_permission.role_assignment", "SELECT,MAINTAIN"],
+  [
+    "column",
+    "bop_permission.role_assignment",
+    "UPDATE",
+    ["effective_until", "version", "updated_at"],
+  ],
+  ["table", "bop_permission.permission_grant", "SELECT,MAINTAIN"],
+  [
+    "column",
+    "bop_permission.permission_grant",
+    "UPDATE",
+    ["effective_until", "version", "updated_at"],
+  ],
   ["table", "bop_permission.permission_definition", "SELECT"],
-  // UPDATE only for the read source's SHARE lock; the history triggers refuse every update.
-  ["table", "bop_publishing.live_gate_version", "SELECT,INSERT,UPDATE"],
-  ["table", "bop_publishing.live_gate_requirement", "SELECT,INSERT,UPDATE"],
-  ["table", "rms_pricing.tax_configuration", "SELECT,UPDATE"],
+  // Launch gate renewal appends a new version under an advisory lock; history is never updated.
+  ["table", "bop_publishing.live_gate_version", "SELECT,INSERT"],
+  ["table", "bop_publishing.live_gate_requirement", "SELECT,INSERT"],
+  // Tax renewal: the root row FOR UPDATE, then its version pointer moves (one versioned UPDATE).
+  ["table", "rms_pricing.tax_configuration", "SELECT"],
+  [
+    "column",
+    "rms_pricing.tax_configuration",
+    "UPDATE",
+    ["aggregate_version", "current_version_id", "updated_at"],
+  ],
   ["table", "rms_pricing.tax_configuration_version", "SELECT,INSERT"],
   ["table", "rms_pricing.tax_configuration_rule", "SELECT,INSERT"],
-  // Read and maintained by the tax version triggers.
-  ["table", "rms_pricing.tax_reference_generation", "SELECT,INSERT,UPDATE"],
-  ["table", "rms_pricing.tax_reference_scope", "SELECT,INSERT,UPDATE"],
+  // Restores a missing Brand tax reference projection row (1200_012), as its root trigger would.
+  ["table", "rms_pricing.tax_reference_generation", "SELECT,INSERT"],
+  ["column", "rms_pricing.tax_reference_generation", "UPDATE", ["generation", "reference_count"]],
+  ["table", "rms_pricing.tax_reference_scope", "SELECT,INSERT"],
   ["table", "rms_pricing.tax_config_publication_candidate", "SELECT"],
   ["table", "rms_pricing.tax_config_candidate_rule", "SELECT"],
   ["table", "rms_pricing.tax_config_authoring_operation", "SELECT"],
   ["table", "platform_audit.audit_record", "SELECT,INSERT"],
-  ["table", "platform_audit.audit_chain_head", "SELECT,INSERT,UPDATE"],
+  // The chain head: created once, locked FOR UPDATE, then only its sequence and last hash move.
+  ["table", "platform_audit.audit_chain_head", "SELECT,INSERT"],
+  ["column", "platform_audit.audit_chain_head", "UPDATE", ["next_sequence", "last_record_hash"]],
 ]);
 const IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/u;
 const QUALIFIED = /^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*(?:\([a-z_, ]*\))?$/u;
@@ -105,11 +146,25 @@ export function renderRenewalRoleSql(role) {
     // A role left from earlier must still be restricted.
     `ALTER ROLE "${role}" NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE`,
   ];
-  for (const [type, object, privileges] of internalTestRenewalGrants)
+  // A role left from an earlier renewal may hold broader table grants: reset every listed table
+  // (this also revokes its column grants) before granting exactly the list.
+  const tables = [
+    ...new Set(
+      internalTestRenewalGrants
+        .filter(([type]) => type === "table" || type === "column")
+        .map(([, object]) => object),
+    ),
+  ];
+  for (const object of tables) statements.push(`REVOKE ALL ON TABLE ${q(object)} FROM "${role}"`);
+  for (const [type, object, privileges, columns] of internalTestRenewalGrants)
     if (type === "schema") statements.push(`GRANT USAGE ON SCHEMA ${q(object)} TO "${role}"`);
     else if (type === "type") statements.push(`GRANT USAGE ON TYPE ${q(object)} TO "${role}"`);
     else if (type === "routine")
       statements.push(`GRANT EXECUTE ON FUNCTION ${q(object)} TO "${role}"`);
+    else if (type === "column")
+      statements.push(
+        `GRANT ${privileges} (${columns.map((column) => q(column)).join(",")}) ON TABLE ${q(object)} TO "${role}"`,
+      );
     else statements.push(`GRANT ${privileges} ON TABLE ${q(object)} TO "${role}"`);
   return statements;
 }

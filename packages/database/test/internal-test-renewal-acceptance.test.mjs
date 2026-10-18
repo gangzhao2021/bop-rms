@@ -148,6 +148,18 @@ it("renews only the synthetic DEMO facts, refuses real rows, audits and is idemp
       await q("RESET row_security");
       await q(`CREATE ROLE ${api} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`);
       await grantPilotApiAcl(admin, api);
+      // A renewal role left from an earlier renewal with the broad grants it had before
+      // 2026-10-18 (as on v15): the next renewal must narrow it to the least-privilege list.
+      const renewalRoleName = context.databaseName + "_internal_test_renewal";
+      await q(
+        `CREATE ROLE "${renewalRoleName}" NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE`,
+      );
+      await q(
+        `GRANT SELECT,INSERT,UPDATE ON TABLE platform_audit.audit_chain_head,bop_publishing.live_gate_version,bop_publishing.live_gate_requirement,rms_pricing.tax_reference_scope TO "${renewalRoleName}"`,
+      );
+      await q(
+        `GRANT SELECT,UPDATE ON TABLE bop_membership.membership,bop_permission.role,rms_pricing.tax_configuration TO "${renewalRoleName}"`,
+      );
 
       const evidence = {
         renewalReference: "01a14000-0000-7000-8000-000000000001",
@@ -318,6 +330,61 @@ it("renews only the synthetic DEMO facts, refuses real rows, audits and is idemp
         ])
       ).rows[0];
       assert.deepEqual(renewalRole, { rolbypassrls: false, rolcanlogin: false, rolsuper: false });
+      // Least privilege (2026-10-18): no whole-table UPDATE anywhere; row locks and versioned
+      // changes through the written columns only; table locks through MAINTAIN; append-only
+      // history SELECT and INSERT only. The broad grants of the earlier role are gone.
+      const privilege = async (sql, values) =>
+        (await q(sql, [renewed.role, ...values])).rows[0].allowed;
+      const table = (object, mode) =>
+        privilege("SELECT has_table_privilege($1,$2,$3) AS allowed", [object, mode]);
+      const column = (object, name, mode) =>
+        privilege("SELECT has_column_privilege($1,$2,$3,$4) AS allowed", [object, name, mode]);
+      for (const object of [
+        "platform_audit.audit_chain_head",
+        "platform_audit.audit_record",
+        "bop_publishing.live_gate_version",
+        "bop_publishing.live_gate_requirement",
+        "bop_membership.membership",
+        "bop_membership.store_assignment",
+        "bop_permission.policy_state",
+        "bop_permission.role",
+        "bop_permission.role_assignment",
+        "bop_permission.permission_grant",
+        "rms_pricing.tax_configuration",
+        "rms_pricing.tax_configuration_version",
+        "rms_pricing.tax_reference_generation",
+        "rms_pricing.tax_reference_scope",
+      ])
+        for (const mode of ["UPDATE", "DELETE", "TRUNCATE"])
+          assert.equal(await table(object, mode), false, object + " " + mode);
+      for (const object of [
+        "platform_audit.audit_chain_head",
+        "bop_publishing.live_gate_version",
+        "bop_publishing.live_gate_requirement",
+        "rms_pricing.tax_configuration",
+        "rms_pricing.tax_reference_scope",
+      ])
+        assert.equal(await table(object, "MAINTAIN"), false, object + " MAINTAIN");
+      for (const object of ["bop_membership.membership", "bop_permission.role"])
+        assert.equal(await table(object, "MAINTAIN"), true, object + " MAINTAIN");
+      assert.equal(await table("bop_publishing.live_gate_version", "INSERT"), true);
+      assert.equal(
+        await column("platform_audit.audit_chain_head", "next_sequence", "UPDATE"),
+        true,
+      );
+      assert.equal(
+        await column("platform_audit.audit_chain_head", "last_record_hash", "UPDATE"),
+        true,
+      );
+      assert.equal(await column("platform_audit.audit_chain_head", "brand_id", "UPDATE"), false);
+      assert.equal(await column("bop_membership.membership", "effective_until", "UPDATE"), true);
+      assert.equal(await column("bop_membership.membership", "lifecycle", "UPDATE"), false);
+      assert.equal(await column("bop_membership.membership", "actor_id", "UPDATE"), false);
+      assert.equal(
+        await column("rms_pricing.tax_configuration", "current_version_id", "UPDATE"),
+        true,
+      );
+      assert.equal(await column("rms_pricing.tax_configuration", "store_id", "UPDATE"), false);
 
       // Idempotent: the same run again, and a run after the profile already names the new end.
       const again = await renew();

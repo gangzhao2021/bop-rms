@@ -17,6 +17,10 @@ const fail = (): never => {
 /** Caller retains this transaction through receipt append. Header UPDATE lock
  * fences new FK-bound batches; batch UPDATE locks fence new FK-bound items.
  * No assumption that an initial submission represents all current batches.
+ * Lock order: these Order row locks come after a receipt issuer's `OrderingReceipt` fence and
+ * before any Payment refund fence (`OrdinaryRefundRequest`, `PaymentReceiptOrder`); never call
+ * this while holding a Payment refund fence for the Order (see Payment's
+ * acquireOrdinaryRefundRequestFences; v15 2026-10-18 40P01).
  */
 export function createPostgresReceiptOrderSource(options: {
   brandReference: string;

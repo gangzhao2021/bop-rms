@@ -1,7 +1,7 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import type { TenantContext } from "@bop/tenant";
 import { MemberDirectoryError, loadStoreMember } from "@bop/membership";
-import { createPostgresReceiptOrderSource } from "@rms/ordering";
+import { listStoreOrderNumbers } from "@rms/ordering";
 import { createPostgresOrdinaryRefundApprovalQueueRuntime } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -88,7 +88,20 @@ export function createMerchantOrdinaryRefundApprovals(options: {
             businessDate: configuration.businessDate,
           })(tx, { observedAt });
           const authority = createMerchantOrdinaryRefundAuthority(configuration.workforce);
-          const order = createPostgresReceiptOrderSource({ ...scope, authorize });
+          // Only the order number is shown: a plain read of Ordering's immutable order number, no
+          // Order row lock. Locking the Order after the refund fences the queue holds would invert
+          // the canonical lock order (acquireOrdinaryRefundRequestFences; v15 2026-10-18 40P01).
+          const orderNumbers = new Map<string, string>();
+          const listed = [...new Set(entries.map((entry) => String(entry.orderReference)))];
+          for (let index = 0; index < listed.length; index += 100) {
+            if (!(await still())) return denied();
+            for (const [reference, number] of await listStoreOrderNumbers(
+              tx,
+              { brandReference: scope.brandReference, storeReference: scope.storeReference },
+              listed.slice(index, index + 100),
+            ))
+              orderNumbers.set(reference, number);
+          }
           // The same server-computed recency for every person (Identity enrollment and step-ups).
           const verifiedUntil = async (
             actor: string,
@@ -146,11 +159,12 @@ export function createMerchantOrdinaryRefundApprovals(options: {
               "payment.refund.request",
               entry.orderReference,
             );
-            const placed = await order(tx, { orderReference: entry.orderReference, observedAt });
+            const orderNumber = orderNumbers.get(String(entry.orderReference));
+            if (orderNumber === undefined) return denied();
             result.push(
               Object.freeze({
                 orderReference: entry.orderReference,
-                orderNumber: placed.orderNumber,
+                orderNumber,
                 requestReference: entry.requestReference,
                 paymentIntentReferences: entry.paymentIntentReferences,
                 paymentMethod: entry.paymentMethod,

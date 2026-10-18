@@ -136,6 +136,17 @@ function occupyingAt(
  * the refund item list, progress, recording a card-machine refund) takes the Order fence alone
  * (`fence: "OrderOnly"`) and still sees a stable request set; it may then read any number of
  * requests of that Order without taking a request-operation fence after the Order fence.
+ *
+ * Across owners (v15 2026-10-18, 40P01), one Order's locks are taken in this order:
+ *   a. Ordering's receipt-chain fence `OrderingReceipt:<brand>:<store>:<order>` — receipt
+ *      issuance only;
+ *   b. Ordering's Order rows: order header and Initial submission FOR UPDATE, then its batches
+ *      FOR UPDATE and items FOR SHARE (Ordering's receipt order source, staff cancellations);
+ *   c. then 1. and 2. above.
+ * A transaction that needs the Order's Ordering rows takes them before either refund fence
+ * (refund receipt issuance, staff item cancellation and the refund item list all do), and never
+ * locks them while holding a refund fence. Reads that need only the immutable order number use
+ * Ordering's plain order-number read, which locks nothing.
  */
 export async function acquireOrdinaryRefundRequestFences(
   tx: ConsumerTransaction,

@@ -1759,6 +1759,88 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
         assert.equal(refundReceipt.record.snapshot.paymentStatus, "Refunded");
         assert.equal(refundReceipt.record.snapshot.refundedTotal.amountMinor, CAPTURED_MINOR);
         assert.deepEqual(refundReceipt.record.snapshot.lines, originalLines);
+
+        // v15 2026-10-18 regression (40P01, order 37): a refund receipt issuance locks the
+        // Order's header and Initial submission (Ordering's receipt order source), then takes the
+        // Payment refund fence `PaymentReceiptOrder` for the coverage read. The staff refund item
+        // list took that fence first and then locked the same Order rows FOR UPDATE: two
+        // connections at once deadlocked. Canonical order (acquireOrdinaryRefundRequestFences):
+        // Ordering's Order rows, then the refund fences. The issuance here pauses with the Order
+        // rows locked until the item list is waiting on a lock, then takes the fence.
+        {
+          const waiting = async () => {
+            for (let attempt = 0; attempt < 200; attempt += 1) {
+              const rows = (
+                await admin.query(
+                  // A row lock wait is a wait on the holder's transaction id (no database).
+                  "SELECT count(*)::int AS waiting FROM pg_catalog.pg_locks l WHERE NOT l.granted AND (l.database IS NULL OR l.database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database()))",
+                )
+              ).rows;
+              if (rows[0].waiting > 0) return;
+              await delay(25);
+            }
+            throw new Error("the refund item list never waited on a lock");
+          };
+          const deadlocks = async () =>
+            (
+              await admin.query(
+                "SELECT deadlocks::int AS deadlocks FROM pg_catalog.pg_stat_database WHERE datname=current_database()",
+              )
+            ).rows[0].deadlocks;
+          const deadlocksBefore = await deadlocks();
+          let orderSourceCalls = 0;
+          let rowsLocked;
+          const locked = new Promise((resolve) => (rowsLocked = resolve));
+          const issuing = transactions().run((tx) =>
+            createRefundReceiptIssuance({
+              scope: paymentScope,
+              authorize: async () => true,
+              authorizeSources: async () => true,
+              // The order source asks before and after it locks the Order rows: pause after.
+              authorizeOrder: async () => {
+                orderSourceCalls += 1;
+                if (orderSourceCalls === 2) {
+                  rowsLocked();
+                  await waiting();
+                }
+                return true;
+              },
+              identities: () => ({ recordReference: fresh(), operationReference: fresh() }),
+              audit: receiptAudit("PAYMENT_REFUND_STATUS_CHANGED"),
+            })(tx, {
+              orderReference: fourth.order,
+              observedAt: new Date().toISOString(),
+              freshAfter: paidAt,
+            }),
+          );
+          await locked;
+          const listing = items({
+            ...session("requester"),
+            query: { orderReference: fourth.order },
+          });
+          const [issued, listed] = await Promise.allSettled([issuing, listing]);
+          const reason = (result) =>
+            result.status === "rejected"
+              ? String(result.reason?.code ?? "") +
+                " " +
+                String(result.reason?.message ?? result.reason) +
+                " " +
+                String(result.reason?.cause?.code ?? "")
+              : "";
+          // The victim's deadlock is counted once its connection reports (both close above).
+          let deadlocksAfter = await deadlocks();
+          for (let attempt = 0; attempt < 20 && deadlocksAfter === deadlocksBefore; attempt += 1) {
+            await delay(100);
+            deadlocksAfter = await deadlocks();
+          }
+          assert.equal(deadlocksAfter - deadlocksBefore, 0, "deadlocks detected (40P01)");
+          assert.equal(issued.status, "fulfilled", "refund receipt issuance: " + reason(issued));
+          assert.equal(listed.status, "fulfilled", "refund item list: " + reason(listed));
+          // Already current: the receipt's refund version stays the latest; the list still reads.
+          assert.equal(issued.value.status, "Existing");
+          assert.equal(issued.value.record.recordReference, refundReceipt.record.recordReference);
+          assert.equal(listed.value.orderReference, fourth.order);
+        }
       }
 
       // ── 12. RLS: another Store's scope sees no step-ups or approvals.

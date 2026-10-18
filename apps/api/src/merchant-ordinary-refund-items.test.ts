@@ -316,3 +316,11 @@ it("WP-2423: a round refunded whole by its cancellation offers no unit again", a
   // A round never charged is not "refunded by cancellation".
   expect(result.items[1]).toMatchObject({ paymentCaptured: false, refundedByCancellation: false });
 });
+
+it("v15 2026-10-18 40P01: locks the Order's Ordering rows before the Payment refund fence", async () => {
+  const f = setup();
+  await f.operation(f.input);
+  const orderCall = d.order.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY;
+  const fenceCall = d.context.mock.invocationCallOrder[0] ?? Number.NEGATIVE_INFINITY;
+  expect(orderCall).toBeLessThan(fenceCall);
+});
