@@ -31,7 +31,8 @@ export type OrderExceptionReconciliation =
       readonly checkedAt: string;
       readonly resolvedAt: string | null;
     }
-  | { readonly type: "Payment" }
+  /** One payment's check differed; resolvedAt once a later check of it matched the Provider. */
+  | { readonly type: "Payment"; readonly resolvedAt: string | null }
   | { readonly type: "UnmatchedCharge" }
   /** WP-2423 D3: the server could not read what this difference is about. */
   | { readonly type: "Unavailable" };
@@ -112,7 +113,14 @@ function businessDate(value: unknown) {
 const MINOR = /^(0|[1-9][0-9]{0,15})$/u;
 function reconciliation(value: unknown): OrderExceptionReconciliation {
   const type = (value as { type?: unknown } | null)?.type;
-  if (type === "Payment" || type === "UnmatchedCharge" || type === "Unavailable") {
+  if (type === "Payment") {
+    const raw = exact(value, ["type", "resolvedAt"]);
+    return Object.freeze({
+      type,
+      resolvedAt: raw.resolvedAt === null ? null : instant(raw.resolvedAt),
+    });
+  }
+  if (type === "UnmatchedCharge" || type === "Unavailable") {
     exact(value, ["type"]);
     return Object.freeze({ type });
   }

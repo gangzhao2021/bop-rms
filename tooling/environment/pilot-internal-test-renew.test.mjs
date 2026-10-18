@@ -24,7 +24,19 @@ const scope = {
   storeReference: "00000000-0000-7000-8000-000000000003",
 };
 const fixtures = () => ({
-  "installation.json": { schemaVersion: 1, environment: "InternalTest", database, port: 1 },
+  "installation.json": {
+    schemaVersion: 1,
+    environment: "InternalTest",
+    database,
+    port: 1,
+    roles: { api: "isolated_api", worker: "isolated_worker" },
+  },
+  "internal-test-menu.json": {
+    environment: "InternalTest",
+    database,
+    skuReference: "0190fa20-0000-7000-8000-00000000000d",
+    taxClassificationReference: "0190fa20-0000-7000-8000-000000000100",
+  },
   "internal-test-profile.json": {
     environment: "InternalTest",
     database,
@@ -111,6 +123,35 @@ async function install(values) {
       { mode: 0o600 },
     );
 }
+const TAX_VERSION = { versionNumber: 2, createdAt: new Date(NOW).toISOString() };
+/** Stands in for the database renewal (covered by internal-test-renewal-acceptance). */
+let databaseCalls;
+const databaseResult = (input, status = input.dryRun ? "Planned" : "Renewed") => ({
+  status,
+  role: database + "_internal_test_renewal",
+  readRole: input.readRole,
+  from: input.from,
+  to: input.to,
+  membership: [],
+  permission: [],
+  policyVersion: null,
+  liveGates: [],
+  tax: {
+    status: "AlreadyRenewed",
+    version: { reference: "x", number: 2 },
+    createdAt: TAX_VERSION.createdAt,
+  },
+  taxConfigurationVersion: TAX_VERSION,
+  alreadyRenewed: 0,
+  checks: {
+    before: { at: input.to, roster: {}, launchGate: "Refused", tax: "Refused" },
+    after: { at: input.to, roster: { a: 1 }, launchGate: "Accepted", tax: "Accepted" },
+  },
+});
+const renewDatabase = async (input) => {
+  databaseCalls.push(input);
+  return databaseResult(input);
+};
 const options = (extra = {}) => ({
   directory,
   expectedDatabaseName: database,
@@ -119,6 +160,7 @@ const options = (extra = {}) => ({
   approvedBy: "Test Owner",
   approval: "TEST: renew the internal test installation",
   now: NOW,
+  renewDatabase,
   ...extra,
 });
 const snapshot = async () => {
@@ -128,6 +170,7 @@ const snapshot = async () => {
   return result;
 };
 beforeEach(async () => {
+  databaseCalls = [];
   vi.stubEnv("NODE_ENV", "development");
   directory = await realpath(await mkdtemp(join(tmpdir(), "bop-internal-renew-")));
   await chmod(directory, 0o700);
@@ -149,10 +192,30 @@ test("dry run lists every window change and writes nothing", async () => {
     "internal-test-task-queue.json effectiveUntil",
     "internal-test-task-queue.json exceptionTaskPolicy.effectiveUntil",
     "internal-test-profile.json binding.validUntil",
+    "internal-test-profile.json taxConfigurationVersion",
   ]);
-  expect(result.changes.every((change) => change.from === OLD && change.to === UNTIL)).toBe(true);
+  expect(
+    result.changes
+      .filter((change) => change.path !== "taxConfigurationVersion")
+      .every((change) => change.from === OLD && change.to === UNTIL),
+  ).toBe(true);
+  expect(result.changes.at(-1)).toMatchObject({ from: null, to: JSON.stringify(TAX_VERSION) });
   expect(result.historicalCopiesUnchanged).toEqual(["internal-test-merchant.v1-backup.json"]);
-  expect(result.databaseArtefactsNotRenewed.length).toBe(4);
+  expect(result.databaseArtefactsNotRenewed.length).toBe(2);
+  // The database half ran as a dry run with the installation's expiry and the services' role.
+  expect(databaseCalls).toEqual([
+    expect.objectContaining({
+      dryRun: true,
+      from: OLD,
+      to: UNTIL,
+      now: NOW,
+      readRole: "isolated_api",
+      evidence: expect.objectContaining({
+        approvedBy: "Test Owner",
+        approval: "TEST: renew the internal test installation",
+      }),
+    }),
+  ]);
   expect(await snapshot()).toEqual(before);
   expect((await readdir(directory)).filter((name) => name.includes("renew"))).toEqual([]);
 });
@@ -164,7 +227,12 @@ test("renewal moves only the windows, keeps previous bytes and writes the record
   const after = await snapshot();
   for (const name of Object.keys(before)) {
     const changed = before[name].replaceAll(OLD, UNTIL);
-    expect(after[name]).toBe(name.includes("v1-backup") ? before[name] : changed);
+    if (name === "internal-test-profile.json")
+      expect(JSON.parse(after[name])).toEqual({
+        ...JSON.parse(changed),
+        taxConfigurationVersion: TAX_VERSION,
+      });
+    else expect(after[name]).toBe(name.includes("v1-backup") ? before[name] : changed);
   }
   const record = join(directory, result.record);
   for (const file of result.files) {
@@ -178,18 +246,62 @@ test("renewal moves only the windows, keeps previous bytes and writes the record
     reason: "Continue internal testing for four weeks",
     previousValidUntil: OLD,
     validUntil: UNTIL,
+    databaseRenewal: expect.objectContaining({ status: "Renewed" }),
   });
   const log = (await readFile(join(directory, "internal-test-renewal-log.jsonl"), "utf8"))
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
-  expect(log).toEqual([expect.objectContaining({ status: "Completed", from: OLD, to: UNTIL })]);
+  expect(log).toEqual([
+    expect.objectContaining({
+      status: "Completed",
+      from: OLD,
+      to: UNTIL,
+      databaseStatus: "Renewed",
+    }),
+  ]);
   expect((await readdir(directory)).filter((name) => name.startsWith(".internal-test"))).toEqual(
     [],
   );
-  expect((await renewInternalTestInstallation(options({ now: NOW + 1 }))).status).toBe(
-    "AlreadyRenewed",
+  const again = await renewInternalTestInstallation(
+    options({
+      now: NOW + 1,
+      renewDatabase: async (input) => databaseResult(input, "AlreadyRenewed"),
+    }),
   );
+  expect(again.status).toBe("AlreadyRenewed");
+  expect(again.changes).toEqual([]);
+});
+
+test("a database refusal leaves every file as it was", async () => {
+  const before = await snapshot();
+  const refusal = Object.assign(new Error("PILOT_INTERNAL_TEST_RENEWAL_UNAVAILABLE"), {
+    reason: "internal-test-membership-not-synthetic",
+  });
+  await expect(
+    renewInternalTestInstallation(
+      options({
+        renewDatabase: async () => {
+          throw refusal;
+        },
+      }),
+    ),
+  ).rejects.toMatchObject({ reason: "internal-test-membership-not-synthetic" });
+  expect(await snapshot()).toEqual(before);
+  expect((await readdir(directory)).filter((name) => name.includes("renew"))).toEqual([]);
+});
+
+test("refuses without the database renewal and before it when a file is not synthetic", async () => {
+  await expect(
+    renewInternalTestInstallation(options({ renewDatabase: undefined })),
+  ).rejects.toMatchObject({ reason: "database-renewal-missing" });
+  const values = fixtures();
+  values["internal-test-dining-table.json"].label = "Table 1";
+  await install(values);
+  await expect(renewInternalTestInstallation(options())).rejects.toMatchObject({
+    reason: "table-not-labelled-demo",
+  });
+  expect(databaseCalls).toEqual([]);
 });
 
 test("an interrupted renewal (profile still old) is finished by running it again", async () => {
@@ -280,47 +392,52 @@ test("argument parsing needs every flag once", () => {
     "a",
     "--approval",
     "w",
+    "--migration-env",
+    "e",
   ];
-  expect(parseRenewalArguments([...args, "--dry-run"])).toMatchObject({ dryRun: true });
+  expect(parseRenewalArguments([...args, "--dry-run"])).toMatchObject({
+    dryRun: true,
+    envFile: "e",
+  });
   expect(() => parseRenewalArguments(args.slice(0, -2))).toThrow();
   expect(() => parseRenewalArguments([...args, "--until", UNTIL])).toThrow();
 });
 
-test("command prints the dry-run plan and fails closed with a fixed reason", async () => {
-  const until = new Date(Date.now() + 10 * DAY).toISOString();
+test("command fails closed with a fixed reason before any change", async () => {
   const env = { ...process.env, NODE_ENV: "development" };
+  const loader = fileURLToPath(new URL("./register-workspace-typescript.mjs", import.meta.url));
   const args = [
     script,
     directory,
     "--database",
     database,
     "--until",
-    until,
+    new Date(Date.now() + 10 * DAY).toISOString(),
     "--reason",
     "Continue internal testing for ten days",
     "--approved-by",
     "Test Owner",
     "--approval",
     "TEST: renew the internal test installation",
+    "--migration-env",
+    join(directory, "missing.env"),
   ];
-  const values = fixtures();
-  const future = new Date(Date.now() + DAY).toISOString();
-  values["internal-test-profile.json"].binding.validUntil = future;
-  values["internal-test-merchant.json"].actors.forEach((actor) => (actor.validUntil = future));
-  values["internal-test-dining-table.json"].validUntil = future;
-  values["internal-test-task-queue.json"].effectiveUntil = future;
-  values["internal-test-task-queue.json"].exceptionTaskPolicy.effectiveUntil = future;
-  await install(values);
-  const { stdout } = await execute(process.execPath, [...args, "--dry-run"], { env });
-  expect(stdout).toContain("Planned (DRY RUN, nothing written)");
-  expect(stdout).toContain(
-    "internal-test-profile.json  binding.validUntil  " + future + " -> " + until,
-  );
-  expect(stdout).toContain("NOT renewed (database");
+  const before = await snapshot();
+  await expect(execute(process.execPath, args, { env })).rejects.toMatchObject({
+    code: 1,
+    stderr: expect.stringContaining(
+      "PILOT_INTERNAL_TEST_RENEWAL_UNAVAILABLE (typescript-loader-missing)",
+    ),
+  });
   await expect(
-    execute(process.execPath, [...args.slice(0, 3), "other_db", ...args.slice(4)], { env }),
+    execute(process.execPath, ["--import", loader, ...args, "--dry-run"], { env }),
   ).rejects.toMatchObject({
     code: 1,
-    stderr: expect.stringContaining("PILOT_INTERNAL_TEST_RENEWAL_UNAVAILABLE (database-mismatch)"),
+    stderr: expect.stringContaining("PILOT_INTERNAL_TEST_RENEWAL_UNAVAILABLE (env-file-invalid)"),
   });
+  await expect(execute(process.execPath, args.slice(0, -2), { env })).rejects.toMatchObject({
+    code: 1,
+    stderr: expect.stringContaining("(arguments-invalid)"),
+  });
+  expect(await snapshot()).toEqual(before);
 });

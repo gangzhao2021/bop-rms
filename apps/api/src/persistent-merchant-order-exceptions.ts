@@ -221,6 +221,17 @@ export function createPersistentMerchantOrderExceptions(options: {
           }
         };
         for (const [reference, detail] of details) {
+          if (detail.kind === "Payment") {
+            // WP-2423 (2026-10-17): a later check of the same payment can resolve it.
+            result.set(
+              reference,
+              Object.freeze({
+                type: "Payment" as const,
+                resolvedAt: detail.resolution?.resolvedAt ?? null,
+              }),
+            );
+            continue;
+          }
           if (detail.kind !== "BusinessDayTotals") {
             result.set(reference, Object.freeze({ type: detail.kind }));
             continue;

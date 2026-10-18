@@ -2,7 +2,7 @@ import process from "node:process";
 import { Buffer } from "node:buffer";
 import console from "node:console";
 import { constants } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { lstat, realpath, readdir, mkdir, open, link, rename, rm, rmdir } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -11,15 +11,24 @@ import { pathToFileURL } from "node:url";
 /**
  * WP-2423: Owner-approved renewal of an InternalTest installation's validity window.
  *
- * Moves the common `validUntil`/`effectiveUntil` of the synthetic installation files (profile
- * binding, DEMO staff roster, DEMO dining tables, InternalTest task queue) to a new instant at
- * most 30 days ahead. It refuses unless every file it reads is InternalTest, matches the expected
- * database and Store binding, and carries only synthetic (DEMO) identities; it never changes any
- * other value. The previous files are kept as hard links in a new owner-only
- * `internal-test-renewal-<time>` directory with a `renewal.json` record (who approved, why,
- * from → to, before/after SHA-256), and each completed renewal appends one line to
- * `internal-test-renewal-log.jsonl`. Historical copies are never rewritten. Database facts with
- * the same expiry have no product renewal path and are listed, never written.
+ * Moves the common `validUntil`/`effectiveUntil` of the synthetic installation to a new instant at
+ * most 30 days ahead, database first, then files:
+ *
+ * 1. Database (pilot-internal-test-renew-database.mjs, one transaction through each owning
+ *    domain): the DEMO staff roster, the synthetic launch gate and the synthetic DEMO tax evidence
+ *    (a new tax version). It commits only if the product read paths accept them after the old
+ *    expiry.
+ * 2. Files: profile binding (and the renewed tax version it now names), DEMO staff roster, DEMO
+ *    dining tables, InternalTest task queue; the profile last.
+ *
+ * It refuses unless every file it reads is InternalTest, matches the expected database and Store
+ * binding, and carries only synthetic (DEMO) identities, and every database row it would move is
+ * labelled synthetic; it never changes any other value. The previous files are kept as hard links
+ * in a new owner-only `internal-test-renewal-<time>` directory with a `renewal.json` record (who
+ * approved, why, from → to, before/after SHA-256, the database changes), each database change is
+ * in the platform audit, and each completed renewal appends one line to
+ * `internal-test-renewal-log.jsonl`. Historical copies are never rewritten. An interrupted run is
+ * finished by running it again (the database part then reports AlreadyRenewed).
  */
 const unavailable = (reason = "unspecified", details = {}) => {
   const error = new Error("PILOT_INTERNAL_TEST_RENEWAL_UNAVAILABLE");
@@ -31,6 +40,13 @@ const keepReason = (reason) => (error) =>
   unavailable(typeof error?.reason === "string" ? error.reason : reason);
 
 const DAY = 86400000;
+/** UUIDv7 correlation reference of one renewal (time-ordered, as in permission-catalog-install). */
+function uuidV7(now = Date.now()) {
+  const time = now.toString(16).padStart(12, "0"),
+    hex = randomBytes(10).toString("hex");
+  const variant = ((parseInt(hex.slice(3, 4), 16) & 0x3) | 0x8).toString(16);
+  return `${time.slice(0, 8)}-${time.slice(8, 12)}-7${hex.slice(0, 3)}-${variant}${hex.slice(4, 7)}-${hex.slice(7, 19)}`;
+}
 export const MAX_RENEWAL_DAYS = 30;
 /** Synthetic fixture identities used by the InternalTest installation (`xxxxxxxx-0000-7000-8000-…`). */
 const SYNTHETIC_REFERENCE = /^[0-9a-f]{8}-0000-7000-8000-[0-9a-f]{12}$/u;
@@ -42,30 +58,18 @@ const LOG = "internal-test-renewal-log.jsonl";
 const LOCK = ".internal-test-renew-lock";
 const SCOPE_KEYS = ["tenantReference", "brandReference", "storeReference"];
 
-/**
- * Same-expiry facts in the database. None has a product command that extends it; renewing them
- * needs the listed product path first (never direct SQL).
- */
+/** Same-expiry facts this renewal deliberately leaves alone. */
 export const databaseArtefactsNotRenewed = Object.freeze([
   Object.freeze({
-    artefact:
-      "DEMO staff roster: bop_membership.membership/store_assignment, bop_permission.role/role_assignment/permission_grant",
-    missing: "no product command extends effective_until (membership and roles can only be ended)",
-  }),
-  Object.freeze({
-    artefact:
-      "launch gate requirement SYNTHETIC_STORE_READY (bop_publishing.live_gate_requirement)",
-    missing: "the Publishing domain only reads gate requirements; no evidence renewal command",
-  }),
-  Object.freeze({
-    artefact:
-      "tax registration and professional review evidence (rms_pricing.tax_configuration_version)",
-    missing:
-      "a new tax version needs the tax publication path with registration and professional review sources, unavailable in the pilot",
-  }),
-  Object.freeze({
     artefact: "Pickup capacity slots (rms_fulfillment.capacity_slot)",
-    missing: "no product command creates capacity slots",
+    missing:
+      "created ahead by the business worker's pickupCapacitySchedule loop after deploy (needs the api INSERT grants on rms_fulfillment.capacity_slot and capacity_slot_configuration); the loop stops once binding.validUntil passes, so renew before the old expiry",
+  }),
+  Object.freeze({
+    artefact:
+      "InternalTest batch cancellation workflow (bop_workflow.workflow_definition_version, InternalTestBatchCancellation)",
+    missing:
+      "superseded by the released UnpaidDineInBatchCancellation workflow (no end); nothing reads it after the release is installed",
   }),
 ]);
 
@@ -234,6 +238,7 @@ async function readArtefacts(directory, database) {
   for (const required of [
     "installation.json",
     "internal-test-profile.json",
+    "internal-test-menu.json",
     "internal-test-merchant.json",
     "internal-test-task-queue.json",
   ])
@@ -246,6 +251,8 @@ async function readArtefacts(directory, database) {
     if (!Array.isArray(listed) || listed.some((name) => !tables.includes(name)))
       return unavailable("dining-table-missing");
   }
+  const menu = await read("internal-test-menu.json");
+  requireInternalTest(menu.value, database);
   const profile = await read("internal-test-profile.json");
   const binding = profile.value.binding ?? {};
   const artefacts = [];
@@ -261,13 +268,23 @@ async function readArtefacts(directory, database) {
   artefacts.push({ ...profile, paths: artefactRules.profile(profile.value, database) });
   return {
     artefacts,
+    profile: profile.value,
+    menu: menu.value,
+    // The services' database role (installation.json), used for the database read checks.
+    readRole: installation.value.roles?.api ?? null,
     current: binding.validUntil,
     historicalCopies: names.filter((name) => HISTORICAL_COPY.test(name)),
   };
 }
 
-/** Pure plan: only the listed window values change, each from the current expiry to `until`. */
-export function planRenewal({ artefacts, current, until, now }) {
+const PROFILE = "internal-test-profile.json";
+const TAX_VERSION = ["taxConfigurationVersion"];
+/**
+ * Pure plan: only the listed window values change, each from the current expiry to `until`, and
+ * the profile names the tax version the database renewal produced (`taxConfigurationVersion`;
+ * `undefined` leaves it as it is, `null` means the installed version 1).
+ */
+export function planRenewal({ artefacts, current, until, now, taxConfigurationVersion }) {
   if (!isInstant(until)) return unavailable("until-invalid");
   if (Date.parse(until) <= now) return unavailable("until-not-in-future");
   if (Date.parse(until) > now + MAX_RENEWAL_DAYS * DAY) return unavailable("until-beyond-30-days");
@@ -285,15 +302,35 @@ export function planRenewal({ artefacts, current, until, now }) {
       setPath(next, path, until);
       moved.push(path);
     }
-    if (moved.length === 0) continue;
+    const taxBefore = artefact.value.taxConfigurationVersion ?? null;
+    const taxMoves =
+      artefact.name === PROFILE &&
+      taxConfigurationVersion !== undefined &&
+      JSON.stringify(taxBefore) !== JSON.stringify(taxConfigurationVersion);
+    if (taxMoves) {
+      if (taxConfigurationVersion === null) delete next.taxConfigurationVersion;
+      else setPath(next, TAX_VERSION, taxConfigurationVersion);
+    }
+    if (moved.length === 0 && !taxMoves) continue;
     const restored = JSON.parse(JSON.stringify(next));
     for (const path of moved) setPath(restored, path, current);
+    if (taxMoves) {
+      if (taxBefore === null) delete restored.taxConfigurationVersion;
+      else setPath(restored, TAX_VERSION, taxBefore);
+    }
     if (JSON.stringify(restored) !== JSON.stringify(artefact.value))
       return unavailable("non-window-change");
     const before = serialise(artefact.value, artefact.style),
       after = serialise(next, artefact.style);
     for (const path of moved)
       changes.push({ file: artefact.name, path: pathText(path), from: current, to: until });
+    if (taxMoves)
+      changes.push({
+        file: artefact.name,
+        path: pathText(TAX_VERSION),
+        from: taxBefore === null ? null : JSON.stringify(taxBefore),
+        to: taxConfigurationVersion === null ? null : JSON.stringify(taxConfigurationVersion),
+      });
     files.push({
       file: artefact.name,
       beforeSha256: sha256(before),
@@ -339,8 +376,12 @@ export async function renewInternalTestInstallation({
   approval,
   dryRun = false,
   now = Date.now(),
+  /** The database renewal (pilot-internal-test-renew-database.mjs) bound to its connection. */
+  renewDatabase,
+  renewalReference = uuidV7(),
 }) {
   if (process.env.NODE_ENV !== "development") return unavailable("not-development-mode");
+  if (typeof renewDatabase !== "function") return unavailable("database-renewal-missing");
   if (
     typeof expectedDatabaseName !== "string" ||
     !/^[a-z][a-z0-9_]{0,62}$/u.test(expectedDatabaseName)
@@ -362,11 +403,32 @@ export async function renewInternalTestInstallation({
     replaced = 0,
     recordName;
   try {
-    const { artefacts, current, historicalCopies } = await readArtefacts(
+    const { artefacts, profile, menu, readRole, current, historicalCopies } = await readArtefacts(
       directory,
       expectedDatabaseName,
     );
-    const { changes, files } = planRenewal({ artefacts, current, until, now });
+    // Validates the files before the database is touched.
+    planRenewal({ artefacts, current, until, now });
+    const operatorAccount = userInfo().username;
+    // Database first: it commits only when the product read paths accept the renewed facts, and
+    // a repeated run reports it AlreadyRenewed, so the files below always follow the database.
+    const databaseRenewal = await renewDatabase({
+      readRole,
+      profile,
+      menu,
+      from: current,
+      to: until,
+      now,
+      dryRun,
+      evidence: { renewalReference, approvedBy, approval, reason, operatorAccount },
+    });
+    const { changes, files } = planRenewal({
+      artefacts,
+      current,
+      until,
+      now,
+      taxConfigurationVersion: databaseRenewal.taxConfigurationVersion,
+    });
     const summary = {
       environment: "InternalTest",
       database: expectedDatabaseName,
@@ -379,10 +441,14 @@ export async function renewInternalTestInstallation({
         afterSha256,
       })),
       historicalCopiesUnchanged: historicalCopies,
+      renewalReference,
+      databaseRenewal,
       databaseArtefactsNotRenewed,
     };
-    if (changes.length === 0) return { status: "AlreadyRenewed", dryRun, ...summary };
+    if (changes.length === 0 && databaseRenewal.status === "AlreadyRenewed")
+      return { status: "AlreadyRenewed", dryRun, ...summary };
     if (dryRun) return { status: "Planned", dryRun: true, ...summary };
+    if (changes.length === 0) return { status: "Renewed", dryRun: false, ...summary };
     recordName = "internal-test-renewal-" + new Date(now).toISOString().replace(/[-:.]/gu, "");
     const record = join(directory, recordName);
     try {
@@ -397,7 +463,7 @@ export async function renewInternalTestInstallation({
       schemaVersion: 1,
       kind: "InternalTestRenewal",
       performedAt: new Date(now).toISOString(),
-      operatorAccount: userInfo().username,
+      operatorAccount,
       approvedBy,
       approval,
       reason,
@@ -425,6 +491,8 @@ export async function renewInternalTestInstallation({
         from: current,
         to: until,
         approvedBy,
+        renewalReference,
+        databaseStatus: databaseRenewal.status,
         files: summary.files.map(({ file }) => file),
       }),
     );
@@ -450,6 +518,7 @@ const flags = {
   "--reason": "reason",
   "--approved-by": "approvedBy",
   "--approval": "approval",
+  "--migration-env": "envFile",
 };
 export function parseRenewalArguments(args) {
   const [directory, ...rest] = args;
@@ -485,6 +554,44 @@ export function formatRenewal(result) {
     `Internal test renewal for ${result.database}: ${result.status}` +
       (result.dryRun ? " (DRY RUN, nothing written)" : ""),
   ];
+  const db = result.databaseRenewal;
+  if (db) {
+    lines.push(`  database (${db.status}, changes as ${db.role}, checks as ${db.readRole}):`);
+    for (const change of [...db.membership, ...db.permission])
+      lines.push(
+        `    ${change.targetType} ${change.targetId}  effective_until ${change.from} -> ${change.to}  (version ${change.versionBefore} -> ${change.versionAfter})`,
+      );
+    if (db.policyVersion !== null)
+      lines.push(`    permission policy version -> ${db.policyVersion}`);
+    for (const gate of db.liveGates)
+      lines.push(
+        `    launch gate ${gate.gateId} version ${gate.fromVersion} -> ${gate.toVersion}: ` +
+          gate.requirements
+            .map((item) => `${item.requirementCode} ${item.from} -> ${item.to}`)
+            .join(", "),
+      );
+    if (db.tax.status === "Renewed")
+      lines.push(
+        `    tax configuration version ${db.tax.fromVersion.number} -> ${db.tax.toVersion.number} (${db.tax.toVersion.reference}): registration and professional evidence ${db.tax.from} -> ${db.tax.to}`,
+      );
+    else lines.push(`    tax configuration version ${db.tax.version.number} already renewed`);
+    if (db.tax.referenceScopeRestored)
+      lines.push(
+        "    tax reference scope of the DEMO configuration restored (missing in this database)",
+      );
+    if (db.alreadyRenewed) lines.push(`    ${db.alreadyRenewed} database fact(s) already renewed`);
+    const staff = (roster) =>
+      Object.keys(roster).length === 0
+        ? "no staff authority"
+        : `${Object.keys(roster).length} staff with authority`;
+    for (const [label, check] of [
+      ["before", db.checks.before],
+      ["after", db.checks.after],
+    ])
+      lines.push(
+        `    check at ${check.at} ${label}: ${staff(check.roster)}, launch gate ${check.launchGate}, tax ${check.tax}`,
+      );
+  }
   for (const change of result.changes)
     lines.push(`  ${change.file}  ${change.path}  ${change.from} -> ${change.to}`);
   for (const file of result.files)
@@ -494,9 +601,7 @@ export function formatRenewal(result) {
     lines.push(
       "  historical copies left unchanged: " + result.historicalCopiesUnchanged.join(", "),
     );
-  lines.push(
-    "  NOT renewed (database, no product renewal path; the Store cannot take orders after the old expiry until these are renewed):",
-  );
+  lines.push("  NOT renewed (deliberately left alone):");
   for (const item of result.databaseArtefactsNotRenewed)
     lines.push(`    - ${item.artefact}: ${item.missing}`);
   if (result.status === "Renewed")
@@ -507,10 +612,23 @@ export function formatRenewal(result) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  let client;
   try {
-    const result = await renewInternalTestInstallation(
-      parseRenewalArguments(process.argv.slice(2)),
+    const options = parseRenewalArguments(process.argv.slice(2));
+    if (process.env.NODE_ENV !== "development") unavailable("not-development-mode");
+    // The database half needs the workspace TypeScript loader (see the runbook command).
+    const database = await import("./pilot-internal-test-renew-database.mjs").catch(
+      keepReason("typescript-loader-missing"),
     );
+    client = await database.connectRenewalDatabase(options.envFile, options.expectedDatabaseName);
+    const result = await renewInternalTestInstallation({
+      ...options,
+      renewDatabase: (input) =>
+        database.renewInternalTestDatabase(client, {
+          database: options.expectedDatabaseName,
+          ...input,
+        }),
+    });
     console.log(formatRenewal(result));
     console.log(JSON.stringify({ ...result, databaseArtefactsNotRenewed: undefined }));
   } catch (error) {
@@ -524,5 +642,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           : " Nothing was replaced."),
     );
     process.exitCode = 1;
+  } finally {
+    await client?.end().catch(() => undefined);
   }
 }

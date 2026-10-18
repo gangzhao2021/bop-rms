@@ -83,3 +83,5 @@ export * from "./infrastructure/persistence/store-receipt-profile-store.js";
 // WP-2423 store name (DEC-STORE-CUSTOMER-NAME): the Owner publishes the Store's public profile.
 export * from "./contracts/public-store-profile-edit.js";
 export * from "./infrastructure/public-store-profile-publisher.js";
+// WP-2423 DEC-PICKUP-CAPACITY-SCHEDULE: published hours laid out ahead for capacity planning.
+export * from "./domain/expand-store-service-calendar.js";

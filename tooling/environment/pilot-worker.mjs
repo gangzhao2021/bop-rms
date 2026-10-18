@@ -100,6 +100,11 @@ export async function createInternalWorker(resources, observers = {}, options = 
       })),
       // WP-2423 Q10 (Owner-approved 30 days): always on; daily removal of expired checkout contacts.
       dependencies.createInternalContactRetentionWorkload(resources, observers.contactRetention),
+      // DEC-PICKUP-CAPACITY-SCHEDULE: always on; without slots no pickup order can be taken.
+      dependencies.createInternalPickupCapacityScheduleWorkload(
+        resources,
+        observers.pickupCapacitySchedule,
+      ),
       ...(options.cartExpiry === true ? [createInternalCartExpiryWorkload(resources)] : []),
       ...(options.diningCheckoutExpiry === true
         ? [createInternalDiningCheckoutExpiryWorkload(resources, observers.diningCheckoutExpiry)]

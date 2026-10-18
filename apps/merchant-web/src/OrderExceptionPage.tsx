@@ -443,6 +443,14 @@ function OrderExceptionCard({
           <dd>{item.ownerStatus}</dd>
         </div>
       </dl>
+      {detail?.type === "Payment" && detail.resolvedAt !== null ? (
+        // WP-2423 (2026-10-17): a later check of the same payment found it matching again.
+        <p role="note">
+          Resolved: this payment was checked again <SourceTime instant={detail.resolvedAt} /> and
+          now matches the payment provider. Nothing more to do; both checks stay in the store&apos;s
+          history.
+        </p>
+      ) : null}
       {csrf &&
       !resolved &&
       item.kind === "PaidWithoutFulfillableOrder" &&
@@ -465,7 +473,9 @@ function OrderExceptionCard({
           showChargeDetails={unmatched}
         />
       ) : null}
-      {resolved && !(csrf && payment) ? (
+      {resolved &&
+      !(csrf && payment) &&
+      !(detail?.type === "Payment" && detail.resolvedAt !== null) ? (
         <p role="note">Resolved: nothing more to do. It stays in the store&apos;s history.</p>
       ) : null}
       {item.orderReference === null && !resolved ? (

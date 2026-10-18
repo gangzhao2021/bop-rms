@@ -76,6 +76,8 @@ const observation = {
   providerIntentReference: "pi_DEMO0123456789",
   amount: { amountMinor: 2260n, currencyCode: "CAD" },
   status: "succeeded",
+  // The Provider's refund creation time (whole seconds), before the result was observed.
+  createdAt: "2026-10-09T04:59:59.000Z",
   observedAt: now,
   evidenceDigest: "sha256:" + "a".repeat(64),
 };
@@ -117,6 +119,9 @@ it("WP-2423 P6: approval sends the fixed Provider request and records the confir
   expect(doubles.store.recordOutcome.mock.calls[0]?.[1].observation).toMatchObject({
     amountMinor: 2260n,
     idempotencyKey: "unmatched-capture-refund:" + id(40),
+    // WP-2423 (2026-10-17): kept so the Settlement page counts the refund on the Provider's day.
+    createdAt: "2026-10-09T04:59:59.000Z",
+    observedAt: now,
   });
 });
 

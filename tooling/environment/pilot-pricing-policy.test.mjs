@@ -1,5 +1,8 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { createInternalPricingPolicy } from "./pilot-pricing-policy.mjs";
+import {
+  createInternalPricingPolicy,
+  internalTestTaxVersionIdentity,
+} from "./pilot-pricing-policy.mjs";
 const profile = {
   environment: "InternalTest",
   database: "synthetic_pilot",
@@ -62,4 +65,60 @@ it("rejects cross-installation or non-test profile/menu and missing expected dat
     await expect(createInternalPricingPolicy({ ...options(), ...change })).rejects.toThrow(
       "INTERNAL_PRICING_ONLY",
     );
+});
+it("names the renewed synthetic tax version the profile records, with its own identities", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  const installed = await createInternalPricingPolicy(options());
+  expect(installed.taxConfiguration).toMatchObject({
+    versionNumber: 1,
+    aggregateVersion: 1,
+    versionReference: "0190fa24-0000-7000-8000-00000000000b",
+    createdAt: profile.createdAt,
+  });
+  const renewedProfile = {
+    ...profile,
+    binding: { ...profile.binding, validUntil: "2026-10-25T12:00:00.000Z" },
+    taxConfigurationVersion: { versionNumber: 2, createdAt: "2026-09-30T08:00:00.000Z" },
+  };
+  const renewed = await createInternalPricingPolicy({
+    ...options(),
+    loadProfile: async () => renewedProfile,
+  });
+  const identity = internalTestTaxVersionIdentity(2);
+  const tax = renewed.taxConfiguration;
+  expect(tax).toMatchObject({
+    versionNumber: 2,
+    aggregateVersion: 2,
+    versionReference: identity.versionReference,
+    createdAt: "2026-09-30T08:00:00.000Z",
+  });
+  expect(tax.rules.map((rule) => rule.ruleReference)).toEqual(identity.ruleReferences);
+  expect(tax.professionalEvidence).toMatchObject({
+    snapshotReference: identity.versionReference,
+    snapshotDigest: tax.snapshotDigest,
+    reviewedAt: profile.createdAt,
+    validUntil: "2026-10-25T12:00:00.000Z",
+  });
+  expect(tax.registrationEvidence.validUntil).toBe("2026-10-25T12:00:00.000Z");
+  expect(tax.snapshotDigest).not.toBe(installed.taxConfiguration.snapshotDigest);
+  // Only the tax version changes; every rate, rule and the price book stay as installed.
+  const withoutIdentity = (rules) =>
+    rules.map((rule) =>
+      Object.fromEntries(Object.entries(rule).filter(([key]) => key !== "ruleReference")),
+    );
+  expect(withoutIdentity(tax.rules)).toEqual(withoutIdentity(installed.taxConfiguration.rules));
+  expect(renewed.priceBook).toEqual(installed.priceBook);
+  for (const taxConfigurationVersion of [
+    null,
+    { versionNumber: 1, createdAt: "2026-09-30T08:00:00.000Z" },
+    { versionNumber: 2, createdAt: "2026-06-30T08:00:00.000Z" },
+    { versionNumber: 2, createdAt: "2026-09-30" },
+    { versionNumber: 2, createdAt: "2026-09-30T08:00:00.000Z", extra: true },
+  ])
+    await expect(
+      createInternalPricingPolicy({
+        ...options(),
+        loadProfile: async () => ({ ...profile, taxConfigurationVersion }),
+      }),
+    ).rejects.toThrow("INTERNAL_PRICING_ONLY");
 });

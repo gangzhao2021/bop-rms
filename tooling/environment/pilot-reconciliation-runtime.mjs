@@ -6,6 +6,7 @@ import {
   parseSettlementReconciliationCandidate,
   parsePaymentReference,
   createPostgresPaymentReconciliationRepository,
+  createPostgresPaymentReconciliationResolvedDifferenceCount,
   createPostgresPaymentReconciliationCandidates,
   createPostgresPaymentReconciliationCandidateSource,
   createPostgresPaymentProviderObservationStore,
@@ -18,6 +19,7 @@ import { createInternalReconciliationTerminalOccurrence } from "./pilot-reconcil
 const factories = {
   createPaymentReconciliationService,
   createPostgresPaymentReconciliationRepository,
+  createPostgresPaymentReconciliationResolvedDifferenceCount,
   createPostgresPaymentReconciliationCandidates,
   createPostgresPaymentReconciliationCandidateSource,
   createPostgresPaymentProviderObservationStore,
@@ -151,7 +153,14 @@ export function createInternalReconciliationRuntime(
           r.scope,
           { now: r.now },
         );
-        const exceptionFor = (input) => {
+        const resolvedDifferences = f.createPostgresPaymentReconciliationResolvedDifferenceCount({
+          scope: r.scope,
+          authorize: async () => held(),
+        });
+        // WP-2423 (2026-10-17): a difference found again after an earlier one of the same payment
+        // (or day) and reason was resolved is a new exception, so it is shown instead of being
+        // folded into the resolved one. Generation 0 keeps the identity differences always had.
+        const exceptionFor = async (input) => {
           if (
             input.brandReference !== run.brandReference ||
             input.storeReference !== run.storeReference ||
@@ -160,8 +169,12 @@ export function createInternalReconciliationRuntime(
             )
           )
             return fail();
-          const candidate = String(parsePaymentReference(input.candidateReference)),
-            stamp = candidate.replaceAll("-", "").slice(0, 12),
+          const candidate = String(parsePaymentReference(input.candidateReference));
+          const generation = await transactions.run((tx) =>
+            resolvedDifferences(tx, { candidateReference: candidate, reason: input.reason }),
+          );
+          if (!Number.isSafeInteger(generation) || generation < 0) return fail();
+          const stamp = candidate.replaceAll("-", "").slice(0, 12),
             h = createHash("sha256")
               .update(
                 JSON.stringify([
@@ -170,6 +183,7 @@ export function createInternalReconciliationRuntime(
                   run.storeReference,
                   candidate,
                   input.reason,
+                  ...(generation === 0 ? [] : [generation]),
                 ]),
               )
               .digest("hex");

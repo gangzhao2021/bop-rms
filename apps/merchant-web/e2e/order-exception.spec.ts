@@ -904,6 +904,88 @@ test("@production WP-2423 a business day's totals difference resolved on re-chec
   expect(writes).toEqual([]);
 });
 
+test("@production WP-2423 a single payment's difference resolved by its re-check reads as such (2026-10-17)", async ({
+  page,
+}) => {
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() !== "GET" &&
+      !request.url().endsWith("/merchant/session/activity") &&
+      !request.url().endsWith("/follow-up-query")
+    )
+      writes.push(request.url());
+  });
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          ...workspace(0),
+          selectedScope: { ...stores[0], timeZone: "America/Toronto" },
+        },
+      },
+      headers,
+    }),
+  );
+  const base = view(0).items[0];
+  const payment = (n: number, resolvedAt: string | null) => ({
+    ...base,
+    exceptionReference: "018f0f58-767a-7f3b-a1d0-00000000093" + n,
+    kind: "PaymentReconciliationDifference",
+    severity: "High",
+    orderReference: "018f0f58-767a-7f3b-a1d0-00000000094" + n,
+    orderNumber: String(40 + n),
+    providerState: resolvedAt === null ? "Unknown" : "Confirmed",
+    compensationStatus: "NotRequested",
+    status: resolvedAt === null ? "Open" : "Resolved",
+    sourceFinal: resolvedAt !== null,
+    reconciliation: { type: "Payment", resolvedAt },
+  });
+  await page.route("**/merchant/order-exceptions", (route) =>
+    route.fulfill({
+      json: {
+        ...view(0),
+        freshnessStatus: "Fresh",
+        items: [payment(1, "2026-08-12T14:05:00.000Z"), payment(2, null)],
+      },
+      headers,
+    }),
+  );
+  await page.route("**/merchant/operations/order-exceptions/follow-up-query", (route) =>
+    route.fulfill({
+      json: {
+        version: 1,
+        followUpStatus: "Open",
+        acknowledged: false,
+        assigned: false,
+        updatedAt: "2026-08-11T15:00:00.000Z",
+      },
+      headers,
+    }),
+  );
+  await page.goto("/operations/order-exceptions");
+  const resolved = page.locator("article").filter({ hasText: "Order 41" });
+  const open = page.locator("article").filter({ hasText: "Order 42" });
+  await expect(resolved.getByText(/^Resolved: this payment was checked again/)).toBeVisible();
+  await expect(resolved.getByText(/now matches the payment provider/)).toBeVisible();
+  await expect(resolved.getByText("Follow-up closed: this difference is resolved.")).toBeVisible();
+  for (const name of ["Review current follow-up", "Acknowledge payment difference", "Assign to me"])
+    await expect(resolved.getByRole("button", { name })).toHaveCount(0);
+  await expect(open.getByText(/^Resolved: this payment was checked again/)).toHaveCount(0);
+  await expect(open.getByText("Open", { exact: true })).toBeVisible();
+  await expectNoInternalText(page);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await resolved.screenshot({ path: `test-results/exceptions-payment-resolved-${width}.png` });
+  }
+  expect(writes).toEqual([]);
+});
+
 test("@production WP-2423 every open case first, resolved history a page at a time, confirmed refunds checked by day end", async ({
   page,
 }) => {

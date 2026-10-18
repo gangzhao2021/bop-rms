@@ -355,7 +355,14 @@ export function createPersistentMerchantSettlement(options: {
                 capturedCount += 1;
                 captured += BigInt(state.amountMinor);
               }
-              if (state.outcome !== null && inDay(state.outcome.providerObservedAt)) {
+              // WP-2423 (2026-10-17): the refund counts in the business day of the Provider's
+              // refund creation time, as on the Provider statement and in day-end settlement
+              // (not when its result was observed). Refunds recorded before that time was kept
+              // fall back to their observation time.
+              if (
+                state.outcome !== null &&
+                inDay(state.outcome.providerCreatedAt ?? state.outcome.providerObservedAt)
+              ) {
                 refundedCount += 1;
                 refunded += BigInt(state.amountMinor);
               }

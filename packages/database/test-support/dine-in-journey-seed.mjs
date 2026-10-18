@@ -595,6 +595,8 @@ export async function seedJourneyStorePublication({
   publishedAt,
   businessDayStart,
   prefix,
+  // How long the publication's launch evidence stays valid (default two days after publishing).
+  validUntil = new Date(Date.parse(publishedAt) + 2 * 86400000).toISOString(),
 }) {
   const id = (n) =>
     n === 90
@@ -696,15 +698,7 @@ export async function seedJourneyStorePublication({
     "INSERT INTO rms_store.store_configuration_publication_content VALUES ($1,$2,$3,$4,'STORE_CONFIGURATION','STORE_CONFIGURATION',$5,$6,'StoreOverride',$7,'ConfigurationMetadata')",
     [scope.brandReference, scope.storeReference, id(1), id(70), digest, configuration, at],
   );
-  await seedStorePublication(
-    client,
-    id,
-    configuration,
-    digest,
-    undefined,
-    undefined,
-    new Date(Date.parse(at) + 2 * 86400000).toISOString(),
-  );
+  await seedStorePublication(client, id, configuration, digest, undefined, undefined, validUntil);
   const storeOptions = {
     ...scope,
     timeZone: "America/Toronto",

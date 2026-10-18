@@ -53,6 +53,10 @@ export async function startPilotBusinessWorker({
           directory,
           "business-contact-retention",
         ),
+        pickupCapacitySchedule: createPilotWorkloadHealthObserver(
+          directory,
+          "business-pickup-capacity-schedule",
+        ),
       },
       {
         cartExpiry: true,

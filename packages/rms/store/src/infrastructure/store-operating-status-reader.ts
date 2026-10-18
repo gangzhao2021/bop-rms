@@ -127,29 +127,96 @@ export function createPostgresStoreOperatingStatusReader(
   };
 }
 
+type PublishedOperatingOptions = Omit<
+  Parameters<typeof createPostgresCurrentStorePublicationProof>[0],
+  "configurationReference" | "hashContent"
+> & {
+  timeZone: string;
+  hashContent(value: unknown): string;
+  verifyPauseOperation: PauseOptions["verifyOperation"];
+};
+type PublicationProof = Awaited<
+  ReturnType<ReturnType<typeof createPostgresCurrentStorePublicationProof>>
+>;
+
 /** Production composition: all schedule facts must match one current publication.
  * Proof is retained only for this invocation/transaction, never across requests.
  * Pause operation authority remains an explicit current public-owner dependency.
  */
 export function createPostgresPublishedStoreOperatingStatusReader(
-  options: Omit<
-    Parameters<typeof createPostgresCurrentStorePublicationProof>[0],
-    "configurationReference" | "hashContent"
-  > & {
-    timeZone: string;
-    hashContent(value: unknown): string;
-    verifyPauseOperation: PauseOptions["verifyOperation"];
-  },
+  options: PublishedOperatingOptions,
+) {
+  return readPublishedOperatingStatus(options, () => undefined);
+}
+
+/**
+ * WP-2423 (DEC-PICKUP-CAPACITY-SCHEDULE): the hours of the one current publication, read through
+ * the same proof as the operating status (publication, live gate, content digest, purpose), so a
+ * consumer planning ahead (Fulfillment's pickup capacity schedule) sees exactly what the open gate
+ * enforces. Same outer transaction; nothing is retained across calls.
+ */
+export function createPostgresPublishedStoreServiceCalendarReader(
+  options: PublishedOperatingOptions,
 ) {
   return async (tx: Transaction, now: string) => {
-    type Proof = Awaited<ReturnType<ReturnType<typeof createPostgresCurrentStorePublicationProof>>>;
-    let proof: Proof | undefined;
+    let proof: PublicationProof | undefined;
+    const status = await readPublishedOperatingStatus(options, (current) => {
+      proof = current;
+    })(tx, now);
+    const configuration = proof?.configuration;
+    if (
+      configuration === undefined ||
+      String(configuration.configurationReference) !==
+        String(status.businessDate.configurationReference) ||
+      configuration.timeZone !== status.businessDate.timeZone
+    )
+      throw new Error("STORE_SERVICE_CALENDAR_UNAVAILABLE");
+    const intervals = (values: (typeof configuration.weeklySchedule)[number]["intervals"]) =>
+      Object.freeze(
+        values.map(({ startLocalTime, endLocalTime, endsNextDay, serviceModes }) =>
+          Object.freeze({ startLocalTime, endLocalTime, endsNextDay, serviceModes }),
+        ),
+      );
+    return Object.freeze({
+      evaluatedAt: status.evaluatedAt,
+      configurationReference: configuration.configurationReference,
+      configurationVersion: configuration.configurationVersion,
+      contentDigest: status.businessDate.contentDigest,
+      timeZone: configuration.timeZone,
+      businessDayStartLocalTime: status.businessDate.businessDayStartLocalTime,
+      enabledServiceModes: Object.freeze([...configuration.enabledServiceModes]),
+      capacityConfigurationReference: configuration.capacityConfigurationReference,
+      effectiveUntil: configuration.effectiveUntil,
+      weeklySchedule: Object.freeze(
+        configuration.weeklySchedule.map((day) =>
+          Object.freeze({ isoWeekday: day.isoWeekday, intervals: intervals(day.intervals) }),
+        ),
+      ),
+      exceptions: Object.freeze(
+        configuration.exceptions.map((exception) =>
+          Object.freeze({
+            localDate: exception.localDate,
+            intervals: intervals(exception.intervals),
+          }),
+        ),
+      ),
+    });
+  };
+}
+
+function readPublishedOperatingStatus(
+  options: PublishedOperatingOptions,
+  onProof: (proof: PublicationProof) => void,
+) {
+  return async (tx: Transaction, now: string) => {
+    let proof: PublicationProof | undefined;
     const read = async (reference: string, at: string) => {
       if (!proof)
         proof = await createPostgresCurrentStorePublicationProof({
           ...options,
           configurationReference: reference,
         })(tx, at);
+      onProof(proof);
       if (
         proof.configuration.configurationReference !== reference ||
         proof.configuration.timeZone !== options.timeZone

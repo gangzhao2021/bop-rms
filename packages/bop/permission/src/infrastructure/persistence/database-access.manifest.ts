@@ -1057,6 +1057,86 @@ const databaseAccessManifestInput = {
       readPattern: null,
       source: "packages/bop/permission/src/infrastructure/persistence/role-assignment-store.ts",
     },
+    {
+      id: "internal-test-validity.read.policy_state",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "policy_state" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/internal-test-validity-store.ts",
+    },
+    {
+      id: "internal-test-validity.write.policy_state",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "policy_state" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/internal-test-validity-store.ts",
+    },
+    {
+      id: "internal-test-validity.read.role",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/internal-test-validity-store.ts",
+    },
+    {
+      id: "internal-test-validity.write.role",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/internal-test-validity-store.ts",
+    },
+    {
+      id: "internal-test-validity.read.role_assignment",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role_assignment" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/internal-test-validity-store.ts",
+    },
+    {
+      id: "internal-test-validity.write.role_assignment",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "role_assignment" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/internal-test-validity-store.ts",
+    },
+    {
+      id: "internal-test-validity.read.permission_grant",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_grant" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/internal-test-validity-store.ts",
+    },
+    {
+      id: "internal-test-validity.write.permission_grant",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_permission", table: "permission_grant" },
+      principal: { kind: "module", id: "@bop/permission" },
+      readPattern: null,
+      source:
+        "packages/bop/permission/src/infrastructure/persistence/internal-test-validity-store.ts",
+    },
   ],
 } as const;
 

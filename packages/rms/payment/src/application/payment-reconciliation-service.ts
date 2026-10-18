@@ -92,7 +92,7 @@ function checkReference(ports: PaymentReconciliationPorts) {
   }
 }
 
-function difference(
+async function difference(
   ports: PaymentReconciliationPorts,
   run: PaymentReconciliationRunInput,
   candidate: PaymentOperationalReconciliationCandidate,
@@ -105,7 +105,7 @@ function difference(
   let exceptionReference;
   try {
     exceptionReference = parsePaymentReference(
-      ports.references.exceptionFor({
+      await ports.references.exceptionFor({
         brandReference: run.brandReference,
         storeReference: run.storeReference,
         candidateReference: candidate.candidateReference,
@@ -382,7 +382,7 @@ async function operationalCheck(
   };
 }
 
-function settlementCheck(
+async function settlementCheck(
   ports: PaymentReconciliationPorts,
   run: PaymentReconciliationRunInput,
   candidate: PaymentSettlementReconciliationCandidate,
@@ -402,7 +402,7 @@ function settlementCheck(
   if (reason !== null) {
     try {
       exceptionReference = parsePaymentReference(
-        ports.references.exceptionFor({
+        await ports.references.exceptionFor({
           brandReference: run.brandReference,
           storeReference: run.storeReference,
           candidateReference: candidate.candidateReference,
@@ -532,7 +532,7 @@ export function createPaymentReconciliationService(ports: PaymentReconciliationP
             )
               return dependency();
             seen.add(candidate.candidateReference);
-            const outcome = settlementCheck(ports, run, candidate, completedAt);
+            const outcome = await settlementCheck(ports, run, candidate, completedAt);
             checks.push(outcome.check);
             if (outcome.exception !== null) exceptions.push(outcome.exception);
           }

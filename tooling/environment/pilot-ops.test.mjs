@@ -252,6 +252,8 @@ describe("WP-2423 Q13 observations", () => {
       receiptTemplate: null,
       // No held-stock check composed: not checked.
       heldStock: null,
+      // No pickup time check composed: not checked.
+      pickupCapacity: null,
       reconciliationDifferences: { count: 2, oldestAgeMs: 24 * 3600_000 },
       settlementExceptions: { count: 2, oldestAgeMs: 32 * 3600_000 },
     });
@@ -346,6 +348,32 @@ describe("WP-2423 Q13 observations", () => {
           throw Error("MERCHANT_BUSINESS_DAY_WINDOW_UNAVAILABLE");
         })
       ).heldStock,
+    ).toBe("unreadable");
+    const horizon = (readPickupCapacityHorizon) =>
+      readBusinessSignals({
+        resources,
+        installation: {},
+        now,
+        settlementExceptions: { count: 0, oldestAgeMs: 0 },
+        dependencies: {
+          createReconciliationExceptions: () => async () => ({
+            items: [],
+            nextAfterExceptionReference: null,
+          }),
+          readPickupCapacityHorizon,
+        },
+      });
+    // DEC-PICKUP-CAPACITY-SCHEDULE: how far ahead pickup times are set up.
+    expect((await horizon(async () => ({ coveredMs: 3_600_000 }))).pickupCapacity).toEqual({
+      coveredMs: 3_600_000,
+    });
+    expect((await horizon(async () => ({ coveredMs: "soon" }))).pickupCapacity).toBe("unreadable");
+    expect(
+      (
+        await horizon(async () => {
+          throw Error("database");
+        })
+      ).pickupCapacity,
     ).toBe("unreadable");
   });
   it("reports business signals as unreadable when the database cannot be reached, and retries", async () => {

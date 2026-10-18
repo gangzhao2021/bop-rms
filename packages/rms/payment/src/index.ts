@@ -243,6 +243,7 @@ export {
   createPostgresPaymentReconciliationRunSource,
   createPostgresPaymentReconciliationRepository,
   createPostgresPaymentReconciliationResolutionReader,
+  createPostgresPaymentReconciliationResolvedDifferenceCount,
   type PaymentReconciliationResolution,
 } from "./infrastructure/persistence/payment-reconciliation-run-source.js";
 export {

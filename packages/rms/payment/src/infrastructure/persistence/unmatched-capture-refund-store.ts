@@ -66,8 +66,14 @@ export interface UnmatchedCaptureRefundState {
   } | null;
   readonly outcome: {
     readonly providerRefundReference: string;
-    /** When the Provider reported the refund succeeded (the day it counts in settlement). */
+    /** When the refund result was observed from the Provider. */
     readonly providerObservedAt: string;
+    /**
+     * WP-2423 (2026-10-17): the Provider's refund creation time, which decides the store business
+     * day the refund counts in (as on the Provider statement and in day-end settlement). Null only
+     * for refunds recorded before it was kept (2000_084).
+     */
+    readonly providerCreatedAt: string | null;
     readonly recordedAt: string;
   } | null;
   readonly status: "Unrefunded" | "Requested" | "Approved" | "Refunded";
@@ -168,6 +174,10 @@ export function createPostgresUnmatchedCaptureRefundStore(options: {
         ? Object.freeze({
             providerRefundReference: String(outcome.provider_refund_reference),
             providerObservedAt: at(outcome.provider_observed_at),
+            providerCreatedAt:
+              outcome.provider_created_at === null || outcome.provider_created_at === undefined
+                ? null
+                : at(outcome.provider_created_at),
             recordedAt: at(outcome.recorded_at),
           })
         : null,
@@ -398,6 +408,8 @@ export function createPostgresUnmatchedCaptureRefundStore(options: {
           readonly providerIntentReference: string;
           readonly amountMinor: bigint;
           readonly status: string;
+          /** The Provider's refund creation time (whole seconds, not after observedAt). */
+          readonly createdAt: string;
           readonly observedAt: string;
           readonly evidenceDigest: string;
           readonly idempotencyKey: string;
@@ -418,7 +430,10 @@ export function createPostgresUnmatchedCaptureRefundStore(options: {
         o.providerIntentReference !== state.providerIntentReference ||
         o.amountMinor !== BigInt(state.amountMinor) ||
         o.idempotencyKey !== state.approval.providerIdempotencyKey ||
-        !/^sha256:[0-9a-f]{64}$/u.test(o.evidenceDigest)
+        !/^sha256:[0-9a-f]{64}$/u.test(o.evidenceDigest) ||
+        !Number.isFinite(Date.parse(o.createdAt)) ||
+        Date.parse(o.createdAt) % 1000 !== 0 ||
+        Date.parse(o.createdAt) > Date.parse(o.observedAt)
       )
         return fail("UNMATCHED_REFUND_STATE_CONFLICT");
       if (state.outcome) {
@@ -428,7 +443,7 @@ export function createPostgresUnmatchedCaptureRefundStore(options: {
       }
       const recordedAt = instant(input.recordedAt);
       await tx.query(
-        "INSERT INTO rms_payment.unmatched_capture_refund_outcome (refund_id,brand_id,store_id,provider_refund_reference,status,amount_minor,provider_observed_at,evidence_digest,recorded_at,audit_id) VALUES ($1,$2,$3,$4,'Succeeded',$5,$6,$7,$8,$9)",
+        "INSERT INTO rms_payment.unmatched_capture_refund_outcome (refund_id,brand_id,store_id,provider_refund_reference,status,amount_minor,provider_observed_at,evidence_digest,recorded_at,audit_id,provider_created_at) VALUES ($1,$2,$3,$4,'Succeeded',$5,$6,$7,$8,$9,$10)",
         [
           state.request.refundReference,
           brand,
@@ -439,6 +454,7 @@ export function createPostgresUnmatchedCaptureRefundStore(options: {
           o.evidenceDigest,
           recordedAt,
           reference(input.auditReference),
+          instant(o.createdAt),
         ],
       );
       await audit(tx, {

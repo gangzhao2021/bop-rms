@@ -234,8 +234,8 @@ function boundaryInstant(
   date: LocalFields,
   start: string,
 ): Readonly<{ epochMilliseconds: number; kind: "Exact" | "GapForward" | "OverlapEarlier" }> {
-  const [hour, minute] = start.split(":").map(Number) as [number, number];
-  const target: LocalFields = { ...date, hour, minute, second: 0 };
+  const [hour = 0, minute = 0, second = 0] = start.split(":").map(Number);
+  const target: LocalFields = { ...date, hour, minute, second };
   const targetTuple = tuple(target);
   const candidates = new Set<number>();
   for (let offsetHour = -36; offsetHour <= 36; offsetHour += 3) {
@@ -263,6 +263,49 @@ function boundaryInstant(
       return Object.freeze({ epochMilliseconds: candidate, kind: "GapForward" });
   }
   throw new BusinessDateError("STORE_BUSINESS_DATE_INPUT_INVALID");
+}
+
+/**
+ * WP-2423 (DEC-PICKUP-CAPACITY-SCHEDULE): the instant a Store local wall-clock date and time
+ * ("HH:MM:SS") names in its IANA time zone. A time skipped by a daylight-saving change moves
+ * forward past the gap; a repeated time takes its earlier instant (the business-day rule).
+ */
+export function resolveStoreLocalInstant(input: {
+  readonly timeZone: string;
+  readonly localDate: string;
+  readonly localTime: string;
+}): Readonly<{
+  instant: CanonicalInstant;
+  disambiguation: "Exact" | "GapForward" | "OverlapEarlier";
+}> {
+  const date = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(input.localDate);
+  if (
+    date === null ||
+    typeof input.localTime !== "string" ||
+    !/^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/u.test(input.localTime)
+  )
+    return fail();
+  const day: LocalFields = {
+    year: Number(date[1]),
+    month: Number(date[2]),
+    day: Number(date[3]),
+    hour: 0,
+    minute: 0,
+    second: 0,
+  };
+  const check = new Date(Date.UTC(day.year, day.month - 1, day.day));
+  if (check.toISOString().slice(0, 10) !== input.localDate) return fail();
+  let format: Intl.DateTimeFormat;
+  try {
+    format = formatter(input.timeZone);
+  } catch {
+    return fail();
+  }
+  const resolved = boundaryInstant(format, day, input.localTime);
+  return Object.freeze({
+    instant: new Date(resolved.epochMilliseconds).toISOString() as CanonicalInstant,
+    disambiguation: resolved.kind,
+  });
 }
 
 export function resolveStoreBusinessDate(

@@ -1810,57 +1810,103 @@ Actual existing-order manual refresh shows CAD 11.30 refunded and CAD 0.00 pendi
 ## Renewing the internal test installation
 
 **InternalTest only, Owner-approved action.** The internal test installation is valid for a fixed
-window (v15: until `2026-10-20T02:26:31.598Z`). After it, staff sign-in, the DEMO tables and the
-customer quote stop working. Renewal moves that window forward by at most 30 days at a time and
-needs the Owner's explicit approval; record the Owner's own words with `--approval`. Never use it
-for a Pilot or real Store: it refuses any file that is not `InternalTest`, carries another
-database, lacks the DEMO/synthetic labels, names a real-looking (non-fixture) Store or staff
-identity, or declares a non-`SYNTHETIC_*` launch gate requirement.
+window (v15: until `2026-10-20T02:26:31.598Z`). After it, staff lose every permission (their DEMO
+memberships end), the launch gate and the DEMO tax evidence lapse, so the Store cannot take
+orders, and the DEMO tables and customer quote stop working. Renewal moves that window forward by
+at most 30 days at a time and needs the Owner's explicit approval; record the Owner's own words
+with `--approval`. Run it **before** the old expiry: the business worker's Pickup capacity
+schedule stops once `binding.validUntil` has passed. Never use it for a Pilot or real Store: it
+refuses any file that is not `InternalTest`, carries another database, lacks the DEMO/synthetic
+labels, names a real-looking (non-fixture) Store or staff identity, or declares a
+non-`SYNTHETIC_*` launch gate requirement, and any database row with the same expiry that is
+not labelled synthetic.
 
-What it renews (files in the runtime directory, validity only):
-`internal-test-profile.json` `binding.validUntil`, every `actors[].validUntil` in
+What it renews, database first (one transaction, through each owning domain, each change in the
+platform audit with the approval wording; it commits only when the product read paths accept the
+renewed facts one hour after the old expiry, checked as the services' api role):
+
+- Membership: the DEMO staff memberships and Store assignments (fixture identities only), version
+  +1, only `effective_until`.
+- Permission: the DEMO roles (`synthetic_…`, `internal_pilot_…`), their assignments and grants,
+  version +1, only `effective_until`; the Brand permission policy version advances once. Real
+  roles (no end) are untouched.
+- Publishing: a new version of the `SYNTHETIC-…` launch gate (append-only), identical except the
+  `SYNTHETIC_STORE_READY` requirement's `valid_until`.
+- Pricing: a new Published version of the `DEMO_…` tax configuration (append-only), identical
+  rules, rates and evidence references; only the registration and professional evidence
+  `valid_until` move. Its identity and digest come from the internal pricing policy. If the
+  database lacks the Brand tax reference projection for that configuration (v15 does), the
+  renewal restores exactly the rows the tax triggers would have written.
+
+The database changes run as a dedicated NOLOGIN NOBYPASSRLS role
+`<database>_internal_test_renewal` that the command creates (or re-restricts) with only the
+privileges listed in `tooling/environment/pilot-internal-test-renew-database.mjs`.
+
+Then the files (validity only): `internal-test-profile.json` `binding.validUntil` and
+`taxConfigurationVersion` (the renewed tax version), every `actors[].validUntil` in
 `internal-test-merchant.json`, `validUntil` in each `internal-test-dining-table*.json`, and
 `effectiveUntil` plus `exceptionTaskPolicy.effectiveUntil` in `internal-test-task-queue.json`.
 Every value must equal the profile's current expiry (or already equal `--until` after an
-interrupted run); nothing else in any file changes. Historical copies
-(`*.v1-backup.json`, `*.before-*.json`) stay untouched.
+interrupted run); nothing else in any file changes. Historical copies (`*.v1-backup.json`,
+`*.before-*.json`) stay untouched.
 
-What it does **not** renew (in the database, no product renewal path yet; the Store still cannot
-take orders after the old expiry until these exist): the DEMO staff roster rows
-(memberships, Store assignments, roles, role assignments and permission grants), the launch gate
-requirement `SYNTHETIC_STORE_READY`, the tax registration and professional review evidence on the
-published tax configuration, and the Pickup capacity slots. These are tracked in WP-2423; do not
-change them with SQL.
+It deliberately leaves alone: the Pickup capacity slots (the business worker's
+`pickupCapacitySchedule` loop creates them after deploy; it needs the api INSERT grants on
+`rms_fulfillment.capacity_slot` and `capacity_slot_configuration`) and the superseded
+`InternalTestBatchCancellation` workflow (the released `UnpaidDineInBatchCancellation` workflow
+has no end).
 
-1. Get the Owner's approval for the new end date and the reason, in writing.
-2. Preview, from the repository root on the host, as the owner of the runtime directory (nothing
-   is written):
+Because the running services still hold the old profile, their quotes refuse the renewed tax
+version until they restart: run the renewal inside a planned update window.
+
+1. Get the Owner's approval for the new end date and the reason, in writing (2026-10-18:
+   "批准，续到 11 月 14 日（推荐）").
+2. Preview, from the repository root on the host, as the owner of the runtime directory. The
+   dry run performs the database part in a transaction and rolls it back, so it shows exactly
+   what would change and the before/after checks; nothing is written:
 
    ```bash
-   NODE_ENV=development node tooling/environment/pilot-internal-test-renew.mjs \
+   source .local/activate.sh
+   NODE_ENV=development node --import ./tooling/environment/register-workspace-typescript.mjs \
+     tooling/environment/pilot-internal-test-renew.mjs \
      "$PWD/.local/pilot-runtime/pilot-v15" --database bop_rms_pilot_v15 \
-     --until <ISO instant, at most 30 days from now, e.g. 2026-11-14T02:26:31.598Z> \
-     --reason "<why>" --approved-by "<Owner name>" --approval "<Owner's approval wording>" --dry-run
+     --migration-env .local/pilot-runtime/migrate-v14/migrate-v15.env \
+     --until 2026-11-14T02:26:31.598Z \
+     --reason "Continue internal testing until 14 November" --approved-by "Owner" \
+     --approval "批准，续到 11 月 14 日（推荐）" --dry-run
    ```
 
-   It lists each file, field, old → new value and the before/after SHA-256, then the database
-   items it leaves alone. A refusal prints a fixed code, e.g.
-   `PILOT_INTERNAL_TEST_RENEWAL_UNAVAILABLE (identity-not-synthetic)`, and changes nothing.
+   `--migration-env` is the migration environment file of the database (it must name
+   `--database`). It lists each database change (row, old → new end, version), the checks one
+   hour after the old expiry (before: no staff authority, launch gate and tax refused; after:
+   the same staff authority as now, both accepted), then each file, field, old → new value and
+   the before/after SHA-256. A refusal prints a fixed code, e.g.
+   `PILOT_INTERNAL_TEST_RENEWAL_UNAVAILABLE (internal-test-permission-not-synthetic)`, and
+   changes nothing.
 
-3. Run the same command without `--dry-run`. It keeps the previous files (hard links) and a
-   `renewal.json` record (operator account, approver, approval wording, reason, from → to, hashes)
-   in a new owner-only `internal-test-renewal-<time>/` directory, replaces each file atomically
-   (the profile last) and appends one line to `internal-test-renewal-log.jsonl`. If it stops part
-   way, run the same command again; it finishes the remaining files.
-4. Restart the services in a planned update window (see Planned updates): `maintenance start`
-   with `--reason "internal test renewal"`, `docker compose -f compose.pilot.yaml restart pilot`,
-   wait until the pages load, `maintenance end`. The services read the profile at start.
-5. Reload open screens. The internal DEMO Pickup and table entries sign their codes from the
+3. Start the planned update window: `maintenance start` with `--reason "internal test renewal"`
+   (see Planned updates).
+4. Run the same command without `--dry-run`. The database part commits first; then it keeps the
+   previous files (hard links) and a `renewal.json` record (operator account, approver, approval
+   wording, reason, from → to, hashes, the database changes and checks) in a new owner-only
+   `internal-test-renewal-<time>/` directory, replaces each file atomically (the profile last)
+   and appends one line to `internal-test-renewal-log.jsonl`. If it stops part way, run the same
+   command again; the database part reports `AlreadyRenewed` and the remaining files are
+   finished.
+5. `docker compose -f compose.pilot.yaml restart pilot`, wait until the pages load, then
+   `maintenance end`. The services read the profile at start.
+6. Reload open screens. The internal DEMO Pickup and table entries sign their codes from the
    profile at start, so they follow the new window after the restart; table codes issued from
    Table QR codes keep their own expiry and need no reprint.
 
-To undo, copy the files back from the `internal-test-renewal-<time>/` directory and restart; the
-record and log line stay as history.
+To undo the files, copy them back from the `internal-test-renewal-<time>/` directory and
+restart; the database changes are history (versions and audit) and are only moved forward by a
+later renewal. The record and log line stay as history.
+
+For a real Store none of this applies: staff validity changes through staff administration
+(member and role screens), the launch gate through the Publishing review flow, and tax evidence
+by publishing a new tax version through the tax publication flow with real registration and
+professional review evidence.
 
 ## Daily backup and weekly restore drill (WP-2423)
 
@@ -2088,6 +2134,7 @@ anything that stops ordering; the pilot operator fixes the cause.
 | <a id="alert-updates-retrying"></a>Some order updates are being retried              | An order, kitchen or payment update has failed 4 times or kept failing for 10+ minutes and is still being retried (urgent after 30 minutes); clears 2 minutes after it is processed                                                                         | Hand ready orders over in person (order number plus name or phone, Pickup "Hand over"); compare the kitchen board with Orders; never take a second payment                                                                                                                                                                   | Read `business-worker.log` (and the other worker logs) in the runtime directory for the failing update's safe code; fix the cause while retries continue; if it becomes "Order or payment updates are stuck", follow that row             |
 | <a id="alert-receipts-template"></a>Receipts are not being issued                    | The receipt template the Store's published settings name cannot be proven as published (or those settings cannot be read) for 2+ minutes; paid orders get no receipt until it is fixed (urgent); clears 2 minutes after a receipt could be issued again     | Tell guests who ask that the receipt will appear on their order page; take payment and hand over orders as usual. Owner: Store setup step 5, choose a published receipt template, then send, approve and publish at step 8                                                                                                   | Read `business-worker.log` for `DIGITAL_RECEIPT_TEMPLATE_UNAVAILABLE`; check that the template named by the published Store configuration has a current Publishing release; once fixed, retry any receipt updates that were dead-lettered |
 | <a id="alert-orders-held-stock"></a>Orders from earlier days are still holding stock | An Order of an earlier business day still has ingredients set aside (accepted but never made or handed over, or ended without its stock being returned), so items made from them can show sold out to guests (warning); clears 2 minutes after none is left | Open Orders: these orders are listed first with today's. Make and hand over one the guest still wants, or cancel it (the guest is refunded, the ingredients return). For a finished order choose "Release held ingredients"; one the kitchen started: mark it done on the kitchen board. Review this before closing each day | Nothing to run: staff resolve it in Orders (every release is audited). If it persists after staff acted, read `api.log` for `ENDED_ORDER_STOCK_*` / `ORDER_CANCELLATION_*` refusals                                                       |
+| <a id="alert-pickup-capacity-horizon"></a>Pickup times are running out               | Pickup times (laid 14 days ahead from the published hours) reach under 24 hours ahead (warning) or under 1 hour or none (urgent: no pickup order online or at the counter); clears 2 minutes after 24 hours again                                           | Warning: nothing changes for guests. Urgent: take pickup orders on paper (items, name, time) and payment on the card machine, enter them once it clears; dine-in is not affected                                                                                                                                             | `business-worker.log`: `pickup_capacity_schedule_applied` and the cycle failure code (`PICKUP_CAPACITY_POLICY_UNAVAILABLE`, `PICKUP_CAPACITY_CONFIGURATION_ENDED`: publish Store hours without either); the next run fills from now       |
 | <a id="alert-reconciliation-differences"></a>Payment differences need checking       | Open differences between store records and the payment provider, for one payment or a business day's totals (urgent after 24 hours)                                                                                                                         | Store Manager: `Exceptions` for each difference; for a day's totals, `Settlement` for that day, which explains it and what to do                                                                                                                                                                                             | Only if a difference is a system fault                                                                                                                                                                                                    |
 | <a id="alert-settlement-exceptions"></a>Day-end settlement has open problems         | A closed day has a difference, or no settlement 6 hours after close                                                                                                                                                                                         | Store Manager: `Settlement` for that day                                                                                                                                                                                                                                                                                     | If days are missing: `daily-settlement-worker.log` `daily_settlement_day_failed` lines name the day and safe code; that day is retried on its own (1 minute, doubling to 30) while later days settle; fix the cause, no restart needed    |
 | <a id="alert-backup-failed"></a>Last night's backup failed                           | The dump failed; retries follow (3 a day)                                                                                                                                                                                                                   | Nothing in store; service is unaffected                                                                                                                                                                                                                                                                                      | `ops/alerts.log` reason; free space; database reachable; `backup-now`                                                                                                                                                                     |

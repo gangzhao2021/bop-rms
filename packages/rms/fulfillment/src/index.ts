@@ -79,3 +79,12 @@ export {
   listStoreUncollectedPickupOrders,
   loadPickupNotCollected,
 } from "./infrastructure/persistence/pickup-handoff-history.js";
+
+// WP-2423 DEC-PICKUP-CAPACITY-SCHEDULE: rolling pickup slots from the Store's published hours.
+export * from "./domain/pickup-capacity-schedule.js";
+export {
+  createPostgresPickupCapacityScheduleStore,
+  type PickupCapacityScheduleRun,
+  type PickupCapacityScheduleResult,
+  type PickupCapacityScheduleTransactionRunner,
+} from "./infrastructure/persistence/pickup-capacity-schedule-store.js";

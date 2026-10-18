@@ -99,7 +99,9 @@ it("loads the open business day's settlement with card-machine payments, also wh
       await seedJourneyStorePublication({
         client: admin,
         scope: ownerScope,
-        publishedAt: new Date(Date.now() - minutes(300)).toISOString(),
+        // Published days back so yesterday (the across-midnight case) is a business day too.
+        publishedAt: new Date(Date.now() - minutes(3 * 24 * 60)).toISOString(),
+        validUntil: new Date(Date.now() + minutes(24 * 60)).toISOString(),
         businessDayStart: "00:00:00",
         prefix: "01a1e100",
       });
@@ -309,6 +311,100 @@ it("loads the open business day's settlement with card-machine payments, also wh
       assert.ok(Date.now() - started < 8_000, "busy is answered before the lock is released");
       await released;
       assert.deepEqual((await read(compose())).cardMachine, expected);
+
+      // WP-2423 (2026-10-17), across midnight: a Provider charge matching no Order, taken
+      // yesterday, refunded with the Provider creating the refund at 23:59:59 and its result
+      // observed at 00:00:00.400 today. The Provider statement and day-end settlement count the
+      // refund yesterday (its creation time); the Settlement page now does the same instead of
+      // putting it on today (the time it was observed).
+      const dayStart = (
+        await admin.query(
+          "SELECT (($1::date)::timestamp AT TIME ZONE 'America/Toronto') AS start",
+          [today],
+        )
+      ).rows[0].start.getTime();
+      const yesterday = new Date(Date.parse(today + "T12:00:00.000Z") - 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+      const t = (offsetMs) => new Date(dayStart + offsetMs).toISOString();
+      await admin.query(
+        "SELECT set_config('bop.brand_id',$1,false),set_config('bop.store_id',$2,false)",
+        [scope.brandReference, scope.storeReference],
+      );
+      await admin.query(
+        "INSERT INTO rms_payment.payment_reconciliation_exception (reconciliation_exception_id,brand_id,store_id,candidate_id,reason,severity,status,opened_at) VALUES ($1,$2,$3,$4,'AmountMismatch','Error','Open',$5)",
+        [id(501), scope.brandReference, scope.storeReference, id(500), t(-minutes(119))],
+      );
+      await admin.query(
+        "INSERT INTO rms_payment.provider_capture_exception_evidence VALUES ($1,$2,$3,$4,$5,$6,'Test','pi_DEMOmidnight01','ch_DEMOmidnight01',$7,$8,2260,'CAD',$9,$10,$11)",
+        [
+          id(500),
+          id(501),
+          ownerScope.tenantReference,
+          scope.brandReference,
+          scope.storeReference,
+          id(20),
+          id(502),
+          id(503),
+          t(-minutes(120)),
+          t(-minutes(119)),
+          sha,
+        ],
+      );
+      await admin.query(
+        "INSERT INTO rms_payment.unmatched_capture_refund_request VALUES ($1,$2,$3,$4,$5,$6,'Test','pi_DEMOmidnight01','ch_DEMOmidnight01',2260,'CAD','NoMatchingOrder',$7,$8,$9,$10)",
+        [
+          id(510),
+          scope.brandReference,
+          scope.storeReference,
+          id(500),
+          id(501),
+          id(20),
+          id(10),
+          t(-minutes(30)),
+          id(511),
+          id(512),
+        ],
+      );
+      await admin.query(
+        "INSERT INTO rms_payment.unmatched_capture_refund_approval VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+        [
+          id(510),
+          scope.brandReference,
+          scope.storeReference,
+          id(11),
+          t(-20_000),
+          id(513),
+          "unmatched-capture-refund:" + id(513),
+          id(514),
+          id(515),
+        ],
+      );
+      await admin.query(
+        "INSERT INTO rms_payment.unmatched_capture_refund_outcome (refund_id,brand_id,store_id,provider_refund_reference,status,amount_minor,provider_observed_at,evidence_digest,recorded_at,audit_id,provider_created_at) VALUES ($1,$2,$3,'re_DEMOmidnight01','Succeeded',2260,$4,$5,$6,$7,$8)",
+        [
+          id(510),
+          scope.brandReference,
+          scope.storeReference,
+          t(400),
+          sha,
+          t(450),
+          id(516),
+          t(-1000),
+        ],
+      );
+      if (Date.now() <= dayStart + 450) await new Promise((r) => setTimeout(r, 500));
+      const charges = async (businessDate) =>
+        (await compose()({ sessionCookie: session.sessionCookie, businessDate }))
+          .unmatchedProviderCharges;
+      assert.deepEqual(await charges(today), {
+        captured: { count: 0, amountMinor: "0", currencyCode: "CAD" },
+        refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" },
+      });
+      assert.deepEqual(await charges(yesterday), {
+        captured: { count: 1, amountMinor: "2260", currencyCode: "CAD" },
+        refunded: { count: 1, amountMinor: "2260", currencyCode: "CAD" },
+      });
     } finally {
       await admin.query("RESET ROLE").catch(() => undefined);
       for (const name of [api, worker])

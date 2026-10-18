@@ -397,10 +397,31 @@ it("atomically records unlinked capture evidence with Audit, concurrent replay a
           providerIntentReference: observation.providerIntentReference,
           amountMinor: observation.amount.amountMinor,
           status: observation.status,
-          observedAt: observation.observedAt,
+          createdAt: observation.createdAt,
+          // WP-2423 (2026-10-17): the refund result is observed 1.5 s after the Provider created
+          // it, so a business day can end between the two (the across-midnight case below).
+          observedAt: new Date(
+            Math.max(Date.parse(observation.observedAt), Date.parse(observation.createdAt) + 1500),
+          ).toISOString(),
           evidenceDigest: observation.evidenceDigest,
           idempotencyKey: providerRequest.idempotencyKey,
         };
+        // A creation time not on a whole second, or after the observation, is refused.
+        for (const createdAt of [
+          new Date(Date.parse(observation.createdAt) + 1).toISOString(),
+          new Date(Date.parse(outcome.observedAt) + 1000).toISOString(),
+        ])
+          await assert.rejects(
+            run((tx) =>
+              refunds.recordOutcome(tx, {
+                exceptionReference: exception,
+                observation: { ...outcome, createdAt },
+                auditReference: id(642),
+                recordedAt: at(2000),
+              }),
+            ),
+            (error) => error.code === "UNMATCHED_REFUND_STATE_CONFLICT",
+          );
         await assert.rejects(
           run((tx) =>
             refunds.recordOutcome(tx, {
@@ -480,6 +501,9 @@ it("atomically records unlinked capture evidence with Audit, concurrent replay a
         const refund = await simulator.adapter.lookupRefund(providerRequest);
         assert.ok(charge.capturedAt < refund.createdAt, charge.capturedAt + " " + refund.createdAt);
         assert.ok(refund.createdAt <= charge.outcome.providerObservedAt);
+        // WP-2423 (2026-10-17): the Provider's creation time is kept with the confirmed refund.
+        assert.equal(charge.outcome.providerCreatedAt, refund.createdAt);
+        assert.equal(observation.createdAt, refund.createdAt);
         const refundDayStart = new Date(Date.parse(charge.capturedAt) + 1).toISOString();
         await sleep(5);
         const closedAt = new Date().toISOString();
@@ -503,6 +527,30 @@ it("atomically records unlinked capture evidence with Audit, concurrent replay a
         assert.equal(refundDay.candidate.providerRefundedAmount.amountMinor, 2260n);
         assert.equal(refundDay.candidate.internalRefundedAmount.amountMinor, 2260n);
         assert.equal(refundDay.candidate.internalCapturedAmount.amountMinor, 0n);
+        // Across midnight: a business day ends after the Provider created the refund but before
+        // its result was observed. Day-end settlement counts it in the day it was created (as the
+        // Provider statement does), and the kept creation time puts it on the same day for the
+        // Settlement page (state.outcome.providerCreatedAt), not the observation's next day.
+        const midnight = new Date(Date.parse(refund.createdAt) + 1).toISOString();
+        assert.ok(midnight <= charge.outcome.providerObservedAt);
+        settlementDay.current = {
+          businessDate: "2026-10-09",
+          startsAt: refundDayStart,
+          endsAt: midnight,
+        };
+        const beforeMidnight = await prepare();
+        assert.equal(beforeMidnight.candidate.providerRefundedAmount.amountMinor, 2260n);
+        assert.equal(beforeMidnight.candidate.internalRefundedAmount.amountMinor, 2260n);
+        settlementDay.current = {
+          businessDate: "2026-10-10",
+          startsAt: midnight,
+          endsAt: closedAt,
+        };
+        const afterMidnight = await prepare();
+        assert.equal(afterMidnight.candidate.providerRefundedAmount.amountMinor, 0n);
+        assert.equal(afterMidnight.candidate.internalRefundedAmount.amountMinor, 0n);
+        assert.ok(charge.outcome.providerCreatedAt < midnight);
+        assert.ok(charge.outcome.providerObservedAt >= midnight);
         settlementDay.current = days.capture;
         const captureDay = await prepare();
         assert.equal(captureDay.candidate.providerCapturedAmount.amountMinor, 2260n);

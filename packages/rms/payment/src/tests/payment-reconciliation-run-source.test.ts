@@ -3,6 +3,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createPostgresPaymentReconciliationRunSource,
   createPostgresPaymentReconciliationRepository,
+  createPostgresPaymentReconciliationResolvedDifferenceCount,
 } from "../infrastructure/persistence/payment-reconciliation-run-source.js";
 const id = (n: number) => "0198a107-0000-7000-8000-" + String(n).padStart(12, "0");
 const at = "2026-09-22T00:00:00.000Z";
@@ -266,4 +267,38 @@ it("rejects a different Store before SQL or appends", async () => {
     }),
   ).rejects.toMatchObject({ code: "PAYMENT_RECONCILIATION_RUN_CONFLICT" });
   expect(f.query).not.toHaveBeenCalled();
+});
+
+it("WP-2423: counts the candidate's earlier resolved differences of a reason, scoped and authorized", async () => {
+  let allowed = true;
+  const query = vi.fn<
+    (sql: string, values?: readonly unknown[]) => Promise<{ rows: unknown[]; rowCount: number }>
+  >(async (sql) => ({
+    rows: sql.startsWith("SELECT count(*)") ? [{ resolved: 2 }] : [],
+    rowCount: 1,
+  }));
+  const tx = { query } as unknown as ConsumerTransaction;
+  const count = createPostgresPaymentReconciliationResolvedDifferenceCount({
+    scope: { brandReference: id(2), storeReference: id(3) },
+    authorize: async () => allowed,
+  });
+  expect(await count(tx, { candidateReference: id(5), reason: "RefundMismatch" })).toBe(2);
+  const sql = query.mock.calls.at(-1);
+  expect(sql?.[0]).toContain("payment_reconciliation_resolution");
+  expect(sql?.[1]).toEqual([id(2), id(3), id(5), "RefundMismatch"]);
+  await expect(count(tx, { candidateReference: id(5), reason: "Other" })).rejects.toMatchObject({
+    code: "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE",
+  });
+  query.mockClear();
+  allowed = false;
+  await expect(
+    count(tx, { candidateReference: id(5), reason: "RefundMismatch" }),
+  ).rejects.toMatchObject({ code: "PAYMENT_RECONCILIATION_PERMISSION_DENIED" });
+  expect(query).not.toHaveBeenCalled();
+  allowed = true;
+  query.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+  query.mockResolvedValueOnce({ rows: [{ resolved: -1 }], rowCount: 1 });
+  await expect(
+    count(tx, { candidateReference: id(5), reason: "RefundMismatch" }),
+  ).rejects.toMatchObject({ code: "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE" });
 });

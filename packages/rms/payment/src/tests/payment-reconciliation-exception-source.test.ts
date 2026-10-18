@@ -204,6 +204,13 @@ it("WP-2423: tells a business day's totals difference, a payment's and an unmatc
     }),
     detailRow(21, { mode: "Operational", unlinked: false }),
     detailRow(22, {}),
+    // 2026-10-17: a later check of the same payment matched the Provider again.
+    detailRow(23, {
+      mode: "Operational",
+      unlinked: false,
+      resolved_at: new Date("2026-10-17T14:05:00.000Z"),
+      resolution_run_reference: id(32),
+    }),
   ];
   const query = vi.fn(async (sql: string) => ({
     rows: sql.includes("FROM rms_payment") ? rows : [],
@@ -215,7 +222,7 @@ it("WP-2423: tells a business day's totals difference, a payment's and an unmatc
     authorize,
   });
   const tx = { query } as unknown as ConsumerTransaction;
-  const details = await read(tx, [id(20), id(21), id(22)]);
+  const details = await read(tx, [id(20), id(21), id(22), id(23)]);
   expect(details.get(id(20))).toEqual({
     exceptionReference: id(20),
     kind: "BusinessDayTotals",
@@ -232,6 +239,13 @@ it("WP-2423: tells a business day's totals difference, a payment's and an unmatc
   });
   expect(details.get(id(21))).toMatchObject({ kind: "Payment", openingCheck: null });
   expect(details.get(id(22))).toMatchObject({ kind: "UnmatchedCharge", resolution: null });
+  expect(details.get(id(21))).toMatchObject({ resolution: null });
+  expect(details.get(id(23))).toEqual({
+    exceptionReference: id(23),
+    kind: "Payment",
+    openingCheck: null,
+    resolution: { resolvedAt: "2026-10-17T14:05:00.000Z", runReference: id(32) },
+  });
   const sql = query.mock.calls.map(([text]) => text).find((text) => text.includes("ANY($3"));
   expect(sql).toContain("e.brand_id=$1 AND e.store_id=$2");
   expect(authorize).toHaveBeenCalledTimes(2);
@@ -242,4 +256,13 @@ it("WP-2423: tells a business day's totals difference, a payment's and an unmatc
     code: "PAYMENT_COMPENSATION_PERMISSION_DENIED",
   });
   await expect(read(tx, [id(20)])).rejects.toThrow();
+  // A charge that matches no order is closed by its refund, never by a check.
+  rows.push(
+    detailRow(24, {
+      resolved_at: new Date("2026-10-17T14:05:00.000Z"),
+      resolution_run_reference: id(33),
+    }),
+  );
+  await expect(read(tx, [id(20), id(21), id(22), id(23), id(24)])).rejects.toThrow();
+  rows.pop();
 });

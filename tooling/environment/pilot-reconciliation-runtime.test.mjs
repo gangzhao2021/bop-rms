@@ -111,6 +111,10 @@ function fixture() {
   const f = {
     createInternalReconciliationLease: () => lease,
     createPostgresPaymentReconciliationRepository: vi.fn(() => repository),
+    // WP-2423: earlier resolved differences of the candidate and reason (a new identity each).
+    resolvedDifferences: 0,
+    createPostgresPaymentReconciliationResolvedDifferenceCount: () => async () =>
+      f.resolvedDifferences,
     createInternalReconciliationTerminalOccurrence: () => async () => ({
       status: "Captured",
       occurredAt: at,
@@ -210,12 +214,27 @@ it("derives stable scope/candidate/reason exception identity independent of run"
     candidateReference: id(4),
     reason: "RefundMismatch",
   };
-  const first = f.ports().references.exceptionFor(input);
-  expect(f.ports().references.exceptionFor(input)).toBe(first);
-  expect(f.ports().references.exceptionFor({ ...input, reason: "AmountMismatch" })).not.toBe(first);
-  expect(() => f.ports().references.exceptionFor({ ...input, storeReference: id(99) })).toThrow();
+  // The identity is read inside the reconciliation lease.
+  await f.lease.claim();
+  const first = await f.ports().references.exceptionFor(input);
+  expect(await f.ports().references.exceptionFor(input)).toBe(first);
+  expect(await f.ports().references.exceptionFor({ ...input, reason: "AmountMismatch" })).not.toBe(
+    first,
+  );
+  await expect(
+    f.ports().references.exceptionFor({ ...input, storeReference: id(99) }),
+  ).rejects.toThrow();
   await expect(f.runtime.run({ ...f.run, runReference: id(33) })).rejects.toThrow();
-  expect(f.ports().references.exceptionFor(input)).toBe(first);
+  await f.lease.claim();
+  expect(await f.ports().references.exceptionFor(input)).toBe(first);
+  // WP-2423 (2026-10-17): after the difference was resolved, the same reason found again is a new
+  // exception (stable for that generation); without the lease no identity is given.
+  f.f.resolvedDifferences = 1;
+  const second = await f.ports().references.exceptionFor(input);
+  expect(second).not.toBe(first);
+  expect(await f.ports().references.exceptionFor(input)).toBe(second);
+  await f.lease.release();
+  await expect(f.ports().references.exceptionFor(input)).rejects.toThrow();
 });
 
 function dailyCandidate() {

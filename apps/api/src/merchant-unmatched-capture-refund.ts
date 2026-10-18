@@ -26,6 +26,8 @@ export interface UnmatchedCaptureRefundObservation {
   readonly providerIntentReference: string;
   readonly amount: { readonly amountMinor: bigint; readonly currencyCode: string };
   readonly status: string;
+  /** The Provider's refund creation time: the business day the refund counts in. */
+  readonly createdAt: string;
   readonly observedAt: string;
   readonly evidenceDigest: string;
 }
@@ -238,6 +240,7 @@ export function createMerchantUnmatchedCaptureRefund(options: {
                   providerIntentReference: observation.providerIntentReference,
                   amountMinor: observation.amount.amountMinor,
                   status: observation.status,
+                  createdAt: observation.createdAt,
                   observedAt: observation.observedAt,
                   evidenceDigest: observation.evidenceDigest,
                   idempotencyKey: request.idempotencyKey,

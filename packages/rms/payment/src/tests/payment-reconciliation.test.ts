@@ -125,6 +125,7 @@ function fixture(
     occurrence?: { status: "Captured" | "Failed" | "Cancelled"; occurredAt: string };
     occurrenceFails?: boolean;
     conflict?: boolean;
+    exceptionFor?: PaymentReconciliationPorts["references"]["exceptionFor"];
   } = {},
 ) {
   const calls: string[] = [];
@@ -208,7 +209,7 @@ function fixture(
     },
     references: {
       generate: () => id(generated++),
-      exceptionFor: () => id(80),
+      exceptionFor: options.exceptionFor ?? (() => id(80)),
     },
     clock: { now: options.now ?? (() => checkedAt) },
   };
@@ -357,6 +358,41 @@ describe("WP-1307 Payment reconciliation job", () => {
     expect(conflictResult.result.checks[0]?.differenceReason).toBe("TerminalConflict");
     expect(conflictResult.result.exceptions[0]?.severity).toBe("Critical");
     expect(terminalConflict.terminal).toHaveLength(0);
+  });
+
+  it("WP-2423: takes an exception identity read asynchronously and fails closed when it cannot be read", async () => {
+    const asked: unknown[] = [];
+    const read = fixture({
+      provider: provider("Pending", { requestedAmount: money(1_251n) }),
+      exceptionFor: async (input) => {
+        asked.push(input);
+        return id(81);
+      },
+    });
+    const result = await read.service.run(run());
+    expect(result.result.checks[0]).toMatchObject({
+      outcome: "Difference",
+      exceptionReference: id(81),
+    });
+    expect(result.result.exceptions[0]?.exceptionReference).toBe(id(81));
+    expect(asked).toEqual([
+      {
+        brandReference: id(2),
+        storeReference: id(3),
+        candidateReference: result.result.checks[0]?.candidateReference,
+        reason: "AmountMismatch",
+      },
+    ]);
+    const failing = fixture({
+      provider: provider("Pending", { requestedAmount: money(1_251n) }),
+      exceptionFor: async () => {
+        throw Error("database unavailable");
+      },
+    });
+    expect(await code(failing.service.run(run()))).toBe(
+      "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE",
+    );
+    expect(failing.calls).not.toContain("commit");
   });
 
   it("records normalized Provider failures and thrown dependencies as unavailable", async () => {

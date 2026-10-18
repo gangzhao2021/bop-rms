@@ -286,6 +286,26 @@ describe("WP-2423 reconciliation cards say what the difference is about", () => 
     expect(html).not.toContain("View charge details");
     expect(html).not.toContain("Review unmatched charge");
   });
+  it("2026-10-17: a single payment's difference resolved by its re-check says so and offers no follow-up", () => {
+    const paymentItem = (resolvedAt: string | null) => ({
+      ...dayItem(resolvedAt),
+      orderReference: "018f0f58-767a-7f3b-a1d0-000000000920",
+      orderNumber: "42",
+      reconciliation: { type: "Payment", resolvedAt },
+    });
+    const resolved = render([paymentItem("2026-10-17T14:05:00.000Z")]);
+    expect(resolved).toContain("Payment reconciliation difference");
+    expect(resolved).toContain("Order 42");
+    expect(resolved).toContain("Resolved: this payment was checked again");
+    expect(resolved).toContain("now matches the payment provider");
+    expect(resolved).toContain("Follow-up closed: this difference is resolved.");
+    expect(resolved).not.toContain("Review current follow-up");
+    expect(resolved).not.toContain("Business day totals differ");
+    expect(findInternalText([resolved.replace(/<[^>]+>/gu, " ")])).toEqual([]);
+    const open = render([paymentItem(null)]);
+    expect(open).not.toContain("Resolved: this payment was checked again");
+    expect(open).toContain("Review current follow-up");
+  });
   it("offers the charge and its refund only for a charge that matches no order", () => {
     const html = render([{ ...dayItem(null), reconciliation: { type: "UnmatchedCharge" } }]);
     expect(html).toContain("Charge that matches no order");
@@ -328,7 +348,7 @@ describe("WP-2423 reconciliation cards say what the difference is about", () => 
     expect(() =>
       parseOrderExceptionView({
         ...fixture(),
-        items: [{ ...fixture().items[0], reconciliation: { type: "Payment" } }],
+        items: [{ ...fixture().items[0], reconciliation: { type: "Payment", resolvedAt: null } }],
       }),
     ).toThrow("ORDER_EXCEPTION_INVALID");
     const bad = dayItem(null);

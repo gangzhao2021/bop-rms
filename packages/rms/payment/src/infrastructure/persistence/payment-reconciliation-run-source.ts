@@ -154,9 +154,10 @@ export function createPostgresPaymentReconciliationRepository(
   options: Parameters<typeof createPostgresPaymentReconciliationRunSource>[0] & {
     transactions: { run<T>(work: (tx: ConsumerTransaction) => Promise<T>): Promise<T> };
     /**
-     * WP-2423: when given, a matching settlement check of a business day resolves that day's
-     * earlier open differences (one append-only resolution row and one audit record each, in the
-     * same transaction as the run). Without it no resolution is recorded.
+     * WP-2423: when given, a matching check resolves the same candidate's earlier open differences
+     * (a business day's settlement check, or a single payment's Operational check), one
+     * append-only resolution row and one audit record each, in the same transaction as the run.
+     * Without it no resolution is recorded.
      */
     resolutions?: { nextReference(): string };
   },
@@ -222,7 +223,9 @@ export function createPostgresPaymentReconciliationRepository(
         );
         for (const e of result.exceptions) {
           const existing = await tx.query(
-            "SELECT reconciliation_exception_id::text AS identity,candidate_id::text AS candidate,reason,severity,status,opened_at FROM rms_payment.payment_reconciliation_exception WHERE brand_id=$1 AND store_id=$2 AND (reconciliation_exception_id=$3 OR (candidate_id=$4 AND reason=$5)) LIMIT 2",
+            // WP-2423: a resolved earlier difference of the same candidate and reason is history; only
+            // an open one (or this exact identity) is the same difference.
+            "SELECT x.reconciliation_exception_id::text AS identity,x.candidate_id::text AS candidate,x.reason,x.severity,x.status,x.opened_at FROM rms_payment.payment_reconciliation_exception x WHERE x.brand_id=$1 AND x.store_id=$2 AND (x.reconciliation_exception_id=$3 OR (x.candidate_id=$4 AND x.reason=$5 AND NOT EXISTS (SELECT 1 FROM rms_payment.payment_reconciliation_resolution s WHERE s.brand_id=x.brand_id AND s.store_id=x.store_id AND s.reconciliation_exception_id=x.reconciliation_exception_id))) LIMIT 2",
             [
               e.brandReference,
               e.storeReference,
@@ -289,7 +292,11 @@ export function createPostgresPaymentReconciliationRepository(
           );
         if (options.resolutions)
           for (const c of result.checks) {
-            if (c.mode !== "DailySettlement" || c.outcome !== "Matched") continue;
+            // A matching check resolves the candidate's earlier open differences: a business day's
+            // settlement check (DailySettlement) or, since 2026-10-17, a single payment's check
+            // (Operational: Payment records and the Provider agree again). A check that still
+            // differs, or is unresolved/unavailable, leaves them open.
+            if (c.outcome !== "Matched") continue;
             const open = await tx.query(
               "SELECT e.reconciliation_exception_id::text AS exception_reference FROM rms_payment.payment_reconciliation_exception e WHERE e.brand_id=$1 AND e.store_id=$2 AND e.candidate_id=$3 AND e.opened_at<=$4::timestamptz AND NOT EXISTS (SELECT 1 FROM rms_payment.payment_reconciliation_resolution s WHERE s.brand_id=e.brand_id AND s.store_id=e.store_id AND s.reconciliation_exception_id=e.reconciliation_exception_id) ORDER BY e.reconciliation_exception_id LIMIT 5",
               [c.brandReference, c.storeReference, c.candidateReference, c.checkedAt],
@@ -347,8 +354,8 @@ export interface PaymentReconciliationResolution {
   readonly resolvedAt: string;
 }
 /**
- * WP-2423: how an earlier reconciliation difference was resolved by a later matching settlement
- * check of the same business day, or null when it was not. Read-only, Store-scoped.
+ * WP-2423: how an earlier reconciliation difference was resolved by a later matching check of the
+ * same candidate (business day or payment), or null when it was not. Read-only, Store-scoped.
  */
 export function createPostgresPaymentReconciliationResolutionReader(options: {
   readonly scope: { readonly brandReference: string; readonly storeReference: string };
@@ -392,5 +399,49 @@ export function createPostgresPaymentReconciliationResolutionReader(options: {
       checkReference: String(parsePaymentReference(row.check_reference)),
       resolvedAt: new Date(resolvedAt).toISOString(),
     });
+  };
+}
+
+/**
+ * WP-2423 (2026-10-17): how many earlier differences of this candidate and reason a later matching
+ * check resolved. A new difference after a resolution is a new exception (its identity includes
+ * this count, which the database assigns as the exception's generation); 0 keeps the identity a
+ * difference has always had. Read-only, Store-scoped, inside the reconciliation lease.
+ */
+export function createPostgresPaymentReconciliationResolvedDifferenceCount(options: {
+  readonly scope: { readonly brandReference: string; readonly storeReference: string };
+  authorize(tx: ConsumerTransaction): Promise<boolean>;
+}) {
+  const scope = Object.freeze({
+    brandReference: String(parsePaymentReference(options.scope.brandReference)),
+    storeReference: String(parsePaymentReference(options.scope.storeReference)),
+  });
+  return async (
+    tx: ConsumerTransaction,
+    input: { readonly candidateReference: string; readonly reason: string },
+  ): Promise<number> => {
+    const candidate = String(parsePaymentReference(input.candidateReference));
+    if (
+      !["StateMismatch", "AmountMismatch", "RefundMismatch", "TerminalConflict"].includes(
+        input.reason,
+      )
+    )
+      return unavailable();
+    if ((await options.authorize(tx)) !== true)
+      throw new PaymentReconciliationError("PAYMENT_RECONCILIATION_PERMISSION_DENIED");
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      scope.brandReference,
+      scope.storeReference,
+    ]);
+    const result = await tx.query(
+      "SELECT count(*)::int AS resolved FROM rms_payment.payment_reconciliation_exception e JOIN rms_payment.payment_reconciliation_resolution s ON s.brand_id=e.brand_id AND s.store_id=e.store_id AND s.reconciliation_exception_id=e.reconciliation_exception_id WHERE e.brand_id=$1 AND e.store_id=$2 AND e.candidate_id=$3 AND e.reason=$4",
+      [scope.brandReference, scope.storeReference, candidate, input.reason],
+    );
+    const resolved =
+      Array.isArray(result.rows) && result.rows.length === 1 ? result.rows[0]?.resolved : null;
+    if (!Number.isSafeInteger(resolved) || (resolved as number) < 0) return unavailable();
+    if ((await options.authorize(tx)) !== true)
+      throw new PaymentReconciliationError("PAYMENT_RECONCILIATION_PERMISSION_DENIED");
+    return resolved as number;
   };
 }

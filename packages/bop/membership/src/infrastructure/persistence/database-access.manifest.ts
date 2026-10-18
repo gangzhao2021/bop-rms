@@ -149,6 +149,46 @@ const databaseAccessManifestInput = {
       readPattern: null,
       source: "packages/bop/membership/src/infrastructure/persistence/member-directory-store.ts",
     },
+    {
+      id: "internal-test-validity.read.membership",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_membership", table: "membership" },
+      principal: { kind: "module", id: "@bop/membership" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/membership/src/infrastructure/persistence/internal-test-validity-store.ts",
+    },
+    {
+      id: "internal-test-validity.write.membership",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_membership", table: "membership" },
+      principal: { kind: "module", id: "@bop/membership" },
+      readPattern: null,
+      source:
+        "packages/bop/membership/src/infrastructure/persistence/internal-test-validity-store.ts",
+    },
+    {
+      id: "internal-test-validity.read.store_assignment",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_membership", table: "store_assignment" },
+      principal: { kind: "module", id: "@bop/membership" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/membership/src/infrastructure/persistence/internal-test-validity-store.ts",
+    },
+    {
+      id: "internal-test-validity.write.store_assignment",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_membership", table: "store_assignment" },
+      principal: { kind: "module", id: "@bop/membership" },
+      readPattern: null,
+      source:
+        "packages/bop/membership/src/infrastructure/persistence/internal-test-validity-store.ts",
+    },
   ],
 } as const;
 

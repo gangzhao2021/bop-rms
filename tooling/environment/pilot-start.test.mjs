@@ -21,6 +21,7 @@ function fixture() {
               pickupPaymentExpiry: cycle,
               diningCheckoutExpiry: cycle,
               contactRetention: cycle,
+              pickupCapacitySchedule: cycle,
             },
           }
         : cycle
@@ -76,6 +77,9 @@ it.each([
   // WP-2423 Q10: the daily contact retention removal is a required loop too.
   ["contactRetention", { state: "failed" }],
   ["contactRetention", undefined],
+  // DEC-PICKUP-CAPACITY-SCHEDULE: without the pickup slot schedule no pickup order can be taken.
+  ["pickupCapacitySchedule", { state: "failed" }],
+  ["pickupCapacitySchedule", undefined],
 ])("does not hide an unhealthy required %s loop", async (component, health) => {
   const f = fixture();
   const original = f.service.getMockImplementation();

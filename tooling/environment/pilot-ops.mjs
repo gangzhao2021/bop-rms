@@ -219,6 +219,7 @@ async function loadBusiness(runtimeDirectory) {
     status,
     receipt,
     heldStock,
+    pickupCapacity,
   ] = await Promise.all([
     import("./pilot-installation.mjs"),
     import("./pilot-configured-resources.mjs"),
@@ -226,6 +227,7 @@ async function loadBusiness(runtimeDirectory) {
     import("./pilot-ops-settlement.mjs"),
     import("./pilot-receipt.mjs"),
     import("./pilot-held-stock.mjs"),
+    import("./pilot-pickup-capacity-schedule.mjs"),
   ]);
   const directory = path.resolve(runtimeDirectory);
   const installation = await loadPilotInstallation(directory);
@@ -238,6 +240,7 @@ async function loadBusiness(runtimeDirectory) {
       readSettlementStatus: status.readPilotSettlementProblems,
       readReceiptTemplate: receipt.readInternalReceiptTemplateReadiness,
       readHeldStockOrders: heldStock.readInternalHeldStockOrders,
+      readPickupCapacityHorizon: pickupCapacity.readInternalPickupCapacityHorizon,
     },
   };
 }

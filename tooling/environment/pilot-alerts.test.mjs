@@ -347,6 +347,31 @@ describe("WP-2423 Q13 messages are plain language and carry no private data", ()
     o.business.heldStock = "unreadable";
     expect(keys(evaluateAlertConditions(o))).toEqual(["monitor.source"]);
   });
+  it("DEC-PICKUP-CAPACITY-SCHEDULE: warns a day before pickup times run out, urgent in the last hour", () => {
+    const o = healthy();
+    o.business.pickupCapacity = { coveredMs: 14 * 24 * 60 * MIN };
+    expect(keys(evaluateAlertConditions(o))).toEqual([]);
+    o.business.pickupCapacity = { coveredMs: 20 * 60 * MIN };
+    let c = evaluateAlertConditions(o);
+    expect(keys(c)).toEqual(["pickup.capacity_horizon"]);
+    expect(c.get("pickup.capacity_horizon").severity).toBe("warning");
+    let text = renderAlert("pickup.capacity_horizon", c.get("pickup.capacity_horizon").params);
+    expect(text.title).toBe("Pickup times are running out");
+    expect(text.summary).toContain("only for the next 20 hours");
+    expect(text.runbook).toBe("alert-pickup-capacity-horizon");
+    o.business.pickupCapacity = { coveredMs: 0 };
+    c = evaluateAlertConditions(o);
+    expect(c.get("pickup.capacity_horizon").severity).toBe("critical");
+    text = renderAlert("pickup.capacity_horizon", c.get("pickup.capacity_horizon").params);
+    expect(text.title).toBe("Pickup orders cannot be taken");
+    expect(text.action).toContain("on paper");
+    for (const value of [text.title, text.summary, text.action])
+      expect(value).not.toMatch(/[A-Z]{2,}_[A-Z]|slot|capacity/iu);
+    expect(text.summary.length).toBeLessThanOrEqual(600);
+    expect(text.action.length).toBeLessThanOrEqual(400);
+    o.business.pickupCapacity = "unreadable";
+    expect(keys(evaluateAlertConditions(o))).toEqual(["monitor.source"]);
+  });
   it("uses the same closed key list as the merchant Home read", () => {
     const api = readFileSync(
       new URL("../../apps/api/src/merchant-operations-alerts.ts", import.meta.url),

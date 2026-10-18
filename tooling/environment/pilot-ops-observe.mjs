@@ -274,6 +274,18 @@ export async function readBusinessSignals({
       heldStock = "unreadable";
     }
 
+  // DEC-PICKUP-CAPACITY-SCHEDULE: how far ahead pickup capacity is set up without a gap.
+  // null when not composed; "unreadable" when the check itself failed.
+  let pickupCapacity = null;
+  if (typeof dependencies.readPickupCapacityHorizon === "function")
+    try {
+      const horizon = await dependencies.readPickupCapacityHorizon(resources);
+      if (!Number.isSafeInteger(horizon?.coveredMs)) throw Error("PICKUP_CAPACITY_UNREADABLE");
+      pickupCapacity = { coveredMs: Math.max(0, horizon.coveredMs) };
+    } catch {
+      pickupCapacity = "unreadable";
+    }
+
   // WP-2423: a recent clean settlement answer may be reused (see createBusinessObserver).
   if (settlementExceptions !== null)
     return {
@@ -281,6 +293,7 @@ export async function readBusinessSignals({
       retryingUpdates,
       receiptTemplate,
       heldStock,
+      pickupCapacity,
       reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
       settlementExceptions,
     };
@@ -296,6 +309,7 @@ export async function readBusinessSignals({
     retryingUpdates,
     receiptTemplate,
     heldStock,
+    pickupCapacity,
     reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
     settlementExceptions: { count: problems.length, oldestAgeMs: age(settlementOldest) },
   };

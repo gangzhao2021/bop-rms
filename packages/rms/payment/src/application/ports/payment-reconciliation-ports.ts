@@ -91,7 +91,9 @@ export interface PaymentReconciliationPorts {
       readonly storeReference: string;
       readonly candidateReference: string;
       readonly reason: PaymentReconciliationDifferenceReason;
-    }): string;
+    }):
+      /** WP-2423: may read how many earlier differences were resolved (a new identity each). */
+      string | Promise<string>;
   };
   readonly clock: { now(): string };
 }

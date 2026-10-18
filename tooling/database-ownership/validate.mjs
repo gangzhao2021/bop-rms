@@ -751,6 +751,17 @@ async function scanUnsupported(root, module, diagnostics) {
             "capacity_asap_commitment",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/current-pickup-capacity-store.ts";
+        // WP-2423 DEC-PICKUP-CAPACITY-SCHEDULE: the owner's rolling pickup slot schedule.
+        const acceptedPickupCapacityScheduleAsset =
+          module.packageName === "@rms/fulfillment" &&
+          module.manifest.ownedDatabase?.schema === "rms_fulfillment" &&
+          [
+            "capacity_slot",
+            "capacity_slot_configuration",
+            "capacity_hold",
+            "capacity_asap_commitment",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/pickup-capacity-schedule-store.ts";
         // WP-2402 admits the exact Fulfillment owner ASAP history/Audit adapter.
         const acceptedRecipePreparationContentAsset =
           module.packageName === "@rms/recipe" &&
@@ -1417,6 +1428,42 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_workflow" &&
           module.manifest.ownedDatabase?.tables?.includes("workflow_definition_version") &&
           moduleRelative === "src/infrastructure/persistence/workflow-definition-store.ts";
+        // WP-2423: Owner-approved InternalTest renewal of synthetic DEMO validity, one store per owner.
+        const internalTestRenewalAssets = {
+          "@bop/membership": {
+            schema: "bop_membership",
+            tables: ["membership", "store_assignment"],
+            file: "src/infrastructure/persistence/internal-test-validity-store.ts",
+          },
+          "@bop/permission": {
+            schema: "bop_permission",
+            tables: ["policy_state", "role", "role_assignment", "permission_grant"],
+            file: "src/infrastructure/persistence/internal-test-validity-store.ts",
+          },
+          "@bop/publishing": {
+            schema: "bop_publishing",
+            tables: ["live_gate_version", "live_gate_requirement"],
+            file: "src/infrastructure/persistence/internal-test-live-gate-renewal-store.ts",
+          },
+          "@rms/pricing": {
+            schema: "rms_pricing",
+            tables: ["tax_configuration", "tax_configuration_version", "tax_configuration_rule"],
+            file: "src/infrastructure/persistence/internal-test-tax-evidence-renewal-store.ts",
+          },
+        };
+        const internalTestRenewalAsset = Object.hasOwn(
+          internalTestRenewalAssets,
+          module.packageName,
+        )
+          ? internalTestRenewalAssets[module.packageName]
+          : null;
+        const acceptedInternalTestRenewalAsset =
+          internalTestRenewalAsset !== null &&
+          module.manifest.ownedDatabase?.schema === internalTestRenewalAsset.schema &&
+          internalTestRenewalAsset.tables.every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === internalTestRenewalAsset.file;
         const acceptedCurrentLiveGateAsset =
           module.packageName === "@bop/publishing" &&
           module.manifest.ownedDatabase?.schema === "bop_publishing" &&
@@ -3570,6 +3617,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedStoreWeeklyScheduleAsset &&
           !acceptedStoreBusinessDateAsset &&
           !acceptedCurrentMembershipAsset &&
+          !acceptedInternalTestRenewalAsset &&
           !acceptedInitialBrandMembershipAsset &&
           !acceptedApprovedWorkforceMembershipAsset &&
           !acceptedMembershipBrandDiscoveryAsset &&
@@ -3604,6 +3652,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedInventoryConfigurationReferenceAsset &&
           !acceptedInventorySkuMappingAsset &&
           !acceptedCurrentPickupCapacityAsset &&
+          !acceptedPickupCapacityScheduleAsset &&
           !acceptedCapacityHoldTransitionAsset &&
           !acceptedCapacityAllocationTerminalAsset &&
           !acceptedCurrentQuoteServiceAsset &&

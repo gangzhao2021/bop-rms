@@ -15,3 +15,4 @@ export * from "./contracts/workforce-invitation-eligibility.js";
 export * from "./infrastructure/persistence/brand-discovery-store.js";
 export * from "./contracts/approved-workforce-membership.js";
 export * from "./infrastructure/persistence/approved-workforce-membership-store.js";
+export * from "./infrastructure/persistence/internal-test-validity-store.js";

@@ -223,3 +223,22 @@ it("WP-2423 Q10: always composes the daily contact retention removal with its he
   expect(await compose("resources", { contactRetention: "observer" }, {})).toBe("workload");
   expect(retention).toHaveBeenCalledWith("resources", "observer");
 });
+it("DEC-PICKUP-CAPACITY-SCHEDULE: always composes the pickup slot schedule with its health observer", async () => {
+  const schedule = vi.fn(() => "workload");
+  const compose = composeConfiguredBusinessWorker({
+    directory: "/synthetic",
+    config,
+    installation: {},
+    implementations: {
+      createInternalWorker: async (r, observers, _options, dependencies) =>
+        dependencies.createInternalPickupCapacityScheduleWorkload(
+          r,
+          observers.pickupCapacitySchedule,
+        ),
+      createInternalPickupCapacityScheduleWorkload: schedule,
+    },
+  });
+  // Not behind a workloads option: a Store without future pickup slots cannot take pickup orders.
+  expect(await compose("resources", { pickupCapacitySchedule: "observer" }, {})).toBe("workload");
+  expect(schedule).toHaveBeenCalledWith("resources", "observer");
+});

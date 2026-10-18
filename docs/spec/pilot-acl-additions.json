@@ -3402,6 +3402,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 DEC-DINING-GUEST-INVITATION, 2026-10-17): the table's Host invites the next guest from their own phone; this append-only record names the Host participant, the Session and the new one-time join code it issued (never the code itself), and its recent rows bound guest issuance to 10 per Session per 10 minutes"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_slot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 DEC-PICKUP-CAPACITY-SCHEDULE, 2026-10-18): the business worker (api role) lays the Store's pickup slots 14 days ahead from its published hours (append-only slots, one capacity version each) and gives unreserved future slots a new capacity version when the hours change"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_slot_configuration",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 DEC-PICKUP-CAPACITY-SCHEDULE, 2026-10-18): the business worker (api role) lays the Store's pickup slots 14 days ahead from its published hours (append-only slots, one capacity version each) and gives unreserved future slots a new capacity version when the hours change"
     }
   ]
 }

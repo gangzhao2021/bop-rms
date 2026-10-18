@@ -27,6 +27,7 @@ const COMPONENT_NAMES = Object.freeze({
   pickupPaymentExpiry: "unpaid pickup expiry",
   diningCheckoutExpiry: "table checkout expiry",
   contactRetention: "customer contact deletion",
+  pickupCapacitySchedule: "pickup times",
   batchCancellation: "cancellations",
   compensation: "automatic refunds",
   kitchen: "kitchen board",
@@ -163,6 +164,24 @@ export const ALERT_CATALOG = Object.freeze({
       'Open Orders: these orders are listed first with today\'s. Make and hand over one the guest still wants, or cancel it (the guest is refunded and the ingredients go back into stock). For an order that is already finished, choose "Release held ingredients".',
     runbook: "alert-orders-held-stock",
   },
+  // WP-2423 DEC-PICKUP-CAPACITY-SCHEDULE: pickup capacity is set up less than a day ahead (the
+  // schedule is not being extended); with none left no pickup order can be taken, online or at the
+  // counter, so staff take pickup orders on paper until it is fixed.
+  "pickup.capacity_horizon": {
+    severity: "warning",
+    raiseAfterMs: 0,
+    title: (p) =>
+      p.coveredMs <= 0 ? "Pickup orders cannot be taken" : "Pickup times are running out",
+    summary: (p) =>
+      p.coveredMs <= 0
+        ? "No pickup times are set up for now, so guests cannot place pickup orders online and staff cannot take them at the counter. Dine-in is not affected."
+        : `Pickup times are set up only for the next ${formatDuration(p.coveredMs)}. After that, guests cannot place pickup orders online and staff cannot take them at the counter.`,
+    action: (p) =>
+      p.coveredMs <= 0
+        ? "Take pickup orders on paper (order sheet, items, name, time) and take payment on the card machine, then enter them once this clears. Ask the pilot operator to check Order processing (pickup times) now."
+        : "Nothing changes for guests yet. Ask the pilot operator to check Order processing (pickup times) today; if it reaches the last hour, take pickup orders on paper.",
+    runbook: "alert-pickup-capacity-horizon",
+  },
   // WP-2423 DEC-STORE-SETUP-PUBLICATION: the receipt template the Store's published settings
   // name cannot be used (receipts are money documents: none is issued with a guessed template).
   "receipts.template": {
@@ -293,6 +312,7 @@ const SOURCE_NAMES = Object.freeze({
   disk: "disk space",
   receipts: "the receipt template check",
   heldStock: "the check for orders holding stock",
+  pickupCapacity: "the check for pickup times",
 });
 
 const PROBE_KEYS = Object.freeze({
@@ -311,6 +331,8 @@ export const DEFAULT_THRESHOLDS = Object.freeze({
   diskCriticalBytes: 1024 ** 3,
   channelFailingMs: 30 * MINUTE,
   retryingCriticalMs: 30 * MINUTE,
+  pickupHorizonWarnMs: 24 * HOUR,
+  pickupHorizonCriticalMs: HOUR,
 });
 const natural = (value) => Number.isSafeInteger(value) && value >= 0;
 
@@ -371,6 +393,19 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
         count: business.heldStock.count,
         oldestAgeMs: business.heldStock.oldestAgeMs,
       });
+    // null when not composed; "unreadable" when the check itself failed.
+    if (business.pickupCapacity === "unreadable") unreadable.push("pickupCapacity");
+    else if (
+      Number.isSafeInteger(business.pickupCapacity?.coveredMs) &&
+      business.pickupCapacity.coveredMs < thresholds.pickupHorizonWarnMs
+    )
+      raise(
+        "pickup.capacity_horizon",
+        { coveredMs: Math.max(0, business.pickupCapacity.coveredMs) },
+        business.pickupCapacity.coveredMs < thresholds.pickupHorizonCriticalMs
+          ? "critical"
+          : "warning",
+      );
     if (pick(business.reconciliationDifferences))
       raise(
         "reconciliation.differences",

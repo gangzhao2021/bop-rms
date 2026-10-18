@@ -2,6 +2,41 @@ import process from "node:process";
 import { createHash } from "node:crypto";
 import { createEffectivePeriod } from "../../packages/bop/effective-period/src/index.ts";
 import { entryTorontoBoundary } from "./pilot-toronto-boundary.mjs";
+
+const fixtureId = (n) => "0190fa24-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+/**
+ * Identities of the synthetic DEMO tax version `versionNumber`: version 1 is the installed one;
+ * each Owner-approved InternalTest renewal (pilot-internal-test-renew) appends the next version
+ * with its own fixture identities, so every version of the authority stays distinguishable.
+ */
+export function internalTestTaxVersionIdentity(versionNumber) {
+  if (!Number.isSafeInteger(versionNumber) || versionNumber < 1 || versionNumber > 4095)
+    throw new Error("INTERNAL_PRICING_ONLY");
+  const base = versionNumber === 1 ? 0 : versionNumber * 0x10000;
+  return {
+    versionReference: fixtureId(base + 11),
+    ruleReferences: ["Pickup", "DineIn"].map((_, index) => fixtureId(base + 18 + index)),
+  };
+}
+const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+/** The profile's renewed tax version (absent: the installed version 1, created with the profile). */
+function taxVersionOf(profile) {
+  const renewed = profile.taxConfigurationVersion;
+  if (renewed === undefined) return { versionNumber: 1, createdAt: profile.createdAt };
+  if (
+    renewed === null ||
+    typeof renewed !== "object" ||
+    Object.keys(renewed).sort().join() !== "createdAt,versionNumber" ||
+    !Number.isSafeInteger(renewed.versionNumber) ||
+    renewed.versionNumber < 2 ||
+    typeof renewed.createdAt !== "string" ||
+    !INSTANT.test(renewed.createdAt) ||
+    new Date(renewed.createdAt).toISOString() !== renewed.createdAt ||
+    renewed.createdAt < profile.createdAt
+  )
+    throw new Error("INTERNAL_PRICING_ONLY");
+  return { versionNumber: renewed.versionNumber, createdAt: renewed.createdAt };
+}
 /** Existing synthetic InternalTest fixture only; never legal or real Store tax evidence. */
 export async function createInternalPricingPolicy({ loadProfile, loadMenu, expectedDatabaseName }) {
   if (
@@ -18,7 +53,7 @@ export async function createInternalPricingPolicy({ loadProfile, loadMenu, expec
     )
   )
     throw new Error("INTERNAL_PRICING_ONLY");
-  const id = (n) => "0190fa24-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const id = fixtureId;
   const hash = (value) =>
     "sha256:" +
     createHash("sha256")
@@ -30,6 +65,8 @@ export async function createInternalPricingPolicy({ loadProfile, loadMenu, expec
   };
   const at = profile.createdAt,
     validUntil = profile.binding.validUntil;
+  const taxVersion = taxVersionOf(profile);
+  const taxIdentity = internalTestTaxVersionIdentity(taxVersion.versionNumber);
   const effectivePeriod = createEffectivePeriod({
     timeZone: "America/Toronto",
     effectiveFrom: entryTorontoBoundary(at),
@@ -69,11 +106,11 @@ export async function createInternalPricingPolicy({ loadProfile, loadMenu, expec
   const priceBook = { ...price, snapshotDigest: hash(price) };
   const tax = {
     configurationReference: id(10),
-    versionReference: id(11),
+    versionReference: taxIdentity.versionReference,
     ...scope,
     stableCode: "DEMO_STORE_TAX",
-    aggregateVersion: 1,
-    versionNumber: 1,
+    aggregateVersion: taxVersion.versionNumber,
+    versionNumber: taxVersion.versionNumber,
     lifecycle: "Published",
     jurisdictionCode: "CA-ON",
     currencyMetadata,
@@ -86,7 +123,7 @@ export async function createInternalPricingPolicy({ loadProfile, loadMenu, expec
       validUntil,
     },
     rules: ["Pickup", "DineIn"].map((orderType, index) => ({
-      ruleReference: id(18 + index),
+      ruleReference: taxIdentity.ruleReferences[index],
       taxClassificationReference: menu.taxClassificationReference,
       orderType,
       chargeType: "Sellable",
@@ -100,7 +137,7 @@ export async function createInternalPricingPolicy({ loadProfile, loadMenu, expec
       exceptionEvidenceReference: null,
       receiptPresentationCode: "SYNTHETIC_TAX_LINE",
     })),
-    createdAt: at,
+    createdAt: taxVersion.createdAt,
   };
   const digest = hash(tax);
   const taxConfiguration = {
@@ -108,7 +145,7 @@ export async function createInternalPricingPolicy({ loadProfile, loadMenu, expec
     snapshotDigest: digest,
     professionalEvidence: {
       evidenceReference: id(15),
-      snapshotReference: id(11),
+      snapshotReference: taxIdentity.versionReference,
       snapshotDigest: digest,
       professionalReviewReference: id(16),
       fixtureSuiteReference: id(17),

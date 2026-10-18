@@ -104,3 +104,42 @@ facts stay Open; these personnel operations do not establish financial finality.
 Production employee/assignee authorization, HTTP command integration, projected
 follow-up and rendered actions remain to be completed. Existing197 upgrade
 rehearsal is historical evidence and must not be presented as a198 cutover.
+
+## Dated corrections
+
+### 2026-10-17 — closing single-payment differences and the day of an unmatched-charge refund
+
+Two gaps in the WP-2423 reconciliation design (2026-10-15) are corrected; earlier
+text above describes the state at its time.
+
+1. **A single payment's difference closes when a later check matches.** Until now
+   only a business day's settlement difference (DailySettlement) was resolved by a
+   later matching check of the same day; a payment's difference (Operational check)
+   stayed open forever even after its next check found the Payment records and the
+   Provider agreeing, so a store would accumulate exceptions nobody could close. Now
+   a later check of the same payment with outcome Matched resolves its open
+   differences with the same append-only record as a day's
+   (`payment_reconciliation_resolution`, `MatchedOnRecheck`, one audit record
+   `PAYMENT_RECONCILIATION_DIFFERENCE_RESOLVED` each, in the run's transaction;
+   migration `2000_083` lets the database guard accept an Operational Matched check).
+   A check that still differs, or is Unresolved/Unavailable, leaves it open. The
+   exception projection becomes Final with that check as its evidence and the
+   Exceptions card says the payment was checked again and now matches. A payment
+   that differs again after a resolution (for example a refund made directly at the
+   Provider) opens a new, visible difference instead of being folded into the
+   resolved one: a difference's identity is now candidate + reason + generation
+   (the count of earlier resolved differences, assigned by the database), and only
+   one difference per candidate and reason can be open at a time.
+2. **An unmatched charge's refund counts in the business day the Provider created
+   it.** The Provider statement places a refund by its creation time, and day-end
+   settlement already counted the refund of a charge that matches no Order that
+   way, but the Settlement page placed it by the time its result was observed. A
+   refund created just before the business day ended and observed just after (or
+   recovered later by approving again) appeared on two different days. The
+   confirmed outcome now keeps the Provider's creation time (migration `2000_084`,
+   whole seconds, not after the observation, required for every new outcome) and
+   the Settlement page counts the refund in the store business day of that time;
+   day-end settlement checks the kept time against the Provider's. Outcomes
+   recorded before the migration keep no creation time and fall back to their
+   observation time (the one such v15 refund, observed 2026-10-09 08:04 Toronto,
+   is mid-day, so both rules give the same day).

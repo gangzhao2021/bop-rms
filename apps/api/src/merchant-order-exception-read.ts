@@ -29,7 +29,8 @@ export type MerchantExceptionReconciliationDetail =
       /** When a later check of the same day matched the payment provider's statement. */
       readonly resolvedAt: string | null;
     }
-  | { readonly type: "Payment" }
+  /** One payment's check differed; resolvedAt once a later check of it matched the Provider. */
+  | { readonly type: "Payment"; readonly resolvedAt: string | null }
   | { readonly type: "UnmatchedCharge" }
   /** WP-2423 D3: the detail could not be read; the card says so instead of guessing its kind. */
   | { readonly type: "Unavailable" };

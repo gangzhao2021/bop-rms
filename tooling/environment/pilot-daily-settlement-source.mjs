@@ -154,7 +154,10 @@ export function createInternalDailySettlementSource({
             outcome.amount.amountMinor !== amountMinor ||
             outcome.providerRefundReference !== state.outcome?.providerRefundReference ||
             seenProvider.has(outcome.providerRefundReference) ||
-            outcome.createdAt > state.outcome.providerObservedAt
+            outcome.createdAt > state.outcome.providerObservedAt ||
+            // WP-2423 (2026-10-17): the kept creation time is the one the Settlement page uses.
+            (state.outcome.providerCreatedAt != null &&
+              outcome.createdAt !== state.outcome.providerCreatedAt)
           )
             return fail();
           seenProvider.add(outcome.providerRefundReference);

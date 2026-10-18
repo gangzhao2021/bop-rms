@@ -212,6 +212,46 @@ const databaseAccessManifestInput = {
       readPattern: "owner-repository",
       source: "packages/bop/publishing/src/infrastructure/persistence/current-live-gate-source.ts",
     },
+    {
+      id: "internal-test-live-gate-renewal.read.live_gate_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_publishing", table: "live_gate_version" },
+      principal: { kind: "module", id: "@bop/publishing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/publishing/src/infrastructure/persistence/internal-test-live-gate-renewal-store.ts",
+    },
+    {
+      id: "internal-test-live-gate-renewal.write.live_gate_version",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_publishing", table: "live_gate_version" },
+      principal: { kind: "module", id: "@bop/publishing" },
+      readPattern: null,
+      source:
+        "packages/bop/publishing/src/infrastructure/persistence/internal-test-live-gate-renewal-store.ts",
+    },
+    {
+      id: "internal-test-live-gate-renewal.read.live_gate_requirement",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_publishing", table: "live_gate_requirement" },
+      principal: { kind: "module", id: "@bop/publishing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/bop/publishing/src/infrastructure/persistence/internal-test-live-gate-renewal-store.ts",
+    },
+    {
+      id: "internal-test-live-gate-renewal.write.live_gate_requirement",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_publishing", table: "live_gate_requirement" },
+      principal: { kind: "module", id: "@bop/publishing" },
+      readPattern: null,
+      source:
+        "packages/bop/publishing/src/infrastructure/persistence/internal-test-live-gate-renewal-store.ts",
+    },
   ],
 } as const;
 export const databaseAccessManifest = databaseAccessManifestInput;
