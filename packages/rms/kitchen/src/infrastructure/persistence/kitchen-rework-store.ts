@@ -3,9 +3,11 @@ import { createHash } from "node:crypto";
 import { appendAuditRecordInTransaction } from "@bop/audit";
 import { appendEventInTransaction, type ConsumerTransaction } from "@bop/eventing";
 
+import { createKitchenReworkCancelledEnvelope } from "../../application/kitchen-rework-cancelled-event.js";
 import { createKitchenReworkCreatedEnvelope } from "../../application/kitchen-rework-created-event.js";
 import {
   KitchenReworkError,
+  kitchenReworkCancelReasons,
   kitchenReworkMaximumPerOriginal,
   kitchenReworkNotReadyWindowMs,
   kitchenReworkOriginalWindowMs,
@@ -14,6 +16,7 @@ import {
   kitchenReworkSourceChannel,
   kitchenReworkWasteApplies,
   parseKitchenReworkCommand,
+  type KitchenReworkCancelReason,
   type KitchenReworkCommand,
   type KitchenReworkItem,
   type KitchenReworkReason,
@@ -36,14 +39,21 @@ const iso = (value: unknown): string | null =>
   value === null || value === undefined
     ? null
     : parseKitchenTicketInstant(value instanceof Date ? value.toISOString() : String(value));
-const statuses: readonly KitchenReworkStatus[] = ["Queued", "In Progress", "Completed"];
+const statuses: readonly KitchenReworkStatus[] = [
+  "Queued",
+  "In Progress",
+  "Completed",
+  "Cancelled",
+];
+/** SQL for a remake still to be made (cancelled and completed remakes are not open). */
+const openSql = "status IN ('Queued','In Progress')";
 
 const columns =
   "kitchen_rework_item_id::text AS id,kitchen_ticket_id::text AS ticket,original_kitchen_work_item_id::text AS original," +
   "order_id::text AS order_id,order_batch_id::text AS batch,order_item_id::text AS order_item,rework_ordinal AS ordinal," +
   "reason_code,reason_note,quantity,waste_applies,status,version::int AS version,created_by_actor_id::text AS created_by," +
   "created_at,started_by_actor_id::text AS started_by,started_at,completed_by_actor_id::text AS completed_by," +
-  "completed_at,event_id::text AS event_id";
+  "completed_at,cancelled_by_actor_id::text AS cancelled_by,cancelled_at,cancel_reason_code,event_id::text AS event_id";
 
 /** Owner row decoder; every reader of rework items goes through it. */
 export function parseKitchenReworkRow(row: unknown): KitchenReworkItem {
@@ -57,7 +67,9 @@ export function parseKitchenReworkRow(row: unknown): KitchenReworkItem {
       typeof r.waste_applies !== "boolean" ||
       !Number.isSafeInteger(Number(r.quantity)) ||
       !Number.isSafeInteger(Number(r.version)) ||
-      (r.reason_note !== null && typeof r.reason_note !== "string")
+      (r.reason_note !== null && typeof r.reason_note !== "string") ||
+      (r.cancel_reason_code !== null &&
+        !kitchenReworkCancelReasons.includes(r.cancel_reason_code as KitchenReworkCancelReason))
     )
       return fail("KITCHEN_REWORK_UNAVAILABLE");
     const optionalReference = (value: unknown) =>
@@ -82,6 +94,9 @@ export function parseKitchenReworkRow(row: unknown): KitchenReworkItem {
       startedAt: iso(r.started_at),
       completedBy: optionalReference(r.completed_by),
       completedAt: iso(r.completed_at),
+      cancelledBy: optionalReference(r.cancelled_by),
+      cancelledAt: iso(r.cancelled_at),
+      cancelReasonCode: (r.cancel_reason_code as KitchenReworkCancelReason | null) ?? null,
       eventReference: parseKitchenTicketReference(r.event_id),
     });
   } catch (error) {
@@ -198,8 +213,14 @@ export function createPostgresKitchenReworkStore(options: {
         wasteApplies: input.item.wasteApplies,
         originalWorkItemReference: input.item.originalWorkItemReference,
         orderItemReference: input.item.orderItemReference,
+        ...(input.item.cancelReasonCode === null
+          ? {}
+          : { cancelReasonCode: input.item.cancelReasonCode }),
       },
-      reasonCode: "KITCHEN_REWORK_" + input.item.reasonCode,
+      reasonCode:
+        input.item.cancelReasonCode === null
+          ? "KITCHEN_REWORK_" + input.item.reasonCode
+          : "KITCHEN_REWORK_CANCEL_" + input.item.cancelReasonCode,
       correlationId: input.correlationReference,
       occurredAt: input.occurredAt,
       sourceChannel: kitchenReworkSourceChannel,
@@ -249,7 +270,7 @@ export function createPostgresKitchenReworkStore(options: {
             "(SELECT count(*)::int FROM rms_kitchen.kitchen_rework_item k WHERE k.brand_id=w.brand_id AND k.store_id=w.store_id " +
             "AND k.original_kitchen_work_item_id=w.kitchen_work_item_id) AS prior," +
             "(SELECT count(*)::int FROM rms_kitchen.kitchen_rework_item k WHERE k.brand_id=w.brand_id AND k.store_id=w.store_id " +
-            "AND k.original_kitchen_work_item_id=w.kitchen_work_item_id AND k.reason_code='NOT_READY' AND k.status<>'Completed') AS open_not_ready " +
+            "AND k.original_kitchen_work_item_id=w.kitchen_work_item_id AND k.reason_code='NOT_READY' AND k.status IN ('Queued','In Progress')) AS open_not_ready " +
             "FROM rms_kitchen.kitchen_work_item w WHERE w.brand_id=$1 AND w.store_id=$2 AND w.kitchen_work_item_id=$3 FOR NO KEY UPDATE OF w",
           [brand, store, command.originalWorkItemReference],
         );
@@ -367,6 +388,86 @@ export function createPostgresKitchenReworkStore(options: {
       const current = await load(tx, command.reworkReference, true);
       if (current === null) return fail("KITCHEN_REWORK_NOT_FOUND");
       if (current.version !== command.expectedVersion) return fail("KITCHEN_REWORK_CONFLICT");
+      if (command.action === "CancelKitchenRework") {
+        // Only a remake still to be made is cancelled; a finished one already went out.
+        if (current.status !== "Queued" && current.status !== "In Progress")
+          return fail("KITCHEN_REWORK_PRECONDITION_FAILED");
+        if (Date.parse(occurredAt) < Date.parse(current.startedAt ?? current.createdAt))
+          return fail("KITCHEN_REWORK_PRECONDITION_FAILED");
+        const operationReference = next(),
+          auditReference = next(),
+          eventReference = next();
+        await tx.query(
+          "UPDATE rms_kitchen.kitchen_rework_item SET status='Cancelled',version=version+1,cancelled_by_actor_id=$4," +
+            "cancelled_at=$5,cancel_reason_code=$6,cancel_event_id=$7 WHERE brand_id=$1 AND store_id=$2 AND kitchen_rework_item_id=$3",
+          [
+            brand,
+            store,
+            current.reworkReference,
+            actor,
+            occurredAt,
+            command.cancelReasonCode,
+            eventReference,
+          ],
+        );
+        await tx.query(
+          "INSERT INTO rms_kitchen.kitchen_rework_operation (kitchen_rework_operation_id,brand_id,store_id,kitchen_rework_item_id," +
+            "action,actor_id,idempotency_key,request_digest,before_status,after_status,result_version,audit_id,correlation_id,occurred_at) " +
+            "VALUES ($1,$2,$3,$4,'Cancel',$5,$6,$7,$8,'Cancelled',$9,$10,$11,$12)",
+          [
+            operationReference,
+            brand,
+            store,
+            current.reworkReference,
+            actor,
+            command.idempotencyKey,
+            requestDigest,
+            current.status,
+            current.version + 1,
+            auditReference,
+            command.correlationReference,
+            occurredAt,
+          ],
+        );
+        const item = await load(tx, current.reworkReference, false);
+        if (item === null) return fail("KITCHEN_REWORK_UNAVAILABLE");
+        await audit(tx, {
+          auditReference,
+          actorReference: actor,
+          actionCode: "KITCHEN_REWORK_CANCELLED",
+          item,
+          before: current.status,
+          correlationReference: command.correlationReference,
+          occurredAt,
+        });
+        await appendEventInTransaction(
+          tx,
+          createKitchenReworkCancelledEnvelope({
+            eventReference,
+            operationReference,
+            correlationReference: command.correlationReference,
+            actorReference: actor,
+            brandReference: brand,
+            storeReference: store,
+            version: item.version,
+            payload: {
+              kitchenReworkItemReference: item.reworkReference,
+              kitchenTicketReference: item.ticketReference,
+              originalKitchenWorkItemReference: item.originalWorkItemReference,
+              orderReference: item.orderReference,
+              orderBatchReference: item.orderBatchReference,
+              orderItemReference: item.orderItemReference,
+              reasonCode: item.reasonCode,
+              cancelReasonCode: command.cancelReasonCode,
+              quantity: item.quantity,
+              wasteApplies: item.wasteApplies,
+              createdEventReference: item.eventReference,
+              cancelledAt: occurredAt,
+            },
+          }),
+        );
+        return Object.freeze({ status: "Applied", action: command.action, item });
+      }
       const start = command.action === "StartKitchenRework";
       if (current.status !== (start ? "Queued" : "In Progress"))
         return fail("KITCHEN_REWORK_PRECONDITION_FAILED");
@@ -441,7 +542,9 @@ export function createPostgresKitchenReworkStore(options: {
             " FROM rms_kitchen.kitchen_rework_item k JOIN rms_kitchen.kitchen_work_item w ON w.brand_id=k.brand_id" +
             " AND w.store_id=k.store_id AND w.kitchen_work_item_id=k.original_kitchen_work_item_id" +
             " WHERE k.brand_id=$1 AND k.store_id=$2 AND " +
-            "(k.status<>'Completed' OR k.completed_at >= $3::timestamptz - make_interval(secs => $4)) " +
+            "(k." +
+            openSql +
+            " OR (k.status='Completed' AND k.completed_at >= $3::timestamptz - make_interval(secs => $4))) " +
             // DEC-KITCHEN-STALE-TICKETS: a closed earlier-day ticket's remakes leave the board.
             "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_ticket_closure c WHERE c.brand_id=k.brand_id " +
             "AND c.store_id=k.store_id AND c.kitchen_ticket_id=k.kitchen_ticket_id) " +
@@ -498,7 +601,9 @@ export async function listOpenKitchenReworkItems(
     const result = await tx.query<Record<string, unknown>>(
       "SELECT order_id::text AS order_id,order_item_id::text AS order_item_id,sum(quantity)::int AS open " +
         "FROM rms_kitchen.kitchen_rework_item k WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[]) " +
-        "AND status<>'Completed' AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_ticket_closure c " +
+        "AND " +
+        openSql +
+        " AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_ticket_closure c " +
         "WHERE c.brand_id=k.brand_id AND c.store_id=k.store_id AND c.kitchen_ticket_id=k.kitchen_ticket_id) " +
         "GROUP BY order_id,order_item_id ORDER BY order_id,order_item_id",
       [brand, store, orders],
@@ -512,6 +617,44 @@ export async function listOpenKitchenReworkItems(
         }),
       ),
     );
+  } catch (error) {
+    return databaseFailure(error);
+  }
+}
+
+/**
+ * DEC-KITCHEN-REWORK cancel public owner Query: whether a remake was cancelled and why, so the
+ * Inventory waste consumer never records waste for a remake opened by mistake. Kitchen facts only.
+ */
+export async function readKitchenReworkCancellation(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  reworkReference: string,
+): Promise<{
+  readonly cancelReasonCode: KitchenReworkCancelReason;
+  readonly cancelledAt: string;
+} | null> {
+  const brand = parseKitchenTicketReference(scope.brandReference),
+    store = parseKitchenTicketReference(scope.storeReference),
+    rework = parseKitchenTicketReference(reworkReference);
+  try {
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      brand,
+      store,
+    ]);
+    const result = await tx.query<Record<string, unknown>>(
+      "SELECT cancel_reason_code,cancelled_at FROM rms_kitchen.kitchen_rework_item " +
+        "WHERE brand_id=$1 AND store_id=$2 AND kitchen_rework_item_id=$3 AND status='Cancelled'",
+      [brand, store, rework],
+    );
+    const row = result.rows[0];
+    if (row === undefined) return null;
+    if (!kitchenReworkCancelReasons.includes(row.cancel_reason_code as KitchenReworkCancelReason))
+      return fail("KITCHEN_REWORK_UNAVAILABLE");
+    return Object.freeze({
+      cancelReasonCode: row.cancel_reason_code as KitchenReworkCancelReason,
+      cancelledAt: iso(row.cancelled_at) as string,
+    });
   } catch (error) {
     return databaseFailure(error);
   }

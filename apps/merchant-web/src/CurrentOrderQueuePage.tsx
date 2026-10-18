@@ -541,8 +541,16 @@ function OnlineRefundNote({
  * staff read as "Served"; a pickup order handed over reads "Picked up".
  */
 export function orderPhaseLabel(
-  order: Pick<CurrentOrderQueue["items"][number], "currentPhase" | "orderType">,
+  order: Pick<CurrentOrderQueue["items"][number], "currentPhase" | "orderType"> & {
+    readonly kitchenPhase?: CurrentOrderQueue["items"][number]["kitchenPhase"];
+  },
 ): string {
+  // WP-2423 (v15 2026-10-18): an accepted pickup reads what the kitchen shows now, as the
+  // customer's page does, instead of "Accepted" until it is handed over.
+  if (order.currentPhase === "Accepted" && order.kitchenPhase === "Ready")
+    return "Ready for pickup";
+  if (order.currentPhase === "Accepted" && order.kitchenPhase === "InProgress")
+    return "In progress";
   switch (order.currentPhase) {
     case null:
       return "Status not loaded · refresh";

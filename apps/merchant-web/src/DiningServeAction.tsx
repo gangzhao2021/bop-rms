@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createDiningServeClient, DiningServeClientError } from "./dining-serve-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import type { DiningProgress } from "./dining-progress-client.js";
+import { servableQuantity, type DiningProgress } from "./dining-progress-client.js";
 type Operation = ReturnType<ReturnType<typeof createDiningServeClient>["prepare"]>;
 export function DiningServeAction({
   view,
@@ -20,7 +20,9 @@ export function DiningServeAction({
 }) {
   // WP-2423 item 7: staff usually serve everything that is ready; they can lower it. Each
   // progress refresh remounts this, so a partial serve offers what is left.
-  const [quantity, setQuantity] = useState(() => String(Math.max(item.remainingQuantity, 1))),
+  // WP-2423 (2026-10-18): portions the kitchen is remaking are not offered until they are done.
+  const servable = servableQuantity(item);
+  const [quantity, setQuantity] = useState(() => String(Math.max(servable, 1))),
     [confirmed, setConfirmed] = useState(false),
     [state, setState] = useState<"Idle" | "Submitting" | "Unknown" | "Denied">("Idle");
   const operation = useRef<Operation | null>(null),
@@ -30,10 +32,10 @@ export function DiningServeAction({
     view.sessionPhase !== "Active" ||
     view.closureStatus !== "Open" ||
     item.phase !== "Ready" ||
-    item.remainingQuantity < 1
+    servable < 1
   )
     return null;
-  const valid = /^[1-9][0-9]{0,2}$/.test(quantity) && Number(quantity) <= item.remainingQuantity;
+  const valid = /^[1-9][0-9]{0,2}$/.test(quantity) && Number(quantity) <= servable;
   const submit = async () => {
     if (pending.current || (!operation.current && (!valid || !confirmed || locked))) return;
     const controller = new AbortController();
@@ -75,7 +77,7 @@ export function DiningServeAction({
         <input
           type="number"
           min="1"
-          max={item.remainingQuantity}
+          max={servable}
           step="1"
           value={quantity}
           disabled={frozen}

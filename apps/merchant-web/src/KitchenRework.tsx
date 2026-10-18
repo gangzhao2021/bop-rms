@@ -4,10 +4,14 @@ import { kitchenOrderText, type KitchenBoardItem } from "./kitchen-board.js";
 import {
   createKitchenReworkClient,
   kitchenReworkBadge,
+  kitchenReworkCancelReasonLabels,
+  kitchenReworkCancelReasons,
   KitchenReworkClientError,
   kitchenReworkNotReadyWindowMs,
+  kitchenReworkOpen,
   kitchenReworkReasonLabels,
   type KitchenReworkBoard,
+  type KitchenReworkCancelReason,
   type KitchenReworkCommandBody,
   type KitchenReworkReason,
   type KitchenReworkView,
@@ -102,12 +106,24 @@ export function useKitchenRework(input: {
       });
     },
     advance(rework: KitchenReworkView) {
-      if (rework.status === "Completed") return;
+      if (!kitchenReworkOpen(rework)) return;
       void run({
         action: rework.status === "Queued" ? "StartKitchenRework" : "CompleteKitchenRework",
         idempotencyKey: serviceOperationReference(),
         reworkReference: rework.reworkReference,
         expectedVersion: rework.version,
+        correlationReference: serviceOperationReference(),
+      });
+    },
+    /** DEC-KITCHEN-REWORK cancel: an open remake that will not be made after all. */
+    cancel(rework: KitchenReworkView, reason: KitchenReworkCancelReason) {
+      if (!kitchenReworkOpen(rework)) return;
+      void run({
+        action: "CancelKitchenRework",
+        idempotencyKey: serviceOperationReference(),
+        reworkReference: rework.reworkReference,
+        expectedVersion: rework.version,
+        cancelReasonCode: reason,
         correlationReference: serviceOperationReference(),
       });
     },
@@ -150,45 +166,60 @@ export function KitchenReworkStatus({
   const { state } = rework;
   if (state.kind === "Idle") return null;
   const creating = state.body.action === "CreateKitchenRework";
+  const cancelling = state.body.action === "CancelKitchenRework";
   const heading =
     state.kind === "Submitting"
       ? creating
         ? "Sending remake"
-        : "Updating remake"
+        : cancelling
+          ? "Cancelling remake"
+          : "Updating remake"
       : state.kind === "Unknown"
         ? "Remake result unknown"
         : state.kind === "Confirmed"
           ? creating
             ? "Remake sent to the kitchen"
-            : "Remake updated"
-          : "Remake not recorded";
+            : cancelling
+              ? "Remake cancelled"
+              : "Remake updated"
+          : cancelling
+            ? "Remake not cancelled"
+            : "Remake not recorded";
   const text =
     state.kind === "Submitting"
       ? "Please wait."
       : state.kind === "Unknown"
-        ? "The answer was lost. Retry the same remake; it will not be sent twice."
+        ? cancelling
+          ? "The answer was lost. Retry the same cancellation; it will not be applied twice."
+          : "The answer was lost. Retry the same remake; it will not be sent twice."
         : state.kind === "Confirmed"
           ? creating && state.body.reasonCode === "NOT_READY"
             ? "The dish is back in progress. Nothing was recorded as waste."
             : creating
               ? "The first dish is recorded as waste. The guest is not charged again."
-              : "The board now shows the remake's current state."
-          : state.code === "WindowClosed"
-            ? state.body.action === "CreateKitchenRework" && state.body.reasonCode === "NOT_READY"
-              ? "More than two minutes have passed since it was marked done. Choose another reason to remake it."
-              : "This dish was finished too long ago to remake. Close the old order instead."
-            : state.code === "PermissionDenied"
-              ? "Your role does not allow remakes. Ask a manager or kitchen lead."
-              : state.code === "Conflict"
-                ? "The remake changed on another screen. The board has been refreshed."
-                : "The dish is not finished, or it was already remade too many times. The board has been refreshed.";
+              : cancelling
+                ? state.body.cancelReasonCode === "OPENED_BY_MISTAKE"
+                  ? "It is off the board. Anything recorded as waste for it is put back in stock."
+                  : "It is off the board. The first dish stays recorded as waste."
+                : "The board now shows the remake's current state."
+          : cancelling && state.code === "PreconditionFailed"
+            ? "This remake is already done or cancelled. The board has been refreshed."
+            : state.code === "WindowClosed"
+              ? state.body.action === "CreateKitchenRework" && state.body.reasonCode === "NOT_READY"
+                ? "More than two minutes have passed since it was marked done. Choose another reason to remake it."
+                : "This dish was finished too long ago to remake. Close the old order instead."
+              : state.code === "PermissionDenied"
+                ? "Your role does not allow remakes. Ask a manager or kitchen lead."
+                : state.code === "Conflict"
+                  ? "The remake changed on another screen. The board has been refreshed."
+                  : "The dish is not finished, or it was already remade too many times. The board has been refreshed.";
   return (
     <div className="kitchen-rework-status" data-kind={state.kind}>
       <StatePanel heading={heading} tone={state.kind === "Rejected" ? "error" : "neutral"} status>
         <p>{text}</p>
         {state.kind === "Unknown" ? (
           <button type="button" onClick={rework.retry}>
-            Retry same remake
+            {cancelling ? "Retry same cancellation" : "Retry same remake"}
           </button>
         ) : null}
         {state.kind === "Confirmed" || state.kind === "Rejected" ? (
@@ -210,6 +241,7 @@ export function KitchenRemakeLane({
   items,
   readOnly,
   onAdvance,
+  onCancel,
   today,
 }: {
   readonly items: readonly KitchenReworkView[];
@@ -217,8 +249,10 @@ export function KitchenRemakeLane({
   readonly today?: string | null | undefined;
   readonly readOnly: boolean;
   readonly onAdvance: (rework: KitchenReworkView) => void;
+  /** Offered when the operator may remake (and so cancel a remake). */
+  readonly onCancel?: ((rework: KitchenReworkView) => void) | undefined;
 }) {
-  const open = items.filter((item) => item.status !== "Completed");
+  const open = items.filter(kitchenReworkOpen);
   if (open.length === 0) return null;
   return (
     <section className="kitchen-station-lane kitchen-remake-lane" aria-label="Remakes">
@@ -279,6 +313,17 @@ export function KitchenRemakeLane({
               <button type="button" disabled={readOnly} onClick={() => onAdvance(rework)}>
                 {rework.status === "Queued" ? "Start remake" : "Remake done"}
               </button>
+              {onCancel ? (
+                <button
+                  type="button"
+                  className="kitchen-remake-cancel"
+                  disabled={readOnly}
+                  onClick={() => onCancel(rework)}
+                  aria-label={`Cancel remake of ${rework.displayName}, ${orderText(rework.orderLabel)}`}
+                >
+                  Cancel remake
+                </button>
+              ) : null}
             </div>
           </article>
         ))}
@@ -442,7 +487,11 @@ export function KitchenRecentlyFinished({
   const finished = recentlyFinishedKitchenItems(items, observedAt);
   if (finished.length === 0) return null;
   const remade = (item: KitchenBoardItem) =>
-    reworks.filter((rework) => rework.originalWorkItemReference === item.workItemReference).length;
+    reworks.filter(
+      (rework) =>
+        rework.originalWorkItemReference === item.workItemReference &&
+        rework.status !== "Cancelled",
+    ).length;
   return (
     <details className="kitchen-recent-finished">
       <summary>Recently finished · {finished.length}</summary>
@@ -468,5 +517,92 @@ export function KitchenRecentlyFinished({
         ))}
       </ul>
     </details>
+  );
+}
+
+/**
+ * DEC-KITCHEN-REWORK cancel: why an open remake is not made after all, and what that does. A
+ * remake the guest no longer wants keeps the first dish's waste; one opened by mistake puts it back.
+ */
+export function KitchenRemakeCancelDialog({
+  rework,
+  onSubmit,
+  onClose,
+}: {
+  readonly rework: KitchenReworkView | null;
+  readonly onSubmit: (rework: KitchenReworkView, reason: KitchenReworkCancelReason) => void;
+  readonly onClose: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const [reason, setReason] = useState<KitchenReworkCancelReason | null>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    if (!element) return;
+    if (rework && !element.open) {
+      setReason(null);
+      element.showModal();
+    } else if (!rework && element.open) element.close();
+  }, [rework]);
+  const notReady = rework?.reasonCode === "NOT_READY";
+  const effect =
+    reason === null
+      ? null
+      : reason === "OPENED_BY_MISTAKE"
+        ? notReady
+          ? "The dish counts as done again, as it was before."
+          : "Nothing was thrown away, so the first dish's waste record is reversed and its ingredients go back to stock."
+        : notReady
+          ? "The dish comes off the board. Nothing was recorded as waste."
+          : "The first dish was still thrown away, so it stays recorded as waste. The guest is not charged again.";
+  return (
+    <dialog
+      ref={dialog}
+      className="kitchen-remake-dialog"
+      aria-labelledby={titleId}
+      onClose={onClose}
+    >
+      {rework ? (
+        <form
+          method="dialog"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (reason === null) return;
+            onSubmit(rework, reason);
+            dialog.current?.close();
+          }}
+        >
+          <h2 id={titleId}>Cancel remake of {rework.displayName}</h2>
+          <p>
+            {orderText(rework.orderLabel)} · {rework.quantity} × ·{" "}
+            {kitchenReworkBadge(rework.reasonCode)}
+          </p>
+          <fieldset>
+            <legend>Why is it no longer needed?</legend>
+            {kitchenReworkCancelReasons.map((value) => (
+              <label key={value} className="kitchen-remake-dialog__reason">
+                <input
+                  type="radio"
+                  name="cancel-reason"
+                  value={value}
+                  checked={reason === value}
+                  onChange={() => setReason(value)}
+                />
+                <span>{kitchenReworkCancelReasonLabels[value]}</span>
+              </label>
+            ))}
+          </fieldset>
+          {effect ? <p className="kitchen-remake-dialog__effect">{effect}</p> : null}
+          <div className="kitchen-remake-dialog__actions">
+            <button type="button" onClick={() => dialog.current?.close()}>
+              Keep remake
+            </button>
+            <button type="submit" disabled={reason === null}>
+              Cancel remake
+            </button>
+          </div>
+        </form>
+      ) : null}
+    </dialog>
   );
 }

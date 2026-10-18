@@ -16,6 +16,7 @@ const d = vi.hoisted(() => ({
   cardMachine: vi.fn(),
   cardMachinePayment: vi.fn(),
   cardMachineRefunds: vi.fn(),
+  remaining: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.scope }));
 vi.mock("@rms/ordering", async (original) => ({
@@ -31,6 +32,7 @@ vi.mock("@rms/payment", async (original) => ({
   ...(await original<object>()),
   createPostgresPaymentCompensationRefundPositionSource: d.positionFactory,
   createPostgresCardMachinePaymentStore: d.cardMachine,
+  readPaymentRemainingRefundable: d.remaining,
 }));
 vi.mock("./submission-inventory-release.js", () => ({
   createSubmissionInventoryRelease: d.releaseFactory,
@@ -38,6 +40,7 @@ vi.mock("./submission-inventory-release.js", () => ({
 import { KitchenBatchCancellationError } from "@rms/kitchen";
 import {
   createMerchantOrderStaffCancellation,
+  createMerchantOrderStaffCancellationPreview,
   staffOrderCancellationPermission,
 } from "./merchant-order-staff-cancellation.js";
 
@@ -78,7 +81,10 @@ function setup() {
   d.cardMachinePayment.mockResolvedValue(null);
   d.cardMachineRefunds.mockResolvedValue([]);
   d.load.mockResolvedValue(null);
-  d.prepare.mockResolvedValue({ status: "Ready", plan: { synthetic: "plan" } });
+  d.prepare.mockResolvedValue({
+    status: "Ready",
+    plan: { synthetic: "plan", orderType: "Pickup" },
+  });
   d.commit.mockResolvedValue({ status: "Created", record });
   d.kitchen.mockReturnValue({ cancel: d.cancel });
   d.cancel.mockResolvedValue({
@@ -126,7 +132,7 @@ it("WP-2423 Q6: cancels kitchen, Ordering and stock in one transaction with serv
     ownerAnswers.push(await ownerAuthorize(f.tx, identity));
     ownerAnswers.push(await ownerAuthorize(f.tx, { ...identity, orderBatchReference: id(99) }));
     ownerAnswers.push(await ownerAuthorize({}, identity));
-    return { status: "Ready", plan: { synthetic: "plan" } };
+    return { status: "Ready", plan: { synthetic: "plan", orderType: "Pickup" } };
   });
   expect(await f.operation(f.input)).toEqual({
     status: "Cancelled",
@@ -165,7 +171,7 @@ it("WP-2423 Q6: cancels kitchen, Ordering and stock in one transaction with serv
     cancelledAt: at,
   });
   expect(d.commit.mock.calls[0]?.[1]).toMatchObject({
-    plan: { synthetic: "plan" },
+    plan: { synthetic: "plan", orderType: "Pickup" },
     cancellationReference,
     operationReference: id(20),
     actorReference: id(2),
@@ -316,5 +322,92 @@ it("WP-2423 Q6 step 2a: after item cancellations the whole cancellation releases
   d.releaseLines.mockResolvedValue({ status: "NotReleasable", reason: "ProductionStarted" });
   await expect(f.operation(f.input)).rejects.toMatchObject({
     code: "ORDER_CANCELLATION_STOCK_NOT_RELEASABLE",
+  });
+});
+
+it("WP-2423 v15 2026-10-18: Guests left is refused on a pickup before anything is cancelled", async () => {
+  const f = setup();
+  const command = { ...f.input.command, reasonCode: "GUEST_LEFT" };
+  await expect(f.operation({ ...f.input, command })).rejects.toMatchObject({
+    code: "ORDER_CANCELLATION_INPUT_INVALID",
+  });
+  expect(d.cancel).not.toHaveBeenCalled();
+  expect(d.commit).not.toHaveBeenCalled();
+  // A table's round may still be cancelled because its guests left.
+  d.prepare.mockResolvedValue({
+    status: "Ready",
+    plan: { synthetic: "plan", orderType: "DineIn" },
+  });
+  expect((await f.operation({ ...f.input, command })).status).toBe("Cancelled");
+  expect(d.commit.mock.calls[0]?.[1]).toMatchObject({ reasonCode: "GUEST_LEFT" });
+});
+
+it("WP-2423 v15 2026-10-18: previews what the cancellation refunds without writing", async () => {
+  const f = setup();
+  const payment = {
+    paymentTransactionReference: id(8),
+    paymentIntentReference: id(11),
+    paymentAttemptReference: id(9),
+  };
+  d.prepare.mockResolvedValue({
+    status: "Ready",
+    plan: { orderType: "Pickup", orderReference: id(5), orderBatchReference: id(6), payment },
+  });
+  const run = vi.fn(async (work: (tx: object) => Promise<unknown>) => work(f.tx));
+  const preview = createMerchantOrderStaffCancellationPreview({
+    persistence: { transactions: { run }, now: () => at } as unknown as Options["persistence"],
+    authentication: {
+      authorize: async () => ({ sessionReference: id(1) }),
+    } as unknown as Options["authentication"],
+    installContext: async () => undefined,
+    nextReference: () => id(999),
+    resolveRefundConfiguration: async () => ({
+      providerAccountReference: id(12),
+      environment: "Test",
+    }),
+  });
+  const input = {
+    sessionCookie: "synthetic-cookie",
+    csrf: "synthetic-csrf",
+    command: { orderReference: id(5), orderBatchReference: id(6), expectedOrderVersion: 3 },
+  };
+  // Already refunded in full by an ordinary refund: nothing more.
+  d.remaining.mockResolvedValue({ capturedMinor: 1130n, remainingMinor: 0n });
+  expect(await preview(input)).toEqual({
+    orderReference: id(5),
+    orderBatchReference: id(6),
+    refundMethod: "Online",
+    paidMinor: "1130",
+    refundMinor: "0",
+    currencyCode: "CAD",
+  });
+  d.remaining.mockResolvedValue({ capturedMinor: 1130n, remainingMinor: 730n });
+  expect(await preview(input)).toMatchObject({ paidMinor: "1130", refundMinor: "730" });
+  expect(d.scope.mock.calls[0]?.[2]).toBe(staffOrderCancellationPermission);
+  // A card-machine round: what is left on the machine payment.
+  d.cardMachinePayment.mockResolvedValue({
+    cardMachinePaymentReference: id(8),
+    preparation: { total: { amountMinor: 2486n, currencyCode: "CAD" } },
+  });
+  d.cardMachineRefunds.mockResolvedValue([{ amountMinor: 1486n }]);
+  expect(await preview(input)).toMatchObject({
+    refundMethod: "CardMachine",
+    paidMinor: "2486",
+    refundMinor: "1000",
+  });
+  // Read-only: nothing cancelled, recorded or released.
+  expect(d.commit).not.toHaveBeenCalled();
+  expect(d.cancel).not.toHaveBeenCalled();
+  expect(d.release).not.toHaveBeenCalled();
+  d.prepare.mockResolvedValueOnce({ status: "NotEligible", reason: "VersionConflict" });
+  await expect(preview(input)).rejects.toMatchObject({
+    code: "ORDER_CANCELLATION_VERSION_CONFLICT",
+  });
+  await expect(
+    preview({ ...input, command: { ...input.command, reasonCode: "SOLD_OUT" } }),
+  ).rejects.toMatchObject({ code: "ORDER_CANCELLATION_INPUT_INVALID" });
+  f.allowed.mockResolvedValue(false);
+  await expect(preview(input)).rejects.toMatchObject({
+    code: "ORDER_CANCELLATION_PERMISSION_DENIED",
   });
 });

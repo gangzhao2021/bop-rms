@@ -2756,6 +2756,60 @@ it("WP-2423 Q6: protects staff cancellation transport and maps owner refusals to
   ).toBe(503);
 });
 
+it("WP-2423 v15 2026-10-18: the cancel preview route returns only the refund it reads", async () => {
+  const result = {
+    orderReference: "0190fa01-0000-7000-8000-000000000001",
+    orderBatchReference: "0190fa01-0000-7000-8000-000000000002",
+    refundMethod: "Online" as const,
+    paidMinor: "1130",
+    refundMinor: "0",
+    currencyCode: "CAD" as const,
+  };
+  const preview = vi.fn<NonNullable<MerchantBffRouterOptions["orderStaffCancellationPreview"]>>(
+    async () => ({ ...result, privateEvidence: "synthetic-private" }) as typeof result,
+  );
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      orderStaffCancellationPreview: preview,
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const submit = (extra: Record<string, string> = {}) =>
+    request(root, "/merchant/orders/cancel/preview", {
+      method: "POST",
+      body: '{"a":1}',
+      headers: { ...headers, ...extra },
+    });
+  expect((await submit({ "X-BOP-CSRF": "" })).status).toBe(403);
+  expect(preview).not.toHaveBeenCalled();
+  const response = await submit();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual(result);
+  preview.mockRejectedValueOnce(
+    new StaffOrderCancellationError("ORDER_CANCELLATION_NOT_CANCELLABLE"),
+  );
+  const refused = await submit();
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toEqual({ error: "order_not_cancellable" });
+});
+
 it("WP-2423 Q9-G1: protects the outage refund decision transport and maps refusals", async () => {
   const result = {
     status: "RefundChosen" as const,

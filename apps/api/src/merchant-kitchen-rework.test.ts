@@ -128,6 +128,45 @@ it("WP-2423 Q26: starting or finishing a remake needs the kitchen board permissi
   expect(doubles.scope.mock.calls[0]?.[2]).toBe("kitchen.operate");
 });
 
+it("WP-2423 (2026-10-18): cancelling an open remake needs the remake permission and passes the reason through", async () => {
+  const { rework } = setup();
+  const cancel = {
+    action: "CancelKitchenRework",
+    idempotencyKey: id(16),
+    reworkReference: id(1),
+    expectedVersion: 1,
+    cancelReasonCode: "OPENED_BY_MISTAKE",
+    correlationReference: id(17),
+  };
+  doubles.execute.mockResolvedValue({
+    status: "Applied",
+    action: "CancelKitchenRework",
+    item: {
+      ...item,
+      status: "Cancelled",
+      version: 2,
+      cancelledBy: id(7),
+      cancelledAt: now,
+      cancelReasonCode: "OPENED_BY_MISTAKE",
+    },
+  });
+  const result = await rework.command(input(cancel));
+  expect(doubles.scope.mock.calls[0]?.[2]).toBe("kitchen.work_item.rework");
+  expect(doubles.execute.mock.calls[0]?.[1]).toMatchObject({ command: cancel });
+  expect(result).toMatchObject({
+    action: "CancelKitchenRework",
+    rework: { status: "Cancelled", cancelReasonCode: "OPENED_BY_MISTAKE", cancelledAt: now },
+  });
+  // No browser-chosen reason outside the list, and no extra authority fields.
+  for (const invalid of [
+    { ...cancel, cancelReasonCode: "CHANGED_MIND" },
+    { ...cancel, actorReference: id(20) },
+  ])
+    await expect(rework.command(input(invalid))).rejects.toMatchObject({
+      code: "KITCHEN_REWORK_INPUT_INVALID",
+    });
+});
+
 it("WP-2423 Q26: refuses other sessions, missing permission and browser-supplied authority", async () => {
   {
     const { rework, run } = setup("Standard");

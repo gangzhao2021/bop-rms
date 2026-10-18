@@ -406,11 +406,14 @@ export { createPostgresKdsOperatorShiftStore } from "./infrastructure/persistenc
 // WP-2423 Q26 (Handoff Section 26.6): Rework work items for dishes that are made again.
 export {
   KitchenReworkError,
+  kitchenReworkCancelledEventConsumer,
+  kitchenReworkCancelReasons,
   kitchenReworkCreatedEventConsumer,
   kitchenReworkErrorCodes,
   kitchenReworkMaximumPerOriginal,
   kitchenReworkNoteMaximumLength,
   kitchenReworkNotReadyWindowMs,
+  kitchenReworkOpenStatuses,
   kitchenReworkOriginalWindowMs,
   kitchenReworkPermission,
   kitchenReworkReasons,
@@ -419,7 +422,11 @@ export {
   parseKitchenReworkCommand,
   type CreateKitchenReworkCommand,
   type AdvanceKitchenReworkCommand,
+  type CancelKitchenReworkCommand,
   type KitchenReworkAction,
+  type KitchenReworkCancelledEnvelope,
+  type KitchenReworkCancelledPayload,
+  type KitchenReworkCancelReason,
   type KitchenReworkCommand,
   type KitchenReworkCreatedEnvelope,
   type KitchenReworkCreatedPayload,
@@ -434,9 +441,14 @@ export {
   parseKitchenReworkCreatedEnvelope,
 } from "./application/kitchen-rework-created-event.js";
 export {
+  createKitchenReworkCancelledEnvelope,
+  parseKitchenReworkCancelledEnvelope,
+} from "./application/kitchen-rework-cancelled-event.js";
+export {
   createPostgresKitchenReworkStore,
   listOpenKitchenReworkByOrder,
   listOpenKitchenReworkItems,
+  readKitchenReworkCancellation,
 } from "./infrastructure/persistence/kitchen-rework-store.js";
 // WP-2423 DEC-KITCHEN-STALE-TICKETS: a manager closes a ticket left from an earlier business day.
 export {

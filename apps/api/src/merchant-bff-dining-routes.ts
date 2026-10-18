@@ -426,6 +426,8 @@ export function installMerchantDiningRoutes(
             deliveredQuantity: item.deliveredQuantity,
             remainingQuantity: item.remainingQuantity,
             itemServiceVersion: item.itemServiceVersion,
+            // WP-2423 (2026-10-18): portions the kitchen is making again.
+            remakingQuantity: item.remakingQuantity,
             // WP-2423 (v15 2026-10-16): options and the customer's note, so identical lines
             // ("Cup 3") can be told apart when serving. Absent when they could not be read.
             ...("options" in item

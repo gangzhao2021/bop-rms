@@ -9,6 +9,11 @@ const doubles = vi.hoisted(() => ({
   table: vi.fn(),
   tableContext: vi.fn(),
   closure: vi.fn(),
+  remakes: vi.fn(),
+}));
+vi.mock("@rms/kitchen", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@rms/kitchen")>()),
+  listOpenKitchenReworkItems: doubles.remakes,
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => doubles.resolve }));
 vi.mock("./dining-order-delivery-progress.js", () => ({
@@ -71,6 +76,7 @@ beforeEach(() => {
   });
   doubles.compose.mockImplementation(() => ({ load: doubles.load }));
   doubles.load.mockResolvedValue({ phase: "Fulfilled", items: [] });
+  doubles.remakes.mockResolvedValue([]);
 });
 it("uses authenticated selected scope, server time and the owner delivery reader", async () => {
   const f = setup();
@@ -188,6 +194,50 @@ it("binds immutable labels to exact current item and batch membership", async ()
   expect(await f.operation(f.input)).toMatchObject({
     items: [{ displayName: "Meal", batchSequence: 2, remainingQuantity: 1 }],
   });
+});
+it("WP-2423 (2026-10-18): says how many portions of each line the kitchen is remaking, by Order item", async () => {
+  const f = setup();
+  doubles.load.mockResolvedValueOnce({
+    items: [
+      {
+        orderItemReference: id(9),
+        orderBatchReference: id(8),
+        phase: "Ready",
+        orderedQuantity: 2,
+        remainingQuantity: 2,
+      },
+      {
+        orderItemReference: id(10),
+        orderBatchReference: id(8),
+        phase: "Ready",
+        orderedQuantity: 1,
+        remainingQuantity: 1,
+      },
+    ],
+  });
+  doubles.labels.mockResolvedValueOnce(
+    [9, 10].map((n) => ({
+      orderItemReference: id(n),
+      orderBatchReference: id(8),
+      displayName: "Meal " + n,
+      batchSequence: 1,
+      itemOrdinal: n - 8,
+    })),
+  );
+  doubles.remakes.mockResolvedValueOnce([
+    { orderReference: id(5), orderItemReference: id(9), openQuantity: 1 },
+  ]);
+  expect(await f.operation(f.input)).toMatchObject({
+    items: [
+      { orderItemReference: id(9), remakingQuantity: 1 },
+      { orderItemReference: id(10), remakingQuantity: 0 },
+    ],
+  });
+  expect(doubles.remakes).toHaveBeenCalledWith(
+    expect.objectContaining({ query: expect.any(Function) }),
+    expect.objectContaining({ brandReference: id(2), storeReference: id(3) }),
+    [id(5)],
+  );
 });
 it("rejects missing labels instead of hiding a current item", async () => {
   const f = setup();

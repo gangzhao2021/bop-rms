@@ -3,7 +3,11 @@ import type { StoreWasteLine, StoreWasteReason } from "../../domain/store-waste.
 import type { InventoryItemTransaction } from "./inventory-item-store.js";
 import type { LedgerTransaction } from "./ledger-posting.js";
 import { createPostgresStockReservationStore } from "./stock-reservation-store.js";
-import { postStoreWaste, type StoreWasteScope } from "./store-waste-store.js";
+import {
+  postStoreWaste,
+  voidKitchenRemakeWaste,
+  type StoreWasteScope,
+} from "./store-waste-store.js";
 
 export class KitchenReworkWasteError extends Error {
   readonly code = "INVENTORY_KITCHEN_REWORK_WASTE_UNAVAILABLE" as const;
@@ -72,11 +76,28 @@ export function kitchenReworkWasteQuantity(input: {
 }
 
 /**
+ * DEC-KITCHEN-REWORK cancel: one remake's waste is recorded and voided one at a time. The waste
+ * consumer takes this lock before it reads whether the remake was cancelled as opened by mistake,
+ * and the cancel consumer takes it before it looks for the waste record, so a remake cancelled
+ * while its waste is being recorded is either never recorded or recorded and then voided.
+ */
+export async function lockKitchenReworkWaste(
+  tx: LedgerTransaction,
+  reworkReference: string,
+): Promise<void> {
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "rms_inventory.kitchen_rework_waste:" + parseInventoryReference(reworkReference),
+  ]);
+}
+
+/**
  * WP-2423 Q26 (Handoff Section 26.6): records the first dish of a Kitchen remake as Store waste, in
  * the caller's transaction, from the Order line's own recipe demand (its per-line reservations).
  * The Kitchen event is the operation: one waste record per event, so a replay returns the record
  * already written. Lines that hold no stock (no recipe, or legacy submission-wide reservations)
- * record nothing. Caller owns authorization and the event's scope check.
+ * record nothing. When stock is short, the available part is recorded and the rest is kept on the
+ * record as a shortfall (needs review). Caller owns authorization, the event's scope check and
+ * `lockKitchenReworkWaste`.
  */
 export async function recordKitchenReworkWaste(
   tx: LedgerTransaction,
@@ -200,10 +221,74 @@ export async function recordKitchenReworkWaste(
       reworkReference: parseInventoryReference(input.reworkReference),
       reasonCode: input.kitchenReasonCode,
     },
+    // WP-2423 (2026-10-18): the food is already gone. When stock cannot cover it (the rest is
+    // reserved for other orders, or the count is behind), the available part leaves stock and the
+    // shortfall stays on the record for a manager to review and count. A remake is never blocked
+    // or dead-lettered by stock accounting, and reservations are never taken.
+    whenShort: "RecordAvailable",
   });
   return Object.freeze({
     status: result.status,
     wasteReference: result.record.wasteReference,
     lines: result.record.lines.length,
   });
+}
+
+/**
+ * DEC-KITCHEN-REWORK cancel (2026-10-18): a remake cancelled as opened by mistake threw nothing
+ * away, so its waste record (keyed by the remake's creation event) is voided: the quantity goes
+ * back to stock through Correction movements. The cancel event is the operation, so a replay is a
+ * no-op. No record (no recipe, or the waste consumer has not run: it then sees the cancellation and
+ * records nothing) and a record a manager already reviewed are left as they are. Caller owns
+ * authorization, the event's scope check and `lockKitchenReworkWaste`.
+ */
+export async function voidKitchenReworkWaste(
+  tx: LedgerTransaction,
+  scope: StoreWasteScope,
+  input: {
+    readonly createdEventReference: string;
+    readonly cancelEventReference: string;
+    readonly actorReference: string;
+    readonly occurredAt: string;
+    readonly nextReference: () => string;
+  },
+): Promise<
+  | {
+      readonly status: "Applied" | "AlreadyApplied" | "AlreadyReviewed";
+      readonly wasteReference: string;
+    }
+  | { readonly status: "NoWaste" }
+> {
+  const created = parseInventoryReference(input.createdEventReference);
+  await tx.query(
+    "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+    [scope.tenantReference, scope.brandReference, scope.storeReference],
+  );
+  const prior = (
+    await tx.query(
+      "SELECT waste_id::text AS waste FROM rms_inventory.store_waste " +
+        "WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND operation_id=$4",
+      [scope.tenantReference, scope.brandReference, scope.storeReference, created],
+    )
+  ).rows[0];
+  if (prior === undefined) return Object.freeze({ status: "NoWaste" as const });
+  // Booked when Inventory applies it (a stock ledger is ordered by posting); the Kitchen time stays
+  // on the cancelled remake and its event.
+  parseInventoryInstant(input.occurredAt);
+  const clock = (
+    await tx.query(
+      "SELECT to_char(date_trunc('milliseconds',clock_timestamp()) AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS now",
+      [],
+    )
+  ).rows[0];
+  if (clock === undefined) return fail();
+  const result = await voidKitchenRemakeWaste(tx, scope, {
+    operationReference: parseInventoryReference(input.cancelEventReference),
+    wasteReference: String(prior.waste),
+    actorReference: parseInventoryReference(input.actorReference),
+    occurredAt: parseInventoryInstant(clock.now),
+    auditReference: parseInventoryReference(input.nextReference()),
+    nextReference: input.nextReference,
+  });
+  return Object.freeze({ status: result.status, wasteReference: result.record.wasteReference });
 }

@@ -16,7 +16,10 @@ import {
 import { createPostgresCardMachinePaymentStore } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
-import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import {
+  runMerchantSnapshotRead,
+  type PersistentMerchantBffOptions,
+} from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 /** The Tables page's own permission first, then the actions it offers. */
 const tableCloseActions = ["dining.session.close", "order.close", "dining.item.serve"] as const;
@@ -53,7 +56,13 @@ export function createMerchantDiningTables(options: {
     const denied = (): never => {
       throw new Error("DINING_TABLES_PERMISSION_DENIED");
     };
-    return options.persistence.transactions.run((tx) =>
+    // WP-2423 (v15 2026-10-18): the Tables page is polled by every floor screen. The read only
+    // selects (Dining, Ordering, Payment and the caller's session, membership and policy) and
+    // reads one snapshot of every owner: the session row's FOR SHARE and the membership/policy
+    // SHARE table locks are answered locally, so it never waits for, or holds up, a staff command,
+    // a role change or another screen, and it never sees half of a command (a table listed with a
+    // session another command has just closed). The commands it offers re-check their versions.
+    return runMerchantSnapshotRead(options.persistence.transactions, (tx) =>
       // WP-2423: the caller is resolved in full at the start and once before the reply; the owner
       // reads in between only confirm they run in this authorized transaction.
       withMerchantTransactionAuthorization(

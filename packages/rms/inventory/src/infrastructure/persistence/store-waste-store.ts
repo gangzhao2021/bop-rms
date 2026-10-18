@@ -3,11 +3,13 @@ import type { InventoryItemAggregate } from "../../domain/inventory-item.js";
 import type { StorageLocation } from "../../domain/stock-place.js";
 import {
   StoreWasteError,
+  storeWasteKitchenRemakeVoidReason,
   storeWasteReviewThresholdMinor,
   storeWasteValueMinor,
   type PostedStoreWasteLine,
   type StoreWasteLine,
   type StoreWasteRecord,
+  type StoreWasteShortfall,
   type StoreWasteSource,
 } from "../../domain/store-waste.js";
 import { latestStoreUnitCosts } from "./inventory-recipe-facts-store.js";
@@ -166,6 +168,13 @@ export async function postStoreWaste(
     readonly nextReference: () => string;
     /** WP-2423 Q26: set when the record comes from a Kitchen remake rather than the waste page. */
     readonly source?: StoreWasteSource;
+    /**
+     * WP-2423 (2026-10-18): what happens when a line needs more than is available. "Refuse" (the
+     * waste page: staff correct the entry) or "RecordAvailable" (a Kitchen remake: the food is
+     * already gone, so the available part leaves stock and the rest is kept on the record as a
+     * shortfall for the manager to review and count; never lost, never taken from reservations).
+     */
+    readonly whenShort?: "Refuse" | "RecordAvailable";
   },
 ): Promise<{ readonly status: "Applied" | "AlreadyApplied"; readonly record: StoreWasteView }> {
   await scoped(tx, scope);
@@ -197,6 +206,8 @@ export async function postStoreWaste(
   const costs = await latestStoreUnitCosts(tx, scope);
   await scoped(tx, scope);
   const posted: PostedStoreWasteLine[] = [];
+  const shortfalls: StoreWasteShortfall[] = [];
+  const recordAvailable = input.whenShort === "RecordAvailable";
   for (const line of input.lines) {
     const item = refs.items.get(line.itemReference) as InventoryItemAggregate | undefined;
     const location = refs.locations.get(line.locationReference) as StorageLocation | undefined;
@@ -238,13 +249,34 @@ export async function postStoreWaste(
         open: false,
       });
     } catch (error) {
-      if (error instanceof LedgerPostingError)
-        return fail("STORE_WASTE_NOT_ENOUGH_STOCK", line.lineReference);
-      throw error;
+      if (!(error instanceof LedgerPostingError)) throw error;
+      if (!recordAvailable) return fail("STORE_WASTE_NOT_ENOUGH_STOCK", line.lineReference);
+      account = null;
     }
-    const available = addDecimal(account.onHand, "-" + account.reserved);
-    if (isNegative(addDecimal(available, "-" + line.quantity)))
-      fail("STORE_WASTE_NOT_ENOUGH_STOCK", line.lineReference);
+    const available = account === null ? "0" : addDecimal(account.onHand, "-" + account.reserved);
+    let quantity = line.quantity;
+    if (isNegative(addDecimal(available, "-" + line.quantity))) {
+      if (!recordAvailable) fail("STORE_WASTE_NOT_ENOUGH_STOCK", line.lineReference);
+      quantity = isNegative(available) ? "0" : available;
+      const unitCostMinor = costs.get(line.itemReference) ?? null;
+      const missingQuantity = addDecimal(line.quantity, "-" + quantity);
+      shortfalls.push(
+        Object.freeze({
+          itemReference: line.itemReference,
+          locationReference: line.locationReference,
+          lotReference: line.lotReference,
+          unitCode: (item as InventoryItemAggregate).baseUnit.unitCode,
+          wastedQuantity: line.quantity,
+          recordedQuantity: quantity,
+          missingQuantity,
+          unitCostMinor,
+          missingValueMinor:
+            unitCostMinor === null ? 0 : storeWasteValueMinor(missingQuantity, unitCostMinor),
+        }),
+      );
+    }
+    // Nothing available: the line stays on the record only as a shortfall.
+    if (account === null || quantity === "0") continue;
     const movement = await appendStockMovement(tx, scope, {
       account,
       item: item as InventoryItemAggregate,
@@ -252,7 +284,7 @@ export async function postStoreWaste(
       lotReference: line.lotReference,
       expiryDate: expiry,
       movementType: "Waste",
-      delta: "-" + line.quantity,
+      delta: "-" + quantity,
       businessSourceType: "STORE_WASTE",
       businessSourceReference: input.wasteReference,
       reasonCode: line.reasonCode,
@@ -265,15 +297,21 @@ export async function postStoreWaste(
     posted.push(
       Object.freeze({
         ...line,
+        quantity,
         unitCode: (item as InventoryItemAggregate).baseUnit.unitCode,
         unitCostMinor,
-        valueMinor: unitCostMinor === null ? 0 : storeWasteValueMinor(line.quantity, unitCostMinor),
+        valueMinor: unitCostMinor === null ? 0 : storeWasteValueMinor(quantity, unitCostMinor),
         movementReference: movement.movementReference,
       }),
     );
   }
-  const valueMinor = posted.reduce((sum, line) => sum + line.valueMinor, 0);
-  const costUnknown = posted.some((line) => line.unitCostMinor === null);
+  // The record is worth everything thrown away, including what stock could not cover.
+  const valueMinor =
+    posted.reduce((sum, line) => sum + line.valueMinor, 0) +
+    shortfalls.reduce((sum, line) => sum + line.missingValueMinor, 0);
+  const costUnknown =
+    posted.some((line) => line.unitCostMinor === null) ||
+    shortfalls.some((line) => line.unitCostMinor === null);
   const record: StoreWasteRecord & { readonly intent: string } = {
     schemaVersion: 1,
     wasteReference: input.wasteReference,
@@ -281,10 +319,13 @@ export async function postStoreWaste(
     lines: Object.freeze(posted),
     valueMinor,
     costUnknown,
-    needsReview: costUnknown || valueMinor >= storeWasteReviewThresholdMinor,
+    // A shortfall is a stock discrepancy: a manager reviews the record and counts the item.
+    needsReview:
+      costUnknown || valueMinor >= storeWasteReviewThresholdMinor || shortfalls.length > 0,
     recordedBy: input.actorReference,
     recordedAt: input.occurredAt,
     ...(input.source === undefined ? {} : { source: input.source }),
+    ...(shortfalls.length === 0 ? {} : { shortfalls: Object.freeze(shortfalls) }),
     intent,
   };
   await tx.query(
@@ -316,6 +357,7 @@ export async function postStoreWaste(
       lines: posted.length,
       valueMinor,
       needsReview: record.needsReview,
+      ...(shortfalls.length === 0 ? {} : { stockShortfallLines: shortfalls.length }),
     },
     reasonCode: input.source === undefined ? "STORE_WASTE" : "KITCHEN_REWORK_WASTE",
     correlationId: input.operationReference,
@@ -331,20 +373,62 @@ export async function postStoreWaste(
   };
 }
 
+interface StoreWasteReviewInput {
+  readonly operationReference: string;
+  readonly wasteReference: string;
+  readonly decision: "Accepted" | "Voided";
+  readonly reasonCode: string;
+  readonly actorReference: string;
+  readonly occurredAt: string;
+  readonly auditReference: string;
+  readonly nextReference: () => string;
+}
+
 /** Accepts a waste record, or voids it by putting every line back through a Correction movement. */
 export async function reviewStoreWaste(
   tx: LedgerTransaction,
   scope: StoreWasteScope,
-  input: {
-    readonly operationReference: string;
-    readonly wasteReference: string;
-    readonly decision: "Accepted" | "Voided";
-    readonly reasonCode: string;
-    readonly actorReference: string;
-    readonly occurredAt: string;
-    readonly auditReference: string;
-    readonly nextReference: () => string;
-  },
+  input: StoreWasteReviewInput,
+): Promise<{ readonly status: "Applied" | "AlreadyApplied"; readonly record: StoreWasteView }> {
+  if (input.reasonCode === storeWasteKitchenRemakeVoidReason) return fail("STORE_WASTE_INVALID");
+  return applyStoreWasteReview(tx, scope, input, false);
+}
+
+/**
+ * DEC-KITCHEN-REWORK cancel (2026-10-18): voids a Kitchen remake's own waste record when the
+ * kitchen cancels the remake as opened by mistake (nothing was thrown away), on behalf of the
+ * staff member who cancelled it. The cancel event is the operation, so a replay returns the same
+ * result; a record a manager already reviewed is left as reviewed. Caller owns authorization.
+ */
+export async function voidKitchenRemakeWaste(
+  tx: LedgerTransaction,
+  scope: StoreWasteScope,
+  input: Omit<StoreWasteReviewInput, "decision" | "reasonCode">,
+): Promise<
+  | { readonly status: "Applied" | "AlreadyApplied"; readonly record: StoreWasteView }
+  | { readonly status: "AlreadyReviewed"; readonly record: StoreWasteView }
+> {
+  try {
+    return await applyStoreWasteReview(
+      tx,
+      scope,
+      { ...input, decision: "Voided", reasonCode: storeWasteKitchenRemakeVoidReason },
+      true,
+    );
+  } catch (error) {
+    if (error instanceof StoreWasteError && error.code === "STORE_WASTE_ALREADY_REVIEWED") {
+      const record = await loadStoreWaste(tx, scope, input.wasteReference);
+      if (record !== null) return { status: "AlreadyReviewed", record };
+    }
+    throw error;
+  }
+}
+
+async function applyStoreWasteReview(
+  tx: LedgerTransaction,
+  scope: StoreWasteScope,
+  input: StoreWasteReviewInput,
+  kitchenRemakeVoid: boolean,
 ): Promise<{ readonly status: "Applied" | "AlreadyApplied"; readonly record: StoreWasteView }> {
   await scoped(tx, scope);
   await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
@@ -362,7 +446,9 @@ export async function reviewStoreWaste(
     if (same?.op === input.operationReference) return { status: "AlreadyApplied", record };
     return fail("STORE_WASTE_ALREADY_REVIEWED");
   }
-  if (record.recordedBy === input.actorReference)
+  if (kitchenRemakeVoid && record.source?.kind !== "KitchenRework")
+    return fail("STORE_WASTE_INVALID");
+  if (!kitchenRemakeVoid && record.recordedBy === input.actorReference)
     return fail("STORE_WASTE_REVIEWER_NOT_INDEPENDENT");
   if (input.decision === "Voided") {
     const refs = await openingCountReferences(

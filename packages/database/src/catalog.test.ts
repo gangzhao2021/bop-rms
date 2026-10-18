@@ -727,6 +727,8 @@ describe("migration catalog", () => {
       "2000_083_alter_reconciliation_payment_resolution",
       "2000_084_alter_unmatched_capture_refund_provider_created",
       "2000_085_alter_pickup_in_person_code_not_shown",
+      "2000_086_alter_kitchen_rework_cancel",
+      "2000_087_alter_store_waste_review_kitchen_remake",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

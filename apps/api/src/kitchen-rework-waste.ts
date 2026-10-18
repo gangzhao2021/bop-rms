@@ -1,6 +1,14 @@
 import type { ConsumerTransaction } from "@bop/eventing";
-import { recordKitchenReworkWaste } from "@rms/inventory";
-import { parseKitchenReworkCreatedEnvelope } from "@rms/kitchen";
+import {
+  lockKitchenReworkWaste,
+  recordKitchenReworkWaste,
+  voidKitchenReworkWaste,
+} from "@rms/inventory";
+import {
+  parseKitchenReworkCancelledEnvelope,
+  parseKitchenReworkCreatedEnvelope,
+  readKitchenReworkCancellation,
+} from "@rms/kitchen";
 import { createPostgresOrderItemInventoryLinkReader } from "@rms/ordering";
 
 export class KitchenReworkWasteConsumptionError extends Error {
@@ -13,6 +21,13 @@ export class KitchenReworkWasteConsumptionError extends Error {
 const fail = (): never => {
   throw new KitchenReworkWasteConsumptionError();
 };
+
+interface Cancellations {
+  read(
+    transaction: ConsumerTransaction,
+    reworkReference: string,
+  ): Promise<{ readonly cancelReasonCode: string } | null>;
+}
 
 interface OrderLineLink {
   readonly submissionReference: string;
@@ -36,7 +51,13 @@ export function createKitchenReworkWasteConsumption(options: {
   links?: {
     load(transaction: ConsumerTransaction, orderItem: string): Promise<OrderLineLink | null>;
   };
+  /** Test seam: defaults to Kitchen's public remake cancellation Query. */
+  cancellations?: Cancellations;
 }) {
+  const cancellations: Cancellations = options.cancellations ?? {
+    read: (transaction, reworkReference) =>
+      readKitchenReworkCancellation(transaction, options.scope, reworkReference),
+  };
   const links =
     options.links ??
     createPostgresOrderItemInventoryLinkReader({
@@ -54,6 +75,19 @@ export function createKitchenReworkWasteConsumption(options: {
     if (!event.payload.wasteApplies) return Object.freeze({ status: "NoWaste" as const });
     const link = await links.load(transaction, event.payload.orderItemReference);
     if (link === null || event.payload.quantity > link.quantity) return fail();
+    // DEC-KITCHEN-REWORK cancel: a remake already cancelled as opened by mistake threw nothing
+    // away (also after a dead-lettered first attempt is retried). Checked under the remake's waste
+    // lock, which the cancel consumer also takes.
+    await lockKitchenReworkWaste(
+      transaction as unknown as Parameters<typeof lockKitchenReworkWaste>[0],
+      event.payload.kitchenReworkItemReference,
+    );
+    const cancelled = await cancellations.read(
+      transaction,
+      event.payload.kitchenReworkItemReference,
+    );
+    if (cancelled?.cancelReasonCode === "OPENED_BY_MISTAKE")
+      return Object.freeze({ status: "CancelledOpenedByMistake" as const });
     return recordKitchenReworkWaste(
       transaction as unknown as Parameters<typeof recordKitchenReworkWaste>[0],
       options.scope,
@@ -70,5 +104,38 @@ export function createKitchenReworkWasteConsumption(options: {
         nextReference: options.nextReference,
       },
     );
+  };
+}
+
+/**
+ * DEC-KITCHEN-REWORK cancel (2026-10-18) composition: Inventory consumes `KitchenReworkCancelled`.
+ * A remake cancelled because it was opened by mistake threw nothing away, so the waste recorded
+ * for it (keyed by its creation event) is voided by the staff member who cancelled it; a remake
+ * the guest no longer wants keeps its waste (the first dish was still thrown away). A remake never
+ * reserved or used stock of its own, so nothing else is released. Inventory owns every write; the
+ * consumer inbox and the cancel-event-keyed review make a replay a no-op.
+ */
+export function createKitchenReworkCancelledWasteConsumption(options: {
+  scope: Readonly<{ tenantReference: string; brandReference: string; storeReference: string }>;
+  nextReference(): string;
+}) {
+  return async (transaction: ConsumerTransaction, value: unknown) => {
+    const event = parseKitchenReworkCancelledEnvelope(value);
+    if (
+      event.tenantId !== options.scope.brandReference ||
+      event.storeId !== options.scope.storeReference
+    )
+      return fail();
+    if (!event.payload.wasteApplies || event.payload.cancelReasonCode !== "OPENED_BY_MISTAKE")
+      return Object.freeze({ status: "WasteStands" as const });
+    const tx = transaction as unknown as Parameters<typeof voidKitchenReworkWaste>[0];
+    await lockKitchenReworkWaste(tx, event.payload.kitchenReworkItemReference);
+    return voidKitchenReworkWaste(tx, options.scope, {
+      createdEventReference: event.payload.createdEventReference,
+      cancelEventReference: event.eventId,
+      actorReference: event.actor.actorId,
+      occurredAt: event.payload.cancelledAt,
+      nextReference: options.nextReference,
+    });
   };
 }

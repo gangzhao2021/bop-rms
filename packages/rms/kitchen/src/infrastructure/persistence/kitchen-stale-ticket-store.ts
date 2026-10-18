@@ -246,7 +246,7 @@ export function createPostgresKitchenStaleTicketStore(options: {
       }
       const reworks = await tx.query(
         "SELECT count(*)::int AS open FROM rms_kitchen.kitchen_rework_item WHERE brand_id=$1 AND store_id=$2 " +
-          "AND kitchen_ticket_id=$3 AND status<>'Completed'",
+          "AND kitchen_ticket_id=$3 AND status IN ('Queued','In Progress')",
         [brand, store, command.ticketReference],
       );
       const openReworks = Number((reworks.rows[0] as Record<string, unknown> | undefined)?.open);

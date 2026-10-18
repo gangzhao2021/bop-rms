@@ -844,6 +844,8 @@ describe("WP-2423 Q26 kitchen remakes (Handoff Section 26.6)", () => {
     createdAt: "2026-08-12T15:10:00.000Z",
     startedAt: null,
     completedAt: null,
+    cancelledAt: null as string | null,
+    cancelReasonCode: null as "GUEST_DECLINED" | "OPENED_BY_MISTAKE" | null,
     displayName: "Mushroom rice bowl",
     selectedOptions: [{ displayName: "Extra mushrooms", quantity: 2 }],
     orderLabel: { orderNumber: "14", orderType: "DineIn" as const, tableLabel: "T4" },
@@ -905,6 +907,32 @@ describe("WP-2423 Q26 kitchen remakes (Handoff Section 26.6)", () => {
     ]);
     expect(back).toContain("Back in progress · Marked done too early");
     expect(back).toContain("Remake done");
+  });
+  it("WP-2423 (2026-10-18): offers Cancel remake only with the remake permission and hides cancelled remakes", () => {
+    const withCancel = (canRework: boolean, items = [rework()]) =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <KitchenBoardScreen
+            view={parseKitchenBoardView({
+              ...kitchenBoardFixture(),
+              items: [finished, awaitingReady],
+            })}
+            remakes={{ ...remakes(canRework, items), onCancel: () => undefined }}
+            actionsBlocked={false}
+          />
+        </MemoryRouter>,
+      );
+    expect(withCancel(true)).toContain("Cancel remake");
+    expect(withCancel(false)).not.toContain("Cancel remake");
+    const cancelled = withCancel(true, [
+      rework({
+        status: "Cancelled",
+        cancelledAt: "2026-08-12T15:12:00.000Z",
+        cancelReasonCode: "GUEST_DECLINED",
+      }),
+    ]);
+    expect(cancelled).not.toContain('aria-label="Remakes"');
+    expect(cancelled).not.toContain("GUEST_DECLINED");
   });
   it("WP-2423: tickets sharing a number lead with where they go; an earlier day's remake says its day", () => {
     // v15: a pickup remake and a table round both numbered 2 (numbers restart each business day).
@@ -1065,6 +1093,8 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
       createdAt: "2026-08-12T15:10:00.000Z",
       startedAt: null,
       completedAt: null,
+      cancelledAt: null,
+      cancelReasonCode: null,
       displayName: "Mushroom rice bowl",
       selectedOptions: [],
       orderLabel: { orderNumber, orderType: "Pickup" as const, tableLabel: null },

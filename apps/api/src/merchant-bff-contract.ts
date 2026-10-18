@@ -57,7 +57,10 @@ import type { createMerchantPickupProof } from "./merchant-pickup-proof.js";
 import type { createMerchantPickupHandoff } from "./merchant-pickup-handoff.js";
 import type { createMerchantPickupNotCollected } from "./merchant-pickup-not-collected.js";
 import type { createMerchantPickupIdentityCheck } from "./merchant-pickup-identity-check.js";
-import type { createMerchantOrderStaffCancellation } from "./merchant-order-staff-cancellation.js";
+import type {
+  createMerchantOrderStaffCancellation,
+  createMerchantOrderStaffCancellationPreview,
+} from "./merchant-order-staff-cancellation.js";
 import type { createMerchantUnpaidRoundCancellation } from "./merchant-unpaid-round-cancellation.js";
 import type { createMerchantEndedOrderStockRelease } from "./merchant-stock-holding-orders.js";
 import type { createMerchantOrderAcceptanceHoldRefund } from "./merchant-order-acceptance-hold-refund.js";
@@ -419,6 +422,10 @@ export interface MerchantBffRouterOptions {
   readonly pickupIdentityCheck?: ReturnType<typeof createMerchantPickupIdentityCheck>;
   /** WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it. */
   readonly orderStaffCancellation?: ReturnType<typeof createMerchantOrderStaffCancellation>;
+  /** WP-2423 (v15 2026-10-18): what that cancellation would refund, for the cancel dialog. */
+  readonly orderStaffCancellationPreview?: ReturnType<
+    typeof createMerchantOrderStaffCancellationPreview
+  >;
   /** WP-2423 abandoned payment: a manager cancels a dine-in round nobody paid for. */
   readonly unpaidRoundCancellation?: ReturnType<typeof createMerchantUnpaidRoundCancellation>;
   /** WP-2423 (2026-10-16): return stock still set aside for an earlier-day Order that ended. */

@@ -53,6 +53,7 @@ Do not edit it directly. The catalog contains only Owner-approved concrete regis
 - `KitchenItemProgressRecorded:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenItemReady:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
 - `KitchenOrderReady:v1` — owner `@rms/kitchen`; stable; store; indirect_identifier
+- `KitchenReworkCancelled:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenReworkCreated:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenTicketClosed:v1` — owner `@rms/kitchen`; stable; store; personal
 - `KitchenWorkAccepted:v1` — owner `@rms/kitchen`; stable; store; personal

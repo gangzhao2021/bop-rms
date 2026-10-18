@@ -7,6 +7,7 @@ import {
   parseOrderingReference,
 } from "@rms/ordering";
 import type { ConsumerTransaction } from "@bop/eventing";
+import { listOpenKitchenReworkItems } from "@rms/kitchen";
 import { readClosedRecord } from "@bop/identity";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -144,6 +145,17 @@ export function createMerchantDiningOrderProgress(options: {
             if (error !== null && typeof error === "object" && "diagnostic" in error) throw error;
             details = null;
           }
+          // WP-2423 (2026-10-18): portions the kitchen is remaking (dropped, wrong, sent back,
+          // marked done too early), matched by Order item reference (Kitchen's public Query), so
+          // servers neither serve nor promise a dish that is being made again.
+          const remaking = new Map<string, number>();
+          for (const remake of await listOpenKitchenReworkItems(businessTransaction, scope, [
+            orderReference,
+          ]))
+            remaking.set(
+              remake.orderItemReference,
+              (remaking.get(remake.orderItemReference) ?? 0) + remake.openQuantity,
+            );
           const items = labels.map((label) => {
             const item = membership.get(label.orderItemReference);
             if (!item || String(item.orderBatchReference) !== String(label.orderBatchReference))
@@ -151,6 +163,10 @@ export function createMerchantDiningOrderProgress(options: {
             const detail = details?.get(label.orderItemReference);
             return Object.freeze({
               ...item,
+              remakingQuantity:
+                item.phase === "Cancelled"
+                  ? 0
+                  : Math.min(remaking.get(label.orderItemReference) ?? 0, item.orderedQuantity),
               displayName: label.displayName,
               batchSequence: label.batchSequence,
               itemOrdinal: label.itemOrdinal,

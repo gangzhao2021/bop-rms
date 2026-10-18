@@ -11,15 +11,22 @@ import {
   createPostgresOrderLineConsumptionStore,
   createPostgresSubmissionReservationStore,
   createPostgresSubmissionStockPlanSource,
+  postStoreWaste,
   recordKitchenReworkWaste,
+  reviewStoreWaste,
+  voidKitchenReworkWaste,
 } from "../../rms/inventory/src/index.ts";
 import {
   createPostgresKitchenReworkStore,
   KitchenReworkError,
   listOpenKitchenReworkByOrder,
   listOpenKitchenReworkItems,
+  readKitchenReworkCancellation,
 } from "../../rms/kitchen/src/index.ts";
-import { createKitchenReworkWasteConsumption } from "../../../apps/api/src/kitchen-rework-waste.ts";
+import {
+  createKitchenReworkCancelledWasteConsumption,
+  createKitchenReworkWasteConsumption,
+} from "../../../apps/api/src/kitchen-rework-waste.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedSyntheticInventoryItems } from "../test-support/recipe-inventory-observation.mjs";
@@ -49,7 +56,7 @@ async function insertRow(client, table, row) {
  * work items inserted by the owner (creation is covered by the Kitchen ticket suites), synthetic
  * inventory items and reservations, and Ordering's Order item link (one line of quantity 2).
  */
-it("remakes a finished dish once, keeps the original, records waste once and corrects a dish marked done too early within two minutes", async () => {
+it("remakes a finished dish once, keeps the original, records waste once, corrects a dish marked done too early, cancels open remakes and records a short-stock remake's waste", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_rework" }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
@@ -839,6 +846,417 @@ it("remakes a finished dish once, keeps the original, records waste once and cor
         )[0].n,
         2,
       );
+
+      // ── 9. DEC-KITCHEN-REWORK cancel (2026-10-18): an open remake is cancelled once, with a
+      // reason, by version; append-only, audited, evented, and no longer open anywhere.
+      const cancel = (rework, cancelReasonCode, expectedVersion) => ({
+        action: "CancelKitchenRework",
+        idempotencyKey: next(),
+        reworkReference: rework,
+        expectedVersion,
+        cancelReasonCode,
+        correlationReference: next(),
+      });
+      const declined = cancel(bQuality.item.reworkReference, "GUEST_DECLINED", 1);
+      await refused(
+        run({ ...declined, idempotencyKey: next(), expectedVersion: 2 }),
+        "KITCHEN_REWORK_CONFLICT",
+      );
+      const cancelledB = await run(declined, other);
+      assert.deepEqual(
+        [
+          cancelledB.status,
+          cancelledB.item.status,
+          cancelledB.item.version,
+          cancelledB.item.cancelledBy,
+          cancelledB.item.cancelReasonCode,
+        ],
+        ["Applied", "Cancelled", 2, other, "GUEST_DECLINED"],
+      );
+      const cancelReplay = await run(declined, other);
+      assert.equal(cancelReplay.status, "AlreadyApplied");
+      await refused(
+        run({ ...declined, cancelReasonCode: "OPENED_BY_MISTAKE" }, other),
+        "KITCHEN_REWORK_CONFLICT",
+      );
+      await refused(
+        run(cancel(bQuality.item.reworkReference, "GUEST_DECLINED", 2)),
+        "KITCHEN_REWORK_PRECONDITION_FAILED",
+      );
+      // A finished remake already went out: it cannot be cancelled.
+      await refused(
+        run(cancel(first.item.reworkReference, "GUEST_DECLINED", 3)),
+        "KITCHEN_REWORK_INPUT_INVALID",
+      );
+      await refused(
+        run(cancel(first.item.reworkReference, "GUEST_DECLINED", 2)),
+        "KITCHEN_REWORK_CONFLICT",
+      );
+      // "Not ready yet" opened on the wrong dish: cancelled straight from In Progress.
+      const notReadyCancelled = await run(
+        cancel(notReady.item.reworkReference, "OPENED_BY_MISTAKE", 1),
+      );
+      assert.deepEqual(
+        [notReadyCancelled.item.status, notReadyCancelled.item.version],
+        ["Cancelled", 2],
+      );
+      assert.deepEqual(
+        await rows(
+          "SELECT action,before_status,after_status,result_version::int AS v FROM rms_kitchen.kitchen_rework_operation WHERE kitchen_rework_item_id=$1 ORDER BY result_version",
+          [bQuality.item.reworkReference],
+        ),
+        [
+          { action: "Create", before_status: null, after_status: "Queued", v: 1 },
+          { action: "Cancel", before_status: "Queued", after_status: "Cancelled", v: 2 },
+        ],
+      );
+      assert.deepEqual(
+        await rows(
+          "SELECT action_code,actor_reference::text AS actor,reason_code FROM platform_audit.audit_record WHERE target_id=$1 ORDER BY occurred_at,action_code DESC",
+          [bQuality.item.reworkReference],
+        ),
+        [
+          {
+            action_code: "KITCHEN_REWORK_CREATED",
+            actor: cook,
+            reason_code: "KITCHEN_REWORK_QUALITY_ISSUE",
+          },
+          {
+            action_code: "KITCHEN_REWORK_CANCELLED",
+            actor: other,
+            reason_code: "KITCHEN_REWORK_CANCEL_GUEST_DECLINED",
+          },
+        ],
+      );
+      const cancelEvents = await rows(
+        "SELECT event_id::text AS id,aggregate_version::int AS v,payload_json FROM platform_eventing.outbox_event WHERE event_type='KitchenReworkCancelled' ORDER BY occurred_at,event_id",
+      );
+      assert.equal(cancelEvents.length, 2);
+      const declinedEvent = cancelEvents.find(
+        (row) => row.payload_json.kitchenReworkItemReference === bQuality.item.reworkReference,
+      );
+      assert.equal(declinedEvent.v, 2);
+      assert.deepEqual(Object.keys(declinedEvent.payload_json).sort(), [
+        "cancelReasonCode",
+        "cancelledAt",
+        "createdEventReference",
+        "kitchenReworkItemReference",
+        "kitchenTicketReference",
+        "orderBatchReference",
+        "orderItemReference",
+        "orderReference",
+        "originalKitchenWorkItemReference",
+        "quantity",
+        "reasonCode",
+        "wasteApplies",
+      ]);
+      assert.equal(declinedEvent.payload_json.createdEventReference, bQuality.item.eventReference);
+      // No longer open: the board, pickup, order and table reads drop it.
+      assert.deepEqual(
+        await asApi((tx) => listOpenKitchenReworkItems(tx, kitchenScope, [order])),
+        [],
+      );
+      assert.equal(
+        (await asApi((tx) => kitchen.listCurrent(tx, instant(0)))).some(
+          (row) => row.item.status === "Cancelled",
+        ),
+        false,
+      );
+      assert.deepEqual(
+        await asApi((tx) =>
+          readKitchenReworkCancellation(tx, kitchenScope, notReady.item.reworkReference),
+        ).then((value) => value?.cancelReasonCode),
+        "OPENED_BY_MISTAKE",
+      );
+      // Past the application: a cancelled remake never comes back, and a cancel needs its
+      // operation row.
+      await assert.rejects(
+        asApi((tx) =>
+          tx.query(
+            "UPDATE rms_kitchen.kitchen_rework_item SET status='In Progress',version=3,started_by_actor_id=$2,started_at=$3," +
+              "cancelled_by_actor_id=NULL,cancelled_at=NULL,cancel_reason_code=NULL,cancel_event_id=NULL WHERE kitchen_rework_item_id=$1",
+            [bQuality.item.reworkReference, cook, instant(0)],
+          ),
+        ),
+        /only moves forward/u,
+      );
+      const loose = await run(create({ originalWorkItemReference: B, reasonCode: "WRONG_ITEM" }));
+      await assert.rejects(
+        asApi((tx) =>
+          tx.query(
+            "UPDATE rms_kitchen.kitchen_rework_item SET status='Cancelled',version=2,cancelled_by_actor_id=$2,cancelled_at=$3," +
+              "cancel_reason_code='GUEST_DECLINED',cancel_event_id=$4 WHERE kitchen_rework_item_id=$1",
+            [loose.item.reworkReference, cook, instant(0), next()],
+          ),
+        ),
+        /operation record/u,
+      );
+
+      // ── 10. Inventory: a remake cancelled as opened by mistake threw nothing away, so its waste is
+      // voided (stock back) by whoever cancelled it — even the cook who opened it; a remake the guest
+      // no longer wants keeps its waste. Either order of the two events gives the same result.
+      const cancelRegistration = Object.freeze({
+        consumerName: "inventory.kitchen-rework-cancelled-waste:v1",
+        consumerVersion: 1,
+        eventType: "KitchenReworkCancelled",
+        schemaVersions: [1],
+        ownerModule: "@rms/inventory",
+        tenantScope: "store",
+        ordering: "none",
+        sideEffect: "void_kitchen_rework_waste",
+        replaySafe: true,
+        handler: async ({ transaction, envelope }) => {
+          await createKitchenReworkCancelledWasteConsumption({
+            scope: sourceScope,
+            nextReference: next,
+          })(transaction, envelope);
+          return { status: "completed" };
+        },
+      });
+      const deliverCancel = (eventId) =>
+        asApi(async (tx) => {
+          const envelope = await loadOutboxEnvelope(tx, eventId);
+          assert.ok(envelope);
+          return consumeEventInTransaction(tx, cancelRegistration, envelope);
+        });
+      const cancelEventOf = async (reworkReference) =>
+        (
+          await rows(
+            "SELECT event_id::text AS id FROM platform_eventing.outbox_event WHERE event_type='KitchenReworkCancelled' AND payload_json->>'kitchenReworkItemReference'=$1",
+            [reworkReference],
+          )
+        )[0].id;
+      const wasteCount = async () =>
+        (await rows("SELECT count(*)::int AS n FROM rms_inventory.store_waste"))[0].n;
+      // The guest no longer wants B's remake: B's line holds no stock here, and the waste stands.
+      assert.deepEqual(await deliverCancel(declinedEvent.id), { status: "processed" });
+
+      const beforeMistake = { rice: await stock(riceAccount), egg: await stock(eggAccount) };
+      const mistaken = await run(create({ reasonCode: "WRONG_ITEM" }));
+      assert.deepEqual(await deliver(mistaken.item.eventReference), { status: "processed" });
+      const mistakenWaste = (
+        await rows(
+          "SELECT waste_id::text AS id FROM rms_inventory.store_waste WHERE operation_id=$1",
+          [mistaken.item.eventReference],
+        )
+      )[0];
+      assert.ok(mistakenWaste, "the remake's waste was recorded first");
+      assert.equal(
+        Number((await stock(riceAccount)).h),
+        Number(beforeMistake.rice.h) - half(reserved[rice]),
+      );
+      const mistakeCancel = await run(
+        cancel(mistaken.item.reworkReference, "OPENED_BY_MISTAKE", 1),
+      );
+      const mistakeEvent = await cancelEventOf(mistaken.item.reworkReference);
+      assert.deepEqual(await deliverCancel(mistakeEvent), { status: "processed" });
+      assert.deepEqual(
+        await rows(
+          "SELECT decision,reason_code,reviewed_by_actor_id::text AS by,recorded_by_actor_id::text AS recorder,operation_id::text AS op FROM rms_inventory.store_waste_review WHERE waste_id=$1",
+          [mistakenWaste.id],
+        ),
+        [
+          {
+            decision: "Voided",
+            reason_code: "KITCHEN_REMAKE_OPENED_BY_MISTAKE",
+            by: cook,
+            recorder: cook,
+            op: mistakeEvent,
+          },
+        ],
+      );
+      assert.deepEqual(
+        { rice: await stock(riceAccount), egg: await stock(eggAccount) },
+        beforeMistake,
+        "the ingredients are back in stock",
+      );
+      assert.equal(mistakeCancel.item.status, "Cancelled");
+      // Replays: the inbox dedupes; a direct retry is keyed by the cancel event.
+      assert.deepEqual(await deliverCancel(mistakeEvent), { status: "duplicate_completed" });
+      assert.equal(
+        (
+          await asApi((tx) =>
+            voidKitchenReworkWaste(tx, sourceScope, {
+              createdEventReference: mistaken.item.eventReference,
+              cancelEventReference: mistakeEvent,
+              actorReference: cook,
+              occurredAt: instant(0),
+              nextReference: next,
+            }),
+          )
+        ).status,
+        "AlreadyApplied",
+      );
+      // The waste page cannot use the kitchen's reason, and the recorder still cannot review
+      // their own waste for any other reason (application and database).
+      const pageWaste = await asApi((tx) =>
+        postStoreWaste(tx, sourceScope, {
+          operationReference: next(),
+          wasteReference: next(),
+          lines: [
+            {
+              lineReference: next(),
+              itemReference: rice,
+              locationReference: stockPlan.allocations.find((a) => a.itemReference === rice)
+                .locationReference,
+              lotReference: null,
+              quantity: "0.0001",
+              reasonCode: "SPOILED",
+              note: null,
+            },
+          ],
+          actorReference: cook,
+          occurredAt: new Date().toISOString(),
+          auditReference: next(),
+          nextReference: next,
+        }),
+      );
+      await assert.rejects(
+        asApi((tx) =>
+          reviewStoreWaste(tx, sourceScope, {
+            operationReference: next(),
+            wasteReference: pageWaste.record.wasteReference,
+            decision: "Voided",
+            reasonCode: "KITCHEN_REMAKE_OPENED_BY_MISTAKE",
+            actorReference: other,
+            occurredAt: instant(0),
+            auditReference: next(),
+            nextReference: next,
+          }),
+        ),
+        (error) => error?.code === "STORE_WASTE_INVALID",
+      );
+      await assert.rejects(
+        admin.query(
+          "INSERT INTO rms_inventory.store_waste_review (tenant_id,brand_id,store_id,waste_id,operation_id,decision,reason_code," +
+            "reviewed_by_actor_id,recorded_by_actor_id,reviewed_at,audit_id) VALUES ($1,$2,$3,$4,$5,'Accepted','REVIEWED_OK',$6,$6,$7,$8)",
+          [
+            scope.tenantReference,
+            scope.brandReference,
+            scope.storeReference,
+            pageWaste.record.wasteReference,
+            next(),
+            cook,
+            instant(0),
+            next(),
+          ],
+        ),
+        /store_waste_review_independent/u,
+      );
+      // Cancelled before Inventory saw the remake (or a dead-lettered first attempt retried later):
+      // nothing to void, and the waste is then never recorded.
+      const wastesBefore = await wasteCount();
+      const early = await run(create({ reasonCode: "DROPPED" }));
+      await run(cancel(early.item.reworkReference, "OPENED_BY_MISTAKE", 1));
+      assert.deepEqual(await deliverCancel(await cancelEventOf(early.item.reworkReference)), {
+        status: "processed",
+      });
+      assert.deepEqual(await deliver(early.item.eventReference), { status: "processed" });
+      assert.equal(await wasteCount(), wastesBefore);
+
+      // ── 11. Short stock: a whole-line remake needs more than is available (the count is behind).
+      // Real store: the food is gone. The available part leaves stock, the rest stays on the record
+      // as a shortfall for a manager to review and count; never refused, dead-lettered or taken
+      // from other orders' reservations.
+      const units = (value) => Math.round(Number(value) * 10_000);
+      const text = (value) => (value / 10_000).toFixed(4).replace(/\.?0+$/u, "");
+      const allocation = (item) => stockPlan.allocations.find((a) => a.itemReference === item);
+      const available = async (account) => {
+        const { h, r } = await stock(account);
+        return units(h) - units(r);
+      };
+      // Leave half a portion's rice and no egg available (synthetic spoilage entered on the page).
+      const leaveRice = units(reserved[rice]) / 2;
+      for (const [item, account, keep] of [
+        [rice, riceAccount, leaveRice],
+        [egg, eggAccount, 0],
+      ]) {
+        const take = (await available(account)) - keep;
+        if (take > 0)
+          await asApi((tx) =>
+            postStoreWaste(tx, sourceScope, {
+              operationReference: next(),
+              wasteReference: next(),
+              lines: [
+                {
+                  lineReference: next(),
+                  itemReference: item,
+                  locationReference: allocation(item).locationReference,
+                  lotReference: null,
+                  quantity: text(take),
+                  reasonCode: "SPOILED",
+                  note: null,
+                },
+              ],
+              actorReference: other,
+              occurredAt: new Date().toISOString(),
+              auditReference: next(),
+              nextReference: next,
+            }),
+          );
+      }
+      assert.equal(await available(riceAccount), leaveRice);
+      assert.equal(await available(eggAccount), 0);
+      // Before this change the remake's waste went through the same strict path and failed.
+      await assert.rejects(
+        asApi((tx) =>
+          postStoreWaste(tx, sourceScope, {
+            operationReference: next(),
+            wasteReference: next(),
+            lines: [
+              {
+                lineReference: next(),
+                itemReference: rice,
+                locationReference: allocation(rice).locationReference,
+                lotReference: null,
+                quantity: reserved[rice],
+                reasonCode: "DROPPED",
+                note: null,
+              },
+            ],
+            actorReference: cook,
+            occurredAt: new Date().toISOString(),
+            auditReference: next(),
+            nextReference: next,
+          }),
+        ),
+        (error) => error?.code === "STORE_WASTE_NOT_ENOUGH_STOCK",
+      );
+      const short = await run(create({ reasonCode: "DROPPED", quantity: 2 }));
+      assert.deepEqual(await deliver(short.item.eventReference), { status: "processed" });
+      const shortWaste = (
+        await rows(
+          "SELECT record_json,needs_review FROM rms_inventory.store_waste WHERE operation_id=$1",
+          [short.item.eventReference],
+        )
+      )[0];
+      assert.ok(shortWaste, "the waste record is never lost");
+      assert.equal(shortWaste.needs_review, true);
+      assert.deepEqual(
+        shortWaste.record_json.lines.map((line) => [line.itemReference, units(line.quantity)]),
+        [[rice, leaveRice]],
+      );
+      assert.deepEqual(
+        Object.fromEntries(
+          shortWaste.record_json.shortfalls.map((entry) => [
+            entry.itemReference,
+            [
+              units(entry.wastedQuantity),
+              units(entry.recordedQuantity),
+              units(entry.missingQuantity),
+            ],
+          ]),
+        ),
+        {
+          [rice]: [units(reserved[rice]), leaveRice, units(reserved[rice]) - leaveRice],
+          [egg]: [units(reserved[egg]), 0, units(reserved[egg])],
+        },
+      );
+      assert.equal(await available(riceAccount), 0);
+      assert.equal(await available(eggAccount), 0);
+      for (const account of [riceAccount, eggAccount])
+        assert.ok(units((await stock(account)).h) >= units((await stock(account)).r));
+      assert.deepEqual(await deliver(short.item.eventReference), { status: "duplicate_completed" });
     } finally {
       await admin.query("RESET ROLE").catch(() => undefined);
       for (const name of [api, worker, setup]) {

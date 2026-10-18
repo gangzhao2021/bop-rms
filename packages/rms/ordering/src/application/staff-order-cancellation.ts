@@ -16,6 +16,24 @@ export const staffOrderCancellationReasonCodes = [
   "GUEST_LEFT",
 ] as const;
 export type StaffOrderCancellationReasonCode = (typeof staffOrderCancellationReasonCodes)[number];
+/**
+ * WP-2423 (v15 2026-10-18): the reasons staff may give for each order type. GUEST_LEFT is a
+ * table's guests leaving and is dine-in only; a pickup customer who never came is closed as not
+ * collected (Fulfillment, after the pickup hold), not cancelled with a dine-in reason. Records
+ * written before this rule keep their reason; only new cancellations are refused.
+ */
+export const staffOrderCancellationReasonCodesByOrderType = Object.freeze({
+  Pickup: Object.freeze(
+    staffOrderCancellationReasonCodes.filter((code) => code !== "GUEST_LEFT"),
+  ) as readonly StaffOrderCancellationReasonCode[],
+  DineIn: staffOrderCancellationReasonCodes as readonly StaffOrderCancellationReasonCode[],
+});
+export function staffOrderCancellationReasonAllowed(
+  orderType: "Pickup" | "DineIn",
+  reasonCode: StaffOrderCancellationReasonCode,
+): boolean {
+  return staffOrderCancellationReasonCodesByOrderType[orderType].includes(reasonCode);
+}
 
 /**
  * Code-owned staff cancellation policy. Staff may cancel only before preparation starts (the

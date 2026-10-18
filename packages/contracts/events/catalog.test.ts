@@ -251,7 +251,7 @@ describe("Event Catalog source", () => {
     },
   );
   it("registers the authoritative bounded Event facts and metric labels", () => {
-    expect(eventCatalog).toHaveLength(144);
+    expect(eventCatalog).toHaveLength(145);
     const byType = new Map(eventCatalog.map((entry) => [entry.eventType, entry]));
     for (const eventType of [
       "DeviceActivated",
@@ -592,6 +592,7 @@ describe("Event Catalog source", () => {
       "KitchenItemProgressRecorded:v1",
       "KitchenItemReady:v1",
       "KitchenOrderReady:v1",
+      "KitchenReworkCancelled:v1",
       "KitchenReworkCreated:v1",
       "KitchenTicketClosed:v1",
       "KitchenWorkAccepted:v1",
@@ -844,6 +845,46 @@ describe("Event Catalog source", () => {
       expect(entry.payloadSchema.safeParse(invalid).success).toBe(false);
     expect(JSON.stringify(payloadJsonSchema(entry.payloadSchema))).not.toMatch(
       /actor|customerReference|guest|note|health|allergen/iu,
+    );
+  });
+
+  it("keeps the kitchen rework cancellation payload closed, reasoned and free of staff notes", () => {
+    const entry = eventCatalog.find(
+      (candidate) => candidate.eventType === "KitchenReworkCancelled",
+    );
+    if (entry === undefined) throw new Error("EVENT_CATALOG_REGISTRATION_MISSING");
+    expect(entry).toMatchObject({
+      ownerModule: "@rms/kitchen",
+      consumers: ["inventory.kitchen-rework-cancelled-waste:v1"],
+      tenantScope: "store",
+      dataClassification: "personal",
+      replaySemantics: "idempotent",
+    });
+    const reference = (n: number) => `018f9910-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+    const payload = {
+      kitchenReworkItemReference: reference(1),
+      kitchenTicketReference: reference(2),
+      originalKitchenWorkItemReference: reference(3),
+      orderReference: reference(4),
+      orderBatchReference: reference(5),
+      orderItemReference: reference(6),
+      reasonCode: "DROPPED",
+      cancelReasonCode: "OPENED_BY_MISTAKE",
+      quantity: 1,
+      wasteApplies: true,
+      createdEventReference: reference(7),
+      cancelledAt: "2026-10-18T12:00:00.000Z",
+    };
+    expect(entry.payloadSchema.safeParse(payload).success).toBe(true);
+    for (const invalid of [
+      { ...payload, cancelReasonCode: "CHANGED_MIND" },
+      { ...payload, quantity: 0 },
+      { ...payload, note: "wrong ticket" },
+      { ...payload, actorReference: reference(8) },
+    ])
+      expect(entry.payloadSchema.safeParse(invalid).success).toBe(false);
+    expect(JSON.stringify(payloadJsonSchema(entry.payloadSchema))).not.toMatch(
+      /actor|customerReference|guest\b|note|health|allergen/iu,
     );
   });
 
@@ -1326,7 +1367,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(158);
+    expect(eventConsumerContracts).toHaveLength(159);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

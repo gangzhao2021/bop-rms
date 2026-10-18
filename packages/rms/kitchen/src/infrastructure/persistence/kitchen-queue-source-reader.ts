@@ -79,7 +79,7 @@ export function createPostgresKitchenQueueSourceReader(options: {
         "WHERE x.brand_id=w.brand_id AND x.store_id=w.store_id AND x.kitchen_ticket_id=w.kitchen_ticket_id " +
         "AND x.order_item_id=w.order_item_id)))) " +
         "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_rework_item y WHERE y.brand_id=k.brand_id " +
-        "AND y.store_id=k.store_id AND y.kitchen_ticket_id=k.kitchen_ticket_id AND y.status<>'Completed')) ";
+        "AND y.store_id=k.store_id AND y.kitchen_ticket_id=k.kitchen_ticket_id AND y.status IN ('Queued','In Progress'))) ";
   return {
     async read(transaction: ConsumerTransaction) {
       // Diagnostics only (the public code stays DEPENDENCY_UNAVAILABLE): a database failure keeps

@@ -334,8 +334,12 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       value !== null && typeof value === "object" && Object.hasOwn(value, "heldStock");
     const withReady =
       value !== null && typeof value === "object" && Object.hasOwn(value, "readyToServeItemCount");
+    // WP-2423 (v15 2026-10-18): a pickup's kitchen state on the detail (absent from an older server).
+    const withKitchen =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenPhase");
     const item = exact(value, [
       ...(withReady ? ["readyToServeItemCount"] : []),
+      ...(withKitchen ? ["kitchenPhase"] : []),
       ...(withHeldStock ? ["heldStock"] : []),
       ...(withCounter ? ["counter"] : []),
       ...(withPaidOnline ? ["paidOnline"] : []),
@@ -416,6 +420,14 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     )
       return fail();
     const readyToServeItemCount = withReady ? Number(item.readyToServeItemCount) : null;
+    const kitchenPhase = withKitchen ? item.kitchenPhase : null;
+    if (
+      kitchenPhase !== null &&
+      (!(kitchenPhase === "InProgress" || kitchenPhase === "Ready") ||
+        item.orderType !== "Pickup" ||
+        item.currentPhase !== "Accepted")
+    )
+      return fail();
     const submittedAt = instant(item.submittedAt),
       observedAt = instant(item.observedAt);
     const heldStock = withHeldStock ? parseHeldStock(item.heldStock) : null;
@@ -636,6 +648,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
        * Tables close dialog's rule); null from an older server.
        */
       readyToServeItemCount,
+      /**
+       * WP-2423 (v15 2026-10-18): what the kitchen shows for an accepted pickup on the order
+       * detail ("InProgress" or "Ready") before Ordering records it; null otherwise.
+       */
+      kitchenPhase: kitchenPhase as "InProgress" | "Ready" | null,
     });
   };
   const earlier = withEarlier

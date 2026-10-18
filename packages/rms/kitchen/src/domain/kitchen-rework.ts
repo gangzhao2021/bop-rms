@@ -15,9 +15,21 @@ export const kitchenReworkReasons = [
   "OTHER",
 ] as const;
 export type KitchenReworkReason = (typeof kitchenReworkReasons)[number];
-export type KitchenReworkStatus = "Queued" | "In Progress" | "Completed";
+export type KitchenReworkStatus = "Queued" | "In Progress" | "Completed" | "Cancelled";
+/** A remake still to be made (open): the board, pickup, order and table screens show it. */
+export const kitchenReworkOpenStatuses = ["Queued", "In Progress"] as const;
 export type KitchenReworkAction =
-  "CreateKitchenRework" | "StartKitchenRework" | "CompleteKitchenRework";
+  "CreateKitchenRework" | "StartKitchenRework" | "CompleteKitchenRework" | "CancelKitchenRework";
+/**
+ * Why an open remake is not made after all (DEC-KITCHEN-REWORK cancel, 2026-10-18):
+ * GUEST_DECLINED — the guest no longer wants it (the first dish was still thrown away: its waste
+ * stands); OPENED_BY_MISTAKE — the remake (or "not ready yet") was opened on the wrong dish or by
+ * accident (nothing was thrown away: Inventory voids the remake's waste record).
+ */
+export const kitchenReworkCancelReasons = ["GUEST_DECLINED", "OPENED_BY_MISTAKE"] as const;
+export type KitchenReworkCancelReason = (typeof kitchenReworkCancelReasons)[number];
+export const kitchenReworkCancelledEventConsumer =
+  "inventory.kitchen-rework-cancelled-waste:v1" as const;
 
 /** Code only the narrow Kitchen rework permission grants (catalog v11). */
 export const kitchenReworkPermission = "kitchen.work_item.rework" as const;
@@ -70,7 +82,17 @@ export interface AdvanceKitchenReworkCommand {
   readonly expectedVersion: number;
   readonly correlationReference: string;
 }
-export type KitchenReworkCommand = CreateKitchenReworkCommand | AdvanceKitchenReworkCommand;
+/** Cancel an open remake (needs the remake permission, like creating one). */
+export interface CancelKitchenReworkCommand {
+  readonly action: "CancelKitchenRework";
+  readonly idempotencyKey: string;
+  readonly reworkReference: string;
+  readonly expectedVersion: number;
+  readonly cancelReasonCode: KitchenReworkCancelReason;
+  readonly correlationReference: string;
+}
+export type KitchenReworkCommand =
+  CreateKitchenReworkCommand | AdvanceKitchenReworkCommand | CancelKitchenReworkCommand;
 
 export interface KitchenReworkItem {
   readonly reworkReference: string;
@@ -92,6 +114,9 @@ export interface KitchenReworkItem {
   readonly startedAt: string | null;
   readonly completedBy: string | null;
   readonly completedAt: string | null;
+  readonly cancelledBy: string | null;
+  readonly cancelledAt: string | null;
+  readonly cancelReasonCode: KitchenReworkCancelReason | null;
   readonly eventReference: string;
 }
 
@@ -210,6 +235,33 @@ export function parseKitchenReworkCommand(value: unknown): KitchenReworkCommand 
       expectedVersion: Number(raw.expectedVersion),
       correlationReference: reference(raw.correlationReference),
     });
+  }
+  if (action === "CancelKitchenRework") {
+    const raw = closed(value, [
+      "action",
+      "idempotencyKey",
+      "reworkReference",
+      "expectedVersion",
+      "cancelReasonCode",
+      "correlationReference",
+    ]);
+    if (
+      !Number.isSafeInteger(raw.expectedVersion) ||
+      Number(raw.expectedVersion) < 1 ||
+      Number(raw.expectedVersion) > 2 ||
+      !kitchenReworkCancelReasons.includes(raw.cancelReasonCode as KitchenReworkCancelReason)
+    )
+      return invalid();
+    const command = Object.freeze({
+      action: "CancelKitchenRework" as const,
+      idempotencyKey: reference(raw.idempotencyKey),
+      reworkReference: reference(raw.reworkReference),
+      expectedVersion: Number(raw.expectedVersion),
+      cancelReasonCode: raw.cancelReasonCode as KitchenReworkCancelReason,
+      correlationReference: reference(raw.correlationReference),
+    });
+    if (command.idempotencyKey === command.correlationReference) return invalid();
+    return command;
   }
   return invalid();
 }

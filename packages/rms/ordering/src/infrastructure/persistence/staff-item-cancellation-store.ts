@@ -8,6 +8,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { parseOrderingInstant, parseOrderingReference } from "../../domain/cart.js";
 import {
   parseStaffOrderCancellationReasonCode,
+  staffOrderCancellationReasonAllowed,
   staffOrderCancellationPolicy,
   StaffOrderCancellationError,
 } from "../../application/staff-order-cancellation.js";
@@ -476,6 +477,9 @@ export function createPostgresStaffItemCancellationStore(options: {
         orderBatchReference: plan.orderBatchReference,
         actorReference,
       };
+      // WP-2423 (v15 2026-10-18): a dine-in reason is never recorded on a pickup order.
+      if (!staffOrderCancellationReasonAllowed(plan.orderType, reasonCode))
+        throw new StaffOrderCancellationError("STAFF_ORDER_CANCELLATION_INVALID");
       // The last remaining lines end the Batch through the whole staff cancellation instead.
       if (
         plan.remainingOrderItemReferences.length === 0 ||

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   createDiningProgressClient,
   DiningProgressError,
+  servableQuantity,
   type DiningProgress,
 } from "./dining-progress-client.js";
 type State =
@@ -58,9 +59,23 @@ export function DiningProgressView({
               Round {item.batchSequence} · Item {item.itemOrdinal}
             </p>
             <p>
-              {itemPhaseText[item.phase] ?? "Checking"} · Ordered {item.orderedQuantity} · Served{" "}
-              {item.deliveredQuantity} · Remaining {item.remainingQuantity}
+              {item.phase === "Ready" &&
+              (item.remakingQuantity ?? 0) > 0 &&
+              servableQuantity(item) === 0
+                ? "Being remade"
+                : (itemPhaseText[item.phase] ?? "Checking")}{" "}
+              · Ordered {item.orderedQuantity} · Served {item.deliveredQuantity} · Remaining{" "}
+              {item.remainingQuantity}
             </p>
+            {(item.remakingQuantity ?? 0) > 0 ? (
+              // WP-2423 (2026-10-18): never serve or promise a dish the kitchen is making again.
+              <p className="dining-progress-remaking" role="note">
+                <strong>Remaking — kitchen is making it again</strong>
+                {(item.remakingQuantity ?? 0) > 1 ? ` (${item.remakingQuantity} of them)` : ""}.
+                Don&apos;t serve it until the kitchen marks the remake done; tell the guest
+                it&apos;s being remade.
+              </p>
+            ) : null}
             {view.closureStatus === "Open" && view.sessionPhase === "Active"
               ? action?.(item)
               : null}

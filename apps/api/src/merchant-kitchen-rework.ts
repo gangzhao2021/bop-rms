@@ -64,6 +64,8 @@ function reworkView(
     createdAt: item.createdAt,
     startedAt: item.startedAt,
     completedAt: item.completedAt,
+    cancelledAt: item.cancelledAt,
+    cancelReasonCode: item.cancelReasonCode,
     displayName: dish === null ? null : displayName(dish.localizedDisplayNames),
     selectedOptions:
       dish === null
@@ -83,7 +85,7 @@ function reworkView(
 
 /**
  * WP-2423 Q26 (Handoff Section 26.6): the Kitchen board's remakes. Reading needs the Kitchen
- * board permission; creating a remake needs `kitchen.work_item.rework`, and starting or finishing
+ * board permission; creating or cancelling a remake needs `kitchen.work_item.rework`, and starting or finishing
  * one needs the Kitchen board permission, each from a current named KDS operator Session. Scope,
  * Actor and time come from the session and server clock, never from the browser body.
  */
@@ -183,13 +185,22 @@ export function createMerchantKitchenRework(options: {
                 "quantity",
                 "correlationReference",
               ]
-            : [
-                "action",
-                "idempotencyKey",
-                "reworkReference",
-                "expectedVersion",
-                "correlationReference",
-              ],
+            : action === "CancelKitchenRework"
+              ? [
+                  "action",
+                  "idempotencyKey",
+                  "reworkReference",
+                  "expectedVersion",
+                  "cancelReasonCode",
+                  "correlationReference",
+                ]
+              : [
+                  "action",
+                  "idempotencyKey",
+                  "reworkReference",
+                  "expectedVersion",
+                  "correlationReference",
+                ],
         );
         command = parseKitchenReworkCommand({ ...browser });
       } catch {
@@ -206,7 +217,9 @@ export function createMerchantKitchenRework(options: {
               const scope = await resolveScope(
                 transaction,
                 input.sessionCookie,
-                command.action === "CreateKitchenRework"
+                // Opening or cancelling a remake needs the remake permission; starting or
+                // finishing one needs the Kitchen board.
+                command.action === "CreateKitchenRework" || command.action === "CancelKitchenRework"
                   ? kitchenReworkPermission
                   : "kitchen.operate",
                 session.sessionReference,

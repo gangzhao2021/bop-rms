@@ -1004,6 +1004,38 @@ it("WP-2423: a dine-in order whose items were all served reads Served, not Ready
   );
 });
 
+it("WP-2423 v15 2026-10-18: an accepted pickup reads what the kitchen shows on the detail", () => {
+  expect(
+    orderPhaseLabel({ orderType: "Pickup", currentPhase: "Accepted", kitchenPhase: "Ready" }),
+  ).toBe("Ready for pickup");
+  expect(
+    orderPhaseLabel({ orderType: "Pickup", currentPhase: "Accepted", kitchenPhase: "InProgress" }),
+  ).toBe("In progress");
+  expect(
+    orderPhaseLabel({ orderType: "Pickup", currentPhase: "Accepted", kitchenPhase: null }),
+  ).toBe("Accepted");
+  // Handed over wins over the kitchen.
+  expect(
+    orderPhaseLabel({ orderType: "Pickup", currentPhase: "Fulfilled", kitchenPhase: "Ready" }),
+  ).toBe("Picked up");
+  const accepted = currentOrderQueueFixture().items[2];
+  if (accepted === undefined) throw new Error("fixture");
+  const read = (kitchenPhase: unknown, extra: Record<string, unknown> = {}) =>
+    parseCurrentOrderQueue({
+      items: [{ ...accepted, ...extra, kitchenPhase }],
+      nextAfterOrderReference: null,
+    }).items[0]?.kitchenPhase;
+  expect(read("Ready")).toBe("Ready");
+  expect(read(null)).toBeNull();
+  expect(
+    parseCurrentOrderQueue({ items: [accepted], nextAfterOrderReference: null }).items[0]
+      ?.kitchenPhase,
+  ).toBeNull();
+  // Only an accepted pickup carries it, with a kitchen state the page knows.
+  expect(() => read("Completed")).toThrow();
+  expect(() => read("Ready", { orderType: "DineIn" })).toThrow();
+});
+
 it("WP-2423 Q10: shows who the pickup is for and how to reach them, only from the detail", () => {
   const phone = renderToStaticMarkup(
     <PickupContactPanel

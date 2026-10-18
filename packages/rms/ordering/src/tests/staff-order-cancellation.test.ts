@@ -6,6 +6,7 @@ import {
   staffOrderCancellationDisposition,
   staffOrderCancellationPolicy,
   staffOrderCancellationReasonCodes,
+  staffOrderCancellationReasonAllowed,
 } from "../application/staff-order-cancellation.js";
 import { parseOrderPaymentOutcomeDisposition } from "../application/order-payment-outcome.js";
 import {
@@ -713,5 +714,14 @@ describe("DEC-TABLE-CLOSE-GUESTS-LEFT: a paid round never accepted", () => {
         storeReference: store,
       }).loadCompensationByPaymentEvent({ transaction: tx, paymentEventReference: id(14) }),
     ).toBeNull();
+  });
+});
+
+describe("staff cancellation reason by order type (WP-2423 v15 2026-10-18)", () => {
+  it("keeps Guests left for a table's round and refuses it on a pickup", () => {
+    expect(staffOrderCancellationReasonAllowed("DineIn", "GUEST_LEFT")).toBe(true);
+    expect(staffOrderCancellationReasonAllowed("Pickup", "GUEST_LEFT")).toBe(false);
+    for (const code of ["CUSTOMER_REQUEST", "SOLD_OUT", "STORE_ERROR", "DUPLICATE_ORDER"] as const)
+      expect(staffOrderCancellationReasonAllowed("Pickup", code)).toBe(true);
   });
 });

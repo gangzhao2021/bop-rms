@@ -97,6 +97,8 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
     ...(item.readyToServeItemCount === undefined
       ? {}
       : { readyToServeItemCount: item.readyToServeItemCount }),
+    // WP-2423 (v15 2026-10-18): a pickup's kitchen state on the detail before Ordering records it.
+    ...(item.kitchenPhase === undefined ? {} : { kitchenPhase: item.kitchenPhase }),
     observedAt: item.observedAt,
   };
 }
@@ -578,6 +580,25 @@ export function installMerchantOrderRoutes(
         });
     },
   );
+  const staffCancellationError = (response: express.Response, error: unknown) => {
+    if (!(error instanceof StaffOrderCancellationError)) {
+      denied(response);
+      return;
+    }
+    const [status, code] = (
+      {
+        ORDER_CANCELLATION_INPUT_INVALID: [400, "order_cancellation_input_invalid"],
+        ORDER_CANCELLATION_PERMISSION_DENIED: [403, "order_cancellation_permission_denied"],
+        ORDER_CANCELLATION_NOT_FOUND: [404, "order_cancellation_not_found"],
+        ORDER_CANCELLATION_VERSION_CONFLICT: [409, "order_version_conflict"],
+        ORDER_CANCELLATION_PREPARATION_STARTED: [409, "order_preparation_started"],
+        ORDER_CANCELLATION_NOT_CANCELLABLE: [409, "order_not_cancellable"],
+        ORDER_CANCELLATION_STOCK_NOT_RELEASABLE: [409, "order_stock_not_releasable"],
+        ORDER_CANCELLATION_UNAVAILABLE: [503, "order_cancellation_unavailable"],
+      } as const
+    )[error.code];
+    response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
+  };
   // WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it; refunded in full.
   router.post("/orders/cancel", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
@@ -609,25 +630,39 @@ export function installMerchantOrderRoutes(
           refundAmountMinor: result.refundAmountMinor,
         });
       })
-      .catch((error: unknown) => {
-        if (!(error instanceof StaffOrderCancellationError)) {
-          denied(response);
-          return;
-        }
-        const [status, code] = (
-          {
-            ORDER_CANCELLATION_INPUT_INVALID: [400, "order_cancellation_input_invalid"],
-            ORDER_CANCELLATION_PERMISSION_DENIED: [403, "order_cancellation_permission_denied"],
-            ORDER_CANCELLATION_NOT_FOUND: [404, "order_cancellation_not_found"],
-            ORDER_CANCELLATION_VERSION_CONFLICT: [409, "order_version_conflict"],
-            ORDER_CANCELLATION_PREPARATION_STARTED: [409, "order_preparation_started"],
-            ORDER_CANCELLATION_NOT_CANCELLABLE: [409, "order_not_cancellable"],
-            ORDER_CANCELLATION_STOCK_NOT_RELEASABLE: [409, "order_stock_not_releasable"],
-            ORDER_CANCELLATION_UNAVAILABLE: [503, "order_cancellation_unavailable"],
-          } as const
-        )[error.code];
-        response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
-      });
+      .catch((error: unknown) => staffCancellationError(response, error));
+  });
+  // WP-2423 (v15 2026-10-18): what cancelling the order or round would refund, read-only.
+  router.post("/orders/cancel/preview", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.orderStaffCancellationPreview) {
+      response.status(503).json({ error: "order_cancellation_unavailable" });
+      return;
+    }
+    void options
+      .orderStaffCancellationPreview({ sessionCookie, csrf, command: request.body })
+      .then((result) => {
+        response.set("Cache-Control", NO_STORE);
+        response.json({
+          orderReference: result.orderReference,
+          orderBatchReference: result.orderBatchReference,
+          refundMethod: result.refundMethod,
+          paidMinor: result.paidMinor,
+          refundMinor: result.refundMinor,
+          currencyCode: result.currencyCode,
+        });
+      })
+      .catch((error: unknown) => staffCancellationError(response, error));
   });
   // WP-2423 abandoned payment (DEC-DINING-ABANDONED-PAYMENT): a manager cancels a dine-in round
   // nobody paid for, before its payment window ends. Nothing was charged, so nothing is refunded.

@@ -53,9 +53,36 @@
 
 - §26.6"重新计算 ETA"：试点无 ETA 计算，未实现。
 - 用户要求的"撤销就绪（2 分钟内回退）"与 §26.6"原 Work Item 不回退"冲突，按 §26.6 以 NOT_READY 重做实现；
-  因就绪结果不撤销，前厅依赖取餐队列的"正在重做"提示；堂食上菜页尚未显示该提示（后续项）。
-- 已开的重做不能取消（顾客离开时重做项会留在看板上）；需要时由后续"取消重做"命令处理。
-- 库存可用量不足（只剩其他订单的预留）时损耗写入失败，消费者重试后进入死信，由运营处理并在盘点中更正；不允许把预留量记为损耗。
+  因就绪结果不撤销，前厅依赖取餐队列与堂食上菜页的"正在重做"提示（见下节）。
+- 取消重做、堂食上菜页提示与库存不足时的损耗：2026-10-18 已处理，见下节。
+
+## 取消重做、上菜页提示与库存不足（2026-10-18）
+
+1. **取消重做**：未完成（Queued/In Progress）的重做可"Cancel remake"，需重做权限 `kitchen.work_item.rework`（同创建）。
+   原因两种：顾客不要了（GUEST_DECLINED，"Guest doesn't want it any more"）——第一份已丢弃，损耗保留；
+   误开（OPENED_BY_MISTAKE，"Opened by mistake"，含误点"Not ready yet"）——没有丢弃任何东西，损耗作废。
+   Kitchen 迁移 `2000_086`：状态增加终态 Cancelled（一步、按版本、同请求重试同结果、异体冲突），记录取消人、时间、原因与事件编号，
+   操作记录新增 Cancel，触发器保证只前进、每次变化有操作记录；"未完成"的定义改为 Queued/In Progress（看板、取餐、顾客订单/桌页、
+   上菜页、旧单关单计数、同一道菜只能有一条未完成 NOT_READY）。平台审计 `KITCHEN_REWORK_CANCELLED`（原因 `KITCHEN_REWORK_CANCEL_<原因>`），
+   事件 `KitchenReworkCancelled` v1（含创建事件编号，无员工说明）。重做本身从不预留或扣减库存（订单行已按原工作项扣过一次），
+   所以取消不需要释放库存；误开时 Inventory 消费者 `inventory.kitchen-rework-cancelled-waste:v1` 按创建事件找到该重做的损耗记录，
+   以 Correction 作废（数量回到库存），记为复核 Voided、原因 `KITCHEN_REMAKE_OPENED_BY_MISTAKE`、复核人为取消的员工；
+   Inventory 迁移 `2000_087` 只对这一原因放宽"复核人≠记录人"（误开的人常是记录人）；损耗页的作废原因列表不含它，其余复核仍须他人。
+   两个消费者在同一重做的损耗锁下处理：取消先到时无可作废，之后损耗消费者经 Kitchen 公开查询 `readKitchenReworkCancellation`
+   看到"误开"即不记损耗（死信重试后同样）；店长已复核过的损耗不再改动（记为 AlreadyReviewed，在盘点中更正）。
+2. **堂食上菜页**：`/merchant/dining/order-progress` 每行带 `remakingQuantity`（Kitchen 公开查询，按订单项引用匹配）；该行显示
+   "Remaking — kitchen is making it again. Don't serve it until the kitchen marks the remake done; tell the guest it's being remade."，
+   可上数量 = 剩余 − 重做中（同一行多份时无法知道是哪一份，重做完成前都不提供），全部在重做时状态写"Being remade"，
+   "Serve all ready items"同样扣除。顾客端桌页原已显示"Being remade"。
+3. **库存不足**：重做的损耗不再因可用量（在手 − 其他订单预留）不足而失败或进入死信：可用部分照常出库，其余作为 `shortfalls`
+   （用量、已出库、未出库、单价与金额）保留在同一损耗记录上，记录金额含全部丢弃的食材，并标记需复核；损耗页列表注明
+   "stock was short, count needed"，详情页"Stock was short — count these items"逐项列出，店长复核并盘点更正。仍不动用其他订单的预留。
+   v15 已进死信的此类事件，部署后用常规恢复工具 `dead-letter-operations.mjs retry --consumer inventory.kitchen-rework-waste:v1`
+   重试即按上述规则入账（原失败事务已整体回滚，收件箱无记录，不会重复）。
+4. **故障时**：取消请求结果未知时显示"Remake result unknown"，"Retry same cancellation"以同一操作编号重试；Inventory 消费者延迟时
+   作废以入账时刻记账。
+
+已知遗留：订单列表"N ready to serve"计数（`merchant-order-queue-read.ts`）仍按厨房就绪计入正在重做的菜（上菜页已正确），列为后续项。
 
 ## 故障时
 
@@ -68,3 +95,7 @@
 迁移 `2000_046`；api 角色对 `rms_kitchen.kitchen_rework_item` SELECT/INSERT/UPDATE、`kitchen_rework_operation` SELECT/INSERT
 （`pilot-acl-additions.json`）；权限目录 v11 安装；门店角色 v10→v11 升级；重建 API dist 并重启。目录未安装前，"Remake"按钮不出现、
 请求被拒，其余厨房功能不受影响。
+
+2026-10-18 取消重做与库存不足：迁移 `2000_086`（Kitchen）、`2000_087`（Inventory）；无新表、无新授权（api 已有两张重做表与损耗复核表的所需权限）、
+无权限目录变更；worker 新增消费者 `inventory.kitchen-rework-cancelled-waste:v1`；重建 API dist 并重启后，用 `dead-letter-operations.mjs`
+重试 `inventory.kitchen-rework-waste:v1` 的死信。

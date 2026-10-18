@@ -643,6 +643,15 @@ export const eventConsumerContracts = defineEventConsumerContracts([
     "replace_kitchen_queue_projection",
     "none",
   ),
+  // DEC-KITCHEN-REWORK cancel: Inventory voids the waste of a remake opened by mistake.
+  contract(
+    "inventory.kitchen-rework-cancelled-waste",
+    "@rms/inventory",
+    "KitchenReworkCancelled",
+    "store",
+    "void_kitchen_rework_waste",
+    "none",
+  ),
   // WP-2423 Q26: Inventory records the remade dish's spoiled first portion as Store waste.
   contract(
     "inventory.kitchen-rework-waste",

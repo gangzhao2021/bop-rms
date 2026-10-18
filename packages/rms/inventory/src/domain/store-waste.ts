@@ -21,6 +21,11 @@ export const storeWasteVoidReasons = [
   "NOT_ACTUALLY_WASTED",
 ] as const;
 export const storeWasteAcceptReasons = ["REVIEWED_OK"] as const;
+/**
+ * DEC-KITCHEN-REWORK cancel (2026-10-18): the void Inventory applies when the kitchen cancels a
+ * remake that was opened by mistake (nothing was thrown away). Never offered on the waste page.
+ */
+export const storeWasteKitchenRemakeVoidReason = "KITCHEN_REMAKE_OPENED_BY_MISTAKE" as const;
 /** CAD 25.00: a record of this value or more is reviewed by someone other than its recorder. */
 export const storeWasteReviewThresholdMinor = 2500;
 
@@ -59,6 +64,27 @@ export interface StoreWasteRecord {
    * remake records the first dish's ingredients (reason and rework reference only).
    */
   readonly source?: StoreWasteSource;
+  /**
+   * WP-2423 (2026-10-18): what a Kitchen remake used that stock could not cover at the time
+   * (available = on hand − reserved for other orders). The food was still thrown away: the record
+   * keeps it, at value, and asks a manager to review it and count the item. Absent when none.
+   */
+  readonly shortfalls?: readonly StoreWasteShortfall[];
+}
+/** Part of a waste line that could not leave stock because not enough was available. */
+export interface StoreWasteShortfall {
+  readonly itemReference: string;
+  readonly locationReference: string;
+  readonly lotReference: string | null;
+  readonly unitCode: string;
+  /** What was used (base unit). */
+  readonly wastedQuantity: string;
+  /** What left stock (0 when nothing was available). */
+  readonly recordedQuantity: string;
+  /** wasted − recorded: the stock discrepancy for the manager to count. */
+  readonly missingQuantity: string;
+  readonly unitCostMinor: number | null;
+  readonly missingValueMinor: number;
 }
 export interface StoreWasteSource {
   readonly kind: "KitchenRework";

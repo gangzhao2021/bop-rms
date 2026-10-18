@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  createKitchenReworkCancelledEnvelope,
   createKitchenReworkCreatedEnvelope,
   KitchenReworkError,
   kitchenReworkWasteApplies,
   parseKitchenReworkCommand,
+  parseKitchenReworkCancelledEnvelope,
   parseKitchenReworkCreatedEnvelope,
 } from "../index.js";
 
@@ -118,5 +120,74 @@ describe("WP-2423 Q26 Kitchen rework (Handoff Section 26.6)", () => {
     expect(() =>
       parseKitchenReworkCreatedEnvelope({ ...envelope, occurredAt: "2026-10-14T12:00:01.000Z" }),
     ).toThrow();
+  });
+
+  it("cancels an open remake only with a listed reason and an expected version", () => {
+    const cancel = {
+      action: "CancelKitchenRework",
+      idempotencyKey: id(30),
+      reworkReference: id(31),
+      expectedVersion: 2,
+      cancelReasonCode: "GUEST_DECLINED",
+      correlationReference: id(32),
+    };
+    expect(parseKitchenReworkCommand(cancel)).toEqual(cancel);
+    expect(
+      parseKitchenReworkCommand({ ...cancel, cancelReasonCode: "OPENED_BY_MISTAKE" }),
+    ).toMatchObject({ cancelReasonCode: "OPENED_BY_MISTAKE" });
+    for (const invalid of [
+      { ...cancel, cancelReasonCode: "CHANGED_MIND" },
+      { ...cancel, expectedVersion: 3 },
+      { ...cancel, expectedVersion: 0 },
+      { ...cancel, note: "wrong ticket" },
+      { ...cancel, correlationReference: id(30) },
+      { ...cancel, actorReference: id(33) },
+    ])
+      expect(code(() => parseKitchenReworkCommand(invalid))).toBe("KITCHEN_REWORK_INPUT_INVALID");
+  });
+
+  it("publishes a minimal KitchenReworkCancelled event that names the creation event", () => {
+    const payload = {
+      kitchenReworkItemReference: id(40),
+      kitchenTicketReference: id(41),
+      originalKitchenWorkItemReference: id(42),
+      orderReference: id(43),
+      orderBatchReference: id(44),
+      orderItemReference: id(45),
+      reasonCode: "DROPPED" as const,
+      cancelReasonCode: "OPENED_BY_MISTAKE" as const,
+      quantity: 1,
+      wasteApplies: true,
+      createdEventReference: id(46),
+      cancelledAt: "2026-10-18T12:00:00.000Z",
+    };
+    const input = {
+      eventReference: id(47),
+      operationReference: id(48),
+      correlationReference: id(49),
+      actorReference: id(50),
+      brandReference: id(51),
+      storeReference: id(52),
+      version: 3,
+      payload,
+    };
+    const envelope = createKitchenReworkCancelledEnvelope(input);
+    expect(envelope).toMatchObject({
+      eventType: "KitchenReworkCancelled",
+      aggregateId: id(40),
+      aggregateVersion: 3n,
+      actor: { type: "Actor", actorId: id(50) },
+    });
+    expect(parseKitchenReworkCancelledEnvelope({ ...envelope })).toEqual(envelope);
+    for (const broken of [
+      { ...input, version: 1 },
+      { ...input, eventReference: id(46) },
+      { ...input, payload: { ...payload, wasteApplies: false } },
+      { ...input, payload: { ...payload, cancelReasonCode: "CHANGED_MIND" } },
+      { ...input, payload: { ...payload, note: "secret" } },
+    ])
+      expect(() =>
+        createKitchenReworkCancelledEnvelope(broken as unknown as typeof input),
+      ).toThrow();
   });
 });

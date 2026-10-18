@@ -15,6 +15,7 @@ import {
 } from "../../rms/inventory/src/index.ts";
 import {
   createKitchenWorkLifecycleService,
+  createPostgresKitchenCustomerStatusReader,
   createPostgresKitchenWorkLifecycleStore,
 } from "../../rms/kitchen/src/index.ts";
 import {
@@ -28,7 +29,10 @@ import {
   createPaymentProviderSnapshot,
   createPostgresCardMachinePaymentStore,
 } from "../../rms/payment/src/index.ts";
-import { createMerchantOrderStaffCancellation } from "../../../apps/api/src/merchant-order-staff-cancellation.ts";
+import {
+  createMerchantOrderStaffCancellation,
+  createMerchantOrderStaffCancellationPreview,
+} from "../../../apps/api/src/merchant-order-staff-cancellation.ts";
 import {
   createMerchantEndedOrderStockRelease,
   readEarlierOrdersHoldingStock,
@@ -1072,7 +1076,10 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       merchant.actor = staff;
       merchant.allowed = () => true;
       function staffCancellation({ beforeCommit = null } = {}) {
-        return createMerchantOrderStaffCancellation({
+        return createMerchantOrderStaffCancellation(staffCancellationOptions({ beforeCommit }));
+      }
+      function staffCancellationOptions({ beforeCommit = null } = {}) {
+        return {
           persistence: {
             transactions: transactions({ guc: false, beforeCommit }),
             now: () => new Date(Math.floor(Date.now())).toISOString(),
@@ -1089,8 +1096,19 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
             providerAccountReference: provider,
             environment: "Test",
           }),
-        });
+        };
       }
+      // WP-2423 (v15 2026-10-18): what the cancel dialog reads before staff confirm.
+      const previewCancel = (order, k) =>
+        createMerchantOrderStaffCancellationPreview(staffCancellationOptions())({
+          sessionCookie: "synthetic-session",
+          csrf: "synthetic-csrf",
+          command: {
+            orderReference: order.order,
+            orderBatchReference: order.batches[k].batch,
+            expectedOrderVersion: order.version,
+          },
+        });
       const cancel = (order, k, overrides = {}, options = {}) =>
         staffCancellation(options)({
           sessionCookie: "synthetic-session",
@@ -1354,6 +1372,23 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       });
       assert.deepEqual(await counts(), before);
 
+      // WP-2423 (v15 2026-10-18): the dialog's preview reads, under the pilot role and writing
+      // nothing, that the whole payment (tip included) is refunded; "Guests left" is a table's
+      // reason and is refused on a pickup before anything is written (a customer who never came
+      // is closed as not collected after the pickup hold instead).
+      assert.deepEqual(await previewCancel(pickup, 0), {
+        orderReference: pickup.order,
+        orderBatchReference: pickup.batches[0].batch,
+        refundMethod: "Online",
+        paidMinor: String(pickup.batches[0].totalMinor),
+        refundMinor: String(pickup.batches[0].totalMinor),
+        currencyCode: "CAD",
+      });
+      await assert.rejects(cancel(pickup, 0, { reasonCode: "GUEST_LEFT" }), {
+        code: "ORDER_CANCELLATION_INPUT_INVALID",
+      });
+      assert.deepEqual(await counts(), before);
+
       // ── Scenario 1: paid, accepted, Confirmed pickup Order with two queued kitchen items.
       const operationReference = fresh();
       // WP-2423 resolution budget: the staff member is resolved in full (the double's `allowed`,
@@ -1563,6 +1598,21 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       await assert.rejects(cancel(started, 0), { code: "ORDER_CANCELLATION_PREPARATION_STARTED" });
       assert.deepEqual(await counts(), before);
       assert.deepEqual(await itemStatuses(started.batches[0].ticket), ["In Progress", "Queued"]);
+      // WP-2423 (v15 2026-10-18): the order detail reads what the kitchen shows now from the
+      // public kitchen source the customer's page reads; as the pilot API role it reads this
+      // started pickup as InProgress (the order detail's "In progress") and writes nothing.
+      const kitchenNow = await transactions().run((tx) =>
+        createPostgresKitchenCustomerStatusReader({
+          brandReference: brand,
+          storeReference: store,
+          authorize: async (_tx, read) => read.orderReference === started.order,
+        }).loadByOrder({ transaction: tx, orderReference: started.order }),
+      );
+      assert.deepEqual(
+        kitchenNow.batches.map((batch) => [batch.orderBatchReference, batch.status]),
+        [[started.batches[0].batch, "InProgress"]],
+      );
+      assert.deepEqual(await counts(), before);
       assert.deepEqual(await stock(), { onHand: "20", reserved: "13" });
 
       // ── Scenario 3a: the kitchen starts first and holds its row locks; the cancellation waits,
@@ -2237,6 +2287,15 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
         (await closePlan(acceptedCard)).rounds.map((round) => [round.state, round.refund]),
         [["NotStarted", { method: "CardMachine", amountMinor: "0" }]],
       );
+      // v15 2026-10-18: the cancel dialog says nothing more is refunded.
+      assert.deepEqual(await previewCancel(acceptedCard, 0), {
+        orderReference: acceptedCard.order,
+        orderBatchReference: acceptedCard.batches[0].batch,
+        refundMethod: "CardMachine",
+        paidMinor: String(acceptedCard.batches[0].totalMinor),
+        refundMinor: "0",
+        currencyCode: "CAD",
+      });
       const stockBeforeAccepted = Number((await stock()).reserved);
       const acceptedResult = await cancel(acceptedCard, 0, { reasonCode: "GUEST_LEFT" });
       assert.equal(acceptedResult.status, "Cancelled");

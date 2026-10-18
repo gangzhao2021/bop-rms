@@ -219,9 +219,18 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
             const client = new Client(context.clientConfig);
             await client.connect();
             try {
-              await client.query(snapshot ? snapshotBegin : "BEGIN");
               // Test-only: owner-side facts changed inside this transaction only (rolled back).
+              // A snapshot read with such facts writes them first and only then becomes READ ONLY
+              // (the same REPEATABLE READ snapshot; PostgreSQL allows read-write -> read-only).
+              await client.query(
+                snapshot
+                  ? before === null
+                    ? snapshotBegin
+                    : "BEGIN ISOLATION LEVEL REPEATABLE READ"
+                  : "BEGIN",
+              );
               if (before !== null) await before(client);
+              if (snapshot && before !== null) await client.query("SET TRANSACTION READ ONLY");
               await client.query("SET LOCAL ROLE " + role);
               await client.query("SET LOCAL lock_timeout='10s'");
               await client.query("SET LOCAL statement_timeout='20s'");
@@ -263,7 +272,7 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
               await client.end();
             }
           },
-          /** WP-2423: polled merchant reads (Orders, pickups) run as the pilot's snapshot read. */
+          /** WP-2423: polled merchant reads (Orders, pickups, Tables) run as the pilot's snapshot read. */
           runSnapshot(work) {
             return this.run(work, true);
           },

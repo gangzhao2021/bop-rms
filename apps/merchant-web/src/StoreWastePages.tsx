@@ -34,7 +34,9 @@ const copy: Record<StoreWasteErrorCode | "Loading", string> = {
   Unavailable: "Waste is unavailable.",
 };
 const reasonText = (code: string) =>
-  code.charAt(0) + code.slice(1).toLowerCase().replaceAll("_", " ");
+  code === "KITCHEN_REMAKE_OPENED_BY_MISTAKE"
+    ? "Remake cancelled — opened by mistake"
+    : code.charAt(0) + code.slice(1).toLowerCase().replaceAll("_", " ");
 type State =
   | { readonly kind: "Loading" | StoreWasteErrorCode }
   | { readonly kind: "Found"; readonly view: StoreWasteView };
@@ -146,12 +148,19 @@ export function StoreWasteListPage({
                     </td>
                     <td>{view.people[record.recordedBy] ?? "Staff member"}</td>
                     <td>
-                      {record.lines
-                        .map(
+                      {[
+                        ...record.lines.map(
                           (line) =>
                             `${itemName(line.itemReference)} ${line.quantity} ${line.unitCode}`,
-                        )
-                        .join(", ")}
+                        ),
+                        ...(record.shortfalls ?? [])
+                          .filter((short) => short.recordedQuantity === "0")
+                          .map(
+                            (short) =>
+                              `${itemName(short.itemReference)} ${short.wastedQuantity} ${short.unitCode}`,
+                          ),
+                      ].join(", ")}
+                      {record.shortfalls?.length ? " · stock was short, count needed" : ""}
                     </td>
                     <td>
                       ${centsText(record.valueMinor)}
@@ -514,6 +523,23 @@ export function StoreWasteDetailPage({
           ))}
         </tbody>
       </table>
+      {record.shortfalls?.length ? (
+        <StatePanel heading="Stock was short — count these items" tone="error">
+          <p>
+            A kitchen remake used more than stock showed as available. The food was thrown away;
+            only what was in stock was taken off. Count these items and correct the count.
+          </p>
+          <ul>
+            {record.shortfalls.map((short) => (
+              <li key={`${short.itemReference}|${short.locationReference}`}>
+                {itemName(short.itemReference)} ({placeName(short.locationReference)}): used{" "}
+                {short.wastedQuantity} {short.unitCode}, taken off stock {short.recordedQuantity}{" "}
+                {short.unitCode}, not in stock {short.missingQuantity} {short.unitCode}
+              </li>
+            ))}
+          </ul>
+        </StatePanel>
+      ) : null}
       {mayReview ? (
         <StatePanel heading="Review">
           <p>

@@ -7657,6 +7657,12 @@ body:has(.product-complete-draft) .bop-shell__header,
 /* WP-2423: the serve confirmation and serving progress list each line's options and note below it. */
 .dining-serve-ready-lines .order-line-options,
 .dining-serve-ready-lines .order-line-note,
+.dining-progress-remaking {
+  margin: 4px 0;
+  padding: 8px 12px;
+  border-inline-start: 3px solid var(--bop-color-warning);
+  background: var(--bop-color-surface-raised);
+}
 .dining-progress-lines .order-line-options,
 .dining-progress-lines .order-line-note {
   display: block;
@@ -8293,12 +8299,14 @@ body:has(.product-complete-draft) .bop-shell__header,
 .kitchen-remake-note {
   border-inline-start-color: var(--bop-color-border-strong);
 }
-.kitchen-work-item__actions button.kitchen-remake-button {
+.kitchen-work-item__actions button.kitchen-remake-button,
+.kitchen-work-item__actions button.kitchen-remake-cancel {
   border-color: var(--bop-color-border-strong);
   background: var(--bop-color-surface-default);
   color: var(--bop-color-text-default);
 }
-.kitchen-work-item__actions button.kitchen-remake-button:hover:not(:disabled) {
+.kitchen-work-item__actions button.kitchen-remake-button:hover:not(:disabled),
+.kitchen-work-item__actions button.kitchen-remake-cancel:hover:not(:disabled) {
   background: var(--bop-color-surface-raised);
 }
 .kitchen-remake-read-failed {

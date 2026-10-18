@@ -1,12 +1,16 @@
 import console from "node:console";
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
 import {
+  parseKitchenReworkCancelledEnvelope,
   parseKitchenReworkCreatedEnvelope,
   parseKitchenTicketClosedEnvelope,
   parseKitchenWorkLifecycleEnvelope,
 } from "../../packages/rms/kitchen/src/index.ts";
 import { createKitchenInventoryConsumption } from "../../apps/api/dist/kitchen-inventory-consumption.js";
-import { createKitchenReworkWasteConsumption } from "../../apps/api/dist/kitchen-rework-waste.js";
+import {
+  createKitchenReworkCancelledWasteConsumption,
+  createKitchenReworkWasteConsumption,
+} from "../../apps/api/dist/kitchen-rework-waste.js";
 import { createKitchenTicketClosedConsumption } from "../../apps/api/dist/kitchen-ticket-closed-consumption.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 
@@ -63,6 +67,55 @@ function createReworkWasteConsumer(resources) {
         await consume(transaction, authorized(envelope));
       } catch (error) {
         failureLog("INTERNAL_KITCHEN_REWORK_WASTE_FAILED", error);
+        throw error;
+      }
+      return { status: "completed" };
+    },
+  });
+  return {
+    registration,
+    consume: (transaction, value) =>
+      consumeEventInTransaction(transaction, registration, authorized(value)),
+  };
+}
+
+/**
+ * DEC-KITCHEN-REWORK cancel (2026-10-18): a remake cancelled as opened by mistake threw nothing
+ * away, so Inventory voids its waste record, once per KitchenReworkCancelled Event.
+ */
+function createReworkCancelledConsumer(resources) {
+  const consume = createKitchenReworkCancelledWasteConsumption({
+    scope: {
+      tenantReference: resources.publicProfile.binding.tenantReference,
+      brandReference: resources.scope.brandReference,
+      storeReference: resources.scope.storeReference,
+    },
+    nextReference: () => resources.credentials.reference(),
+  });
+  const authorized = (value) => {
+    const event = parseKitchenReworkCancelledEnvelope(value);
+    if (
+      event.tenantId !== resources.scope.brandReference ||
+      event.storeId !== resources.scope.storeReference
+    )
+      throw new Error("INTERNAL_INVENTORY_SCOPE_DENIED");
+    return event;
+  };
+  const registration = Object.freeze({
+    consumerName: "inventory.kitchen-rework-cancelled-waste:v1",
+    consumerVersion: 1,
+    eventType: "KitchenReworkCancelled",
+    schemaVersions: [1],
+    ownerModule: "@rms/inventory",
+    tenantScope: "store",
+    ordering: "none",
+    sideEffect: "void_kitchen_rework_waste",
+    replaySafe: true,
+    handler: async ({ transaction, envelope }) => {
+      try {
+        await consume(transaction, authorized(envelope));
+      } catch (error) {
+        failureLog("INTERNAL_KITCHEN_REWORK_CANCELLED_WASTE_FAILED", error);
         throw error;
       }
       return { status: "completed" };
@@ -197,6 +250,7 @@ export function createInternalInventoryConsumers(resources) {
   return [
     ...lifecycle,
     createReworkWasteConsumer(resources),
+    createReworkCancelledConsumer(resources),
     createTicketClosedConsumer(resources),
   ];
 }

@@ -68,7 +68,10 @@ import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-was
 import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
 import { createMerchantServiceControl } from "../../apps/api/dist/merchant-service-control.js";
 import { createMerchantUnmatchedCaptureRefund } from "../../apps/api/dist/merchant-unmatched-capture-refund.js";
-import { createMerchantOrderStaffCancellation } from "../../apps/api/dist/merchant-order-staff-cancellation.js";
+import {
+  createMerchantOrderStaffCancellation,
+  createMerchantOrderStaffCancellationPreview,
+} from "../../apps/api/dist/merchant-order-staff-cancellation.js";
 import { createMerchantUnpaidRoundCancellation } from "../../apps/api/dist/merchant-unpaid-round-cancellation.js";
 import { createMerchantEndedOrderStockRelease } from "../../apps/api/dist/merchant-stock-holding-orders.js";
 import { createMerchantBusinessDayWindows } from "../../apps/api/dist/merchant-business-day-window.js";
@@ -520,7 +523,7 @@ export async function createInternalMerchant(
         });
   // WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts. The refund is made by
   // the compensation workload (business worker), which discovers the staff cancellation record.
-  const orderStaffCancellation = createMerchantOrderStaffCancellation({
+  const orderStaffCancellationOptions = {
     persistence,
     authentication: service,
     nextReference: () => resources.credentials.reference(),
@@ -541,7 +544,14 @@ export async function createInternalMerchant(
         [scope.tenantReference, scope.brandReference, scope.storeReference],
       );
     },
-  });
+  };
+  const orderStaffCancellation = createMerchantOrderStaffCancellation(
+    orderStaffCancellationOptions,
+  );
+  // WP-2423 (v15 2026-10-18): the cancel dialog reads what the cancellation would refund.
+  const orderStaffCancellationPreview = createMerchantOrderStaffCancellationPreview(
+    orderStaffCancellationOptions,
+  );
   // WP-2423 abandoned payment: a manager cancels an unpaid dine-in round before its deadline.
   const unpaidRound =
     createInternalUnpaidRoundCancellation === undefined
@@ -1379,6 +1389,7 @@ export async function createInternalMerchant(
       compensationQuery,
       ...(unmatchedCaptureRefund === undefined ? {} : { unmatchedCaptureRefund }),
       orderStaffCancellation,
+      orderStaffCancellationPreview,
       ...(unpaidRoundCancellation === undefined ? {} : { unpaidRoundCancellation }),
       endedOrderStockRelease,
       ...(orderItemStaffCancellation === undefined ? {} : { orderItemStaffCancellation }),

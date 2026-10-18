@@ -1,8 +1,12 @@
 import { expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createDiningProgressClient, parseDiningProgress } from "./dining-progress-client.js";
+import {
+  createDiningProgressClient,
+  parseDiningProgress,
+  servableQuantity,
+} from "./dining-progress-client.js";
 import { DiningProgressView } from "./DiningOrderProgress.js";
-import { serveLines } from "./DiningServeReadyAction.js";
+import { readyToServe, serveLines } from "./DiningServeReadyAction.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const item = {
@@ -239,4 +243,36 @@ it("v15 2026-10-16: the serve confirmation merges identical lines without a note
   );
   expect(serveLines(rounds.items, true).map((entry) => entry.quantity)).toEqual([1, 1]);
   expect(serveLines(rounds.items, false).map((entry) => entry.quantity)).toEqual([2]);
+});
+it("WP-2423 (2026-10-18): a line the kitchen is remaking says so plainly and is not offered for serving", () => {
+  const parsed = parseDiningProgress(
+    {
+      ...view(),
+      items: [
+        { ...item, remakingQuantity: 2 },
+        { ...item, orderItemReference: id(4), displayName: "Second meal", remakingQuantity: 0 },
+      ],
+    },
+    id(1),
+  );
+  const html = renderToStaticMarkup(<DiningProgressView view={parsed} />);
+  expect(html).toContain("Remaking — kitchen is making it again");
+  expect(html).toContain("(2 of them)");
+  expect(html).toContain("tell the guest it&#x27;s being remade");
+  expect(html.match(/Remaking —/gu)).toHaveLength(1);
+  expect(html).toContain("Being remade · Ordered 3");
+  expect(html).toContain("Ready to serve · Ordered 3");
+  expect(readyToServe(parsed).map((line) => line.displayName)).toEqual(["Second meal"]);
+  // Part of a line: what is left less the remade portions.
+  const partial = parseDiningProgress(
+    { ...view(), items: [{ ...item, remakingQuantity: 1 }] },
+    id(1),
+  );
+  expect(servableQuantity(partial.items[0] as (typeof partial.items)[number])).toBe(1);
+  expect(serveLines(readyToServe(partial), false)).toMatchObject([{ quantity: 1 }]);
+  // An older source without the field: nothing is being remade.
+  expect(servableQuantity(parseDiningProgress(view(), id(1)).items[0] as never)).toBe(2);
+  expect(() =>
+    parseDiningProgress({ ...view(), items: [{ ...item, remakingQuantity: 4 }] }, id(1)),
+  ).toThrow();
 });

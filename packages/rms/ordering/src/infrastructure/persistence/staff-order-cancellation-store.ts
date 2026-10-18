@@ -11,6 +11,7 @@ import { parseOrderTerminationRecord } from "../../application/order-termination
 import {
   parseStaffOrderCancellationPlan,
   parseStaffOrderCancellationReasonCode,
+  staffOrderCancellationReasonAllowed,
   parseStaffOrderCancellationRecord,
   staffOrderCancellationDisposition,
   staffOrderCancellationPolicy,
@@ -63,6 +64,9 @@ const conflict = (): never => {
 };
 const unavailable = (): never => {
   throw new StaffOrderCancellationError("STAFF_ORDER_CANCELLATION_UNAVAILABLE");
+};
+const invalidReason = (): never => {
+  throw new StaffOrderCancellationError("STAFF_ORDER_CANCELLATION_INVALID");
 };
 const sha256 = (value: unknown) =>
   "sha256:" + createHash("sha256").update(canonicalizeRfc8785(value)).digest("hex");
@@ -422,6 +426,8 @@ export function createPostgresStaffOrderCancellationStore(options: {
       const refundDisposition = input.refundDisposition ?? "Refund";
       if (refundDisposition !== "Refund" && refundDisposition !== "AlreadyRefunded")
         return unavailable();
+      // WP-2423 (v15 2026-10-18): a dine-in reason is never recorded on a pickup order.
+      if (!staffOrderCancellationReasonAllowed(plan.orderType, reasonCode)) return invalidReason();
       const identity = {
         orderReference: plan.orderReference,
         orderBatchReference: plan.orderBatchReference,

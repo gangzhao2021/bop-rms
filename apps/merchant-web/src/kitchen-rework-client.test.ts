@@ -4,6 +4,7 @@ import {
   createKitchenReworkClient,
   kitchenReworkBadge,
   KitchenReworkClientError,
+  kitchenReworkOpen,
 } from "./kitchen-rework-client.js";
 
 const id = (n: number) => "018f0f58-767a-7f3b-a1d0-" + n.toString(16).padStart(12, "0");
@@ -103,5 +104,47 @@ describe("WP-2423 Q26 remakes stay with today's dishes", () => {
     expect(remakeOffered(dish("2026-10-14T17:00:00.000Z"), now)).toBe(true);
     expect(remakeOffered(dish("2026-10-09T17:00:00.000Z"), now)).toBe(false);
     expect(remakeOffered(dish("2026-10-14T17:00:00.000Z", "In Progress"), now)).toBe(false);
+  });
+  it("WP-2423 (2026-10-18): cancels an open remake with a reason and reads the cancelled result", async () => {
+    const body = {
+      action: "CancelKitchenRework" as const,
+      idempotencyKey: id(30),
+      reworkReference: id(1),
+      expectedVersion: 1,
+      cancelReasonCode: "OPENED_BY_MISTAKE" as const,
+      correlationReference: id(31),
+    };
+    const fetcher = vi.fn(async () =>
+      json({
+        status: "Applied",
+        action: "CancelKitchenRework",
+        rework: {
+          ...view,
+          status: "Cancelled",
+          version: 2,
+          cancelledAt: "2026-10-14T12:01:00.000Z",
+          cancelReasonCode: "OPENED_BY_MISTAKE",
+        },
+      }),
+    );
+    const client = createKitchenReworkClient({ csrf, storeReference: id(9), fetcher });
+    await expect(client.execute(body)).resolves.toMatchObject({
+      status: "Cancelled",
+      cancelReasonCode: "OPENED_BY_MISTAKE",
+    });
+    expect(
+      JSON.parse(String((fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].body)),
+    ).toEqual(body);
+    // An older source without cancel facts still reads as not cancelled.
+    const board = await createKitchenReworkClient({
+      csrf,
+      storeReference: id(9),
+      fetcher: vi.fn(async () =>
+        json({ storeReference: id(9), observedAt: view.createdAt, canRework: true, items: [view] }),
+      ),
+    }).load();
+    expect(board.items[0]).toMatchObject({ cancelledAt: null, cancelReasonCode: null });
+    expect(kitchenReworkOpen({ status: "Cancelled" })).toBe(false);
+    expect(kitchenReworkOpen({ status: "In Progress" })).toBe(true);
   });
 });

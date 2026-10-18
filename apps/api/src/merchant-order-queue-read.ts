@@ -4,6 +4,7 @@ import {
 } from "./dining-order-delivery-progress.js";
 import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
+import { createPostgresKitchenCustomerStatusReader } from "@rms/kitchen";
 import { withOptionalRead } from "./merchant-round-business-date.js";
 import {
   readEarlierOrdersHoldingStock,
@@ -228,10 +229,35 @@ export function createMerchantOrderQueueRead(options: {
                 orderBatchReference: item.initialBatchReference,
               });
               if (execution.occurredAt > observedAt) return unavailable();
+              // WP-2423 (v15 2026-10-18): on the order detail, what the kitchen itself shows now —
+              // the public source the customer's page reads — so staff see "Preparing"/"Ready" the
+              // moment the kitchen does, as the customer does. It changes nothing on the Order
+              // (its version and commands still follow Ordering). Unreadable leaves it unknown.
+              let kitchenPhase: "InProgress" | "Ready" | null = null;
+              // A pickup's Ordering phase stays Accepted until it is handed over.
+              if (!listing && execution.phase === "Accepted") {
+                const work = await createPostgresKitchenCustomerStatusReader({
+                  ...ownerScope,
+                  authorize: async (_tx, kitchenScope) =>
+                    kitchenScope.orderReference === item.orderReference && (await allowed()),
+                })
+                  .loadByOrder({ transaction, orderReference: item.orderReference })
+                  .catch(() => null);
+                const batch =
+                  work !== null && work.batches.length === 1 ? work.batches[0] : undefined;
+                if (
+                  batch !== undefined &&
+                  batch.orderBatchReference === item.initialBatchReference &&
+                  batch.updatedAt <= observedAt &&
+                  (batch.status === "InProgress" || batch.status === "Ready")
+                )
+                  kitchenPhase = batch.status;
+              }
               return {
                 phase: execution.phase,
                 version: execution.version,
                 observedAt,
+                kitchenPhase,
                 // Pickup readiness is a Fulfillment fact (the pickup queue), never served here.
                 readyToServeItemCount: 0,
                 batches: [
@@ -302,12 +328,15 @@ export function createMerchantOrderQueueRead(options: {
                   version: cancelled?.orderVersion ?? null,
                   observedAt,
                   readyToServeItemCount: 0,
+                  kitchenPhase: null,
                   batches: [],
                 }
               : {
                   phase: progress?.phase ?? unavailable(),
                   version: execution.orderVersion,
                   observedAt,
+                  // A table's phase already follows the kitchen (delivery progress).
+                  kitchenPhase: null,
                   // WP-2423: items the kitchen marked ready that nobody served yet, in any round —
                   // the same delivery progress and rule as the Tables page's close dialog.
                   readyToServeItemCount: readyToServeQuantity(progress?.items ?? []),
@@ -364,6 +393,11 @@ export function createMerchantOrderQueueRead(options: {
             currentVersion: current.version,
             /** WP-2423: dine-in items ready at the pass and not yet served (0 for pickups). */
             readyToServeItemCount: current.readyToServeItemCount,
+            /**
+             * WP-2423 (v15 2026-10-18): a pickup's kitchen state on the order detail while Ordering
+             * has not recorded it yet (null otherwise, and always on the list).
+             */
+            kitchenPhase: current.kitchenPhase,
             observedAt: current.observedAt,
           }),
         );

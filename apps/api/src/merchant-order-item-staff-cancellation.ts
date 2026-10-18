@@ -13,6 +13,7 @@ import {
   parseOrderingReference,
   parseStaffItemCancellationSelection,
   staffOrderCancellationReasonCodes,
+  staffOrderCancellationReasonAllowed,
   type StaffItemCancellationRecord,
   type StaffOrderCancellationReasonCode,
 } from "@rms/ordering";
@@ -612,6 +613,10 @@ export function createMerchantOrderItemStaffCancellation(options: {
                 : "ORDER_CANCELLATION_NOT_CANCELLABLE",
           );
         const plan = prepared.plan;
+        // WP-2423 (v15 2026-10-18): "Guests left" is a table's reason; a pickup nobody collected
+        // is closed as not collected after the pickup hold, not cancelled.
+        if (!staffOrderCancellationReasonAllowed(plan.orderType, intent.reasonCode))
+          return fail("ORDER_CANCELLATION_INPUT_INVALID");
         // The last remaining lines: the whole Batch (pickup: the Order) is cancelled instead.
         if (plan.remainingOrderItemReferences.length === 0) return { kind: "Whole" as const };
         const cancellationReference = String(parseOrderingReference(options.nextReference()));

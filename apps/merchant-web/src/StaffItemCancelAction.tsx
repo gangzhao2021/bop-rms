@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  staffCancellationReasons,
   type CurrentOrderLine,
   type CurrentOrderQueue,
   type StaffCancellationReason,
@@ -14,7 +13,10 @@ import {
   type ItemCancelPreview,
   type ItemCancelScope,
 } from "./staff-item-cancellation-client.js";
-import { staffCancellationReasonLabel } from "./StaffOrderCancelAction.js";
+import {
+  staffCancellationReasonLabel,
+  staffCancellationReasonsFor,
+} from "./StaffOrderCancelAction.js";
 
 type Order = CurrentOrderQueue["items"][number];
 type Batch = Order["batches"][number];
@@ -305,7 +307,7 @@ export function StaffItemCancelAction({
               onChange={(event) => setReason(event.currentTarget.value as StaffCancellationReason)}
             >
               <option value="">Select a reason</option>
-              {staffCancellationReasons.map((code) => (
+              {staffCancellationReasonsFor(order.orderType).map((code) => (
                 <option key={code} value={code}>
                   {staffCancellationReasonLabel[code]}
                 </option>

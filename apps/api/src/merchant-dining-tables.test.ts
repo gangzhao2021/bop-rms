@@ -463,3 +463,23 @@ it("WP-2423: lists each party's paid rounds still awaiting acceptance, with when
   ]);
   expect(JSON.stringify(view)).not.toContain(id(41));
 });
+it("reads the polled Tables page in the composition's snapshot transaction when it has one", async () => {
+  const f = setup();
+  const run = vi.fn(async (work: (tx: unknown) => unknown) => work(f.tx)),
+    runSnapshot = vi.fn(async (work: (tx: unknown) => unknown) => work(f.tx));
+  const persistence = (transactions: object) =>
+    ({ transactions, now: () => "2026-09-25T12:00:00.000Z" }) as unknown as Options["persistence"];
+  const read = (transactions: object) =>
+    createMerchantDiningTables({
+      persistence: persistence(transactions),
+      authentication: { authorize: f.authorize } as unknown as Options["authentication"],
+    })(f.input);
+  // WP-2423 (v15 2026-10-18): one read-only snapshot, never an ordinary (locking) transaction.
+  expect((await read({ run, runSnapshot })).items).toHaveLength(1);
+  expect(runSnapshot).toHaveBeenCalledOnce();
+  expect(run).not.toHaveBeenCalled();
+  expect(mock.list).toHaveBeenCalledOnce();
+  // A composition without a snapshot transaction still reads, as an ordinary transaction.
+  expect((await read({ run })).items).toHaveLength(1);
+  expect(run).toHaveBeenCalledOnce();
+});

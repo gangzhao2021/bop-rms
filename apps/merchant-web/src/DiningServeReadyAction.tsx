@@ -6,7 +6,7 @@ import {
   type DiningServeReadyResult,
 } from "./dining-serve-ready-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import type { DiningProgress } from "./dining-progress-client.js";
+import { servableQuantity, type DiningProgress } from "./dining-progress-client.js";
 
 type Item = DiningProgress["items"][number];
 type Operation = ReturnType<ReturnType<typeof createDiningServeReadyClient>["prepare"]>;
@@ -17,7 +17,8 @@ export function readyToServe(view: DiningProgress, batchSequence?: number): read
   return view.items.filter(
     (item) =>
       item.phase === "Ready" &&
-      item.remainingQuantity >= 1 &&
+      // WP-2423 (2026-10-18): a portion the kitchen is remaking is not ready to serve.
+      servableQuantity(item) >= 1 &&
       (batchSequence === undefined || item.batchSequence === batchSequence),
   );
 }
@@ -52,7 +53,7 @@ export function serveLines(lines: readonly Item[], byRound: boolean): readonly S
     const note = item.details?.customerNote ?? null;
     const line = {
       key: item.orderItemReference,
-      quantity: item.remainingQuantity,
+      quantity: servableQuantity(item),
       name: item.displayName,
       options,
       note,
@@ -69,7 +70,7 @@ export function serveLines(lines: readonly Item[], byRound: boolean): readonly S
       grouped.set(same, result.length);
       result.push(line);
     } else if (at !== undefined)
-      result[at] = { ...existing, quantity: existing.quantity + item.remainingQuantity };
+      result[at] = { ...existing, quantity: existing.quantity + servableQuantity(item) };
   }
   return result;
 }
@@ -169,7 +170,7 @@ export function DiningServeReadyAction({
         expectedTableAssignmentVersion: view.tableAssignmentVersion,
         lines: lines.map((item) => ({
           orderItemReference: item.orderItemReference,
-          quantity: item.remainingQuantity,
+          quantity: servableQuantity(item),
           expectedItemServiceVersion: item.itemServiceVersion,
         })),
       });

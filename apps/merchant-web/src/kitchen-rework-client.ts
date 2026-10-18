@@ -12,7 +12,18 @@ export const kitchenReworkReasons = [
   "OTHER",
 ] as const;
 export type KitchenReworkReason = (typeof kitchenReworkReasons)[number];
-export type KitchenReworkStatus = "Queued" | "In Progress" | "Completed";
+export type KitchenReworkStatus = "Queued" | "In Progress" | "Completed" | "Cancelled";
+/** A remake still to be made: shown in the Remakes lane. */
+export const kitchenReworkOpen = (rework: { readonly status: KitchenReworkStatus }) =>
+  rework.status === "Queued" || rework.status === "In Progress";
+/** Why an open remake is not made after all (DEC-KITCHEN-REWORK cancel). */
+export const kitchenReworkCancelReasons = ["GUEST_DECLINED", "OPENED_BY_MISTAKE"] as const;
+export type KitchenReworkCancelReason = (typeof kitchenReworkCancelReasons)[number];
+export const kitchenReworkCancelReasonLabels: Readonly<Record<KitchenReworkCancelReason, string>> =
+  Object.freeze({
+    GUEST_DECLINED: "Guest doesn't want it any more",
+    OPENED_BY_MISTAKE: "Opened by mistake",
+  });
 
 /** Staff words for each reason (never the internal code). */
 export const kitchenReworkReasonLabels: Readonly<Record<KitchenReworkReason, string>> =
@@ -46,6 +57,8 @@ export interface KitchenReworkView {
   readonly createdAt: string;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
+  readonly cancelledAt: string | null;
+  readonly cancelReasonCode: KitchenReworkCancelReason | null;
   readonly displayName: string;
   readonly selectedOptions: readonly { readonly displayName: string; readonly quantity: number }[];
   readonly orderLabel: {
@@ -105,7 +118,7 @@ function parseView(value: unknown): KitchenReworkView {
   const raw = record(value);
   if (
     !kitchenReworkReasons.includes(raw.reasonCode as KitchenReworkReason) ||
-    !["Queued", "In Progress", "Completed"].includes(String(raw.status)) ||
+    !["Queued", "In Progress", "Completed", "Cancelled"].includes(String(raw.status)) ||
     !Number.isSafeInteger(raw.quantity) ||
     !Number.isSafeInteger(raw.version) ||
     typeof raw.wasteApplies !== "boolean" ||
@@ -127,6 +140,14 @@ function parseView(value: unknown): KitchenReworkView {
     createdAt: instant(raw.createdAt),
     startedAt: optionalInstant(raw.startedAt),
     completedAt: optionalInstant(raw.completedAt),
+    // Absent from an older source: not cancelled.
+    cancelledAt: raw.cancelledAt === undefined ? null : optionalInstant(raw.cancelledAt),
+    cancelReasonCode:
+      raw.cancelReasonCode === undefined || raw.cancelReasonCode === null
+        ? null
+        : kitchenReworkCancelReasons.includes(raw.cancelReasonCode as KitchenReworkCancelReason)
+          ? (raw.cancelReasonCode as KitchenReworkCancelReason)
+          : fail("OutcomeUnknown"),
     displayName: optionalText(raw.displayName) ?? "Dish",
     selectedOptions: raw.selectedOptions.map((option: unknown) => {
       const entry = record(option);
@@ -218,6 +239,14 @@ export type KitchenReworkCommandBody =
       readonly idempotencyKey: string;
       readonly reworkReference: string;
       readonly expectedVersion: number;
+      readonly correlationReference: string;
+    }
+  | {
+      readonly action: "CancelKitchenRework";
+      readonly idempotencyKey: string;
+      readonly reworkReference: string;
+      readonly expectedVersion: number;
+      readonly cancelReasonCode: KitchenReworkCancelReason;
       readonly correlationReference: string;
     };
 

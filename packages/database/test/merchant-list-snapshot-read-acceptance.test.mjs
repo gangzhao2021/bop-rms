@@ -7,6 +7,7 @@ import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
 import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
+import { createDiningTable, parseDiningSession } from "../../rms/dining/src/index.ts";
 import {
   createFulfillmentReadinessService,
   createPickupFulfillmentService,
@@ -22,6 +23,7 @@ import {
   parseOrderConfirmedEnvelope,
 } from "../../rms/ordering/src/index.ts";
 import { createMerchantPickupQuery } from "../../../apps/api/src/merchant-pickup-query.ts";
+import { createMerchantDiningTables } from "../../../apps/api/src/merchant-dining-tables.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { createTenantTransactionRunner } from "../src/transaction-runner.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -523,6 +525,360 @@ it("serves polled pickup lists from one snapshot without fences: no lock timeout
       assert.deepEqual(
         listed(await read(snapshotQuery)),
         [...afterBase, ...pendingB.map((value) => value.fulfillment)].sort(),
+      );
+    } finally {
+      await pool.end().catch(() => undefined);
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * WP-2423 (v15 2026-10-18): the Tables page is polled by every floor screen. Its read only selects,
+ * but as an ordinary transaction it holds the caller's session row FOR SHARE and the membership and
+ * permission tables IN SHARE MODE until it ends, and its statements each see the latest commit.
+ * It now reads one REPEATABLE READ, READ ONLY snapshot (`runSnapshot`) like the Orders list.
+ *
+ * Same composition as above: the application runner (pilot timeouts 5 s/2 s) as a restricted
+ * NOBYPASSRLS role with the rendered pilot API grants, a real merchant session, and the Tables read
+ * as the API composes it. Test-only stand-ins (labelled): 30 tables with 20 open sessions are owner
+ * rows; a session close is the owner committing the Closed session and the freed table together
+ * (as the close command does); a Staff-settings role change is an owner UPDATE of the caller's
+ * role row held 400 ms, then rolled back.
+ */
+it("serves the polled Tables page from one snapshot: no wait behind a role change, no torn view of a session closed mid-read, and faster under concurrent screens", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  await withIsolatedDatabase({ caseId: "wp2423_snaptables" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const api = "wp2423_st_" + context.runId,
+      worker = "wp2423_st_w_" + context.runId;
+    const pool = new Pool({
+      ...context.clientConfig,
+      max: 24,
+      connectionTimeoutMillis: 5000,
+      query_timeout: 10_000,
+    });
+    try {
+      for (const name of [api, worker])
+        await admin.query(
+          "CREATE ROLE " + name + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+        );
+      const root = new URL("../../../docs/spec/", import.meta.url);
+      const matrices = await Promise.all(
+        ["pilot-acl-matrix.json", "pilot-acl-additions.json"].map(async (file) =>
+          JSON.parse(await readFile(new URL(file, root), "utf8")),
+        ),
+      );
+      await admin.query(renderPilotAclSql(matrices, { api, worker }));
+
+      const ref = (n) => "01a0f080-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+      const brand = ref(1),
+        store = ref(2),
+        tenant = ref(3),
+        scope = { brandReference: brand, storeReference: store };
+      const now = () => new Date().toISOString();
+      const tenantRunner = createTenantTransactionRunner(pool, { brandId: brand, storeId: store });
+      const asApi = (work) => async (tx) => {
+        await tx.query("SET LOCAL ROLE " + api, []);
+        return work(tx);
+      };
+      const runner = {
+        run: (work) => tenantRunner.run(asApi(work)),
+        runSnapshot: (work) => tenantRunner.runSnapshot(asApi(work)),
+      };
+      const referencePrefix = "01a0f083";
+      const session = await seedMerchantAcceptanceSession({
+        admin,
+        runner,
+        role: api,
+        scope: { tenantReference: tenant, ...scope },
+        actor: ref(0x900),
+        at: now(),
+        extraPermissions: [
+          "dining.operate",
+          "dining.session.close",
+          "order.close",
+          "dining.item.serve",
+          "dining.host.transfer",
+          "ordering.order.cancel",
+        ],
+        referencePrefix,
+        sessionReferencePrefix: "01a0f084",
+      });
+      const roleReference =
+        referencePrefix + "-0000-7000-8000-" + (4).toString(16).padStart(12, "0");
+
+      // 30 tables, the first 20 occupied (test-only owner rows).
+      const startedAt = new Date(
+        Math.floor((Date.now() - 30 * 60_000) / 1000) * 1000,
+      ).toISOString();
+      const tables = [];
+      for (let n = 1; n <= 30; n++) {
+        const tableReference = ref(0x1000 + n),
+          sessionReference = n <= 20 ? ref(0x2000 + n) : null;
+        const table = createDiningTable({
+          tenantReference: tenant,
+          ...scope,
+          tableReference,
+          stableLabel: "SYNTHETIC-" + n,
+          areaReference: ref(0x3000),
+          areaCode: "ROOM",
+          capacity: 4,
+          accessibilityAttributes: [],
+          lifecycle: "Published",
+          qrStatus: "Active",
+          qrVersion: 1,
+          operationalState: "Available",
+          blockReasonCode: null,
+          activeDiningSessionReference: sessionReference,
+          aggregateVersion: 1,
+          createdAt: startedAt,
+          observedAt: startedAt,
+        });
+        await admin.query(
+          "INSERT INTO rms_dining.dining_table (table_id,tenant_id,brand_id,store_id,version,table_snapshot,created_at,observed_at) VALUES ($1,$2,$3,$4,1,$5::jsonb,$6,$6)",
+          [tableReference, tenant, brand, store, JSON.stringify(table), startedAt],
+        );
+        if (sessionReference !== null) {
+          const dining = parseDiningSession({
+            diningSessionReference: sessionReference,
+            brandReference: brand,
+            storeReference: store,
+            tableReference,
+            tableAssignmentVersion: 1,
+            phase: "Active",
+            version: 2,
+            startedByActorReference: ref(0x900),
+            startedAt,
+            hostParticipantReference: null,
+          });
+          await admin.query(
+            "INSERT INTO rms_dining.dining_session (session_id,tenant_id,brand_id,store_id,table_id,version,phase,session_snapshot,started_at) VALUES ($1,$2,$3,$4,$5,2,'Active',$6::jsonb,$7)",
+            [
+              sessionReference,
+              tenant,
+              brand,
+              store,
+              tableReference,
+              JSON.stringify(dining),
+              startedAt,
+            ],
+          );
+        }
+        tables.push({ tableReference, sessionReference });
+      }
+      /** The close command's committed effect: the session Closed and its table free, at once. */
+      const closeSession = async ({ tableReference, sessionReference }) => {
+        await admin.query("BEGIN");
+        await admin.query(
+          "UPDATE rms_dining.dining_session SET phase='Closed',version=version+1,session_snapshot=session_snapshot||jsonb_build_object('phase','Closed','version',version+1) WHERE session_id=$1",
+          [sessionReference],
+        );
+        await admin.query(
+          "UPDATE rms_dining.dining_table SET version=version+1,table_snapshot=table_snapshot||jsonb_build_object('activeDiningSessionReference',NULL::text,'aggregateVersion',version+1) WHERE table_id=$1",
+          [tableReference],
+        );
+        await admin.query("COMMIT");
+      };
+
+      const tablesRead = (transactions) =>
+        createMerchantDiningTables({
+          persistence: { ...session.persistence, transactions, now },
+          authentication: session.authentication,
+          tableAvailabilityCommandEnabled: true,
+        });
+      const read = (query) =>
+        query({
+          sessionCookie: session.sessionCookie,
+          csrf: session.csrf,
+          query: { afterTableReference: null, limit: 100 },
+        });
+      // Before: the same read in ordinary transactions (the locking read v15 ran).
+      const lockingTables = tablesRead({ run: runner.run });
+      const snapshotTables = tablesRead(runner);
+      const occupied = (view) =>
+        view.items
+          .filter((item) => item.currentDiningSessionReference !== null)
+          .map((item) => String(item.tableReference))
+          .sort();
+      const firstSnapshot = await read(snapshotTables);
+      assert.equal(firstSnapshot.items.length, 30);
+      assert.equal(firstSnapshot.canCloseSessions, true);
+      assert.deepEqual(
+        occupied(firstSnapshot),
+        tables.filter((t) => t.sessionReference !== null).map((t) => t.tableReference),
+      );
+      assert.deepEqual(await read(lockingTables), firstSnapshot, "both reads show the same page");
+
+      // 1. A Staff-settings role change is in progress (owner UPDATE of the caller's role, held).
+      //    The locking read waits for its permission-table SHARE lock and fails at the 2 s lock
+      //    timeout; the snapshot read returns at once with the same page.
+      const changer = new Client(context.clientConfig);
+      await changer.connect();
+      let lockingMs, snapshotMs, lockingOutcome;
+      try {
+        await changer.query("BEGIN");
+        await changer.query("UPDATE bop_permission.role SET version=version WHERE role_id=$1", [
+          roleReference,
+        ]);
+        const snapshotStarted = Date.now();
+        assert.deepEqual(await read(snapshotTables), firstSnapshot);
+        snapshotMs = Date.now() - snapshotStarted;
+        const lockingStarted = Date.now();
+        lockingOutcome = await read(lockingTables).then(
+          () => null,
+          (error) => error,
+        );
+        lockingMs = Date.now() - lockingStarted;
+      } finally {
+        await changer.query("ROLLBACK").catch(() => undefined);
+        await changer.end();
+      }
+      assert.ok(
+        lockingOutcome !== null,
+        "the locking read could not finish behind the role change",
+      );
+      assert.ok(lockingMs >= 1900, "the locking read waited for the role change " + lockingMs);
+      assert.ok(snapshotMs < 1500, "the snapshot read never waited " + snapshotMs);
+
+      // 2. One snapshot for the whole read: a session closed (and its table freed) by a command
+      //    committing between the table list and the session read is not seen half-way.
+      const closingMidRead = (base, target) => {
+        let pending = target;
+        const wrap = (work) => (tx) =>
+          work({
+            query: async (sql, values) => {
+              const result = await tx.query(sql, values);
+              if (pending !== null && /FROM rms_dining\.dining_table WHERE/u.test(sql)) {
+                const closing = pending;
+                pending = null;
+                await closeSession(closing);
+              }
+              return result;
+            },
+          });
+        return tablesRead({
+          run: (work) => base.run(wrap(work)),
+          ...(base.runSnapshot ? { runSnapshot: (work) => base.runSnapshot(wrap(work)) } : {}),
+        });
+      };
+      const [closedA, closedB] = [tables[0], tables[1]];
+      const duringClose = await read(closingMidRead(runner, closedA));
+      assert.deepEqual(occupied(duringClose), occupied(firstSnapshot), "the read's own snapshot");
+      assert.equal(
+        duringClose.items.find((item) => item.tableReference === closedA.tableReference)?.session
+          ?.phase,
+        "Active",
+      );
+      const afterClose = await read(snapshotTables);
+      assert.equal(
+        afterClose.items.find((item) => item.tableReference === closedA.tableReference)
+          ?.currentDiningSessionReference,
+        null,
+        "the next read shows the table free",
+      );
+      // Control: the ordinary read's session read sees the close its table list did not.
+      const tornOutcome = await read(closingMidRead({ run: runner.run }, closedB)).then(
+        () => null,
+        (error) => error,
+      );
+      assert.ok(tornOutcome !== null, "control: the ordinary read saw half of the close");
+
+      // 3. Timing. (a) One screen, 20 sequential reads each way on an idle database.
+      const sequential = async (query) => {
+        const latencies = [];
+        for (let i = 0; i < 20; i++) {
+          const started = Date.now();
+          await read(query);
+          latencies.push(Date.now() - started);
+        }
+        return { p50: percentile(latencies, 50), p95: percentile(latencies, 95) };
+      };
+      const idleLocking = await sequential(lockingTables);
+      const idleSnapshot = await sequential(snapshotTables);
+      // (b) 8 screens polling back to back while 6 role changes (each held 400 ms) run one after
+      //     another; first with locking reads, then snapshot reads.
+      async function load(query) {
+        const stop = { value: false };
+        const latencies = [],
+          errors = {},
+          changeLatencies = [];
+        const screen = async () => {
+          while (!stop.value) {
+            const started = Date.now();
+            try {
+              const view = await read(query);
+              if (view.items.length !== 30) errors.page = (errors.page ?? 0) + 1;
+              latencies.push(Date.now() - started);
+            } catch (error) {
+              const key =
+                (error?.code ?? error?.message ?? "UNKNOWN") +
+                ":" +
+                (error?.diagnostic?.sqlState ?? "");
+              errors[key] = (errors[key] ?? 0) + 1;
+            }
+          }
+        };
+        const changes = (async () => {
+          await delay(200);
+          for (let i = 0; i < 6; i++) {
+            const client = new Client(context.clientConfig);
+            await client.connect();
+            const started = Date.now();
+            try {
+              await client.query("BEGIN");
+              await client.query("SET LOCAL lock_timeout='10s'");
+              await client.query(
+                "UPDATE bop_permission.role SET version=version WHERE role_id=$1",
+                [roleReference],
+              );
+              changeLatencies.push(Date.now() - started);
+              await client.query("SELECT pg_sleep(0.4)");
+            } finally {
+              await client.query("ROLLBACK").catch(() => undefined);
+              await client.end();
+            }
+            await delay(100);
+          }
+          await delay(200);
+          stop.value = true;
+        })();
+        const screens = Array.from({ length: 8 }, () => screen());
+        await changes;
+        await Promise.all(screens);
+        return {
+          reads: latencies.length,
+          errors,
+          p50: percentile(latencies, 50),
+          p95: percentile(latencies, 95),
+          max: Math.max(0, ...latencies),
+          roleChangeWaitP50: percentile(changeLatencies, 50),
+          roleChangeWaitMax: Math.max(0, ...changeLatencies),
+        };
+      }
+      const before = await load(lockingTables);
+      const after = await load(snapshotTables);
+      const report = {
+        tables: 30,
+        openSessions: 20,
+        roleChangeInProgress: {
+          snapshotMs,
+          lockingMs,
+          lockingError: lockingOutcome?.message ?? String(lockingOutcome),
+        },
+        idleSequential: { locking: idleLocking, snapshot: idleSnapshot },
+        lockingReads: before,
+        snapshotReads: after,
+      };
+      if (process.env.WP2423_SNAPSHOT_TABLES_REPORT)
+        await writeFile(process.env.WP2423_SNAPSHOT_TABLES_REPORT, JSON.stringify(report, null, 2));
+      assert.deepEqual(after.errors, {}, "no snapshot Tables read failed");
+      assert.ok(after.reads > 0 && before.reads > 0);
+      assert.ok(after.p95 < before.p95, "snapshot reads are faster than locking reads under load");
+      assert.ok(
+        after.roleChangeWaitMax < 500,
+        "a role change never waits for snapshot Tables reads " + after.roleChangeWaitMax,
       );
     } finally {
       await pool.end().catch(() => undefined);

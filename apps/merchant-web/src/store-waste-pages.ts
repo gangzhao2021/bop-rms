@@ -40,6 +40,18 @@ export interface WasteRecordView {
   readonly needsReview: boolean;
   readonly recordedBy: string;
   readonly recordedAt: string;
+  /**
+   * WP-2423 (2026-10-18): a Kitchen remake used more than stock showed as available. The food was
+   * thrown away; this much did not leave stock and the item needs counting.
+   */
+  readonly shortfalls?: readonly {
+    readonly itemReference: string;
+    readonly locationReference: string;
+    readonly unitCode: string;
+    readonly wastedQuantity: string;
+    readonly recordedQuantity: string;
+    readonly missingQuantity: string;
+  }[];
   readonly review: {
     readonly decision: "Accepted" | "Voided";
     readonly reasonCode: string;

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Link } from "react-router";
 import {
   staffCancellationReasons,
   type CurrentOrderQueue,
@@ -10,6 +11,7 @@ import {
   FULL_SIGN_IN_REQUIRED_TEXT,
   isFullSignInRequired,
 } from "./full-sign-in.js";
+import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 
 type Order = CurrentOrderQueue["items"][number];
@@ -23,6 +25,76 @@ export const staffCancellationReasonLabel: Readonly<Record<StaffCancellationReas
   DUPLICATE_ORDER: "Duplicate order",
   GUEST_LEFT: "Guests left",
 };
+
+/**
+ * WP-2423 (v15 2026-10-18): the reasons offered for an order type. "Guests left" is a table's
+ * reason; the server refuses it on a pickup order.
+ */
+export function staffCancellationReasonsFor(orderType: Order["orderType"]) {
+  return staffCancellationReasons.filter((code) => orderType !== "Pickup" || code !== "GUEST_LEFT");
+}
+
+/** WP-2423 (v15 2026-10-18): what the cancellation would refund, as the server reads it. */
+export interface StaffCancelRefundPreview {
+  readonly refundMethod: "Online" | "CardMachine";
+  readonly paidMinor: string;
+  readonly refundMinor: string;
+}
+const minor = /^(0|[1-9][0-9]{0,17})$/;
+export function parseStaffCancelRefundPreview(
+  value: unknown,
+  order: Pick<Order, "orderReference">,
+  batch: Pick<Batch, "orderBatchReference">,
+): StaffCancelRefundPreview | null {
+  if (value === null || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  if (
+    raw.orderReference !== order.orderReference ||
+    raw.orderBatchReference !== batch.orderBatchReference ||
+    (raw.refundMethod !== "Online" && raw.refundMethod !== "CardMachine") ||
+    typeof raw.paidMinor !== "string" ||
+    !minor.test(raw.paidMinor) ||
+    typeof raw.refundMinor !== "string" ||
+    !minor.test(raw.refundMinor) ||
+    raw.currencyCode !== "CAD" ||
+    BigInt(raw.refundMinor) > BigInt(raw.paidMinor)
+  )
+    return null;
+  return Object.freeze({
+    refundMethod: raw.refundMethod,
+    paidMinor: raw.paidMinor,
+    refundMinor: raw.refundMinor,
+  });
+}
+
+/**
+ * WP-2423 (v15 2026-10-18): the dialog's refund line in staff words: refunded in full, the
+ * remaining amount after earlier refunds, or nothing more when it was already refunded in full.
+ * Without a preview (still checking, or it could not be read) it says what the server will do.
+ */
+export function staffCancelRefundText(
+  pickup: boolean,
+  preview: StaffCancelRefundPreview | "Checking" | "Failed",
+): string {
+  const what = pickup ? "order" : "round";
+  if (preview === "Checking") return "Checking what will be refunded…";
+  if (preview === "Failed")
+    return `What is refunded could not be checked. The customer gets back whatever is left of this ${what}'s payment, including tip.`;
+  const money = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CAD" });
+  const refund = BigInt(preview.refundMinor),
+    paid = BigInt(preview.paidMinor);
+  const machine = preview.refundMethod === "CardMachine";
+  if (refund === 0n)
+    return `This ${what} was already refunded in full; nothing more will be refunded.`;
+  if (refund >= paid)
+    return machine
+      ? `Refund ${money(preview.refundMinor)} in full, including tip, on the card machine.`
+      : `The customer is refunded in full, ${money(preview.refundMinor)} including tip.`;
+  const already = money((paid - refund).toString());
+  return machine
+    ? `${already} was already refunded. Refund the remaining ${money(preview.refundMinor)} on the card machine.`
+    : `${already} was already refunded. The customer is refunded the remaining ${money(preview.refundMinor)}.`;
+}
 
 /** "Cancelled by store · refund pending" (pickup) or "Batch 2 cancelled · refunded" (dine-in). */
 export function staffCancellationSummary(order: Order, batch: Batch) {
@@ -125,7 +197,8 @@ export function StaffCancelStatus({
 
 /**
  * WP-2423 Q6: cancel a paid pickup order, or one dine-in batch, before the kitchen starts. The
- * customer is refunded in full including tip. One intent keeps its operation reference so a lost
+ * customer gets back what is left of the payment, tip included; the dialog reads that amount from
+ * the server when it opens (v15 2026-10-18: "nothing more" when already refunded). One intent keeps its operation reference so a lost
  * response is retried safely; any settled answer refreshes the order.
  */
 export function StaffOrderCancelAction({
@@ -147,7 +220,36 @@ export function StaffOrderCancelAction({
   const refreshOnClose = useRef(false);
   const [reason, setReason] = useState<StaffCancellationReason | "">("");
   const [outcome, setOutcome] = useState<Outcome>("Idle");
+  const [preview, setPreview] = useState<StaffCancelRefundPreview | "Checking" | "Failed">(
+    "Checking",
+  );
   const pickup = order.orderType === "Pickup";
+  const nothingToRefund = typeof preview === "object" && preview.refundMinor === "0";
+  // WP-2423 (v15 2026-10-18): read what the cancellation would refund each time the dialog opens.
+  const checkRefund = async () => {
+    if (order.currentVersion === null) return;
+    setPreview("Checking");
+    try {
+      const response = await fetcher("/merchant/orders/cancel/preview", {
+        method: "POST",
+        credentials: "same-origin",
+        redirect: "error",
+        cache: "no-store",
+        headers: { "content-type": "application/json", "x-bop-csrf": csrf },
+        body: JSON.stringify({
+          orderReference: order.orderReference,
+          orderBatchReference: batch.orderBatchReference,
+          expectedOrderVersion: order.currentVersion,
+        }),
+      });
+      const read = response.ok
+        ? parseStaffCancelRefundPreview(await response.json(), order, batch)
+        : null;
+      setPreview(read ?? "Failed");
+    } catch {
+      setPreview("Failed");
+    }
+  };
   const label = pickup ? "Cancel order" : "Cancel round";
   const titleId = "staff-cancel-" + batch.orderBatchReference;
   const submit = async () => {
@@ -203,12 +305,19 @@ export function StaffOrderCancelAction({
         type="button"
         className="order-cancel-open"
         disabled={outcome === "Cancelled"}
-        onClick={() => dialog.current?.showModal()}
+        onClick={() => {
+          dialog.current?.showModal();
+          void checkRefund();
+        }}
       >
         {label}
       </button>
       {outcome === "Cancelled" || outcome === "PreparationStarted" ? (
-        <p role="status">{message[outcome]}</p>
+        <p role="status">
+          {outcome === "Cancelled" && nothingToRefund
+            ? "Cancelled. It was already refunded in full; nothing more was refunded."
+            : message[outcome]}
+        </p>
       ) : null}
       <dialog
         ref={dialog}
@@ -228,12 +337,30 @@ export function StaffOrderCancelAction({
             ? `Cancel order ${order.orderNumber}`
             : `Cancel round ${batch.sequence} of order ${order.orderNumber}`}
         </h2>
-        <p>Only before the kitchen starts. The customer is refunded in full, including tip.</p>
+        <p>Only before the kitchen starts.</p>
+        <p className="order-cancel-refund" aria-live="polite">
+          {staffCancelRefundText(pickup, preview)}
+          {preview === "Failed" ? (
+            <>
+              {" "}
+              <button type="button" onClick={() => void checkRefund()}>
+                Check again
+              </button>
+            </>
+          ) : null}
+        </p>
         <p>
           {pickup
             ? "The order leaves the queue and its items return to stock."
             : "Only this round is cancelled; the rest of the table's order continues."}
         </p>
+        {pickup ? (
+          <p className="order-cancel-no-show">
+            Customer not coming? If they told you, choose Customer request. If they just never came,
+            keep the order: once it is ready and the one-hour pickup hold has passed, close it as
+            not collected in <Link to="/operations/pickup">Pickup</Link>.
+          </p>
+        ) : null}
         <form
           hidden={!formOpen}
           onSubmit={(event) => {
@@ -250,7 +377,7 @@ export function StaffOrderCancelAction({
               onChange={(event) => setReason(event.currentTarget.value as StaffCancellationReason)}
             >
               <option value="">Select a reason</option>
-              {staffCancellationReasons.map((code) => (
+              {staffCancellationReasonsFor(order.orderType).map((code) => (
                 <option key={code} value={code}>
                   {staffCancellationReasonLabel[code]}
                 </option>
@@ -268,8 +395,12 @@ export function StaffOrderCancelAction({
                 : outcome === "Pending"
                   ? "Cancelling…"
                   : pickup
-                    ? "Cancel order and refund"
-                    : "Cancel round and refund"}
+                    ? nothingToRefund
+                      ? "Cancel order"
+                      : "Cancel order and refund"
+                    : nothingToRefund
+                      ? "Cancel round"
+                      : "Cancel round and refund"}
             </button>
             <button
               type="button"

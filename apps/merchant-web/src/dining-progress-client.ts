@@ -119,6 +119,13 @@ export function parseDiningProgress(value: unknown, expectedOrder: string) {
       deliveredQuantity,
       remainingQuantity,
       itemServiceVersion: integer(item.itemServiceVersion, 0, 2147483647),
+      /**
+       * WP-2423 (2026-10-18): portions the kitchen is making again (dropped, wrong, sent back,
+       * marked done too early). Absent from an older source: none.
+       */
+      ...(item.remakingQuantity === undefined
+        ? {}
+        : { remakingQuantity: integer(item.remakingQuantity, 0, orderedQuantity) }),
       /** Options and the customer's note; absent when the read could not include them. */
       ...(lineDetails === null ? {} : { details: lineDetails }),
     });
@@ -146,6 +153,14 @@ export function parseDiningProgress(value: unknown, expectedOrder: string) {
   });
 }
 export type DiningProgress = ReturnType<typeof parseDiningProgress>;
+/**
+ * What staff can hand over now: what is left to serve less the portions being remade (which one
+ * of identical portions is being remade is not known, so none of them is offered until the remake
+ * is done).
+ */
+export function servableQuantity(item: DiningProgress["items"][number]): number {
+  return Math.max(0, item.remainingQuantity - (item.remakingQuantity ?? 0));
+}
 export function createDiningProgressClient(fetcher: typeof fetch = fetch) {
   return {
     async load(orderReference: string, csrf: string, signal?: AbortSignal) {

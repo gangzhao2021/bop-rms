@@ -414,6 +414,8 @@ export * from "./infrastructure/persistence/checkout-contact-customer-removal-st
 // WP-2423 Q6: store staff cancel a paid, accepted Order/Batch before the kitchen starts it.
 export {
   staffOrderCancellationReasonCodes,
+  staffOrderCancellationReasonCodesByOrderType,
+  staffOrderCancellationReasonAllowed,
   staffOrderCancellationPolicy,
   parseStaffOrderCancellationRecord,
   parseStaffOrderCancellationPlan,

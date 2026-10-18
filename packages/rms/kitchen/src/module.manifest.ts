@@ -46,6 +46,7 @@ const moduleManifestInput =
       "rms.kitchen.kitchen-item-progress-recorded.v1",
       "rms.kitchen.kitchen-item-ready.v1",
       "rms.kitchen.kitchen-order-ready.v1",
+      "rms.kitchen.kitchen-rework-cancelled.v1",
       "rms.kitchen.kitchen-rework-created.v1",
       "rms.kitchen.kitchen-ticket-closed.v1",
       "rms.kitchen.kitchen-work-accepted.v1",

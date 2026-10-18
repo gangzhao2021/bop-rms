@@ -3,6 +3,7 @@ import { kitchenActionNotice, kitchenStepText, useKitchenActions } from "./use-k
 import { useKitchenClock } from "./kitchen-clock.js";
 import {
   KitchenRecentlyFinished,
+  KitchenRemakeCancelDialog,
   KitchenRemakeDialog,
   KitchenRemakeLane,
   KitchenReworkStatus,
@@ -11,7 +12,7 @@ import {
   useKitchenRework,
   type RemakeChoice,
 } from "./KitchenRework.js";
-import type { KitchenReworkView } from "./kitchen-rework-client.js";
+import type { KitchenReworkCancelReason, KitchenReworkView } from "./kitchen-rework-client.js";
 import {
   earlierDayText,
   earlierDayTickets,
@@ -945,6 +946,8 @@ export function KitchenBoardScreen({
         readonly blocked: boolean;
         readonly onCreate: (item: KitchenBoardItem, choice: RemakeChoice) => void;
         readonly onAdvance: (rework: KitchenReworkView) => void;
+        /** DEC-KITCHEN-REWORK cancel: offered with the remake permission. */
+        readonly onCancel?: (rework: KitchenReworkView, reason: KitchenReworkCancelReason) => void;
       }
     | undefined;
   readonly onAction?: (item: KitchenBoardItem, action: KitchenAction) => void;
@@ -977,6 +980,7 @@ export function KitchenBoardScreen({
   const searchApplied = orderSearch !== null;
   const filterSheetRef = useRef<HTMLDialogElement>(null);
   const [remakeTarget, setRemakeTarget] = useState<KitchenBoardItem | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<KitchenReworkView | null>(null);
   const readOnly = view.freshnessStatus !== "Fresh" || view.operatorStatus !== "Named";
   const remakeReadOnly = readOnly || stale !== undefined || (remakes?.blocked ?? true);
   // DEC-KITCHEN-STALE-TICKETS: order numbers restart every business day. An earlier day's open
@@ -1390,6 +1394,7 @@ export function KitchenBoardScreen({
               today={today}
               readOnly={remakeReadOnly}
               onAdvance={remakes.onAdvance}
+              onCancel={remakes.canRework && remakes.onCancel ? setCancelTarget : undefined}
             />
           </div>
         ) : null}
@@ -1571,6 +1576,13 @@ export function KitchenBoardScreen({
             readOnly={remakeReadOnly}
             onRemake={onRemake}
             orderLabel={dayLabel}
+          />
+        ) : null}
+        {remakes?.canRework && remakes.onCancel ? (
+          <KitchenRemakeCancelDialog
+            rework={cancelTarget}
+            onSubmit={remakes.onCancel}
+            onClose={() => setCancelTarget(null)}
           />
         ) : null}
         {remakes && onRemake ? (
@@ -1976,6 +1988,7 @@ function KitchenBoardContent(
                   blocked: rework.busy || browserOffline(),
                   onCreate: rework.create,
                   onAdvance: rework.advance,
+                  onCancel: rework.cancel,
                 }
               : undefined
           }

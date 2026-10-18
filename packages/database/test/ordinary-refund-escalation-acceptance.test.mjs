@@ -157,6 +157,21 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       const time = (offset) => new Date(base + offset).toISOString();
       const from = time(-minutes(180)),
         until = time(minutes(600));
+      // The commands read the database clock (clock_timestamp() in the Payment refund stores) as
+      // well as this process's clock, so the fixture cannot pin "now". Instead it pins the Store's
+      // Business Day to `base`, the database's own reading: the day starts on the hour four to
+      // five hours before `base` (Toronto offsets are whole hours, so a UTC hour is a local hour).
+      // Every fixture time (roles 3 h ago, captures 39-41 min ago, refunds now) then lies inside
+      // one Business Date at any wall-clock time. A fixed 04:00 start put the captures on the
+      // previous Business Date during 04:00-04:41 Toronto and escalated the small refund with
+      // DifferentBusinessDate.
+      const businessDayStartsAt = Math.floor((base - minutes(240)) / 3_600_000) * 3_600_000;
+      const torontoParts = (format) =>
+        new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", ...format }).format(
+          new Date(businessDayStartsAt),
+        );
+      const businessDayStartLocalTime = `${torontoParts({ hour: "2-digit", hourCycle: "h23" })}:00:00`;
+      const businessDate = torontoParts({});
 
       // ── Workforce: real Membership, Store assignment, roles, permission grants and MFA
       // enrollment (verified two hours ago, so only a step-up can make it recent).
@@ -328,9 +343,6 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       const submittedAt = time(-minutes(40)),
         paidAt = time(-minutes(39)),
         acceptedAt = time(-minutes(38));
-      const businessDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto" }).format(
-        new Date(submittedAt),
-      );
       async function seedOrder(n) {
         const b = n + 100;
         const order = { order: id(n + 1), guest: id(n + 2) };
@@ -358,7 +370,7 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
         };
         order.batch = refs;
         await admin.query(
-          "INSERT INTO rms_ordering.order_number_allocation (order_id,brand_id,store_id,business_date,sequence,order_number,allocated_at,business_date_configuration_id,business_date_configuration_version,business_date_content_digest,time_zone,business_day_start,business_date_boundary_at,boundary_disambiguation) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,'America/Toronto','00:00',$7,'Exact')",
+          "INSERT INTO rms_ordering.order_number_allocation (order_id,brand_id,store_id,business_date,sequence,order_number,allocated_at,business_date_configuration_id,business_date_configuration_version,business_date_content_digest,time_zone,business_day_start,business_date_boundary_at,boundary_disambiguation) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,'America/Toronto',$10,$11,'Exact')",
           [
             order.order,
             brand,
@@ -369,6 +381,8 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
             submittedAt,
             id(50),
             hash("bd"),
+            businessDayStartLocalTime.slice(0, 5),
+            new Date(businessDayStartsAt).toISOString(),
           ],
         );
         await admin.query(
@@ -589,7 +603,12 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
       const third = await seedOrder(3000);
       const fourth = await seedOrder(4000);
       const { businessDate: businessDatePort, storeOptions } =
-        await seedOrdinaryRefundStorePublication({ client: admin, scope, firstCapturedAt: paidAt });
+        await seedOrdinaryRefundStorePublication({
+          client: admin,
+          scope,
+          firstCapturedAt: paidAt,
+          businessDayStartLocalTime,
+        });
 
       // ── Simulated Stripe (InternalTest): the real refund adapter over a fake transport.
       const providerRefunds = [];

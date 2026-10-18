@@ -9,7 +9,9 @@ import {
   parseOrderingInstant,
   parseOrderingReference,
   readStaffBatchLineSources,
+  staffOrderCancellationReasonAllowed,
   staffOrderCancellationReasonCodes,
+  type StaffOrderCancellationPlan,
   type StaffOrderCancellationReasonCode,
   type StaffOrderCancellationRecord,
 } from "@rms/ordering";
@@ -165,6 +167,71 @@ export async function readStaffCancellationRefundStatus(
   if (record.refundDisposition === "AlreadyRefunded") return "Refunded";
   const position = await readStaffCancellationRefundPosition(transaction, scope, record, authorize);
   return position.confirmedMinor > 0n && position.pendingMinor === 0n ? "Refunded" : "Pending";
+}
+
+/**
+ * What a staff cancellation of this Batch still refunds, read under the caller's Order fence: the
+ * card-machine payment less what was refunded on the machine, or Payment's remaining refundable
+ * amount of the online capture (tip included). Null when the Batch was paid online and the Store's
+ * Provider account is not configured here (an accepted Batch is then refunded by compensation).
+ */
+async function readStaffCancellationRemaining(
+  tx: ConsumerTransaction,
+  options: Pick<StaffOrderCancellationOptions, "resolveRefundConfiguration" | "persistence">,
+  selected: { tenantReference: string; brandReference: string; storeReference: string },
+  plan: StaffOrderCancellationPlan,
+  allowed: () => Promise<boolean>,
+): Promise<{
+  readonly refundMethod: "Online" | "CardMachine";
+  readonly paidMinor: bigint;
+  readonly remainingMinor: bigint;
+} | null> {
+  const orderReference = String(plan.orderReference);
+  // The staff member was resolved at the start of this transaction and is again before the
+  // commit; these Payment reads only confirm they run in it, for this Order.
+  const cardStore = createPostgresCardMachinePaymentStore({
+    scope: selected,
+    authorize: async (t, value) =>
+      t === tx && value.orderReference === orderReference && (await allowed()),
+  });
+  const card = await cardStore.loadByBatch(tx, orderReference, String(plan.orderBatchReference));
+  let result: {
+    refundMethod: "Online" | "CardMachine";
+    paidMinor: bigint;
+    remainingMinor: bigint;
+  } | null = null;
+  if (card !== null) {
+    const refunds = await cardStore.refunds(tx, card.cardMachinePaymentReference);
+    result = {
+      refundMethod: "CardMachine",
+      paidMinor: card.preparation.total.amountMinor,
+      remainingMinor:
+        card.preparation.total.amountMinor -
+        refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n),
+    };
+  } else if (options.resolveRefundConfiguration !== undefined) {
+    const configuration = await options.resolveRefundConfiguration(tx, selected);
+    const position = await readPaymentRemainingRefundable(tx, {
+      scope: {
+        ...selected,
+        providerAccountReference: configuration.providerAccountReference,
+        environment: configuration.environment,
+      },
+      orderReference,
+      paymentTransactionReference: String(plan.payment.paymentTransactionReference),
+      paymentIntentReference: String(plan.payment.paymentIntentReference),
+      paymentAttemptReference: String(plan.payment.paymentAttemptReference),
+      observedAt: parseOrderingInstant(options.persistence.now()),
+      authorize: async (t, query) => t === tx && query.orderReference === orderReference,
+    });
+    result = {
+      refundMethod: "Online",
+      paidMinor: position.capturedMinor,
+      remainingMinor: position.remainingMinor,
+    };
+  }
+  if (result !== null && result.remainingMinor < 0n) return fail("ORDER_CANCELLATION_UNAVAILABLE");
+  return result === null ? null : Object.freeze(result);
 }
 
 function databaseCode(error: unknown) {
@@ -338,48 +405,24 @@ export function createMerchantOrderStaffCancellation(options: {
                     : "ORDER_CANCELLATION_NOT_CANCELLABLE",
               );
             const plan = prepared.plan;
+            // WP-2423 (v15 2026-10-18): "Guests left" is a table's reason. A pickup customer who
+            // never came is closed as not collected after the pickup hold, not cancelled.
+            if (!staffOrderCancellationReasonAllowed(plan.orderType, reasonCode))
+              return fail("ORDER_CANCELLATION_INPUT_INVALID");
             // DEC-TABLE-CLOSE-GUESTS-LEFT: a round whose payment ordinary refunds already returned in full
             // (never accepted, or accepted and refunded item by item) owes nothing more; otherwise
             // Payment refunds what is left (all of it, tip included).
-            let refundDisposition: "Refund" | "AlreadyRefunded" = "Refund";
-            {
-              // The staff member was resolved at the start of this transaction and is again before
-              // the commit; these Payment reads only confirm they run in it, for this Order.
-              const cardStore = createPostgresCardMachinePaymentStore({
-                scope: selected,
-                authorize: async (t, value) =>
-                  t === tx && value.orderReference === orderReference && (await allowed()),
-              });
-              const card = await cardStore.loadByBatch(tx, orderReference, orderBatchReference);
-              let remainingMinor: bigint | null = null;
-              if (card !== null) {
-                const refunds = await cardStore.refunds(tx, card.cardMachinePaymentReference);
-                remainingMinor =
-                  card.preparation.total.amountMinor -
-                  refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
-              } else if (options.resolveRefundConfiguration !== undefined) {
-                const configuration = await options.resolveRefundConfiguration(tx, selected);
-                const position = await readPaymentRemainingRefundable(tx, {
-                  scope: {
-                    ...selected,
-                    providerAccountReference: configuration.providerAccountReference,
-                    environment: configuration.environment,
-                  },
-                  orderReference,
-                  paymentTransactionReference: String(plan.payment.paymentTransactionReference),
-                  paymentIntentReference: String(plan.payment.paymentIntentReference),
-                  paymentAttemptReference: String(plan.payment.paymentAttemptReference),
-                  observedAt: parseOrderingInstant(options.persistence.now()),
-                  authorize: async (t, query) =>
-                    t === tx && query.orderReference === orderReference,
-                });
-                remainingMinor = position.remainingMinor;
-              } else if (plan.previousPhase === "Submitted")
-                return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
-              if (remainingMinor !== null && remainingMinor < 0n)
-                return fail("ORDER_CANCELLATION_UNAVAILABLE");
-              if (remainingMinor === 0n) refundDisposition = "AlreadyRefunded";
-            }
+            const position = await readStaffCancellationRemaining(
+              tx,
+              options,
+              selected,
+              plan,
+              allowed,
+            );
+            if (position === null && plan.previousPhase === "Submitted")
+              return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
+            const refundDisposition: "Refund" | "AlreadyRefunded" =
+              position?.remainingMinor === 0n ? "AlreadyRefunded" : "Refund";
             const cancellationReference = String(parseOrderingReference(options.nextReference()));
             const cancelledAt = parseOrderingInstant(options.persistence.now());
             // Kitchen after the Ordering fence (foreign owner fences first): every item still unstarted.
@@ -458,6 +501,142 @@ export function createMerchantOrderStaffCancellation(options: {
       if (error instanceof KitchenBatchCancellationError && error.code === "KITCHEN_WORK_STARTED")
         return fail("ORDER_CANCELLATION_PREPARATION_STARTED");
       // A concurrent kitchen start or order change: the staff member refreshes and decides again.
+      const code = databaseCode(error);
+      if (code === "40P01" || code === "40001" || code === "55P03")
+        return fail("ORDER_CANCELLATION_VERSION_CONFLICT");
+      if (code === "STORE_SERVICE_PERMISSION_DENIED")
+        return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
+      return fail("ORDER_CANCELLATION_UNAVAILABLE");
+    }
+  };
+}
+
+export type StaffOrderCancellationOptions = Parameters<
+  typeof createMerchantOrderStaffCancellation
+>[0];
+
+export interface StaffOrderCancellationPreview {
+  readonly orderReference: string;
+  readonly orderBatchReference: string;
+  readonly refundMethod: "Online" | "CardMachine";
+  /** What the customer paid for this order (pickup) or round (dine-in), tip included. */
+  readonly paidMinor: string;
+  /** What the cancellation refunds now: the payment less every refund already made or on its way. */
+  readonly refundMinor: string;
+  readonly currencyCode: "CAD";
+}
+
+/**
+ * WP-2423 (v15 2026-10-18): what cancelling this order (pickup) or round (dine-in) would refund,
+ * read the same way the cancellation decides it, so the dialog says "refunded in full", "the
+ * remaining $X" or "nothing more is refunded" truthfully. Read-only: it writes nothing, and the
+ * cancellation still decides the refund again under its own fence when staff confirm.
+ */
+export function createMerchantOrderStaffCancellationPreview(
+  options: StaffOrderCancellationOptions,
+) {
+  const resolveScope = createMerchantStoreScope(options.persistence);
+  return async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    command: unknown;
+  }): Promise<StaffOrderCancellationPreview> => {
+    const session = await options.authentication.authorize(input);
+    let orderReference: string, orderBatchReference: string;
+    let intent: Readonly<Record<string, unknown>>;
+    try {
+      intent = readClosedRecord(input.command, [
+        "orderReference",
+        "orderBatchReference",
+        "expectedOrderVersion",
+      ]);
+      orderReference = String(parseOrderingReference(intent.orderReference));
+      orderBatchReference = String(parseOrderingReference(intent.orderBatchReference));
+    } catch {
+      return fail("ORDER_CANCELLATION_INPUT_INVALID");
+    }
+    const expectedOrderVersion = intent.expectedOrderVersion;
+    if (
+      typeof expectedOrderVersion !== "number" ||
+      !Number.isSafeInteger(expectedOrderVersion) ||
+      expectedOrderVersion < 1 ||
+      expectedOrderVersion > 2147483646
+    )
+      return fail("ORDER_CANCELLATION_INPUT_INVALID");
+    try {
+      return await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const current = await resolveScope(
+                transaction,
+                input.sessionCookie,
+                staffOrderCancellationPermission,
+                session.sessionReference,
+              ).catch(() => fail("ORDER_CANCELLATION_PERMISSION_DENIED"));
+              if ((await current.allowed()) !== true)
+                return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
+              return current;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied: () => fail("ORDER_CANCELLATION_PERMISSION_DENIED"),
+          },
+          async (authority) => {
+            const scope = authority.scope;
+            const allowed = () => authority.guard();
+            const tx = transaction as unknown as ConsumerTransaction;
+            const selected = {
+              tenantReference: String(scope.selected.tenantReference),
+              brandReference: String(scope.context.brand.brandReference),
+              storeReference: String(scope.store.storeReference),
+            };
+            const actorReference = String(scope.actorReference);
+            await options.installContext(tx, selected);
+            const prepared = await createPostgresStaffOrderCancellationStore({
+              brandReference: selected.brandReference,
+              storeReference: selected.storeReference,
+              authorize: async (t, identity) =>
+                t === tx &&
+                identity.orderReference === orderReference &&
+                identity.orderBatchReference === orderBatchReference &&
+                identity.actorReference === actorReference &&
+                (await allowed()),
+            }).prepare(tx, {
+              orderReference,
+              orderBatchReference,
+              expectedOrderVersion,
+              actorReference,
+            });
+            if (prepared.status === "NotEligible")
+              return fail(
+                prepared.reason === "NotFound"
+                  ? "ORDER_CANCELLATION_NOT_FOUND"
+                  : prepared.reason === "VersionConflict"
+                    ? "ORDER_CANCELLATION_VERSION_CONFLICT"
+                    : "ORDER_CANCELLATION_NOT_CANCELLABLE",
+              );
+            const position = await readStaffCancellationRemaining(
+              tx,
+              options,
+              selected,
+              prepared.plan,
+              allowed,
+            );
+            if (position === null) return fail("ORDER_CANCELLATION_UNAVAILABLE");
+            return Object.freeze({
+              orderReference,
+              orderBatchReference,
+              refundMethod: position.refundMethod,
+              paidMinor: position.paidMinor.toString(),
+              refundMinor: position.remainingMinor.toString(),
+              currencyCode: "CAD" as const,
+            });
+          },
+        ),
+      );
+    } catch (error) {
+      if (error instanceof StaffOrderCancellationError) throw error;
       const code = databaseCode(error);
       if (code === "40P01" || code === "40001" || code === "55P03")
         return fail("ORDER_CANCELLATION_VERSION_CONFLICT");
