@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { validCountedQuantity } from "./stock-count-pages.js";
-import { availableQuantityText, centsText, wasteQuantityAllowed } from "./store-waste-pages.js";
+import {
+  availableQuantityText,
+  centsText,
+  wasteQuantityAllowed,
+  wasteTakesHeldStock,
+} from "./store-waste-pages.js";
 
 describe("WP-2423 count and waste entry checks", () => {
   it.each([
@@ -18,8 +23,21 @@ describe("WP-2423 count and waste entry checks", () => {
     ["4.301", 3, "4.3", false],
     ["0", 3, "4.3", false],
     ["0.25", 1, "4.3", false],
-  ])("waste %s at precision %i with %s available is %s", (value, precision, available, ok) => {
-    expect(wasteQuantityAllowed(value, precision, available)).toBe(ok);
+  ])("waste %s at precision %i with %s on hand is %s", (value, precision, onHand, ok) => {
+    expect(wasteQuantityAllowed(value, precision, onHand)).toBe(ok);
+  });
+  // DEC-INV-COUNT-SHORT amendment (2026-10-18): waste up to on hand is recordable even when open
+  // orders hold the stock; staff are told when it takes held stock.
+  it.each([
+    ["0.1", "0.3", false],
+    ["0.3", "0.3", false],
+    ["0.31", "0.3", true],
+    ["", "0.3", false],
+    ["0.05", "0", true],
+    ["", "-0.14", true],
+    ["0.05", "-0.14", true],
+  ])("waste %s with %s free of open orders takes held stock: %s", (value, available, held) => {
+    expect(wasteTakesHeldStock(value, available)).toBe(held);
   });
   it.each([
     ["100.6959", "100.69"],

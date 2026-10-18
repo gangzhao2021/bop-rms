@@ -87,6 +87,11 @@ export interface StoreWasteView {
     readonly lotCode: string | null;
     readonly expiryDate: string | null;
     readonly unitCode: string;
+    /** What is physically there: the most a waste line can take. */
+    readonly onHand: string;
+    /** Held by open orders. */
+    readonly reserved: string;
+    /** on hand − held; zero or below when open orders hold all of it or are short. */
     readonly available: string;
   }[];
   readonly people: Readonly<Record<string, string>>;
@@ -130,8 +135,8 @@ export function parseStoreWasteView(
     throw new Error("STORE_WASTE_PAGE_INVALID");
   return r as unknown as StoreWasteView;
 }
-/** Quantity entry within the item's precision and the available stock (exact decimals). */
-export function wasteQuantityAllowed(value: string, precision: number, available: string): boolean {
+/** Quantity entry within the item's precision and the stock on hand (exact decimals). */
+export function wasteQuantityAllowed(value: string, precision: number, onHand: string): boolean {
   const match = /^(?:0|[1-9]\d{0,11})(?:\.(\d{1,6}))?$/u.exec(value.trim());
   if (!match || (match[1]?.length ?? 0) > precision || /^0(?:\.0+)?$/u.test(value.trim()))
     return false;
@@ -139,7 +144,22 @@ export function wasteQuantityAllowed(value: string, precision: number, available
     const [whole = "0", fraction = ""] = text.split(".");
     return BigInt(whole + fraction.padEnd(6, "0").slice(0, 6));
   };
-  return scaled(value.trim()) <= scaled(available);
+  return scaled(value.trim()) <= scaled(onHand);
+}
+/**
+ * DEC-INV-COUNT-SHORT amendment (2026-10-18): whether recording `value` takes stock open orders hold
+ * (more than is free, or nothing is free). The waste is still recorded — it is gone — and those
+ * orders become (more) short. Exact decimals; `available` may be negative.
+ */
+export function wasteTakesHeldStock(value: string, available: string): boolean {
+  const scaled = (text: string) => {
+    const negative = text.startsWith("-");
+    const [whole = "0", fraction = ""] = (negative ? text.slice(1) : text).split(".");
+    return (negative ? -1n : 1n) * BigInt(whole + fraction.padEnd(6, "0").slice(0, 6));
+  };
+  if (!/^-?\d+(?:\.\d+)?$/u.test(available)) return false;
+  if (scaled(available) <= 0n) return true;
+  return /^\d+(?:\.\d+)?$/u.test(value.trim()) && scaled(value.trim()) > scaled(available);
 }
 /**
  * v15 store-day L3: an available stock quantity as staff read it: at most two decimals, trailing

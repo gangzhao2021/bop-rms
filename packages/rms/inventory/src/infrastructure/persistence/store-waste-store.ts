@@ -24,8 +24,8 @@ import { openingCountReferences } from "./opening-count-store.js";
 
 /**
  * WP-2423 / DEC-INV-WASTE: Store waste records and their reviews in the caller's transaction. Each line
- * leaves stock through a Waste movement that never touches reserved stock; a review accepts the record
- * or voids it with Correction movements. Caller owns authorization.
+ * leaves stock through a Waste movement (up to on hand; reservations are never changed); a review
+ * accepts the record or voids it with Correction movements. Caller owns authorization.
  */
 export interface StoreWasteScope {
   readonly tenantReference: string;
@@ -115,7 +115,11 @@ export async function loadStoreWaste(
   return row ? view(row) : null;
 }
 
-/** Stock (by location and lot) a waste line can take: available = on hand − reserved. */
+/**
+ * Stock (by location and lot) staff can record as waste: everything on hand. `available` (on hand −
+ * reserved) can be zero or below when open orders hold the stock; DEC-INV-COUNT-SHORT amendment
+ * (2026-10-18): waste up to on-hand is still recordable (it is gone), which leaves those orders short.
+ */
 export async function listWasteableStock(
   tx: LedgerTransaction,
   scope: StoreWasteScope,
@@ -127,6 +131,8 @@ export async function listWasteableStock(
     readonly lotCode: string | null;
     readonly expiryDate: string | null;
     readonly unitCode: string;
+    readonly onHand: string;
+    readonly reserved: string;
     readonly available: string;
   }[]
 > {
@@ -134,11 +140,11 @@ export async function listWasteableStock(
   return (
     await tx.query(
       `SELECT a.item_id::text item,a.location_id::text location,a.lot_id::text lot,l.lot_code,a.expiry_date::text expiry,a.unit_code,
-         (b.on_hand-b.reserved)::text available
+         b.on_hand::text on_hand,b.reserved::text reserved,(b.on_hand-b.reserved)::text available
        FROM rms_inventory.stock_account a JOIN rms_inventory.stock_balance b
          ON b.tenant_id=a.tenant_id AND b.brand_id=a.brand_id AND b.store_id=a.store_id AND b.account_id=a.account_id
        LEFT JOIN rms_inventory.stock_lot l ON l.tenant_id=a.tenant_id AND l.brand_id=a.brand_id AND l.store_id=a.store_id AND l.lot_id=a.lot_id
-       WHERE a.tenant_id=$1 AND a.brand_id=$2 AND a.store_id=$3 AND b.on_hand-b.reserved>0
+       WHERE a.tenant_id=$1 AND a.brand_id=$2 AND a.store_id=$3 AND b.on_hand>0
        ORDER BY a.item_id,a.location_id,a.expiry_date NULLS LAST LIMIT 2000`,
       [scope.tenantReference, scope.brandReference, scope.storeReference],
     )
@@ -149,6 +155,8 @@ export async function listWasteableStock(
     lotCode: row.lot_code === null ? null : String(row.lot_code),
     expiryDate: row.expiry === null ? null : String(row.expiry),
     unitCode: String(row.unit_code),
+    onHand: String(row.on_hand),
+    reserved: String(row.reserved),
     available: String(row.available),
   }));
 }
@@ -169,10 +177,12 @@ export async function postStoreWaste(
     /** WP-2423 Q26: set when the record comes from a Kitchen remake rather than the waste page. */
     readonly source?: StoreWasteSource;
     /**
-     * WP-2423 (2026-10-18): what happens when a line needs more than is available. "Refuse" (the
-     * waste page: staff correct the entry) or "RecordAvailable" (a Kitchen remake: the food is
-     * already gone, so the available part leaves stock and the rest is kept on the record as a
-     * shortfall for the manager to review and count; never lost, never taken from reservations).
+     * WP-2423 (2026-10-18): what happens when a line needs more than stock covers. "Refuse" (the
+     * waste page): a line may take up to what is on hand, even stock open orders hold
+     * (DEC-INV-COUNT-SHORT amendment: what was thrown away is gone; those orders keep their
+     * reservations and become short, shown to the manager); more than on hand is refused for staff
+     * to correct. "RecordAvailable" (a Kitchen remake): the available part leaves stock and the rest
+     * is kept on the record as a shortfall for the manager to review and count.
      */
     readonly whenShort?: "Refuse" | "RecordAvailable";
   },
@@ -208,6 +218,8 @@ export async function postStoreWaste(
   const posted: PostedStoreWasteLine[] = [];
   const shortfalls: StoreWasteShortfall[] = [];
   const recordAvailable = input.whenShort === "RecordAvailable";
+  // Lines that took stock open orders held (the waste page only): kept on the audit record.
+  let heldStockLines = 0;
   for (const line of input.lines) {
     const item = refs.items.get(line.itemReference) as InventoryItemAggregate | undefined;
     const location = refs.locations.get(line.locationReference) as StorageLocation | undefined;
@@ -254,9 +266,13 @@ export async function postStoreWaste(
       account = null;
     }
     const available = account === null ? "0" : addDecimal(account.onHand, "-" + account.reserved);
+    // The waste page may record up to on hand (stock held by open orders included).
+    if (!recordAvailable && isNegative(addDecimal(account?.onHand ?? "0", "-" + line.quantity)))
+      fail("STORE_WASTE_NOT_ENOUGH_STOCK", line.lineReference);
+    if (!recordAvailable && isNegative(addDecimal(available, "-" + line.quantity)))
+      heldStockLines += 1;
     let quantity = line.quantity;
-    if (isNegative(addDecimal(available, "-" + line.quantity))) {
-      if (!recordAvailable) fail("STORE_WASTE_NOT_ENOUGH_STOCK", line.lineReference);
+    if (recordAvailable && isNegative(addDecimal(available, "-" + line.quantity))) {
       quantity = isNegative(available) ? "0" : available;
       const unitCostMinor = costs.get(line.itemReference) ?? null;
       const missingQuantity = addDecimal(line.quantity, "-" + quantity);
@@ -358,6 +374,7 @@ export async function postStoreWaste(
       valueMinor,
       needsReview: record.needsReview,
       ...(shortfalls.length === 0 ? {} : { stockShortfallLines: shortfalls.length }),
+      ...(heldStockLines === 0 ? {} : { heldForOpenOrdersLines: heldStockLines }),
     },
     reasonCode: input.source === undefined ? "STORE_WASTE" : "KITCHEN_REWORK_WASTE",
     correlationId: input.operationReference,

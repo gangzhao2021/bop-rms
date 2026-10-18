@@ -172,6 +172,8 @@ const d = vi.hoisted(() => ({
   shortages: vi.fn(async (): Promise<unknown[]> => []),
   orders: vi.fn(async (): Promise<unknown[]> => []),
   lots: vi.fn(async (): Promise<Map<string, unknown>> => new Map()),
+  load: vi.fn(),
+  moved: vi.fn(async (): Promise<string[]> => []),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
 vi.mock("./merchant-stock-catalog.js", () => ({
@@ -195,6 +197,8 @@ vi.mock("@rms/inventory", async (original) => ({
   listStockCounts: d.list,
   listStoreStockShortages: d.shortages,
   stockLotLabels: d.lots,
+  loadStockCount: d.load,
+  stockCountMovedLines: d.moved,
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<object>()),
@@ -533,5 +537,41 @@ describe("DEC-INV-COUNT-SHORT: counts that leave stock short against open orders
     await expect(f.service.command(f.submit)).rejects.toMatchObject({ code: "Unavailable" });
     d.execute.mockRejectedValueOnce(new StockCountError("STOCK_COUNT_CONFLICT"));
     await expect(f.service.command(f.submit)).rejects.toMatchObject({ code: "Conflict" });
+  });
+});
+describe("v15 2026-10-18 D2: refreshing lines where stock moved", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const counting = (status: string) => ({
+    countReference: id(2),
+    status,
+    assigneeReference: id(10),
+    expectedQuantityVisibility: "BlindUntilSubmit",
+    lines: [{ lineReference: id(60), lotReference: null, balanceVersion: 4 }],
+  });
+  it("offers no refresh on a count just started (no line moved)", async () => {
+    const f = setup();
+    d.load.mockResolvedValue(counting("InProgress"));
+    const view = (await f.service.query({ ...f.input, countReference: id(2), before: null })) as {
+      movedLineReferences: unknown;
+    };
+    expect(view.movedLineReferences).toEqual([]);
+    expect(d.moved).toHaveBeenCalledTimes(1);
+  });
+  it("names the lines whose stock moved while counting, and only while counting", async () => {
+    const f = setup();
+    d.moved.mockResolvedValue([id(60)]);
+    d.load.mockResolvedValue(counting("InProgress"));
+    const view = (await f.service.query({ ...f.input, countReference: id(2), before: null })) as {
+      movedLineReferences: unknown;
+    };
+    expect(view.movedLineReferences).toEqual([id(60)]);
+    d.load.mockResolvedValue(counting("Submitted"));
+    const submitted = (await f.service.query({
+      ...f.input,
+      countReference: id(2),
+      before: null,
+    })) as { movedLineReferences: unknown };
+    expect(submitted.movedLineReferences).toEqual([]);
+    expect(d.moved).toHaveBeenCalledTimes(1);
   });
 });

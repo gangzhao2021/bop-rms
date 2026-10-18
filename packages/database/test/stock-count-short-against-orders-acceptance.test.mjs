@@ -13,6 +13,7 @@ import {
   createPostgresSubmissionStockPlanSource,
   executeStockCountCommand,
   listStoreStockShortages,
+  listWasteableStock,
   parseStoreWasteLines,
   postStoreWaste,
 } from "../../rms/inventory/src/index.ts";
@@ -30,8 +31,9 @@ const sha = (value) =>
  * WP-2423 (2026-10-18) DEC-INV-COUNT-SHORT, on the real ledger under a NOBYPASSRLS role holding
  * exactly the rendered pilot API grants (synthetic Store, item and orders): a physical count lower
  * than what open orders hold is posted and keeps their reservations; the account is listed short
- * against those orders; no new order, waste or adjustment can take the missing stock (application
- * and ledger trigger); the orders can still be made (the part on-hand does not cover is recorded
+ * against those orders; no new order or adjustment can take the missing stock (application and
+ * ledger trigger), while waste up to on hand is recorded and deepens the shortage (2026-10-18
+ * amendment) without touching reservations; the orders can still be made (the part on-hand does not cover is recorded
  * as USED_BEYOND_COUNT, on-hand never negative) or cancelled (released); the ledger balances; and a
  * later count clears the "used beyond the count" notice.
  */
@@ -373,8 +375,10 @@ it("posts a count below what open orders hold, keeps them fulfillable and cancel
         ),
         { code: "STOCK_RESERVATION_INSUFFICIENT" },
       );
-      // Waste cannot take held stock either.
-      await assert.rejects(
+      // DEC-INV-COUNT-SHORT amendment (2026-10-18): what was thrown away is gone, so waste up to
+      // what is on hand is recorded even though open orders hold it (the shortage grows, their
+      // reservations are untouched); more than is on hand is refused.
+      const waste = (quantity) =>
         asApi((client) =>
           postStoreWaste(client, owner, {
             operationReference: next(),
@@ -385,8 +389,8 @@ it("posts a count below what open orders hold, keeps them fulfillable and cancel
                 itemReference: item,
                 locationReference: location,
                 lotReference: null,
-                quantity: "0.1",
-                reasonCode: "SPOILED",
+                quantity,
+                reasonCode: "DROPPED",
                 note: null,
               },
             ]),
@@ -395,15 +399,63 @@ it("posts a count below what open orders hold, keeps them fulfillable and cancel
             auditReference: next(),
             nextReference: next,
           }),
-        ),
-        { code: "STORE_WASTE_NOT_ENOUGH_STOCK" },
+        );
+      // v15 D1: the waste form lists the held item with what is there and what orders hold.
+      assert.deepEqual(
+        (await asApi((client) => listWasteableStock(client, owner))).map((row) => [
+          row.itemReference,
+          row.onHand,
+          row.reserved,
+          row.available,
+        ]),
+        [[item, "0.5", "0.9999", "-0.4999"]],
       );
-      // The ledger itself refuses any movement but a count that lowers availability below zero,
-      // even written past the application (owner connection, row security bypassed).
+      const reservationsBefore = (
+        await admin.query(
+          "SELECT count(*)::int n FROM rms_inventory.stock_reservation_version WHERE account_id=$1",
+          [account],
+        )
+      ).rows[0].n;
+      await assert.rejects(waste("0.5001"), { code: "STORE_WASTE_NOT_ENOUGH_STOCK" });
+      assert.deepEqual(await balance(), { v: 6, h: "0.5", r: "0.9999", a: "-0.4999" });
+      const wasted = await waste("0.1");
+      assert.equal(wasted.status, "Applied");
+      assert.deepEqual(
+        wasted.record.lines.map((line) => line.quantity),
+        ["0.1"],
+      );
+      assert.equal(wasted.record.shortfalls, undefined);
+      assert.deepEqual(await balance(), { v: 7, h: "0.4", r: "0.9999", a: "-0.5999" });
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM rms_inventory.stock_reservation_version WHERE account_id=$1",
+            [account],
+          )
+        ).rows[0].n,
+        reservationsBefore,
+      );
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT after_summary_json FROM platform_audit.audit_record WHERE action_code='INVENTORY_WASTE_RECORDED' AND target_id=$1",
+            [wasted.record.wasteReference],
+          )
+        ).rows.map((row) => row.after_summary_json.heldForOpenOrdersLines),
+        [1],
+      );
+      // The notice follows: short by 0.5999 kg, the same round still holding all 0.9999 kg.
+      assert.deepEqual(
+        (await shortages()).map((s) => [s.onHand, s.reserved, s.shortQuantity, s.holding]),
+        [["0.4", "0.9999", "0.5999", [{ submissionReference: id(40), quantity: "0.9999" }]]],
+      );
+      // The ledger itself refuses any movement but a count or waste that lowers availability below
+      // zero, and waste beyond on hand, even written past the application (owner connection, row
+      // security bypassed).
       const raw = async (movementType, delta, onHandDelta, reservedDelta) => {
         const b = await balance();
         const after = {
-          onHand: String(Number(b.h) + onHandDelta),
+          onHand: String(Number((Number(b.h) + onHandDelta).toFixed(4))),
           reserved: String(Number((Number(b.r) + reservedDelta).toFixed(4))),
         };
         const record = {
@@ -469,16 +521,18 @@ it("posts a count below what open orders hold, keeps them fulfillable and cancel
       };
       for (const [type, delta, onHandDelta, reservedDelta] of [
         ["Reserve", "0.0001", 0, 0.0001],
-        ["Waste", "-0.1", -0.1, 0],
         ["Adjustment", "-0.1", -0.1, 0],
       ])
         await assert.rejects(raw(type, delta, onHandDelta, reservedDelta), {
           code: "23514",
           message: "stock movement would take reserved stock",
         });
-      assert.deepEqual(await balance(), { v: 6, h: "0.5", r: "0.9999", a: "-0.4999" });
+      await assert.rejects(raw("Waste", "-0.5", -0.5, 0), { code: "23514" });
+      // (A raw Waste within on hand is accepted by the ledger; the statement is rolled back.)
+      await raw("Waste", "-0.1", -0.1, 0);
+      assert.deepEqual(await balance(), { v: 7, h: "0.4", r: "0.9999", a: "-0.5999" });
 
-      // The kitchen makes line A: 0.3333 kg is on hand, nothing is used beyond the count.
+      // The kitchen makes line A: 0.4 kg is on hand, nothing is used beyond the count.
       const kitchen = (line, progress, minuteAt) =>
         asApi((client) =>
           createPostgresOrderLineConsumptionStore(runner(client), owner, {
@@ -506,7 +560,7 @@ it("posts a count below what open orders hold, keeps them fulfillable and cancel
           ["Consume", "0.3333", undefined],
         ],
       );
-      assert.deepEqual(await balance(), { v: 7, h: "0.1667", r: "0.6666", a: "-0.4999" });
+      assert.deepEqual(await balance(), { v: 8, h: "0.0667", r: "0.6666", a: "-0.5999" });
 
       // Line B is cancelled before the kitchen starts it: its stock is released.
       const store = (client) => createPostgresStockReservationStore(runner(client), owner);
@@ -519,7 +573,7 @@ it("posts a count below what open orders hold, keeps them fulfillable and cancel
           operationReference,
           accountReference: held.accountReference,
           action: "Release",
-          expectedLedgerVersion: 7,
+          expectedLedgerVersion: 8,
           quantity: "0.3333",
           movementReference: next(),
           reservation: advanceInventoryReservation(held.reservation, {
@@ -541,26 +595,26 @@ it("posts a count below what open orders hold, keeps them fulfillable and cancel
         }),
       );
       assert.equal(released.status, "Applied");
-      assert.deepEqual(await balance(), { v: 8, h: "0.1667", r: "0.3333", a: "-0.1666" });
+      assert.deepEqual(await balance(), { v: 9, h: "0.0667", r: "0.3333", a: "-0.2666" });
 
-      // The kitchen makes line C with more than was counted: 0.1666 kg is recorded as used beyond
+      // The kitchen makes line C with more than was counted: 0.2666 kg is recorded as used beyond
       // the count first, then the line's full 0.3333 kg is consumed. On-hand never goes negative.
       assert.deepEqual(
         (await kitchen(lineC, done, 22)).map((e) => [e.action, e.quantity, e.usedBeyondCount]),
         [
           ["StartProduction", null, undefined],
-          ["Consume", "0.3333", "0.1666"],
+          ["Consume", "0.3333", "0.2666"],
         ],
       );
-      assert.deepEqual(await balance(), { v: 10, h: "0", r: "0", a: "0" });
+      assert.deepEqual(await balance(), { v: 11, h: "0", r: "0", a: "0" });
       assert.deepEqual(
         (
           await admin.query(
-            "SELECT movement_type t,base_quantity_delta::text d,record_json->>'reasonCode' reason,record_json->>'performedBy' actor FROM rms_inventory.stock_movement WHERE account_id=$1 AND ledger_version=9",
+            "SELECT movement_type t,base_quantity_delta::text d,record_json->>'reasonCode' reason,record_json->>'performedBy' actor FROM rms_inventory.stock_movement WHERE account_id=$1 AND ledger_version=10",
             [account],
           )
         ).rows,
-        [{ t: "Adjustment", d: "0.1666", reason: "USED_BEYOND_COUNT", actor: cook }],
+        [{ t: "Adjustment", d: "0.2666", reason: "USED_BEYOND_COUNT", actor: cook }],
       );
       assert.deepEqual(
         (
@@ -574,7 +628,7 @@ it("posts a count below what open orders hold, keeps them fulfillable and cancel
       // No longer short for orders; the stock used beyond the count stays listed for a recount.
       assert.deepEqual(
         (await shortages()).map((s) => [s.shortQuantity, s.usedBeyondCount, s.holding]),
-        [["0", "0.1666", []]],
+        [["0", "0.2666", []]],
       );
 
       // The ledger balances: every on-hand and reserved change is a movement, versions are
@@ -587,7 +641,7 @@ it("posts a count below what open orders hold, keeps them fulfillable and cancel
       ).rows;
       assert.deepEqual(
         movements.map((m) => m.v),
-        [2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
       );
       for (let i = 1; i < movements.length; i++)
         assert.deepEqual(movements[i].r.before, movements[i - 1].r.after);

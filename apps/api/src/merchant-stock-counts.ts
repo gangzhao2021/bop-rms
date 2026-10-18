@@ -12,6 +12,7 @@ import {
   openStockCountAt,
   StockCountError,
   StockCountStaleError,
+  stockCountMovedLines,
   stockLotLabels,
   type LedgerTransaction,
   type StockCountAction,
@@ -475,6 +476,12 @@ export function createMerchantStockCounts(options: {
               people: await people([count.assigneeReference, count.submittedBy, count.approvedBy]),
               count: redactStockCount(count, permissions.mayApprove, scope.actor),
               lots: Object.fromEntries(lots),
+              // v15 2026-10-18 D2: lines "Refresh lines where stock moved" would refresh; the
+              // counter is offered the refresh only when there are some (never on a fresh count).
+              movedLineReferences:
+                count.status === "InProgress"
+                  ? await stockCountMovedLines(ledger(tx), scope.owner, count)
+                  : [],
             };
           }
           const page = await listStockCounts(ledger(tx), scope.owner, {

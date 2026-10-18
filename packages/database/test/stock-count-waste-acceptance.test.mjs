@@ -14,6 +14,7 @@ import {
   postStoreReceipt,
   postStoreWaste,
   reviewStoreWaste,
+  stockCountMovedLines,
   StockCountStaleError,
 } from "../../rms/inventory/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -421,6 +422,10 @@ it("counts blind, explains and posts variances, refreshes moved lines, and recor
       assert.equal(lineOf(current, cream).expectedQuantity, "3");
       assert.notEqual(lineOf(current, cream).lotReference, null);
       await stepThree(counter, "Start");
+      // v15 2026-10-18 D2: a count just started has no moved line, so no refresh is offered.
+      const moved = () => tx((t) => stockCountMovedLines(t, scope, current));
+      assert.deepEqual(await moved(), []);
+      await assert.rejects(stepThree(counter, "Refresh"), { code: "STOCK_COUNT_STATE_CONFLICT" });
       await stepThree(counter, "SaveLine", {
         lineReference: lineOf(current, cream).lineReference,
         countedQuantity: "2",
@@ -448,7 +453,9 @@ it("counts blind, explains and posts variances, refreshes moved lines, and recor
       ]);
       await stepThree(manager, "Reject", { reasonCode: "RECOUNT_REQUIRED" });
       assert.equal(current.status, "InProgress");
+      assert.deepEqual(await moved(), [lineOf(current, cream).lineReference]);
       await stepThree(counter, "Refresh");
+      assert.deepEqual(await moved(), []);
       assert.deepEqual(
         [lineOf(current, cream).expectedQuantity, lineOf(current, cream).countedQuantity],
         ["2", null],

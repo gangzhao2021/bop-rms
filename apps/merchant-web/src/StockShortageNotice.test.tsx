@@ -63,7 +63,7 @@ it("lists items counted short of open orders with those orders, and items used b
       orders: [],
     },
   ]);
-  expect(html).toContain("Counted less than open orders need");
+  expect(html).toContain("Less in stock than open orders need");
   expect(html).toContain("Whole milk (lot TEST-LOT-1017K)</strong> at Bar fridge");
   expect(html).toContain("short by 0.16");
   expect(html).toContain(`href="/operations/orders/${id(10)}"`);

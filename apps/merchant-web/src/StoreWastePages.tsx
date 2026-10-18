@@ -7,6 +7,7 @@ import { newOperationReference } from "./operation-reference.js";
 import {
   StoreWastePageError,
   availableQuantityText,
+  wasteTakesHeldStock,
   centsText,
   parseStoreWasteView,
   unavailableStoreWasteClient,
@@ -24,7 +25,7 @@ const copy: Record<StoreWasteErrorCode | "Loading", string> = {
   NotFound: "This waste record does not exist for the selected Store.",
   Conflict: "This was already recorded. Refresh and check before trying again.",
   NotEnoughStock:
-    "The highlighted line asks for more than the available stock there (stock reserved for orders cannot be wasted).",
+    "The highlighted line asks for more than is in stock there. If the stock figure is wrong, count the item first.",
   AlreadyReviewed: "This record has already been reviewed.",
   NotIndependent: "The person who recorded the waste cannot review it.",
   LineInvalid:
@@ -33,6 +34,21 @@ const copy: Record<StoreWasteErrorCode | "Loading", string> = {
   Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
   Unavailable: "Waste is unavailable.",
 };
+/**
+ * DEC-INV-COUNT-SHORT amendment (2026-10-18): staff see what is physically there and what open
+ * orders hold. Waste up to what is there is recordable; taking held stock leaves those orders short.
+ */
+const stockText = (row: { readonly onHand: string; readonly reserved: string }) =>
+  `${availableQuantityText(row.onHand)} in stock` +
+  (/^0(?:\.0+)?$/u.test(row.reserved)
+    ? ""
+    : `, ${availableQuantityText(row.reserved)} held for open orders`);
+const heldStockNote = (available: string) =>
+  available.startsWith("-")
+    ? "Held for open orders — recording this waste makes the shortage bigger; receive stock or recount."
+    : /^0(?:\.0+)?$/u.test(available)
+      ? "Held for open orders — recording this waste leaves those orders short; receive stock or recount."
+      : `Only ${availableQuantityText(available)} is not held for open orders — recording more leaves those orders short; receive stock or recount.`;
 const reasonText = (code: string) =>
   code === "KITCHEN_REMAKE_OPENED_BY_MISTAKE"
     ? "Remake cancelled — opened by mistake"
@@ -254,10 +270,16 @@ export function StoreWasteFormPage({
         !row ||
         !item ||
         !line.reasonCode ||
-        !wasteQuantityAllowed(line.quantity, item.ledgerPrecision, row.available) ||
+        !wasteQuantityAllowed(line.quantity, item.ledgerPrecision, row.onHand) ||
         (line.reasonCode === "OTHER" && line.note.trim() === "")
       ) {
-        setError({ code: row ? "LineInvalid" : "NotEnoughStock", line: line.lineReference });
+        // A well-formed quantity above what is there is "not enough stock", not an invalid line.
+        const tooMuch =
+          !row ||
+          (item !== undefined &&
+            wasteQuantityAllowed(line.quantity, item.ledgerPrecision, "999999999999") &&
+            !wasteQuantityAllowed(line.quantity, item.ledgerPrecision, row.onHand));
+        setError({ code: tooMuch ? "NotEnoughStock" : "LineInvalid", line: line.lineReference });
         return;
       }
     }
@@ -299,7 +321,9 @@ export function StoreWasteFormPage({
         </div>
         <Link to="/operations/inventory/waste">Waste records</Link>
       </header>
-      {view.stock.length === 0 ? <p>No stock is available to waste in this Store.</p> : null}
+      {view.stock.length === 0 ? (
+        <p>Nothing is in stock in this Store to record as waste.</p>
+      ) : null}
       <form
         className="detail-section"
         onSubmit={(event) => {
@@ -371,15 +395,14 @@ export function StoreWasteFormPage({
                         {row.lotCode}
                         {row.expiryDate
                           ? ` (exp. ${storeDate(row.expiryDate, timeZone)})`
-                          : ""} · {availableQuantityText(row.available)} available
+                          : ""} · {stockText(row)}
                       </option>
                     ))}
                   </select>
                 </label>
               ) : null}
               <label>
-                Quantity ({item?.unitCode})
-                {selected ? ` — ${availableQuantityText(selected.available)} available` : ""}
+                Quantity ({item?.unitCode}){selected ? ` — ${stockText(selected)}` : ""}
                 <input
                   required
                   inputMode="decimal"
@@ -387,6 +410,9 @@ export function StoreWasteFormPage({
                   onChange={(event) => update(index, { quantity: event.currentTarget.value })}
                 />
               </label>
+              {selected && wasteTakesHeldStock(line.quantity, selected.available) ? (
+                <p role="note">{heldStockNote(selected.available)}</p>
+              ) : null}
               <label>
                 Reason
                 <select

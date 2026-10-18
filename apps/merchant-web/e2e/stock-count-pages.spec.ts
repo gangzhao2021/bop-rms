@@ -318,10 +318,10 @@ test("@production a count below what open orders hold posts and lists those orde
   await expect(page.getByText("Posted", { exact: false }).first()).toBeVisible();
   expect(commands).toHaveLength(1);
   expect(commands[0]).toMatchObject({ action: "ApproveAndPost", expectedVersion: 5 });
-  const notice = page.getByRole("region", { name: "Counted less than open orders need" });
+  const notice = page.getByRole("region", { name: "Less in stock than open orders need" });
   await expect(notice).toBeVisible();
   await expect(notice).toContainText(
-    "Whole milk (lot TEST-LOT-1017K) at Bar fridge: 0.1 L counted, 0.26 L held for open orders — short by 0.16 L.",
+    "Whole milk (lot TEST-LOT-1017K) at Bar fridge: 0.1 L in stock, 0.26 L held for open orders — short by 0.16 L.",
   );
   await expect(notice.getByRole("link", { name: "Order 9" })).toHaveAttribute(
     "href",
@@ -334,7 +334,7 @@ test("@production a count below what open orders hold posts and lists those orde
   await page.getByRole("link", { name: "All counts" }).click();
   await expect(page.getByRole("heading", { name: "Stock counts", level: 2 })).toBeVisible();
   await expect(
-    page.getByRole("region", { name: "Counted less than open orders need" }),
+    page.getByRole("region", { name: "Less in stock than open orders need" }),
   ).toContainText("short by 0.16 L");
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -457,4 +457,317 @@ test("@production a count step that fails says nothing changed, not that the cou
   await expect(
     page.getByText("Someone else changed this count meanwhile", { exact: false }),
   ).toBeVisible();
+});
+
+// v15 2026-10-18 D1 (DEC-INV-COUNT-SHORT amendment): milk short against open orders vanished from
+// the waste form, so spilled milk could not be recorded. It is listed with what is there and what
+// orders hold, a plain note, and can be recorded up to what is there.
+test("@production the waste form lists stock held for open orders and records it up to what is there", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/**", (route) =>
+    route.fulfill({ status: 503, json: { error: "unavailable" } }),
+  );
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-18",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "INV-WASTE-RECORD",
+              label: "Waste",
+              href: "/operations/inventory/waste",
+              permission: "inventory.waste.record",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const viewer = id(1),
+    milk = id(20),
+    beans = id(21),
+    fridge = id(30),
+    lot = id(50);
+  const base = {
+    sourceAsOf: "2026-10-18T14:40:00.000Z",
+    viewer,
+    permissions: { mayRecord: true, mayRead: true, mayReview: false },
+    reasons: ["EXPIRED", "SPOILED", "DROPPED", "OTHER"],
+    acceptReasons: ["REVIEWED_OK"],
+    voidReasons: ["ENTERED_IN_ERROR"],
+    reviewThresholdMinor: 2500,
+    items: [
+      {
+        itemReference: milk,
+        name: "Whole milk",
+        unitCode: "L",
+        ledgerPrecision: 3,
+        lotTracking: "Lot",
+      },
+      {
+        itemReference: beans,
+        name: "Coffee beans",
+        unitCode: "KG",
+        ledgerPrecision: 3,
+        lotTracking: "NoLot",
+      },
+    ],
+    locations: [{ locationReference: fridge, name: "Bar fridge" }],
+    stock: [
+      {
+        itemReference: milk,
+        locationReference: fridge,
+        lotReference: lot,
+        lotCode: "TEST-LOT-1017K",
+        expiryDate: null,
+        unitCode: "L",
+        onHand: "0.05",
+        reserved: "0.12",
+        available: "-0.07",
+      },
+      {
+        itemReference: beans,
+        locationReference: fridge,
+        lotReference: null,
+        lotCode: null,
+        expiryDate: null,
+        unitCode: "KG",
+        onHand: "4.3",
+        reserved: "0",
+        available: "4.3",
+      },
+    ],
+    people: { [viewer]: "You" },
+    hasMore: false,
+  };
+  const commands: { lines: { quantity: string; itemReference: string }[] }[] = [];
+  await page.route("**/merchant/supply/waste/command", (route) => {
+    commands.push(route.request().postDataJSON());
+    return route.fulfill({ headers, json: { status: "Applied" } });
+  });
+  await page.route("**/merchant/supply/waste/query", (route) => {
+    const query = route.request().postDataJSON() as { wasteReference: string | null };
+    return route.fulfill({
+      headers,
+      json:
+        query.wasteReference === null
+          ? { screenId: "INV-WASTE-LIST", ...base, records: [] }
+          : {
+              screenId: "INV-WASTE-DETAIL",
+              ...base,
+              records: [
+                {
+                  wasteReference: query.wasteReference,
+                  lines: [
+                    {
+                      lineReference: id(70),
+                      itemReference: milk,
+                      locationReference: fridge,
+                      lotReference: lot,
+                      quantity: "0.05",
+                      reasonCode: "DROPPED",
+                      note: null,
+                      unitCode: "L",
+                      unitCostMinor: 300,
+                      valueMinor: 15,
+                    },
+                  ],
+                  valueMinor: 15,
+                  costUnknown: false,
+                  needsReview: false,
+                  recordedBy: viewer,
+                  recordedAt: "2026-10-18T14:41:00.000Z",
+                  review: null,
+                },
+              ],
+            },
+    });
+  });
+
+  await page.goto("/operations/inventory/waste/new");
+  await expect(page.getByRole("heading", { name: "Record waste", level: 2 })).toBeVisible();
+  const item = page.getByLabel("Item");
+  await expect(item.locator("option", { hasText: "Whole milk (L)" })).toHaveCount(1);
+  await expect(item).toHaveValue(milk);
+  await expect(page.locator("label", { hasText: "Quantity (L)" })).toContainText(
+    "— 0.05 in stock, 0.12 held for open orders",
+  );
+  const note = page.getByRole("note");
+  await expect(note).toHaveText(
+    "Held for open orders — recording this waste makes the shortage bigger; receive stock or recount.",
+  );
+  await page.getByLabel(/^Quantity/u).fill("0.06");
+  await page.getByLabel("Reason").selectOption("DROPPED");
+  await page.getByRole("button", { name: "Record waste" }).click();
+  await expect(
+    page.getByText("asks for more than is in stock there", { exact: false }),
+  ).toBeVisible();
+  expect(commands).toHaveLength(0);
+  await page.getByLabel(/^Quantity/u).fill("0.05");
+  await page.getByRole("button", { name: "Record waste" }).click();
+  await expect(page).toHaveURL(/\/operations\/inventory\/waste\/[0-9a-f-]{36}$/u);
+  expect(commands).toHaveLength(1);
+  expect(commands[0]?.lines.map((line) => [line.itemReference, line.quantity])).toEqual([
+    [milk, "0.05"],
+  ]);
+
+  // Stock nobody holds carries no note.
+  await page.goto("/operations/inventory/waste/new");
+  await page.getByLabel("Item").selectOption(beans);
+  await expect(page.locator("label", { hasText: "Quantity (KG)" })).toContainText("— 4.3 in stock");
+  await expect(page.locator("label", { hasText: "Quantity (KG)" })).not.toContainText("held");
+  await expect(page.getByRole("note")).toHaveCount(0);
+  await expectNoInternalText(page);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  }
+});
+
+// v15 2026-10-18 D2: "Refresh lines where stock moved" on a count just started was refused with
+// "This step is not possible in the count's current state". It is offered only when stock moved.
+test("@production a count offers the refresh only when stock moved on its lines", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/**", (route) =>
+    route.fulfill({ status: 503, json: { error: "unavailable" } }),
+  );
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-18",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "INV-COUNT-LIST",
+              label: "Stock counts",
+              href: "/operations/inventory/counts",
+              permission: "inventory.count.read",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const viewer = id(1),
+    line = id(60);
+  let moved: string[] = [];
+  let version = 3;
+  const commands: { action: string; expectedVersion: number }[] = [];
+  await page.route("**/merchant/supply/counts/command", (route) => {
+    commands.push(route.request().postDataJSON());
+    moved = [];
+    version += 1;
+    return route.fulfill({ headers, json: { status: "Applied", version } });
+  });
+  await page.route("**/merchant/supply/counts/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "INV-COUNT-WORKBENCH",
+        sourceAsOf: "2026-10-18T14:30:00.000Z",
+        viewer,
+        permissions: { mayCreate: true, mayCount: true, mayApprove: false },
+        varianceReasons: ["THEFT_OR_LOSS"],
+        items: [
+          {
+            itemReference: id(20),
+            internalCode: "MILK-2",
+            name: "Whole milk",
+            unitCode: "L",
+            ledgerPrecision: 3,
+          },
+        ],
+        locations: [{ locationReference: id(30), code: "FRIDGE-1", name: "Bar fridge" }],
+        staff: [{ actorReference: viewer, label: "You" }],
+        shortages: [],
+        lots: {},
+        movedLineReferences: moved,
+        count: {
+          countReference: id(40),
+          stockScope: { scopeType: "Location", scopeReference: id(30) },
+          countType: "Spot",
+          status: "InProgress",
+          assigneeReference: viewer,
+          submittedBy: null,
+          approvedBy: null,
+          aggregateVersion: version,
+          createdAt: "2026-10-18T14:20:00.000Z",
+          updatedAt: "2026-10-18T14:21:00.000Z",
+          lines: [
+            {
+              lineReference: line,
+              itemReference: id(20),
+              lotReference: null,
+              locationReference: id(30),
+              unitCode: "L",
+              expectedQuantity: null,
+              countedQuantity: null,
+              variance: null,
+              varianceReasonCode: null,
+              recountNumber: 0,
+              movementReference: null,
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const refresh = page.getByRole("button", { name: "Refresh lines where stock moved" });
+  await page.goto(`/operations/inventory/counts/${id(40)}`);
+  await expect(page.getByRole("heading", { name: "Count · Bar fridge", level: 2 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save counts" })).toBeVisible();
+  await expect(refresh).toHaveCount(0);
+  await expect(page.getByText("stock moved", { exact: false })).toHaveCount(0);
+
+  // A sale used milk while counting: the line is marked and the refresh is offered.
+  moved = [line];
+  await page.reload();
+  await expect(page.getByRole("note")).toHaveText(
+    "Stock moved on 1 line since counting started (sales, deliveries or waste). Refresh them and count them again.",
+  );
+  await expect(page.getByRole("cell", { name: "Whole milk · stock moved" })).toBeVisible();
+  await refresh.click();
+  await expect(refresh).toHaveCount(0);
+  expect(commands).toEqual([expect.objectContaining({ action: "Refresh", expectedVersion: 3 })]);
+  await expect(page.getByText("not possible in the count's current state")).toHaveCount(0);
+  await expectNoInternalText(page);
 });

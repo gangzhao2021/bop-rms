@@ -124,6 +124,11 @@ export interface StockCountWorkbenchView extends Base {
   readonly lots: Readonly<
     Record<string, { readonly lotCode: string; readonly expiryDate: string | null }>
   >;
+  /**
+   * v15 2026-10-18 D2: lines (of a count being counted) whose stock moved after their snapshot;
+   * "Refresh lines where stock moved" is offered only when there are some.
+   */
+  readonly movedLineReferences?: readonly string[];
 }
 export type StockCountCommand =
   | {

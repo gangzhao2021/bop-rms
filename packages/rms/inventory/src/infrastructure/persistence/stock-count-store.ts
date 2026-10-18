@@ -437,6 +437,39 @@ export async function openStockCountAt(
 }
 export { loadCount as loadStockCount };
 
+/**
+ * WP-2423 (v15 2026-10-18 D2): the lines of a count whose stock account moved (sales, receipts,
+ * waste) after the line's snapshot — exactly what "Refresh lines where stock moved" would refresh.
+ * A line without an account is unchanged until one is opened and moves, as in the Refresh command.
+ * Read only; reveals no quantities (blind counting). Empty for a count just started.
+ */
+export async function stockCountMovedLines(
+  tx: LedgerTransaction,
+  scope: StockCountScope,
+  count: StockCountAggregate,
+): Promise<readonly string[]> {
+  if (count.lines.length === 0) return [];
+  await scoped(tx, scope);
+  const lines = count.lines.map((line) => ({
+    line: line.lineReference,
+    item: line.itemReference,
+    lot: line.lotReference,
+    location: line.locationReference,
+    version: line.balanceVersion,
+  }));
+  return (
+    await tx.query(
+      `SELECT l.line FROM jsonb_to_recordset($4::jsonb) AS l(line text,item uuid,lot uuid,location uuid,version bigint)
+       JOIN rms_inventory.stock_account a ON a.tenant_id=$1 AND a.brand_id=$2 AND a.store_id=$3
+         AND a.location_id=l.location AND a.item_id=l.item AND a.lot_id IS NOT DISTINCT FROM l.lot
+       JOIN rms_inventory.stock_balance b
+         ON b.tenant_id=a.tenant_id AND b.brand_id=a.brand_id AND b.store_id=a.store_id AND b.account_id=a.account_id
+       WHERE b.ledger_version<>l.version ORDER BY l.line`,
+      [scope.tenantReference, scope.brandReference, scope.storeReference, JSON.stringify(lines)],
+    )
+  ).rows.map((row) => String(row.line));
+}
+
 /** Printed lot codes and expiry dates of the Store's lots, for count sheets. */
 export async function stockLotLabels(
   tx: LedgerTransaction,

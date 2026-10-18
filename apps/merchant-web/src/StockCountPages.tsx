@@ -105,7 +105,8 @@ export function staffName(
 const quantityText = (quantity: string, unitCode: string) => `${quantity} ${unitText(unitCode)}`;
 /**
  * DEC-INV-COUNT-SHORT (2026-10-18): what a manager acts on after a count. A count is posted even
- * when it finds less than open orders already hold; those orders keep their ingredients and are
+ * when it finds less than open orders already hold (and waste up to what is there is recorded, the
+ * 2026-10-18 amendment); those orders keep their ingredients and are
  * listed here so staff can get more stock, make them with what is there, or cancel them. Items the
  * kitchen then used beyond the count are listed until they are counted again.
  */
@@ -132,18 +133,19 @@ export function StockShortageNotice({
     <section className="detail-section" aria-labelledby="stock-shortage-heading">
       {short.length > 0 ? (
         <>
-          <h3 id="stock-shortage-heading">Counted less than open orders need</h3>
+          <h3 id="stock-shortage-heading">Less in stock than open orders need</h3>
           <p>
-            These orders were taken before the count and keep their ingredients. New orders
-            can&apos;t use these items until it is fixed. For each order: get more and record the
-            delivery under <Link to="/operations/receiving/new">Receiving</Link>, make it with what
-            you have and count the item again afterwards, or cancel it (the guest is refunded).
+            These orders were taken before stock ran short (a count found less, or waste was
+            recorded) and keep their ingredients. New orders can&apos;t use these items until it is
+            fixed. For each order: get more and record the delivery under{" "}
+            <Link to="/operations/receiving/new">Receiving</Link>, make it with what you have and
+            count the item again afterwards, or cancel it (the guest is refunded).
           </p>
           <ul>
             {short.map((entry) => (
               <li key={`${entry.itemReference}:${entry.locationReference}:${entry.lotCode ?? ""}`}>
                 <strong>{name(entry)}</strong> at {place(entry)}:{" "}
-                {quantityText(entry.onHand, entry.unitCode)} counted,{" "}
+                {quantityText(entry.onHand, entry.unitCode)} in stock,{" "}
                 {quantityText(entry.reserved, entry.unitCode)} held for open orders —{" "}
                 <strong>short by {quantityText(entry.shortQuantity, entry.unitCode)}</strong>.
                 {entry.orders.length > 0 ? (
@@ -437,6 +439,9 @@ export function StockCountWorkbenchPage({
     );
   };
   const counted = count.lines.filter((line) => line.countedQuantity !== null).length;
+  // v15 2026-10-18 D2: only lines whose stock moved since their snapshot can be refreshed; a count
+  // just started has none, so the refresh is not offered (it used to answer "not possible").
+  const moved = new Set(counting ? (view.movedLineReferences ?? []) : []);
   return (
     <AppFrame title={`Count · ${location}`} description="Stock count">
       <header className="screen-heading">
@@ -489,7 +494,10 @@ export function StockCountWorkbenchPage({
                 aria-invalid={flagged}
                 style={flagged ? { outline: "2px solid #b42318" } : undefined}
               >
-                <td>{item?.name ?? "Item"}</td>
+                <td>
+                  {item?.name ?? "Item"}
+                  {moved.has(line.lineReference) ? " · stock moved" : ""}
+                </td>
                 <td>
                   {lot ? (
                     <>
@@ -580,9 +588,17 @@ export function StockCountWorkbenchPage({
           >
             Submit for review
           </button>{" "}
-          <button disabled={busy} onClick={() => void run([base("Refresh")])}>
-            Refresh lines where stock moved
-          </button>
+          {moved.size > 0 ? (
+            <button disabled={busy} onClick={() => void run([base("Refresh")])}>
+              Refresh lines where stock moved
+            </button>
+          ) : null}
+        </p>
+      ) : null}
+      {counting && moved.size > 0 ? (
+        <p role="note">
+          Stock moved on {moved.size === 1 ? "1 line" : `${moved.size} lines`} since counting
+          started (sales, deliveries or waste). Refresh them and count them again.
         </p>
       ) : null}
       {reviewing ? (
