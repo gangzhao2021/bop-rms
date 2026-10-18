@@ -87,6 +87,20 @@ const plainText = (value, min, max) =>
   // eslint-disable-next-line no-control-regex
   !/[\u0000-\u001f\u007f]/u.test(value);
 
+/**
+ * The operating-system account that runs the renewal. The pilot image runs as the host owner's
+ * numeric uid (compose `user:`), which has no passwd entry there; it is then recorded as `uid:<n>`.
+ */
+export function operatorAccountName(read = userInfo) {
+  try {
+    const name = read().username;
+    if (typeof name === "string" && name.length > 0) return name;
+  } catch {
+    // No passwd entry for this uid (container); fall through to the numeric account.
+  }
+  return "uid:" + process.getuid();
+}
+
 async function privateDirectory(directory) {
   if (typeof directory !== "string" || !isAbsolute(directory))
     return unavailable("directory-not-absolute");
@@ -409,7 +423,7 @@ export async function renewInternalTestInstallation({
     );
     // Validates the files before the database is touched.
     planRenewal({ artefacts, current, until, now });
-    const operatorAccount = userInfo().username;
+    const operatorAccount = operatorAccountName();
     // Database first: it commits only when the product read paths accept the renewed facts, and
     // a repeated run reports it AlreadyRenewed, so the files below always follow the database.
     const databaseRenewal = await renewDatabase({
@@ -633,9 +647,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(JSON.stringify({ ...result, databaseArtefactsNotRenewed: undefined }));
   } catch (error) {
     const reason = typeof error?.reason === "string" ? error.reason : "unexpected-error";
+    // Only a fixed error code (never a message, which may carry connection details).
+    const code =
+      reason === "unexpected-error" &&
+      typeof error?.code === "string" &&
+      /^[A-Z][A-Z0-9_]{1,63}$/u.test(error.code)
+        ? " " + error.code
+        : "";
     console.error(
       "PILOT_INTERNAL_TEST_RENEWAL_UNAVAILABLE (" +
         reason +
+        code +
         "): requires development mode, an owner-only InternalTest runtime with the expected database, synthetic DEMO identities only, a common expiry and --until at most 30 days ahead." +
         (error?.replaced > 0
           ? ` ${error.replaced} file(s) were already renewed (previous copies in ${error.record}/); run the same command again to finish.`

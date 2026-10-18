@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import {
+  operatorAccountName,
   parseRenewalArguments,
   renewInternalTestInstallation,
 } from "./pilot-internal-test-renew.mjs";
@@ -377,6 +378,17 @@ test("refuses outside development mode and for a file that is not owner-only", a
   await expect(renewInternalTestInstallation(options())).rejects.toMatchObject({
     reason: "file-not-0600",
   });
+});
+
+test("the operator account falls back to the numeric uid without a passwd entry (pilot image)", () => {
+  expect(operatorAccountName(() => ({ username: "owner" }))).toBe("owner");
+  const missing = () => {
+    const error = new Error("uv_os_get_passwd returned ENOENT");
+    error.code = "ERR_SYSTEM_ERROR";
+    throw error;
+  };
+  expect(operatorAccountName(missing)).toBe("uid:" + process.getuid());
+  expect(operatorAccountName(() => ({ username: "" }))).toBe("uid:" + process.getuid());
 });
 
 test("argument parsing needs every flag once", () => {

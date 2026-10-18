@@ -1861,20 +1861,29 @@ version until they restart: run the renewal inside a planned update window.
 
 1. Get the Owner's approval for the new end date and the reason, in writing (2026-10-18:
    "批准，续到 11 月 14 日（推荐）").
-2. Preview, from the repository root on the host, as the owner of the runtime directory. The
-   dry run performs the database part in a transaction and rolls it back, so it shows exactly
-   what would change and the before/after checks; nothing is written:
+2. Preview, from the repository root on the host, in a one-off pilot container (the way the
+   pilot runs: as the runtime owner's uid, with the runtime and migration environment paths the
+   container sees under `/app/.local`; the host paths do not work because the environment
+   file's password path is relative to the container's `/app`). The dry run performs the
+   database part in a transaction and rolls it back, so it shows exactly what would change and
+   the before/after checks; nothing is written:
 
    ```bash
-   source .local/activate.sh
-   NODE_ENV=development node --import ./tooling/environment/register-workspace-typescript.mjs \
+   PILOT_UID=$(id -u) PILOT_GID=$(id -g) PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 \
+     PILOT_OFFSITE_DIR=$HOME/bop-rms-pilot-offsite \
+     docker compose -f compose.pilot.yaml run --rm --no-deps -T -e NODE_ENV=development pilot \
+     node --import ./tooling/environment/register-workspace-typescript.mjs \
      tooling/environment/pilot-internal-test-renew.mjs \
-     "$PWD/.local/pilot-runtime/pilot-v15" --database bop_rms_pilot_v15 \
-     --migration-env .local/pilot-runtime/migrate-v14/migrate-v15.env \
+     /app/.local/pilot-v15 --database bop_rms_pilot_v15 \
+     --migration-env .local/migrate-v14/migrate-v15.env \
      --until 2026-11-14T02:26:31.598Z \
      --reason "Continue internal testing until 14 November" --approved-by "Owner" \
      --approval "批准，续到 11 月 14 日（推荐）" --dry-run
    ```
+
+   The image must contain the renewal tooling of the deployed revision (an image built before
+   the `uid:<n>` operator fallback stops with `unexpected-error ERR_SYSTEM_ERROR`). The
+   container has no account name for the host uid, so the record names the operator `uid:<n>`.
 
    `--migration-env` is the migration environment file of the database (it must name
    `--database`). It lists each database change (row, old → new end, version), the checks one
