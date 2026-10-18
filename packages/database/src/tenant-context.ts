@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from "pg";
+import { snapshotReadBegin } from "./snapshot-read.js";
 
 export const tenantContextDatabaseErrorCodes = [
   "TENANT_DATABASE_SCOPE_INVALID",
@@ -143,6 +144,8 @@ export async function withTenantContextTransaction<T>(
   pool: Pick<Pool, "connect">,
   scopeInput: TenantDatabaseScope,
   callback: (client: PoolClient) => Promise<T>,
+  /** WP-2423: "Snapshot" begins one REPEATABLE READ, READ ONLY transaction (see snapshot-read). */
+  mode: "ReadWrite" | "Snapshot" = "ReadWrite",
 ): Promise<T> {
   const scope = readScope(scopeInput);
   let client: PoolClient;
@@ -167,7 +170,7 @@ export async function withTenantContextTransaction<T>(
   let primaryError: unknown;
   let failed = false;
   try {
-    await client.query("BEGIN");
+    await client.query(mode === "Snapshot" ? snapshotReadBegin : "BEGIN");
     began = true;
     await client.query("SELECT set_config('bop.brand_id', $1, true)", [scope.brandId]);
     await client.query("SELECT set_config('bop.store_id', $1, true)", [scope.storeId]);

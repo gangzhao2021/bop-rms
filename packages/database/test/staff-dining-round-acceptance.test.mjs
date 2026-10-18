@@ -88,6 +88,8 @@ import { createInternalCompensationIdentity } from "../../../tooling/environment
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { createTransactionStatementMemo } from "../src/transaction-statement-memo.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { snapshotBegin } from "../test-support/snapshot-read-runner.mjs";
+import { snapshotReadStatement } from "../src/snapshot-read.ts";
 import { seedAcceptanceOrderHistory } from "../test-support/acceptance-order-history.mjs";
 import { seedAdditionalDiningGuest } from "../test-support/additional-dining-guest.mjs";
 import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
@@ -233,11 +235,11 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
 
       /** One restricted-role transaction on its own connection (the pilot API's grants). */
       const transactions = ({ guc = false } = {}) => ({
-        async run(work) {
+        async run(work, snapshot = false) {
           const client = new Client(context.clientConfig);
           await client.connect();
           try {
-            await client.query("BEGIN");
+            await client.query(snapshot ? snapshotBegin : "BEGIN");
             await client.query("SET LOCAL ROLE " + api);
             await client.query("SET LOCAL lock_timeout='10s'");
             await client.query("SET LOCAL statement_timeout='20s'");
@@ -259,8 +261,15 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
             );
             let pending = 0;
             const result = await work({
-              query: async (sql, values) => {
+              query: async (written, values) => {
                 const list = values === undefined ? [] : [...values];
+                // WP-2423: a snapshot read runs the pilot's statement rules (snapshot-read).
+                let sql = written;
+                if (snapshot) {
+                  const planned = snapshotReadStatement(written);
+                  if (planned.kind === "Answer") return planned.result;
+                  sql = planned.sql;
+                }
                 const answered = pending === 0 ? memo.answer(sql, list) : null;
                 if (answered !== null) return answered;
                 restricted.statements += 1;
@@ -285,6 +294,10 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
           } finally {
             await client.end();
           }
+        },
+        /** WP-2423: polled merchant reads (Orders) run as the pilot's snapshot read. */
+        runSnapshot(work) {
+          return this.run(work, true);
         },
       });
       const ownerRunner = () => ({

@@ -58,6 +58,7 @@ import { createPaymentCompensationComposition } from "../../../apps/api/src/paym
 import { createInternalCompensationIdentity } from "../../../tooling/environment/pilot-compensation-identity.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { snapshotBegin, snapshotQuery } from "../test-support/snapshot-read-runner.mjs";
 import { ensureSyntheticStockPlace } from "../test-support/stock-place.mjs";
 import { seedOrdinaryRefundStorePublication } from "../test-support/ordinary-refund-store-publication.mjs";
 import { seedStaffItemCancellationQuote } from "../test-support/staff-item-cancellation-pricing.mjs";
@@ -163,11 +164,11 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
       /** One restricted-role transaction on its own connection; optional pause before COMMIT. */
       function transactions({ guc = true, beforeCommit = null } = {}) {
         return {
-          async run(work) {
+          async run(work, snapshot = false) {
             const client = new Client(context.clientConfig);
             await client.connect();
             try {
-              await client.query("BEGIN");
+              await client.query(snapshot ? snapshotBegin : "BEGIN");
               await client.query("SET LOCAL ROLE " + role);
               await client.query("SET LOCAL lock_timeout='10s'");
               await client.query("SET LOCAL statement_timeout='20s'");
@@ -176,9 +177,9 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
                   "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
                   [tenant, brand, store],
                 );
-              const tx = {
-                query: (sql, values) => client.query(sql, values === undefined ? [] : [...values]),
-              };
+              const send = (sql, values) =>
+                client.query(sql, values === undefined ? [] : [...values]);
+              const tx = { query: snapshot ? snapshotQuery(send) : send };
               const result = await work(tx);
               if (beforeCommit) await beforeCommit();
               await client.query("COMMIT");
@@ -189,6 +190,10 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
             } finally {
               await client.end();
             }
+          },
+          /** WP-2423: polled merchant reads (the pickup queue) run as the pilot's snapshot read. */
+          runSnapshot(work) {
+            return this.run(work, true);
           },
         };
       }
@@ -2049,6 +2054,30 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         assert.equal(applied.status, "Applied");
         assert.equal(applied.effect.operation.phaseAfter, "Ready");
         assert.equal(applied.effect.operation.aggregateVersionAfter, 3n);
+        // WP-2423 (v15 2026-10-18): the pickup screen's queue is a snapshot read (no Order fence
+        // or pickup lock) running the pilot's current-source check over the real Ordering source:
+        // the pickup is listed Ready with line A only; the cancelled line B is not handed over.
+        const queued = await transactions().runSnapshot((tx) =>
+          createPostgresFulfillmentReadinessStore({
+            ...readinessOptions,
+            authorizeQueue: async () => true,
+          }).listPickupQueue({
+            transaction: tx,
+            afterFulfillmentReference: null,
+            limit: 50,
+            includeCompleted: false,
+          }),
+        );
+        assert.deepEqual(
+          queued.items.map((item) => String(item.fulfillmentReference)),
+          [String(fulfillment.fulfillmentReference)],
+        );
+        assert.equal(queued.items[0].phase, "Ready");
+        assert.equal(queued.items[0].items.length, 1);
+        assert.equal(
+          queued.items[0].items[0].readyQuantity,
+          queued.items[0].items[0].orderedQuantity,
+        );
 
         // fulfillment.internal-pickup-proof: the guest's pickup code is issued.
         const credentials = createPickupCredentialProvider([

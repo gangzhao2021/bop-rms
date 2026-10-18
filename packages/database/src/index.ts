@@ -45,6 +45,11 @@ export {
   type DatabaseTransaction,
   type DatabaseTransactionRunner,
 } from "./transaction-runner.ts";
+export {
+  snapshotReadBegin,
+  snapshotReadStatement,
+  type SnapshotReadStatement,
+} from "./snapshot-read.ts";
 
 export {
   createAbuseBudgetConsumer,

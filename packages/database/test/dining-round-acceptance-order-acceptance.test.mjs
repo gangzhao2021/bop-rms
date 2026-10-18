@@ -37,6 +37,7 @@ import { createOrderPaidOutcomeSource } from "../../../apps/api/src/order-paid-o
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { createInternalMerchantAcceptance } from "../../../tooling/environment/pilot-merchant-acceptance.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { snapshotBegin, snapshotQuery } from "../test-support/snapshot-read-runner.mjs";
 import { seedAcceptanceOrderHistory } from "../test-support/acceptance-order-history.mjs";
 import { seedAdditionalDiningGuest } from "../test-support/additional-dining-guest.mjs";
 import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
@@ -142,20 +143,19 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
           const queryCount = { value: 0 };
           /** One restricted-role transaction on its own connection (the pilot's grants). */
           const transactions = (role = api) => ({
-            async run(work) {
+            async run(work, snapshot = false) {
               const client = new Client(context.clientConfig);
               await client.connect();
               try {
-                await client.query("BEGIN");
+                await client.query(snapshot ? snapshotBegin : "BEGIN");
                 await client.query("SET LOCAL ROLE " + role);
                 await client.query("SET LOCAL lock_timeout='10s'");
                 await client.query("SET LOCAL statement_timeout='20s'");
-                const result = await work({
-                  query: (sql, values) => {
-                    queryCount.value += 1;
-                    return client.query(sql, values === undefined ? [] : values);
-                  },
-                });
+                const send = (sql, values) => {
+                  queryCount.value += 1;
+                  return client.query(sql, values === undefined ? [] : values);
+                };
+                const result = await work({ query: snapshot ? snapshotQuery(send) : send });
                 await client.query("COMMIT");
                 return result;
               } catch (error) {
@@ -164,6 +164,10 @@ it.each(["Unpaid", "Cancelled", "PaidFirst"])(
               } finally {
                 await client.end();
               }
+            },
+            /** WP-2423: polled merchant reads (Orders) run as the pilot's snapshot read. */
+            runSnapshot(work) {
+              return this.run(work, true);
             },
           });
           const ownerRunner = () => ({

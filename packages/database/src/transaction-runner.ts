@@ -6,6 +6,7 @@ import {
   type TenantDatabaseScope,
 } from "./tenant-context.js";
 import { createTransactionStatementMemo } from "./transaction-statement-memo.js";
+import { snapshotReadStatement } from "./snapshot-read.js";
 
 const retryableSqlStates: ReadonlySet<string> = new Set(["55P03", "40001", "40P01"]);
 function sqlState(error: unknown): string {
@@ -58,6 +59,12 @@ export interface DatabaseTransaction {
 }
 export interface DatabaseTransactionRunner {
   run<T>(action: (transaction: DatabaseTransaction) => Promise<T>): Promise<T>;
+  /**
+   * WP-2423: a list or detail read staff screens poll. One REPEATABLE READ, READ ONLY snapshot;
+   * advisory/table locks are answered locally and row-locking clauses dropped (snapshot-read), so
+   * it never waits for, or holds up, a command or another read. It cannot write.
+   */
+  runSnapshot<T>(action: (transaction: DatabaseTransaction) => Promise<T>): Promise<T>;
 }
 
 export function createTenantTransactionRunner(
@@ -79,9 +86,14 @@ export function createTenantTransactionRunner(
   const fixedScope = Object.freeze(
     Object.defineProperties({}, Object.getOwnPropertyDescriptors(scope)),
   ) as TenantDatabaseScope;
-  return Object.freeze<DatabaseTransactionRunner>({
-    run: (action) =>
-      withTenantContextTransaction(pool, fixedScope, async (client) => {
+  const execute = <T>(
+    mode: "ReadWrite" | "Snapshot",
+    action: (transaction: DatabaseTransaction) => Promise<T>,
+  ): Promise<T> =>
+    withTenantContextTransaction(
+      pool,
+      fixedScope,
+      async (client) => {
         try {
           // One round trip for the three limits (a parameterless multi-statement simple query).
           await client.query(transactionLimits);
@@ -120,14 +132,20 @@ export function createTenantTransactionRunner(
                     "TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY",
                   );
                 }
+                let statement = sql;
+                if (mode === "Snapshot") {
+                  const planned = snapshotReadStatement(sql);
+                  if (planned.kind === "Answer") return planned.result;
+                  statement = planned.sql;
+                }
                 if (pending === 0) {
-                  const answered = memo.answer(sql, values);
+                  const answered = memo.answer(statement, values);
                   if (answered !== null) return answered;
                 }
                 pending += 1;
                 try {
-                  const result = await client.query(sql, [...values]);
-                  memo.observe(sql, values);
+                  const result = await client.query(statement, [...values]);
+                  memo.observe(statement, values);
                   return result;
                 } catch (error) {
                   memo.forget();
@@ -182,6 +200,11 @@ export function createTenantTransactionRunner(
         } finally {
           active = false;
         }
-      }),
+      },
+      mode,
+    );
+  return Object.freeze<DatabaseTransactionRunner>({
+    run: (action) => execute("ReadWrite", action),
+    runSnapshot: (action) => execute("Snapshot", action),
   });
 }

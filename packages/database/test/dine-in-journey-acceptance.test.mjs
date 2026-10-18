@@ -95,6 +95,8 @@ import { standardRefundRoleMapping } from "../../../tooling/environment/pilot-re
 import { exerciseReceiptTemplate } from "../test-support/receipt-template.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { snapshotBegin } from "../test-support/snapshot-read-runner.mjs";
+import { snapshotReadStatement } from "../src/snapshot-read.ts";
 import { seedAcceptanceOrderHistory } from "../test-support/acceptance-order-history.mjs";
 import { seedAdditionalDiningGuest } from "../test-support/additional-dining-guest.mjs";
 import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
@@ -213,11 +215,11 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
        */
       function transactions(role = api, { guc = false, before = null, rollback = false } = {}) {
         return {
-          async run(work) {
+          async run(work, snapshot = false) {
             const client = new Client(context.clientConfig);
             await client.connect();
             try {
-              await client.query("BEGIN");
+              await client.query(snapshot ? snapshotBegin : "BEGIN");
               // Test-only: owner-side facts changed inside this transaction only (rolled back).
               if (before !== null) await before(client);
               await client.query("SET LOCAL ROLE " + role);
@@ -231,7 +233,14 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
               // Same rule as the application runner: one query at a time per transaction.
               let inFlight = 0;
               const result = await work({
-                query: async (sql, values) => {
+                query: async (written, values) => {
+                  // WP-2423: a snapshot read runs the pilot's statement rules (snapshot-read).
+                  let sql = written;
+                  if (snapshot) {
+                    const planned = snapshotReadStatement(written);
+                    if (planned.kind === "Answer") return planned.result;
+                    sql = planned.sql;
+                  }
                   if (inFlight > 0)
                     throw Object.assign(new Error("concurrent query"), {
                       code: "TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY",
@@ -253,6 +262,10 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
             } finally {
               await client.end();
             }
+          },
+          /** WP-2423: polled merchant reads (Orders, pickups) run as the pilot's snapshot read. */
+          runSnapshot(work) {
+            return this.run(work, true);
           },
         };
       }

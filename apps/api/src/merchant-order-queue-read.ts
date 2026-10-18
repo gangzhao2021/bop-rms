@@ -183,6 +183,9 @@ export function createMerchantOrderQueueRead(options: {
       // pickup queue too). Fenced one by one in list order (newest first), this read deadlocked
       // with the pickup queue fencing the same two Orders oldest first. Re-entrant: each Order's
       // readers below take the fence again. The list keeps its order.
+      // The pilot runs this read as a snapshot read (55P03, same day), where these fences and the
+      // readers' row locks are answered locally: one snapshot of every owner, no lock held. They
+      // remain for a composition that runs it as an ordinary transaction.
       for (const orderReference of [...new Set(listed.map(({ item }) => item.orderReference))]
         .map(String)
         .sort())

@@ -42,7 +42,10 @@ import {
   staffOrderCancellationPermission,
   type StaffOrderRefundStatus,
 } from "./merchant-order-staff-cancellation.js";
-import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import {
+  runMerchantSnapshotRead,
+  type PersistentMerchantBffOptions,
+} from "./persistent-merchant-bff.js";
 import { readItemCancellationRefund } from "./merchant-order-item-staff-cancellation.js";
 import { readCustomerReceiptFinancial } from "./customer-receipt-financial.js";
 import {
@@ -89,7 +92,10 @@ export function createPersistentMerchantOrderQueue(options: {
     const unavailable = (): never => {
       throw new Error("MERCHANT_ORDER_QUEUE_UNAVAILABLE");
     };
-    const view = await source.transactions.run((transaction) =>
+    // WP-2423 (v15 2026-10-18, 55P03): Orders, its detail and Home's count are polled by every
+    // staff screen. They read one snapshot of every owner and take no Order fence or row lock, so
+    // they neither queue behind each other nor hold up staff commands (snapshot-read).
+    const view = await runMerchantSnapshotRead(source.transactions, (transaction) =>
       // WP-2423: the caller (Session, Store, ordering.operate) is resolved in full at the start of
       // the transaction and once more before the reply. The owner reads in between (several per
       // order) only confirm they run in this authorized transaction; re-resolving the scope in

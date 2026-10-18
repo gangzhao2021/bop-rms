@@ -19,7 +19,10 @@ import {
   type MerchantTransactionAuthority,
 } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
-import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import {
+  runMerchantSnapshotRead,
+  type PersistentMerchantBffOptions,
+} from "./persistent-merchant-bff.js";
 type StoreOptions = Parameters<typeof createPostgresFulfillmentReadinessStore>[0];
 function invalid(): never {
   throw new FulfillmentReadinessError("FULFILLMENT_READINESS_INPUT_INVALID");
@@ -76,7 +79,10 @@ export function createMerchantPickupQuery(options: {
     const denied = (): never => {
       throw new FulfillmentReadinessError("FULFILLMENT_READINESS_PERMISSION_DENIED");
     };
-    return options.persistence.transactions.run((transaction) =>
+    // WP-2423 (v15 2026-10-18, 55P03): the pickup queue is polled by every pickup screen; it reads
+    // one snapshot and takes no Order fence or pickup lock, so it never waits for or holds up a
+    // handoff, a cancellation or another screen's read (snapshot-read).
+    return runMerchantSnapshotRead(options.persistence.transactions, (transaction) =>
       // WP-2423: the caller is resolved in full at the start and once before the reply; the owner
       // reads in between only confirm they run in this authorized transaction.
       withMerchantTransactionAuthorization(

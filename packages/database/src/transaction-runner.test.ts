@@ -317,3 +317,44 @@ describe("WP-2423 repeated scope settings and held locks", () => {
     expect(ran()).toBe(5);
   });
 });
+
+describe("WP-2423 snapshot reads (v15 2026-10-18, 55P03)", () => {
+  it("begins one REPEATABLE READ, READ ONLY transaction, answers fences locally and reads rows without locking them", async () => {
+    const f = fixture();
+    const results: unknown[] = [];
+    await f.runner.runSnapshot(async (transaction) => {
+      results.push(
+        await transaction.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+          "OrderingOrderDisposition:a:b:c",
+        ]),
+      );
+      await transaction.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", ["k"]);
+      await transaction.query("LOCK TABLE rms_ordering.order_header IN SHARE MODE", []);
+      await transaction.query(
+        "SELECT order_id FROM rms_ordering.order_header WHERE order_id=$1 FOR UPDATE",
+        ["x"],
+      );
+      await transaction.query("SELECT fulfillment_id FROM f WHERE id=$1 FOR SHARE OF f NOWAIT", [
+        "y",
+      ]);
+    });
+    const sent = f.query.mock.calls.map(([sql]) => sql);
+    expect(sent[0]).toBe("BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+    expect(sent.some((sql) => /advisory|LOCK TABLE|FOR (UPDATE|SHARE)/u.test(sql))).toBe(false);
+    expect(sent).toContain("SELECT order_id FROM rms_ordering.order_header WHERE order_id=$1");
+    expect(sent).toContain("SELECT fulfillment_id FROM f WHERE id=$1");
+    expect(results[0]).toMatchObject({ rowCount: 1, rows: [{ pg_advisory_xact_lock: "" }] });
+    expect(sent.at(-1)).toBe("COMMIT");
+  });
+  it("leaves ordinary transactions' fences and row locks as written", async () => {
+    const f = fixture();
+    await f.runner.run(async (transaction) => {
+      await transaction.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", ["k"]);
+      await transaction.query("SELECT id FROM t WHERE id=$1 FOR UPDATE", ["x"]);
+    });
+    const sent = f.query.mock.calls.map(([sql]) => sql);
+    expect(sent[0]).toBe("BEGIN");
+    expect(sent).toContain("SELECT pg_advisory_xact_lock(hashtextextended($1,0))");
+    expect(sent).toContain("SELECT id FROM t WHERE id=$1 FOR UPDATE");
+  });
+});

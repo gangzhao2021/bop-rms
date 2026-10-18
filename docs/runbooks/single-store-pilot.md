@@ -2160,6 +2160,12 @@ The first five alerts (store system, customer page, staff screens, supervisor, b
 wait during a [planned update](#planned-updates-deploys-and-planned-restarts-2026-10-18) window and
 are raised at once if the problem is still there when it ends.
 
+"Some order updates are being retried" after its cause is fixed and deployed: updates already
+waiting keep their backoff (one step can be 15–30 minutes), so the alert can stay up for about
+30 minutes while they go through one by one (v15 2026-10-18: 10:00 to 10:24). Staff keep handing
+orders over as the row says. There is no audited "retry now" for waiting updates yet (WP-2423
+follow-up); never edit retry or outbox rows by hand to speed them up.
+
 If the Home card says "The alert monitor is not running" or "stopped reporting": nothing above is
 being checked. The pilot operator runs `docker compose -f compose.pilot.yaml up -d ops` and reads
 `docker compose logs ops`.
