@@ -22,6 +22,7 @@ import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-che
 import type { PersistentPublicStoreProfileOptions } from "./persistent-public-store-profile.js";
 import { readCustomerStoreContact, type CustomerStoreContact } from "./customer-store-contact.js";
 import { readCurrentStoreReceiptProfile } from "@rms/store";
+import { isGuestTableOrder } from "./customer-order-status-read.js";
 
 /** Side-effect-free receipt retrieval under the same current Guest transaction. */
 export function createCustomerReceiptRead(
@@ -109,13 +110,18 @@ export function createCustomerReceiptRead(
             (await stillAuthorized()),
           validateSources: async () => false,
         });
+        // WP-2423 (v15 8c4480dd M1): a guest at a shared table who placed a later round reads the
+        // table's receipt; decided from Ordering's order header after the owner check refused it.
+        let tableOrder = false;
         const query = createDigitalReceiptQueryService({
           authorization: {
             authorizeGuest: async (input) =>
               input.orderReference === orderReference && (await stillAuthorized())
-                ? endedVisit
-                  ? { guestSession: guest, endedVisit: true as const }
-                  : { guestSession: guest }
+                ? {
+                    guestSession: guest,
+                    ...(endedVisit ? { endedVisit: true as const } : {}),
+                    ...(tableOrder ? { tableOrder: true as const } : {}),
+                  }
                 : null,
             authorizeResume: async () => null,
           },
@@ -123,11 +129,26 @@ export function createCustomerReceiptRead(
             load: (reference) => store.load({ transaction, orderReference: reference }),
           },
         });
-        const chain = await query.getCustomer({
-          orderReference,
-          observedAt: now(),
-          resumeGrantReference: null,
-        });
+        const request = { orderReference, observedAt: now(), resumeGrantReference: null };
+        let chain: Awaited<ReturnType<typeof query.getCustomer>>;
+        try {
+          chain = await query.getCustomer(request);
+        } catch (error) {
+          if (
+            !(error instanceof DigitalReceiptError) ||
+            error.code !== "DIGITAL_RECEIPT_PERMISSION_DENIED"
+          )
+            throw error;
+          tableOrder = await isGuestTableOrder(transaction, {
+            scope: options.scope,
+            guest,
+            orderReference,
+            now,
+            stillAuthorized,
+          });
+          if (!tableOrder) throw error;
+          chain = await query.getCustomer({ ...request, observedAt: now() });
+        }
         if (!(await stillAuthorized()))
           throw new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED");
         let financial = null;

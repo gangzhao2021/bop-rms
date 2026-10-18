@@ -303,6 +303,10 @@ export const orderStatusText = Object.freeze({
   itemRefundPending: "Refund pending",
   cancelledItemsRefunded: (amount: string) =>
     `Cancelled items: ${amount} refunded to your original payment (tax and their share of any tip included).`,
+  cancelledItemsRefundedWithTip: (amount: string, tip: string) =>
+    `Cancelled items: ${amount} refunded to your original payment, including ${tip} of the tip.`,
+  cancelledItemsRefundedNoTip: (amount: string) =>
+    `Cancelled items: ${amount} refunded to your original payment (tax included).`,
   cancelledItemsRefundPending: (amount: string) =>
     `Cancelled items: a refund of ${amount} to your original payment is pending (tax and their share of any tip included).`,
   /** The order's progress heading and sentence, per situation. */
@@ -395,6 +399,9 @@ export const orderStatusText = Object.freeze({
   statusFailed: "We couldn’t update your order status. The details below may be out of date.",
   statusStale: "The details below may be out of date. Refresh to check for an update.",
   itemsHeading: "Your items",
+  /** WP-2423 (v15 8c4480dd M1): a dine-in table shares one order across its guests' rounds. */
+  tableItemsHeading: "Ordered at your table",
+  tableItemsNote: "Every round at your table, from you and the other guests.",
   roundHeading: (round: number) => `Round ${round}`,
   roundCancelledByStoreUnpaid: "This round was cancelled by the store. Nobody was charged for it.",
   orderCancelledByStoreUnpaid: "This order was cancelled by the store. Nobody was charged for it.",

@@ -172,8 +172,12 @@ test.describe("@production order status HTTP continuity", () => {
     await expect(page.getByText("In the queue", { exact: true })).toHaveCount(1);
     await expect(
       page
-        .getByRole("region", { name: "Your items" })
+        .getByRole("region", { name: "Ordered at your table" })
         .getByText("Not started yet", { exact: true }),
+    ).toBeVisible();
+    // v15 8c4480dd M1: a dine-in order is the table's, with every guest's rounds.
+    await expect(
+      page.getByText("Every round at your table, from you and the other guests.", { exact: true }),
     ).toBeVisible();
     await expectNoInternalText(page);
     const response = page.waitForResponse(
@@ -289,7 +293,10 @@ test.describe("@production order status HTTP continuity", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     }, id(23));
     const main = page.getByRole("main");
-    await expect(main.getByText("Cancelled · Refunded $6.08")).toBeVisible();
+    // v15 8c4480dd L2: each item shows its price with tax the same way (the item cancelled on its
+    // own no longer shows its refund with its tip share); the tip is in the refund sentences.
+    await expect(main.getByText("Cancelled · Refunded $5.37")).toBeVisible();
+    await expect(main.getByText("Cancelled · Refunded $6.08")).toHaveCount(0);
     await expect(main.getByText("Cancelled · Refunded $4.86")).toBeVisible();
     await expect(main.getByText("Cancelled · Refunded $5.53")).toBeVisible();
     await expect(

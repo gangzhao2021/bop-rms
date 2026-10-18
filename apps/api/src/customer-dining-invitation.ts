@@ -146,7 +146,14 @@ export function createCustomerDiningInvitation(options: CustomerDiningInvitation
         });
         const authorize = async () => {
           const at = parseCanonicalInstant(options.now());
-          const guest = await identity.authorize({ ...credentials, observedAt: at });
+          // Identity takes a closed record: only the two credentials (v15 8c4480dd H1: spreading
+          // the parsed request also passed `operationReference`, so every read and issue was
+          // refused as invalid and reported "not joined").
+          const guest = await identity.authorize({
+            sessionCredential: credentials.sessionCredential,
+            csrfCredential: credentials.csrfCredential,
+            observedAt: at,
+          });
           const checked = parseCanonicalInstant(options.now());
           assertGuestSessionUsable(guest, checked);
           if ((await binding.validate(guest, checked)) !== "Current")

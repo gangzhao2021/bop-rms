@@ -198,10 +198,21 @@ export function createCustomerOrderStatusRead(
             });
             return deliveryRead;
           };
+          // WP-2423 (v15 8c4480dd M1, DEC-DINING-ANY-PARTICIPANT-SUBMIT): a dine-in table shares one
+          // Order across rounds, so a guest who submitted and paid a later round reads the table's
+          // Order here like its first guest does. Only the Order of this guest's own dining
+          // session (Ordering's order header), decided after the owner check refused it.
+          let tableParticipant = false;
           const query = createOrderStatusQueryService({
             authorization: {
               authorizeCustomer: async (input) =>
                 input.orderReference === orderReference && (await stillAuthorized())
+                  ? { guestSession: guest }
+                  : null,
+              authorizeDiningParticipant: async (input) =>
+                tableParticipant &&
+                input.orderReference === orderReference &&
+                (await stillAuthorized())
                   ? { guestSession: guest }
                   : null,
               authorizeMerchant: async () => null,
@@ -237,7 +248,25 @@ export function createCustomerOrderStatusRead(
               },
             },
           });
-          const result = await query.getCustomer({ orderReference, observedAt: now() });
+          let result: Awaited<ReturnType<typeof query.getCustomer>>;
+          try {
+            result = await query.getCustomer({ orderReference, observedAt: now() });
+          } catch (error) {
+            if (
+              !(error instanceof OrderStatusProjectionError) ||
+              error.code !== "ORDER_STATUS_PERMISSION_DENIED"
+            )
+              throw error;
+            tableParticipant = await isGuestTableOrder(transaction, {
+              scope: options.scope,
+              guest,
+              orderReference,
+              now,
+              stillAuthorized,
+            });
+            if (!tableParticipant) throw error;
+            result = await query.getDiningParticipant({ orderReference, observedAt: now() });
+          }
           let dining: null | {
             items: {
               orderItemReference: string;
@@ -887,4 +916,42 @@ export interface CustomerOrderReceived {
   readonly orderType: "Pickup" | "DineIn";
   readonly submittedAt: string;
   readonly checkedAt: string;
+}
+
+/**
+ * WP-2423 (v15 8c4480dd M1): whether this guest's own dining session's dine-in Order is the given
+ * Order (Ordering's order header for that session; one Order per session). A guest at the table
+ * then reads the table's Order and its receipt like the guest who placed its first round; an Order
+ * of any other table, party or Store is never matched.
+ */
+export async function isGuestTableOrder(
+  transaction: ConsumerTransaction,
+  input: {
+    readonly scope: { readonly brandReference: string; readonly storeReference: string };
+    readonly guest: {
+      readonly channel: string;
+      readonly diningSessionReference: string | null;
+      readonly sessionReference: string;
+    };
+    readonly orderReference: string;
+    now(): string;
+    stillAuthorized(): Promise<boolean>;
+  },
+): Promise<boolean> {
+  const { guest } = input;
+  if (guest.channel !== "DineIn" || guest.diningSessionReference === null) return false;
+  const diningSessionReference = String(guest.diningSessionReference);
+  const guestSessionReference = String(guest.sessionReference);
+  const order = await createPostgresDiningSessionOrderLookup({
+    ...input.scope,
+    authorize: async (_tx, query) =>
+      String(query.diningSessionReference) === diningSessionReference &&
+      String(query.guestSessionReference) === guestSessionReference &&
+      (await input.stillAuthorized()),
+  }).load(transaction, {
+    diningSessionReference,
+    guestSessionReference,
+    observedAt: input.now(),
+  });
+  return order === input.orderReference;
 }

@@ -1115,15 +1115,36 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         roundsOf(hostTable).map(([n, , st, pay]) => [n, "AnotherGuest", st, pay]),
       );
       assert.deepEqual(otherTable.summary, hostTable.summary);
-      // WP-2423 (46940b76 L5): the other guest at the table may not open the host's order page,
-      // but is told it is their table's order (and sent to the table view), under the restricted
-      // API role; any other order reads as before (no answer about it).
+      // WP-2423 (v15 8c4480dd M1, DEC-DINING-ANY-PARTICIPANT-SUBMIT): the table shares one Order,
+      // so the other guest at the table reads the table's order page (the round they pay is part
+      // of it) under the restricted API role, exactly as its first guest does.
+      const participantStatus = await statusRead.read({
+        sessionCredential: tableGuestP.sessionCredential,
+        csrfCredential: tableGuestP.csrfCredential,
+        orderReference,
+      });
+      const hostStatus = await statusRead.read({
+        sessionCredential: guest.sessionCredential,
+        csrfCredential: guest.csrfCredential,
+        orderReference,
+      });
+      assert.equal(participantStatus.order.orderReference, orderReference);
+      assert.deepEqual(
+        participantStatus.order.batches.map((batch) => String(batch.orderBatchReference)),
+        hostStatus.order.batches.map((batch) => String(batch.orderBatchReference)),
+      );
+      // Contact details are the guest's own: none are offered to the other guest.
+      assert.equal(participantStatus.sources.contactDetails, undefined);
+      // Any other order still reads as before (no answer about it).
       await assert.rejects(
         statusRead.read({
           sessionCredential: tableGuestP.sessionCredential,
           csrfCredential: tableGuestP.csrfCredential,
-          orderReference,
+          orderReference: id(0x7fe),
         }),
+        // Both answer the guest's page as 404, the same as for an Order that does not exist.
+        (error) =>
+          ["ORDER_STATUS_NOT_FOUND", "ORDER_STATUS_PERMISSION_DENIED"].includes(error.code),
       );
       assert.equal(
         await statusRead.tableOrder({
@@ -2749,15 +2770,24 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       assert.deepEqual(endedReceipt.visitEnded, { receiptAvailableUntil: absolute });
       assert.equal(endedReceipt.chain.records.length, currentReceipt.chain.records.length);
       assert.equal(endedReceipt.chain.records.at(-1).snapshot.refunds.length, 1);
-      // Another guest of the table never reads the Host's receipt, and nothing opens past the
-      // visit's 24 h bound.
+      // WP-2423 (v15 8c4480dd M1): the other guest at the table, who paid a round of this Order,
+      // reads the table's receipt; never another Order's, and nothing opens past the visit's 24 h
+      // bound.
+      const participantReceipt = await receiptRead({ ended: true }).readView({
+        sessionCredential: tableGuestP.sessionCredential,
+        csrfCredential: tableGuestP.csrfCredential,
+        orderReference,
+      });
+      assert.equal(participantReceipt.chain.orderReference, orderReference);
+      assert.equal(participantReceipt.chain.records.length, currentReceipt.chain.records.length);
       await assert.rejects(
-        receiptRead({ ended: true }).readView({
+        receiptRead().readView({
           sessionCredential: tableGuestP.sessionCredential,
           csrfCredential: tableGuestP.csrfCredential,
-          orderReference,
+          orderReference: id(0x7fe),
         }),
-        { code: "DIGITAL_RECEIPT_PERMISSION_DENIED" },
+        (error) =>
+          ["DIGITAL_RECEIPT_NOT_FOUND", "DIGITAL_RECEIPT_PERMISSION_DENIED"].includes(error.code),
       );
       await assert.rejects(
         receiptRead({

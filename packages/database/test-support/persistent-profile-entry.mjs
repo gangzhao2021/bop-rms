@@ -67,6 +67,7 @@ export async function exercisePersistentProfileEntry({
   pickupOnly = false,
   onPickupReady,
   acquire,
+  diningInvitation = false,
 }) {
   const f = fixture(at);
   if (pickupOnly) {
@@ -779,6 +780,8 @@ export async function exercisePersistentProfileEntry({
         binding: diningContext,
         store: createPostgresGuestSessionEntryStore({ run }, scope),
       },
+      hostInvitation: diningInvitation,
+      runtimeOptions,
       enterAnother: async (base) => {
         const response = await request(base);
         assert.equal(response.status, 201);

@@ -630,3 +630,36 @@ describe("chosen option lines (WP-2423)", () => {
     ).toThrow(DigitalReceiptError);
   });
 });
+
+it("WP-2423 (v15 8c4480dd M1): a guest at the table reads its shared dine-in Order's receipt", async () => {
+  const other = {
+    ...guest(),
+    sessionReference: id(40),
+    publicTableReference: id(41),
+    channel: "DineIn",
+    diningState: "DiningBound",
+    diningSessionReference: id(42),
+    diningParticipantReference: id(43),
+  } as unknown as GuestSession;
+  const read = (session: GuestSession, tableOrder: boolean) =>
+    createDigitalReceiptQueryService({
+      authorization: {
+        authorizeGuest: async () =>
+          tableOrder ? { guestSession: session, tableOrder: true } : { guestSession: session },
+        authorizeResume: async () => null,
+      },
+      receipts: { load: async () => parseDigitalReceiptChain(chain()) },
+    }).getCustomer({ orderReference: refs.order, observedAt: at, resumeGrantReference: null });
+  // Without the caller's table check another guest is refused; with it the table's receipt opens.
+  await expect(read(other, false)).rejects.toMatchObject({
+    code: "DIGITAL_RECEIPT_PERMISSION_DENIED",
+  });
+  await expect(read(other, true)).resolves.toMatchObject({ orderReference: refs.order });
+  // Never for a guest who is not at a dine-in table, nor in another Store.
+  await expect(read(guest(), true)).rejects.toMatchObject({
+    code: "DIGITAL_RECEIPT_PERMISSION_DENIED",
+  });
+  await expect(
+    read({ ...other, storeReference: id(99) } as unknown as GuestSession, true),
+  ).rejects.toMatchObject({ code: "DIGITAL_RECEIPT_PERMISSION_DENIED" });
+});

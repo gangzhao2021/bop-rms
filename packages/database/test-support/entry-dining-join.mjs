@@ -32,8 +32,9 @@ import {
   exerciseEntryDiningCart,
   exerciseSharedDiningMember,
 } from "./entry-dining-cart.mjs";
+import { exerciseEntryDiningInvitation } from "./entry-dining-invitation.mjs";
 import assert from "node:assert/strict";
-import { createHash, createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomInt } from "node:crypto";
 import {
   createPostgresMerchantOrganizationSource,
   createTenantContext,
@@ -82,6 +83,9 @@ export async function exerciseEntryDiningJoin({
   cookie,
   csrfToken,
   enterAnother,
+  /** DEC-DINING-GUEST-INVITATION: run the Host invitation journey (HumanCode table) and stop. */
+  hostInvitation = false,
+  runtimeOptions,
 }) {
   const scope = {
     tenantReference: binding.tenantReference,
@@ -109,7 +113,11 @@ export async function exerciseEntryDiningJoin({
   const hash = (value) => createHash("sha256").update(value).digest("hex");
   const credentials = {
     generateReference: reference,
-    generateJoinCredential: () => randomBytes(16).toString("base64url"),
+    // As the pilot's generator: a six-digit code for HumanCode tables, otherwise an invitation.
+    generateJoinCredential: (kind) =>
+      kind === "HumanCode"
+        ? String(randomInt(0, 1000000)).padStart(6, "0")
+        : randomBytes(16).toString("base64url"),
     hashJoinCredential: (kind, value) =>
       createHmac("sha256", key)
         .update("DiningJoin:" + kind + ":" + value)
@@ -220,7 +228,7 @@ export async function exerciseEntryDiningJoin({
     tableReference,
     expectedAssignmentVersion: table.aggregateVersion,
     operationReference: reference(),
-    joinKind: "Invitation",
+    joinKind: hostInvitation ? "HumanCode" : "Invitation",
     requestedAt: at,
   });
   const diningBinding = createPostgresDiningGuestBindingStore({ run }, scope);
@@ -433,6 +441,43 @@ export async function exerciseEntryDiningJoin({
         }),
       { code: "GUEST_SESSION_UNAVAILABLE" },
     );
+    if (hostInvitation) {
+      await exerciseEntryDiningInvitation({
+        admin,
+        role,
+        run,
+        scope,
+        at,
+        key,
+        credentials,
+        session,
+        contextsForTransaction,
+        reference,
+        runtimeOptions,
+        host: { cookie: currentCookie, csrfToken: activation.csrfToken },
+        base,
+        joinAndBind,
+        enterAnother,
+        staffReplace: async () => {
+          const current = await regeneration.resolveActiveJoin(
+            started.session.diningSessionReference,
+          );
+          assert.ok(current);
+          const replaced = await staff.regenerate({
+            diningSessionReference: current.session.diningSessionReference,
+            tableReference,
+            expectedAssignmentVersion: current.session.tableAssignmentVersion,
+            expectedSessionVersion: current.session.version,
+            expectedCapabilityVersion: current.capability.version,
+            expectedGeneration: current.capability.generation,
+            operationReference: reference(),
+            requestedAt: at,
+          });
+          assert.equal(replaced.status, "Issued");
+        },
+      });
+      return { resolve };
+    }
     await exerciseEntryDiningCart({
       base,
       cookie: currentCookie,

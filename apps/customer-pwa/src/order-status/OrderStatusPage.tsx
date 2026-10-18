@@ -7,6 +7,7 @@ import {
 } from "./order-status-controller.js";
 import type {
   ItemCancellation,
+  OrderRefunds,
   OrderStatusState,
   OrderStatusView,
   StaffCancellation,
@@ -312,15 +313,17 @@ export function staffRefundText(cancellation: StaffCancellation): string {
     : orderStatusText.staffRefundPending;
 }
 /**
- * WP-2423 Q6 step 2: "Cancelled · Refund pending $4.52" next to an item the store cancelled. The
- * amount is shown when the cancellation covers only this item (the refund is per cancellation).
+ * WP-2423 Q6 step 2: "Cancelled · Refund pending $4.52" next to an item the store cancelled.
+ * WP-2423 (v15 8c4480dd L2): every cancelled item shows its own price with tax, the same way for
+ * an item cancellation and a cancelled round; the tip share it returned is stated only in the
+ * refund sentence below the items (the cancellation's refund amount includes it).
  */
-export function itemCancellationText(cancellation: ItemCancellation): string {
+export function itemCancellationText(
+  cancellation: ItemCancellation,
+  lineTotal: { readonly amountMinor: bigint; readonly currencyCode: string } | null,
+): string {
   const amount =
-    cancellation.orderItemReferences.length === 1
-      ? " " +
-        formatMoney(cancellation.refundAmount.amountMinor, cancellation.refundAmount.currencyCode)
-      : "";
+    lineTotal === null ? "" : " " + formatMoney(lineTotal.amountMinor, lineTotal.currencyCode);
   return orderStatusText.itemCancelled(
     cancellation.refundStatus === "Refunded"
       ? orderStatusText.itemRefunded
@@ -346,24 +349,54 @@ export function storeCancelledItemText(
     " " + formatMoney(lineTotal.amountMinor, lineTotal.currencyCode),
   );
 }
-/** WP-2423 Q6 step 2: where the money for cancelled items is (tax and their tip share included). */
-export function itemRefundSummary(cancellations: readonly ItemCancellation[]): string[] {
+/**
+ * WP-2423 Q6 step 2: where the money for cancelled items is (tax and their tip share included).
+ * WP-2423 (v15 8c4480dd L2): once the receipt states the refund, the sentence names the tip share
+ * it returned, since the items above show only their price with tax.
+ */
+export function itemRefundSummary(
+  cancellations: readonly ItemCancellation[],
+  refunds: OrderRefunds["entries"] = [],
+): string[] {
   const currency = cancellations[0]?.refundAmount.currencyCode;
   if (currency === undefined) return [];
+  const same = (a: readonly string[], b: readonly string[]) =>
+    a.length === b.length && a.every((value) => b.includes(value));
   const sum = (status: ItemCancellation["refundStatus"]) => {
     const entries = cancellations.filter((entry) => entry.refundStatus === status);
-    return entries.length === 0
-      ? null
-      : formatMoney(
-          entries.reduce((total, entry) => total + entry.refundAmount.amountMinor, 0n),
-          currency,
-        );
+    if (entries.length === 0) return null;
+    const total = entries.reduce((sum, entry) => sum + entry.refundAmount.amountMinor, 0n);
+    const tips = entries.map(
+      (entry) =>
+        refunds.find(
+          (refund) =>
+            refund.kind === "ItemCancellation" &&
+            same(refund.orderItemReferences, entry.orderItemReferences),
+        )?.tip.amountMinor,
+    );
+    return {
+      amount: formatMoney(total, currency),
+      tip: tips.every((tip) => tip !== undefined)
+        ? tips.reduce<bigint>((sum, tip) => sum + (tip ?? 0n), 0n)
+        : null,
+    };
   };
   const refunded = sum("Refunded");
   const pending = sum("Pending");
   return [
-    ...(refunded === null ? [] : [orderStatusText.cancelledItemsRefunded(refunded)]),
-    ...(pending === null ? [] : [orderStatusText.cancelledItemsRefundPending(pending)]),
+    ...(refunded === null
+      ? []
+      : [
+          refunded.tip === null
+            ? orderStatusText.cancelledItemsRefunded(refunded.amount)
+            : refunded.tip > 0n
+              ? orderStatusText.cancelledItemsRefundedWithTip(
+                  refunded.amount,
+                  formatMoney(refunded.tip, currency),
+                )
+              : orderStatusText.cancelledItemsRefundedNoTip(refunded.amount),
+        ]),
+    ...(pending === null ? [] : [orderStatusText.cancelledItemsRefundPending(pending.amount)]),
   ];
 }
 /** WP-2423 Q6: the store cancelled the whole order (a pickup, or every dine-in round). */
@@ -863,7 +896,14 @@ function StatusContent({
       ) : null}
 
       <section className="order-status__batches" aria-labelledby="order-items-heading">
-        <h2 id="order-items-heading">{orderStatusText.itemsHeading}</h2>
+        <h2 id="order-items-heading">
+          {view.order.orderType === "DineIn"
+            ? orderStatusText.tableItemsHeading
+            : orderStatusText.itemsHeading}
+        </h2>
+        {view.order.orderType === "DineIn" ? (
+          <p className="order-status__table-note">{orderStatusText.tableItemsNote}</p>
+        ) : null}
         {view.order.batches.map((batch, index) => {
           const batchKitchen = kitchen?.batches.find(
             (entry) => entry.orderBatchReference === batch.orderBatchReference,
@@ -969,7 +1009,10 @@ function StatusContent({
                       </span>
                       {itemCancellation ? (
                         <span className="order-status__item-cancelled">
-                          {itemCancellationText(itemCancellation)}
+                          {itemCancellationText(
+                            itemCancellation,
+                            refundedBefore.has(item.orderItemReference) ? null : item.lineTotal,
+                          )}
                         </span>
                       ) : batchCancelled ? (
                         <span className="order-status__item-cancelled">
@@ -1056,7 +1099,10 @@ function StatusContent({
           <p className="order-status__item-refund">{orderStatusText.unpaidRoundsExcluded}</p>
         ) : null}
         {/* A whole store cancellation states its own full refund; the item note would contradict it. */}
-        {(storeCancelled ? [] : itemRefundSummary(itemCancellations)).map((line) => (
+        {(storeCancelled
+          ? []
+          : itemRefundSummary(itemCancellations, view.sources?.refunds?.entries)
+        ).map((line) => (
           <p key={line} className="order-status__item-refund">
             {line}
           </p>

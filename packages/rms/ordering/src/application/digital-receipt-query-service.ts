@@ -55,6 +55,7 @@ export function createDigitalReceiptQueryService(ports: DigitalReceiptQueryPorts
       let authorization:
         | {
             readonly guestSessionReference: string;
+            readonly tableOrder?: true;
             readonly brandReference: string;
             readonly storeReference: string;
           }
@@ -84,10 +85,16 @@ export function createDigitalReceiptQueryService(ports: DigitalReceiptQueryPorts
                 ? assertGuestSessionReceiptReadable
                 : assertGuestSessionUsable
             )(createGuestSession(result.guestSession), request.observedAt);
+            if (
+              result.tableOrder === true &&
+              (session.channel !== "DineIn" || session.diningSessionReference === null)
+            )
+              return fail("DIGITAL_RECEIPT_PERMISSION_DENIED");
             authorization = {
               guestSessionReference: parseOrderingReference(session.sessionReference),
               brandReference: parseOrderingReference(session.brandReference),
               storeReference: parseOrderingReference(session.storeReference),
+              ...(result.tableOrder === true ? { tableOrder: true as const } : {}),
             };
           }
         }
@@ -111,6 +118,7 @@ export function createDigitalReceiptQueryService(ports: DigitalReceiptQueryPorts
         first.brandReference !== authorization.brandReference ||
         first.storeReference !== authorization.storeReference ||
         (authorization.guestSessionReference !== "resume-grant" &&
+          authorization.tableOrder !== true &&
           first.guestSessionReference !== authorization.guestSessionReference)
       )
         return fail("DIGITAL_RECEIPT_PERMISSION_DENIED");

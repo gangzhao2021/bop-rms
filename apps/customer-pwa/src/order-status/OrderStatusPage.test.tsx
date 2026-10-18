@@ -776,7 +776,7 @@ it("WP-2423 Q6 step 2: marks items the store cancelled and where their refund is
     orderItemReference: id(5),
     displayName: "Synthetic tea",
     quantity: 1,
-    lineTotal: { amountMinor: 400n, currencyCode: "CAD" },
+    lineTotal: { amountMinor: 452n, currencyCode: "CAD" },
   };
   const juice = { ...tea, orderItemReference: id(6), displayName: "Synthetic juice" };
   const cancellation = {
@@ -829,7 +829,7 @@ it("WP-2423 Q6 step 2: marks items the store cancelled and where their refund is
   expect(html).not.toContain("Order cancelled by the store");
   expect(html).not.toContain("SoldOut");
   // The original items total stays; the refund is explained beneath it.
-  expect(html).toMatch(/Total including tax<\/span><span>\$33\.98/u);
+  expect(html).toMatch(/Total including tax<\/span><span>\$35\.02/u);
   const refunded = render({
     ...state,
     view: {
@@ -847,10 +847,46 @@ it("WP-2423 Q6 step 2: marks items the store cancelled and where their refund is
       },
     },
   });
-  // A cancellation of several items refunds them together: the amount is in the summary.
-  expect(refunded.match(/Cancelled · Refunded</gu)).toHaveLength(2);
+  // WP-2423 (v15 8c4480dd L2): each cancelled item shows its own price with tax, also when one
+  // cancellation covered several; the total refunded is in the summary.
+  expect(refunded.match(/Cancelled · Refunded \$4\.52</gu)).toHaveLength(2);
   expect(refunded).toContain(
     "Cancelled items: $9.04 refunded to your original payment (tax and their share of any tip included).",
+  );
+  // Once the receipt states the refund, the item lines still show price with tax only and the
+  // sentence names the tip share it returned (never one line with its tip and others without).
+  const withTip = render({
+    ...state,
+    view: {
+      ...view,
+      sources: {
+        ...view.sources,
+        itemCancellations: [
+          {
+            ...cancellation,
+            orderItemReferences: [id(5), id(6)],
+            refundStatus: "Refunded" as const,
+            refundAmount: { amountMinor: 1040n, currencyCode: "CAD" },
+          },
+        ],
+        refunds: {
+          refunded: { amountMinor: 1040n, currencyCode: "CAD" },
+          entries: [
+            {
+              kind: "ItemCancellation" as const,
+              orderItemReferences: [id(6), id(5)],
+              total: { amountMinor: 1040n, currencyCode: "CAD" },
+              tip: { amountMinor: 136n, currencyCode: "CAD" },
+            },
+          ],
+        },
+      },
+    },
+  });
+  expect(withTip.match(/Cancelled · Refunded \$4\.52</gu)).toHaveLength(2);
+  expect(withTip).not.toContain("Cancelled · Refunded $5.20");
+  expect(withTip).toContain(
+    "Cancelled items: $10.40 refunded to your original payment, including $1.36 of the tip.",
   );
   // The last item cancelled turns the round into a store cancellation refunded in full, tip included:
   // every line is marked and the item summary's tip note no longer applies.
@@ -1667,8 +1703,11 @@ describe("WP-2423 (v15 3cd0f8dd) payments and refunds the guest sees", () => {
       },
     };
     const html = render({ ...state, view });
-    // Every cancelled item shows what it returned, not only the first one.
-    expect(html).toContain("Cancelled · Refunded $6.08");
+    // Every cancelled item shows its price with tax, the same way for each (v15 8c4480dd L2: the
+    // item cancelled alone showed its refund with its tip share, $6.08, the others did not); the
+    // tip returned is stated in the refund sentences.
+    expect(html).toContain("Cancelled · Refunded $5.37");
+    expect(html).not.toContain("Cancelled · Refunded $6.08");
     expect(html).toContain("Cancelled · Refunded $4.86");
     expect(html).toContain("Cancelled · Refunded $5.53");
     // Each refund and the tip it returned.

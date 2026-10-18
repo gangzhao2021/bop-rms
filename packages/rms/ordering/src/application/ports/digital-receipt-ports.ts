@@ -13,6 +13,12 @@ export interface DigitalReceiptQueryPorts {
        * reading its own receipt within the Session's absolute lifetime; read only.
        */
       readonly endedVisit?: true;
+      /**
+       * WP-2423 (v15 8c4480dd M1): the caller verified from Ordering's order header that this is
+       * the dine-in Order of the guest's own dining session; a guest at the table who placed a
+       * later round reads the table's receipt.
+       */
+      readonly tableOrder?: true;
     } | null>;
     authorizeResume(input: {
       readonly orderReference: string;
