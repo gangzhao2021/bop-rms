@@ -219,7 +219,9 @@ export function planPickupCapacitySchedule(
   // Cut points: local hours, pickup opening/closing times and business-day starts. An opening or
   // closing time less than a minute from a local hour or business-day start (hours that end at
   // 23:59:59 meaning end of day) is not a cut of its own: it would leave a sliver of a slot with a
-  // capacity of 1. The neighbouring slot keeps the service it overlaps.
+  // capacity of 1. The neighbouring slot keeps the service it overlaps. A window edge at the
+  // horizon is where the Store calendar was clipped to it, not an opening or closing time: cutting
+  // there would add a few-minute slot at the far end on every run while pickup is open.
   const fixedCuts = [
     ...localHourStarts(input.timeZone, observedAt - HOUR, horizonUntil + HOUR),
     ...days.map(([, start]) => start),
@@ -227,7 +229,8 @@ export function planPickupCapacitySchedule(
   const cuts = new Set<number>(fixedCuts.filter((at) => at > observedAt && at <= horizonUntil));
   for (const [start, end] of windows)
     for (const at of [start, end])
-      if (!fixedCuts.some((fixed) => Math.abs(fixed - at) < MINUTE)) cuts.add(at);
+      if (at !== horizonUntil && !fixedCuts.some((fixed) => Math.abs(fixed - at) < MINUTE))
+        cuts.add(at);
   const orderedCuts = [...cuts]
     .filter((at) => at > observedAt && at <= horizonUntil)
     .sort((a, b) => a - b);

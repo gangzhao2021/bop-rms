@@ -42,10 +42,8 @@ import {
   staffOrderCancellationPermission,
   type StaffOrderRefundStatus,
 } from "./merchant-order-staff-cancellation.js";
-import {
-  runMerchantSnapshotRead,
-  type PersistentMerchantBffOptions,
-} from "./persistent-merchant-bff.js";
+import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
 import { readItemCancellationRefund } from "./merchant-order-item-staff-cancellation.js";
 import { readCustomerReceiptFinancial } from "./customer-receipt-financial.js";
 import {

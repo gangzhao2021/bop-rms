@@ -116,6 +116,45 @@ describe("planPickupCapacitySchedule (DEC-PICKUP-CAPACITY-SCHEDULE)", () => {
     ]);
   });
 
+  it("does not cut a short slot where open hours are clipped at an in-service horizon", () => {
+    // The worker expands the Store calendar only up to the horizon, so a horizon during pickup
+    // hours arrives as a service window ending exactly there.
+    const clipped = (horizonUntil: string) => [
+      { startsAt: "2026-10-19T12:00:00.000Z", endsAt: "2026-10-20T00:00:00.000Z" },
+      { startsAt: "2026-10-20T12:00:00.000Z", endsAt: horizonUntil },
+    ];
+    const first = planPickupCapacitySchedule(
+      input({
+        observedAt: "2026-10-19T13:10:00.000Z",
+        horizonUntil: "2026-10-20T13:10:00.000Z",
+        serviceWindows: clipped("2026-10-20T13:10:00.000Z"),
+      }),
+    );
+    expect(first.coveredUntil).toBe("2026-10-20T13:00:00.000Z");
+    expect(first.create.at(-1)?.startsAt).toBe("2026-10-20T12:00:00.000Z");
+    expect(first.create.at(-1)?.capacityLimit).toBe(20);
+    const later = planPickupCapacitySchedule(
+      input({
+        observedAt: "2026-10-19T13:15:00.000Z",
+        horizonUntil: "2026-10-20T13:15:00.000Z",
+        serviceWindows: clipped("2026-10-20T13:15:00.000Z"),
+        existingSlots: asExisting(first),
+      }),
+    );
+    expect(later.create).toEqual([]);
+    const hourLater = planPickupCapacitySchedule(
+      input({
+        observedAt: "2026-10-19T14:01:00.000Z",
+        horizonUntil: "2026-10-20T14:01:00.000Z",
+        serviceWindows: clipped("2026-10-20T14:01:00.000Z"),
+        existingSlots: asExisting(first),
+      }),
+    );
+    expect(
+      hourLater.create.map((slot) => [slot.startsAt, slot.endsAt, slot.capacityLimit]),
+    ).toEqual([["2026-10-20T13:00:00.000Z", "2026-10-20T14:00:00.000Z", 20]]);
+  });
+
   it("catches up after downtime from the current instant, cut at the next local hour", () => {
     const plan = planPickupCapacitySchedule(
       input({

@@ -194,7 +194,7 @@ export async function verifyPickupQuoteLab(origin, pickup) {
           });
         await continueButton.click();
         await expect(
-          page.getByText("We could not confirm checkout. Retry to recover the same checkout.", {
+          page.getByText("We couldn’t confirm checkout. Retry to recover the same checkout.", {
             exact: true,
           }),
         ).toBeVisible();

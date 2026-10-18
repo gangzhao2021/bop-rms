@@ -16,10 +16,8 @@ import {
 import { createPostgresCardMachinePaymentStore } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
-import {
-  runMerchantSnapshotRead,
-  type PersistentMerchantBffOptions,
-} from "./persistent-merchant-bff.js";
+import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 /** The Tables page's own permission first, then the actions it offers. */
 const tableCloseActions = ["dining.session.close", "order.close", "dining.item.serve"] as const;

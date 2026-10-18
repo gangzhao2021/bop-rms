@@ -19,10 +19,8 @@ import {
   type MerchantTransactionAuthority,
 } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
-import {
-  runMerchantSnapshotRead,
-  type PersistentMerchantBffOptions,
-} from "./persistent-merchant-bff.js";
+import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
 type StoreOptions = Parameters<typeof createPostgresFulfillmentReadinessStore>[0];
 function invalid(): never {
   throw new FulfillmentReadinessError("FULFILLMENT_READINESS_INPUT_INVALID");

@@ -48,16 +48,6 @@ type Persistence = Parameters<typeof createPostgresBrowserSessionStore>[0];
 type Transaction = Parameters<NonNullable<Persistence["onSessionCreated"]>>[0];
 type SelectedContext = Awaited<ReturnType<ReturnType<typeof createMerchantSelectedContext>>>;
 
-/** WP-2423: runs a polled staff read in the snapshot transaction when the composition has one. */
-export function runMerchantSnapshotRead<T>(
-  transactions: PersistentMerchantBffOptions["transactions"],
-  work: (transaction: Transaction) => Promise<T>,
-): Promise<T> {
-  return transactions.runSnapshot === undefined
-    ? transactions.run(work)
-    : transactions.runSnapshot(work);
-}
-
 export interface PersistentMerchantBffOptions {
   readonly identity: Omit<BrowserSessionServiceOptions, "store" | "now">;
   readonly transactions: Persistence["transactions"] & {
