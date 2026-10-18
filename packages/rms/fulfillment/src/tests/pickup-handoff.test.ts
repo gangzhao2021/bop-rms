@@ -7,6 +7,8 @@ import {
   PickupHandoffError,
   planCompletePickupHandoff,
   parseCompletePickupHandoffCommand,
+  parsePickupInPersonVerificationRecord,
+  pickupHandoffAuditDetails,
   type CompletePickupHandoffCommand,
   type PickupHandoffReference,
   type PickupHandoffSource,
@@ -452,6 +454,89 @@ describe("WP-2423 in-person handoff when the pickup proof expired or was never i
         ),
       "PICKUP_HANDOFF_VERIFICATION_FAILED",
     );
+  });
+});
+
+describe("WP-2423 in-person handoff when the customer cannot show a still-valid code", () => {
+  const record = (overrides: Record<string, unknown> = {}) => ({
+    verificationReference: id(30),
+    correlationReference: id(31),
+    fulfillmentReference: refs.fulfillment,
+    brandReference: refs.brand,
+    storeReference: refs.store,
+    verificationMethod: "InPerson" as const,
+    identityCheck: "OrderNumberAndPhoneLast4" as const,
+    reason: "CodeNotShown" as const,
+    codeNotShownCause: "PhoneUnavailable" as const,
+    verifiedByActorReference: refs.actor,
+    verifiedAt: "2026-08-11T12:02:00.000Z",
+    ...overrides,
+  });
+  it("hands over with a staff-chosen cause only while a proof exists", () => {
+    const effect = planCompletePickupHandoff(
+      source({ currentProofGeneration: 1 }),
+      command({ verification: record() as never }),
+    );
+    expect(effect.record.verificationMethod).toBe("InPerson");
+    expect(effect.audit.actorReference).toBe(refs.actor);
+    code(
+      () =>
+        planCompletePickupHandoff(
+          source({ currentProofGeneration: null }),
+          command({ verification: record() as never }),
+        ),
+      "PICKUP_HANDOFF_VERIFICATION_FAILED",
+    );
+  });
+  it("requires the cause exactly with CodeNotShown, from the fixed list", () => {
+    for (const cause of ["PhoneUnavailable", "CodeNotReceived", "OrderPageLost"] as const)
+      expect(
+        parsePickupInPersonVerificationRecord(record({ codeNotShownCause: cause }))
+          .codeNotShownCause,
+      ).toBe(cause);
+    const withoutCause: Record<string, unknown> = { ...record() };
+    delete withoutCause.codeNotShownCause;
+    for (const invalid of [
+      withoutCause,
+      record({ codeNotShownCause: "LooksFamiliar" }),
+      record({ codeNotShownCause: null }),
+      record({ codeNotShownCause: "Lost phone, name Sam" }),
+      record({ reason: "CodeLocked" }),
+      record({ reason: "ProofExpired", codeNotShownCause: undefined }),
+    ]) {
+      code(() => parsePickupInPersonVerificationRecord(invalid), "PICKUP_HANDOFF_INPUT_INVALID");
+      code(
+        () => parseCompletePickupHandoffCommand(command({ verification: invalid as never })),
+        "PICKUP_HANDOFF_VERIFICATION_FAILED",
+      );
+    }
+  });
+  it("still reads older in-person records that carry no cause, with the same shape", () => {
+    const older: Record<string, unknown> = { ...record({ reason: "CodeLocked" }) };
+    delete older.codeNotShownCause;
+    const parsed = parsePickupInPersonVerificationRecord(older);
+    expect(parsed).toEqual(older);
+    expect("codeNotShownCause" in parsed).toBe(false);
+  });
+  it("names the audit reason and cause of a handover without the code", () => {
+    expect(
+      pickupHandoffAuditDetails({
+        inPersonReason: "CodeNotShown",
+        codeNotShownCause: "OrderPageLost",
+      }),
+    ).toEqual({
+      reasonCode: "PICKUP_HANDOFF_CODE_NOT_SHOWN",
+      afterSummary: { action: "CompletePickupHandoff", codeNotShownCause: "OrderPageLost" },
+    });
+    for (const input of [
+      {},
+      { inPersonReason: null, codeNotShownCause: null },
+      { inPersonReason: "CodeLocked" as const, codeNotShownCause: null },
+    ])
+      expect(pickupHandoffAuditDetails(input)).toEqual({
+        reasonCode: "PICKUP_HANDOFF",
+        afterSummary: { action: "CompletePickupHandoff" },
+      });
   });
 });
 

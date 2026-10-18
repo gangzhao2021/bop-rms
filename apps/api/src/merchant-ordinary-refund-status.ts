@@ -3,6 +3,7 @@ import { readClosedRecord, parseOpaqueUuidV7 } from "@bop/identity";
 import {
   createPostgresOrdinaryRefundRequestStatusSource,
   createOrdinaryRefundRoleResolver,
+  observeOrdinaryRefundOrderAfterFence,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -97,6 +98,8 @@ export function createMerchantOrdinaryRefundStatus(options: {
             }),
           });
           const role = createOrdinaryRefundRoleResolver(configuration.roleMapping);
+          /** The session's resolution until the refund fence is held, then the time read after it. */
+          let observedAt = String(current.context.resolvedAt);
           const authorize = async (
             _tx: ConsumerTransaction,
             query: Scope & { orderReference: string; actorReference: string; observedAt: string },
@@ -107,7 +110,7 @@ export function createMerchantOrdinaryRefundStatus(options: {
               query.storeReference !== scope.storeReference ||
               query.orderReference !== orderReference ||
               query.actorReference !== String(current.actorReference) ||
-              query.observedAt !== String(current.context.resolvedAt)
+              query.observedAt !== observedAt
             )
               return false;
             return authorized.guard();
@@ -134,10 +137,18 @@ export function createMerchantOrdinaryRefundStatus(options: {
               ...scope,
               orderReference,
               actorReference: String(current.actorReference),
-              observedAt: String(current.context.resolvedAt),
+              observedAt,
             });
           if (!(await allowed())) return deny();
-          const observedAt = String(current.context.resolvedAt);
+          // v15 2026-10-18 (dd750045): read at a time taken once the Order's refund fence is held,
+          // so a request recorded for this Order meanwhile is part of the history read.
+          observedAt = await observeOrdinaryRefundOrderAfterFence(
+            businessTransaction,
+            scope,
+            orderReference,
+            observedAt,
+            options.persistence.now,
+          );
           const result = await createPostgresOrdinaryRefundRequestStatusSource({
             scope,
             providerAccountReference: configuration.providerAccountReference,

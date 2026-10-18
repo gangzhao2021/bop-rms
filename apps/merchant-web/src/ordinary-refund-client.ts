@@ -6,11 +6,28 @@ import {
 
 export class OrdinaryRefundClientError extends Error {
   constructor(
-    readonly code: "Denied" | FullSignInRequired | "Conflict" | "Unavailable" | "OutcomeUnknown",
+    /** Changed: the order's refunds changed while a read was loading (it was read once more). */
+    readonly code:
+      "Denied" | FullSignInRequired | "Conflict" | "Changed" | "Unavailable" | "OutcomeUnknown",
   ) {
     super("Refund request could not be confirmed");
   }
 }
+/** The server was briefly busy (503 retry_later): a read is tried once more. */
+class RetryLater extends Error {}
+/** The JSON `error` of a short failure reply, or null. */
+const replyError = async (response: Response): Promise<string | null> => {
+  try {
+    const text = await response.text();
+    if (text.length > 200) return null;
+    const value: unknown = JSON.parse(text);
+    const error =
+      value && typeof value === "object" ? (value as { error?: unknown }).error : undefined;
+    return typeof error === "string" ? error : null;
+  } catch {
+    return null;
+  }
+};
 const fail = (): never => {
   throw new OrdinaryRefundClientError("Unavailable");
 };
@@ -221,7 +238,17 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
         throw new OrdinaryRefundClientError(FULL_SIGN_IN_REQUIRED);
       if (response.status === 401 || response.status === 403)
         throw new OrdinaryRefundClientError("Denied");
-      if (response.status === 409) throw new OrdinaryRefundClientError("Conflict");
+      // v15 2026-10-18: a read that met a refund recorded while it was loading answers 409
+      // changed_while_loading; a busy server answers 503 retry_later. Neither is a refusal.
+      if (response.status === 409 || response.status === 503) {
+        const error = await replyError(response);
+        if (response.status === 409)
+          throw new OrdinaryRefundClientError(
+            error === "changed_while_loading" ? "Changed" : "Conflict",
+          );
+        if (error === "retry_later") throw new RetryLater();
+        return fail();
+      }
       if (
         response.status !== status ||
         response.headers.get("cache-control") !== "no-store" ||
@@ -243,17 +270,31 @@ export function createOrdinaryRefundClient(fetcher: typeof fetch = fetch) {
     return Object.freeze(parsed);
   };
   const boundary = async <T>(work: () => Promise<T>, mutation: boolean): Promise<T> => {
-    try {
-      return await work();
-    } catch (error) {
-      if (
-        error instanceof OrdinaryRefundClientError &&
-        (error.code === "Denied" ||
-          error.code === FULL_SIGN_IN_REQUIRED ||
-          error.code === "Conflict")
-      )
-        throw error;
-      throw new OrdinaryRefundClientError(mutation ? "OutcomeUnknown" : "Unavailable");
+    // A read that changed while loading, or met a busy server, is read once more by itself
+    // (after a short pause) before staff are told anything; a command is never resent here.
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await work();
+      } catch (error) {
+        const retryable =
+          error instanceof RetryLater ||
+          (error instanceof OrdinaryRefundClientError && error.code === "Changed");
+        if (!mutation && retryable && attempt === 1) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, error instanceof RetryLater ? 800 : 200),
+          );
+          continue;
+        }
+        if (
+          error instanceof OrdinaryRefundClientError &&
+          (error.code === "Denied" ||
+            error.code === FULL_SIGN_IN_REQUIRED ||
+            error.code === "Conflict" ||
+            (!mutation && error.code === "Changed"))
+        )
+          throw error;
+        throw new OrdinaryRefundClientError(mutation ? "OutcomeUnknown" : "Unavailable");
+      }
     }
   };
   return Object.freeze({

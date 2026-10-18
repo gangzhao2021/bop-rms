@@ -62,22 +62,56 @@ export function sameOriginMutation(options: MerchantBffRouterOptions): RequestHa
   };
 }
 
-/** WP-2423 Q19: a read that kept meeting a database transaction conflict is "retry later"
- * (503), never a permission refusal; anything else stays a plain denial. */
+/** The failure's code: an owner error's `code`, or the UPPER_SNAKE message of a plain Error. */
+function failureCode(error: unknown): string | null {
+  if (error === null || typeof error !== "object") return null;
+  const code = Object.getOwnPropertyDescriptor(error, "code")?.value;
+  if (typeof code === "string") return code;
+  return error instanceof Error && /^[A-Z][A-Z0-9_]{2,127}$/u.test(error.message)
+    ? error.message
+    : null;
+}
+
+/**
+ * Why a merchant read failed, for the reply. WP-2423 Q19: a read that kept meeting a database
+ * transaction conflict is "retry later" (503). v15 2026-10-18 (dd750045): a read that met facts
+ * recorded while it was loading (an Order's refund history that changed under it) is
+ * "changed while loading" (409, retry at once), and a dependency that could not be read is
+ * "retry later" (503) — never a permission refusal, which staff read as "you may not do this".
+ * Only a refusal (`*_DENIED`) or an unrecognised failure stays a plain denial (403).
+ */
+export function readFailureKind(error: unknown): "RetryLater" | "Changed" | "Denied" {
+  const code = failureCode(error);
+  if (code === null) return "Denied";
+  if (code === "TENANT_DATABASE_TRANSACTION_CONFLICT" || code === "TENANT_DATABASE_ACQUIRE_FAILED")
+    return "RetryLater";
+  if (code === "TENANT_DATABASE_TRANSACTION_FAILED") {
+    // A statement cancelled by its timeout or a lost connection is transient; a refused row
+    // (a missing grant) or any other database failure stays a refusal.
+    const diagnostic = Object.getOwnPropertyDescriptor(error, "diagnostic")?.value as
+      { sqlState?: unknown } | null | undefined;
+    const sqlState = diagnostic?.sqlState;
+    return typeof sqlState === "string" && (sqlState === "57014" || sqlState.startsWith("08"))
+      ? "RetryLater"
+      : "Denied";
+  }
+  if (code.endsWith("_DENIED")) return "Denied";
+  if (code.endsWith("_HISTORY_UNAVAILABLE") || code.endsWith("_READ_CHANGED")) return "Changed";
+  if (code.endsWith("_UNAVAILABLE")) return "RetryLater";
+  return "Denied";
+}
+
 export function refundReadFailure(response: express.Response, error: unknown): void {
-  const code =
-    error !== null && typeof error === "object"
-      ? Object.getOwnPropertyDescriptor(error, "code")?.value
-      : undefined;
-  if (code === "TENANT_DATABASE_TRANSACTION_CONFLICT") {
-    response
-      .status(503)
-      .set("Cache-Control", NO_STORE)
-      .set("Retry-After", "1")
-      .json({ error: "retry_later" });
+  const kind = readFailureKind(error);
+  if (kind === "Denied") {
+    denied(response);
     return;
   }
-  denied(response);
+  response
+    .status(kind === "Changed" ? 409 : 503)
+    .set("Cache-Control", NO_STORE)
+    .set("Retry-After", kind === "Changed" ? "0" : "1")
+    .json({ error: kind === "Changed" ? "changed_while_loading" : "retry_later" });
 }
 
 /**

@@ -3,6 +3,7 @@ import {
   createOrdinaryRefundRoleResolver,
   createPostgresOrdinaryRefundRequestContextSource,
   createPostgresOrdinaryRefundRequestStatusSource,
+  observeOrdinaryRefundOrderAfterFence,
 } from "@rms/payment";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -94,13 +95,17 @@ export function createMerchantOrdinaryRefundProgress(options: {
               context: current.context,
             }),
           });
-          const observedAt = String(current.context.resolvedAt);
+          const resolvedAt = String(current.context.resolvedAt);
           const readable = async () =>
             (
               await refundReadAccess(
                 workforce,
                 tx,
-                { ...scope, actorReference: String(current.actorReference), observedAt },
+                {
+                  ...scope,
+                  actorReference: String(current.actorReference),
+                  observedAt: resolvedAt,
+                },
                 role,
                 current.kdsOperatorProfileAllows,
               )
@@ -108,6 +113,15 @@ export function createMerchantOrdinaryRefundProgress(options: {
           if (!(await readable())) return deny();
           authorized.recheckBeforeReply(readable);
           const allowed = () => authorized.guard();
+          // v15 2026-10-18 (dd750045): read at a time taken once the Order's refund fence is held,
+          // so a request recorded for this Order meanwhile is part of the history read.
+          const observedAt = await observeOrdinaryRefundOrderAfterFence(
+            tx,
+            scope,
+            orderReference,
+            resolvedAt,
+            options.persistence.now,
+          );
           const context = await createPostgresOrdinaryRefundRequestContextSource({
             scope,
             // Read-only: the Order's refund fence only (canonical lock order, Payment request store).

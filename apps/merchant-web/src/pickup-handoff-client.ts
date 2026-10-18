@@ -7,6 +7,17 @@ import {
   type PickupQueueItem,
 } from "./pickup.js";
 
+/**
+ * WP-2423: why a customer cannot show a still-valid pickup code, chosen by staff from this list
+ * (the order of the choices on screen).
+ */
+export const pickupCodeNotShownCauses = [
+  "PhoneUnavailable",
+  "CodeNotReceived",
+  "OrderPageLost",
+] as const;
+export type PickupCodeNotShownCause = (typeof pickupCodeNotShownCauses)[number];
+
 export class PickupHandoffClientError extends Error {
   constructor(
     readonly code: "Invalid" | "PermissionDenied" | "Conflict" | "Rejected" | "OutcomeUnknown",
@@ -33,6 +44,11 @@ export function createPickupHandoffClient(fetcher: typeof fetch = fetch) {
       /** Null for an in-person check (the proof expired or was never issued). */
       verification: PickupVerification | null;
       identityCheck?: "OrderNumberAndName" | "OrderNumberAndPhoneLast4";
+      /**
+       * WP-2423: the code is still valid but the customer cannot show it; staff chose why. Only
+       * for an in-person check of an order whose code is ready.
+       */
+      codeNotShownCause?: PickupCodeNotShownCause;
       workstation: PickupWorkstation;
       recipientType: "Customer" | "Delegate";
       recipientDisplayMask: string;
@@ -48,7 +64,10 @@ export function createPickupHandoffClient(fetcher: typeof fetch = fetch) {
           !workstation ||
           input.item.phase !== "Ready" ||
           (verification === null
-            ? !["Expired", "NotIssued", "Locked"].includes(input.item.proofReadiness) ||
+            ? (input.codeNotShownCause === undefined
+                ? !["Expired", "NotIssued", "Locked"].includes(input.item.proofReadiness)
+                : input.item.proofReadiness !== "Ready" ||
+                  !pickupCodeNotShownCauses.includes(input.codeNotShownCause)) ||
               (input.identityCheck !== "OrderNumberAndName" &&
                 input.identityCheck !== "OrderNumberAndPhoneLast4")
             : !execution.proof ||
@@ -74,7 +93,12 @@ export function createPickupHandoffClient(fetcher: typeof fetch = fetch) {
           fulfillmentReference: parsePickupReference(input.item.fulfillmentReference),
           expectedAggregateVersion: expectedVersion,
           ...(verification === null
-            ? { identityCheck: input.identityCheck }
+            ? {
+                identityCheck: input.identityCheck,
+                ...(input.codeNotShownCause === undefined
+                  ? {}
+                  : { codeNotShownCause: input.codeNotShownCause }),
+              }
             : { verificationReference: parsePickupReference(verification.verificationReference) }),
           ...workstation,
           quantities,

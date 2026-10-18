@@ -3850,6 +3850,21 @@ it("protects refund items transport and strips private nested data", async () =>
   });
   query.mockRejectedValueOnce(new Error("private"));
   expect(await (await send()).json()).toEqual({ error: "request_denied" });
+  // v15 2026-10-18 (dd750045): history that changed while the list loaded, or a dependency that
+  // could not be read, is never answered as a permission refusal; a refusal still is.
+  for (const [message, status, body] of [
+    ["ORDINARY_REFUND_HISTORY_UNAVAILABLE", 409, { error: "changed_while_loading" }],
+    ["MERCHANT_REFUND_READ_CHANGED", 409, { error: "changed_while_loading" }],
+    ["ORDINARY_REFUND_COMMAND_UNAVAILABLE", 503, { error: "retry_later" }],
+    ["ORDINARY_REFUND_REQUEST_DENIED", 403, { error: "request_denied" }],
+    ["ORDINARY_REFUND_PERMISSION_DENIED", 403, { error: "request_denied" }],
+    ["STORE_SERVICE_PERMISSION_DENIED", 403, { error: "request_denied" }],
+  ] as const) {
+    query.mockRejectedValueOnce(new Error(message));
+    const failed = await send();
+    expect([failed.status, await failed.json()]).toEqual([status, body]);
+    expect(failed.headers.get("cache-control")).toBe("no-store");
+  }
   const unconfigured = await serveRefundItems();
   expect(
     (

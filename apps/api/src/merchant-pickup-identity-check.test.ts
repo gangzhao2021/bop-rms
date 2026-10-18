@@ -193,3 +193,33 @@ it("refuses the reply when the permission is withdrawn while the details are rea
     code: "PICKUP_HANDOFF_PERMISSION_DENIED",
   });
 });
+
+it("WP-2423: reads the details for a still-valid code only once staff said why it can't be shown", async () => {
+  const f = setup();
+  doubles.current.mockResolvedValue(ready({ codeChecksLocked: false }));
+  await expect(f.operation(f.input)).rejects.toMatchObject({ code: "PICKUP_HANDOFF_NOT_READY" });
+  expect(
+    await f.operation({
+      ...f.input,
+      query: { ...f.input.query, codeNotShownCause: "PhoneUnavailable" },
+    }),
+  ).toEqual({ status: "Available", name: "Sam Lee", phoneLast4: "0123" });
+  // Only a cause from the fixed list, never free text.
+  for (const codeNotShownCause of ["Phone died, ask Sam", null, ""])
+    await expect(
+      f.operation({ ...f.input, query: { ...f.input.query, codeNotShownCause } }),
+    ).rejects.toMatchObject({ code: "PICKUP_HANDOFF_INPUT_INVALID" });
+  // Still nothing for an order that is not ready.
+  doubles.current.mockResolvedValue(
+    ready({
+      codeChecksLocked: false,
+      source: { ...ready().source, canonicalPhase: "Completed" },
+    }),
+  );
+  await expect(
+    f.operation({
+      ...f.input,
+      query: { ...f.input.query, codeNotShownCause: "OrderPageLost" },
+    }),
+  ).rejects.toMatchObject({ code: "PICKUP_HANDOFF_NOT_READY" });
+});

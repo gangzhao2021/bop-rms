@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { createPickupHandoffClient, PickupHandoffClientError } from "./pickup-handoff-client.js";
+import {
+  createPickupHandoffClient,
+  PickupHandoffClientError,
+  type PickupCodeNotShownCause,
+} from "./pickup-handoff-client.js";
 import type { PickupVerification } from "./pickup-proof-client.js";
 import { pickupItemLabel, type PickupQueueItem, type PickupWorkstation } from "./pickup.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -9,6 +13,12 @@ import {
   type PickupIdentityOutcome,
 } from "./pickup-identity-check-client.js";
 const client = createPickupHandoffClient();
+/** WP-2423: what staff choose when a customer cannot show a still-valid pickup code. */
+const codeNotShownChoices: readonly (readonly [PickupCodeNotShownCause, string])[] = [
+  ["PhoneUnavailable", "Phone is dead, lost or left behind"],
+  ["CodeNotReceived", "Customer never got the pickup code"],
+  ["OrderPageLost", "Order page was closed or lost"],
+];
 
 /**
  * WP-2423: what staff compare in person: the name on the order and the phone's last four digits
@@ -75,8 +85,15 @@ export function PickupHandoffForm({
   csrf,
   storeReference,
   paused = false,
+  codeNotShown = false,
   onRecorded,
 }: {
+  /**
+   * WP-2423: the customer's code is still valid but they cannot show it (phone dead, code never
+   * received, order page lost). A deliberate secondary action beside the code check: staff choose
+   * why, then check the customer in person; the reason and the staff member are recorded.
+   */
+  readonly codeNotShown?: boolean;
   /**
    * WP-2423: called once the handover is recorded; the queue closes this dialog, re-reads at once
    * so the order leaves Waiting, and says so plainly.
@@ -102,6 +119,7 @@ export function PickupHandoffForm({
   // WP-2423: taken at the counter: no pickup code was ever sent and the walk-up customer left no
   // contact (counter orders carry no name), so staff call the order number and hand it over.
   const counter = inPerson && item.takenAtCounter === true && item.proofReadiness === "NotIssued";
+  const [cause, setCause] = useState<"" | PickupCodeNotShownCause>("");
   const [identityCheck, setIdentityCheck] = useState<
     "" | "OrderNumberAndName" | "OrderNumberAndPhoneLast4"
   >("");
@@ -113,17 +131,22 @@ export function PickupHandoffForm({
   // dropped when it closes.
   const [details, setDetails] = useState<PickupIdentityOutcome | "Loading" | null>(null);
   const detailsRequest = useRef<AbortController | null>(null);
-  const loadDetails = () => {
-    if (!inPerson || counter || browserOffline()) return;
+  const loadDetails = (chosen: "" | PickupCodeNotShownCause = cause) => {
+    // A still-valid code: the name and phone are read only once staff said why it can't be shown.
+    if (!inPerson || counter || (codeNotShown && !chosen) || browserOffline()) return;
     detailsRequest.current?.abort();
     const active = new AbortController();
     detailsRequest.current = active;
     setDetails("Loading");
-    void readPickupIdentityCheck({ item, storeReference, csrf, signal: active.signal }).then(
-      (result) => {
-        if (!active.signal.aborted) setDetails(result);
-      },
-    );
+    void readPickupIdentityCheck({
+      item,
+      storeReference,
+      csrf,
+      signal: active.signal,
+      ...(codeNotShown && chosen ? { codeNotShownCause: chosen } : {}),
+    }).then((result) => {
+      if (!active.signal.aborted) setDetails(result);
+    });
   };
   // No phone on the order to compare: only the name check can be chosen.
   const phoneUnavailable =
@@ -156,7 +179,12 @@ export function PickupHandoffForm({
       browserOffline() ||
       controller.current ||
       (!retry &&
-        (status !== "Idle" || !confirmed || !recipient || !mask || (inPerson && !identityCheck)))
+        (status !== "Idle" ||
+          !confirmed ||
+          !recipient ||
+          !mask ||
+          (inPerson && !identityCheck) ||
+          (codeNotShown && !cause)))
     )
       return;
     try {
@@ -166,6 +194,7 @@ export function PickupHandoffForm({
           item,
           verification,
           ...(identityCheck ? { identityCheck } : {}),
+          ...(codeNotShown && cause ? { codeNotShownCause: cause } : {}),
           workstation,
           storeReference,
           recipientType: recipient,
@@ -209,16 +238,19 @@ export function PickupHandoffForm({
     <>
       <button
         disabled={status !== "Idle" || paused}
+        className={codeNotShown ? "pickup-handoff__no-code" : undefined}
         onClick={() => {
           dialog.current?.showModal();
           loadDetails();
         }}
       >
-        {counter
-          ? "Hand over"
-          : inPerson
-            ? "Hand over after checking in person"
-            : "Review pickup handoff"}
+        {codeNotShown
+          ? "Guest can’t show the code"
+          : counter
+            ? "Hand over"
+            : inPerson
+              ? "Hand over after checking in person"
+              : "Review pickup handoff"}
       </button>
       {status === "Completed" || status === "InProgress" ? (
         <p ref={resultAnnouncement} role="status" tabIndex={-1}>
@@ -264,6 +296,13 @@ export function PickupHandoffForm({
             This order was taken at the counter, so no pickup code was sent. Call the order number
             and hand it over to the customer who answers.
           </p>
+        ) : codeNotShown ? (
+          <p>
+            The customer&apos;s pickup code is still valid. Use this only when they can&apos;t show
+            it. Choose why, then ask for the order number and check it with the name or the last
+            four digits of the phone on the order. Your name and the reason are kept with the
+            handover.
+          </p>
         ) : inPerson ? (
           <p>
             {item.proofReadiness === "Expired"
@@ -275,7 +314,12 @@ export function PickupHandoffForm({
             on the order before handing over.
           </p>
         ) : null}
-        {inPerson ? <PickupIdentityDetails details={details} onRetry={loadDetails} /> : null}
+        {codeNotShown && !cause && status === "Idle" ? (
+          <p role="status">Choose why first. The name and phone on the order then show here.</p>
+        ) : null}
+        {inPerson ? (
+          <PickupIdentityDetails details={details} onRetry={() => loadDetails()} />
+        ) : null}
         {status === "Idle" ? (
           <form
             autoComplete="off"
@@ -284,6 +328,26 @@ export function PickupHandoffForm({
               void submit(false);
             }}
           >
+            {codeNotShown ? (
+              <label>
+                Why the code can&apos;t be shown
+                <select
+                  value={cause}
+                  onChange={(event) => {
+                    const chosen = event.currentTarget.value as typeof cause;
+                    setCause(chosen);
+                    if (chosen && details === null) loadDetails(chosen);
+                  }}
+                >
+                  <option value="">Choose why</option>
+                  {codeNotShownChoices.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             {inPerson ? (
               <label>
                 Checked in person
@@ -341,7 +405,14 @@ export function PickupHandoffForm({
             <button
               type="submit"
               data-variant="primary"
-              disabled={paused || !confirmed || !recipient || !mask || (inPerson && !identityCheck)}
+              disabled={
+                paused ||
+                !confirmed ||
+                !recipient ||
+                !mask ||
+                (inPerson && !identityCheck) ||
+                (codeNotShown && !cause)
+              }
             >
               Confirm and record handoff
             </button>

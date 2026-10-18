@@ -148,6 +148,65 @@ it("WP-2423: offers an in-person handoff when the pickup code expired or was nev
   expect(render("Locked")).toContain("Too many wrong codes for this order. Check the customer");
   expect(render("Expired")).not.toContain("Too many wrong codes for this order");
 });
+it("WP-2423: a guest who can't show a valid code is a deliberate secondary action beside the code check", () => {
+  const fixture = pickupQueueFixture();
+  const render = (proofReadiness: string) => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PickupQueueScreen
+          view={parsePickupQueueView({
+            ...fixture,
+            workstation: {
+              deviceReference: "01900000-0000-7000-8000-000000000008",
+              pickupLocationReference: "01900000-0000-7000-8000-000000000009",
+            },
+            items: fixture.items.map((item) => ({
+              ...item,
+              proofReadiness,
+              execution: {
+                aggregateVersion: "3",
+                publicOrderReference: null,
+                proof: { kind: "HumanCode", generation: 1, expiresAt: "2026-08-12T16:00:00.000Z" },
+                items: [
+                  {
+                    fulfillmentItemReference: "01900000-0000-7000-8000-000000000003",
+                    orderedQuantity: 1,
+                    readyQuantity: 1,
+                    handedOverQuantity: 0,
+                  },
+                ],
+              },
+            })),
+          })}
+          proofContext={{
+            csrf: "A".repeat(43),
+            storeReference: "01900000-0000-7000-8000-000000000004",
+          }}
+        />
+      </MemoryRouter>,
+    );
+    return html.slice(html.indexOf("<article"), html.indexOf("</article>"));
+  };
+  const ready = render("Ready");
+  // The code check stays first and primary; the fallback is the quieter action after it.
+  expect(ready.indexOf("Check pickup code")).toBeGreaterThan(-1);
+  expect(ready.indexOf("Guest can’t show the code")).toBeGreaterThan(
+    ready.indexOf("Check pickup code"),
+  );
+  expect(ready).toContain('class="pickup-handoff__no-code"');
+  expect(ready).toContain("The customer&#x27;s pickup code is still valid.");
+  for (const text of [
+    "Choose why",
+    "Phone is dead, lost or left behind",
+    "Customer never got the pickup code",
+    "Order page was closed or lost",
+    "Your name and the reason are kept with the handover.",
+  ])
+    expect(ready).toContain(text);
+  // Without a usable code the ordinary in-person check is offered instead, with no cause to pick.
+  for (const proofReadiness of ["Expired", "NotIssued", "Locked"])
+    expect(render(proofReadiness)).not.toContain("Guest can’t show the code");
+});
 it("WP-2423: a counter order is handed over in person at once, never by pickup code", () => {
   const fixture = pickupQueueFixture();
   const render = (proofReadiness: string, takenAtCounter: boolean) => {

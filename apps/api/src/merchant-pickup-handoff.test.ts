@@ -207,6 +207,91 @@ it("WP-2423: builds an in-person verification for the current staff member and p
     }),
   ).rejects.toMatchObject({ code: "PICKUP_HANDOFF_INPUT_INVALID" });
 });
+it("WP-2423: a still-valid code the customer can't show records CodeNotShown with the chosen cause", async () => {
+  const f = setup();
+  const command: Record<string, unknown> = {
+    ...f.input.command,
+    identityCheck: "OrderNumberAndName",
+    codeNotShownCause: "CodeNotReceived",
+  };
+  delete command.verificationReference;
+  doubles.current.mockResolvedValue({
+    verifications: [],
+    inPerson: [],
+    source: { lockedAt: "2026-09-19T12:00:00.000Z" },
+    codeChecksLocked: false,
+    capability: { expiresAt: "2026-09-19T13:00:00.000Z" },
+  });
+  await f.operation({ ...f.input, command });
+  expect(doubles.complete.mock.calls[0]?.[0].command.verification).toEqual({
+    verificationReference: id(20),
+    correlationReference: id(12),
+    fulfillmentReference: id(6),
+    brandReference: id(3),
+    storeReference: id(4),
+    verificationMethod: "InPerson",
+    identityCheck: "OrderNumberAndName",
+    reason: "CodeNotShown",
+    codeNotShownCause: "CodeNotReceived",
+    verifiedByActorReference: id(2),
+    verifiedAt: "2026-09-19T12:00:00.000Z",
+  });
+  // Only from the fixed list, and only with an in-person identity check.
+  for (const bad of [
+    { ...command, codeNotShownCause: "Phone died, ask Sam" },
+    { ...command, codeNotShownCause: null },
+    { ...f.input.command, codeNotShownCause: "PhoneUnavailable" },
+  ])
+    await expect(f.operation({ ...f.input, command: bad })).rejects.toMatchObject({
+      code: "PICKUP_HANDOFF_INPUT_INVALID",
+    });
+  expect(doubles.complete).toHaveBeenCalledTimes(1);
+});
+it("WP-2423: a replay reuses the recorded in-person check and refuses a changed choice", async () => {
+  const f = setup();
+  const recorded = {
+    verificationReference: id(40),
+    correlationReference: id(12),
+    fulfillmentReference: id(6),
+    brandReference: id(3),
+    storeReference: id(4),
+    verificationMethod: "InPerson",
+    identityCheck: "OrderNumberAndName",
+    reason: "CodeNotShown",
+    codeNotShownCause: "PhoneUnavailable",
+    verifiedByActorReference: id(2),
+    verifiedAt: "2026-09-19T11:59:00.000Z",
+  };
+  doubles.current.mockResolvedValue({ verifications: [], inPerson: [recorded] });
+  doubles.recover.mockResolvedValue({
+    record: {
+      handoffReference: id(30),
+      verificationReference: id(40),
+      handedOverAt: "2026-09-19T11:59:00.000Z",
+    },
+    operation: { operationReference: id(31) },
+    audit: { auditReference: id(32) },
+  });
+  const command: Record<string, unknown> = {
+    ...f.input.command,
+    identityCheck: "OrderNumberAndName",
+    codeNotShownCause: "PhoneUnavailable",
+  };
+  delete command.verificationReference;
+  await f.operation({ ...f.input, command });
+  expect(doubles.complete.mock.calls[0]?.[0].command.verification).toBe(recorded);
+  const withoutCause = { ...command };
+  delete withoutCause.codeNotShownCause;
+  for (const changed of [
+    { ...command, codeNotShownCause: "OrderPageLost" },
+    { ...command, identityCheck: "OrderNumberAndPhoneLast4" },
+    withoutCause,
+  ])
+    await expect(f.operation({ ...f.input, command: changed })).rejects.toMatchObject({
+      code: "PICKUP_HANDOFF_VERSION_CONFLICT",
+    });
+  expect(doubles.complete).toHaveBeenCalledTimes(1);
+});
 it("WP-2423: resolves the caller in full once at the start and once before the commit", async () => {
   const f = setup();
   const access = {

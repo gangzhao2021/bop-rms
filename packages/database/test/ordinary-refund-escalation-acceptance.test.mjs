@@ -1319,7 +1319,45 @@ it("escalated ordinary refund: request, step-ups, independent approval and one P
           },
         ],
       };
-      const small = await request({ ...session("requester"), command: smallRequest });
+      // v15 2026-10-18 regression (dd750045, order 40): the Owner's refund item list was refused
+      // with "your permissions do not allow this refund workflow" while a Manager recorded a
+      // request for the same Order. The list fixed its observation time when it resolved the
+      // signed-in session, then read the Order's request history on its own connection after the
+      // request committed: a request recorded after that time read as inconsistent history
+      // (ORDINARY_REFUND_HISTORY_UNAVAILABLE), answered as a permission refusal. Here the list
+      // resolves its session, the request is recorded and committed on another connection, then
+      // the list continues: it must show the new request, read at a time after the refund fence.
+      let small;
+      {
+        let releaseList, listPaused;
+        const paused = new Promise((resolve) => (listPaused = resolve));
+        const gate = new Promise((resolve) => (releaseList = resolve));
+        const gatedItems = createMerchantOrdinaryRefundItems({
+          persistence,
+          authentication,
+          resolveConfiguration: async () => {
+            listPaused();
+            await gate;
+            return { providerAccountReference: provider, environment: "Test", roleMapping };
+          },
+          newReference: fresh,
+          locale: "en-CA",
+        });
+        const listing = gatedItems({
+          ...session("approver"),
+          query: { orderReference: third.order },
+        });
+        await paused;
+        small = await request({ ...session("requester"), command: smallRequest });
+        releaseList();
+        const listed = await listing;
+        assert.equal(listed.claimVersion, 2);
+        assert.deepEqual(
+          listed.recentRequests.map((r) => r.requestReference),
+          [thirdRequest.requestReference, smallRequest.requestReference],
+        );
+        assert.equal(listed.recentRequests[1].progress, "Recorded");
+      }
       assert.equal(small.approvalRequired, false);
       assert.ok(BigInt(small.amountMinor) < 10000n);
       const sendsBefore = providerSends;

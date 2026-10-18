@@ -1,4 +1,5 @@
 import { parsePickupReference, type PickupQueueItem } from "./pickup.js";
+import type { PickupCodeNotShownCause } from "./pickup-handoff-client.js";
 
 /**
  * WP-2423: what staff compare when they check a pickup customer in person: the name on the order
@@ -31,7 +32,14 @@ function parse(raw: unknown): PickupIdentityDetails | null {
 }
 
 export async function readPickupIdentityCheck(
-  input: { item: PickupQueueItem; storeReference: string; csrf: string; signal?: AbortSignal },
+  input: {
+    item: PickupQueueItem;
+    storeReference: string;
+    csrf: string;
+    signal?: AbortSignal;
+    /** WP-2423: the code is still valid; staff said why the customer cannot show it. */
+    codeNotShownCause?: PickupCodeNotShownCause;
+  },
   fetcher: typeof fetch = fetch,
 ): Promise<PickupIdentityOutcome> {
   let body: string;
@@ -40,6 +48,9 @@ export async function readPickupIdentityCheck(
       orderReference: parsePickupReference(input.item.orderReference),
       storeReference: parsePickupReference(input.storeReference),
       fulfillmentReference: parsePickupReference(input.item.fulfillmentReference),
+      ...(input.codeNotShownCause === undefined
+        ? {}
+        : { codeNotShownCause: input.codeNotShownCause }),
     });
   } catch {
     return { status: "Unavailable" };

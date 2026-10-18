@@ -13,8 +13,22 @@ vi.mock("./merchant-refund-read-authority.js", () => ({ refundReadAccess: double
 vi.mock("./merchant-workforce-authority-source.js", () => ({
   createMerchantWorkforcePermissionSource: () => vi.fn(),
 }));
+const observations = vi.hoisted(() => ({
+  at: null as string | null,
+  calls: [] as string[],
+}));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<object>()),
+  // v15 2026-10-18: the time read once the Order's refund fence is held (recorded per call).
+  observeOrdinaryRefundOrderAfterFence: async (
+    _tx: unknown,
+    _scope: unknown,
+    orderReference: string,
+    notBefore: string,
+  ) => {
+    observations.calls.push(orderReference);
+    return observations.at ?? notBefore;
+  },
   createPostgresCardMachinePaymentStore: doubles.cards,
   createPostgresOrdinaryRefundRequestContextSource: doubles.context,
   createPostgresOrdinaryRefundCurrentEscalationSource: doubles.escalation,
@@ -27,7 +41,11 @@ const id = (n: number) => "0190a7c6-0000-7000-8000-" + n.toString(16).padStart(1
 type Options = Parameters<typeof createMerchantCardMachineOrdinaryRefund>[0];
 type Authorize = (t: unknown, query: Record<string, unknown>) => Promise<boolean>;
 const now = "2026-10-15T12:00:00.000Z";
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  observations.at = null;
+  observations.calls.length = 0;
+});
 function setup() {
   const allowed = vi.fn(async () => true),
     during: boolean[] = [];

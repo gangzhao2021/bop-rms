@@ -114,6 +114,11 @@ export async function readPickupInPersonVerifications(
       verificationMethod: "InPerson",
       identityCheck: row.identity_check,
       reason: row.reason,
+      // WP-2423: present only when the customer could not show a still-valid code (older rows and
+      // other reasons have none).
+      ...(row.code_not_shown_cause === null || row.code_not_shown_cause === undefined
+        ? {}
+        : { codeNotShownCause: row.code_not_shown_cause }),
       verifiedByActorReference: row.verified_by_actor_id,
       verifiedAt: at(row.verified_at),
     });

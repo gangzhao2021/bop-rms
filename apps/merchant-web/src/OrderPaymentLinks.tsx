@@ -15,9 +15,11 @@ export const refundErrorText = (error: unknown) =>
     ? FULL_SIGN_IN_REQUIRED_TEXT
     : error instanceof OrdinaryRefundClientError && error.code === "Denied"
       ? "Your current permissions do not allow this refund workflow."
-      : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
-        ? "The payment or refund selection changed. Refresh before trying again."
-        : "Unable to refresh this information. Check your connection and try again.";
+      : error instanceof OrdinaryRefundClientError && error.code === "Changed"
+        ? "This order changed while it was loading. Refresh to see the latest."
+        : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
+          ? "The payment or refund selection changed. Refresh before trying again."
+          : "Unable to refresh this information. Check your connection and try again.";
 
 export function OrderPaymentLinks({
   orderReference,

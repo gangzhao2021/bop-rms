@@ -8,6 +8,7 @@ import {
   createPostgresCapturedBatchPaymentSource,
   createPostgresCardMachinePaymentStore,
   createOrdinaryRefundRoleResolver,
+  observeOrdinaryRefundOrderAfterFence,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -110,6 +111,8 @@ export function createMerchantOrdinaryRefundItems(options: {
             }),
           });
           const role = createOrdinaryRefundRoleResolver(configuration.roleMapping);
+          /** The session's resolution until the refund fence is held, then the time read after it. */
+          let observedAt = String(current.context.resolvedAt);
           // WP-2423 Q19: read once per request (display only; the request command rechecks).
           let soleOperatorStatus: Promise<string> | null = null;
           const soleOperator = options.soleOperator;
@@ -138,7 +141,7 @@ export function createMerchantOrdinaryRefundItems(options: {
               query.storeReference !== scope.storeReference ||
               query.orderReference !== orderReference ||
               query.actorReference !== String(current.actorReference) ||
-              query.observedAt !== String(current.context.resolvedAt)
+              query.observedAt !== observedAt
             )
               return false;
             return authorized.guard();
@@ -166,16 +169,25 @@ export function createMerchantOrdinaryRefundItems(options: {
               ...scope,
               orderReference,
               actorReference: String(current.actorReference),
-              observedAt: String(current.context.resolvedAt),
+              observedAt,
             });
           if (!(await allowed())) return deny();
-          const observedAt = String(current.context.resolvedAt);
           // Canonical cross-owner lock order (acquireOrdinaryRefundRequestFences): the Order's
           // Ordering rows before the Payment refund fence. v15 2026-10-18 (40P01): taken after
           // the fence, this read deadlocked with a refund receipt being issued for the Order.
           const order = await createPostgresReceiptOrderSource({ ...scope, authorize: allowed })(
             businessTransaction,
             { orderReference, observedAt },
+          );
+          // v15 2026-10-18 (dd750045): the refund history is read at a time taken once the Order's
+          // refund fence is held, not at the session's resolution: a request recorded for this
+          // Order meanwhile is part of the history read, never "inconsistent history".
+          observedAt = await observeOrdinaryRefundOrderAfterFence(
+            businessTransaction,
+            scope,
+            orderReference,
+            observedAt,
+            options.persistence.now,
           );
           const context = await createPostgresOrdinaryRefundRequestContextSource({
             scope,

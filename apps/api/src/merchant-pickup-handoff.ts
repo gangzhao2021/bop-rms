@@ -5,6 +5,7 @@ import {
   parsePickupProofReference,
   PickupHandoffError,
   completePickupHandoffPermission,
+  pickupCodeNotShownCauses,
 } from "@rms/fulfillment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -32,13 +33,19 @@ export function createMerchantPickupHandoff(options: {
   const resolveScope = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const session = await options.authentication.authorize(input);
-    // WP-2423: staff verified the customer in person (proof expired, never issued, or code checks
-    // locked after five wrong codes) instead of a
-    // proof verification: the browser names only which identity check was made.
+    // WP-2423: staff verified the customer in person (proof expired, never issued, code checks
+    // locked after five wrong codes, or a valid code the customer cannot show) instead of a
+    // proof verification: the browser names only which identity check was made (and why the code
+    // was not shown); the reason is decided here from the proof state.
     const inPerson =
       input.command !== null &&
       typeof input.command === "object" &&
       Object.prototype.hasOwnProperty.call(input.command, "identityCheck");
+    // WP-2423: staff chose "Guest can't show the code" while the code is still valid, and named
+    // why; the owner checks again under the lock that the code is still valid and unlocked.
+    const codeNotShown =
+      inPerson &&
+      Object.prototype.hasOwnProperty.call(input.command as object, "codeNotShownCause");
     let intent: Readonly<Record<string, unknown>>;
     try {
       intent = readClosedRecord(input.command, [
@@ -47,6 +54,7 @@ export function createMerchantPickupHandoff(options: {
         "fulfillmentReference",
         "expectedAggregateVersion",
         inPerson ? "identityCheck" : "verificationReference",
+        ...(codeNotShown ? ["codeNotShownCause"] : []),
         "recipientType",
         "recipientDisplayMask",
         "pickupLocationReference",
@@ -69,6 +77,10 @@ export function createMerchantPickupHandoff(options: {
       intent.identityCheck !== "OrderNumberAndPhoneLast4"
     )
       return invalid();
+    const codeNotShownCause = codeNotShown
+      ? pickupCodeNotShownCauses.find((cause) => cause === intent.codeNotShownCause)
+      : undefined;
+    if (codeNotShown && codeNotShownCause === undefined) return invalid();
     if (
       typeof intent.expectedAggregateVersion !== "string" ||
       !/^[1-9][0-9]{0,18}$/.test(intent.expectedAggregateVersion) ||
@@ -148,25 +160,38 @@ export function createMerchantPickupHandoff(options: {
             idempotencyReference,
           });
           const correlationReference = parsePickupProofReference(intent.correlationReference);
+          const recorded = inPerson
+            ? current.inPerson.find(
+                (value) => value.verificationReference === prior?.record.verificationReference,
+              )
+            : undefined;
+          // A replay must repeat what staff chose: the same identity check and the same cause.
+          if (
+            recorded &&
+            (recorded.identityCheck !== intent.identityCheck ||
+              recorded.codeNotShownCause !== codeNotShownCause)
+          )
+            throw new PickupHandoffError("PICKUP_HANDOFF_VERSION_CONFLICT");
           const verification = inPerson
             ? // A replay reuses the recorded verification; a new one names this staff member and the
-              // proof state the owner checks again (never issued, or expired by now).
-              (current.inPerson.find(
-                (value) => value.verificationReference === prior?.record.verificationReference,
-              ) ?? {
+              // proof state the owner checks again (never issued, expired by now, locked, or still
+              // valid while the customer cannot show it).
+              (recorded ?? {
                 verificationReference: options.nextReference(),
                 correlationReference,
                 fulfillmentReference: intent.fulfillmentReference,
                 ...selected,
                 verificationMethod: "InPerson" as const,
                 identityCheck: intent.identityCheck,
-                reason:
-                  current.capability === null
+                reason: codeNotShownCause
+                  ? "CodeNotShown"
+                  : current.capability === null
                     ? "ProofNotIssued"
                     : String(current.source.lockedAt) < String(current.capability.expiresAt) &&
                         current.codeChecksLocked
                       ? "CodeLocked"
                       : "ProofExpired",
+                ...(codeNotShownCause ? { codeNotShownCause } : {}),
                 verifiedByActorReference: scope.actorReference,
                 verifiedAt: options.persistence.now(),
               })

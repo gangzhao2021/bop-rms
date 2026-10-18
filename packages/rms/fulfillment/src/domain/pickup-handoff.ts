@@ -32,6 +32,18 @@ export interface PickupHandoffSource {
 }
 
 /**
+ * WP-2423: why a customer whose pickup code is still valid could not show it, chosen by staff from
+ * a fixed list (never free text, so no personal detail is recorded): their phone is dead, lost or
+ * left behind; the pickup message never arrived; or the order page was closed or lost.
+ */
+export const pickupCodeNotShownCauses = [
+  "PhoneUnavailable",
+  "CodeNotReceived",
+  "OrderPageLost",
+] as const;
+export type PickupCodeNotShownCause = (typeof pickupCodeNotShownCauses)[number];
+
+/**
  * WP-2423: staff verified the customer in person because the pickup proof had expired or was never
  * issued: the order number together with the name on the order or the last four digits of its phone.
  */
@@ -43,8 +55,14 @@ export interface PickupInPersonVerificationRecord {
   readonly storeReference: PickupHandoffReference;
   readonly verificationMethod: "InPerson";
   readonly identityCheck: "OrderNumberAndName" | "OrderNumberAndPhoneLast4";
-  /** CodeLocked (WP-2423): five wrong pickup codes locked code checks for a still-valid proof. */
-  readonly reason: "ProofExpired" | "ProofNotIssued" | "CodeLocked";
+  /**
+   * CodeLocked (WP-2423): five wrong pickup codes locked code checks for a still-valid proof.
+   * CodeNotShown (WP-2423): the proof is still valid and unlocked but the customer cannot show it;
+   * staff chose this deliberately and named the cause.
+   */
+  readonly reason: "ProofExpired" | "ProofNotIssued" | "CodeLocked" | "CodeNotShown";
+  /** Present exactly when the reason is CodeNotShown. */
+  readonly codeNotShownCause?: PickupCodeNotShownCause;
   readonly verifiedByActorReference: PickupHandoffReference;
   readonly verifiedAt: PickupHandoffInstant;
 }
@@ -119,6 +137,42 @@ export interface PickupHandoffEffect {
   };
   readonly nextPhase: "InProgress" | "Completed";
   readonly nextAggregateVersion: bigint;
+}
+
+/**
+ * WP-2423: the platform audit reason and summary of a recorded handoff. A handover without the code
+ * while the code was still valid is named apart, with the cause staff chose; the in-person
+ * verification row also keeps the staff member, reason and cause.
+ */
+export function pickupHandoffAuditDetails(input: {
+  readonly inPersonReason?: PickupInPersonVerificationRecord["reason"] | null;
+  readonly codeNotShownCause?: PickupCodeNotShownCause | null;
+}):
+  | {
+      readonly reasonCode: "PICKUP_HANDOFF_CODE_NOT_SHOWN";
+      readonly afterSummary: {
+        readonly action: "CompletePickupHandoff";
+        readonly codeNotShownCause: PickupCodeNotShownCause;
+      };
+    }
+  | {
+      readonly reasonCode: "PICKUP_HANDOFF";
+      readonly afterSummary: { readonly action: "CompletePickupHandoff" };
+    } {
+  if (
+    input.inPersonReason === "CodeNotShown" &&
+    input.codeNotShownCause !== null &&
+    input.codeNotShownCause !== undefined &&
+    pickupCodeNotShownCauses.includes(input.codeNotShownCause)
+  )
+    return {
+      reasonCode: "PICKUP_HANDOFF_CODE_NOT_SHOWN",
+      afterSummary: {
+        action: "CompletePickupHandoff",
+        codeNotShownCause: input.codeNotShownCause,
+      },
+    };
+  return { reasonCode: "PICKUP_HANDOFF", afterSummary: { action: "CompletePickupHandoff" } };
 }
 
 export const pickupHandoffErrorCodes = [
@@ -429,6 +483,10 @@ function mask(value: unknown): string {
 export function parsePickupInPersonVerificationRecord(
   value: unknown,
 ): PickupInPersonVerificationRecord {
+  const withCause =
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, "codeNotShownCause");
   const raw = exactRecord(value, [
     "verificationReference",
     "correlationReference",
@@ -438,6 +496,7 @@ export function parsePickupInPersonVerificationRecord(
     "verificationMethod",
     "identityCheck",
     "reason",
+    ...(withCause ? ["codeNotShownCause"] : []),
     "verifiedByActorReference",
     "verifiedAt",
   ]);
@@ -447,7 +506,11 @@ export function parsePickupInPersonVerificationRecord(
       raw.identityCheck !== "OrderNumberAndPhoneLast4") ||
     (raw.reason !== "ProofExpired" &&
       raw.reason !== "ProofNotIssued" &&
-      raw.reason !== "CodeLocked")
+      raw.reason !== "CodeLocked" &&
+      raw.reason !== "CodeNotShown") ||
+    // The cause is named exactly when the code was not shown, and only from the fixed list.
+    (raw.reason === "CodeNotShown") !== withCause ||
+    (withCause && !(pickupCodeNotShownCauses as readonly unknown[]).includes(raw.codeNotShownCause))
   )
     return fail("PICKUP_HANDOFF_INPUT_INVALID");
   const verificationReference = reference(raw.verificationReference);
@@ -462,6 +525,7 @@ export function parsePickupInPersonVerificationRecord(
     verificationMethod: "InPerson",
     identityCheck: raw.identityCheck,
     reason: raw.reason,
+    ...(withCause ? { codeNotShownCause: raw.codeNotShownCause as PickupCodeNotShownCause } : {}),
     verifiedByActorReference: reference(raw.verifiedByActorReference),
     verifiedAt: instant(raw.verifiedAt),
   });

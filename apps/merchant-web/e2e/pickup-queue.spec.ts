@@ -432,15 +432,21 @@ test("@production Pickup reloads the current page after an authorized Store swit
   await page.goto("/app");
   await expect(page.getByRole("heading", { name: "Store 1", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Pickup", exact: true }).click();
-  await expect(page.getByText("Order PICKUPSTORE00000000001", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Order PICKUPSTORE00000000001", exact: true }),
+  ).toBeVisible();
 
   await page.goto("/app");
   await page.getByLabel("Authorized Store").selectOption(storeTwo.storeReference);
   await page.getByRole("button", { name: "Switch Store", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Store 2", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Pickup", exact: true }).click();
-  await expect(page.getByText("Order PICKUPSTORE00000000002", { exact: true })).toBeVisible();
-  await expect(page.getByText("Order PICKUPSTORE00000000001", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Order PICKUPSTORE00000000002", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Order PICKUPSTORE00000000001", exact: true }),
+  ).toHaveCount(0);
   // The home page's "Right now" card also reads the pickup queue; the Store sequence is what matters.
   expect(readScopes.filter((scope, index) => scope !== readScopes[index - 1])).toEqual([
     storeOne.storeReference,
@@ -935,5 +941,225 @@ test("@production Pickup hands a counter order over in person at once while a gu
     recipientType: "Customer",
   });
   expect(handoffs[0]).not.toHaveProperty("verificationReference");
+  await expectNoInternalText(page);
+});
+
+test("@production Pickup hands over a guest who can't show a still-valid code after staff say why and check in person", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "FUL-PICKUP-QUEUE",
+              label: "Pickup",
+              href: "/operations/pickup",
+              permission: "fulfillment.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  let handedOver = false;
+  const order = (n: number, fulfillment: number, orderReference: number) => ({
+    fulfillmentReference: id(fulfillment),
+    orderReference: id(orderReference),
+    orderNumber: String(n),
+    phase: "Ready",
+    aggregateVersion: "3",
+    readyAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+    publicOrderReference: null,
+    proof: {
+      kind: "HumanCode",
+      generation: 1,
+      expiresAt: new Date(Date.now() + 50 * 60_000).toISOString(),
+    },
+    items: [
+      {
+        fulfillmentItemReference: id(fulfillment + 100),
+        orderedQuantity: 1,
+        readyQuantity: 1,
+        handedOverQuantity: 0,
+      },
+    ],
+  });
+  await page.route("**/merchant/pickup/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        source: "CurrentFulfillment",
+        workstation: { deviceReference: id(10), pickupLocationReference: id(11) },
+        storeReference: scope.storeReference,
+        observedAt: new Date().toISOString(),
+        nextAfterFulfillmentReference: null,
+        items: [...(handedOver ? [] : [order(9, 1, 3)]), order(10, 5, 6)],
+      },
+    }),
+  );
+  const identityReads: Record<string, unknown>[] = [];
+  await page.route("**/merchant/pickup/identity-check", (route) => {
+    identityReads.push(route.request().postDataJSON());
+    return route.fulfill({
+      headers,
+      json: { status: "Available", name: "Sam Lee", phoneLast4: "0123" },
+    });
+  });
+  const proofChecks: unknown[] = [];
+  await page.route("**/merchant/pickup/proof", (route) => {
+    proofChecks.push(route.request().postDataJSON());
+    return route.fulfill({ status: 500, headers, json: {} });
+  });
+  const handoffs: Record<string, unknown>[] = [];
+  let refuseNext = true;
+  await page.route("**/merchant/pickup/handoff", (route) => {
+    const request = route.request().postDataJSON();
+    handoffs.push(request);
+    // The first try meets a code that locked or expired meanwhile: refused, staff refresh.
+    if (refuseNext) {
+      refuseNext = false;
+      return route.fulfill({
+        status: 422,
+        headers,
+        json: { error: "PICKUP_HANDOFF_VERIFICATION_FAILED" },
+      });
+    }
+    handedOver = true;
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Applied",
+        handoffReference: id(12),
+        fulfillmentReference: request.fulfillmentReference,
+        nextAggregateVersion: "4",
+        nextPhase: "Completed",
+      },
+    });
+  });
+  await page.goto("/operations/pickup");
+  const card = page
+    .locator(".pickup-queue__card")
+    .filter({ has: page.getByRole("heading", { name: "Order 9", exact: true }) });
+  await expect(card).toBeVisible();
+  await expect(card.getByText("Sent to customer")).toBeVisible();
+  // The code check stays the main action; the fallback is a quieter, deliberate one beside it.
+  const codeCheck = card.getByRole("button", { name: "Check pickup code" });
+  const noCode = card.getByRole("button", { name: "Guest can’t show the code" });
+  await expect(codeCheck).toBeVisible();
+  await expect(noCode).toBeEnabled();
+  expect(await noCode.evaluate((element) => getComputedStyle(element).textDecorationLine)).toBe(
+    "underline",
+  );
+  expect(
+    await codeCheck.evaluate((element) => getComputedStyle(element).textDecorationLine),
+  ).not.toBe("underline");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `no horizontal overflow at ${width}`,
+    ).toBe(true);
+    const box = await noCode.boundingBox();
+    expect(box?.height ?? 0, `touch target at ${width}`).toBeGreaterThanOrEqual(44);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectNoInternalText(page);
+
+  const attempt = async (cause: string) => {
+    await noCode.click();
+    const dialog = page.getByRole("dialog", { name: "Confirm pickup handoff" });
+    await expect(
+      dialog.getByText("The customer's pickup code is still valid.", { exact: false }),
+    ).toBeVisible();
+    // Nothing personal is read until staff say why the code can't be shown.
+    await expect(
+      dialog.getByText("Choose why first. The name and phone on the order then show here."),
+    ).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Confirm and record handoff" })).toBeDisabled();
+    const readsBefore = identityReads.length;
+    await dialog.getByLabel("Why the code can't be shown").selectOption({ label: cause });
+    await expect(dialog.getByText("Sam Lee")).toBeVisible();
+    expect(identityReads.length).toBe(readsBefore + 1);
+    await dialog
+      .getByLabel("Checked in person")
+      .selectOption({ label: "Order number and last four digits of the phone" });
+    await dialog.getByLabel("Collected by").selectOption("Customer");
+    await dialog.getByLabel("Collector’s initial").fill("S***");
+    await dialog.getByLabel("I matched this order", { exact: false }).check();
+    return dialog;
+  };
+  const first = await attempt("Phone is dead, lost or left behind");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.screenshot({ path: `test-results/pickup-code-not-shown-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectNoInternalText(page);
+  await first.getByRole("button", { name: "Confirm and record handoff" }).click();
+  await expect(
+    first.getByText(
+      "Handoff was not confirmed. Close and refresh the queue before another attempt.",
+    ),
+  ).toBeVisible();
+  await first.getByRole("button", { name: "Close handoff confirmation" }).click();
+  await page.reload();
+
+  const second = await attempt("Order page was closed or lost");
+  await second.getByRole("button", { name: "Confirm and record handoff" }).click();
+  await expect(page.getByText("Order 9 handed over.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Order 9", exact: true })).toHaveCount(0);
+  // The other guest's order keeps its code check, and no pickup code was ever tried.
+  await expect(
+    page
+      .locator(".pickup-queue__card")
+      .filter({ has: page.getByRole("heading", { name: "Order 10", exact: true }) })
+      .getByRole("button", { name: "Check pickup code" }),
+  ).toBeVisible();
+  expect(proofChecks).toEqual([]);
+  expect(identityReads).toEqual([
+    {
+      orderReference: id(3),
+      storeReference: id(99),
+      fulfillmentReference: id(1),
+      codeNotShownCause: "PhoneUnavailable",
+    },
+    {
+      orderReference: id(3),
+      storeReference: id(99),
+      fulfillmentReference: id(1),
+      codeNotShownCause: "OrderPageLost",
+    },
+  ]);
+  expect(handoffs).toHaveLength(2);
+  expect(handoffs[0]).toMatchObject({
+    orderReference: id(3),
+    fulfillmentReference: id(1),
+    identityCheck: "OrderNumberAndPhoneLast4",
+    codeNotShownCause: "PhoneUnavailable",
+  });
+  expect(handoffs[1]).toMatchObject({ codeNotShownCause: "OrderPageLost" });
+  // A new attempt after the refusal is a new request, never a replay of the refused one.
+  expect(handoffs[1]?.idempotencyReference).not.toBe(handoffs[0]?.idempotencyReference);
+  for (const handoff of handoffs) expect(handoff).not.toHaveProperty("verificationReference");
   await expectNoInternalText(page);
 });

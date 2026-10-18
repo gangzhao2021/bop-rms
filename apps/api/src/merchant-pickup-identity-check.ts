@@ -5,6 +5,7 @@ import {
   parsePickupProofReference,
   PickupHandoffError,
   completePickupHandoffPermission,
+  pickupCodeNotShownCauses,
 } from "@rms/fulfillment";
 import { loadOrderPickupContact } from "@rms/ordering";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -21,7 +22,8 @@ function invalid(): never {
  * WP-2423: what staff compare when they check a pickup customer in person: the name on the order
  * and the last four digits of its phone. Read from Ordering's own contact read, only for the
  * pickup counter (fulfillment.pickup.complete) and only while the order is ready with no usable
- * code (never sent, expired, or locked after five wrong codes). The full phone never leaves here.
+ * code (never sent, expired, or locked after five wrong codes) or staff said why the customer
+ * cannot show a still-valid code. The full phone never leaves here.
  */
 export type PickupIdentityCheck =
   | { readonly status: "Available"; readonly name: string; readonly phoneLast4: string | null }
@@ -54,16 +56,28 @@ export function createMerchantPickupIdentityCheck(options: {
     query: unknown;
   }): Promise<PickupIdentityCheck> => {
     const session = await options.authentication.authorize(input);
+    // WP-2423: the code is still valid but staff chose "Guest can't show the code" and named why;
+    // only then are the name and phone digits shown while a usable code exists.
+    const codeNotShown =
+      input.query !== null &&
+      typeof input.query === "object" &&
+      Object.prototype.hasOwnProperty.call(input.query, "codeNotShownCause");
     let intent: Readonly<Record<string, unknown>>;
     try {
       intent = readClosedRecord(input.query, [
         "orderReference",
         "storeReference",
         "fulfillmentReference",
+        ...(codeNotShown ? ["codeNotShownCause"] : []),
       ]);
     } catch {
       return invalid();
     }
+    if (
+      codeNotShown &&
+      !(pickupCodeNotShownCauses as readonly unknown[]).includes(intent.codeNotShownCause)
+    )
+      return invalid();
     const orderReference = parsePickupProofReference(intent.orderReference),
       fulfillmentReference = parsePickupProofReference(intent.fulfillmentReference);
     const denied = (): never => {
@@ -134,7 +148,7 @@ export function createMerchantPickupIdentityCheck(options: {
             current.source.fulfillmentReference !== fulfillmentReference ||
             current.source.canonicalPhase !== "Ready" ||
             current.notCollected ||
-            !(notIssued || expired || current.codeChecksLocked)
+            !(notIssued || expired || current.codeChecksLocked || codeNotShown)
           )
             throw new PickupHandoffError("PICKUP_HANDOFF_NOT_READY");
           // Ordering owns the checkout contact; its read checks the order belongs to this Store.

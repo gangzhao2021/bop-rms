@@ -2,6 +2,7 @@ import console from "node:console";
 import { Buffer } from "node:buffer";
 import { appendAuditRecordInTransaction } from "../../packages/bop/audit/src/index.ts";
 import { createAbuseBudgetConsumer } from "../../packages/database/src/index.ts";
+import { pickupHandoffAuditDetails } from "../../packages/rms/fulfillment/src/index.ts";
 import { createMerchantPickupProof } from "../../apps/api/dist/merchant-pickup-proof.js";
 import { createMerchantPickupNotCollected } from "../../apps/api/dist/merchant-pickup-not-collected.js";
 import { createMerchantPickupHandoff } from "../../apps/api/dist/merchant-pickup-handoff.js";
@@ -121,9 +122,11 @@ export async function createInternalMerchantPickup(
         actionCode: audit.actionCode,
         targetType: "Fulfillment",
         targetId: audit.fulfillmentReference,
-        afterSummary: { action: audit.purpose },
-        reasonCode:
-          audit.actionCode === "PICKUP_NOT_COLLECTED" ? "PICKUP_NOT_COLLECTED" : "PICKUP_HANDOFF",
+        // WP-2423: a handover without the code while it was still valid is named apart, with the
+        // cause staff chose.
+        ...(audit.actionCode === "PICKUP_NOT_COLLECTED"
+          ? { afterSummary: { action: audit.purpose }, reasonCode: "PICKUP_NOT_COLLECTED" }
+          : pickupHandoffAuditDetails(audit)),
         correlationId: audit.correlationReference,
         occurredAt: audit.occurredAt,
         sourceChannel: "MERCHANT_WEB",

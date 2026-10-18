@@ -12,8 +12,22 @@ vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.
 vi.mock("./merchant-workforce-authority-source.js", () => ({
   createMerchantWorkforcePermissionSource: () => d.workforce,
 }));
+const observations = vi.hoisted(() => ({
+  at: null as string | null,
+  calls: [] as string[],
+}));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<object>()),
+  // v15 2026-10-18: the time read once the Order's refund fence is held (recorded per call).
+  observeOrdinaryRefundOrderAfterFence: async (
+    _tx: unknown,
+    _scope: unknown,
+    orderReference: string,
+    notBefore: string,
+  ) => {
+    observations.calls.push(orderReference);
+    return observations.at ?? notBefore;
+  },
   createPostgresOrdinaryRefundRequestStatusSource: () => d.status,
   createPostgresCapturedBatchPaymentSource: () => ({ load: d.capture }),
 }));
@@ -58,6 +72,8 @@ function setup() {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  observations.at = null;
+  observations.calls.length = 0;
   d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["manager"] });
   d.status.mockResolvedValue({ requestReference: id(10), observedAt: at });
 });
@@ -68,6 +84,18 @@ it("queries exact request status under current Manager permission", async () => 
     orderReference: id(8),
     operationReference: id(9),
     observedAt: at,
+  });
+});
+it("v15 2026-10-18 (dd750045): reads the request status at the time taken once the Order's refund fence is held", async () => {
+  const f = setup();
+  const later = "2026-09-20T12:00:02.000Z";
+  observations.at = later;
+  await f.operation(f.input);
+  expect(observations.calls).toEqual([id(8)]);
+  expect(d.status).toHaveBeenCalledWith(expect.anything(), {
+    orderReference: id(8),
+    operationReference: id(9),
+    observedAt: later,
   });
 });
 it("denies current non-Manager requester before querying status", async () => {

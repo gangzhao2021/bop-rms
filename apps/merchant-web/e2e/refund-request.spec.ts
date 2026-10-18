@@ -521,6 +521,26 @@ for (const recovery of ["retry", "history"] as const)
       await page.getByRole("button", { name: "Refresh recorded requests" }).click();
       await expect(page.getByText("Request remains recorded.", { exact: false })).toBeVisible();
       await expect(list).toContainText("Request 1: $11.30");
+      // v15 2026-10-18 (dd750045): a refund recorded for this order while the list was loading
+      // answers "changed while loading"; the page reads it once more by itself and shows the
+      // latest, never "your permissions do not allow this refund workflow".
+      const itemStatuses: number[] = [];
+      page.on("response", (response) => {
+        if (response.url().endsWith("/merchant/payments/refunds/items"))
+          itemStatuses.push(response.status());
+      });
+      await page.route(
+        "**/merchant/payments/refunds/items",
+        (route) =>
+          route.fulfill({ status: 409, headers, json: { error: "changed_while_loading" } }),
+        { times: 1 },
+      );
+      await page.getByRole("button", { name: "Refresh recorded requests" }).click();
+      await expect.poll(() => itemStatuses).toEqual([409, 200]);
+      await expect(page.getByText("Request remains recorded.", { exact: false })).toBeVisible();
+      await expect(list).toContainText("Request 1: $11.30");
+      await expect(page.getByText(/permissions do not allow/u)).toHaveCount(0);
+      await expect(page.getByText(/changed while it was loading/u)).toHaveCount(0);
       // WP-2423 Q5: each recorded request shows where it stands without a separate check.
       await expect(list).toContainText("Recorded, not sent yet");
       await expect(page.getByRole("spinbutton", { name: /Latte/ })).toHaveAttribute("max", "1");

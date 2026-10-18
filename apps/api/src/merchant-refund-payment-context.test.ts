@@ -17,8 +17,22 @@ vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.
 vi.mock("./merchant-workforce-authority-source.js", () => ({
   createMerchantWorkforcePermissionSource: () => d.workforce,
 }));
+const observations = vi.hoisted(() => ({
+  at: null as string | null,
+  calls: [] as string[],
+}));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<object>()),
+  // v15 2026-10-18: the time read once the Order's refund fence is held (recorded per call).
+  observeOrdinaryRefundOrderAfterFence: async (
+    _tx: unknown,
+    _scope: unknown,
+    orderReference: string,
+    notBefore: string,
+  ) => {
+    observations.calls.push(orderReference);
+    return observations.at ?? notBefore;
+  },
   // WP-2423 item 4: no card-machine payment unless a test says so.
   createPostgresCardMachinePaymentStore: () => d.cards(),
   createPostgresPaymentIntentBindingSource: (options: unknown) => {
@@ -78,6 +92,8 @@ const terminal = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  observations.at = null;
+  observations.calls.length = 0;
   d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["manager"] });
   d.binding.mockResolvedValue(binding);
   d.terminal.mockResolvedValue(terminal);

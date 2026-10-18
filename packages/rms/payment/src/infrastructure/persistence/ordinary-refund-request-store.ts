@@ -164,6 +164,40 @@ export async function acquireOrdinaryRefundRequestFences(
   ]);
 }
 
+/**
+ * v15 2026-10-18 (dd750045, order 40): the observation time of a read of an Order's refund
+ * history, taken only once no request can be appended any more. A read that fixed its time when
+ * it resolved the signed-in session and then waited on (or simply ran after) a request being
+ * recorded for the same Order saw a request recorded after that time and refused it as
+ * inconsistent history. Takes the Order's refund fence (read-only callers: no request-operation
+ * fence; see acquireOrdinaryRefundRequestFences for the canonical lock order, so call it where
+ * the caller would otherwise take the fence first), then reads `now`: the same clock that stamps
+ * a request's requestedAt (the merchant API clock), so every request recorded before the fence
+ * was granted is at or before the returned time. Never earlier than `notBefore` (the caller's
+ * session resolution), so the read never moves back in time.
+ */
+export async function observeOrdinaryRefundOrderAfterFence(
+  tx: ConsumerTransaction,
+  scope: Pick<Scope, "brandReference" | "storeReference">,
+  orderReference: string,
+  notBefore: string,
+  now: () => unknown,
+): Promise<string> {
+  const floor = parsePaymentInstant(notBefore);
+  await acquireOrdinaryRefundRequestFences(
+    tx,
+    {
+      brandReference: String(parsePaymentReference(scope.brandReference)),
+      storeReference: String(parsePaymentReference(scope.storeReference)),
+    },
+    null,
+    String(parsePaymentReference(orderReference)),
+  );
+  const time = now();
+  const observedAt = parsePaymentInstant(time instanceof Date ? time.toISOString() : time);
+  return observedAt < floor ? floor : observedAt;
+}
+
 interface RequestContextQuery {
   readonly orderReference: string;
   readonly operationReference: string;

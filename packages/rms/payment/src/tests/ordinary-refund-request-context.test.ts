@@ -1,6 +1,9 @@
 import { expect, it, vi } from "vitest";
 import type { ConsumerTransaction } from "@bop/eventing";
-import { createPostgresOrdinaryRefundRequestContextSource } from "../infrastructure/persistence/ordinary-refund-request-store.js";
+import {
+  createPostgresOrdinaryRefundRequestContextSource,
+  observeOrdinaryRefundOrderAfterFence,
+} from "../infrastructure/persistence/ordinary-refund-request-store.js";
 import { encodeOrdinaryRefundRequest } from "../application/ordinary-refund-request.js";
 import {
   ordinaryRefundRequestFixture,
@@ -145,4 +148,47 @@ it("takes the request operation fence before the Order fence, or the Order fence
       fence: "Neither" as never,
     }),
   ).toThrow("ORDINARY_REFUND_REQUEST_CONFLICT");
+});
+
+it("v15 2026-10-18 (dd750045): observes an Order's refund history only once its refund fence is held", async () => {
+  const request = ordinaryRefundRequestFixture();
+  const steps: string[] = [];
+  const tx = {
+    query: vi.fn(async (sql: string, values: readonly unknown[]) => {
+      steps.push(sql.includes("pg_advisory_xact_lock") ? "fence:" + String(values[0]) : sql);
+      return { rows: [], rowCount: null };
+    }),
+  } as unknown as ConsumerTransaction;
+  const scope = { brandReference: request.brandReference, storeReference: request.storeReference };
+  const resolvedAt = "2026-09-20T12:00:00.000Z";
+  const now = vi.fn(() => {
+    steps.push("clock");
+    return "2026-09-20T12:00:01.250Z";
+  });
+  await expect(
+    observeOrdinaryRefundOrderAfterFence(tx, scope, request.orderReference, resolvedAt, now),
+  ).resolves.toBe("2026-09-20T12:00:01.250Z");
+  // The Order fence only (a read takes no request-operation fence), then the clock.
+  expect(steps).toEqual([
+    "fence:PaymentReceiptOrder:" +
+      request.brandReference +
+      ":" +
+      request.storeReference +
+      ":" +
+      request.orderReference,
+    "clock",
+  ]);
+  // Never earlier than the session's resolution.
+  await expect(
+    observeOrdinaryRefundOrderAfterFence(
+      tx,
+      scope,
+      request.orderReference,
+      resolvedAt,
+      () => new Date("2026-09-20T11:59:59.000Z"),
+    ),
+  ).resolves.toBe(resolvedAt);
+  await expect(
+    observeOrdinaryRefundOrderAfterFence(tx, scope, request.orderReference, resolvedAt, () => "x"),
+  ).rejects.toThrow();
 });

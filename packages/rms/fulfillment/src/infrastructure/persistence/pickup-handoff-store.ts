@@ -9,6 +9,7 @@ import {
   type CompletePickupHandoffCommand,
   type PickupHandoffEffect,
   type PickupInPersonVerificationRecord,
+  type PickupCodeNotShownCause,
 } from "../../contracts/pickup-handoff.js";
 import {
   parsePickupProofInstant,
@@ -69,7 +70,12 @@ export function createPostgresPickupHandoffStore(options: {
           readonly permission: "ordering.order.cancel";
           readonly purpose: "CloseUncollectedPickup";
         })
-    ) & { readonly fulfillmentReference: string },
+    ) & {
+      readonly fulfillmentReference: string;
+      /** Handoffs only: why staff checked in person, or null for a code or proof check. */
+      readonly inPersonReason?: PickupInPersonVerificationRecord["reason"] | null;
+      readonly codeNotShownCause?: PickupCodeNotShownCause | null;
+    },
   ) => Promise<void>;
 }) {
   const brand = parsePickupProofReference(options.brandReference),
@@ -174,6 +180,9 @@ export function createPostgresPickupHandoffStore(options: {
           verified_by_actor_id: inPerson.verifiedByActorReference,
           identity_check: inPerson.identityCheck,
           reason: inPerson.reason,
+          ...(inPerson.codeNotShownCause === undefined
+            ? {}
+            : { code_not_shown_cause: inPerson.codeNotShownCause }),
           verified_at: inPerson.verifiedAt,
           correlation_id: inPerson.correlationReference,
           data_classification: "IndirectIdentifier",
@@ -220,6 +229,10 @@ export function createPostgresPickupHandoffStore(options: {
       await options.appendAudit(tx, {
         ...effect.audit,
         fulfillmentReference: r.fulfillmentReference,
+        // WP-2423: why staff checked in person (null for a code or proof check), for the audit
+        // reason; the in-person verification row keeps the staff member, reason and cause.
+        inPersonReason: inPerson?.reason ?? null,
+        codeNotShownCause: inPerson?.codeNotShownCause ?? null,
       });
       if (effect.nextPhase === "Completed")
         await appendFulfillmentCompletion(tx, {
@@ -455,17 +468,27 @@ export function createPostgresPickupHandoffStore(options: {
         throw new PickupHandoffError("PICKUP_HANDOFF_VERIFICATION_FAILED");
       let inPerson: PickupInPersonVerificationRecord | null = null;
       if (submitted.verificationMethod === "InPerson") {
-        // WP-2423: in person only when no usable proof exists: never issued, expired by now, or
-        // locked after five wrong codes (DEC-PICKUP-COUNTER-CODE).
+        // WP-2423: the recorded reason must match the proof state under the lock: never issued,
+        // expired by now, locked after five wrong codes (DEC-PICKUP-COUNTER-CODE), or still valid
+        // and unlocked while the customer cannot show it (staff chose this and named the cause).
+        // A proof state that changed since staff chose refuses, and the queue is refreshed.
         const notIssued = state.capability === null;
         const expired =
           state.capability !== null &&
           String(state.source.lockedAt) >= String(state.capability.expiresAt);
         const locked = !notIssued && !expired && state.codeChecksLocked;
+        const usable = !notIssued && !expired && !locked;
+        const matchesState =
+          submitted.reason === "CodeNotShown"
+            ? usable
+            : submitted.reason === "ProofNotIssued"
+              ? notIssued
+              : submitted.reason === "CodeLocked"
+                ? locked
+                : expired;
         if (
-          !(notIssued || expired || locked) ||
-          (submitted.reason === "ProofNotIssued") !== notIssued ||
-          (submitted.reason === "CodeLocked") !== locked ||
+          !matchesState ||
+          (submitted.reason === "CodeNotShown") !== (submitted.codeNotShownCause !== undefined) ||
           submitted.verifiedAt > state.source.lockedAt ||
           state.inPerson.some((v) => v.verificationReference === submitted.verificationReference)
         )

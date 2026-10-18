@@ -195,7 +195,10 @@ export {
 } from "./application/order-settled-finality.js";
 export { createPostgresOrderSettledFinalityStore } from "./infrastructure/persistence/order-settled-finality-store.js";
 
-export { createPostgresOrdinaryRefundRequestContextSource } from "./infrastructure/persistence/ordinary-refund-request-store.js";
+export {
+  createPostgresOrdinaryRefundRequestContextSource,
+  observeOrdinaryRefundOrderAfterFence,
+} from "./infrastructure/persistence/ordinary-refund-request-store.js";
 
 export { createPostgresOrdinaryRefundRequestRuntime } from "./infrastructure/ordinary-refund-request-runtime.js";
 export {

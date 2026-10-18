@@ -188,4 +188,40 @@ describe("WP-2423 in-person handoff intent", () => {
       }),
     ).toThrow();
   });
+  it("sends the staff-chosen cause when the customer can't show a still-valid code", async () => {
+    const fetcher = vi.fn(async () => response());
+    const intent = createPickupHandoffClient(fetcher).prepare({
+      ...input(),
+      verification: null,
+      identityCheck: "OrderNumberAndPhoneLast4",
+      codeNotShownCause: "PhoneUnavailable",
+    });
+    await intent.execute(csrf);
+    const body = JSON.parse(String(((fetcher.mock.calls[0] as unknown[])[1] as RequestInit).body));
+    expect(body).toMatchObject({
+      identityCheck: "OrderNumberAndPhoneLast4",
+      codeNotShownCause: "PhoneUnavailable",
+    });
+    expect(body).not.toHaveProperty("verificationReference");
+  });
+  it("offers the no-code cause only while the code is ready, and only from the list", () => {
+    const client = createPickupHandoffClient(vi.fn());
+    expect(() =>
+      client.prepare({
+        ...input(),
+        item: { ...item, proofReadiness: "Expired" },
+        verification: null,
+        identityCheck: "OrderNumberAndName",
+        codeNotShownCause: "OrderPageLost",
+      }),
+    ).toThrow();
+    expect(() =>
+      client.prepare({
+        ...input(),
+        verification: null,
+        identityCheck: "OrderNumberAndName",
+        codeNotShownCause: "LooksFamiliar" as never,
+      }),
+    ).toThrow();
+  });
 });

@@ -23,8 +23,22 @@ vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.
 vi.mock("./merchant-workforce-authority-source.js", () => ({
   createMerchantWorkforcePermissionSource: () => d.workforce,
 }));
+const observations = vi.hoisted(() => ({
+  at: null as string | null,
+  calls: [] as string[],
+}));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<object>()),
+  // v15 2026-10-18: the time read once the Order's refund fence is held (recorded per call).
+  observeOrdinaryRefundOrderAfterFence: async (
+    _tx: unknown,
+    _scope: unknown,
+    orderReference: string,
+    notBefore: string,
+  ) => {
+    observations.calls.push(orderReference);
+    return observations.at ?? notBefore;
+  },
   // WP-2423 item 4: no card-machine payment unless a test says so.
   createPostgresCardMachinePaymentStore: () => d.cards(),
   // Without declines every recorded request occupies the Order (WP-2423 Q5).
@@ -84,6 +98,8 @@ function setup() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  observations.at = null;
+  observations.calls.length = 0;
   d.status.mockResolvedValue({ payments: [{ state: "Confirmed" }] });
   d.cancelledRound.mockResolvedValue(false);
   d.workforce.mockResolvedValue({ decision: { effect: "Allow" }, activeRoleCodes: ["manager"] });
@@ -323,4 +339,18 @@ it("v15 2026-10-18 40P01: locks the Order's Ordering rows before the Payment ref
   const orderCall = d.order.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY;
   const fenceCall = d.context.mock.invocationCallOrder[0] ?? Number.NEGATIVE_INFINITY;
   expect(orderCall).toBeLessThan(fenceCall);
+});
+it("v15 2026-10-18 (dd750045): reads the refund history at the time taken once the Order's refund fence is held", async () => {
+  const f = setup();
+  // A request was recorded for this Order after the session resolved (at) and before the fence.
+  const later = "2026-09-20T12:00:01.500Z";
+  observations.at = later;
+  await f.operation(f.input);
+  expect(observations.calls).toEqual([id(8)]);
+  // Ordering's rows are read first (canonical lock order) at the session's time ...
+  expect(d.order.mock.calls[0]?.[1]).toMatchObject({ observedAt: at });
+  // ... the refund history, payments and request status at the time after the fence.
+  expect(d.context.mock.calls[0]?.[1]).toMatchObject({ observedAt: later });
+  for (const call of d.capture.mock.calls) expect(call[1]).toMatchObject({ observedAt: later });
+  for (const call of d.status.mock.calls) expect(call[1]).toMatchObject({ observedAt: later });
 });

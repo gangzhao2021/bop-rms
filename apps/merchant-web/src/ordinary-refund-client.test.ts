@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
-import { createOrdinaryRefundClient } from "./ordinary-refund-client";
+import { createOrdinaryRefundClient, OrdinaryRefundClientError } from "./ordinary-refund-client";
+import { refundErrorText } from "./OrderPaymentLinks";
 const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const csrf = "a".repeat(43);
 const command = () => ({
@@ -168,6 +169,59 @@ it("binds item queries to order and denies selectable units on uncaptured batche
   await expect(client.items(id(1), csrf)).resolves.toEqual(data);
   await expect(client.items(id(1), csrf)).rejects.toMatchObject({ code: "Unavailable" });
   await expect(client.items(id(1), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+});
+
+it("v15 2026-10-18: a read that changed while loading is read once more, never shown as a refusal", async () => {
+  const data = {
+    orderReference: id(1),
+    orderNumber: "40",
+    canRequest: false,
+    claimVersion: 0,
+    recentRequests: [],
+    items: [],
+  };
+  const changed = () => response({ error: "changed_while_loading" }, 409);
+  const busy = () => response({ error: "retry_later" }, 503);
+  // Changed once: read again at once, and the latest is shown.
+  let fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(changed())
+    .mockResolvedValueOnce(response(data));
+  await expect(createOrdinaryRefundClient(fetcher).items(id(1), csrf)).resolves.toEqual(data);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  // Busy once: read again after a pause.
+  fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(busy())
+    .mockResolvedValueOnce(response(data));
+  await expect(createOrdinaryRefundClient(fetcher).items(id(1), csrf)).resolves.toEqual(data);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  // Still changing: one retry only, then "changed" (not "Denied").
+  fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(changed()).mockResolvedValueOnce(changed());
+  await expect(createOrdinaryRefundClient(fetcher).items(id(1), csrf)).rejects.toMatchObject({
+    code: "Changed",
+  });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  // A refusal is not retried.
+  fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response({ error: "request_denied" }, 403));
+  await expect(createOrdinaryRefundClient(fetcher).items(id(1), csrf)).rejects.toMatchObject({
+    code: "Denied",
+  });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  // Staff read what happened in plain words, never a permission refusal.
+  expect(refundErrorText(new OrdinaryRefundClientError("Changed"))).toBe(
+    "This order changed while it was loading. Refresh to see the latest.",
+  );
+  expect(refundErrorText(new OrdinaryRefundClientError("Changed"))).not.toMatch(/permission/iu);
+  // A command is never resent by the client.
+  fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response(preview))
+    .mockResolvedValueOnce(busy());
+  const operation = createOrdinaryRefundClient(fetcher).prepareRequest(command());
+  await operation.preview(csrf);
+  await expect(operation.submit(csrf)).rejects.toMatchObject({ code: "OutcomeUnknown" });
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });
 
 const context = {

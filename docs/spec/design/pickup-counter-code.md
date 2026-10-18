@@ -26,7 +26,15 @@ runbook 改为口头核对）时没有可手输的码。真实门店用短码：
    5 分钟 10 次的滥用预算保留。平台审计 `PICKUP_PROOF_REJECTED` / `PICKUP_PROOF_LOCKED`（摘要只有 operation，无码值）。
 6. **锁定后的人工路径**：取餐页卡片显示"Too many wrong codes · check in person"，提供"Hand over after checking in person"：
    店员核对订单号 + 订单上的名字或手机后四位，记录当面核对（原因新增 `CodeLocked`，迁移同时放宽该检查约束）。
-   凭证未锁且有效时仍不允许当面核对（防绕过）。
+   凭证未锁且有效时，只能经第 6a 条的明确操作当面核对（防绕过）。
+   6a. **顾客出示不了有效码（2026-10-18 补充，v15 实测 Low/运营连续性）**：手机没电/丢失、没收到码、订单页关掉时，店员不必先输错
+   五次。取餐卡片在主操作"Check pickup code"旁提供次要文字按钮"Guest can't show the code"：先必选原因（固定列表，无自由文本：
+   `PhoneUnavailable` "Phone is dead, lost or left behind" / `CodeNotReceived` "Customer never got the pickup code" /
+   `OrderPageLost` "Order page was closed or lost"），选定后才读取订单上的名字与手机后四位，再核对订单号 + 名字或后四位。
+   记录为当面核对，原因 `CodeNotShown` + `code_not_shown_cause`（迁移 `2000_085`，CHECK：原因恰在 `CodeNotShown` 时必填且在列表内），
+   核对人即交付店员；平台审计 `reasonCode=PICKUP_HANDOFF_CODE_NOT_SHOWN`、摘要只含原因。浏览器只送意图（核对方式 + 原因），
+   服务端在锁内重新判断：码必须仍有效且未锁；期间已过期或已锁则拒绝（422），界面提示刷新后走对应路径。权限同交付
+   `fulfillment.pickup.complete`（Section 88 `FUL-PICKUP-HANDOFF` "approved alternative"）。同一幂等键重放须同一核对方式与原因。
 7. **界面用语**：店员"Ask the customer to read the 6-digit pickup code"；不符"That code doesn't match this order. Check the order
    number, then ask the customer to read the code again."，输入框清空并聚焦，可再试；非六位"Pickup codes have 6 digits."；
    锁定"Too many wrong codes for this order. Check the customer in person instead…"。顾客"Show or read this code to staff"。

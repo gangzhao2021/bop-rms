@@ -8474,6 +8474,15 @@ body:has(.product-complete-draft) .bop-shell__header,
   background: var(--bop-color-surface-raised);
   font-weight: 600;
 }
+/* WP-2423: "Guest can't show the code" is the deliberate fallback beside the code check: a quiet
+   underlined text action, never styled like the primary code check. */
+.card-actions button.pickup-handoff__no-code {
+  border-color: transparent;
+  background: transparent;
+  color: var(--bop-color-text-default);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 /* WP-2423: the order just handed over on this device. */
 .pickup-queue__handed-over {
   margin: 0;

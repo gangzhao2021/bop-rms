@@ -7,6 +7,7 @@ import {
   createPostgresPaymentTerminalStore,
   createPostgresOrderPaymentRefundPosition,
   createOrdinaryRefundRoleResolver,
+  observeOrdinaryRefundOrderAfterFence,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
@@ -43,6 +44,10 @@ export function createMerchantRefundPaymentContext(options: {
   const resolve = createMerchantStoreScope(options.persistence);
   const deny = (): never => {
     throw new Error("ORDINARY_REFUND_REQUEST_DENIED");
+  };
+  /** A fact recorded after this read's observation time: the payment changed while loading. */
+  const changed = (): never => {
+    throw new Error("MERCHANT_REFUND_READ_CHANGED");
   };
   return async (input: { sessionCookie: unknown; csrf: unknown; query: unknown }) => {
     const authenticated = await options.authentication.authorize(input);
@@ -157,7 +162,18 @@ export function createMerchantRefundPaymentContext(options: {
       if (!(await readAccess())) return deny();
       authority.recheckBeforeReply(readAccess);
       const allowed = (tx?: unknown) => authority.guard(tx);
-      const observedAt = String(current.context.resolvedAt);
+      const resolvedAt = String(current.context.resolvedAt);
+      // v15 2026-10-18 (dd750045): once the Order is known, the payment's refunds are read at a
+      // time taken after the Order's refund fence is held (a request recorded for the Order
+      // meanwhile is part of the read), never at the session's resolution.
+      const observeOrder = (orderReference: string) =>
+        observeOrdinaryRefundOrderAfterFence(
+          businessTransaction,
+          scope,
+          orderReference,
+          resolvedAt,
+          options.persistence.now,
+        );
       // WP-2423 item 4: a payment taken on the Store's own card machine. Its refunds are made on
       // that machine: confirmed is what was recorded as refunded there (ordinary requests and
       // whole refunds of a cancelled or unfulfillable round); pending is an ordinary request not
@@ -169,7 +185,8 @@ export function createMerchantRefundPaymentContext(options: {
         authorize: async () => true,
       }).loadByIntent(businessTransaction, paymentIntentReference);
       if (card !== null) {
-        if (card.recordedAt > observedAt) return deny();
+        const observedAt = await observeOrder(card.orderReference);
+        if (card.recordedAt > observedAt) return changed();
         const cards = createPostgresCardMachinePaymentStore({
           scope,
           authorize: async (_tx, query) => query.orderReference === card.orderReference,
@@ -214,7 +231,8 @@ export function createMerchantRefundPaymentContext(options: {
       const binding = await createPostgresPaymentIntentBindingSource({
         scope: { ...scope, environment: configuration.environment },
         authorize: (tx) => allowed(tx),
-      })(businessTransaction, { paymentIntentReference, observedAt });
+      })(businessTransaction, { paymentIntentReference, observedAt: resolvedAt });
+      const observedAt = await observeOrder(binding.orderReference);
       const terminal = await createPostgresPaymentTerminalStore(
         { run: (work) => work(businessTransaction) },
         {
@@ -227,10 +245,10 @@ export function createMerchantRefundPaymentContext(options: {
       if (
         terminal &&
         (terminal.paymentAttemptReference !== binding.paymentAttemptReference ||
-          terminal.orderReference !== binding.orderReference ||
-          terminal.recordedAt > observedAt)
+          terminal.orderReference !== binding.orderReference)
       )
         return deny();
+      if (terminal && terminal.recordedAt > observedAt) return changed();
       if (terminal === null || terminal.outcome === "Failed") {
         return Object.freeze({
           ...binding,

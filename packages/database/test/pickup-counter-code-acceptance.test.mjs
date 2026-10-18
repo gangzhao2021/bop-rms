@@ -14,6 +14,7 @@ import {
   createPostgresPickupHandoffStore,
   createPostgresPickupProofIssuer,
   createPostgresPickupProofStore,
+  pickupHandoffAuditDetails,
   validatePickupProof,
 } from "../../rms/fulfillment/src/index.ts";
 import { parseKitchenItemReadyEnvelope } from "../../rms/kitchen/src/index.ts";
@@ -57,7 +58,7 @@ const minutes = (base, n) => new Date(Date.parse(base) + n * 60_000).toISOString
  * controlled past instant so pickup windows can be crossed without waiting; one derivation is
  * forced to repeat a live code to prove the collision guard.
  */
-it("issues a unique six-digit code, accepts it once typed, records and locks wrong codes without the code, rejects other stores and expired days, allows the in-person check once locked, and issues no code for a counter order", async () => {
+it("issues a unique six-digit code, accepts it once typed, records and locks wrong codes without the code, rejects other stores and expired days, allows the in-person check once locked, hands over a valid code the guest cannot show with a stated reason, and issues no code for a counter order", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_pcode" }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
@@ -534,8 +535,8 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
               actionCode: audit.actionCode,
               targetType: "Fulfillment",
               targetId: audit.fulfillmentReference,
-              afterSummary: { action: "CompletePickupHandoff" },
-              reasonCode: "PICKUP_HANDOFF",
+              // As the pilot runtime does: a handover without the code is named apart.
+              ...pickupHandoffAuditDetails(audit),
               correlationId: audit.correlationReference,
               occurredAt: audit.occurredAt,
               sourceChannel: "MERCHANT_WEB",
@@ -544,7 +545,7 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
               retentionPolicyVersion: 1,
             }),
         });
-      const handOver = (pickup, verification) =>
+      const handOver = (pickup, verification, keys = {}) =>
         asApi(pickup.scope.storeReference, async (tx) => {
           const store = handoffStore(pickup.scope.storeReference);
           const current = await store.lockByOrder({
@@ -558,7 +559,8 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
               fulfillmentReference: pickup.fulfillment,
               brandReference: brand,
               storeReference: pickup.scope.storeReference,
-              expectedAggregateVersion: current.source.aggregateVersion,
+              expectedAggregateVersion:
+                keys.expectedAggregateVersion ?? current.source.aggregateVersion,
               purpose: "CompletePickupHandoff",
               actorReference: actor,
               actorPermissions: ["fulfillment.pickup.complete"],
@@ -571,16 +573,16 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
                 fulfillmentItemReference: item.fulfillmentItemReference,
                 quantity: item.readyQuantity,
               })),
-              handoffReference: reference(),
-              operationReference: reference(),
-              auditReference: reference(),
-              idempotencyReference: reference(),
-              correlationReference: reference(),
-              handedOverAt: now(),
+              handoffReference: keys.handoffReference ?? reference(),
+              operationReference: keys.operationReference ?? reference(),
+              auditReference: keys.auditReference ?? reference(),
+              idempotencyReference: keys.idempotencyReference ?? reference(),
+              correlationReference: keys.correlationReference ?? reference(),
+              handedOverAt: keys.handedOverAt ?? now(),
             },
           });
         });
-      const inPerson = (pickup, reason) => (current) => {
+      const inPerson = (pickup, reason, cause) => (current) => {
         assert.equal(current.codeChecksLocked, pickup === a2);
         return {
           verificationReference: reference(),
@@ -591,15 +593,19 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
           verificationMethod: "InPerson",
           identityCheck: "OrderNumberAndName",
           reason,
+          ...(cause === undefined ? {} : { codeNotShownCause: cause }),
           verifiedByActorReference: actor,
           verifiedAt: now(),
         };
       };
+      const refused = (error) => error.code === "PICKUP_HANDOFF_VERIFICATION_FAILED";
       clock = minutes(t0, 4);
       await assert.rejects(
         handOver(a2, inPerson(a2, "ProofExpired")),
         (error) => error.code === "PICKUP_HANDOFF_VERIFICATION_FAILED",
       );
+      // A locked code is not "a valid code the customer can't show": that reason is refused.
+      await assert.rejects(handOver(a2, inPerson(a2, "CodeNotShown", "PhoneUnavailable")), refused);
       assert.equal((await handOver(a2, inPerson(a2, "CodeLocked"))).status, "Applied");
       assert.equal(
         (
@@ -660,6 +666,8 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
         ).rows[0].n,
         0,
       );
+      // An expired code is not "a valid code the customer can't show" either.
+      await assert.rejects(handOver(b1, inPerson(b1, "CodeNotShown", "OrderPageLost")), refused);
       assert.equal((await handOver(b1, inPerson(b1, "ProofExpired"))).status, "Applied");
 
       // ── A code is free again once the order holding it can no longer use it.
@@ -715,6 +723,11 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
       );
       assert.equal(counterItem?.phase, "Ready");
       assert.equal(counterItem?.proof, null);
+      // No code was ever issued: "can't show the code" is refused; the ordinary check applies.
+      await assert.rejects(
+        handOver(counter, inPerson(counter, "CodeNotShown", "CodeNotReceived")),
+        refused,
+      );
       const handedOver = await handOver(counter, inPerson(counter, "ProofNotIssued"));
       assert.equal(handedOver.status, "Applied");
       assert.equal(handedOver.effect.nextPhase, "Completed");
@@ -732,6 +745,142 @@ it("issues a unique six-digit code, accepts it once typed, records and locks wro
         handOver(guest, inPerson(guest, "ProofNotIssued")),
         (error) => error.code === "PICKUP_HANDOFF_VERIFICATION_FAILED",
       );
+
+      // ── WP-2423: the guest's code is valid and unlocked but they can't show it (phone dead).
+      // Staff deliberately choose the in-person check and name why; no wrong codes are needed.
+      // Without a cause, or with a cause outside the list, nothing is recorded.
+      await assert.rejects(handOver(guest, inPerson(guest, "CodeNotShown")), refused);
+      await assert.rejects(handOver(guest, inPerson(guest, "CodeNotShown", "Phone died")), refused);
+      await assert.rejects(
+        handOver(guest, inPerson(guest, "CodeLocked", "PhoneUnavailable")),
+        refused,
+      );
+      const noCodeVerification = {
+        verificationReference: reference(),
+        correlationReference: reference(),
+        fulfillmentReference: guest.fulfillment,
+        brandReference: brand,
+        storeReference: storeA,
+        verificationMethod: "InPerson",
+        identityCheck: "OrderNumberAndPhoneLast4",
+        reason: "CodeNotShown",
+        codeNotShownCause: "PhoneUnavailable",
+        verifiedByActorReference: actor,
+        verifiedAt: now(),
+      };
+      const guestBefore = await asApi(storeA, (tx) =>
+        handoffStore(storeA).lockByOrder({ transaction: tx, orderReference: guest.order }),
+      );
+      assert.equal(guestBefore.codeChecksLocked, false);
+      const noCodeKeys = {
+        expectedAggregateVersion: guestBefore.source.aggregateVersion,
+        handoffReference: reference(),
+        operationReference: reference(),
+        auditReference: reference(),
+        idempotencyReference: reference(),
+        correlationReference: reference(),
+        handedOverAt: now(),
+      };
+      const noCode = await handOver(guest, () => noCodeVerification, noCodeKeys);
+      assert.equal(noCode.status, "Applied");
+      assert.equal(noCode.effect.nextPhase, "Completed");
+      assert.equal(noCode.effect.record.verificationMethod, "InPerson");
+      // No wrong codes were entered for it.
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_fulfillment.pickup_code_check_rejection WHERE fulfillment_id=$1",
+            [guest.fulfillment],
+          )
+        ).rows[0].n,
+        0,
+      );
+      // The verification row names the staff member, the reason and the chosen cause.
+      const noCodeRows = (
+        await admin.query(
+          "SELECT verified_by_actor_id,identity_check,reason,code_not_shown_cause FROM rms_fulfillment.pickup_in_person_verification WHERE fulfillment_id=$1",
+          [guest.fulfillment],
+        )
+      ).rows;
+      assert.deepEqual(noCodeRows, [
+        {
+          verified_by_actor_id: actor,
+          identity_check: "OrderNumberAndPhoneLast4",
+          reason: "CodeNotShown",
+          code_not_shown_cause: "PhoneUnavailable",
+        },
+      ]);
+      // Older reasons carry no cause.
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT code_not_shown_cause FROM rms_fulfillment.pickup_in_person_verification WHERE fulfillment_id=$1",
+            [a2.fulfillment],
+          )
+        ).rows[0].code_not_shown_cause,
+        null,
+      );
+      // The platform audit names the staff member and the reason, with the cause and nothing else.
+      const noCodeAudit = (
+        await admin.query(
+          "SELECT actor_reference,action_code,reason_code,after_summary_json::text AS after FROM platform_audit.audit_record WHERE audit_id=$1",
+          [noCodeKeys.auditReference],
+        )
+      ).rows;
+      assert.equal(noCodeAudit.length, 1);
+      assert.equal(noCodeAudit[0].actor_reference, actor);
+      assert.equal(noCodeAudit[0].action_code, "PICKUP_HANDOFF_COMPLETED");
+      assert.equal(noCodeAudit[0].reason_code, "PICKUP_HANDOFF_CODE_NOT_SHOWN");
+      assert.deepEqual(JSON.parse(noCodeAudit[0].after), {
+        action: "CompletePickupHandoff",
+        codeNotShownCause: "PhoneUnavailable",
+      });
+      // A retried request (same key, same choice) returns the recorded handover; a changed cause
+      // under the same key is refused, and nothing more is written.
+      clock = minutes(t0, 71);
+      const again = await handOver(guest, () => noCodeVerification, noCodeKeys);
+      assert.equal(again.status, "AlreadyApplied");
+      assert.deepEqual(again.effect, noCode.effect);
+      await assert.rejects(
+        handOver(
+          guest,
+          () => ({ ...noCodeVerification, codeNotShownCause: "OrderPageLost" }),
+          noCodeKeys,
+        ),
+        (error) => error.code === "PICKUP_HANDOFF_VERSION_CONFLICT",
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM rms_fulfillment.pickup_in_person_verification WHERE fulfillment_id=$1",
+            [guest.fulfillment],
+          )
+        ).rows[0].n,
+        1,
+      );
+      // The database holds the same rule: a cause exactly with CodeNotShown, only from the list.
+      for (const [reason, cause] of [
+        ["CodeNotShown", null],
+        ["CodeNotShown", "Phone died"],
+        ["ProofExpired", "PhoneUnavailable"],
+      ])
+        await assert.rejects(
+          admin.query(
+            "INSERT INTO rms_fulfillment.pickup_in_person_verification (pickup_in_person_verification_id,brand_id,store_id,fulfillment_id,verified_by_actor_id,identity_check,reason,code_not_shown_cause,verified_at,correlation_id,data_classification) VALUES ($1,$2,$3,$4,$5,'OrderNumberAndName',$6,$7,$8,$9,'IndirectIdentifier')",
+            [
+              reference(),
+              brand,
+              storeA,
+              guest.fulfillment,
+              actor,
+              reason,
+              cause,
+              now(),
+              reference(),
+            ],
+          ),
+          (error) => error.code === "23514",
+        );
     } finally {
       await admin.end();
     }

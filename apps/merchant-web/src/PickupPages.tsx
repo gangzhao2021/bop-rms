@@ -239,16 +239,39 @@ function PickupCard({
               onRecorded={recorded}
             />
           ) : canComplete && item.execution && proofContext ? (
-            <PickupProofForm
-              key={item.execution.aggregateVersion + ":" + item.execution.proof?.generation}
-              paused={paused}
-              item={item}
-              workstation={workstation}
-              csrf={proofContext.csrf}
-              storeReference={proofContext.storeReference}
-              onRecorded={recorded}
-              onLocked={onRefresh}
-            />
+            <>
+              <PickupProofForm
+                key={item.execution.aggregateVersion + ":" + item.execution.proof?.generation}
+                paused={paused}
+                item={item}
+                workstation={workstation}
+                csrf={proofContext.csrf}
+                storeReference={proofContext.storeReference}
+                onRecorded={recorded}
+                onLocked={onRefresh}
+              />
+              {item.phase === "Ready" && workstation ? (
+                // WP-2423: the code is still valid but the customer can't show it (phone dead,
+                // code never received, order page lost): a deliberate in-person check with a
+                // stated reason, without wrong codes to lock the order first.
+                <PickupHandoffForm
+                  key={
+                    "no-code:" +
+                    item.execution.aggregateVersion +
+                    ":" +
+                    item.execution.proof?.generation
+                  }
+                  codeNotShown
+                  paused={paused}
+                  item={item}
+                  verification={null}
+                  workstation={workstation}
+                  csrf={proofContext.csrf}
+                  storeReference={proofContext.storeReference}
+                  onRecorded={recorded}
+                />
+              ) : null}
+            </>
           ) : null}
           {inPersonEligible && wait >= pickupHoldMinutes && proofContext ? (
             <PickupNotCollectedAction

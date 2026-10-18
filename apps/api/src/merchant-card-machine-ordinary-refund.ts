@@ -11,6 +11,7 @@ import {
   createPostgresOrdinaryRefundCurrentEscalationSource,
   createPostgresOrdinaryRefundRequestContextSource,
   listOrdinaryRefundApprovalReferences,
+  observeOrdinaryRefundOrderAfterFence,
   ordinaryRefundClaimKind,
   ordinaryRefundPaymentAmount,
   parseCardMachineRefundRecord,
@@ -216,7 +217,16 @@ export function createMerchantCardMachineOrdinaryRefund(options: {
                 return fail("CARD_MACHINE_REFUND_IDEMPOTENCY_CONFLICT");
               return reply("AlreadyRecorded", prior);
             }
-            // The request, as recorded (history under the Order's refund fence).
+            // The request, as recorded (history under the Order's refund fence), read at a time
+            // taken once that fence is held: another request recorded for the Order meanwhile is
+            // part of the history (v15 2026-10-18, dd750045).
+            const historyObservedAt = await observeOrdinaryRefundOrderAfterFence(
+              tx,
+              scope,
+              command.orderReference,
+              observedAt,
+              options.persistence.now,
+            );
             const context = await createPostgresOrdinaryRefundRequestContextSource({
               scope,
               // Read-only: the Order's refund fence only (canonical lock order, Payment request store).
@@ -225,7 +235,7 @@ export function createMerchantCardMachineOrdinaryRefund(options: {
             })(tx, {
               orderReference: command.orderReference,
               operationReference: options.nextReference(),
-              observedAt,
+              observedAt: historyObservedAt,
             });
             const request = context.history.find(
               (entry) => entry.requestReference === command.requestReference,
