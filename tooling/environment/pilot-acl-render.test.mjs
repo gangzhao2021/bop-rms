@@ -78,6 +78,58 @@ describe("renderPilotAclSql", () => {
         renderPilotAclSql([matrix([entry("routine", "security", bad, "EXECUTE")])], roles),
       ).toThrow("PILOT_ACL_RENDER_INVALID");
   });
+  it("WP-2423: renders approved revocations before grants so column grants survive", () => {
+    const withdrawn = (privilege, column = null) => ({
+      ...entry(
+        column ? "column" : "table",
+        "rms_fulfillment",
+        "capacity_slot",
+        privilege,
+        "api",
+        column,
+      ),
+      revoke: true,
+      approval: "Owner standing approval 2026-10-14",
+    });
+    const sql = renderPilotAclSql(
+      [
+        matrix([
+          entry("column", "rms_fulfillment", "capacity_slot", "UPDATE", "api", "slot_id"),
+          entry("table", "rms_fulfillment", "capacity_slot", "MAINTAIN"),
+        ]),
+        matrix([withdrawn("UPDATE"), withdrawn("DELETE")]),
+      ],
+      roles,
+    );
+    expect(sql.split("\n")).toEqual([
+      "BEGIN;",
+      'REVOKE DELETE ON TABLE "rms_fulfillment"."capacity_slot" FROM "pilot_api";',
+      'REVOKE UPDATE ON TABLE "rms_fulfillment"."capacity_slot" FROM "pilot_api";',
+      'GRANT MAINTAIN ON TABLE "rms_fulfillment"."capacity_slot" TO "pilot_api";',
+      'GRANT UPDATE ("slot_id") ON TABLE "rms_fulfillment"."capacity_slot" TO "pilot_api";',
+      'ALTER ROLE "pilot_api" CONNECTION LIMIT 45;',
+      "COMMIT;",
+      "",
+    ]);
+  });
+  it.each([
+    ["a revocation without approval text", { revoke: true }],
+    ["a revocation with blank approval text", { revoke: true, approval: " " }],
+    ["a non-boolean revoke flag", { revoke: "yes", approval: "x" }],
+  ])("WP-2423: rejects %s", (_name, extra) => {
+    expect(() =>
+      renderPilotAclSql([matrix([{ ...entry("table", "s", "t", "UPDATE"), ...extra }])], roles),
+    ).toThrow("PILOT_ACL_RENDER_INVALID");
+  });
+  it("WP-2423: rejects a privilege that is both granted and revoked", () => {
+    const grant = entry("table", "s", "t", "UPDATE");
+    expect(() =>
+      renderPilotAclSql(
+        [matrix([grant]), matrix([{ ...grant, revoke: true, approval: "x" }])],
+        roles,
+      ),
+    ).toThrow("PILOT_ACL_RENDER_INVALID");
+  });
   it("rejects shared or unsafe role names", () => {
     expect(() => renderPilotAclSql([matrix([])], { api: "x", worker: "x" })).toThrow();
     expect(() => renderPilotAclSql([matrix([])], { api: 'x"', worker: "y" })).toThrow();

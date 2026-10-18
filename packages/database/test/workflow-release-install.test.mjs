@@ -93,9 +93,10 @@ it("installs the released cancellation Workflow through Publishing, replays it e
         "GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO " +
           role,
       );
-      // The pilot API role's grants (docs/spec/pilot-acl-matrix.json); UPDATE only takes the lock mode.
+      // The pilot API role's grants (pilot ACL matrix plus additions); MAINTAIN only takes the
+      // SHARE lock modes, the api role holds no UPDATE on these append-only tables (WP-2423).
       await admin.query(
-        "GRANT SELECT,INSERT,UPDATE ON bop_workflow.workflow_definition_version,bop_publishing.publishing_mutation_record TO " +
+        "GRANT SELECT,INSERT,MAINTAIN ON bop_workflow.workflow_definition_version,bop_publishing.publishing_mutation_record TO " +
           role,
       );
       const restricted = {

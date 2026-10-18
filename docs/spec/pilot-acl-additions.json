@@ -528,15 +528,6 @@
       "schema": "rms_recipe",
       "object": "recipe_reference_generation",
       "column": null,
-      "privilege": "UPDATE",
-      "principal": "api",
-      "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
-    },
-    {
-      "type": "table",
-      "schema": "rms_recipe",
-      "object": "recipe_reference_generation",
-      "column": null,
       "privilege": "INSERT",
       "principal": "api",
       "approval": "WP-2423 DEC-RECIPE-AUTHORING 2026-10-07: Brand recipe authoring"
@@ -566,7 +557,8 @@
       "column": null,
       "privilege": "UPDATE",
       "principal": "api",
-      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts"
+      "approval": "WP-2423 DEC-INV-STOCK-COUNT 2026-10-07: Store stock counts",
+      "justification": "the count head advances one version at a time (stock-count-store.ts; guard_stock_count_head); count history rows are separate"
     },
     {
       "type": "table",
@@ -1543,27 +1535,9 @@
     {
       "type": "table",
       "schema": "rms_catalog",
-      "object": "menu_reference_generation",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api",
-      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
-    },
-    {
-      "type": "table",
-      "schema": "rms_catalog",
       "object": "published_menu_projection",
       "column": null,
       "privilege": "INSERT",
-      "principal": "api",
-      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
-    },
-    {
-      "type": "table",
-      "schema": "rms_catalog",
-      "object": "published_menu_projection",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api",
       "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
     },
@@ -1615,27 +1589,9 @@
     {
       "type": "table",
       "schema": "rms_catalog",
-      "object": "published_menu_projection_section",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api",
-      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
-    },
-    {
-      "type": "table",
-      "schema": "rms_catalog",
       "object": "published_menu_projection_sellable",
       "column": null,
       "privilege": "INSERT",
-      "principal": "api",
-      "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
-    },
-    {
-      "type": "table",
-      "schema": "rms_catalog",
-      "object": "published_menu_projection_sellable",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api",
       "approval": "WP-2423 DEC-MENU-REVISION 2026-10-08: Menu review, approval, publication and customer menu projection"
     },
@@ -1966,15 +1922,6 @@
     {
       "type": "table",
       "schema": "rms_pricing",
-      "object": "option_price_rule_version",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api",
-      "approval": "WP-2423 slice 4.3 2026-10-08: option prices drafted, published by another approver, read by customer Quotes and menu review"
-    },
-    {
-      "type": "table",
-      "schema": "rms_pricing",
       "object": "option_price_authoring_operation",
       "column": null,
       "privilege": "SELECT",
@@ -2293,15 +2240,6 @@
       "object": "store_configuration_review_snapshot",
       "column": null,
       "privilege": "INSERT",
-      "principal": "api",
-      "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
-    },
-    {
-      "type": "table",
-      "schema": "rms_store",
-      "object": "store_configuration_review_snapshot",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api",
       "approval": "WP-2423 Owner 2026-10-10 (按你建议做: Q4 store hours and holiday editing): a store manager drafts and submits weekly hours and dated closures; a different person (owner) approves and publishes; append-only versions, review snapshot and publication content"
     },
@@ -2627,7 +2565,8 @@
       "column": null,
       "privilege": "UPDATE",
       "principal": "api",
-      "approval": "Owner approved 2026-10-14 in session (\"按建议，批准\") (WP-2423 Q10): customer order continuity — staff read of removed-contact evidence; 30-day contact removal run by the pilot worker under the api role (database accepts only the contact-clearing update)"
+      "approval": "Owner approved 2026-10-14 in session (\"按建议，批准\") (WP-2423 Q10): customer order continuity — staff read of removed-contact evidence; 30-day contact removal run by the pilot worker under the api role (database accepts only the contact-clearing update)",
+      "justification": "customer contact retention and removal clear contact fields (checkout-contact-retention-store.ts, checkout-contact-customer-removal-store.ts; guard_checkout_details_update)"
     },
     {
       "type": "table",
@@ -3420,6 +3359,746 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (WP-2423 DEC-PICKUP-CAPACITY-SCHEDULE, 2026-10-18): the business worker (api role) lays the Store's pickup slots 14 days ahead from its published hours (append-only slots, one capacity version each) and gives unreserved future slots a new capacity version when the hours change"
+    },
+    {
+      "type": "table",
+      "schema": "platform_audit",
+      "object": "audit_record",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "audit history: only INSERT and SELECT are used (append-audit-record.ts)"
+    },
+    {
+      "type": "table",
+      "schema": "platform_audit",
+      "object": "audit_chain_head",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "only next_sequence and last_record_hash change; brand/store of a head never change"
+    },
+    {
+      "type": "column",
+      "schema": "platform_audit",
+      "object": "audit_chain_head",
+      "column": "next_sequence",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "the chain head advances its sequence (append-audit-record.ts advanceHeadSql) under FOR UPDATE"
+    },
+    {
+      "type": "column",
+      "schema": "platform_audit",
+      "object": "audit_chain_head",
+      "column": "last_record_hash",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "the chain head records the last record hash (append-audit-record.ts advanceHeadSql)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_publishing",
+      "object": "live_gate_requirement",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "bop_publishing",
+      "object": "live_gate_requirement",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: current-live-gate-source.ts LOCK TABLE IN SHARE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "bop_publishing",
+      "object": "live_gate_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "bop_publishing",
+      "object": "live_gate_version",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: current-live-gate-source.ts LOCK TABLE IN SHARE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "bop_publishing",
+      "object": "publishing_mutation_record",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "bop_publishing",
+      "object": "publishing_mutation_record",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: publishing-mutation-store.ts and guard_mutation_history_v4 LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "bop_workflow",
+      "object": "workflow_definition_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "bop_workflow",
+      "object": "workflow_definition_version",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: workflow-definition-store.ts LOCK TABLE IN SHARE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "capacity_slot",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by column UPDATE"
+    },
+    {
+      "type": "column",
+      "schema": "rms_fulfillment",
+      "object": "capacity_slot",
+      "column": "slot_id",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "SELECT ... FOR UPDATE/FOR SHARE needs UPDATE on at least one column, so the grant is limited to the key column, which no code path changes: capacity hold/allocation stores and validate_capacity_* triggers lock the slot FOR UPDATE; trigger capacity_slot_no_mutation rejects every UPDATE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by column UPDATE"
+    },
+    {
+      "type": "column",
+      "schema": "rms_fulfillment",
+      "object": "fulfillment",
+      "column": "fulfillment_id",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "SELECT ... FOR UPDATE/FOR SHARE needs UPDATE on at least one column, so the grant is limited to the key column, which no code path changes: fulfillment-readiness-store.ts locks the fulfillment FOR UPDATE; trigger fulfillment_no_update_trigger rejects every UPDATE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "inventory_item",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN and column UPDATE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "inventory_item",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: recipe-configuration-coverage-source.ts LOCK TABLE IN SHARE MODE"
+    },
+    {
+      "type": "column",
+      "schema": "rms_inventory",
+      "object": "inventory_item",
+      "column": "item_id",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "SELECT ... FOR UPDATE/FOR SHARE needs UPDATE on at least one column, so the grant is limited to the key column, which no code path changes: stock reservation, lot hold and Item stores and enforce_item_* triggers lock the Item FOR UPDATE / FOR KEY SHARE; trigger inventory_item_immutable rejects every UPDATE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_account",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by column UPDATE"
+    },
+    {
+      "type": "column",
+      "schema": "rms_inventory",
+      "object": "stock_account",
+      "column": "account_id",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "SELECT ... FOR UPDATE/FOR SHARE needs UPDATE on at least one column, so the grant is limited to the key column, which no code path changes: stock-reservation-store.ts, lot-hold-store.ts and enforce_stock_reservation/enforce_lot_hold_version lock the account FOR UPDATE; trigger stock_account_immutable rejects every UPDATE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_reservation_set",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "reservation history: no UPDATE, row lock or table lock"
+    },
+    {
+      "type": "table",
+      "schema": "rms_inventory",
+      "object": "stock_reservation_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "reservation history: no UPDATE, row lock or table lock"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "cart_binding_record",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "binding history: no UPDATE, row lock or table lock"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_amendment",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by column UPDATE"
+    },
+    {
+      "type": "column",
+      "schema": "rms_ordering",
+      "object": "order_amendment",
+      "column": "amendment_id",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "SELECT ... FOR UPDATE/FOR SHARE needs UPDATE on at least one column, so the grant is limited to the key column, which no code path changes: dining-session-order-inventory.ts locks the order's amendments FOR UPDATE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_amendment_state_record",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "amendment history: no UPDATE, row lock or table lock"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_creation_record",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "creation evidence: INSERT and SELECT only (kitchen-ticket-store.ts)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_creation_record",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "creation evidence: INSERT and SELECT only (kitchen-ticket-store.ts)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "option_price_rule_version",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: option-price-authoring-store.ts LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_modifier_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_modifier_version",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: recipe demand, owner coverage and preparation stores LOCK TABLE IN SHARE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "public_store_profile_timing",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "public_store_profile_timing",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: public-store-profile-timing-store.ts LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "public_store_profile_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "public_store_profile_version",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: public-store-profile-store.ts LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_authoring_operation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_authoring_operation",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: configuration-authoring-store.ts, business-date-source.ts LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_operation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_operation",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: service-control-store.ts, pause-history-source.ts LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_publication_content",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_publication_content",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: publication-content-source.ts, business-date-source.ts LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_review_snapshot",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_review_snapshot",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: review-snapshot-store.ts LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_configuration_version",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: business-date, exception, publication and weekly schedule sources LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: exception-content-source.ts LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception_content",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception_content",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: exception-content-source.ts LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception_interval",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_exception_interval",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: exception-content-source.ts LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_pause_content",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_pause_content",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: service-control-store.ts, pause-history-source.ts LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_resume_content",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_service_resume_content",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: service-control-store.ts, pause-history-source.ts LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_weekly_service_period",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_weekly_service_period",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: weekly-schedule-source.ts LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "projection rows are inserted per generation; only the generation and checkpoint rows change"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_section",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "projection rows are inserted per generation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "published_menu_projection_sellable",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "projection rows are inserted per generation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "menu_reference_generation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "maintained only by the SECURITY DEFINER trigger maintain_menu_reference_generation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "recipe_reference_generation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "maintained only by the SECURITY DEFINER trigger maintain_recipe_reference_projection"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "permission_definition",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN and column UPDATE"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "permission_definition",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: permission policy stores LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "column",
+      "schema": "bop_permission",
+      "object": "permission_definition",
+      "column": "permission_id",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "SELECT ... FOR UPDATE/FOR SHARE needs UPDATE on at least one column, so the grant is limited to the key column, which no code path changes: brand-initial-policy-store.ts locks definitions FOR SHARE; definitions are never changed by the api"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "permission_override",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "replaced by MAINTAIN"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "permission_override",
+      "column": null,
+      "privilege": "MAINTAIN",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: permission policy stores LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "store",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "revoke": true,
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
+      "justification": "the api only locks Store rows FOR SHARE; the existing column grants (lifecycle, version) cover that lock"
     }
   ]
 }

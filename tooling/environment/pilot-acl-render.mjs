@@ -7,6 +7,9 @@ import { pilotApiRoleConnectionLimit } from "./pilot-connection-budget.mjs";
 // WP-2423 P3: render the role-neutral pilot runtime ACL (exported v14 matrix plus Owner-approved
 // additions) as GRANT SQL for one installation's api/worker role names. Least privilege only:
 // no schema-wide or future grants, and no role names in migrations (Section 95.4).
+// An entry with `revoke: true` and its approval text renders a REVOKE, so an installation that
+// still holds a withdrawn privilege converges. REVOKEs run before GRANTs: revoking a table
+// privilege also removes that privilege's column grants, which the GRANTs then restore.
 const identifier = /^[a-z_][a-z0-9_]{0,62}$/u;
 // Argument types may be schema-qualified (e.g. platform_helpers.uuid_v7 domains) or one of
 // PostgreSQL's fixed multi-word type names (e.g. timestamp with time zone).
@@ -38,30 +41,39 @@ export function renderPilotAclSql(matrices, roles) {
     roles.api === roles.worker
   )
     invalid();
-  const statements = new Set();
+  const grants = new Map();
+  const revokes = new Map();
   for (const matrix of matrices) {
     if (matrix?.schemaVersion !== 1 || !Array.isArray(matrix.entries)) invalid();
     for (const entry of matrix.entries) {
       const grantee = quote(roles[entry.principal] ?? invalid());
       if (!privileges[entry.type]?.includes(entry.privilege)) invalid();
+      if (entry.revoke !== undefined && entry.revoke !== true) invalid();
+      const revoke = entry.revoke === true;
+      if (revoke && (typeof entry.approval !== "string" || entry.approval.trim() === "")) invalid();
       const schema = quote(entry.schema);
-      if (entry.type === "schema") statements.add(`GRANT USAGE ON SCHEMA ${schema} TO ${grantee};`);
+      let target;
+      if (entry.type === "schema") target = `USAGE ON SCHEMA ${schema}`;
       else if (entry.type === "routine") {
         if (!routine.test(entry.object) || !entry.object.startsWith(entry.schema + ".")) invalid();
-        statements.add(`GRANT EXECUTE ON FUNCTION ${entry.object} TO ${grantee};`);
+        target = `EXECUTE ON FUNCTION ${entry.object}`;
       } else if (entry.type === "column")
-        statements.add(
-          `GRANT ${entry.privilege} (${quote(entry.column)}) ON TABLE ${schema}.${quote(entry.object)} TO ${grantee};`,
-        );
+        target = `${entry.privilege} (${quote(entry.column)}) ON TABLE ${schema}.${quote(entry.object)}`;
       else
-        statements.add(
-          `GRANT ${entry.privilege} ON ${entry.type === "sequence" ? "SEQUENCE" : "TABLE"} ${schema}.${quote(entry.object)} TO ${grantee};`,
-        );
+        target = `${entry.privilege} ON ${entry.type === "sequence" ? "SEQUENCE" : "TABLE"} ${schema}.${quote(entry.object)}`;
+      const key = target + "\u0000" + grantee;
+      (revoke ? revokes : grants).set(
+        key,
+        revoke ? `REVOKE ${target} FROM ${grantee};` : `GRANT ${target} TO ${grantee};`,
+      );
     }
   }
+  // A privilege is either granted or withdrawn, never both.
+  for (const key of revokes.keys()) if (grants.has(key)) invalid();
   // WP-2423: every supervised service's pool must fit the api role at once (pilot-connections).
   const roleSettings = `ALTER ROLE ${quote(roles.api)} CONNECTION LIMIT ${pilotApiRoleConnectionLimit};`;
-  return "BEGIN;\n" + [...statements].sort().join("\n") + "\n" + roleSettings + "\nCOMMIT;\n";
+  const statements = [...[...revokes.values()].sort(), ...[...grants.values()].sort()];
+  return "BEGIN;\n" + statements.join("\n") + "\n" + roleSettings + "\nCOMMIT;\n";
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

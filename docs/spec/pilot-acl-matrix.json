@@ -103,7 +103,8 @@
       "object": "order_batch",
       "column": "order_batch_id",
       "privilege": "UPDATE",
-      "principal": "api"
+      "principal": "api",
+      "justification": "SELECT ... FOR UPDATE/FOR SHARE needs UPDATE on at least one column, so the grant is limited to the key column, which no code path changes: order termination, closure and cancellation stores and triggers lock the batch FOR UPDATE"
     },
     {
       "type": "column",
@@ -111,7 +112,8 @@
       "object": "order_header",
       "column": "order_id",
       "privilege": "UPDATE",
-      "principal": "api"
+      "principal": "api",
+      "justification": "SELECT ... FOR UPDATE/FOR SHARE needs UPDATE on at least one column, so the grant is limited to the key column, which no code path changes: order stores and validate_order_* triggers lock the order FOR UPDATE"
     },
     {
       "type": "column",
@@ -119,7 +121,8 @@
       "object": "order_item",
       "column": "order_item_id",
       "privilege": "UPDATE",
-      "principal": "api"
+      "principal": "api",
+      "justification": "SELECT ... FOR UPDATE/FOR SHARE needs UPDATE on at least one column, so the grant is limited to the key column, which no code path changes: receipt-order-source.ts locks order items FOR UPDATE"
     },
     {
       "type": "column",
@@ -127,7 +130,8 @@
       "object": "order_submission_record",
       "column": "order_id",
       "privilege": "UPDATE",
-      "principal": "api"
+      "principal": "api",
+      "justification": "SELECT ... FOR UPDATE/FOR SHARE needs UPDATE on at least one column, so the grant is limited to the key column, which no code path changes: order creation and contact removal stores lock the submission FOR UPDATE"
     },
     {
       "type": "routine",
@@ -548,14 +552,6 @@
     {
       "type": "table",
       "schema": "bop_permission",
-      "object": "permission_definition",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "bop_permission",
       "object": "permission_grant",
       "column": null,
       "privilege": "SELECT",
@@ -575,14 +571,6 @@
       "object": "permission_override",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "bop_permission",
-      "object": "permission_override",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -644,25 +632,9 @@
     {
       "type": "table",
       "schema": "bop_publishing",
-      "object": "live_gate_requirement",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "bop_publishing",
       "object": "live_gate_version",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "bop_publishing",
-      "object": "live_gate_version",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -679,14 +651,6 @@
       "object": "publishing_mutation_record",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "bop_publishing",
-      "object": "publishing_mutation_record",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -731,14 +695,6 @@
     },
     {
       "type": "table",
-      "schema": "bop_tenant",
-      "object": "store",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
       "schema": "bop_workflow",
       "object": "workflow_definition_version",
       "column": null,
@@ -751,14 +707,6 @@
       "object": "workflow_definition_version",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "bop_workflow",
-      "object": "workflow_definition_version",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -780,14 +728,6 @@
     {
       "type": "table",
       "schema": "platform_audit",
-      "object": "audit_chain_head",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "platform_audit",
       "object": "audit_record",
       "column": null,
       "privilege": "INSERT",
@@ -799,14 +739,6 @@
       "object": "audit_record",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "platform_audit",
-      "object": "audit_record",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -1580,14 +1512,6 @@
     {
       "type": "table",
       "schema": "rms_fulfillment",
-      "object": "capacity_slot",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_fulfillment",
       "object": "capacity_slot_configuration",
       "column": null,
       "privilege": "SELECT",
@@ -1612,14 +1536,6 @@
     {
       "type": "table",
       "schema": "rms_fulfillment",
-      "object": "fulfillment",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_fulfillment",
       "object": "fulfillment_completion_publication",
       "column": null,
       "privilege": "INSERT",
@@ -1828,14 +1744,6 @@
     {
       "type": "table",
       "schema": "rms_inventory",
-      "object": "inventory_item",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_inventory",
       "object": "inventory_item_operation",
       "column": null,
       "privilege": "INSERT",
@@ -1871,14 +1779,6 @@
       "object": "stock_account",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_inventory",
-      "object": "stock_account",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -1940,14 +1840,6 @@
     {
       "type": "table",
       "schema": "rms_inventory",
-      "object": "stock_reservation_set",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_inventory",
       "object": "stock_reservation_version",
       "column": null,
       "privilege": "INSERT",
@@ -1959,14 +1851,6 @@
       "object": "stock_reservation_version",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_inventory",
-      "object": "stock_reservation_version",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -2006,14 +1890,6 @@
       "schema": "rms_kitchen",
       "object": "kitchen_creation_record",
       "column": null,
-      "privilege": "DELETE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_kitchen",
-      "object": "kitchen_creation_record",
-      "column": null,
       "privilege": "INSERT",
       "principal": "api"
     },
@@ -2023,14 +1899,6 @@
       "object": "kitchen_creation_record",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_kitchen",
-      "object": "kitchen_creation_record",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -2239,14 +2107,6 @@
       "object": "cart_binding_record",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_ordering",
-      "object": "cart_binding_record",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -2484,25 +2344,9 @@
     {
       "type": "table",
       "schema": "rms_ordering",
-      "object": "order_amendment",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_ordering",
       "object": "order_amendment_state_record",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_ordering",
-      "object": "order_amendment_state_record",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -3388,14 +3232,6 @@
     {
       "type": "table",
       "schema": "rms_recipe",
-      "object": "recipe_modifier_version",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_recipe",
       "object": "recipe_operation_record",
       "column": null,
       "privilege": "INSERT",
@@ -3508,14 +3344,6 @@
     {
       "type": "table",
       "schema": "rms_store",
-      "object": "public_store_profile_timing",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_store",
       "object": "public_store_profile_version",
       "column": null,
       "privilege": "INSERT",
@@ -3532,25 +3360,9 @@
     {
       "type": "table",
       "schema": "rms_store",
-      "object": "public_store_profile_version",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_store",
       "object": "store_configuration_authoring_operation",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_store",
-      "object": "store_configuration_authoring_operation",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -3564,25 +3376,9 @@
     {
       "type": "table",
       "schema": "rms_store",
-      "object": "store_configuration_operation",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_store",
       "object": "store_configuration_publication_content",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_store",
-      "object": "store_configuration_publication_content",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -3596,25 +3392,9 @@
     {
       "type": "table",
       "schema": "rms_store",
-      "object": "store_configuration_version",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_store",
       "object": "store_service_exception",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_store",
-      "object": "store_service_exception",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -3628,25 +3408,9 @@
     {
       "type": "table",
       "schema": "rms_store",
-      "object": "store_service_exception_content",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_store",
       "object": "store_service_exception_interval",
       "column": null,
       "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_store",
-      "object": "store_service_exception_interval",
-      "column": null,
-      "privilege": "UPDATE",
       "principal": "api"
     },
     {
@@ -3660,31 +3424,7 @@
     {
       "type": "table",
       "schema": "rms_store",
-      "object": "store_service_pause_content",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_store",
       "object": "store_service_resume_content",
-      "column": null,
-      "privilege": "SELECT",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_store",
-      "object": "store_service_resume_content",
-      "column": null,
-      "privilege": "UPDATE",
-      "principal": "api"
-    },
-    {
-      "type": "table",
-      "schema": "rms_store",
-      "object": "store_weekly_service_period",
       "column": null,
       "privilege": "SELECT",
       "principal": "api"
@@ -3694,7 +3434,7 @@
       "schema": "rms_store",
       "object": "store_weekly_service_period",
       "column": null,
-      "privilege": "UPDATE",
+      "privilege": "SELECT",
       "principal": "api"
     },
     {
