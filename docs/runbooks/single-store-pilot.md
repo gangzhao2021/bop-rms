@@ -1807,6 +1807,61 @@ Manual refresh is also available. Failed reads hide summary amounts while keepin
 the existing refund intent; browser recovery tests preserve same-request retries.
 Actual existing-order manual refresh shows CAD 11.30 refunded and CAD 0.00 pending.
 
+## Renewing the internal test installation
+
+**InternalTest only, Owner-approved action.** The internal test installation is valid for a fixed
+window (v15: until `2026-10-20T02:26:31.598Z`). After it, staff sign-in, the DEMO tables and the
+customer quote stop working. Renewal moves that window forward by at most 30 days at a time and
+needs the Owner's explicit approval; record the Owner's own words with `--approval`. Never use it
+for a Pilot or real Store: it refuses any file that is not `InternalTest`, carries another
+database, lacks the DEMO/synthetic labels, names a real-looking (non-fixture) Store or staff
+identity, or declares a non-`SYNTHETIC_*` launch gate requirement.
+
+What it renews (files in the runtime directory, validity only):
+`internal-test-profile.json` `binding.validUntil`, every `actors[].validUntil` in
+`internal-test-merchant.json`, `validUntil` in each `internal-test-dining-table*.json`, and
+`effectiveUntil` plus `exceptionTaskPolicy.effectiveUntil` in `internal-test-task-queue.json`.
+Every value must equal the profile's current expiry (or already equal `--until` after an
+interrupted run); nothing else in any file changes. Historical copies
+(`*.v1-backup.json`, `*.before-*.json`) stay untouched.
+
+What it does **not** renew (in the database, no product renewal path yet; the Store still cannot
+take orders after the old expiry until these exist): the DEMO staff roster rows
+(memberships, Store assignments, roles, role assignments and permission grants), the launch gate
+requirement `SYNTHETIC_STORE_READY`, the tax registration and professional review evidence on the
+published tax configuration, and the Pickup capacity slots. These are tracked in WP-2423; do not
+change them with SQL.
+
+1. Get the Owner's approval for the new end date and the reason, in writing.
+2. Preview, from the repository root on the host, as the owner of the runtime directory (nothing
+   is written):
+
+   ```bash
+   NODE_ENV=development node tooling/environment/pilot-internal-test-renew.mjs \
+     "$PWD/.local/pilot-runtime/pilot-v15" --database bop_rms_pilot_v15 \
+     --until <ISO instant, at most 30 days from now, e.g. 2026-11-14T02:26:31.598Z> \
+     --reason "<why>" --approved-by "<Owner name>" --approval "<Owner's approval wording>" --dry-run
+   ```
+
+   It lists each file, field, old → new value and the before/after SHA-256, then the database
+   items it leaves alone. A refusal prints a fixed code, e.g.
+   `PILOT_INTERNAL_TEST_RENEWAL_UNAVAILABLE (identity-not-synthetic)`, and changes nothing.
+
+3. Run the same command without `--dry-run`. It keeps the previous files (hard links) and a
+   `renewal.json` record (operator account, approver, approval wording, reason, from → to, hashes)
+   in a new owner-only `internal-test-renewal-<time>/` directory, replaces each file atomically
+   (the profile last) and appends one line to `internal-test-renewal-log.jsonl`. If it stops part
+   way, run the same command again; it finishes the remaining files.
+4. Restart the services in a planned update window (see Planned updates): `maintenance start`
+   with `--reason "internal test renewal"`, `docker compose -f compose.pilot.yaml restart pilot`,
+   wait until the pages load, `maintenance end`. The services read the profile at start.
+5. Reload open screens. The internal DEMO Pickup and table entries sign their codes from the
+   profile at start, so they follow the new window after the restart; table codes issued from
+   Table QR codes keep their own expiry and need no reprint.
+
+To undo, copy the files back from the `internal-test-renewal-<time>/` directory and restart; the
+record and log line stay as history.
+
 ## Daily backup and weekly restore drill (WP-2423)
 
 `tooling/environment/pilot-backup.sh` needs only docker on the host and runs while all services
