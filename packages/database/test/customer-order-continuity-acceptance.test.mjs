@@ -16,6 +16,7 @@ import {
   createPostgresCustomerOrderNotificationRecords,
 } from "../../bop/notification/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { grantPilotApiAcl } from "../test-support/pilot-api-acl.mjs";
 import { createContactRetentionDispatcher } from "../../../tooling/environment/pilot-contact-retention.mjs";
 
 const { Client } = pg;
@@ -54,19 +55,11 @@ it("WP-2423 Q10: order continuity reads, staff contact, retention removal and pa
             role,
         );
       }
-      // The pilot api role's grants (docs/spec/pilot-acl-matrix.json and the Owner-approved WP-2423
-      // Q10 additions): these reads, plus appending removal evidence and the guarded removal itself.
-      await admin.query(
-        "GRANT SELECT ON rms_ordering.order_header,rms_ordering.order_submission_record,rms_ordering.order_checkout_details_link,rms_ordering.checkout_details_record,rms_ordering.checkout_contact_redaction,rms_payment.payment_terminal_fact TO " +
-          apiRole,
-      );
-      // The customer order status read loads the Ordering status projection (pilot api grant).
-      await admin.query(
-        "GRANT SELECT ON rms_ordering.order_status_projection,rms_ordering.order_status_projection_generation TO " +
-          apiRole,
-      );
-      await admin.query("GRANT UPDATE ON rms_ordering.checkout_details_record TO " + apiRole);
-      await admin.query("GRANT INSERT ON rms_ordering.checkout_contact_redaction TO " + apiRole);
+      // The api role gets exactly the rendered pilot api ACL (docs/spec/pilot-acl-matrix.json plus
+      // the Owner-approved WP-2423 additions), so a read that joins another table (e.g. Payment's
+      // intent for the tip) cannot pass here while the deployed role lacks it, nor fail on a fixture
+      // grant list that drifted behind the product.
+      await grantPilotApiAcl(admin, apiRole);
       // A role with only the read grants cannot remove anything.
       await admin.query(
         "GRANT SELECT ON rms_ordering.checkout_details_record,rms_ordering.checkout_contact_redaction TO " +
@@ -202,6 +195,28 @@ it("WP-2423 Q10: order continuity reads, staff contact, retention removal and pa
           recent,
           "sha256:" + "c".repeat(64),
           id(0x406),
+        ],
+      );
+      // The intent the terminal fact belongs to: its round and the tip frozen at payment (9b2b3f21
+      // joins it so the order page shows what was paid).
+      await admin.query(
+        "INSERT INTO rms_payment.payment_intent (payment_intent_id,brand_id,store_id,payment_operation_id,order_id,order_batch_id,submission_id,guest_session_id,source_cart_id,source_cart_version,quote_id,preparation_id,capacity_allocation_id,intent_digest,preparation_source_digest,order_allocation_minor,tip_minor,total_minor,currency_code,payment_method,capture_mode,aggregate_version,creation_status,prepared_at,capacity_expires_at,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10,$11,$12,$13,$13,1034,200,1234,'CAD','OnlineCard','Automatic',1,'ProviderCreatePending',$14,$15,$14)",
+        [
+          id(0x402),
+          brand,
+          store,
+          id(0x407),
+          id(0x102),
+          id(0x408),
+          id(0x1102),
+          guest,
+          id(0x2102),
+          id(801),
+          id(0x409),
+          id(0x40a),
+          "sha256:" + "d".repeat(64),
+          new Date(Date.parse(recent) - 60_000).toISOString(),
+          new Date(Date.parse(recent) + 29 * 60_000).toISOString(),
         ],
       );
       await admin.query("SET session_replication_role = origin");
@@ -378,6 +393,8 @@ it("WP-2423 Q10: order continuity reads, staff contact, retention removal and pa
       assert.equal(outcomes[0].outcome, "Succeeded");
       assert.equal(outcomes[0].amount.amountMinor, 1234n);
       assert.equal(outcomes[0].paymentIntentReference, id(0x402));
+      assert.equal(outcomes[0].orderBatchReference, id(0x408));
+      assert.deepEqual(outcomes[0].tip, { amountMinor: 200n, currencyCode: "CAD" });
       assert.deepEqual(
         await runAs(apiRole, (tx) =>
           listOrderPaymentTerminalOutcomes(
