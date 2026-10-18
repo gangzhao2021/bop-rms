@@ -155,6 +155,179 @@ describe("planPickupCapacitySchedule (DEC-PICKUP-CAPACITY-SCHEDULE)", () => {
     ).toEqual([["2026-10-20T13:00:00.000Z", "2026-10-20T14:00:00.000Z", 20]]);
   });
 
+  describe("slivers left by runs before 2026-10-18 (horizon cut while pickup was open)", () => {
+    // 10:00-11:00 EDT on 20 October, in pickup hours: twelve slots of five minutes, each given
+    // the per-slot rounded-up capacity of 2 (24 for the hour instead of 20).
+    const cellStart = Date.parse("2026-10-20T14:00:00.000Z");
+    const twoDays = (overrides: Partial<PickupCapacityScheduleInput> = {}) =>
+      input({
+        horizonUntil: "2026-10-21T12:00:00.000Z",
+        serviceWindows: [
+          { startsAt: "2026-10-19T12:00:00.000Z", endsAt: "2026-10-20T00:00:00.000Z" },
+          { startsAt: "2026-10-20T12:00:00.000Z", endsAt: "2026-10-21T00:00:00.000Z" },
+        ],
+        ...overrides,
+      });
+    const MINUTE = 60_000;
+    const sliver = (
+      index: number,
+      from: number,
+      to: number,
+      extra: Partial<PickupCapacityExistingSlot> = {},
+    ) => ({
+      slotReference: `0198a700-0000-7000-8000-${(0x500 + index).toString(16).padStart(12, "0")}`,
+      startsAt: iso(cellStart + from * MINUTE),
+      endsAt: iso(cellStart + to * MINUTE),
+      configVersion: 1,
+      capacityLimit: pickupSlotCapacityLimit((to - from) * MINUTE, true, policy),
+      reserved: false,
+      ...extra,
+    });
+    const hourOfSlivers = (
+      extra: (index: number) => Partial<PickupCapacityExistingSlot> = () => ({}),
+    ) =>
+      Array.from({ length: 12 }, (_, index) =>
+        sliver(index, index * 5, index * 5 + 5, extra(index)),
+      );
+    // The rest of the schedule is already whole hours.
+    const wholeHours = asExisting(planPickupCapacitySchedule(twoDays())).filter(
+      (slot) => slot.startsAt < iso(cellStart) || slot.startsAt >= iso(cellStart + HOUR),
+    );
+    const applied = (
+      slots: PickupCapacityExistingSlot[],
+      plan: ReturnType<typeof planPickupCapacitySchedule>,
+    ) =>
+      slots.map((slot) => {
+        const change = plan.republish.find((item) => item.slotReference === slot.slotReference);
+        return change === undefined
+          ? slot
+          : { ...slot, configVersion: change.configVersion, capacityLimit: change.capacityLimit };
+      });
+    const hourTotal = (slots: PickupCapacityExistingSlot[]) =>
+      slots
+        .filter((slot) => slot.startsAt >= iso(cellStart) && slot.startsAt < iso(cellStart + HOUR))
+        .reduce((sum, slot) => sum + (slot.capacityLimit ?? 0), 0);
+
+    it("shares the hour's capacity among unreserved future slivers, at least 1 each, and settles", () => {
+      const slots = [...wholeHours, ...hourOfSlivers()];
+      expect(hourTotal(slots)).toBe(24);
+      const plan = planPickupCapacitySchedule(twoDays({ existingSlots: slots }));
+      expect(plan.create).toEqual([]);
+      expect(plan.republish.every((change) => change.configVersion === 2)).toBe(true);
+      const corrected = applied(slots, plan);
+      expect(hourTotal(corrected)).toBe(20);
+      const shares = corrected
+        .filter((slot) => slot.startsAt >= iso(cellStart) && slot.startsAt < iso(cellStart + HOUR))
+        .map((slot) => slot.capacityLimit);
+      expect(shares).toEqual([2, 2, 1, 2, 2, 1, 2, 2, 1, 2, 2, 1]);
+      // Whole-hour slots are untouched.
+      expect(plan.republish).toHaveLength(4);
+      // Idempotent now, later while the hour is ahead, and once the hour has begun.
+      for (const observedAt of [
+        "2026-10-19T12:00:00.000Z",
+        "2026-10-20T13:59:00.000Z",
+        "2026-10-20T14:12:00.000Z",
+      ])
+        expect(
+          planPickupCapacitySchedule(twoDays({ observedAt, existingSlots: corrected })).republish,
+        ).toEqual([]);
+    });
+
+    it("never changes a reserved sliver and takes its extra share from the later slivers", () => {
+      const slots = [
+        ...wholeHours,
+        ...hourOfSlivers((index) => (index === 2 || index === 11 ? { reserved: true } : {})),
+      ];
+      const plan = planPickupCapacitySchedule(twoDays({ existingSlots: slots }));
+      const reserved = new Set([slots.at(-10)?.slotReference, slots.at(-1)?.slotReference]);
+      expect(plan.republish.some((change) => reserved.has(change.slotReference))).toBe(false);
+      const corrected = applied(slots, plan);
+      expect(hourTotal(corrected)).toBe(20);
+      expect(
+        corrected
+          .filter((slot) => reserved.has(slot.slotReference))
+          .map((slot) => slot.capacityLimit),
+      ).toEqual([2, 2]);
+      expect(corrected.every((slot) => (slot.capacityLimit ?? 0) >= 1)).toBe(true);
+      expect(planPickupCapacitySchedule(twoDays({ existingSlots: corrected })).republish).toEqual(
+        [],
+      );
+    });
+
+    it("leaves the current hour as it is", () => {
+      const slots = [...wholeHours, ...hourOfSlivers()];
+      const plan = planPickupCapacitySchedule(
+        twoDays({ observedAt: "2026-10-20T14:07:00.000Z", existingSlots: slots }),
+      );
+      expect(plan.republish).toEqual([]);
+    });
+
+    it("shares a part-filled hour at the horizon once the hour is complete", () => {
+      // Slivers to 10:35 EDT; the rest of the hour is laid once the horizon passes 11:00.
+      const partial = hourOfSlivers().slice(0, 7);
+      const before = wholeHours.filter((slot) => slot.startsAt < iso(cellStart));
+      const waiting = planPickupCapacitySchedule(
+        twoDays({
+          observedAt: "2026-10-19T14:40:00.000Z",
+          horizonUntil: "2026-10-20T14:40:00.000Z",
+          serviceWindows: [
+            { startsAt: "2026-10-19T14:40:00.000Z", endsAt: "2026-10-20T00:00:00.000Z" },
+            { startsAt: "2026-10-20T12:00:00.000Z", endsAt: "2026-10-20T14:40:00.000Z" },
+          ],
+          existingSlots: [...before, ...partial],
+        }),
+      );
+      expect(waiting.create).toEqual([]);
+      expect(waiting.republish).toEqual([]);
+      const complete = planPickupCapacitySchedule(
+        twoDays({
+          observedAt: "2026-10-19T15:01:00.000Z",
+          horizonUntil: "2026-10-20T15:01:00.000Z",
+          serviceWindows: [
+            { startsAt: "2026-10-19T15:01:00.000Z", endsAt: "2026-10-20T00:00:00.000Z" },
+            { startsAt: "2026-10-20T12:00:00.000Z", endsAt: "2026-10-20T15:01:00.000Z" },
+          ],
+          existingSlots: [...before, ...partial],
+        }),
+      );
+      expect(complete.create.map((slot) => [slot.startsAt, slot.endsAt])).toEqual([
+        ["2026-10-20T14:35:00.000Z", "2026-10-20T15:00:00.000Z"],
+      ]);
+      const corrected = applied(partial, complete);
+      expect(hourTotal(corrected) + (complete.create[0]?.capacityLimit ?? 0)).toBe(20);
+      expect(complete.create[0]?.capacityLimit).toBe(8); // 25 minutes of 20 an hour, the rest of the hour
+    });
+
+    it("keeps an end-of-day one-second sliver at 1 and the hour at the policy", () => {
+      const windows = [
+        { startsAt: "2026-10-19T12:00:00.000Z", endsAt: "2026-10-20T03:59:59.000Z" },
+      ];
+      const slots = asExisting(planPickupCapacitySchedule(input({ serviceWindows: windows }))).map(
+        (slot) =>
+          slot.endsAt === "2026-10-20T04:00:00.000Z"
+            ? { ...slot, endsAt: "2026-10-20T03:59:59.000Z" }
+            : slot,
+      );
+      slots.push({
+        slotReference: "0198a700-0000-7000-8000-0000000000ff",
+        startsAt: "2026-10-20T03:59:59.000Z",
+        endsAt: "2026-10-20T04:00:00.000Z",
+        configVersion: 1,
+        capacityLimit: 1,
+        reserved: false,
+      });
+      const plan = planPickupCapacitySchedule(
+        input({ existingSlots: slots, serviceWindows: windows }),
+      );
+      expect(plan.republish.map((change) => change.capacityLimit)).toEqual([19]);
+      expect(
+        planPickupCapacitySchedule(
+          input({ existingSlots: applied(slots, plan), serviceWindows: windows }),
+        ).republish,
+      ).toEqual([]);
+    });
+  });
+
   it("catches up after downtime from the current instant, cut at the next local hour", () => {
     const plan = planPickupCapacitySchedule(
       input({

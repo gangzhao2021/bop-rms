@@ -18,6 +18,18 @@ import { parseFulfillmentInstant, type FulfillmentInstant } from "./pickup-fulfi
  * Slots and their capacity versions are append-only. Existing slots are never moved; new slots
  * only fill time no slot covers. When hours or the capacity policy change, a future slot nobody
  * has reserved receives a new capacity version; a slot with any reservation keeps its version.
+ *
+ * Capacity is set per cell (the time between two cuts): a cell's capacity is the policy rate for
+ * its service, in proportion to its length. Normally one slot fills a cell and takes all of it.
+ * Where earlier runs left several slots in one cell (few-minute "slivers" cut at the horizon
+ * before 2026-10-18), the cell's capacity is shared among them so the cell's total stays at the
+ * policy instead of rounding up per sliver: shares follow length, counted from the start of the
+ * cell so a slot's share depends only on its own bounds and does not change as time passes, and
+ * every slot keeps at least 1 (an ASAP checkout during a sliver is never refused while the hour
+ * has room; only a cell holding more slots than its capacity exceeds it, by 1 a slot). Reserved
+ * slots keep their version; when they hold more than their share, the largest unreserved shares
+ * in the cell give it up (down to 1). The current cell and a cell reaching past the horizon are
+ * left as they are; a slot crossing a cut keeps the per-slot rule.
  */
 export interface PickupCapacityPolicy {
   /** Pickup orders per hour while the Store's published hours offer pickup. */
@@ -85,6 +97,14 @@ const QUARTER = 15 * MINUTE;
 /** At most this far ahead (two months) and this many new slots in one plan. */
 const MAXIMUM_HORIZON = 62 * 24 * HOUR;
 const MAXIMUM_CREATED = 4_000;
+
+/** A slot's place in its cell; fixedLimit is the capacity a reserved or current slot keeps. */
+interface Member {
+  readonly start: number;
+  readonly end: number;
+  readonly fixedLimit: number | null;
+  target: number;
+}
 
 function fail(): never {
   throw new PickupCapacityScheduleError("PICKUP_CAPACITY_SCHEDULE_INPUT_INVALID");
@@ -253,35 +273,140 @@ export function planPickupCapacitySchedule(
     const day = days.find(([, start, end]) => start <= at && at < end);
     return day === undefined ? fail() : day[0];
   };
-  const create: PickupCapacitySlotPlan[] = [];
+  const newSlots: [number, number][] = [];
   for (const [gapStart, gapEnd] of gaps) {
     let start = gapStart;
     for (const cut of orderedCuts) {
       if (cut <= start) continue;
       if (cut >= gapEnd) break;
-      create.push(planned(start, cut));
+      newSlots.push([start, cut]);
       start = cut;
     }
     // The far end stops at the last cut: a later run extends it by whole slots, never by the
     // few minutes since the previous run.
     if (gapEnd > start && (gapEnd < horizonUntil || cuts.has(horizonUntil)))
-      create.push(planned(start, gapEnd));
+      newSlots.push([start, gapEnd]);
   }
-  function planned(start: number, end: number): PickupCapacitySlotPlan {
-    return Object.freeze({
+  if (newSlots.length > MAXIMUM_CREATED) return fail();
+
+  // Cells: from the last cut at or before observedAt through every cut up to the horizon. A
+  // window edge at observedAt is where the calendar was clipped, not an opening time.
+  const cellCuts = [
+    ...fixedCuts.filter((at) => at <= observedAt).slice(-1),
+    ...orderedCuts.filter((at) => !(at === observedAt && !fixedCuts.includes(at))),
+  ].sort((a, b) => a - b);
+  const cellIndexOf = (at: number) => {
+    let found = -1;
+    cellCuts.forEach((cut, index) => {
+      if (cut <= at) found = index;
+    });
+    return found;
+  };
+  const cells = new Map<number, { members: Member[]; regular: boolean }>();
+  const leftAsIs = new Set<Member>();
+  const memberOf = new Map<object, Member>();
+  const enrol = (key: object, start: number, end: number, fixedLimit: number | null) => {
+    const index = cellIndexOf(start);
+    const cellEnd = cellCuts[index + 1];
+    const member: Member = { start, end, fixedLimit, target: desiredLimit(start, end) };
+    memberOf.set(key, member);
+    // A slot crossing a cut (an older schedule, or hours that changed after it was laid) keeps
+    // the per-slot rule, and so does every slot sharing a cell with it.
+    for (let next = index + 1; (cellCuts[next] ?? Infinity) < end; next += 1) {
+      const crossed = cells.get(next) ?? { members: [], regular: true };
+      crossed.regular = false;
+      cells.set(next, crossed);
+    }
+    if (index < 0) return;
+    // A cell reaching past the horizon is not complete yet; it is shared once a run lays its end.
+    if (cellEnd === undefined) {
+      leftAsIs.add(member);
+      return;
+    }
+    const cell = cells.get(index) ?? { members: [], regular: true };
+    if (end > cellEnd) cell.regular = false;
+    cell.members.push(member);
+    cells.set(index, cell);
+  };
+  const fixedOf = (slot: (typeof existing)[number]) =>
+    slot.start <= observedAt || slot.start >= horizonUntil || slot.reserved
+      ? (slot.capacityLimit ?? 0)
+      : null;
+  for (const slot of existing) enrol(slot, slot.start, slot.end, fixedOf(slot));
+  const newKeys = newSlots.map(([start, end]) => {
+    const key = {};
+    enrol(key, start, end, null);
+    return key;
+  });
+  for (const [index, cell] of cells) {
+    if (!cell.regular) continue;
+    const cellStart = cellCuts[index] ?? fail(),
+      cellEnd = cellCuts[index + 1] ?? fail();
+    // The current cell was shared while it was ahead.
+    if (cellStart <= observedAt) {
+      cell.members.forEach((member) => leftAsIs.add(member));
+      continue;
+    }
+    shareCell(
+      cellStart,
+      cellEnd,
+      cell.members.sort((left, right) => left.start - right.start),
+    );
+  }
+  function shareCell(cellStart: number, cellEnd: number, members: Member[]) {
+    const budget = desiredLimit(cellStart, cellEnd);
+    const length = cellEnd - cellStart;
+    // Shares counted from the start of the cell, so each depends only on the slot's own bounds.
+    const upTo = (at: number) => Math.ceil((budget * (at - cellStart)) / length);
+    for (const member of members) member.target = upTo(member.end) - upTo(member.start);
+    // At least 1 each, taken back from the largest shares (the latest on a tie).
+    let excess = 0;
+    for (const member of members)
+      if (member.target < 1) {
+        excess += 1 - member.target;
+        member.target = 1;
+      }
+    const giveBack = (amount: number, eligible: (member: Member) => boolean) => {
+      while (amount > 0) {
+        const largest = members.reduce<Member | undefined>(
+          (best, member) =>
+            eligible(member) &&
+            member.target > 1 &&
+            (best === undefined || member.target >= best.target)
+              ? member
+              : best,
+          undefined,
+        );
+        if (largest === undefined) return;
+        largest.target -= 1;
+        amount -= 1;
+      }
+    };
+    giveBack(excess, () => true);
+    // Reserved slots keep what they hold; unreserved ones give up anything held beyond a share.
+    const held = members.reduce(
+      (sum, member) => (member.fixedLimit === null ? sum : sum + member.fixedLimit - member.target),
+      0,
+    );
+    giveBack(held, (member) => member.fixedLimit === null);
+  }
+
+  const create: PickupCapacitySlotPlan[] = newSlots.map(([start, end], index) =>
+    Object.freeze({
       startsAt: iso(start),
       endsAt: iso(end),
       businessDate: businessDateAt(start),
-      capacityLimit: desiredLimit(start, end),
-    });
-  }
-  if (create.length > MAXIMUM_CREATED) return fail();
+      capacityLimit: memberOf.get(newKeys[index] ?? fail())?.target ?? fail(),
+    }),
+  );
 
   // Future slots nobody reserved follow the current hours and policy; reserved ones never change.
   const republish: PickupCapacityRepublication[] = [];
   for (const slot of existing) {
     if (slot.start <= observedAt || slot.start >= horizonUntil || slot.reserved) continue;
-    const limit = desiredLimit(slot.start, slot.end);
+    const member = memberOf.get(slot) ?? fail();
+    if (leftAsIs.has(member)) continue;
+    const limit = member.target;
     if (slot.capacityLimit === limit) continue;
     republish.push(
       Object.freeze({

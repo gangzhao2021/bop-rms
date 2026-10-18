@@ -367,3 +367,187 @@ it("lays the pickup schedule from the Store's published hours through the pilot 
     }),
   );
 });
+
+it("shares an hour of slivers left by earlier runs at the policy, keeps the reserved sliver and settles", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_slivers" }, async (context) => {
+    const admin = new pg.Client(context.clientConfig);
+    await admin.connect();
+    const { api, drop } = await restrictedRole(admin, context.runId);
+    try {
+      const runner = runnerAs(context.clientConfig, api);
+      const schedule = createPostgresPickupCapacityScheduleStore(runner, scope);
+      let sequence = 0x900;
+      const reference = () =>
+        `0198b100-0000-7000-8000-${(sequence++).toString(16).padStart(12, "0")}`;
+      const dbNow = async () =>
+        (
+          await admin.query("SELECT date_trunc('milliseconds',clock_timestamp()) AS at")
+        ).rows[0].at.toISOString();
+      const shift = (at, ms) => new Date(Date.parse(at) + ms).toISOString();
+      const t0 = await dbNow();
+      const horizonUntil = shift(t0, 3 * 24 * HOUR);
+      const apply = async () => {
+        const observedAt = await dbNow();
+        const calendar = expandStoreServiceCalendar({
+          timeZone: "America/Toronto",
+          businessDayStartLocalTime: "04:00:00",
+          weeklySchedule: everyDay("20:00:00"),
+          exceptions: [],
+          serviceMode: "Pickup",
+          from: observedAt,
+          until: horizonUntil,
+        });
+        return schedule.apply({
+          observedAt,
+          horizonUntil,
+          timeZone: "America/Toronto",
+          serviceWindows: calendar.windows,
+          businessDays: calendar.businessDays,
+          policy,
+          generateReference: reference,
+        });
+      };
+      // An in-service hour tomorrow (10:00-17:00 local), as earlier runs left it before
+      // 2026-10-18: twelve five-minute slots at the per-slot rounded-up 2 each (24 for the hour).
+      const local = (at) =>
+        Object.fromEntries(
+          new Intl.DateTimeFormat("en-CA", {
+            timeZone: "America/Toronto",
+            hourCycle: "h23",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+          })
+            .formatToParts(new Date(at))
+            .map((part) => [part.type, part.value]),
+        );
+      let hourStart = Math.ceil((Date.parse(t0) + 26 * HOUR) / HOUR) * HOUR;
+      while (Number(local(hourStart).hour) < 10 || Number(local(hourStart).hour) > 16)
+        hourStart += HOUR;
+      const day = local(hourStart);
+      const sliverIds = [];
+      await admin.query("BEGIN");
+      await admin.query(
+        "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+        [brand, store],
+      );
+      for (let index = 0; index < 12; index += 1) {
+        const slotId = reference();
+        sliverIds.push(slotId);
+        await admin.query(
+          `INSERT INTO rms_fulfillment.capacity_slot
+           (brand_id,store_id,slot_id,fulfillment_type,starts_at,ends_at,time_zone,business_date)
+           VALUES ($1,$2,$3,'Pickup',$4,$5,'America/Toronto',$6::date)`,
+          [
+            brand,
+            store,
+            slotId,
+            new Date(hourStart + index * 300_000).toISOString(),
+            new Date(hourStart + (index + 1) * 300_000).toISOString(),
+            `${day.year}-${day.month}-${day.day}`,
+          ],
+        );
+        await admin.query(
+          `INSERT INTO rms_fulfillment.capacity_slot_configuration
+           (brand_id,store_id,slot_id,config_version,capacity_limit,published_at)
+           VALUES ($1,$2,$3,1,2,date_trunc('milliseconds',clock_timestamp()))`,
+          [brand, store, slotId],
+        );
+      }
+      // A guest already holds the third sliver (its share would be 1; it keeps 2).
+      const stamp = await dbNow();
+      await admin.query(
+        "INSERT INTO rms_fulfillment.capacity_asap_commitment " +
+          "(brand_id,store_id,allocation_id,version,state,slot_id,config_version," +
+          "guest_session_id,cart_id,cart_version,quote_id,submission_id,order_id,order_batch_id," +
+          "fulfillment_id,payment_operation_id,capacity_units,units_rule_version,units_input_digest,intent_digest," +
+          "prepared_at,preparation_valid_until) " +
+          "VALUES ($1,$2,$3,1,'Prepared',$4,1,$5,$6,1,$7,$8,$9,$10,$11,$12,1,1,$13,$13,$14,$15)",
+        [
+          brand,
+          store,
+          reference(),
+          sliverIds[2],
+          reference(),
+          reference(),
+          reference(),
+          reference(),
+          reference(),
+          reference(),
+          reference(),
+          reference(),
+          `sha256:${"c".repeat(64)}`,
+          stamp,
+          shift(stamp, 600_000),
+        ],
+      );
+      await admin.query("COMMIT");
+
+      const hour = async () =>
+        (
+          await admin.query(
+            `SELECT s.slot_id, s.starts_at, s.ends_at,
+               (SELECT json_agg(json_build_object('v',config_version,'l',capacity_limit) ORDER BY config_version)
+                FROM rms_fulfillment.capacity_slot_configuration c WHERE c.slot_id=s.slot_id) AS versions
+             FROM rms_fulfillment.capacity_slot s
+             WHERE s.starts_at>=$1 AND s.starts_at<$2 ORDER BY s.starts_at`,
+            [new Date(hourStart).toISOString(), new Date(hourStart + HOUR).toISOString()],
+          )
+        ).rows;
+      const latest = (row) => row.versions.at(-1).l;
+
+      // The worker's ordinary run fills the schedule around the hour and shares the hour.
+      const first = await apply();
+      assert.ok(first.created > 24);
+      // Shares 2,2,1 per quarter hour; the held third sliver keeps 2, so the largest later share
+      // gives up the extra one: slivers 6, 9, 11 and 12 drop from 2 to 1.
+      assert.equal(first.republished, 4);
+      const corrected = await hour();
+      assert.deepEqual(
+        corrected.map((row) => row.slot_id),
+        sliverIds,
+      ); // nothing moved, removed or added inside the hour
+      assert.equal(
+        corrected.reduce((sum, row) => sum + latest(row), 0),
+        20,
+      );
+      assert.deepEqual(corrected.map(latest), [2, 2, 2, 2, 2, 1, 2, 2, 1, 2, 1, 1]);
+      assert.deepEqual(corrected[2].versions, [{ v: 1, l: 2 }]); // the reserved sliver keeps its version
+      for (const row of corrected)
+        assert.ok(row.versions.length <= 2 && row.versions[0].v === 1 && row.versions[0].l === 2);
+      // Whole hours around it are at the policy.
+      const neighbours = (
+        await admin.query(
+          `SELECT (SELECT capacity_limit FROM rms_fulfillment.capacity_slot_configuration c
+             WHERE c.slot_id=s.slot_id ORDER BY config_version DESC LIMIT 1)::integer AS l
+           FROM rms_fulfillment.capacity_slot s WHERE s.starts_at IN ($1,$2)`,
+          [new Date(hourStart - HOUR).toISOString(), new Date(hourStart + HOUR).toISOString()],
+        )
+      ).rows;
+      assert.deepEqual(
+        neighbours.map((row) => row.l),
+        [20, 20],
+      );
+
+      // Idempotent: the next run writes nothing.
+      const count = Number(
+        (await admin.query("SELECT count(*) FROM rms_fulfillment.capacity_slot_configuration"))
+          .rows[0].count,
+      );
+      const again = await apply();
+      assert.deepEqual([again.created, again.republished], [0, 0]);
+      assert.equal(
+        Number(
+          (await admin.query("SELECT count(*) FROM rms_fulfillment.capacity_slot_configuration"))
+            .rows[0].count,
+        ),
+        count,
+      );
+      assert.deepEqual(await hour(), corrected);
+    } finally {
+      await drop();
+      await admin.end();
+    }
+  });
+});
