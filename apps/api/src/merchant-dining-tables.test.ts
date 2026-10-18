@@ -11,6 +11,7 @@ const mock = vi.hoisted(() => ({
   sessionOrders: vi.fn(),
   unpaidGuestRounds: vi.fn(),
   paidAwaitingAcceptance: vi.fn(),
+  paidOnline: vi.fn(),
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
@@ -24,6 +25,7 @@ vi.mock("@rms/ordering", async (original) => ({
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<typeof import("@rms/payment")>()),
   createPostgresCardMachinePaymentStore: vi.fn(() => ({ listByBatches: mock.cardPaid })),
+  listStoreOrderBatchesPaidOnline: mock.paidOnline,
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => mock.resolve }));
 vi.mock("@rms/dining", async (original) => ({
@@ -66,6 +68,7 @@ function setup() {
   mock.sessionOrders.mockResolvedValue(new Map());
   mock.unpaidGuestRounds.mockResolvedValue([]);
   mock.paidAwaitingAcceptance.mockResolvedValue([]);
+  mock.paidOnline.mockResolvedValue(new Set());
   mock.list.mockResolvedValue({
     items: [
       {
@@ -313,7 +316,7 @@ it("WP-2423 item 5: lists the party's staff rounds still awaiting card-machine p
 
 it("WP-2423 abandoned payment: lists each party's unpaid guest rounds and who may cancel them", async () => {
   const f = setup();
-  mock.list.mockResolvedValueOnce({
+  const tables = {
     items: [4, 6].map((n) => ({
       tableReference: id(n),
       stableLabel: "T" + String(n),
@@ -325,16 +328,16 @@ it("WP-2423 abandoned payment: lists each party's unpaid guest rounds and who ma
       activeDiningSessionReference: id(n + 1),
     })),
     nextAfterTableReference: null,
-  });
-  mock.loadSessions.mockResolvedValueOnce(
-    [5, 7].map((n) => ({
-      diningSessionReference: id(n),
-      brandReference: id(2),
-      storeReference: id(3),
-      phase: "Active",
-      startedAt: "2026-09-25T11:42:00.000Z",
-    })),
-  );
+  };
+  const sessions = [5, 7].map((n) => ({
+    diningSessionReference: id(n),
+    brandReference: id(2),
+    storeReference: id(3),
+    phase: "Active",
+    startedAt: "2026-09-25T11:42:00.000Z",
+  }));
+  mock.list.mockResolvedValueOnce(tables);
+  mock.loadSessions.mockResolvedValueOnce(sessions);
   const unpaid = {
     diningSessionReference: id(5),
     orderReference: id(40),
@@ -364,6 +367,15 @@ it("WP-2423 abandoned payment: lists each party's unpaid guest rounds and who ma
     effect: action === "ordering.order.cancel" ? "Deny" : "Allow",
   }));
   expect((await f.read(f.input)).canCancelUnpaidRounds).toBe(false);
+  // A payment that just arrived (Payment recorded it, Ordering not yet): no longer unpaid, so no
+  // "cancel unpaid round" for it. One Payment read for every listed round.
+  mock.list.mockResolvedValueOnce(tables);
+  mock.loadSessions.mockResolvedValueOnce(sessions);
+  mock.unpaidGuestRounds.mockResolvedValueOnce([unpaid]);
+  mock.paidOnline.mockResolvedValueOnce(new Set([id(41)]));
+  const arrived = await f.read(f.input);
+  expect(mock.paidOnline.mock.calls.at(-1)?.[2]).toEqual([id(41)]);
+  expect(arrived.items.map((item) => item.guestRoundsAwaitingPayment)).toEqual([[], []]);
 });
 
 it("WP-2423 D4: gives each open session's phase, version and Order to staff who may close tables", async () => {

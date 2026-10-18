@@ -491,7 +491,12 @@ export function createPostgresOrderBatchCheckoutCancellationStore(options: {
           audit.occurredAt !== record.cancelledAt ||
           audit.dataClassification !== "Restricted" ||
           audit.beforeSummary !== undefined ||
-          audit.afterSummary !== undefined
+          // WP-2423 abandoned payment: a manager's cancellation after the card provider could not
+          // confirm the round's online payment says so (they checked with the guest).
+          (audit.afterSummary !== undefined &&
+            (record.reasonCode !== "STAFF_CANCELLED_UNPAID" ||
+              JSON.stringify(audit.afterSummary) !==
+                JSON.stringify({ providerPaymentUnconfirmed: true })))
         )
           return fail();
         if (parseOrderingInstant(options.now()) < started || !(await options.authorize(tx, record)))

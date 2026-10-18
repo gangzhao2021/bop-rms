@@ -957,6 +957,14 @@ it("WP-2423: words an unpaid round's payment state for staff", () => {
   expect(paymentDueText({ status: "Awaiting", cancelsAt: null }, "UTC", undefined, true)).toBe(
     "Entered by staff · awaiting card-machine payment",
   );
+  // WP-2423 abandoned payment: 5 minutes past the deadline the card provider still couldn't
+  // confirm the guest's online payment; staff check with the guest.
+  expect(paymentDueText(due, "UTC", at("2026-09-14T00:35:00.000Z"))).toBe(
+    "Card payment not confirmed by the card provider (due 00:30) · ask the guest if they were charged; if not, cancel the round (a later charge is refunded automatically)",
+  );
+  expect(paymentDueText(due, "UTC", at("2026-09-14T00:35:00.000Z"), true)).toBe(
+    "Not paid in time · being cancelled automatically",
+  );
   expect(paymentDueTier(due, at("2026-09-14T00:05:00.000Z"))).toBe("warning");
   expect(paymentDueTier(due, at("2026-09-14T00:21:00.000Z"))).toBe("urgent");
   expect(paymentDueTier({ status: "Failed", cancelsAt: due.cancelsAt })).toBe("urgent");

@@ -13,7 +13,7 @@ import {
   staffCancellationReasonLabel,
   staffCancellationSummary,
 } from "./StaffOrderCancelAction.js";
-import { UnpaidRoundCancelAction } from "./UnpaidRoundCancelAction.js";
+import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import {
   HeldStockNotice,
   HeldStockReleaseAction,
@@ -623,6 +623,8 @@ export function paymentDueText(
     return passed
       ? "Payment failed · being cancelled automatically"
       : `Payment failed · will be cancelled automatically at ${at}`;
+  if (!staffRound && isPaymentUnconfirmed(due.cancelsAt, now))
+    return `Card payment not confirmed by the card provider (due ${at}) · ask the guest if they were charged; if not, cancel the round (a later charge is refunded automatically)`;
   if (passed) return "Not paid in time · being cancelled automatically";
   const left =
     now === undefined ? null : Math.max(1, Math.ceil((Date.parse(due.cancelsAt) - now) / 60_000));
@@ -1904,6 +1906,11 @@ export function CurrentOrderQueuePage({
                         orderLabel={"order " + order.orderNumber}
                         csrf={csrf}
                         fetcher={fetcher}
+                        paymentUnconfirmed={
+                          batch.staffRound == null &&
+                          batch.paymentDue?.status === "Awaiting" &&
+                          isPaymentUnconfirmed(batch.paymentDue.cancelsAt, now)
+                        }
                         onSettled={() => reload(after)}
                       />
                     </fieldset>

@@ -830,3 +830,214 @@ export async function resolveDeadLetter(
   if (updated.rowCount !== 1) throw new Error("DEAD_LETTER_RESOLUTION_NOT_CONFIRMED");
   return "applied";
 }
+
+/**
+ * WP-2423: once the cause of a consumer failure is fixed, platform support brings the retries
+ * still waiting out their backoff forward to now, so the retry worker delivers them on its next
+ * pass instead of after up to half an hour. Only `scheduled` retries due later than now move; a
+ * `claimed` retry is being delivered and completed/dead-lettered ones are history. Only
+ * `available_at` (and the row version) changes: the event, attempt count, deadline and state stay.
+ * Each retry brought forward gets one append-only `consumer_retry_expedite_action` record. The
+ * same idempotency key repeated returns the recorded result and changes nothing; a dry run returns
+ * what would move and writes nothing.
+ */
+export interface ConsumerRetryExpediteCommand {
+  readonly brandId: string;
+  readonly storeId?: string;
+  /** One consumer, or `null` for every consumer of the scope. */
+  readonly consumerName: string | null;
+  readonly actorId: string;
+  readonly permission: "EVENTING_DEAD_LETTER_RETRY";
+  readonly purpose: "RELIABILITY_RECOVERY";
+  readonly reason: "DEPENDENCY_RECOVERED";
+  readonly idempotencyKey: string;
+  readonly dryRun: boolean;
+  /** A new UUIDv7 for each audit record. */
+  readonly actionId: () => string;
+}
+
+export interface ExpeditedConsumerRetry {
+  readonly scheduleId: string;
+  readonly eventId: string;
+  readonly consumerName: string;
+  readonly attemptCount: number;
+  readonly previousAvailableAt: string;
+  /** `null` in a dry run. */
+  readonly expeditedAvailableAt: string | null;
+  readonly deadlineAt: string;
+}
+
+export interface ConsumerRetryExpediteResult {
+  readonly status: "applied" | "already_applied" | "dry_run" | "conflict";
+  readonly retries: readonly ExpeditedConsumerRetry[];
+}
+
+function validateExpediteCommand(command: ConsumerRetryExpediteCommand) {
+  for (const [name, value] of [
+    ["brandId", command.brandId],
+    ["actorId", command.actorId],
+    ["idempotencyKey", command.idempotencyKey],
+    ...(command.storeId !== undefined ? ([["storeId", command.storeId]] as const) : []),
+  ] as const)
+    if (typeof value !== "string" || !uuidV7.test(value))
+      throw new TypeError(`${name} must be a UUIDv7`);
+  if (command.consumerName !== null && !consumerNamePattern.test(command.consumerName))
+    throw new TypeError("consumerName is invalid");
+  if (command.permission !== "EVENTING_DEAD_LETTER_RETRY")
+    throw new TypeError("permission does not authorize the requested action");
+  if (command.purpose !== "RELIABILITY_RECOVERY") throw new TypeError("purpose is invalid");
+  if (command.reason !== "DEPENDENCY_RECOVERED")
+    throw new TypeError("reason does not authorize the requested action");
+  if (typeof command.dryRun !== "boolean") throw new TypeError("dryRun must be a boolean");
+  if (typeof command.actionId !== "function") throw new TypeError("actionId must be a factory");
+}
+
+const instant = (value: Date | string) =>
+  value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+
+const recordedExpediteSql = `SELECT
+  schedule_id::text, event_id::text, consumer_name, requested_consumer_name, attempt_count,
+  previous_available_at, expedited_available_at, deadline_at
+FROM platform_eventing.consumer_retry_expedite_action AS action
+WHERE brand_id = $1
+  AND store_id IS NOT DISTINCT FROM $2
+  AND idempotency_key = $3
+ORDER BY action.previous_available_at, action.schedule_id`;
+
+const pendingExpediteSql = `SELECT
+  schedule_id::text, event_id::text, consumer_name, attempt_count, available_at, deadline_at,
+  version::text
+FROM platform_eventing.consumer_retry_schedule AS schedule
+WHERE brand_id = $1
+  AND store_id IS NOT DISTINCT FROM $2
+  AND state = 'scheduled'
+  AND available_at > statement_timestamp()
+  AND ($3::text IS NULL OR consumer_name = $3)
+ORDER BY schedule.available_at, schedule.schedule_id`;
+
+// The audit record copies the locked retry's own values, so the record and the retry agree to the
+// microsecond; the retry then moves to exactly the recorded time. The table's no-update rules rule
+// out ON CONFLICT: a concurrent request with the same key fails on the unique key and rolls back.
+const insertExpediteActionSql = `INSERT INTO platform_eventing.consumer_retry_expedite_action (
+  action_id, brand_id, store_id, schedule_id, event_id, consumer_name, requested_consumer_name,
+  attempt_count, previous_available_at, expedited_available_at, deadline_at, actor_id,
+  permission_code, purpose_code, reason_code, idempotency_key
+)
+SELECT
+  $1, schedule.brand_id, schedule.store_id, schedule.schedule_id, schedule.event_id,
+  schedule.consumer_name, $3, schedule.attempt_count, schedule.available_at,
+  statement_timestamp(), schedule.deadline_at, $4, $5, $6, $7, $8
+FROM platform_eventing.consumer_retry_schedule AS schedule
+WHERE schedule.schedule_id = $2
+  AND schedule.state = 'scheduled'
+  AND schedule.available_at > statement_timestamp()
+RETURNING expedited_available_at`;
+
+const expediteScheduleSql = `UPDATE platform_eventing.consumer_retry_schedule AS schedule
+SET available_at = action.expedited_available_at,
+    version = schedule.version + 1
+FROM platform_eventing.consumer_retry_expedite_action AS action
+WHERE action.action_id = $3
+  AND schedule.schedule_id = $1
+  AND action.schedule_id = schedule.schedule_id
+  AND schedule.version = $2
+  AND schedule.state = 'scheduled'
+  AND schedule.available_at > action.expedited_available_at`;
+
+export async function expediteConsumerRetries(
+  transaction: RetryDeadLetterTransaction,
+  command: ConsumerRetryExpediteCommand,
+): Promise<ConsumerRetryExpediteResult> {
+  validateExpediteCommand(command);
+  const storeId = command.storeId ?? null;
+  const recorded = await transaction.query<{
+    schedule_id: string;
+    event_id: string;
+    consumer_name: string;
+    requested_consumer_name: string | null;
+    attempt_count: number;
+    previous_available_at: Date | string;
+    expedited_available_at: Date | string;
+    deadline_at: Date | string;
+  }>(recordedExpediteSql, [command.brandId, storeId, command.idempotencyKey]);
+  if (recorded.rows.length > 0) {
+    // The same key names one request: a different consumer scope is a different request.
+    if (recorded.rows.some((row) => row.requested_consumer_name !== command.consumerName))
+      return { status: "conflict", retries: [] };
+    return {
+      status: "already_applied",
+      retries: recorded.rows.map((row) => ({
+        scheduleId: row.schedule_id,
+        eventId: row.event_id,
+        consumerName: row.consumer_name,
+        attemptCount: row.attempt_count,
+        previousAvailableAt: instant(row.previous_available_at),
+        expeditedAvailableAt: instant(row.expedited_available_at),
+        deadlineAt: instant(row.deadline_at),
+      })),
+    };
+  }
+  const pending = await transaction.query<{
+    schedule_id: string;
+    event_id: string;
+    consumer_name: string;
+    attempt_count: number;
+    available_at: Date | string;
+    deadline_at: Date | string;
+    version: string;
+  }>(command.dryRun ? pendingExpediteSql : `${pendingExpediteSql}\nFOR UPDATE`, [
+    command.brandId,
+    storeId,
+    command.consumerName,
+  ]);
+  if (command.dryRun)
+    return {
+      status: "dry_run",
+      retries: pending.rows.map((row) => ({
+        scheduleId: row.schedule_id,
+        eventId: row.event_id,
+        consumerName: row.consumer_name,
+        attemptCount: row.attempt_count,
+        previousAvailableAt: instant(row.available_at),
+        expeditedAvailableAt: null,
+        deadlineAt: instant(row.deadline_at),
+      })),
+    };
+  const retries: ExpeditedConsumerRetry[] = [];
+  for (const row of pending.rows) {
+    const actionId = command.actionId();
+    if (!uuidV7.test(actionId)) throw new TypeError("actionId must be a UUIDv7");
+    const inserted = await transaction.query<{ expedited_available_at: Date | string }>(
+      insertExpediteActionSql,
+      [
+        actionId,
+        row.schedule_id,
+        command.consumerName,
+        command.actorId,
+        command.permission,
+        command.purpose,
+        command.reason,
+        command.idempotencyKey,
+      ],
+    );
+    const expeditedAt = inserted.rows[0]?.expedited_available_at;
+    // Fell due between the read and now: the worker takes it anyway, nothing to bring forward.
+    if (expeditedAt === undefined) continue;
+    const moved = await transaction.query(expediteScheduleSql, [
+      row.schedule_id,
+      row.version,
+      actionId,
+    ]);
+    if (moved.rowCount !== 1) throw new Error("CONSUMER_RETRY_EXPEDITE_NOT_CONFIRMED");
+    retries.push({
+      scheduleId: row.schedule_id,
+      eventId: row.event_id,
+      consumerName: row.consumer_name,
+      attemptCount: row.attempt_count,
+      previousAvailableAt: instant(row.available_at),
+      expeditedAvailableAt: instant(expeditedAt),
+      deadlineAt: instant(row.deadline_at),
+    });
+  }
+  return { status: "applied", retries };
+}

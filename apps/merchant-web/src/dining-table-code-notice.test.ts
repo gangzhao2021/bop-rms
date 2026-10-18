@@ -138,6 +138,17 @@ it("WP-2423 abandoned payment: warns staff before an unpaid guest round is cance
   const ended = guestRoundPaymentNotice(waiting, Date.parse(payBy), "America/Toronto");
   expect(ended?.text).toContain("wasn't paid by 08:30 and is being cancelled");
   expect(ended?.text).not.toMatch(/[0-9a-f]{8}-/u);
+  // Still listed 5 minutes after the deadline: the card provider couldn't confirm the payment, so
+  // staff decide with the guest (before that it is still "being cancelled").
+  expect(
+    guestRoundPaymentNotice(waiting, Date.parse(payBy) + 5 * 60_000 - 1, "America/Toronto")?.text,
+  ).toContain("is being cancelled");
+  expect(
+    guestRoundPaymentNotice(waiting, Date.parse(payBy) + 5 * 60_000, "America/Toronto"),
+  ).toEqual({
+    tier: "urgent",
+    text: "Round 1: the card provider couldn't confirm the guest's payment (due by 08:30), so it wasn't cancelled automatically. Ask the guest whether their card was charged. If it wasn't, cancel the round; a charge that still comes through is refunded automatically.",
+  });
 });
 
 it("WP-2423: warns on the table while a paid round waits for staff to accept it", () => {

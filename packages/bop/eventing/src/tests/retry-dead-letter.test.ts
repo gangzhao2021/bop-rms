@@ -4,6 +4,10 @@ import {
   retryPolicy,
   retryTelemetryBuckets,
 } from "../contracts/retry-dead-letter.js";
+import {
+  expediteConsumerRetries,
+  type ConsumerRetryExpediteCommand,
+} from "../infrastructure/messaging/retry-dead-letter.js";
 
 describe("retry policy", () => {
   const firstAttemptAt = "2026-07-24T00:00:00.000Z";
@@ -179,5 +183,73 @@ describe("retry policy", () => {
       attemptBucket: "8",
       delayBucket: "5m",
     });
+  });
+});
+
+describe("WP-2423 consumer retry expedite command", () => {
+  const brandId = "018f1f48-7b5d-7001-8a1b-123456789abc";
+  const actorId = "018f1f48-7b5d-7006-8a1b-123456789abc";
+  const idempotencyKey = "018f1f48-7b5d-7008-8a1b-123456789abc";
+  const command = {
+    brandId,
+    consumerName: "inventory.order-line-kitchenworkstarted:v1",
+    actorId,
+    permission: "EVENTING_DEAD_LETTER_RETRY",
+    purpose: "RELIABILITY_RECOVERY",
+    reason: "DEPENDENCY_RECOVERED",
+    idempotencyKey,
+    dryRun: true,
+    actionId: () => "018f1f48-7b5d-7009-8a1b-123456789abc",
+  } as const;
+  const recording = () => {
+    const statements: string[] = [];
+    return {
+      statements,
+      transaction: {
+        query: async (text: string) => {
+          statements.push(text);
+          return { rowCount: 0, rows: [] };
+        },
+      },
+    };
+  };
+
+  it.each([
+    [{ brandId: "not-a-uuid" }],
+    [{ actorId: "018f1f48-7b5d-4006-8a1b-123456789abc" }],
+    [{ storeId: "" }],
+    [{ consumerName: "Bad Name" }],
+    [{ permission: "EVENTING_DEAD_LETTER_DISCARD" }],
+    [{ reason: "TRANSIENT_RECOVERED" }],
+    [{ purpose: "OTHER" }],
+    [{ dryRun: "yes" }],
+  ])("refuses %j before reading", async (override) => {
+    const { statements, transaction } = recording();
+    await expect(
+      expediteConsumerRetries(transaction, {
+        ...command,
+        ...override,
+      } as unknown as ConsumerRetryExpediteCommand),
+    ).rejects.toThrow(TypeError);
+    expect(statements).toEqual([]);
+  });
+
+  it("reads only in a dry run and locks the retries it moves", async () => {
+    const dry = recording();
+    expect(await expediteConsumerRetries(dry.transaction, command)).toEqual({
+      status: "dry_run",
+      retries: [],
+    });
+    expect(dry.statements).toHaveLength(2);
+    expect(dry.statements.some((sql) => /\b(INSERT|UPDATE|FOR UPDATE)\b/u.test(sql))).toBe(false);
+    const live = recording();
+    expect(
+      await expediteConsumerRetries(live.transaction, {
+        ...command,
+        consumerName: null,
+        dryRun: false,
+      }),
+    ).toEqual({ status: "applied", retries: [] });
+    expect(live.statements[1]).toMatch(/state = 'scheduled'[\s\S]*FOR UPDATE$/u);
   });
 });

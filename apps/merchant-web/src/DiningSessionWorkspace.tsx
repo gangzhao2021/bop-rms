@@ -1,4 +1,4 @@
-import { UnpaidRoundCancelAction } from "./UnpaidRoundCancelAction.js";
+import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import { paidRoundWait, tableRoundWaitText, type PaidRoundWaitTier } from "./paid-round-wait.js";
 import { DiningHostTransferAction } from "./DiningHostTransferAction.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -139,6 +139,19 @@ export function guestRoundPaymentNotice(
       : `Rounds ${rounds.map((round) => String(round.roundNumber)).join(", ")}`;
   const remainingMs = Date.parse(first.payBy) - now;
   const at = storeTime(first.payBy, timeZone);
+  // WP-2423 abandoned payment: still here well after the deadline, the card provider couldn't
+  // confirm the guest's payment, so staff decide with the guest (only those rounds are named).
+  const unconfirmed = rounds.filter((round) => isPaymentUnconfirmed(round.payBy, now));
+  const firstUnconfirmed = unconfirmed[0];
+  if (firstUnconfirmed !== undefined)
+    return {
+      tier: "urgent",
+      text: `${
+        unconfirmed.length === 1
+          ? `Round ${String(firstUnconfirmed.roundNumber)}`
+          : `Rounds ${unconfirmed.map((round) => String(round.roundNumber)).join(", ")}`
+      }: the card provider couldn't confirm the guest's payment (due by ${storeTime(firstUnconfirmed.payBy, timeZone)}), so it wasn't cancelled automatically. Ask the guest whether their card was charged. If it wasn't, cancel the round; a charge that still comes through is refunded automatically.`,
+    };
   if (remainingMs <= 0)
     return {
       tier: "urgent",
@@ -703,6 +716,7 @@ export function DiningSessionWorkspace({
                               roundNumber={round.roundNumber}
                               orderLabel={"table " + selected.stableLabel}
                               csrf={csrf}
+                              paymentUnconfirmed={isPaymentUnconfirmed(round.payBy, now)}
                               onSettled={() => void loadRef.current(false, true)}
                             />
                           ))

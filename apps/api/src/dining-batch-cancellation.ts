@@ -7,6 +7,7 @@ import {
   parsePaymentIntentCreationRecord,
 } from "@rms/payment";
 import {
+  listStoreDiningBatchPaymentDeadlines,
   createPostgresOrderBatchCheckoutCancellationReader,
   createPostgresOrderBatchCheckoutCancellationStore,
   parseOrderBatchCheckoutCancellation,
@@ -17,6 +18,7 @@ import {
 import type { ConsumerTransaction } from "@bop/eventing";
 import { createDiningBatchCancellationSource } from "./dining-batch-cancellation-source.js";
 import { evaluateDiningBatchCancellationWorkflow } from "./dining-batch-cancellation-workflow.js";
+import { isPaymentUnconfirmed } from "./open-payment-attempt-resolution.js";
 type SourceOptions = Parameters<typeof createDiningBatchCancellationSource>[0];
 type Cancellation = ReturnType<typeof parseOrderBatchCheckoutCancellation>;
 type Evidence = Awaited<ReturnType<ReturnType<typeof createDiningBatchCancellationSource>["load"]>>;
@@ -192,6 +194,13 @@ export function createDiningBatchCancellation(
      * transition, stock release and OrderCancelled event as the System's, with the reason
      * STAFF_CANCELLED_UNPAID and the manager as the audit actor. Same operation reference → the
      * original outcome.
+     *
+     * `paymentUnconfirmed`: the manager checked with the guest after the card provider could not
+     * confirm the round's online payment (still unresolved `unconfirmedPaymentGraceMs` after the
+     * payment window ended, re-checked here from Ordering's deadline). Then an online attempt
+     * without a terminal outcome does not block the cancellation (a succeeded one still does); the
+     * audit records `providerPaymentUnconfirmed`. A charge that still arrives is refunded
+     * automatically ("paid without a fulfillable order").
      */
     async cancelUnpaidForStaff(
       transaction: ConsumerTransaction,
@@ -201,6 +210,7 @@ export function createDiningBatchCancellation(
         orderBatchReference: string;
         actorReference: string;
         authorize(tx: ConsumerTransaction): Promise<boolean>;
+        paymentUnconfirmed?: boolean;
       },
     ): Promise<
       | { status: "Created" | "Existing"; record: Cancellation }
@@ -261,6 +271,7 @@ export function createDiningBatchCancellation(
         authorize: async (tx) => tx === transaction && (await allowed(tx)),
       }).loadByPaymentOperation(transaction, round.paymentOperationReference);
       if (card !== null) return refuse("Paid");
+      let unconfirmed = false;
       const stored = await createPostgresPaymentIntentCreationStore(
         runner,
         { brandReference: scope.brandReference, storeReference: scope.storeReference },
@@ -279,8 +290,23 @@ export function createDiningBatchCancellation(
           fact === null ||
           fact.outcome !== "Failed" ||
           String(fact.paymentAttemptReference) !== String(payment.attempt.paymentAttemptReference)
-        )
-          return refuse("PaymentInProgress");
+        ) {
+          if (input.paymentUnconfirmed !== true) return refuse("PaymentInProgress");
+          const deadline = (
+            await listStoreDiningBatchPaymentDeadlines(
+              transaction,
+              { brandReference: scope.brandReference, storeReference: scope.storeReference },
+              [orderReference],
+            )
+          ).find((entry) => entry.orderBatchReference === orderBatchReference);
+          if (
+            deadline === undefined ||
+            !isPaymentUnconfirmed(deadline.paymentDeadline, options.now()) ||
+            !(await allowed(transaction))
+          )
+            return refuse("PaymentInProgress");
+          unconfirmed = true;
+        }
       }
       return await write(transaction, {
         operationReference,
@@ -290,6 +316,7 @@ export function createDiningBatchCancellation(
         actorReference,
         allowed,
         started,
+        ...(unconfirmed ? { afterSummary: { providerPaymentUnconfirmed: true } as const } : {}),
       });
     },
   });
@@ -332,6 +359,7 @@ export function createDiningBatchCancellation(
       actorReference: string | null;
       allowed(tx: unknown): Promise<boolean>;
       started: string;
+      afterSummary?: { readonly providerPaymentUnconfirmed: true };
     },
   ) {
     const { evidence, identity, allowed } = input;
@@ -414,6 +442,7 @@ export function createDiningBatchCancellation(
           reasonCode: candidate.reasonCode,
           occurredAt: candidate.cancelledAt,
           sourceChannel: input.actorReference === null ? "SYSTEM" : "MERCHANT_WEB",
+          ...(input.afterSummary === undefined ? {} : { afterSummary: input.afterSummary }),
           dataClassification: "Restricted",
           retentionPolicyCode: "AUDIT_DEFAULT",
           retentionPolicyVersion: 1,

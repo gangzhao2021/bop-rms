@@ -331,7 +331,17 @@ export async function seedJourneyCheckout(client, { round, evidence, link, refer
  */
 export async function seedJourneyPayment(
   client,
-  { scope, providerAccountReference, round, refs, outcome, requestedAt, occurredAt, totalMinor },
+  {
+    scope,
+    providerAccountReference,
+    round,
+    refs,
+    outcome,
+    requestedAt,
+    occurredAt,
+    totalMinor,
+    idempotencyDigest,
+  },
 ) {
   const r = round.f.request.record,
     b = round.batch,
@@ -369,7 +379,7 @@ export async function seedJourneyPayment(
       s.brandReference,
       s.storeReference,
       key,
-      hash(["idempotency", key]),
+      idempotencyDigest ?? hash(["idempotency", key]),
       requestedAt,
     ],
   );
@@ -385,6 +395,15 @@ export async function seedJourneyPayment(
       requestedAt,
     ],
   );
+  // WP-2423 abandoned payment: "CreateUnknown" — the Provider create's answer was lost (timeout):
+  // the attempt's only observation is an unknown failure, so the guest never got a card form.
+  if (outcome === "CreateUnknown") {
+    await client.query(
+      "INSERT INTO rms_payment.payment_provider_observation (provider_observation_id,brand_id,store_id,payment_intent_id,payment_attempt_id,observation_kind,failure_code,retry_disposition,safe_reason_code,recorded_at) VALUES ($1,$2,$3,$4,$5,'Failure','Unknown','Unknown','CREATE_RESULT_UNKNOWN',$6)",
+      [refs.observation, s.brandReference, s.storeReference, key, refs.attempt, occurredAt],
+    );
+    return;
+  }
   // WP-2423 abandoned payment: "Open" — the guest started paying (the Provider intent exists) and
   // never confirmed it, so there is no outcome, webhook or status projection.
   const open = outcome === "Open";

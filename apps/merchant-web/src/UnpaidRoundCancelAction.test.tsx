@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import {
+  isPaymentUnconfirmed,
   UnpaidRoundCancelAction,
   unpaidRoundCancelMessage,
   unpaidRoundCancelOutcome,
@@ -37,4 +38,34 @@ it("WP-2423 abandoned payment: names the round and says nobody is charged", () =
   expect(html).toContain("Cancel unpaid round 1 of order 12?");
   expect(html).toContain("Nobody is charged.");
   expect(html.replace(/<[^>]+>/gu, " ")).not.toContain(id(2));
+});
+
+it("WP-2423 abandoned payment: a payment that just arrived is reported as paid, with a refresh", () => {
+  expect(unpaidRoundCancelMessage.Paid).toMatch(/^Payment just arrived/u);
+  expect(unpaidRoundCancelMessage.Paid).toContain("Refresh");
+});
+
+it("WP-2423 abandoned payment: hands a payment the card provider can't confirm to the manager", () => {
+  expect(
+    isPaymentUnconfirmed("2026-10-18T12:00:00.000Z", Date.parse("2026-10-18T12:04:59.999Z")),
+  ).toBe(false);
+  expect(
+    isPaymentUnconfirmed("2026-10-18T12:00:00.000Z", Date.parse("2026-10-18T12:05:00.000Z")),
+  ).toBe(true);
+  expect(isPaymentUnconfirmed(null, Date.now())).toBe(false);
+  const html = renderToStaticMarkup(
+    <UnpaidRoundCancelAction
+      orderReference={id(1)}
+      orderBatchReference={id(2)}
+      roundNumber={2}
+      orderLabel="table A1"
+      csrf="c"
+      paymentUnconfirmed
+      onSettled={() => undefined}
+    />,
+  ).replaceAll("<!-- -->", "");
+  expect(html).toContain("couldn&#x27;t confirm the guest&#x27;s payment");
+  expect(html).toContain("Not charged: cancel round 2");
+  expect(html).toContain("refunded to the guest automatically");
+  expect(html).not.toContain("Nobody has paid for this round");
 });

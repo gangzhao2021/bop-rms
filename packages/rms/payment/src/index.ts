@@ -76,6 +76,7 @@ export { createPostgresPaymentTerminalSource } from "./infrastructure/persistenc
 export {
   createPostgresPaymentTerminalStore,
   listOrderPaymentTerminalOutcomes,
+  listStoreOrderBatchesPaidOnline,
   type OrderPaymentTerminalOutcome,
 } from "./infrastructure/persistence/payment-terminal-store.js";
 

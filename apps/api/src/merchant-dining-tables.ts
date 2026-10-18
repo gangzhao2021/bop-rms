@@ -13,7 +13,10 @@ import {
   listStorePaidDiningRoundsAwaitingAcceptance,
   listStoreUnpaidGuestDiningRounds,
 } from "@rms/ordering";
-import { createPostgresCardMachinePaymentStore } from "@rms/payment";
+import {
+  createPostgresCardMachinePaymentStore,
+  listStoreOrderBatchesPaidOnline,
+} from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -219,10 +222,20 @@ export function createMerchantDiningTables(options: {
               payBy: string;
             }[]
           >();
-          for (const round of await listStoreUnpaidGuestDiningRounds(
+          const unpaidRounds = await listStoreUnpaidGuestDiningRounds(
             tx as unknown as Parameters<typeof listStoreUnpaidGuestDiningRounds>[0],
             scoped,
             activeReferences,
+          );
+          // A payment that just arrived (Payment recorded it; Ordering records it seconds later):
+          // the round is paid, so it is not offered for cancellation as unpaid. One Payment read.
+          const paidOnline = await listStoreOrderBatchesPaidOnline(
+            tx as unknown as Parameters<typeof listStoreOrderBatchesPaidOnline>[0],
+            scoped,
+            unpaidRounds.map((round) => round.orderBatchReference),
+          );
+          for (const round of unpaidRounds.filter(
+            (entry) => !paidOnline.has(entry.orderBatchReference),
           ))
             unpaidGuestRounds.set(round.diningSessionReference, [
               ...(unpaidGuestRounds.get(round.diningSessionReference) ?? []),

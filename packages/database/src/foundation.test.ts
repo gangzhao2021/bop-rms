@@ -92,6 +92,16 @@ describe("foundation verifier", () => {
             },
             {
               kind: "table",
+              name: "consumer_retry_expedite_action",
+              schema: "platform_eventing",
+            },
+            {
+              kind: "policy",
+              name: "consumer_retry_expedite_action_tenant_scope",
+              schema: "platform_eventing",
+            },
+            {
+              kind: "table",
               name: "dead_letter_item",
               schema: "platform_eventing",
             },

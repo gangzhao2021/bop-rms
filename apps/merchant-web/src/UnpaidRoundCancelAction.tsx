@@ -18,6 +18,19 @@ type Outcome =
   | typeof FULL_SIGN_IN_REQUIRED
   | "Unknown";
 
+/**
+ * WP-2423 abandoned payment: minutes after a round's payment deadline after which an online payment
+ * the card provider still can't confirm is handed to staff (the server applies the same grace).
+ */
+export const unconfirmedPaymentGraceMinutes = 5;
+
+/** The round's card payment could not be confirmed with the card provider since its deadline. */
+export function isPaymentUnconfirmed(payBy: string | null, now: number | undefined): boolean {
+  if (payBy === null || now === undefined) return false;
+  const due = Date.parse(payBy);
+  return Number.isFinite(due) && now >= due + unconfirmedPaymentGraceMinutes * 60_000;
+}
+
 /** The server's answer in staff words; only an unknown result keeps the same operation. */
 export function unpaidRoundCancelOutcome(
   status: number,
@@ -39,7 +52,7 @@ export function unpaidRoundCancelOutcome(
 export const unpaidRoundCancelMessage: Record<Exclude<Outcome, "Idle">, string> = {
   Pending: "Cancelling…",
   Cancelled: "Round cancelled. It never went to the kitchen and nobody was charged.",
-  Paid: "This round was paid after all, so it wasn't cancelled. Refresh to see it.",
+  Paid: "Payment just arrived: the guest paid for this round, so nothing was cancelled. Refresh to see it as paid.",
   PaymentInProgress:
     "The guest's card payment is still being confirmed. Try again in a minute; nothing was cancelled.",
   NotCancellable: "This round can no longer be cancelled. Close to refresh it.",
@@ -64,6 +77,7 @@ export function UnpaidRoundCancelAction({
   orderLabel,
   csrf,
   onSettled,
+  paymentUnconfirmed = false,
   fetcher = fetch,
 }: {
   readonly orderReference: string;
@@ -73,6 +87,11 @@ export function UnpaidRoundCancelAction({
   readonly orderLabel: string;
   readonly csrf: string;
   readonly onSettled: () => void;
+  /**
+   * The card provider could not confirm the guest's online payment for this round since its
+   * deadline (see `isPaymentUnconfirmed`): the manager checks with the guest before cancelling.
+   */
+  readonly paymentUnconfirmed?: boolean | undefined;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -96,6 +115,7 @@ export function UnpaidRoundCancelAction({
           orderReference,
           orderBatchReference,
           operationReference: operation.current,
+          ...(paymentUnconfirmed ? { acknowledgeUnconfirmedPayment: true } : {}),
         }),
       });
       let error: string | null = null;
@@ -147,24 +167,48 @@ export function UnpaidRoundCancelAction({
         <h2 id={titleId}>
           Cancel unpaid round {roundNumber} of {orderLabel}?
         </h2>
-        <p>
-          Nobody has paid for this round. Cancelling it means it never goes to the kitchen, its
-          items go back to stock and the guest can&apos;t pay for it any more. Nobody is charged.
-        </p>
-        <p>If the guest is still paying on their phone, ask them first.</p>
+        {paymentUnconfirmed ? (
+          <>
+            <p>
+              The card provider couldn&apos;t confirm the guest&apos;s payment for this round. Ask
+              the guest whether their card was charged for it.
+            </p>
+            <p>
+              Cancel only if it wasn&apos;t: the round never goes to the kitchen and its items go
+              back to stock. If a charge still comes through later, it is refunded to the guest
+              automatically.
+            </p>
+          </>
+        ) : (
+          <>
+            <p>
+              Nobody has paid for this round. Cancelling it means it never goes to the kitchen, its
+              items go back to stock and the guest can&apos;t pay for it any more. Nobody is
+              charged.
+            </p>
+            <p>If the guest is still paying on their phone, ask them first.</p>
+          </>
+        )}
         <div className="card-actions">
           <button
             type="button"
             data-variant="destructive"
-            disabled={outcome === "Pending" || outcome === "Cancelled"}
+            disabled={outcome === "Pending" || outcome === "Cancelled" || outcome === "Paid"}
             onClick={() => void submit()}
           >
             {retrying
               ? "Retry same cancellation"
               : outcome === "Pending"
                 ? "Cancelling…"
-                : `Cancel round ${roundNumber}`}
+                : paymentUnconfirmed
+                  ? `Not charged: cancel round ${roundNumber}`
+                  : `Cancel round ${roundNumber}`}
           </button>
+          {outcome === "Paid" ? (
+            <button type="button" onClick={() => dialog.current?.close()}>
+              Refresh
+            </button>
+          ) : null}
           <button
             type="button"
             disabled={outcome === "Pending"}

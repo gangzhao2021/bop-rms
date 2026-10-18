@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import process from "node:process";
 import { createOpenPaymentAttemptResolution } from "../../apps/api/dist/open-payment-attempt-resolution.js";
 import {
@@ -10,6 +11,17 @@ import {
   parsePaymentInstant,
 } from "../../packages/rms/payment/src/index.ts";
 import { isPilotRuntime } from "./pilot-environment.mjs";
+
+/**
+ * WP-2423 abandoned payment: the Provider idempotency key of an attempt's create, derived from the
+ * attempt (a fresh reference per attempt, so still one key per create). Payment stores only its
+ * digest; deriving it lets Payment repeat the same create later to learn what the Provider holds
+ * when the create's answer was lost (DEC-DINING-ABANDONED-PAYMENT, unknown create outcome).
+ */
+export function pilotCreateIntentIdempotencyKey(input) {
+  return "create-intent:" + String(input.paymentAttemptReference);
+}
+const keyDigest = (key) => "sha256:" + createHash("sha256").update(key).digest("hex");
 
 /**
  * WP-2423 abandoned payment (DEC-DINING-ABANDONED-PAYMENT): TEST-ONLY internal simulator binding of
@@ -108,6 +120,12 @@ export function createInternalOpenPaymentResolution(
             };
           },
           provider: simulator.adapter,
+          // Only an attempt whose recorded key digest matches (attempts created before the key was
+          // derived from the attempt can't be asked about again; staff are told after the grace).
+          createIdempotencyKey: (record) => {
+            const key = pilotCreateIntentIdempotencyKey(record.attempt);
+            return keyDigest(key) === record.attempt.providerIdempotencyDigest ? key : null;
+          },
           newReference: reference,
           recordTerminal: async ({
             record,

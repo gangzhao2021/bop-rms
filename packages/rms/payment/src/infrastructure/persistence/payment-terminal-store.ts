@@ -466,3 +466,53 @@ export async function listOrderPaymentTerminalOutcomes(
     return fail();
   }
 }
+
+/**
+ * WP-2423 abandoned payment: which of these order batches (dine-in rounds) Payment has already
+ * recorded as paid online — a succeeded terminal fact for one of the batch's payment intents. Read
+ * from Payment's own terminal facts, which are written when the Provider's answer arrives; Ordering
+ * records the payment a few seconds later through its event consumer, so a page listing unpaid
+ * rounds uses this to stop offering "cancel unpaid round" for a payment that just arrived. Read
+ * only; the caller authorizes the Store and owns the transaction.
+ */
+export async function listStoreOrderBatchesPaidOnline(
+  transaction: { query(text: string, values: readonly unknown[]): Promise<unknown> },
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderBatchReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  try {
+    if (orderBatchReferences.length > 200) return fail();
+    const brand = parsePaymentReference(scope.brandReference),
+      store = parsePaymentReference(scope.storeReference),
+      batches = orderBatchReferences.map((reference) => parsePaymentReference(reference));
+    if (batches.length === 0) return new Set<string>();
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [brand, store],
+    );
+    const result: unknown = await transaction.query(
+      "SELECT DISTINCT i.order_batch_id::text AS order_batch_id FROM rms_payment.payment_intent i " +
+        "JOIN rms_payment.payment_terminal_fact f ON f.brand_id=i.brand_id AND f.store_id=i.store_id " +
+        "AND f.payment_intent_id=i.payment_intent_id AND f.order_id=i.order_id " +
+        "WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_batch_id=ANY($3::uuid[]) " +
+        "AND f.terminal_outcome='Succeeded' LIMIT 201",
+      [brand, store, batches],
+    );
+    const found: unknown =
+      result !== null && typeof result === "object"
+        ? Object.getOwnPropertyDescriptor(result, "rows")?.value
+        : undefined;
+    if (!Array.isArray(found) || found.length > 200) return fail();
+    return new Set(
+      found.map((value: unknown) => {
+        const batch = String(
+          parsePaymentReference(exactPaymentObject(value, ["order_batch_id"]).order_batch_id),
+        );
+        return batches.includes(batch as never) ? batch : fail();
+      }),
+    );
+  } catch (error) {
+    if (error instanceof PaymentTerminalError) throw error;
+    return fail();
+  }
+}

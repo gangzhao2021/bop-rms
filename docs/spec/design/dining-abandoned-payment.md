@@ -68,7 +68,17 @@
 - 真实 Stripe：适配器已支持取消（`POST /v1/payment_intents/:id/cancel`，幂等键，返回同一意图状态；已成功/处理中的意图 Stripe 拒绝取消，
   按"未确定"处理后再查询）。Stripe 接入试点本身仍是外部关口。
 
-## 已知限制
+## 已知限制（2026-10-18 已处理）
 
-- 意图在本地已认领但服务商创建结果未知（`Processing` 创建）时，到期查询无法取回服务商意图，保持等待（店员仍可在服务商对账后处理）。
-- 线上已付但 Ordering 尚未记录（worker 处理中，通常数秒）时，Tables 仍短暂显示为未付；店员此时取消会被 Payment 拒绝（"已经付了"）。
+- **服务商创建结果未知**（意图在本地已认领但创建应答丢失：无观测或 `Unknown` 失败；客人从未拿到卡表单）：Payment 用同一幂等键、同一请求
+  再发一次创建向服务商查询——服务商返回它已建的意图，或此时新建一个未确认的意图——随后按第 2 条处理（通常在服务商取消并记为
+  `Cancelled`，下一轮以 `PAYMENT_NOT_COMPLETED` 取消该轮）。创建幂等键改为由尝试派生（`create-intent:<attempt>`，每次尝试仍唯一），
+  仅当其摘要与尝试记录的 `providerIdempotencyDigest` 一致时才查询；首次快照经 Payment 观测记录绑定该意图（尝试、金额、方式已校验），
+  之后的快照必须为同一意图。早于此改动的尝试不能用猜测的键查询，保持等待。
+- **仍无法确认时交给店员**：截止后 5 分钟（取消扫描每数秒重查一次）仍未解决的线上付款，Tables 与 Orders 显示"the card provider couldn't
+  confirm the guest's payment… Ask the guest whether their card was charged. If it wasn't, cancel the round; a charge that still comes
+  through is refunded automatically"；店长确认（`acknowledgeUnconfirmedPayment: true`，按钮"Not charged: cancel round N"）后取消，事务内按
+  Ordering 截止时间重新判断宽限、Payment 已记成功仍拒绝；审计 `afterSummary {providerPaymentUnconfirmed: true}`。之后到达的扣款沿用
+  "已付款无法履约"自动退款。
+- **线上已付但 Ordering 尚未记录**（数秒）：Tables 读取 Payment 自己的终态事实（`listStoreOrderBatchesPaidOnline`），该轮不再显示为未付、
+  不再提供取消；店长恰在此时取消时，对话框显示"Payment just arrived: the guest paid for this round, so nothing was cancelled"及"Refresh"。

@@ -1026,6 +1026,12 @@ applies an event twice. `retry --dead-letter <uuid>` retries one item of either 
 below its automatic attempt limit). An operator retry opens a new bounded window from the time of the
 retry; a retry that fails again reopens the item.
 
+Consumer retries still waiting out their backoff after the cause is fixed are brought forward with
+`consumer-retry-operations.mjs` (`list`; `retry-now --confirm-target --operator (--consumer <name> |
+--all) [--dry-run]`): only `scheduled` retries due later move to now, payload, attempt count and
+deadline unchanged; each one moved is recorded in `platform_eventing.consumer_retry_expedite_action`.
+See the runbook's "Retrying waiting updates now".
+
 Outbox events that exhausted all eight automatic deliveries are recovered with
 `outbox-recovery-operations.mjs recover --operator <uuid> [--dead-letter <uuid>]`, run in the pilot
 container (it reads `PILOT_RUNTIME_DIRECTORY`). It builds the business worker composition without

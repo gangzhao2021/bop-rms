@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { pilotCreateIntentIdempotencyKey } from "./pilot-open-payment-resolution.mjs";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { createCustomerSessionPaymentIntent } from "../../apps/api/dist/customer-session-payment-intent.js";
 import { createCustomerCheckoutSessionRead } from "../../apps/api/dist/customer-checkout-session-read.js";
@@ -176,7 +177,7 @@ export async function createInternalPaymentIntent(
           generate: reference,
           hash: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
           equals: (a, b) => a === b,
-          providerIdempotencyKey: reference,
+          providerIdempotencyKey: pilotCreateIntentIdempotencyKey,
         },
         audit: {
           create: async (value) => ({

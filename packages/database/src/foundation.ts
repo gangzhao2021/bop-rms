@@ -34,6 +34,9 @@ const acceptedLaterObjects = new Set([
   "platform_eventing.consumer_inbox_tenant_scope:policy",
   "platform_eventing.consumer_retry_schedule:table",
   "platform_eventing.consumer_retry_schedule_tenant_scope:policy",
+  // WP-2423 (2000_090): audited operator "retry now" for consumer retries in backoff.
+  "platform_eventing.consumer_retry_expedite_action:table",
+  "platform_eventing.consumer_retry_expedite_action_tenant_scope:policy",
   "platform_eventing.dead_letter_action:table",
   "platform_eventing.dead_letter_action_tenant_scope:policy",
   "platform_eventing.dead_letter_item:table",

@@ -50,6 +50,11 @@ function databaseCode(error: unknown) {
  * Nothing was charged, so nothing is refunded; a payment that still arrives later is refunded by
  * the existing "paid without a fulfillable order" compensation. Same operation reference → the
  * original outcome.
+ *
+ * When the card provider still can't confirm the round's online payment
+ * `unconfirmedPaymentGraceMs` after its payment window ended, staff are told so and a manager may
+ * cancel after checking with the guest (`acknowledgeUnconfirmedPayment: true`); the transaction
+ * re-checks the deadline and refuses a payment Payment recorded as succeeded.
  */
 export function createMerchantUnpaidRoundCancellation(options: {
   persistence: PersistentMerchantBffOptions;
@@ -70,16 +75,26 @@ export function createMerchantUnpaidRoundCancellation(options: {
   }): Promise<{ status: "Cancelled" | "AlreadyCancelled"; cancelledAt: string }> => {
     const session = await options.authentication.authorize(input);
     let orderReference: string, orderBatchReference: string, operationReference: string;
+    let paymentUnconfirmed = false;
     try {
+      const acknowledged =
+        input.command !== null &&
+        typeof input.command === "object" &&
+        Object.prototype.hasOwnProperty.call(input.command, "acknowledgeUnconfirmedPayment");
       const intent = readClosedRecord(input.command, [
         "orderReference",
         "orderBatchReference",
         "operationReference",
+        ...(acknowledged ? ["acknowledgeUnconfirmedPayment"] : []),
       ]);
+      if (acknowledged && intent.acknowledgeUnconfirmedPayment !== true)
+        return fail("UNPAID_ROUND_INPUT_INVALID");
+      paymentUnconfirmed = acknowledged;
       orderReference = String(parseOrderingReference(intent.orderReference));
       orderBatchReference = String(parseOrderingReference(intent.orderBatchReference));
       operationReference = String(parseOrderingReference(intent.operationReference));
-    } catch {
+    } catch (error) {
+      if (error instanceof UnpaidRoundCancellationError) throw error;
       return fail("UNPAID_ROUND_INPUT_INVALID");
     }
     const authorized = <T>(
@@ -135,8 +150,12 @@ export function createMerchantUnpaidRoundCancellation(options: {
       if (round === null) return fail("UNPAID_ROUND_NOT_FOUND");
       const payment = await options.resolvePayment(round.paymentOperationReference);
       if (payment.status === "Paid") return fail("UNPAID_ROUND_PAID");
-      if (payment.status === "Processing") return fail("UNPAID_ROUND_PAYMENT_IN_PROGRESS");
-      if (payment.status === "Unavailable") return fail("UNPAID_ROUND_UNAVAILABLE");
+      // The card provider can't confirm the payment: only once the manager checked with the guest
+      // and the grace after the deadline has passed (re-checked in the transaction below).
+      if (payment.status === "Processing" && !paymentUnconfirmed)
+        return fail("UNPAID_ROUND_PAYMENT_IN_PROGRESS");
+      if (payment.status === "Unavailable" && !paymentUnconfirmed)
+        return fail("UNPAID_ROUND_UNAVAILABLE");
       const result = await authorized(async ({ transaction, actorReference, allowed }) =>
         options.cancellation.cancelUnpaidForStaff(transaction, {
           operationReference,
@@ -144,6 +163,10 @@ export function createMerchantUnpaidRoundCancellation(options: {
           orderBatchReference,
           actorReference,
           authorize: async () => (await allowed()) === true,
+          ...(paymentUnconfirmed &&
+          (payment.status === "Processing" || payment.status === "Unavailable")
+            ? { paymentUnconfirmed: true }
+            : {}),
         }),
       );
       if (result.status === "NotEligible")

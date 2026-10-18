@@ -14,6 +14,7 @@ import {
   createPaymentIntentCreationService,
   createPaymentProviderSnapshot,
   createPostgresPaymentIntentCreationStore,
+  listStoreOrderBatchesPaidOnline,
   PaymentIntentCreationError,
 } from "../../rms/payment/src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
@@ -288,8 +289,10 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
           );
         return { refs, requestedAt, expiresAt };
       }
-      /** The round's online payment: "Open" (started, never confirmed) or "Succeeded". */
-      const payment = async (round, outcome, n) => {
+      /** The round's online payment: "Open" (started, never confirmed), "Succeeded", or
+       * "CreateUnknown" (the Provider create's answer was lost). */
+      const attemptOf = (n) => id(0x7000 + n * 0x10 + 2);
+      const payment = async (round, outcome, n, idempotencyDigest) => {
         const k = 0x7000 + n * 0x10;
         const refs = {
           paymentIntent: id(k + 1),
@@ -330,22 +333,36 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
           requestedAt: round.requestedAt,
           occurredAt: new Date(Date.parse(round.requestedAt) + 1000).toISOString(),
           totalMinor: 1689,
+          idempotencyDigest,
         });
         return refs;
       };
 
       await admin.query("SET session_replication_role = replica");
-      let resumed, staffRound, paidRound, lateRound, pay;
+      let resumed, staffRound, paidRound, lateRound, unknownRound, legacyRound, recentRound, pay;
       try {
         resumed = await guestRound(1, time(-minutes(5)));
         staffRound = await guestRound(2, time(-minutes(6)));
         paidRound = await guestRound(3, time(-minutes(7)));
         lateRound = await guestRound(4, time(-minutes(40)));
+        // Rounds whose Provider create answer was lost: one with the attempt-derived key (Payment
+        // can ask again), one older without it, one whose window only just ended.
+        unknownRound = await guestRound(5, time(-minutes(41)));
+        legacyRound = await guestRound(6, time(-minutes(42)));
+        recentRound = await guestRound(7, time(-minutes(31)));
         pay = {
           resumed: await payment(resumed, "Open", 1),
           staff: await payment(staffRound, "Open", 2),
           paid: await payment(paidRound, "Succeeded", 3),
           late: await payment(lateRound, "Open", 4),
+          unknown: await payment(
+            unknownRound,
+            "CreateUnknown",
+            5,
+            digest("create-intent:" + attemptOf(5)),
+          ),
+          legacy: await payment(legacyRound, "CreateUnknown", 6),
+          recent: await payment(recentRound, "CreateUnknown", 7),
         };
       } finally {
         await admin.query("SET session_replication_role = origin");
@@ -650,11 +667,14 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
 
       // ── Test-only Provider with the simulator's semantics: an intent answers RequiresCustomerAction
       // until the guest confirms it (Captured) or Payment cancels it (Cancelled, idempotent).
+      const lostCreates = [pay.unknown, pay.legacy, pay.recent];
       const intents = new Map(
-        Object.values(pay).map((refs) => [
-          refs.providerIntent,
-          { status: refs === pay.paid ? "Captured" : "RequiresCustomerAction", at: null },
-        ]),
+        Object.values(pay)
+          .filter((refs) => !lostCreates.includes(refs))
+          .map((refs) => [
+            refs.providerIntent,
+            { status: refs === pay.paid ? "Captured" : "RequiresCustomerAction", at: null },
+          ]),
       );
       const providerCalls = [];
       const snapshot = (request, reference) => {
@@ -678,6 +698,21 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
       };
       const simulatedProvider = async () => ({
         adapter: {
+          // The same create again (same idempotency key) answers the intent it made, or makes it
+          // now, unconfirmed (the simulator's and Stripe's idempotent create).
+          createIntent: async (request) => {
+            providerCalls.push(["create", request.idempotencyKey]);
+            const refs = lostCreates.find(
+              (entry) => request.idempotencyKey === "create-intent:" + entry.attempt,
+            );
+            assert.ok(refs, "only a lost create is repeated");
+            assert.equal(request.context.paymentAttemptReference, refs.attempt);
+            assert.equal(request.context.operationReference, refs.paymentOperation);
+            assert.equal(request.amount.amountMinor, 1689n);
+            if (!intents.has(refs.providerIntent))
+              intents.set(refs.providerIntent, { status: "RequiresCustomerAction", at: null });
+            return snapshot(request, refs.providerIntent);
+          },
           retrieveIntent: async (request) => {
             providerCalls.push(["retrieve", request.providerIntentReference]);
             return snapshot(request, request.providerIntentReference);
@@ -783,11 +818,9 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
       const listed = await unpaid();
       assert.deepEqual(
         listed.map((round) => [round.orderBatchReference, round.roundNumber, round.payBy]),
-        [resumed, staffRound, paidRound, lateRound].map((round) => [
-          round.refs.batch,
-          1,
-          round.expiresAt,
-        ]),
+        [resumed, staffRound, paidRound, lateRound, unknownRound, legacyRound, recentRound].map(
+          (round) => [round.refs.batch, 1, round.expiresAt],
+        ),
       );
 
       // ── 2. A manager cancels an unpaid round before its deadline.
@@ -803,7 +836,7 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
         providerAccountReference: provider,
       });
       const manager = id(0x500);
-      const staffCancel = (round, operationReference) =>
+      const staffCancel = (round, operationReference, extra = {}) =>
         transactions.run((tx) =>
           cancellation.cancelUnpaidForStaff(tx, {
             operationReference,
@@ -811,6 +844,7 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
             orderBatchReference: round.refs.batch,
             actorReference: manager,
             authorize: async () => true,
+            ...extra,
           }),
         );
       const counts = async () =>
@@ -1023,6 +1057,188 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
       assert.equal(
         discovered.some((entry) => entry.orderBatchReference === lateRound.refs.batch),
         false,
+      );
+
+      // ── 5. The Provider create's answer was lost (timeout): no card form was ever shown, but the
+      // Provider may hold an intent. Inventory recorded these rounds as untracked (nothing set aside).
+      await admin.query("SET session_replication_role = replica");
+      try {
+        for (const [n, round] of [
+          [5, unknownRound],
+          [6, legacyRound],
+        ]) {
+          const k = 0x5000 + n * 0x10;
+          const v = parseSubmissionInventoryFinalValidation({
+            schemaVersion: 1,
+            validationReference: id(k + 1),
+            operationReference: id(k + 2),
+            actorReference: round.refs.guest,
+            auditReference: id(k + 3),
+            tenantReference: tenant,
+            brandReference: brand,
+            storeReference: store,
+            orderReference: round.refs.order,
+            submissionReference: round.refs.submission,
+            cartReference: round.refs.cart,
+            cartVersion: 1,
+            quoteReference: round.refs.quote,
+            demandReference: id(k + 4),
+            demandDigest: stockHash(["demand", n]),
+            workflowReference: id(k + 5),
+            workflowVersionReference: id(k + 6),
+            workflowVersion: 1,
+            transitionReference: id(k + 7),
+            observedAt: new Date(Date.parse(round.requestedAt) - 2000).toISOString(),
+            items: [
+              {
+                itemReference: id(k + 8),
+                currentItemVersion: 1,
+                configurationOperationReferences: [id(k + 9)],
+                unit: {
+                  ...unit,
+                  unitCode: "EA",
+                  dimension: "Count",
+                  displayPrecision: 0,
+                  ledgerPrecision: 0,
+                },
+                quantity: "1",
+                stockTrackingEnabled: false,
+                disposition: "NotTracked",
+                deferredActionCode: null,
+              },
+            ],
+            reservationSet: null,
+          });
+          await admin.query(
+            "INSERT INTO rms_inventory.submission_final_validation (tenant_id,brand_id,store_id,validation_id,operation_id,actor_id,audit_id,order_id,submission_id,cart_id,cart_version,quote_id,demand_id,demand_digest,workflow_id,workflow_version_id,workflow_version,transition_id,reservation_set_id,observed_at,record_digest,record_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULL,$19,$20,$21)",
+            [
+              tenant,
+              brand,
+              store,
+              v.validationReference,
+              v.operationReference,
+              v.actorReference,
+              v.auditReference,
+              v.orderReference,
+              v.submissionReference,
+              v.cartReference,
+              v.cartVersion,
+              v.quoteReference,
+              v.demandReference,
+              v.demandDigest,
+              v.workflowReference,
+              v.workflowVersionReference,
+              v.workflowVersion,
+              v.transitionReference,
+              v.observedAt,
+              stockHash(v),
+              v,
+            ],
+          );
+        }
+      } finally {
+        await admin.query("SET session_replication_role = origin");
+      }
+      const candidateOf = async (round) =>
+        (
+          await transactions.run((tx) =>
+            createPostgresDiningCheckoutExpiryCandidates({
+              brandReference: brand,
+              storeReference: store,
+              authorize: async () => true,
+            }).discover(tx, { observedAt: now(), after: null, limit: 20 }),
+          )
+        ).find((candidate) => candidate.orderBatchReference === round.refs.batch);
+      for (const round of [unknownRound, legacyRound])
+        assert.equal(
+          (await recorder.record(await candidateOf(round))).record.status,
+          "AwaitingPaymentResolution",
+        );
+      const createCalls = (refs) =>
+        providerCalls.filter(([kind, key]) => kind === "create" && key.includes(refs.attempt));
+      // The cancellation sweep asks the Provider again with the same create (attempt-derived key):
+      // the intent it holds is cancelled as never confirmed and recorded as not completed.
+      const beforeUnknown = await counts();
+      assert.equal(await dispatcher.runOnce(), 0);
+      assert.deepEqual(createCalls(pay.unknown), [
+        ["create", "create-intent:" + pay.unknown.attempt],
+      ]);
+      assert.ok(
+        providerCalls.some(
+          ([kind, key]) => kind === "cancel" && key === "cancel-abandoned:" + pay.unknown.attempt,
+        ),
+      );
+      assert.deepEqual(await terminal(pay.unknown), [{ outcome: "Failed", reason: "Cancelled" }]);
+      // An older attempt whose key can't be re-derived (digest differs) is never asked about with a
+      // guessed key: it keeps waiting, nothing recorded, nothing cancelled.
+      assert.deepEqual(createCalls(pay.legacy), []);
+      assert.deepEqual(await terminal(pay.legacy), []);
+      assert.deepEqual(await counts(), beforeUnknown);
+      // Next sweep: PaymentFailed evidence, the round is cancelled as not completed (nobody paid).
+      assert.equal(
+        (await recorder.record(await candidateOf(unknownRound))).record.status,
+        "PaymentFailed",
+      );
+      assert.equal(await dispatcher.runOnce(), 1);
+      assert.deepEqual(
+        await one(
+          "SELECT reason_code FROM rms_ordering.order_batch_checkout_cancellation WHERE order_batch_id=$1",
+          [unknownRound.refs.batch],
+        ),
+        [{ reason_code: "PAYMENT_NOT_COMPLETED" }],
+      );
+      // Still unresolved: the round goes to staff. Without the manager's confirmation, or before
+      // the grace after the deadline has passed, it is refused as before; a paid round never.
+      assert.deepEqual(await staffCancel(legacyRound, id(0x701)), {
+        status: "NotEligible",
+        reason: "PaymentInProgress",
+      });
+      assert.deepEqual(await staffCancel(recentRound, id(0x702), { paymentUnconfirmed: true }), {
+        status: "NotEligible",
+        reason: "PaymentInProgress",
+      });
+      assert.deepEqual(await staffCancel(paidRound, id(0x703), { paymentUnconfirmed: true }), {
+        status: "NotEligible",
+        reason: "Paid",
+      });
+      const beforeLegacy = await counts();
+      const unconfirmed = await staffCancel(legacyRound, id(0x704), { paymentUnconfirmed: true });
+      assert.equal(unconfirmed.status, "Created");
+      assert.equal(unconfirmed.record.reasonCode, "STAFF_CANCELLED_UNPAID");
+      assert.deepEqual(await counts(), {
+        cancellations: beforeLegacy.cancellations + 1,
+        events: beforeLegacy.events + 1,
+      });
+      assert.deepEqual(
+        await one(
+          "SELECT actor_reference::text AS actor,reason_code,after_summary_json AS after FROM platform_audit.audit_record WHERE action_code='ORDERING_BATCH_CHECKOUT_CANCELLED' AND target_id=$1",
+          [legacyRound.refs.batch],
+        ),
+        [
+          {
+            actor: manager,
+            reason_code: "STAFF_CANCELLED_UNPAID",
+            after: { providerPaymentUnconfirmed: true },
+          },
+        ],
+      );
+      assert.equal(
+        (await staffCancel(legacyRound, id(0x704), { paymentUnconfirmed: true })).status,
+        "Existing",
+      );
+      // Tables reads Payment's own terminal facts: a payment that just arrived (Ordering has not
+      // recorded it yet) is not offered for cancellation as unpaid.
+      assert.deepEqual(
+        [
+          ...(await transactions.run((tx) =>
+            listStoreOrderBatchesPaidOnline(tx, { brandReference: brand, storeReference: store }, [
+              paidRound.refs.batch,
+              recentRound.refs.batch,
+              unknownRound.refs.batch,
+            ]),
+          )),
+        ],
+        [paidRound.refs.batch],
       );
 
       // Tables: the staff-cancelled round no longer waits (the paid ones leave once Ordering

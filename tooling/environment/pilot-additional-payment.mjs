@@ -1,6 +1,7 @@
 import console from "node:console";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { createHash } from "node:crypto";
+import { pilotCreateIntentIdempotencyKey } from "./pilot-open-payment-resolution.mjs";
 import { createPostgresSubmissionFinalValidationStore } from "../../packages/rms/inventory/src/index.ts";
 import { paymentProviderAdmissionKillSwitchKey } from "../../packages/rms/payment/src/index.ts";
 import { createCustomerAdmittedAdditionalDiningPayment } from "../../apps/api/dist/customer-admitted-additional-dining-payment.js";
@@ -105,7 +106,7 @@ export async function createInternalAdditionalPayment(
             generate: reference,
             hash: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
             equals: (a, b) => a === b,
-            providerIdempotencyKey: reference,
+            providerIdempotencyKey: pilotCreateIntentIdempotencyKey,
           },
           audit: {
             create: async (value) => ({

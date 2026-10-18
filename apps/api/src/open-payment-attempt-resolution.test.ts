@@ -1,12 +1,20 @@
 import { expect, it, vi } from "vitest";
-import { createPaymentIntentCreationService, createPaymentProviderSnapshot } from "@rms/payment";
+import {
+  createPaymentIntentCreationService,
+  createPaymentProviderFailure,
+  createPaymentProviderSnapshot,
+  parsePaymentIntentCreationRecord,
+} from "@rms/payment";
 import {
   harness,
   command,
   refs,
   id,
 } from "../../../packages/rms/payment/src/tests/payment-intent-creation.fixture.js";
-import { createOpenPaymentAttemptResolution } from "./open-payment-attempt-resolution.js";
+import {
+  createOpenPaymentAttemptResolution,
+  isPaymentUnconfirmed,
+} from "./open-payment-attempt-resolution.js";
 
 async function record() {
   return (await createPaymentIntentCreationService(harness().ports).create(command())).record;
@@ -132,4 +140,129 @@ it("WP-2423: records what the Provider answered to the cancel, never an assumed 
   expect(f.recordTerminal).toHaveBeenCalledWith(
     expect.objectContaining({ status: "Captured", failureReason: null }),
   );
+});
+
+async function unknownCreate(outcome: "Failure" | "None") {
+  const base = await record();
+  const created = base.providerOutcome;
+  if (created?.kind !== "Snapshot") throw new Error("fixture invalid");
+  const unknown = parsePaymentIntentCreationRecord({
+    ...base,
+    providerOutcome:
+      outcome === "None"
+        ? null
+        : createPaymentProviderFailure({
+            kind: "Failure",
+            context: created.context,
+            code: "Unknown",
+            retryDisposition: "Unknown",
+            safeReasonCode: "CREATE_RESULT_UNKNOWN" as never,
+          }),
+  });
+  return { base, unknown };
+}
+
+it("WP-2423: asks the Provider again about an attempt whose create answer is unknown, then cancels it", async () => {
+  for (const outcome of ["Failure", "None"] as const) {
+    const { base, unknown } = await unknownCreate(outcome);
+    const provider = {
+      createIntent: vi.fn(async () => snapshotOf(base, "RequiresCustomerAction")),
+      retrieveIntent: vi.fn(async () => snapshotOf(base, "RequiresCustomerAction")),
+      cancelIntent: vi.fn(async () => snapshotOf(base, "Cancelled")),
+    };
+    const recordTerminal = vi.fn(async () => undefined);
+    const createIdempotencyKey = vi.fn(
+      () => "create-intent:" + String(base.attempt.paymentAttemptReference),
+    );
+    let n = 300;
+    const resolution = createOpenPaymentAttemptResolution({
+      load: async () => ({ record: unknown, terminal: null, cardMachine: false }),
+      provider: provider as never,
+      recordTerminal,
+      createIdempotencyKey,
+      newReference: () => id(n++),
+    });
+    expect(await resolution.resolve(refs.operation)).toEqual({
+      status: "Failed",
+      notCompleted: true,
+    });
+    // The same create again: same key, same amount, the original operation as context.
+    expect(provider.createIntent).toHaveBeenCalledTimes(1);
+    const [create] = provider.createIntent.mock.calls[0] as unknown as [
+      {
+        idempotencyKey: string;
+        amount: { amountMinor: bigint };
+        context: { operationReference: string; paymentAttemptReference: string };
+      },
+    ];
+    expect(create.idempotencyKey).toBe(
+      "create-intent:" + String(base.attempt.paymentAttemptReference),
+    );
+    expect(create.amount.amountMinor).toBe(base.intent.preparation.total.amountMinor);
+    expect(create.context.operationReference).toBe(String(base.intent.paymentOperationReference));
+    expect(create.context.paymentAttemptReference).toBe(
+      String(base.attempt.paymentAttemptReference),
+    );
+    expect(provider.retrieveIntent).not.toHaveBeenCalled();
+    expect(provider.cancelIntent).toHaveBeenCalledTimes(1);
+    expect(recordTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "Failed", failureReason: "Cancelled" }),
+    );
+  }
+});
+
+it("WP-2423: keeps waiting, recording nothing, when an unknown create can't be asked about", async () => {
+  const { base, unknown } = await unknownCreate("Failure");
+  const provider = {
+    createIntent: vi.fn(async () => snapshotOf(base, "RequiresCustomerAction")),
+    retrieveIntent: vi.fn(),
+    cancelIntent: vi.fn(),
+  };
+  const recordTerminal = vi.fn(async () => undefined);
+  let n = 400;
+  const options = {
+    load: async () => ({ record: unknown, terminal: null, cardMachine: false }),
+    provider: provider as never,
+    recordTerminal,
+    newReference: () => id(n++),
+  };
+  // No re-derivable key (an attempt created before keys were derived from the attempt).
+  expect(await createOpenPaymentAttemptResolution(options).resolve(refs.operation)).toEqual({
+    status: "Processing",
+  });
+  expect(
+    await createOpenPaymentAttemptResolution({
+      ...options,
+      createIdempotencyKey: () => null,
+    }).resolve(refs.operation),
+  ).toEqual({ status: "Processing" });
+  expect(provider.createIntent).not.toHaveBeenCalled();
+  // The Provider can't answer, or answers for another attempt or amount.
+  const keyed = createOpenPaymentAttemptResolution({
+    ...options,
+    createIdempotencyKey: () => "create-intent:" + String(base.attempt.paymentAttemptReference),
+  });
+  provider.createIntent.mockRejectedValueOnce(new Error("offline"));
+  expect(await keyed.resolve(refs.operation)).toEqual({ status: "Unavailable" });
+  provider.createIntent.mockResolvedValueOnce({ kind: "Failure" } as never);
+  expect(await keyed.resolve(refs.operation)).toEqual({ status: "Unavailable" });
+  const other = snapshotOf(base, "RequiresCustomerAction");
+  provider.createIntent.mockResolvedValueOnce(
+    createPaymentProviderSnapshot({
+      ...other,
+      requestedAmount: {
+        ...other.requestedAmount,
+        amountMinor: other.requestedAmount.amountMinor + 1n,
+      },
+    }),
+  );
+  expect(await keyed.resolve(refs.operation)).toEqual({ status: "Unavailable" });
+  expect(provider.cancelIntent).not.toHaveBeenCalled();
+  expect(recordTerminal).not.toHaveBeenCalled();
+});
+
+it("WP-2423: tells when an unresolved payment is handed to staff", () => {
+  expect(isPaymentUnconfirmed("2026-10-18T12:00:00.000Z", "2026-10-18T12:04:59.999Z")).toBe(false);
+  expect(isPaymentUnconfirmed("2026-10-18T12:00:00.000Z", "2026-10-18T12:05:00.000Z")).toBe(true);
+  expect(isPaymentUnconfirmed("not a time", "2026-10-18T12:05:00.000Z")).toBe(false);
 });

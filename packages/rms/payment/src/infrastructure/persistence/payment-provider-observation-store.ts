@@ -150,9 +150,16 @@ export function createPostgresPaymentProviderObservationStore(
           )
             return fail();
           const prior = record.providerOutcome;
+          // WP-2423 abandoned payment: when the attempt's create answer was lost (none recorded, or
+          // an unknown failure), Payment repeats the same create to learn the Provider intent; its
+          // first snapshot binds that intent to the attempt (attempt, amount and method checked
+          // above). Any later snapshot must name the same intent.
+          const createUnknown =
+            prior === null || (prior.kind === "Failure" && prior.retryDisposition === "Unknown");
           if (
-            prior?.kind !== "Snapshot" ||
-            prior.providerIntentReference !== snapshot.providerIntentReference
+            !createUnknown &&
+            (prior?.kind !== "Snapshot" ||
+              prior.providerIntentReference !== snapshot.providerIntentReference)
           )
             return fail("PAYMENT_INTENT_IDEMPOTENCY_CONFLICT");
           const values = [
@@ -196,9 +203,10 @@ export function createPostgresPaymentProviderObservationStore(
             });
           }
           if (
-            snapshot.observedAt < prior.observedAt ||
-            (["Captured", "Failed", "Cancelled"].includes(prior.status) &&
-              snapshot.status !== prior.status)
+            prior?.kind === "Snapshot" &&
+            (snapshot.observedAt < prior.observedAt ||
+              (["Captured", "Failed", "Cancelled"].includes(prior.status) &&
+                snapshot.status !== prior.status))
           )
             return fail("PAYMENT_INTENT_IDEMPOTENCY_CONFLICT");
           const result = await tx.query(

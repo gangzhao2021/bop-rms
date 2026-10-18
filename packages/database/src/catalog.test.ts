@@ -731,6 +731,7 @@ describe("migration catalog", () => {
       "2000_087_alter_store_waste_review_kitchen_remake",
       "2000_088_alter_stock_count_short_against_orders",
       "2000_089_alter_stock_waste_beyond_open_orders",
+      "2000_090_create_consumer_retry_expedite_action",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
