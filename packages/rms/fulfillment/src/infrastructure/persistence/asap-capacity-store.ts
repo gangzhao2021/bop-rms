@@ -9,6 +9,7 @@ import {
   parseFulfillmentInstant,
 } from "../../domain/pickup-fulfillment.js";
 import {
+  parseAsapCapacityAdmission,
   parseAsapCapacityCommitment,
   AsapCapacityError,
   type AsapCapacityCommitment,
@@ -82,7 +83,7 @@ const selectRecord = `SELECT jsonb_build_object('slot',jsonb_build_object('brand
 FROM rms_fulfillment.capacity_asap_commitment a
 JOIN rms_fulfillment.capacity_slot s ON s.brand_id=a.brand_id AND s.store_id=a.store_id AND s.slot_id=a.slot_id
 WHERE a.brand_id=$1 AND a.store_id=$2`;
-const insertRecord = `INSERT INTO rms_fulfillment.capacity_asap_commitment (brand_id,store_id,slot_id,config_version,allocation_id,guest_session_id,cart_id,quote_id,submission_id,order_id,order_batch_id,fulfillment_id,payment_operation_id,cart_version,capacity_units,units_rule_version,units_input_digest,intent_digest,state,version,prepared_at,preparation_valid_until,ordering_linked_at,payment_requested_at,capacity_expires_at,terminal_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING allocation_id AS reference`;
+const insertRecord = `INSERT INTO rms_fulfillment.capacity_asap_commitment (brand_id,store_id,slot_id,config_version,allocation_id,guest_session_id,cart_id,quote_id,submission_id,order_id,order_batch_id,fulfillment_id,payment_operation_id,cart_version,capacity_units,units_rule_version,units_input_digest,intent_digest,state,version,prepared_at,preparation_valid_until,ordering_linked_at,payment_requested_at,capacity_expires_at,terminal_at,admission) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) RETURNING allocation_id AS reference`;
 
 /** Internal owner storage. History recovery is not current checkout or Payment authorization. */
 export function createPostgresAsapCapacityStore(
@@ -176,8 +177,17 @@ export function createPostgresAsapCapacityStore(
     },
     append(value: unknown) {
       return safe(async () => {
-        const raw = closed(value, ["record", "audit"]);
+        const raw = closed(
+          value,
+          value !== null && typeof value === "object" && "admission" in value
+            ? ["record", "audit", "admission"]
+            : ["record", "audit"],
+        );
         const record = scoped(parseAsapCapacityCommitment(raw.record));
+        // DEC-COUNTER-WALK-UP-CAPACITY: only a first version is admitted; later versions keep
+        // the admission of the first (the database copies it).
+        const admission = parseAsapCapacityAdmission(raw.admission);
+        if (admission === "WalkUp" && record.version !== 1) return fail("ASAP_CAPACITY_INVALID");
         const at = record.terminalAt ?? record.paymentRequestedAt ?? record.preparedAt;
         const now = parseFulfillmentInstant(clock.now());
         if (at > now) return fail("ASAP_CAPACITY_INVALID");
@@ -258,6 +268,7 @@ export function createPostgresAsapCapacityStore(
               record.paymentRequestedAt,
               record.capacityExpiresAt,
               record.terminalAt,
+              admission,
             ]),
           );
           if (

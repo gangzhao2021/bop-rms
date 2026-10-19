@@ -15,6 +15,7 @@ import {
   createPostgresPickupCartBindingReader,
 } from "../../packages/rms/ordering/src/index.ts";
 import { createPostgresSubmissionFinalValidationStore } from "../../packages/rms/inventory/src/index.ts";
+import { createPostgresCurrentPickupCapacityStore } from "../../packages/rms/fulfillment/src/index.ts";
 import { createPersistentCustomerEntryComposition } from "../../apps/api/dist/persistent-customer-entry.js";
 import { createPersistentPublicStoreProfileReader } from "../../apps/api/dist/persistent-public-store-profile.js";
 import { createCustomerCartBindingComposition } from "../../apps/api/dist/customer-cart-binding-composition.js";
@@ -201,6 +202,9 @@ export async function createInternalCounterOrder(
       read: (value) => checkoutRead.read(value),
     },
     takesOrder: async (input) => counterTakesOrder(await operatingNow(), input),
+    // WP-2423: whether a pickup time covers now, asked only to explain an unexpected refusal.
+    pickupTimesNow: () =>
+      createPostgresCurrentPickupCapacityStore(transactions, scope).covers(now()),
     // The same stock check the counter Cart makes when an item is added (its own Cart as context),
     // so staff are told how many of a short item are left.
     stock: {

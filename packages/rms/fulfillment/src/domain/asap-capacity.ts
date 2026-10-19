@@ -36,6 +36,19 @@ export interface AsapCapacityCommitment extends References {
   readonly capacityExpiresAt: FulfillmentInstant | null;
   readonly terminalAt: FulfillmentInstant | null;
 }
+/**
+ * WP-2423 DEC-COUNTER-WALK-UP-CAPACITY: how a new ASAP commitment is admitted. Paced (an online
+ * pickup order) is refused when the slot is full; WalkUp (an order staff take at the counter for a
+ * customer standing there, or a paper order entered after an outage) is recorded and counts
+ * against the slot, so online orders are paced by it, but is never refused for capacity. Absent
+ * means Paced.
+ */
+export type AsapCapacityAdmission = "Paced" | "WalkUp";
+export function parseAsapCapacityAdmission(value: unknown): AsapCapacityAdmission {
+  if (value === undefined || value === "Paced") return "Paced";
+  if (value === "WalkUp") return "WalkUp";
+  return fail();
+}
 export class AsapCapacityError extends Error {
   constructor(
     readonly code:
@@ -191,17 +204,25 @@ export function prepareAsapCapacityCommitment(
       capacityExpiresAt: null,
       terminalAt: null,
     });
-    const current = closed(currentValue, ["slot", "capacityLimit", "occupiedUnits", "observedAt"]);
+    const fields = ["slot", "capacityLimit", "occupiedUnits", "observedAt"];
+    const current = closed(
+      currentValue,
+      currentValue !== null && typeof currentValue === "object" && "admission" in currentValue
+        ? [...fields, "admission"]
+        : fields,
+    );
     if (
       JSON.stringify(parseScheduledCapacitySlot(current.slot)) !== JSON.stringify(record.slot) ||
       parseFulfillmentInstant(current.observedAt) < record.preparedAt ||
       parseFulfillmentInstant(current.observedAt) >= record.preparationValidUntil
     )
       return fail("ASAP_CAPACITY_CONFLICT");
-    if (
-      BigInt(record.units) >
-      BigInt(integer(current.capacityLimit, 0)) - BigInt(integer(current.occupiedUnits, 0))
-    )
+    const admission = parseAsapCapacityAdmission(current.admission);
+    const limit = BigInt(integer(current.capacityLimit, 0)),
+      occupied = BigInt(integer(current.occupiedUnits, 0));
+    // DEC-COUNTER-WALK-UP-CAPACITY: a walk-up (counter) order counts against the hour but is
+    // never refused because the hour is full.
+    if (admission !== "WalkUp" && BigInt(record.units) > limit - occupied)
       return fail("ASAP_CAPACITY_INSUFFICIENT");
     return record;
   });

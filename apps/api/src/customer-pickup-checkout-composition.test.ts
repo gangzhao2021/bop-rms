@@ -133,6 +133,30 @@ describe("Pickup checkout Identity and CSRF composition", () => {
     expect(f.generate).toHaveBeenCalledTimes(5);
     expect(f.append).toHaveBeenCalledOnce();
   });
+  // WP-2423 DEC-COUNTER-WALK-UP-CAPACITY: the counter (Pos) Cart's source says WalkUp; the
+  // commitment is recorded over a full slot. Without it the same full slot refuses the order.
+  it("admits a counter walk-up order over a full slot and paces an online one", async () => {
+    const full = (walkUp: boolean) => {
+      const f = fixture();
+      const resolve = f.source.getMockImplementation();
+      if (resolve === undefined) throw new Error("synthetic source missing");
+      f.source.mockImplementation(async (value: { observedAt: string }) => ({
+        ...(await resolve(value)),
+        capacityLimit: 1,
+        occupiedUnits: 1,
+        ...(walkUp ? { admission: "WalkUp" } : {}),
+      }));
+      return f;
+    };
+    const counter = full(true);
+    expect((await counter.service.prepareForOrdering(counter.input)).record.state).toBe("Prepared");
+    expect(counter.append).toHaveBeenCalledWith(expect.objectContaining({ admission: "WalkUp" }));
+    const online = full(false);
+    await expect(online.service.prepareForOrdering(online.input)).rejects.toMatchObject({
+      code: "ASAP_CAPACITY_INSUFFICIENT",
+    });
+    expect(online.append).not.toHaveBeenCalled();
+  });
   it("rejects bad CSRF before source queries or capacity history disclosure", async () => {
     const f = fixture();
     await expect(

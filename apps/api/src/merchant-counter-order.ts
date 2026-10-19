@@ -33,6 +33,11 @@ export const counterOrderErrorCodes = [
   "COUNTER_ORDER_NOT_FINISHED",
   "COUNTER_ORDER_IN_PROGRESS",
   "COUNTER_ORDER_IDEMPOTENCY_CONFLICT",
+  /**
+   * WP-2423: no pickup time covers now (the Store's pickup time schedule ran out), so no pickup
+   * order can be entered; staff take it on paper and enter it once pickup times are back.
+   */
+  "COUNTER_ORDER_NO_PICKUP_TIMES",
   "COUNTER_ORDER_UNAVAILABLE",
 ] as const;
 export type CounterOrderErrorCode = (typeof counterOrderErrorCodes)[number];
@@ -163,6 +168,11 @@ export interface CounterGuestCredentials {
 export interface CounterGuestPipeline {
   /** The counter's opening rule ({@link counterTakesOrder}) on the Store's current status. */
   takesOrder(input: { readonly recordedAfterOutage: boolean }): Promise<boolean>;
+  /**
+   * WP-2423: whether a pickup time covers now (Fulfillment's schedule has not run out). Asked
+   * only after an unexpected failure, so staff are told the real reason instead of "try again".
+   */
+  pickupTimesNow?(): Promise<boolean>;
   open(input: {
     readonly requestedAt: string;
   }): Promise<
@@ -734,6 +744,10 @@ export function createMerchantCounterOrder(options: {
       if (code === "STORE_CLOSED") return fail("COUNTER_ORDER_STORE_NOT_TAKING_ORDERS");
       // WP-2423: stock ran out between checkout and submission; nothing was placed or charged.
       if (code === "ORDER_CREATE_STOCK_SHORT") return fail("COUNTER_ORDER_ITEM_UNAVAILABLE");
+      // WP-2423: the pickup time schedule ran out; say so rather than "try again". A counter
+      // order is never refused because the hour is full (DEC-COUNTER-WALK-UP-CAPACITY).
+      const covered = await options.pipeline.pickupTimesNow?.().catch(() => true);
+      if (covered === false) return fail("COUNTER_ORDER_NO_PICKUP_TIMES");
       try {
         options.onUnexpected?.(error);
       } catch {

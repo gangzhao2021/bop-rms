@@ -254,6 +254,8 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
       [409, { error: "item_short", lineIndex: 0, available: 1 }],
       [409, { error: "store_not_taking_pickup_orders" }],
       [503, { error: "counter_order_unavailable" }],
+      [409, { error: "counter_order_no_pickup_times" }],
+      [502, {}],
     ];
     const fetcher = vi.fn(async () => {
       const [status, body] = responses.shift() ?? [500, {}];
@@ -278,7 +280,17 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     await expect(client.placeOrder(command)).rejects.toMatchObject({
       code: "StoreNotTakingOrders",
     });
+    // WP-2423: the server's own "could not place" is a definite answer with what to do, not
+    // "no answer"; a gateway failure without the server's answer stays OutcomeUnknown.
+    await expect(client.placeOrder(command)).rejects.toMatchObject({ code: "SystemProblem" });
+    await expect(client.placeOrder(command)).rejects.toMatchObject({ code: "NoPickupTimes" });
     await expect(client.placeOrder(command)).rejects.toMatchObject({ code: "OutcomeUnknown" });
+    expect(placeErrorText(new CounterOrderClientError("SystemProblem"), [])).toBe(
+      "The system couldn't place this order (a problem on our side, not with the order). Nothing was charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.",
+    );
+    expect(placeErrorText(new CounterOrderClientError("NoPickupTimes"), [])).toContain(
+      "Take this order on paper and charge it on the card machine, then enter it under Paper order once pickup times are back.",
+    );
     expect(fetcher).toHaveBeenCalledWith(
       "/merchant/counter/orders",
       expect.objectContaining({

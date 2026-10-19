@@ -26,6 +26,10 @@ export class CounterOrderClientError extends Error {
       | "NotPayable"
       | "Invalid"
       | "Conflict"
+      /** WP-2423: no pickup time covers now (the schedule ran out); nothing was placed. */
+      | "NoPickupTimes"
+      /** WP-2423: the server answered that it could not place the order (its own fault). */
+      | "SystemProblem"
       | "Unavailable"
       | "OutcomeUnknown",
     /** ItemUnavailable: the line the store cannot sell now. ItemShort: the short item's first line. */
@@ -471,6 +475,11 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       if (code === "counter_order_not_finished") throw new CounterOrderClientError("NotFinished");
       if (code === "counter_order_in_progress") throw new CounterOrderClientError("InProgress");
       if (code === "counter_order_conflict") throw new CounterOrderClientError("Conflict");
+      if (code === "counter_order_no_pickup_times")
+        throw new CounterOrderClientError("NoPickupTimes");
+      // WP-2423: a definite answer from the server that it could not place the order, as opposed
+      // to no answer at all (a gateway or network failure keeps OutcomeUnknown).
+      if (code === "counter_order_unavailable") throw new CounterOrderClientError("SystemProblem");
       if (response.status === 400) throw new CounterOrderClientError("Invalid");
       throw new CounterOrderClientError(response.status >= 500 ? "OutcomeUnknown" : "Unavailable");
     },

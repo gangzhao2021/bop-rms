@@ -218,6 +218,37 @@ describe("counter order command — WP-2423 Q7", () => {
     expect(await send({ operationReference: id(31) })).toMatchObject({ status: "Placed" });
   });
 
+  // WP-2423: a checkout that fails because the pickup time schedule ran out is told to staff as
+  // that, not "try again"; with pickup times present (or unknown) the failure stays unexpected.
+  it("names a run-out pickup time schedule instead of a generic failure", async () => {
+    const { pipeline, send, onUnexpected } = setup();
+    const failure = Object.assign(new Error("DEPENDENCY_UNAVAILABLE"), {
+      code: "DEPENDENCY_UNAVAILABLE",
+    });
+    const covered = vi.fn(async () => false);
+    Object.assign(pipeline, { pickupTimesNow: covered });
+    pipeline.startCheckout.mockRejectedValueOnce(failure);
+    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_NO_PICKUP_TIMES" });
+    expect(onUnexpected).not.toHaveBeenCalled();
+    covered.mockResolvedValueOnce(true);
+    pipeline.startCheckout.mockRejectedValueOnce(failure);
+    await expect(send({ operationReference: id(32) })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_UNAVAILABLE",
+    });
+    covered.mockRejectedValueOnce(new Error("read failed"));
+    pipeline.startCheckout.mockRejectedValueOnce(failure);
+    await expect(send({ operationReference: id(33) })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_UNAVAILABLE",
+    });
+    expect(onUnexpected).toHaveBeenCalledTimes(2);
+    // Business refusals never ask.
+    pipeline.takesOrder.mockResolvedValueOnce(false);
+    await expect(send({ operationReference: id(34) })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_STORE_NOT_TAKING_ORDERS",
+    });
+    expect(covered).toHaveBeenCalledTimes(3);
+  });
+
   it("does not log business refusals", async () => {
     const { pipeline, send, onUnexpected } = setup();
     pipeline.addItem.mockResolvedValueOnce({ status: "NotAvailable" } as never);

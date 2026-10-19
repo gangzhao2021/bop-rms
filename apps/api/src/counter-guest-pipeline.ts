@@ -100,6 +100,8 @@ export function createCounterGuestPipeline(options: {
   };
   /** The counter's opening rule on the Store's current status (checked again at payment). */
   takesOrder(input: { readonly recordedAfterOutage: boolean }): Promise<boolean>;
+  /** WP-2423: whether a pickup time covers now (to explain a refused order to staff). */
+  pickupTimesNow?(): Promise<boolean>;
   payment: (credentials: CounterGuestCredentials) => PaymentOptions;
   /**
    * WP-2423 (v15 run): the stock check the counter Cart's item command makes (the Catalog
@@ -119,6 +121,9 @@ export function createCounterGuestPipeline(options: {
   const steps = createGuestOrderSteps(options);
   const pipeline: CounterGuestPipeline = {
     takesOrder: (input) => options.takesOrder(input),
+    ...(options.pickupTimesNow === undefined
+      ? {}
+      : { pickupTimesNow: options.pickupTimesNow.bind(options) }),
     async open(input) {
       const result = (await options.entry.establish({
         entryRequestReference: options.nextReference(),

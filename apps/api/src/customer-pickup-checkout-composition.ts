@@ -17,6 +17,7 @@ import {
   parseFulfillmentReference,
   parseFulfillmentDigest,
   AsapCapacityError,
+  parseAsapCapacityAdmission,
   type AsapCapacityCommitment,
   type AsapCapacityServiceOptions,
 } from "@rms/fulfillment";
@@ -26,7 +27,10 @@ export interface CustomerPickupCheckoutOptions {
   readonly session: Pick<GuestSessionServiceOptions, "binding" | "credentials" | "store">;
   readonly capacity: Pick<AsapCapacityServiceOptions, "repository" | "audit">;
   readonly sources: {
-    /** Required owner composition: exact current Cart/Quote/Guest and capacity units/slot evidence. */
+    /**
+     * Required owner composition: exact current Cart/Quote/Guest and capacity units/slot evidence.
+     * It adds `admission: "WalkUp"` for a counter (Pos) Cart (DEC-COUNTER-WALK-UP-CAPACITY).
+     */
     resolve(
       input: Readonly<{
         guestSessionReference: string;
@@ -103,23 +107,26 @@ export function createCustomerPickupCheckoutComposition(options: CustomerPickupC
       const first = await authenticate();
       const guestReference = parseFulfillmentReference(first.sessionReference);
       async function source(observedAt: string) {
-        const raw = readClosedRecord(
-          await options.sources.resolve({
-            ...intent,
-            guestSessionReference: guestReference,
-            observedAt,
-          }),
-          [
-            "slot",
-            "capacityLimit",
-            "occupiedUnits",
-            "units",
-            "unitsRuleVersion",
-            "unitsInputDigest",
-            "observedAt",
-            "validUntil",
-          ],
-        );
+        const resolved = await options.sources.resolve({
+          ...intent,
+          guestSessionReference: guestReference,
+          observedAt,
+        });
+        const raw = readClosedRecord(resolved, [
+          "slot",
+          "capacityLimit",
+          "occupiedUnits",
+          "units",
+          "unitsRuleVersion",
+          "unitsInputDigest",
+          "observedAt",
+          "validUntil",
+          // DEC-COUNTER-WALK-UP-CAPACITY: present only for an order staff take at the counter.
+          ...(resolved !== null && typeof resolved === "object" && "admission" in resolved
+            ? ["admission"]
+            : []),
+        ]);
+        const admission = parseAsapCapacityAdmission(raw.admission);
         const slot = parseScheduledCapacitySlot(raw.slot);
         const snapshot = Object.freeze({
           slot,
@@ -130,6 +137,7 @@ export function createCustomerPickupCheckoutComposition(options: CustomerPickupC
           unitsInputDigest: parseFulfillmentDigest(raw.unitsInputDigest),
           observedAt: parseCanonicalInstant(raw.observedAt),
           validUntil: parseCanonicalInstant(raw.validUntil),
+          admission,
         });
         if (
           slot.brandReference !== scope.brandReference ||
@@ -160,6 +168,7 @@ export function createCustomerPickupCheckoutComposition(options: CustomerPickupC
               capacityLimit: resolved.capacityLimit,
               occupiedUnits: resolved.occupiedUnits,
               observedAt: resolved.observedAt,
+              ...(resolved.admission === "WalkUp" ? { admission: resolved.admission } : {}),
             };
           },
         },

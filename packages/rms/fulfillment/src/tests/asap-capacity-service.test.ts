@@ -120,6 +120,35 @@ describe("ASAP application current authority", () => {
     expect((await f.service.prepare(f.record)).status).toBe("Existing");
     expect(f.counts()).toEqual({ writes: 1, auditCalls: 1, sourceCalls: 1 });
   });
+  // WP-2423 DEC-COUNTER-WALK-UP-CAPACITY: the counter's walk-up order is recorded over a full slot
+  // and handed to the repository as WalkUp; an online order on the same full slot is refused.
+  it("admits a walk-up order over a full slot and records its admission", async () => {
+    const f = setup();
+    const appended: unknown[] = [];
+    const append = f.options.repository.append;
+    f.options.repository.append = async (request) => {
+      appended.push(request);
+      return append(request);
+    };
+    f.options.current.resolve = async (_record, time) => ({
+      ...current(),
+      capacityLimit: 3,
+      observedAt: time,
+      admission: "WalkUp",
+    });
+    expect((await f.service.prepare(f.record)).status).toBe("Created");
+    expect(appended).toEqual([{ record: f.record, audit: {}, admission: "WalkUp" }]);
+    const g = setup();
+    g.options.current.resolve = async (_record, time) => ({
+      ...current(),
+      capacityLimit: 3,
+      observedAt: time,
+    });
+    await expect(g.service.prepare(g.record)).rejects.toMatchObject({
+      code: "ASAP_CAPACITY_INSUFFICIENT",
+    });
+    expect(g.counts().writes).toBe(0);
+  });
   it("allows a current observation after the original preparation instant", async () => {
     const f = setup();
     f.setTime("2026-09-10T12:00:01.000Z");

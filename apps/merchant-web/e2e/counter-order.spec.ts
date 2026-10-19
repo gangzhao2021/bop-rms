@@ -532,6 +532,64 @@ test("@production a short item names how many are left and the order stays edita
   expect(sent.map((lines) => lines.length)).toEqual([3, 2]);
 });
 
+// WP-2423 (DEC-COUNTER-WALK-UP-CAPACITY): a refused counter order said only "try again" and the
+// resend kept failing. Staff now see the real reason and what to do; a system failure starts a new
+// order on the next send instead of re-asking about the failed one.
+test("@production a refused counter order says why and what to do, then sends as a new order", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+  const operations: string[] = [];
+  const replies = [
+    { status: 503, json: { error: "counter_order_unavailable" } },
+    { status: 409, json: { error: "counter_order_no_pickup_times" } },
+  ];
+  await page.route("**/merchant/counter/orders", (route) => {
+    operations.push(
+      (route.request().postDataJSON() as { operationReference: string }).operationReference,
+    );
+    const refusal = replies.shift();
+    if (refusal !== undefined) return route.fulfill({ ...refusal, headers });
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Placed",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "15",
+        orderVersion: 1,
+        orderMinor: "475",
+        tipMinor: "0",
+        totalMinor: "475",
+        payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+        recordedAfterOutage: false,
+      },
+    });
+  });
+  await page.goto("/operations/order-entry");
+  await page.getByRole("button", { name: "Add Banana Bread" }).click();
+  await page.getByRole("button", { name: "Add to order" }).click();
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "The system couldn't place this order (a problem on our side, not with the order). Nothing was charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.",
+  );
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "Pickup times have run out in the system, so no pickup order can be entered right now. Nothing was sent or charged. Take this order on paper and charge it on the card machine, then enter it under Paper order once pickup times are back. Tell a manager — Home shows the alert.",
+  );
+  await expect(page.getByText(/counter_order|no_pickup_times|409|503/u)).toHaveCount(0);
+  await expect(
+    page.getByRole("list", { name: "Items in this order" }).getByRole("listitem"),
+  ).toHaveCount(1);
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Charge $4.75 on the card machine" }),
+  ).toBeVisible();
+  // Each send after a definite refusal is a new order (never a resend of the failed one).
+  expect(new Set(operations).size).toBe(3);
+});
+
 // v15 run (738b4c8b): right after an order was sent the counter menu still offered Flat White
 // although the milk left could not make one. The menu is re-read after each send and payment,
 // and every 30 s while staff build an order.

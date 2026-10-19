@@ -3,6 +3,8 @@ import {
   parseAsapCapacityCommitment,
   prepareAsapCapacityCommitment,
   assertAsapCapacityPaymentUsable,
+  parseAsapCapacityAdmission,
+  type AsapCapacityAdmission,
   type AsapCapacityCommitment,
 } from "../domain/asap-capacity.js";
 import {
@@ -27,12 +29,23 @@ export interface AsapCapacityServiceOptions {
     ): Promise<unknown>;
   };
   readonly current: {
-    /** Exact owner slot/configuration and shared occupancy observation; DB rechecks under its lock. */
+    /**
+     * Exact owner slot/configuration and shared occupancy observation; DB rechecks under its lock.
+     * It may add `admission: "WalkUp"` for an order staff take at the counter (never refused for
+     * capacity, still counted); without it the commitment is Paced.
+     */
     resolve(record: AsapCapacityCommitment, observedAt: string): Promise<unknown>;
   };
   readonly repository: {
     loadSubmission(reference: string): Promise<unknown>;
-    append(input: Readonly<{ record: AsapCapacityCommitment; audit: unknown }>): Promise<unknown>;
+    /** `admission` is present only for a WalkUp commitment (DEC-COUNTER-WALK-UP-CAPACITY). */
+    append(
+      input: Readonly<{
+        record: AsapCapacityCommitment;
+        audit: unknown;
+        admission?: AsapCapacityAdmission;
+      }>,
+    ): Promise<unknown>;
   };
   readonly audit: { prepare(record: AsapCapacityCommitment): Promise<unknown> };
 }
@@ -165,13 +178,18 @@ export function createAsapCapacityService(options: AsapCapacityServiceOptions) {
       if (now() < requested.preparedAt || now() >= requested.preparationValidUntil)
         return fail("ASAP_CAPACITY_EXPIRED");
       const at = now();
-      const observation = closed(await options.current.resolve(requested, at), [
+      const observed = await options.current.resolve(requested, at);
+      const observation = closed(observed, [
         "slot",
         "capacityLimit",
         "occupiedUnits",
         "observedAt",
+        ...(observed !== null && typeof observed === "object" && "admission" in observed
+          ? ["admission"]
+          : []),
       ]);
       if (parseFulfillmentInstant(observation.observedAt) !== at) return fail();
+      const admission = parseAsapCapacityAdmission(observation.admission);
       const raw = closed(requested, [
         "allocationReference",
         "guestSessionReference",
@@ -215,7 +233,11 @@ export function createAsapCapacityService(options: AsapCapacityServiceOptions) {
       if (now() >= requested.preparationValidUntil) return fail("ASAP_CAPACITY_EXPIRED");
       let result: unknown;
       try {
-        result = await options.repository.append({ record: requested, audit });
+        result = await options.repository.append(
+          admission === "WalkUp"
+            ? { record: requested, audit, admission }
+            : { record: requested, audit },
+        );
       } catch (error) {
         const recovered = await recover();
         if (recovered !== null)

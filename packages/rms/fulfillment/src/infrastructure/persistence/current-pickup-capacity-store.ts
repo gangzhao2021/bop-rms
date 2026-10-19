@@ -94,6 +94,27 @@ export function createPostgresCurrentPickupCapacityStore(
   const brand = parseFulfillmentReference(scope.brandReference),
     store = parseFulfillmentReference(scope.storeReference);
   return Object.freeze({
+    /**
+     * WP-2423: whether any pickup time covers this instant (the schedule has not run out), so a
+     * refused order can be explained to staff. A read failure is an error, never "no".
+     */
+    async covers(observedAtValue: unknown): Promise<boolean> {
+      const observedAt = parseFulfillmentInstant(observedAtValue);
+      return runner.run(async (tx) => {
+        await tx.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [brand, store],
+        );
+        const result: unknown = await tx.query(
+          "SELECT EXISTS (SELECT 1 FROM rms_fulfillment.capacity_slot s WHERE s.brand_id=$1 AND s.store_id=$2 " +
+            "AND s.fulfillment_type='Pickup' AND s.starts_at<=$3::timestamptz AND s.ends_at>$3::timestamptz) AS covered",
+          [brand, store, observedAt],
+        );
+        const covered = (result as { rows?: { covered?: unknown }[] } | null)?.rows?.[0]?.covered;
+        if (typeof covered !== "boolean") return fail();
+        return covered;
+      });
+    },
     async resolve(observedAtValue: unknown) {
       try {
         const observedAt = parseFulfillmentInstant(observedAtValue);

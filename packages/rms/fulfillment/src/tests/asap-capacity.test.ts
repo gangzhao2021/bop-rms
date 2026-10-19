@@ -80,6 +80,28 @@ describe("ASAP capacity commitment", () => {
       expect.objectContaining({ code: "ASAP_CAPACITY_INSUFFICIENT" }),
     );
   });
+  // WP-2423 DEC-COUNTER-WALK-UP-CAPACITY: a customer at the counter is never refused for capacity.
+  it.each([0, 1, 4])("admits a walk-up order over a full slot %s", (capacityLimit) => {
+    const result = prepareAsapCapacityCommitment(input(), {
+      ...current(),
+      capacityLimit,
+      admission: "WalkUp",
+    });
+    expect(result).toMatchObject({ state: "Prepared", units: 2 });
+    expect(result).not.toHaveProperty("admission");
+  });
+  it("paces an explicit Paced order and rejects an unknown admission", () => {
+    expect(() =>
+      prepareAsapCapacityCommitment(input(), {
+        ...current(),
+        capacityLimit: 4,
+        admission: "Paced",
+      }),
+    ).toThrow(expect.objectContaining({ code: "ASAP_CAPACITY_INSUFFICIENT" }));
+    expect(() =>
+      prepareAsapCapacityCommitment(input(), { ...current(), admission: "Counter" }),
+    ).toThrow(expect.objectContaining({ code: "ASAP_CAPACITY_INVALID" }));
+  });
   it("rejects a stale configuration observation", () => {
     expect(() =>
       prepareAsapCapacityCommitment(input(), {

@@ -2989,6 +2989,7 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
     ["COUNTER_ORDER_NOT_PRICED", 409, "order_not_priced"],
     ["COUNTER_ORDER_NOT_FINISHED", 409, "counter_order_not_finished"],
     ["COUNTER_ORDER_IDEMPOTENCY_CONFLICT", 409, "counter_order_conflict"],
+    ["COUNTER_ORDER_NO_PICKUP_TIMES", 409, "counter_order_no_pickup_times"],
     ["COUNTER_ORDER_UNAVAILABLE", 503, "counter_order_unavailable"],
   ] as const) {
     counterOrder.mockRejectedValueOnce(new CounterOrderError(code));

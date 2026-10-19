@@ -94,7 +94,16 @@ function createVersionedCustomerPickupCapacitySources(
           Math.min(Date.parse(source.validUntil), Date.parse(current.slot.endsAt)),
         ).toISOString();
         if (validUntil <= parseCanonicalInstant(options.now())) throw new Error();
-        return Object.freeze({ ...current, ...units, validUntil });
+        // WP-2423 DEC-COUNTER-WALK-UP-CAPACITY: a counter (Pos) Cart is only ever opened by staff
+        // for a customer standing at the counter (or a paper order entered after an outage). It
+        // counts against the pickup hour, so online orders are paced by it, but is never refused
+        // because the hour is full.
+        return Object.freeze({
+          ...current,
+          ...units,
+          validUntil,
+          ...(cart?.sourceChannel === "Pos" ? { admission: "WalkUp" as const } : {}),
+        });
       } catch {
         throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
       }
