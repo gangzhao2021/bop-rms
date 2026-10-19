@@ -471,6 +471,13 @@ export function createMerchantStaffDiningRound(options: {
         }
       }
     };
+    /**
+     * WP-2423: from the checkout on, the round may exist (an unexpected failure there is answered
+     * as still being sent, so the same command recovers it); before it, nothing was ordered and
+     * the round's own items are taken back out of the table's Cart.
+     */
+    let roundMayExist = false;
+    let removeRoundItems: (() => Promise<"Removed" | "Kept">) | null = null;
     try {
       // A retry of the same staff command returns the round it created, never a second one.
       const prior = await inScope(async (tx, scope, allowed) => {
@@ -551,6 +558,32 @@ export function createMerchantStaffDiningRound(options: {
       // The Cart line each round line went to, to name a line the checkout finds short.
       const cartLines: (string | undefined)[] = [];
       let lines: readonly CounterCartLine[] = [];
+      // The round's own lines (the Cart had no unsent items before them), never a guest's.
+      removeRoundItems = async () => {
+        const references = [...new Set(cartLines)].filter(
+          (reference): reference is string => reference !== undefined,
+        );
+        try {
+          // Only when every line sent so far is known to its Cart line.
+          if (
+            options.pipeline.removeItems !== undefined &&
+            references.length > 0 &&
+            cartLines.every((reference) => reference !== undefined)
+          )
+            return await options.pipeline.removeItems(credentials, {
+              cartReference: cart.cartReference,
+              cartVersion,
+              cartItemReferences: references,
+            });
+        } catch (error) {
+          try {
+            options.onUnexpected?.(error);
+          } catch {
+            // Reporting never changes the answer.
+          }
+        }
+        return "Kept";
+      };
       for (const [index, line] of command.lines.entries()) {
         const added = await options.pipeline.addItem(credentials, {
           operationReference: options.nextReference(),
@@ -576,30 +609,10 @@ export function createMerchantStaffDiningRound(options: {
        * it again.
        */
       const withdraw = async () => {
-        const references = [...new Set(cartLines)].filter(
-          (reference): reference is string => reference !== undefined,
-        );
-        let removed: "Removed" | "Kept" = "Kept";
-        try {
-          // Only when every round line is known to its Cart line (none of a guest's is touched).
-          if (
-            options.pipeline.removeItems !== undefined &&
-            references.length > 0 &&
-            cartLines.length === command.lines.length &&
-            cartLines.every((reference) => reference !== undefined)
-          )
-            removed = await options.pipeline.removeItems(credentials, {
-              cartReference: cart.cartReference,
-              cartVersion,
-              cartItemReferences: references,
-            });
-        } catch (error) {
-          try {
-            options.onUnexpected?.(error);
-          } catch {
-            // Reporting never changes the answer.
-          }
-        }
+        const removed =
+          cartLines.length === command.lines.length && removeRoundItems !== null
+            ? await removeRoundItems()
+            : "Kept";
         if (removed === "Removed") startedTable = tableStarted;
         await abandonStartedTable();
       };
@@ -621,6 +634,7 @@ export function createMerchantStaffDiningRound(options: {
       // From here the round may exist (checkout, submission): the session is never closed for it.
       const tableStarted = startedTable;
       startedTable = null;
+      roundMayExist = true;
       const checkout = await options.pipeline.startCheckout(credentials, {
         createOperationReference: options.nextReference(),
         cartReference: cart.cartReference,
@@ -656,9 +670,15 @@ export function createMerchantStaffDiningRound(options: {
         await withdraw();
         return fail("STAFF_ROUND_ITEM_UNAVAILABLE");
       }
-      if (preparation.tip.amountMinor !== tip) return fail("STAFF_ROUND_UNAVAILABLE");
+      // The round was submitted with another tip: the same command reads back what it holds.
+      if (preparation.tip.amountMinor !== tip) return fail("STAFF_ROUND_IN_PROGRESS");
       return await finished("Placed", entry.record);
     } catch (error) {
+      // WP-2423: failed before its checkout, so nothing was ordered: the round's items leave the
+      // table's Cart, so sending it again (a new attempt) is not refused for them.
+      const remove = roundMayExist ? null : removeRoundItems;
+      removeRoundItems = null;
+      if (remove !== null) await remove();
       await abandonStartedTable();
       if (error instanceof StaffDiningRoundError) throw error;
       if (
@@ -675,7 +695,9 @@ export function createMerchantStaffDiningRound(options: {
       } catch {
         // Reporting never changes the answer.
       }
-      return fail("STAFF_ROUND_UNAVAILABLE");
+      // WP-2423: a definite "could not send" only while nothing can exist yet; once the checkout
+      // started the round may exist, so the same command is sent again to recover it.
+      return fail(roundMayExist ? "STAFF_ROUND_IN_PROGRESS" : "STAFF_ROUND_UNAVAILABLE");
     }
   };
 }

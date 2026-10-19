@@ -1163,3 +1163,114 @@ test("@production Pickup hands over a guest who can't show a still-valid code af
   for (const handoff of handoffs) expect(handoff).not.toHaveProperty("verificationReference");
   await expectNoInternalText(page);
 });
+
+// WP-2423: closing an uncollected order re-reads the queue at once (like a handover), so the card
+// leaves without waiting for the 10 s re-read; a remake still being made is said before closing.
+test("@production Pickup removes an order closed as not collected at once and says its remake is cancelled", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "FUL-PICKUP-QUEUE",
+              label: "Pickup",
+              href: "/operations/pickup",
+              permission: "fulfillment.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  let closed = false;
+  await page.route("**/merchant/pickup/query", (route) => {
+    const now = Date.now();
+    return route.fulfill({
+      headers,
+      json: {
+        source: "CurrentFulfillment",
+        workstation: { deviceReference: id(10), pickupLocationReference: id(11) },
+        storeReference: scope.storeReference,
+        observedAt: new Date(now).toISOString(),
+        nextAfterFulfillmentReference: null,
+        items: closed
+          ? []
+          : [
+              {
+                fulfillmentReference: id(1),
+                orderReference: id(3),
+                phase: "Ready",
+                aggregateVersion: "7",
+                readyAt: new Date(now - 70 * 60_000).toISOString(),
+                publicOrderReference: "D".repeat(22),
+                orderNumber: "42",
+                remakeInProgress: 2,
+                proof: {
+                  kind: "HumanCode",
+                  generation: 1,
+                  expiresAt: new Date(now - 10 * 60_000).toISOString(),
+                },
+                items: [
+                  {
+                    fulfillmentItemReference: id(4),
+                    orderedQuantity: 2,
+                    readyQuantity: 2,
+                    handedOverQuantity: 0,
+                  },
+                ],
+              },
+            ],
+      },
+    });
+  });
+  const sent: unknown[] = [];
+  await page.route("**/merchant/pickup/not-collected", async (route) => {
+    sent.push(route.request().postDataJSON());
+    closed = true;
+    await route.fulfill({
+      headers,
+      json: { status: "Applied", fulfillmentReference: id(1), closedAt: new Date().toISOString() },
+    });
+  });
+  await page.goto("/operations/pickup");
+  const card = page.getByRole("heading", { name: "Order 42" });
+  await expect(card).toBeVisible();
+  await page.getByRole("button", { name: "Mark not collected", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText(
+    "The kitchen is still remaking 2 items for this order. Closing it also cancels the remake and takes it off the Kitchen screen. Tell the kitchen to stop making it.",
+  );
+  await expectNoInternalText(page);
+  await dialog.getByLabel("I checked the pickup shelf and nobody collected this order").check();
+  const started = Date.now();
+  await dialog.getByRole("button", { name: "Close as not collected", exact: true }).click();
+  // Well under the 10 s re-read: the queue is read again as soon as the server answers.
+  await expect(card).toHaveCount(0, { timeout: 2_000 });
+  expect(Date.now() - started).toBeLessThan(2_000);
+  await expect(
+    page.getByRole("status").filter({ hasText: "Order 42 closed as not collected." }),
+  ).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  expect(sent).toHaveLength(1);
+});

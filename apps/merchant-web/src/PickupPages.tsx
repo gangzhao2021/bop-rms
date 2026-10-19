@@ -109,8 +109,11 @@ function PickupCard({
   hidden,
   earlier = false,
   onHandedOver,
+  onNotCollected,
   onRefresh,
 }: {
+  /** WP-2423: the order was closed as not collected; the queue re-reads at once. */
+  readonly onNotCollected?: ((orderLabel: string) => void) | undefined;
   /** Re-read the queue (after code checks were locked, to offer the in-person check). */
   readonly onRefresh?: (() => void) | undefined;
   /** WP-2423: the handover was recorded; the queue re-reads and confirms it. */
@@ -275,6 +278,7 @@ function PickupCard({
           ) : null}
           {inPersonEligible && wait >= pickupHoldMinutes && proofContext ? (
             <PickupNotCollectedAction
+              onClosed={onNotCollected ? () => onNotCollected(orderLabel) : undefined}
               paused={paused}
               item={item}
               csrf={proofContext.csrf}
@@ -302,8 +306,13 @@ export function PickupQueueScreen({
   checkedAt,
   handedOver,
   onHandedOver,
+  notCollected,
+  onNotCollected,
 }: {
   readonly view: PickupQueueView;
+  /** WP-2423: the order just closed as not collected on this device (plain confirmation). */
+  readonly notCollected?: string | null | undefined;
+  readonly onNotCollected?: ((orderLabel: string) => void) | undefined;
   /** WP-2423: the order just handed over on this device (plain confirmation). */
   readonly handedOver?: string | null | undefined;
   readonly onHandedOver?: ((orderLabel: string) => void) | undefined;
@@ -371,6 +380,11 @@ export function PickupQueueScreen({
         {handedOver ? (
           <p className="pickup-queue__handed-over" role="status">
             Order {handedOver} handed over.
+          </p>
+        ) : null}
+        {notCollected ? (
+          <p className="pickup-queue__handed-over" role="status">
+            Order {notCollected} closed as not collected.
           </p>
         ) : null}
         {stale ? (
@@ -471,6 +485,7 @@ export function PickupQueueScreen({
                 workstation={view.workstation}
                 hidden={!visibleReferences.has(item.fulfillmentReference)}
                 onHandedOver={onHandedOver}
+                onNotCollected={onNotCollected}
                 onRefresh={onRefresh}
               />
             ))}
@@ -500,6 +515,7 @@ export function PickupQueueScreen({
                   hidden={!visibleReferences.has(item.fulfillmentReference)}
                   earlier
                   onHandedOver={onHandedOver}
+                  onNotCollected={onNotCollected}
                   onRefresh={onRefresh}
                 />
               ))}
@@ -540,13 +556,19 @@ export function PickupQueuePage(props: {
   const [cursors, setCursors] = useState<string[]>([]),
     [includeCompleted, setIncludeCompleted] = useState(false),
     [revision, setRevision] = useState(0),
-    [handedOver, setHandedOver] = useState<string | null>(null);
+    [handedOver, setHandedOver] = useState<string | null>(null),
+    [notCollected, setNotCollected] = useState<string | null>(null);
   // WP-2423: the confirmation stays long enough to read, then clears.
   useEffect(() => {
     if (handedOver === null) return;
     const timer = window.setTimeout(() => setHandedOver(null), 20_000);
     return () => window.clearTimeout(timer);
   }, [handedOver]);
+  useEffect(() => {
+    if (notCollected === null) return;
+    const timer = window.setTimeout(() => setNotCollected(null), 20_000);
+    return () => window.clearTimeout(timer);
+  }, [notCollected]);
   const cursor = cursors.at(-1) ?? null;
   const load = useCallback(
     () =>
@@ -677,6 +699,13 @@ export function PickupQueuePage(props: {
       onHandedOver={(orderLabel) => {
         // Re-read at once so the order leaves Waiting without anyone pressing Refresh.
         setHandedOver(orderLabel);
+        focusAfterLoad.current = true;
+        setRevision((value) => value + 1);
+      }}
+      notCollected={notCollected}
+      onNotCollected={(orderLabel) => {
+        // WP-2423: re-read at once, like a handover, instead of waiting for the next poll.
+        setNotCollected(orderLabel);
         focusAfterLoad.current = true;
         setRevision((value) => value + 1);
       }}

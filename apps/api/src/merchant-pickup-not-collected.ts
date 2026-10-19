@@ -6,6 +6,7 @@ import {
   PickupHandoffError,
   completePickupHandoffPermission,
 } from "@rms/fulfillment";
+import { createPostgresKitchenReworkStore, KitchenReworkError } from "@rms/kitchen";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -116,6 +117,26 @@ export function createMerchantPickupNotCollected(options: {
             correlationReference,
             closedAt: options.persistence.now(),
           });
+          // DEC-PICKUP-NOT-COLLECTED-REMAKE (2026-10-19): nobody is coming for the order, so a
+          // dish the kitchen is still remaking for it is cancelled with the closure (the guest no
+          // longer wants it) and leaves the Kitchen screen, instead of being made for an order
+          // that can no longer be handed over. Same transaction: both happen or neither, and a
+          // failure is answered like the closure's own (retry the same close).
+          if (result.status === "Applied")
+            await createPostgresKitchenReworkStore({
+              ...selected,
+              nextReference: options.nextReference,
+            })
+              .cancelOpenForOrder(tx, {
+                orderReference,
+                actorReference: scope.actorReference,
+                occurredAt: result.record.closedAt,
+                correlationReference,
+              })
+              .catch((error: unknown) => {
+                if (error instanceof KitchenReworkError) return invalid();
+                throw error;
+              });
           return Object.freeze({
             status: result.status,
             fulfillmentReference: result.record.fulfillmentReference,

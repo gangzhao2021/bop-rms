@@ -154,7 +154,9 @@ export function placeErrorText(
     case "NoPickupTimes":
       return "Pickup times have run out in the system, so no pickup order can be entered right now. Nothing was sent or charged. Take this order on paper and charge it on the card machine, then enter it under Paper order once pickup times are back. Tell a manager — Home shows the alert.";
     case "SystemProblem":
-      return "The system couldn't place this order (a problem on our side, not with the order). Nothing was charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.";
+      return table !== null
+        ? `The system couldn't send this round for ${table} (a problem on our side, not with the order). Nothing was sent to the kitchen or charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.`
+        : "The system couldn't place this order (a problem on our side, not with the order). Nothing was charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.";
     default:
       // WP-2423: e.g. no order can be priced right now; Home shows the alert and what to do.
       return "The order could not be sent. Check the order and try again. If it keeps failing, check Home for an alert and take the order on paper.";

@@ -1,9 +1,20 @@
+import { KitchenReworkError } from "@rms/kitchen";
 import { beforeEach, expect, it, vi } from "vitest";
 import {
   closeUncollectedPickupPermission,
   createMerchantPickupNotCollected,
 } from "./merchant-pickup-not-collected.js";
-const doubles = vi.hoisted(() => ({ scope: vi.fn(), store: vi.fn(), close: vi.fn() }));
+const doubles = vi.hoisted(() => ({
+  scope: vi.fn(),
+  store: vi.fn(),
+  close: vi.fn(),
+  kitchen: vi.fn(),
+  cancelRemakes: vi.fn(),
+}));
+vi.mock("@rms/kitchen", async (original) => ({
+  ...(await original<object>()),
+  createPostgresKitchenReworkStore: doubles.kitchen,
+}));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => doubles.scope }));
 vi.mock("@rms/fulfillment", async (original) => ({
   ...(await original<object>()),
@@ -22,6 +33,8 @@ function setup() {
     allowed,
   });
   doubles.store.mockReturnValue({ closeUncollected: doubles.close });
+  doubles.kitchen.mockReturnValue({ cancelOpenForOrder: doubles.cancelRemakes });
+  doubles.cancelRemakes.mockResolvedValue({ cancelledQuantity: 0 });
   doubles.close.mockResolvedValue({
     status: "Applied",
     record: { fulfillmentReference: id(6), closedAt: "2026-10-09T05:00:00.000Z" },
@@ -123,4 +136,35 @@ it("WP-2423: a permission withdrawn or Session ended during the close refuses it
   expect(rolledBack).toMatchObject({ code: "PICKUP_HANDOFF_PERMISSION_DENIED" });
   expect(doubles.close).toHaveBeenCalledOnce();
   expect(f.allowed).toHaveBeenCalledTimes(2);
+});
+it("WP-2423: a remake still being made for the order is cancelled with the closure, once", async () => {
+  const f = setup();
+  doubles.cancelRemakes.mockResolvedValue({ cancelledQuantity: 2 });
+  await f.operation(f.input);
+  expect(doubles.kitchen.mock.calls[0]?.[0]).toMatchObject({
+    brandReference: id(3),
+    storeReference: id(4),
+  });
+  const transaction = doubles.close.mock.calls[0]?.[0].transaction;
+  expect(doubles.cancelRemakes).toHaveBeenCalledWith(transaction, {
+    orderReference: id(5),
+    actorReference: id(2),
+    occurredAt: "2026-10-09T05:00:00.000Z",
+    correlationReference: id(12),
+  });
+  // A replay of the same close changes nothing more.
+  doubles.close.mockResolvedValue({
+    status: "AlreadyApplied",
+    record: { fulfillmentReference: id(6), closedAt: "2026-10-09T05:00:00.000Z" },
+  });
+  doubles.cancelRemakes.mockClear();
+  await f.operation(f.input);
+  expect(doubles.cancelRemakes).not.toHaveBeenCalled();
+});
+it("WP-2423: a remake that can't be cancelled fails the whole close (retry the same close)", async () => {
+  const f = setup();
+  doubles.cancelRemakes.mockRejectedValue(new KitchenReworkError("KITCHEN_REWORK_UNAVAILABLE"));
+  await expect(f.operation(f.input)).rejects.toMatchObject({
+    code: "PICKUP_HANDOFF_INPUT_INVALID",
+  });
 });

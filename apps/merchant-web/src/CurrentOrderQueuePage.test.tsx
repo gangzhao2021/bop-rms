@@ -128,8 +128,12 @@ it("filters only by exact public order number and fields present on the current 
   );
   expect(filterCurrentOrderItems(view.items, { ...all, type: "DineIn" })).toHaveLength(1);
   expect(
-    filterCurrentOrderItems(view.items, { ...all, channel: "Web", phase: "Unavailable" }),
+    filterCurrentOrderItems(view.items, { ...all, channel: "TableQr", phase: "Unavailable" }),
   ).toHaveLength(1);
+  // DEC-ORDER-CHANNEL-LABEL: no "Website" channel beside "Online"; a table's Web order is its guests'.
+  expect(
+    filterCurrentOrderItems(view.items, { ...all, channel: "Web", phase: "Unavailable" }),
+  ).toHaveLength(0);
 });
 
 it("labels a cancelled additional Batch distinctly from unaccepted work", () => {
@@ -972,7 +976,7 @@ it("WP-2423: words an unpaid round's payment state for staff", () => {
   expect(["Online", "TableQr", "Web", "Pos", "Api", "Kiosk"].map(orderChannelLabel)).toEqual([
     "Online",
     "Table QR code",
-    "Website",
+    "Online",
     "Counter",
     "Partner integration",
     "Other",
@@ -1002,6 +1006,10 @@ it("WP-2423: a table order whose first round staff entered is listed and filtere
   expect(
     orderChannel({ ...order("Pickup", [batch(1, false)]), sourceChannel: "Pos" } as Order),
   ).toBe("Pos");
+  // Guests ordering at a table from the Store's web page are still the table's own guests.
+  expect(
+    orderChannel({ ...order("DineIn", [batch(1, false)]), sourceChannel: "Web" } as Order),
+  ).toBe("TableQr");
   const items = [
     order("DineIn", [batch(1, true)]),
     order("DineIn", [batch(1, false)]),

@@ -45,7 +45,10 @@ export function PickupNotCollectedAction({
   storeReference,
   fetcher = fetch,
   paused = false,
+  onClosed,
 }: {
+  /** WP-2423: the order was closed; the queue re-reads at once (as after a handover). */
+  readonly onClosed?: (() => void) | undefined;
   /** IDR-0039: offline or stale; nothing is sent and nothing is queued for later. */
   readonly paused?: boolean;
   readonly item: PickupQueueItem;
@@ -75,14 +78,19 @@ export function PickupNotCollectedAction({
         headers: { "content-type": "application/json", "x-bop-csrf": csrf },
         body: JSON.stringify(closeUncollectedBody(item, storeReference, intent.current)),
       });
-      setOutcome(closeUncollectedOutcome(response.status));
+      const result = closeUncollectedOutcome(response.status);
+      setOutcome(result);
+      if (result === "Closed") {
+        dialog.current?.close();
+        onClosed?.();
+      }
     } catch {
       setOutcome("Unknown");
     }
   };
   const message: Record<Exclude<Outcome, "Idle">, string> = {
     Pending: "Closing…",
-    Closed: "Closed as not collected. Refresh the queue.",
+    Closed: "Closed as not collected.",
     Denied: "Only a manager can close an uncollected order.",
     NotEligible: "This order can no longer be closed. Refresh the queue.",
     Unknown: "Result unknown. Retry the same close to recover its result.",
@@ -104,6 +112,15 @@ export function PickupNotCollectedAction({
           The customer is not refunded automatically. If the Store decides to refund, a manager does
           it from the order&apos;s payments.
         </p>
+        {item.remakeQuantity ? (
+          // DEC-PICKUP-NOT-COLLECTED-REMAKE: the closure also cancels the remake (server-side).
+          <p className="pickup-queue__remake" role="note">
+            The kitchen is still remaking{" "}
+            {item.remakeQuantity === 1 ? "1 item" : `${item.remakeQuantity} items`} for this order.
+            Closing it also cancels the remake and takes it off the Kitchen screen. Tell the kitchen
+            to stop making it.
+          </p>
+        ) : null}
         {outcome === "Idle" || outcome === "Unknown" ? (
           <>
             <label>

@@ -378,6 +378,9 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
       [409, { error: "table_unavailable" }],
       [409, { error: "store_not_taking_dine_in_orders" }],
       [403, { error: "staff_round_permission_denied" }],
+      [503, { error: "staff_round_unavailable" }],
+      [409, { error: "staff_round_in_progress" }],
+      [502, {}],
     ];
     const fetcher = vi.fn(async () => {
       const [status, body] = responses.shift() ?? [500, {}];
@@ -415,6 +418,14 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     await expect(client.placeTableRound(command)).rejects.toMatchObject({
       code: "PermissionDenied",
     });
+    // WP-2423: the server's own "could not send" is a definite answer (a new attempt next); a round
+    // that may exist is still being sent; only no answer from the server is OutcomeUnknown.
+    await expect(client.placeTableRound(command)).rejects.toMatchObject({ code: "SystemProblem" });
+    await expect(client.placeTableRound(command)).rejects.toMatchObject({ code: "InProgress" });
+    await expect(client.placeTableRound(command)).rejects.toMatchObject({ code: "OutcomeUnknown" });
+    expect(placeErrorText(new CounterOrderClientError("SystemProblem"), [], "Table T4")).toBe(
+      "The system couldn't send this round for Table T4 (a problem on our side, not with the order). Nothing was sent to the kitchen or charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.",
+    );
     // A table round's reply names its table; a counter order's never does.
     expect(() => parsePlacedCounterOrder(placed)).toThrow();
     const { tableLabel: _label, ...counter } = placed;

@@ -429,7 +429,9 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       generation: 1,
     });
     submitted.pipeline.preparePayment.mockRejectedValueOnce(new Error("connection reset"));
-    await expect(submitted.send()).rejects.toMatchObject({ code: "STAFF_ROUND_UNAVAILABLE" });
+    // WP-2423: the round may exist, so it is "still being sent" (the same command recovers it),
+    // never the definite "could not send" that makes the next send a new attempt.
+    await expect(submitted.send()).rejects.toMatchObject({ code: "STAFF_ROUND_IN_PROGRESS" });
     expect(submitted.pipeline.abandonTable).not.toHaveBeenCalled();
     // A round placed at a table this request opened keeps its session.
     state.entries.clear();
@@ -539,5 +541,55 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     });
     expect(removeItems).toHaveBeenCalledTimes(1);
     expect(f.onUnexpected).not.toHaveBeenCalled();
+  });
+
+  it("WP-2423: a failure before the checkout takes the round's items back so a new attempt is sent", async () => {
+    const f = setup();
+    f.pipeline.addItem.mockResolvedValue({
+      status: "Applied",
+      cartVersion: 4,
+      lines: [{ cartItemReference: id(40), quantity: 2 }],
+    } as never);
+    f.pipeline.quote.mockRejectedValueOnce(new Error("connection reset"));
+    const removeItems = vi.fn(async () => "Removed" as const);
+    Object.assign(f.pipeline, { removeItems });
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_UNAVAILABLE" });
+    expect(removeItems).toHaveBeenCalledWith(guest, {
+      cartReference: id(6),
+      cartVersion: 4,
+      cartItemReferences: [id(40)],
+    });
+    expect(f.pipeline.startCheckout).not.toHaveBeenCalled();
+    // Staff send it again as a new attempt (a new operation): the round is placed once.
+    await expect(f.send({ operationReference: id(90) })).resolves.toMatchObject({
+      status: "Placed",
+    });
+    expect(f.pipeline.startCheckout).toHaveBeenCalledTimes(1);
+  });
+
+  it("WP-2423: a sold-out later line takes the round's earlier lines back out of the table's cart", async () => {
+    const f = setup();
+    f.pipeline.addItem
+      .mockResolvedValueOnce({
+        status: "Applied",
+        cartVersion: 4,
+        lines: [{ cartItemReference: id(40), quantity: 2 }],
+      } as never)
+      .mockResolvedValueOnce({ status: "NotAvailable" });
+    const removeItems = vi.fn(async () => "Removed" as const);
+    Object.assign(f.pipeline, { removeItems });
+    await expect(
+      f.send({
+        lines: [
+          { sellableReference: id(2), quantity: 2, optionSelections: [], note: null },
+          { sellableReference: id(3), quantity: 1, optionSelections: [], note: null },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "STAFF_ROUND_ITEM_UNAVAILABLE", lineIndex: 1 });
+    expect(removeItems).toHaveBeenCalledWith(guest, {
+      cartReference: id(6),
+      cartVersion: 4,
+      cartItemReferences: [id(40)],
+    });
   });
 });

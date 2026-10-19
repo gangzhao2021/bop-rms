@@ -101,6 +101,24 @@ describe("Operational Dashboard page", () => {
       expect(html).toContain(value);
     expect(html.match(/Open authorized source facts/gu)).toHaveLength(5);
     expect(html).not.toContain("Schedule report");
+    expect(html).toContain('value="All channels"');
+    expect(html).toContain('value="All types"');
+  });
+
+  it("WP-2423: shows the channel and order type filters in the Orders list's words, never codes", () => {
+    const html = renderToStaticMarkup(
+      <OperationalDashboard
+        view={parseOperationalDashboardView({
+          ...view(),
+          sourceChannel: "Qr",
+          orderType: "DineIn",
+        })}
+      />,
+    );
+    expect(html).toContain('value="Table QR code"');
+    expect(html).toContain('value="Dine-in"');
+    expect(html).not.toContain('value="Qr"');
+    expect(html).not.toContain('value="DineIn"');
   });
 
   it("keeps partial results read-only and labels missing KPI values as unavailable, not zero", () => {

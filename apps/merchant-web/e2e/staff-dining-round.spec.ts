@@ -765,3 +765,64 @@ test("@production a table round short on stock names the item and how many are l
   ]);
   expect(payments).toEqual([]);
 });
+
+// WP-2423: a table round the server could not send said "no answer, resend" and the resend kept
+// failing. Staff now see that it was a system problem with nothing charged, and the next send is a
+// new attempt; a gateway failure without the server's answer still resends the same round.
+test("@production a table round the system could not send says so plainly, then sends as a new round", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  const operations: string[] = [];
+  const replies = [
+    { status: 503, json: { error: "staff_round_unavailable" } },
+    { status: 502, json: {} },
+  ];
+  await page.route("**/merchant/dining/staff-rounds", (route) => {
+    operations.push(
+      (route.request().postDataJSON() as { operationReference: string }).operationReference,
+    );
+    const refusal = replies.shift();
+    if (refusal !== undefined) return route.fulfill({ ...refusal, headers });
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Placed",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "8",
+        orderVersion: 4,
+        tableLabel: "T4",
+        orderMinor: "1599",
+        tipMinor: "0",
+        totalMinor: "1599",
+        payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+        recordedAfterOutage: false,
+      },
+    });
+  });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T4", exact: true }).click();
+  await page.getByRole("link", { name: "Take order for table T4" }).click();
+  await page.getByRole("button", { name: "Add Shoyu Ramen" }).click();
+  await page.getByRole("button", { name: "Add to order" }).click();
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "The system couldn't send this round for Table T4 (a problem on our side, not with the order). Nothing was sent to the kitchen or charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.",
+  );
+  await expect(page.getByText(/staff_round|503/u)).toHaveCount(0);
+  await expectNoInternalText(page);
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "No answer from the system. Send again — the same order is never created twice.",
+  );
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Charge $15.99 on the card machine" }),
+  ).toBeVisible();
+  // A new attempt after the system problem; the same round resent after no answer.
+  expect(operations).toHaveLength(3);
+  expect(operations[1]).not.toBe(operations[0]);
+  expect(operations[2]).toBe(operations[1]);
+});

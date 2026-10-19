@@ -451,6 +451,9 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       if (code === "staff_round_not_finished") throw new CounterOrderClientError("NotFinished");
       if (code === "staff_round_in_progress") throw new CounterOrderClientError("InProgress");
       if (code === "staff_round_conflict") throw new CounterOrderClientError("Conflict");
+      // WP-2423: the server's own answer that it could not send the round (nothing was ordered or
+      // charged; the next send is a new attempt), as opposed to no answer at all (OutcomeUnknown).
+      if (code === "staff_round_unavailable") throw new CounterOrderClientError("SystemProblem");
       if (response.status === 400) throw new CounterOrderClientError("Invalid");
       throw new CounterOrderClientError(response.status >= 500 ? "OutcomeUnknown" : "Unavailable");
     },

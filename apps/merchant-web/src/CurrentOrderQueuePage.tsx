@@ -40,6 +40,12 @@ import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link, useParams } from "react-router";
 import { StaffRoundPaymentAction } from "./StaffRoundPaymentAction.js";
 import {
+  orderChannel,
+  orderChannelFilterOptions,
+  orderChannelLabel,
+  orderTypeLabel,
+} from "./order-channel.js";
+import {
   cancelledItemsRefund,
   createCurrentOrderQueueClient,
   CurrentOrderQueueError,
@@ -571,45 +577,8 @@ export function orderPhaseLabel(
       return order.currentPhase;
   }
 }
-/**
- * WP-2423: the channel an order is listed and filtered under, as staff think of it. A table's Order
- * takes the channel of its first round: when staff entered that round for the table it is "Staff"
- * (taken by staff), otherwise the guests' table QR code ("TableQr"); later rounds keep their own
- * "Entered by staff" marker. A pickup Order a customer placed on their own phone or computer is
- * "Online" whichever link or code opened the Store's page (DEC-ORDER-CHANNEL-LABEL, 2026-10-19:
- * the customer app records such pickup carts as Qr, which staff read as a table QR code).
- */
-export function orderChannel(
-  order: Pick<CurrentOrderQueue["items"][number], "orderType" | "sourceChannel" | "batches">,
-): string {
-  if (order.orderType === "Pickup")
-    return order.sourceChannel === "Qr" || order.sourceChannel === "Web"
-      ? "Online"
-      : order.sourceChannel;
-  if (order.batches.find((batch) => batch.sequence === 1)?.staffRound != null) return "Staff";
-  return order.sourceChannel === "Qr" ? "TableQr" : order.sourceChannel;
-}
-/** Staff-facing words for an order's type and the channel it came in through (never codes). */
-export const orderTypeLabel = { DineIn: "Dine-in", Pickup: "Pickup" } as const;
-export function orderChannelLabel(channel: string): string {
-  switch (channel) {
-    case "Staff":
-      return "Taken by staff";
-    case "Online":
-      return "Online";
-    case "TableQr":
-    case "Qr":
-      return "Table QR code";
-    case "Web":
-      return "Website";
-    case "Pos":
-      return "Counter";
-    case "Api":
-      return "Partner integration";
-    default:
-      return "Other";
-  }
-}
+// WP-2423 (DEC-ORDER-CHANNEL-LABEL): one channel mapping, shared with the Operational dashboard.
+export { orderChannel, orderChannelLabel, orderTypeLabel };
 
 /** WP-2423 item 5: minutes before an unpaid round's cancellation when staff are warned urgently. */
 export const unpaidRoundUrgentMinutes = 10;
@@ -1606,12 +1575,11 @@ export function CurrentOrderQueuePage({
                   onChange={(event) => setChannelFilter(event.target.value)}
                 >
                   <option value="All">All channels</option>
-                  <option value="Online">Online</option>
-                  <option value="Pos">Counter</option>
-                  <option value="TableQr">Table QR code</option>
-                  <option value="Staff">Taken by staff</option>
-                  <option value="Web">Website</option>
-                  <option value="Api">Partner integration</option>
+                  {orderChannelFilterOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label>

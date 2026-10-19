@@ -522,8 +522,64 @@ export function createPostgresKitchenReworkStore(options: {
     }
   }
 
+  /**
+   * WP-2423 (DEC-PICKUP-NOT-COLLECTED-REMAKE, 2026-10-19): the Order was given up (a pickup closed
+   * as not collected), so each remake still to be made for it is cancelled as the guest no longer
+   * wanting it, in the caller's transaction, through the same audited, evented cancel as the
+   * board's. The first dish's waste stands. The caller owns authority (the Order cancellation
+   * permission) and fences the Order first. Returns the portions cancelled.
+   */
+  async function cancelOpenForOrder(
+    tx: ConsumerTransaction,
+    input: {
+      readonly orderReference: string;
+      readonly actorReference: string;
+      readonly occurredAt: string;
+      readonly correlationReference: string;
+    },
+  ): Promise<{ readonly cancelledQuantity: number }> {
+    const order = parseKitchenTicketReference(input.orderReference);
+    let open: readonly { id: string; version: number; quantity: number }[];
+    try {
+      await scoped(tx);
+      open = (
+        await tx.query<Record<string, unknown>>(
+          "SELECT kitchen_rework_item_id::text AS id,version::int AS version,quantity FROM rms_kitchen.kitchen_rework_item " +
+            "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND " +
+            openSql +
+            " ORDER BY kitchen_rework_item_id FOR NO KEY UPDATE",
+          [brand, store, order],
+        )
+      ).rows.map((row) => ({
+        id: parseKitchenTicketReference(row.id),
+        version: Number(row.version),
+        quantity: Number(row.quantity),
+      }));
+    } catch (error) {
+      return databaseFailure(error);
+    }
+    let cancelledQuantity = 0;
+    for (const rework of open) {
+      await execute(tx, {
+        command: {
+          action: "CancelKitchenRework",
+          idempotencyKey: next(),
+          reworkReference: rework.id,
+          expectedVersion: rework.version,
+          cancelReasonCode: "GUEST_DECLINED",
+          correlationReference: input.correlationReference,
+        },
+        actorReference: input.actorReference,
+        occurredAt: input.occurredAt,
+      });
+      cancelledQuantity += rework.quantity;
+    }
+    return Object.freeze({ cancelledQuantity });
+  }
+
   return Object.freeze({
     execute,
+    cancelOpenForOrder,
     /**
      * Open reworks, and those finished within the last two hours, newest first (at most 100), each
      * with the original dish's Kitchen snapshot (display names and modifiers) for the board.

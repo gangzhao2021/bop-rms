@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { orderTypeLabel, sourceChannelFilterLabel } from "./order-channel.js";
 import {
   OperationalDashboardClientError,
   parseOperationalDashboardView,
@@ -143,11 +144,14 @@ export function OperationalDashboard({ view }: { readonly view: OperationalDashb
         </label>
         <label>
           Channel
-          <input value={view.sourceChannel} readOnly />
+          <input value={sourceChannelFilterLabel(view.sourceChannel, view.orderType)} readOnly />
         </label>
         <label>
           Order type
-          <input value={view.orderType} readOnly />
+          <input
+            value={view.orderType === "All" ? "All types" : orderTypeLabel[view.orderType]}
+            readOnly
+          />
         </label>
       </form>
       {noActivity ? (

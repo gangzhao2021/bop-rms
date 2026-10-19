@@ -1257,6 +1257,90 @@ it("remakes a finished dish once, keeps the original, records waste once, correc
       for (const account of [riceAccount, eggAccount])
         assert.ok(units((await stock(account)).h) >= units((await stock(account)).r));
       assert.deepEqual(await deliver(short.item.eventReference), { status: "duplicate_completed" });
+
+      // ── 12. DEC-PICKUP-NOT-COLLECTED-REMAKE (2026-10-19): the Order is given up (a pickup closed
+      // as not collected), so every remake still to be made for it is cancelled as the guest no
+      // longer wanting it, through the same audited, evented cancel; nothing else is touched.
+      const openBefore = await rows(
+        "SELECT kitchen_rework_item_id::text AS id,quantity FROM rms_kitchen.kitchen_rework_item WHERE order_id=$1 AND status IN ('Queued','In Progress') ORDER BY kitchen_rework_item_id",
+        [order],
+      );
+      assert.ok(openBefore.length >= 2, "loose and short are still open");
+      const finishedBefore = (
+        await rows(
+          "SELECT count(*)::int AS n FROM rms_kitchen.kitchen_rework_item WHERE order_id=$1 AND status='Completed'",
+          [order],
+        )
+      )[0].n;
+      const manager = id(52),
+        closure = next();
+      const given = await asApi((tx) =>
+        kitchen.cancelOpenForOrder(tx, {
+          orderReference: order,
+          actorReference: manager,
+          occurredAt: instant(0),
+          correlationReference: closure,
+        }),
+      );
+      assert.equal(
+        given.cancelledQuantity,
+        openBefore.reduce((sum, row) => sum + Number(row.quantity), 0),
+      );
+      assert.deepEqual(
+        await asApi((tx) => listOpenKitchenReworkItems(tx, kitchenScope, [order])),
+        [],
+      );
+      assert.deepEqual(
+        await rows(
+          "SELECT kitchen_rework_item_id::text AS id,status,cancel_reason_code,cancelled_by_actor_id::text AS actor FROM rms_kitchen.kitchen_rework_item WHERE kitchen_rework_item_id=ANY($1::uuid[]) ORDER BY kitchen_rework_item_id",
+          [openBefore.map((row) => row.id)],
+        ),
+        openBefore.map((row) => ({
+          id: row.id,
+          status: "Cancelled",
+          cancel_reason_code: "GUEST_DECLINED",
+          actor: manager,
+        })),
+      );
+      assert.equal(
+        (
+          await rows(
+            "SELECT count(*)::int AS n FROM rms_kitchen.kitchen_rework_item WHERE order_id=$1 AND status='Completed'",
+            [order],
+          )
+        )[0].n,
+        finishedBefore,
+      );
+      assert.equal(
+        (
+          await rows(
+            "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE action_code='KITCHEN_REWORK_CANCELLED' AND correlation_id=$1",
+            [closure],
+          )
+        )[0].n,
+        openBefore.length,
+      );
+      assert.equal(
+        (
+          await rows(
+            "SELECT count(*)::int AS n FROM platform_eventing.outbox_event WHERE event_type='KitchenReworkCancelled' AND correlation_id=$1",
+            [closure],
+          )
+        )[0].n,
+        openBefore.length,
+      );
+      // Nothing left to cancel: a second call changes nothing.
+      assert.deepEqual(
+        await asApi((tx) =>
+          kitchen.cancelOpenForOrder(tx, {
+            orderReference: order,
+            actorReference: manager,
+            occurredAt: instant(0),
+            correlationReference: next(),
+          }),
+        ),
+        { cancelledQuantity: 0 },
+      );
     } finally {
       await admin.query("RESET ROLE").catch(() => undefined);
       for (const name of [api, worker, setup]) {
