@@ -178,7 +178,10 @@ function bridge(
         String(clock.quoteReference) !== v.quoteReference ||
         String(clock.orderReference) !== order.order.orderReference ||
         String(clock.orderBatchReference) !== batch.orderBatchReference ||
-        clock.state !== "PaymentPending" ||
+        // A repeat after staff accepted the paid pickup Order finds its commitment Consumed
+        // (DEC-PICKUP-CAPACITY-CONSUMED); the payment window it records is unchanged.
+        (clock.state !== "PaymentPending" &&
+          !(orderType === "Pickup" && clock.state === "Consumed")) ||
         clock.paymentRequestedAt === null ||
         clock.capacityExpiresAt === null
       )

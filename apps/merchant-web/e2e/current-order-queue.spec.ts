@@ -113,7 +113,7 @@ test("@production current queue pages and clears old orders after denied refresh
   await expect(visibleOrderRows).toHaveCount(0);
   await page.getByRole("button", { name: "Clear order filters" }).click();
   await expect(visibleOrderRows).toHaveCount(50);
-  await page.getByRole("combobox", { name: "Channel" }).selectOption("Web");
+  await page.getByRole("combobox", { name: "Channel" }).selectOption("Online");
   await page.getByRole("combobox", { name: "Order status" }).selectOption("InProgress");
   await expect(page.getByRole("heading", { name: "No orders match these filters" })).toBeVisible();
   await page.getByRole("button", { name: "Clear order filters" }).click();
@@ -615,6 +615,12 @@ test("@production WP-2423 Q1: new orders and acceptance deadlines surface withou
   await page.clock.fastForward(10_000);
   await expect(page.getByRole("heading", { name: "ORD-21", exact: true })).toBeVisible();
   await expect(page.getByText("1 order is waiting to be accepted.")).toBeVisible();
+  // DEC-ORDER-CHANNEL-LABEL: a pickup order placed from the customer start page (recorded Qr) is
+  // listed as online, never as a table QR code.
+  await expect(page.locator("details.order-workbench-entry").first()).toContainText(
+    "Pickup · Online",
+  );
+  await expect(page.locator("details.order-workbench-entry").first()).not.toContainText("QR code");
   await expect(page.locator(".order-accept-by")).toHaveText("Accept within 8 min");
   await expect(page.locator(".order-accept-by")).toHaveAttribute("data-tier", "warning");
   expect(await page.title()).toMatch(/^\(1\) /u);

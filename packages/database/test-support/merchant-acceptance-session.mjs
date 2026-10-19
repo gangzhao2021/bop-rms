@@ -94,6 +94,15 @@ export async function seedMerchantAcceptanceSession({
       "GRANT SELECT ON rms_ordering.order_payment_acceptance_wait,rms_ordering.order_payment_disposition_record,rms_fulfillment.capacity_asap_commitment TO " +
         role,
     );
+    // WP-2423 DEC-PICKUP-CAPACITY-CONSUMED: accepting a paid pickup Order appends the Consumed
+    // version of its capacity commitment, whose trigger locks the slot and reads its occupancy
+    // (the same pilot api grants checkout already uses).
+    await admin.query("GRANT INSERT ON rms_fulfillment.capacity_asap_commitment TO " + role);
+    await admin.query(
+      "GRANT SELECT ON rms_fulfillment.capacity_slot,rms_fulfillment.capacity_slot_configuration,rms_fulfillment.capacity_hold,rms_fulfillment.capacity_hold_terminal,rms_fulfillment.capacity_allocation,rms_fulfillment.capacity_allocation_terminal TO " +
+        role,
+    );
+    await admin.query("GRANT UPDATE(slot_id) ON rms_fulfillment.capacity_slot TO " + role);
     await admin.query(
       "GRANT SELECT ON rms_kitchen.kitchen_ticket,rms_kitchen.kitchen_work_item,rms_kitchen.kitchen_order_item_ready_result,rms_dining.dining_item_service_record TO " +
         role,

@@ -9,6 +9,7 @@ import {
   parseFulfillmentInstant,
 } from "../../domain/pickup-fulfillment.js";
 import {
+  finishAsapCapacityCommitment,
   parseAsapCapacityAdmission,
   parseAsapCapacityCommitment,
   AsapCapacityError,
@@ -90,6 +91,11 @@ export function createPostgresAsapCapacityStore(
   runner: AsapCapacityTransactionRunner,
   scopeInput: unknown,
   clock: { now(): string },
+  /**
+   * `joined`: the runner hands out the caller's open read-committed transaction (no isolation
+   * statement is issued; the database trigger still refuses any other isolation).
+   */
+  mode: { readonly joined?: boolean } = {},
 ) {
   const scope = closed(scopeInput, ["brandReference", "storeReference"]);
   const brand = parseFulfillmentReference(scope.brandReference);
@@ -219,14 +225,17 @@ export function createPostgresAsapCapacityStore(
           audit.actionCode !== "FULFILLMENT_ASAP_CAPACITY_" + record.state.toUpperCase() ||
           audit.targetType !== "FulfillmentAsapCapacity" ||
           audit.targetId !== record.allocationReference ||
-          audit.reasonCode !== "AUTHORIZED_CHECKOUT_CAPACITY" ||
+          // WP-2423 DEC-PICKUP-CAPACITY-CONSUMED: staff accepting the paid Order consumes it.
+          audit.reasonCode !==
+            (record.state === "Consumed" ? "ORDER_ACCEPTED" : "AUTHORIZED_CHECKOUT_CAPACITY") ||
           audit.occurredAt !== at ||
-          audit.sourceChannel !== "CUSTOMER_PWA" ||
+          audit.sourceChannel !== (record.state === "Consumed" ? "MERCHANT_WEB" : "CUSTOMER_PWA") ||
           audit.dataClassification !== "Restricted"
         )
           return fail("ASAP_CAPACITY_INVALID");
         return runner.run(async (tx) => {
-          await tx.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED", []);
+          if (mode.joined !== true)
+            await tx.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED", []);
           await context(tx);
           await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
             "FulfillmentAsap:" + brand + ":" + store + ":" + record.submissionReference,
@@ -284,6 +293,95 @@ export function createPostgresAsapCapacityStore(
       });
     },
   });
+}
+
+/**
+ * WP-2423 DEC-PICKUP-CAPACITY-CONSUMED: staff accepted the paid pickup Order of this submission, so
+ * its ASAP commitment becomes Consumed and keeps counting against its pickup hour after the payment
+ * window (otherwise an accepted Order stops counting 30 minutes after checkout and the hour is
+ * oversold). Runs inside the caller's acceptance transaction, under a savepoint: the acceptance
+ * stands even when the commitment can no longer be consumed (its capacity window already passed,
+ * e.g. an Order held through a Store outage) — the Order is never refused for bookkeeping. Repeats
+ * report the existing consumption. The caller authorizes the Order and Store.
+ */
+export async function consumeAcceptedAsapCapacity(
+  transaction: AuditTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: {
+    readonly submissionReference: string;
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    /** Server-owned audit identity of the capacity fact (System actor, linked to the acceptance). */
+    readonly auditReference: string;
+    readonly correlationReference: string;
+    readonly retentionPolicyCode: string;
+    readonly retentionPolicyVersion: number;
+  },
+): Promise<"Consumed" | "AlreadyConsumed" | "NotConsumable"> {
+  const savepoint = "fulfillment_asap_consume";
+  await transaction.query("SAVEPOINT " + savepoint, []);
+  try {
+    const instant = (
+      (await transaction.query(
+        "SELECT to_char(date_trunc('milliseconds',clock_timestamp()) AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS observed_at",
+        [],
+      )) as { rows: readonly { observed_at: unknown }[] }
+    ).rows[0]?.observed_at;
+    const observedAt = parseFulfillmentInstant(instant);
+    const store = createPostgresAsapCapacityStore(
+      { run: async (work) => work(transaction) },
+      { brandReference: scope.brandReference, storeReference: scope.storeReference },
+      { now: () => observedAt },
+      { joined: true },
+    );
+    const current = await store.loadSubmission(input.submissionReference);
+    let outcome: "Consumed" | "AlreadyConsumed" | "NotConsumable";
+    if (
+      current === null ||
+      current.orderReference !== parseFulfillmentReference(input.orderReference) ||
+      current.orderBatchReference !== parseFulfillmentReference(input.orderBatchReference)
+    )
+      outcome = "NotConsumable";
+    else if (current.state === "Consumed") outcome = "AlreadyConsumed";
+    else if (
+      current.state !== "PaymentPending" ||
+      current.capacityExpiresAt === null ||
+      observedAt >= current.capacityExpiresAt
+    )
+      outcome = "NotConsumable";
+    else {
+      const record = finishAsapCapacityCommitment(current, "Consumed", observedAt);
+      await store.append({
+        record,
+        audit: {
+          auditId: input.auditReference,
+          brandId: record.slot.brandReference,
+          storeId: record.slot.storeReference,
+          actor: { type: "System" },
+          actionCode: "FULFILLMENT_ASAP_CAPACITY_CONSUMED",
+          targetType: "FulfillmentAsapCapacity",
+          targetId: record.allocationReference,
+          reasonCode: "ORDER_ACCEPTED",
+          correlationId: input.correlationReference,
+          occurredAt: observedAt,
+          sourceChannel: "MERCHANT_WEB",
+          dataClassification: "Restricted",
+          retentionPolicyCode: input.retentionPolicyCode,
+          retentionPolicyVersion: input.retentionPolicyVersion,
+        },
+      });
+      outcome = "Consumed";
+    }
+    await transaction.query("RELEASE SAVEPOINT " + savepoint, []);
+    return outcome;
+  } catch (error) {
+    if (!(error instanceof AsapCapacityError)) throw error;
+    // The trigger refused it (the window closed between the read and the write): keep the
+    // acceptance, which is what the customer and kitchen depend on.
+    await transaction.query("ROLLBACK TO SAVEPOINT " + savepoint, []);
+    await transaction.query("RELEASE SAVEPOINT " + savepoint, []);
+    return "NotConsumable";
+  }
 }
 
 /**

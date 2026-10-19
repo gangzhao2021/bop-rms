@@ -814,8 +814,8 @@ it("WP-2423: warns staff before an unpaid dine-in round is cancelled and says so
   expect(failed).not.toContain("Acceptance: Not accepted");
   // Plain words, never internal codes.
   expect(failed).toContain("<dt>Order type</dt><dd>Dine-in</dd>");
-  expect(failed).toContain("<dt>Channel</dt><dd>QR code</dd>");
-  expect(failed).toContain("Dine-in · QR code");
+  expect(failed).toContain("<dt>Channel</dt><dd>Table QR code</dd>");
+  expect(failed).toContain("Dine-in · Table QR code");
   expect(failed).not.toMatch(/>DineIn<|>Qr</u);
   // Once the time has passed the round reads as being cancelled.
   expect(
@@ -969,8 +969,9 @@ it("WP-2423: words an unpaid round's payment state for staff", () => {
   expect(paymentDueTier(due, at("2026-09-14T00:21:00.000Z"))).toBe("urgent");
   expect(paymentDueTier({ status: "Failed", cancelsAt: due.cancelsAt })).toBe("urgent");
   expect(orderTypeLabel.DineIn).toBe("Dine-in");
-  expect(["Qr", "Web", "Pos", "Api", "Kiosk"].map(orderChannelLabel)).toEqual([
-    "QR code",
+  expect(["Online", "TableQr", "Web", "Pos", "Api", "Kiosk"].map(orderChannelLabel)).toEqual([
+    "Online",
+    "Table QR code",
     "Website",
     "Counter",
     "Partner integration",
@@ -991,15 +992,24 @@ it("WP-2423: a table order whose first round staff entered is listed and filtere
     ({ orderType, sourceChannel: "Qr", batches }) as unknown as Order;
   expect(orderChannel(order("DineIn", [batch(1, true), batch(2, false)]))).toBe("Staff");
   // Guests opened the table by QR code; a later staff round keeps its own "Entered by staff".
-  expect(orderChannel(order("DineIn", [batch(1, false), batch(2, true)]))).toBe("Qr");
-  expect(orderChannel(order("Pickup", [batch(1, false)]))).toBe("Qr");
+  expect(orderChannel(order("DineIn", [batch(1, false), batch(2, true)]))).toBe("TableQr");
+  // DEC-ORDER-CHANNEL-LABEL: a pickup order the customer placed from the Store's start page is
+  // online, not a table QR code; a counter order stays Counter.
+  expect(orderChannel(order("Pickup", [batch(1, false)]))).toBe("Online");
+  expect(
+    orderChannel({ ...order("Pickup", [batch(1, false)]), sourceChannel: "Web" } as Order),
+  ).toBe("Online");
+  expect(
+    orderChannel({ ...order("Pickup", [batch(1, false)]), sourceChannel: "Pos" } as Order),
+  ).toBe("Pos");
   const items = [
     order("DineIn", [batch(1, true)]),
     order("DineIn", [batch(1, false)]),
   ] as unknown as Parameters<typeof filterCurrentOrderItems>[0];
   const all = { orderNumber: "", type: "All", channel: "All", phase: "All" };
   expect(filterCurrentOrderItems(items, { ...all, channel: "Staff" })).toEqual([items[0]]);
-  expect(filterCurrentOrderItems(items, { ...all, channel: "Qr" })).toEqual([items[1]]);
+  expect(filterCurrentOrderItems(items, { ...all, channel: "TableQr" })).toEqual([items[1]]);
+  expect(filterCurrentOrderItems(items, { ...all, channel: "Online" })).toEqual([]);
 });
 
 it("WP-2423: a dine-in order whose items were all served reads Served, not Ready", () => {

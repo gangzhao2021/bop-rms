@@ -1,6 +1,7 @@
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { readClosedRecord } from "@bop/identity";
 import type { ConsumerTransaction } from "@bop/eventing";
+import { consumeAcceptedAsapCapacity } from "@rms/fulfillment";
 import { evaluateIntactReservationPaymentRule } from "@rms/inventory";
 import {
   isPaidOrderWithinAcceptanceWindow,
@@ -240,11 +241,40 @@ export function createMerchantPaidOrderAcceptance(
           );
         },
       });
-      return writer.commit({
+      const committed = await writer.commit({
         transaction: input.transaction,
         record,
         submissionReference: preparation.submissionReference,
       });
+      // WP-2423 DEC-PICKUP-CAPACITY-CONSUMED: an accepted pickup Order keeps counting against its
+      // pickup hour (Fulfillment consumes its ASAP commitment in this same transaction). A repeat
+      // of the acceptance repeats it idempotently. Never refuses the acceptance.
+      if (current.order.order.orderType === "Pickup" && current.capacity?.owner === "AsapPickup") {
+        const audit = await options.audit(committed.record);
+        const auditReference = Reflect.get(Object(audit), "auditId");
+        const retentionPolicyCode = Reflect.get(Object(audit), "retentionPolicyCode");
+        const retentionPolicyVersion = Reflect.get(Object(audit), "retentionPolicyVersion");
+        if (
+          typeof auditReference !== "string" ||
+          typeof retentionPolicyCode !== "string" ||
+          typeof retentionPolicyVersion !== "number"
+        )
+          return unavailable();
+        await consumeAcceptedAsapCapacity(
+          input.transaction,
+          { brandReference: scope.brandReference, storeReference: scope.storeReference },
+          {
+            submissionReference: preparation.submissionReference,
+            orderReference: identity.orderReference,
+            orderBatchReference: identity.orderBatchReference,
+            auditReference,
+            correlationReference: String(committed.record.operationReference),
+            retentionPolicyCode,
+            retentionPolicyVersion,
+          },
+        );
+      }
+      return committed;
     },
   });
 }

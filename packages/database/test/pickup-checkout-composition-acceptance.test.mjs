@@ -1360,14 +1360,34 @@ it.each([
 
         await assert.rejects(tips.select({ ...tipInput, selectionReference: id(90011) }));
         observedAt = shift(360000);
-        assert.deepEqual((await composition.prepare(input)).record, sealed.clock);
+        // WP-2423 DEC-PICKUP-CAPACITY-CONSUMED: once staff accepted the paid Order its commitment
+        // is Consumed (same payment window, still counted against the hour); replays return it and
+        // no further payment is authorized against it.
+        const consumedAt = positive
+          ? (
+              await admin.query(
+                "SELECT to_char(terminal_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS at " +
+                  "FROM rms_fulfillment.capacity_asap_commitment WHERE allocation_id=$1 AND version=3 AND state='Consumed'",
+                [sealed.clock.allocationReference],
+              )
+            ).rows[0]?.at
+          : undefined;
+        if (positive) assert.equal(typeof consumedAt, "string");
+        const currentClock = positive
+          ? { ...sealed.clock, state: "Consumed", version: 3, terminalAt: consumedAt }
+          : sealed.clock;
+        assert.deepEqual((await composition.prepare(input)).record, currentClock);
         const { session: replaySession, ...replayedClock } =
           await sessionOrders.preparePaymentClock(sessionOrderInput);
         assert.deepEqual(replaySession, createdSession.session);
-        assert.deepEqual(replayedClock, sealed);
+        assert.deepEqual(replayedClock, { ...sealed, clock: currentClock });
         assert.deepEqual(await sealCounts(), { records: 1, audits: 1 });
         await assert.rejects(composition.prepareForOrdering(input));
-        assert.deepEqual((await composition.authorizePayment(input)).record, sealed.clock);
+        if (positive)
+          await assert.rejects(composition.authorizePayment(input), {
+            code: "ASAP_CAPACITY_EXPIRED",
+          });
+        else assert.deepEqual((await composition.authorizePayment(input)).record, sealed.clock);
         assert.deepEqual((await tips.select(tipInput)).record, selected.record);
         assert.deepEqual(await tipCounts(), { records: 1, audits: 1 });
         assert.deepEqual((await orderService.create(orderInput)).record, recovered.record);
@@ -1472,7 +1492,7 @@ it.each([
         await writeSwitch(3, "Inactive");
         observedAt = sealed.clock.capacityExpiresAt;
         await assert.rejects(composition.authorizePayment(input));
-        assert.deepEqual((await composition.prepare(input)).record, sealed.clock);
+        assert.deepEqual((await composition.prepare(input)).record, currentClock);
         await sessions.revoke({
           selectorHash: guest.sessionSelectorHash,
           expectedVersion: 1,

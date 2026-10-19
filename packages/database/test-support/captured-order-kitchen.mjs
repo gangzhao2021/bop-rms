@@ -350,10 +350,41 @@ export async function exerciseCapturedOrderKitchen({
   await assert.rejects(authenticatedAccept({ ...commandInput, csrf: "synthetic-invalid" }));
   const authenticatedResult = await authenticatedAccept(commandInput);
   assert.deepEqual(authenticatedResult, { status: "Created", acceptedOrderVersion: 2 });
+  // WP-2423 DEC-PICKUP-CAPACITY-CONSUMED: accepting a paid pickup Order consumes its ASAP
+  // commitment in the same transaction, so it keeps counting against its pickup hour after the
+  // 30-minute payment window (v15 before the fix: every accepted Order stayed PaymentPending).
+  const capacityHistory = async () =>
+    (
+      await admin.query(
+        "SELECT state,version::int AS version,(terminal_at < capacity_expires_at) AS in_window " +
+          "FROM rms_fulfillment.capacity_asap_commitment WHERE order_id=$1 ORDER BY version",
+        [record.orderReference],
+      )
+    ).rows;
+  if (order.order.orderType === "Pickup") {
+    assert.deepEqual(
+      (await capacityHistory()).map((row) => [row.state, row.version, row.in_window]),
+      [
+        ["Prepared", 1, null],
+        ["PaymentPending", 2, null],
+        ["Consumed", 3, true],
+      ],
+    );
+    const consumedAudit = await admin.query(
+      "SELECT actor_type,reason_code,source_channel FROM platform_audit.audit_record " +
+        "WHERE action_code='FULFILLMENT_ASAP_CAPACITY_CONSUMED' AND correlation_id=$1",
+      [record.operationReference],
+    );
+    assert.deepEqual(consumedAudit.rows, [
+      { actor_type: "System", reason_code: "ORDER_ACCEPTED", source_channel: "MERCHANT_WEB" },
+    ]);
+  }
   assert.deepEqual(await authenticatedAccept(commandInput), {
     status: "AlreadyCommitted",
     acceptedOrderVersion: 2,
   });
+  // A repeated acceptance does not append another capacity version.
+  if (order.order.orderType === "Pickup") assert.equal((await capacityHistory()).length, 3);
   const accepted = await accept();
   assert.equal(accepted.status, "AlreadyCommitted");
   assert.notEqual(accepted.record.sourceDigest, hash("SYNTHETIC_MERCHANT_ELIGIBILITY"));
