@@ -34,10 +34,12 @@ describe("WP-2212 pooled transaction runner", () => {
         return 42;
       }),
     ).toBe(42);
-    expect(f.query.mock.calls.map(([sql]) => sql)).toContain(
-      "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
+    // WP-2423 item 4: BEGIN and the three limits in one round trip, then the scope in one.
+    expect(f.query.mock.calls.slice(0, 2).map(([sql]) => sql)).toEqual([
+      "BEGIN; SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
         "SET LOCAL idle_in_transaction_session_timeout = '5s'",
-    );
+      "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+    ]);
     expect(f.query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
     expect(f.release).toHaveBeenCalledWith(false);
     await expect(escaped?.query("SELECT 1", [])).rejects.toMatchObject({
@@ -64,8 +66,9 @@ describe("WP-2212 pooled transaction runner", () => {
   it.each([
     "SELECT secret",
     "COMMIT",
-    "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
+    "BEGIN; SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
       "SET LOCAL idle_in_transaction_session_timeout = '5s'",
+    "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
     "release",
   ])("bounds %s failure without retry", async (failure) => {
     const f = fixture(failure);
@@ -84,7 +87,7 @@ describe("WP-2212 pooled transaction runner", () => {
   it.each([
     ["COMMIT", "Connection terminated unexpectedly", "08006"],
     [
-      "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
+      "BEGIN; SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'; " +
         "SET LOCAL idle_in_transaction_session_timeout = '5s'",
       "Client has encountered a connection error and is not queryable",
       "08006",
@@ -339,7 +342,7 @@ describe("WP-2423 snapshot reads (v15 2026-10-18, 55P03)", () => {
       ]);
     });
     const sent = f.query.mock.calls.map(([sql]) => sql);
-    expect(sent[0]).toBe("BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+    expect(sent[0]).toMatch(/^BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY; SET LOCAL /u);
     expect(sent.some((sql) => /advisory|LOCK TABLE|FOR (UPDATE|SHARE)/u.test(sql))).toBe(false);
     expect(sent).toContain("SELECT order_id FROM rms_ordering.order_header WHERE order_id=$1");
     expect(sent).toContain("SELECT fulfillment_id FROM f WHERE id=$1");
@@ -353,7 +356,7 @@ describe("WP-2423 snapshot reads (v15 2026-10-18, 55P03)", () => {
       await transaction.query("SELECT id FROM t WHERE id=$1 FOR UPDATE", ["x"]);
     });
     const sent = f.query.mock.calls.map(([sql]) => sql);
-    expect(sent[0]).toBe("BEGIN");
+    expect(sent[0]).toMatch(/^BEGIN; SET LOCAL /u);
     expect(sent).toContain("SELECT pg_advisory_xact_lock(hashtextextended($1,0))");
     expect(sent).toContain("SELECT id FROM t WHERE id=$1 FOR UPDATE");
   });

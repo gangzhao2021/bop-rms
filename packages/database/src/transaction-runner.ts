@@ -94,15 +94,6 @@ export function createTenantTransactionRunner(
       pool,
       fixedScope,
       async (client) => {
-        try {
-          // One round trip for the three limits (a parameterless multi-statement simple query).
-          await client.query(transactionLimits);
-        } catch (error) {
-          throw new TenantContextDatabaseError(
-            "TENANT_DATABASE_TRANSACTION_FAILED",
-            tenantContextDatabaseDiagnostic(error),
-          );
-        }
         let active = true;
         let failed = false;
         let conflicted = false;
@@ -202,6 +193,8 @@ export function createTenantTransactionRunner(
         }
       },
       mode,
+      // The three limits go with BEGIN (one round trip; a parameterless simple query).
+      transactionLimits,
     );
   return Object.freeze<DatabaseTransactionRunner>({
     run: (action) => execute("ReadWrite", action),

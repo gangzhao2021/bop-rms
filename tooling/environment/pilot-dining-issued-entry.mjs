@@ -54,7 +54,16 @@ export async function createIssuedDiningEntries(resources, { loadProfile, loadKe
     registration,
     authorizeRegistration: async () => true,
   });
-  const binding = (runner) => {
+  /**
+   * `oneTransaction` (WP-2423 item 4): the runner lends one transaction to a single Guest Session
+   * binding check (pilot-customer-entry). Within it the guest's QR/table context is resolved once
+   * per session and instant and reused for the check's later purposes: here registration
+   * authorization is constant and public-store authorization only tells CustomerEntry from the
+   * other purposes, and the Brand, Store and table rows it read stay share-locked by this same
+   * transaction (the issued code row is append-only), so a second read could only repeat it.
+   */
+  const binding = (runner, { oneTransaction = false } = {}) => {
+    const resolved = oneTransaction ? new Map() : null;
     const guest = async (session) => {
       if (session?.channel !== "DineIn" || !uuidPattern.test(String(session.qrReference)))
         return null;
@@ -66,10 +75,22 @@ export async function createIssuedDiningEntries(resources, { loadProfile, loadKe
             transactions: runner,
           });
     };
+    const resolve = async (input) => {
+      const key =
+        resolved === null
+          ? null
+          : JSON.stringify([input?.session, input?.observedAt, input?.purpose === "CustomerEntry"]);
+      if (key !== null && resolved.has(key)) return resolved.get(key);
+      const current = (await (await guest(input?.session))?.resolve(input)) ?? null;
+      if (key !== null) resolved.set(key, current);
+      return current;
+    };
     return {
-      resolve: async (input) => (await guest(input.session))?.resolve(input) ?? null,
+      resolve,
       validate: async (session, at) =>
-        (await guest(session))?.validate(session, at) ?? "Unavailable",
+        (await resolve({ session, observedAt: at, purpose: "GuestSessionBinding" })) === null
+          ? "Unavailable"
+          : "Current",
     };
   };
   const admission = createPostgresGuestEntryAdmissionStore({

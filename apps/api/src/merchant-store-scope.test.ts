@@ -15,6 +15,7 @@ const ports = vi.hoisted(() => ({
   membership: vi.fn(),
   assignment: vi.fn(),
   authorize: vi.fn(),
+  packet: vi.fn(),
   validity: vi.fn(),
   source: vi.fn(),
 }));
@@ -37,6 +38,7 @@ vi.mock("@bop/permission", () => ({
   createPostgresCurrentPermissionPolicySource: () => ({
     authorize: ports.authorize,
     async authorizeActionsWithRoles(request: { actions: readonly string[] }) {
+      ports.packet(request.actions);
       const decisions = [];
       for (const action of request.actions)
         decisions.push(await ports.authorize({ ...request, actions: undefined, action }));
@@ -189,16 +191,21 @@ it("preserves both decisions for a different action and returns its actual denia
   );
 });
 it.each(["merchant.access", "catalog.manage"])(
-  "navigation denial stops %s without a second policy request",
+  "navigation denial stops %s from one policy packet read",
   async (action) => {
     const scope = await resolve(action);
-    ports.authorize.mockResolvedValue({
-      effect: "Deny",
+    ports.authorize.mockImplementation(async (request: { action: string }) => ({
+      // Only navigation is denied: an allowed requested action must still answer null.
+      effect: request.action === "merchant.access" ? "Deny" : "Allow",
       scopeKind: "Store",
-      action: "merchant.access",
-    });
+      action: request.action,
+    }));
     expect(await scope.authorizeAction(action)).toBeNull();
-    expect(ports.authorize).toHaveBeenCalledOnce();
+    // WP-2423 item 4: navigation and the action are one packet read, not two.
+    expect(ports.packet).toHaveBeenCalledOnce();
+    expect(ports.packet.mock.calls[0]?.[0]).toEqual(
+      action === "merchant.access" ? ["merchant.access"] : ["merchant.access", action],
+    );
   },
 );
 it("rejects a replaced session before resolving its selected context or policies", async () => {
@@ -403,7 +410,7 @@ it("initial admission retains the actual policy deadline and refuses expiry duri
 
 it("shares one transaction Permission owner for navigation and later actions without retaining Allow", async () => {
   const policy = createPostgresCurrentPermissionPolicySource(tx),
-    read = vi.spyOn(policy, "authorizeWithRoles"),
+    read = vi.spyOn(policy, "authorizeActionsWithRoles"),
     source = { identity: {}, now: () => at } as never;
   const scope = await createInitiallyAuthorizedMerchantStoreScope(source, policy)(
     tx,
@@ -413,11 +420,11 @@ it("shares one transaction Permission owner for navigation and later actions wit
   expect(read).toHaveBeenCalledTimes(1);
   expect(await scope.allowed()).toBe(true);
   expect(await scope.authorizeAction("catalog.option_set.read")).toMatchObject({ effect: "Allow" });
-  expect(read.mock.calls.map(([request]) => request.action)).toEqual([
-    "merchant.access",
-    "merchant.access",
-    "merchant.access",
-    "catalog.option_set.read",
+  // WP-2423 item 4: each checkpoint reads one policy packet for navigation and its action.
+  expect(read.mock.calls.map(([request]) => request.actions)).toEqual([
+    ["merchant.access"],
+    ["merchant.access"],
+    ["merchant.access", "catalog.option_set.read"],
   ]);
   ports.authorize.mockImplementation(async (request: { action: string }) => ({
     effect: "Deny",

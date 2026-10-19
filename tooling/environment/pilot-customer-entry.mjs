@@ -19,9 +19,9 @@ export async function createInternalCustomerEntry(
     await createInternalMerchantSession(resources),
   );
   const bound = createInternalDiningBinding(resources, dining, owner);
-  const binding = (runner) => {
+  const compose = (runner) => {
     const p = pickup.binding(runner),
-      d = dining.binding(runner);
+      d = dining.binding(runner, { oneTransaction: true });
     return createCustomerDiningSessionBinding({
       scope: resources.scope,
       binding: {
@@ -33,6 +33,24 @@ export async function createInternalCustomerEntry(
       now: resources.now,
     });
   };
+  /**
+   * WP-2423 item 4: every read of one Guest Session binding check (the table code issue, the
+   * QR/table context for each purpose, the Dining participation) runs in one transaction instead
+   * of one each (five for a seated guest). The same owner reads and checks run in the same order;
+   * they now see one consistent set of facts. Any failure still answers "Unavailable".
+   */
+  const binding = (runner) =>
+    Object.freeze({
+      async validate(session, at) {
+        try {
+          return await runner.run((tx) =>
+            compose({ run: (work) => work(tx) }).validate(session, at),
+          );
+        } catch {
+          return "Unavailable";
+        }
+      },
+    });
   const session = {
     credentials: resources.credentials.sessions,
     binding: binding(resources.transactions),

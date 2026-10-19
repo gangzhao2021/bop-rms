@@ -140,14 +140,31 @@ function readScope(input: unknown): Readonly<{ brandId: string; storeId: string 
   }
 }
 
+/**
+ * WP-2423 item 4: parameterless transaction-local limits sent in the same round trip as BEGIN
+ * (`SET LOCAL <setting> = '<value>'` only; anything else is refused before a connection is taken).
+ */
+const transactionSetup =
+  /^SET LOCAL [a-z_]{1,63} = '[0-9a-z]{1,16}'(?:; SET LOCAL [a-z_]{1,63} = '[0-9a-z]{1,16}'){0,7}$/u;
+/**
+ * The Brand and Store scope of one transaction, set together in one parameterized statement
+ * (values are bound, never interpolated).
+ */
+export const tenantContextScopeStatement =
+  "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)";
+
 export async function withTenantContextTransaction<T>(
   pool: Pick<Pool, "connect">,
   scopeInput: TenantDatabaseScope,
   callback: (client: PoolClient) => Promise<T>,
   /** WP-2423: "Snapshot" begins one REPEATABLE READ, READ ONLY transaction (see snapshot-read). */
   mode: "ReadWrite" | "Snapshot" = "ReadWrite",
+  /** WP-2423 item 4: transaction-local limits sent with BEGIN (see `transactionSetup`). */
+  setup?: string,
 ): Promise<T> {
   const scope = readScope(scopeInput);
+  if (setup !== undefined && (typeof setup !== "string" || !transactionSetup.test(setup)))
+    throw new TenantContextDatabaseError("TENANT_DATABASE_SCOPE_INVALID");
   let client: PoolClient;
   try {
     client = await pool.connect();
@@ -170,10 +187,13 @@ export async function withTenantContextTransaction<T>(
   let primaryError: unknown;
   let failed = false;
   try {
-    await client.query(mode === "Snapshot" ? snapshotReadBegin : "BEGIN");
+    const begin = mode === "Snapshot" ? snapshotReadBegin : "BEGIN";
+    // WP-2423 item 4: BEGIN and the limits in one simple-protocol round trip, then the scope in
+    // one bound statement (two setup round trips instead of four). Marked begun first: if a
+    // statement after BEGIN fails, the transaction is rolled back like any other setup failure.
     began = true;
-    await client.query("SELECT set_config('bop.brand_id', $1, true)", [scope.brandId]);
-    await client.query("SELECT set_config('bop.store_id', $1, true)", [scope.storeId]);
+    await client.query(setup === undefined ? begin : begin + "; " + setup);
+    await client.query(tenantContextScopeStatement, [scope.brandId, scope.storeId]);
     callbackActive = true;
     result = await callback(client);
     callbackActive = false;

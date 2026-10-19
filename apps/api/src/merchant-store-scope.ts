@@ -122,17 +122,27 @@ function createMerchantStoreScopeResolver(
         fresh.context.resolvedAt,
       );
       const policy = permissionPolicy ?? createPostgresCurrentPermissionPolicySource(tx);
-      const request = { tenantContext: fresh.context, membership, storeAssignment };
-      const assess = async (policyAction: string) => {
-        const result = await policy.authorizeWithRoles({ ...request, action: policyAction });
-        retain(field(result, "validUntil"), fresh.context.resolvedAt, true);
-        check();
-        return result.decision;
-      };
-      const navigation = await assess("merchant.access");
+      // WP-2423 item 4: navigation and the requested action from one permission packet read in
+      // this transaction (each action is evaluated on its own, exactly as two single reads would),
+      // instead of reading the same locked policy rows twice at the same checkpoint.
+      const actions =
+        requestedAction === "merchant.access"
+          ? ["merchant.access"]
+          : ["merchant.access", requestedAction];
+      const result = await policy.authorizeActionsWithRoles({
+        tenantContext: fresh.context,
+        membership,
+        storeAssignment,
+        actions: Object.freeze(actions),
+      });
+      retain(field(result, "validUntil"), fresh.context.resolvedAt, true);
+      check();
+      if (result.decisions.length !== actions.length) return denied();
+      const [navigation, decision] = result.decisions;
+      if (navigation === undefined) return denied();
       if (navigation.effect !== "Allow") return null;
       if (requestedAction === "merchant.access") return navigation;
-      return assess(requestedAction);
+      return decision ?? denied();
     };
     type Decision = Awaited<ReturnType<typeof assessSelection>>;
     /**
