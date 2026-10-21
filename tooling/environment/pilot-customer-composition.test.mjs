@@ -41,8 +41,11 @@ it("passes all existing customer routes and configured resources to the API runt
             "createInternalCustomerEntry",
             "providerAccountReference",
             "paymentChannel",
+            // DEC-PILOT-MAINTENANCE-PAGE: hosting.json customerOrigin (default the local entry).
+            "publicOrigin",
           ].sort(),
         );
+        expect(deps.publicOrigin).toBe("https://127.0.0.1:4443");
         expect(deps.providerAccountReference).toBe(config.providerAccountReference);
         expect(await deps.createInternalTestResources()).toBe(r);
         return sentinel;

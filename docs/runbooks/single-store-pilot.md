@@ -394,7 +394,9 @@ permission `dining.table.qr.manage`); see
   page works offline and can be printed from any computer or saved as PDF.
 - **TEST-ONLY until the Secrets and Tls gates close**: codes are signed with the local internal-test
   key and point at `https://127.0.0.1:4443`, so phones cannot scan them. After the managed QR key and
-  the public customer domain arrive, replace and reprint every code.
+  the public customer domain arrive, replace and reprint every code. The same applies to any later
+  change of `customerOrigin` or a compromised QR key
+  ([hosting](#hosting-customer-domain-certificate-and-managed-secrets-wp-2423)).
 
 ## Opening and closing the store (WP-2423)
 
@@ -1957,6 +1959,69 @@ First local run (v15, 2026-10-09): backup 532 tables / 525,651 rows / 37.8 MB in
 serving; drill restored it in 49 s and every table matched; a byte-flipped copy was refused with
 `checksum mismatch` before any database was created.
 
+## Hosting: customer domain, certificate and managed secrets (WP-2423)
+
+Decision: [pilot hosting integrations](../spec/design/pilot-hosting-integrations.md)
+(DEC-PILOT-SECRETS, DEC-PILOT-OFFSITE-S3, DEC-PILOT-MAINTENANCE-PAGE). Everything the hosting
+provides is named in `<runtime>/hosting.json` (0600, pilot operator, no secret values). Without the
+file the installation is the local internal test entry, exactly as v15 runs today; InternalTest may
+not name a public domain or a secrets folder (its DEMO staff login and simulated payments never go
+on the internet).
+
+```json
+{
+  "schemaVersion": 1,
+  "environment": "Pilot",
+  "customerOrigin": "https://order.<store domain>",
+  "secretsDirectory": "/run/secrets/bop-rms",
+  "tls": {
+    "mode": "front",
+    "certificateFile": "/run/tls/fullchain.pem",
+    "keyFile": "/run/tls/privkey.pem"
+  }
+}
+```
+
+- `customerOrigin`: the address printed on table QR codes and the only Origin/Host the pages and
+  API accept. **Changing it means Replace and print for every table code.**
+- `secretsDirectory`: the managed secret files; the list, rotation and QR key switch are in
+  [key and secret rotation](key-secret-rotation.md#pilot-secret-files-wp-2423-dec-pilot-secrets).
+- `tls.mode`: `front` when the hosting gives certificate files (the `front` service presents them
+  and reloads renewed files within a minute); `proxy` when a TLS-terminating load balancer or reverse
+  proxy in front of port 4443 holds the certificate (it may present the local certificate to that
+  proxy).
+
+Mount the hosting's folders read-only with a compose override next to `compose.pilot.yaml`
+(`docker compose -f compose.pilot.yaml -f compose.pilot.hosting.yaml …`), for example:
+
+```yaml
+services:
+  pilot:
+    environment: { NODE_ENV: production, BOP_PILOT_ENVIRONMENT: Pilot }
+    volumes: ["/etc/bop-rms/secrets:/run/secrets/bop-rms:ro"]
+  ops:
+    environment: { NODE_ENV: production, BOP_PILOT_ENVIRONMENT: Pilot }
+  front:
+    environment: { NODE_ENV: production, BOP_PILOT_ENVIRONMENT: Pilot }
+    volumes: ["/etc/bop-rms/tls:/run/tls:ro"]
+  postgres:
+    ports: ["0.0.0.0:443:14443"]
+```
+
+Before starting: `node tooling/environment/pilot-secrets.mjs check <runtime>` must print
+`PILOT_SECRETS_COMPLETE`. A Pilot start checks the secrets and the certificate first: the supervisor
+prints one `PILOT_NOT_READY Secrets: …` / `PILOT_NOT_READY Tls: <reason>` line per problem (file
+names and fixed reasons only) and refuses. `Tls` is met only with a public name and a certificate
+that phones trust for it (`certificate-not-trusted`, `certificate-wrong-host`, `certificate-expired`,
+`certificate-key-mismatch`, `certificate-unreadable`, `proxy-unreachable`, `customer-origin-not-public`
+name what to fix). Payment provider, staff login (Cognito) and reviewed currency/tax configuration
+remain separate gaps.
+
+The monitor's probes follow `customerOrigin` (Host and, with `front`, the public trust store for
+that name) and its certificate-expiry alert reads the hosted certificate. The internal test
+certificate expires **2026-11-14T05:15:40Z**; renew it (with the internal test installation, Owner
+approval) before then while the store still runs InternalTest.
+
 ## Alerts and scheduled backups (WP-2423 Q13)
 
 Decision: [DEC-PILOT-ALERTS-BACKUP](../spec/design/pilot-alerts-backup.md). The compose service
@@ -2085,6 +2150,29 @@ who open the menu during the window meet the existing "couldn't load / try again
 taking orders at that moment use the store outage procedure until the pages load. An unplanned
 restart (outage recovery) does not open a window: those alerts are real.
 
+**Update page (DEC-PILOT-MAINTENANCE-PAGE, [decision](../spec/design/pilot-hosting-integrations.md)).**
+The compose service `front` owns the published HTTPS port and stays up while `pilot` is recreated
+(`up -d pilot ops` does not touch it). Whenever the entry cannot be reached, guests and staff get a
+plain page instead of a connection reset: "Ordering is paused for a moment" (or, inside a planned
+window, "We're updating"), "This page will try again by itself", and "At a table? A staff member can
+take your order in the meantime." (staff pages: keep taking orders at the counter or on paper). It
+reloads itself every 20 seconds; French browsers get the French text. Pages already open meet their
+existing "try again" messages, which now succeed as soon as the entry is back. The monitor still
+reports the entry as down (the page answers 503), so real outages alert as before.
+
+First deployment of `front` (once; replaces the `proxy` relay of port 14443, a few seconds without
+the HTTPS port):
+
+1. `docker compose -f compose.pilot.yaml build pilot` (the image carries `pilot-front.mjs`).
+2. Open a planned window as in step 2 above.
+3. `docker compose -f compose.pilot.yaml up -d proxy front`, then `up -d pilot ops` as usual.
+4. Check: `docker compose -f compose.pilot.yaml logs front` shows `PILOT_FRONT_LISTENING 0.0.0.0:14443 → 127.0.0.1:4443 (relay)`;
+   the customer page and `/app` load at `https://127.0.0.1:4443` with the same certificate as before;
+   end the window.
+
+To roll back, restore the previous `compose.pilot.yaml` (proxy relaying 14443) and run
+`up -d --remove-orphans proxy`.
+
 ### Scheduled backups
 
 Daily at `backup.localTime` in the Store's time zone (after the business day closes; 04:30 by
@@ -2107,8 +2195,35 @@ Off-site copies are AES-256-GCM encrypted on this host before they are written, 
 be any folder that leaves the host: an external drive, or a folder a cloud sync client uploads.
 Mount it with `PILOT_OFFSITE_DIR=<host folder>` (create it first, owned by the pilot user). Compose
 refuses to start without it (and without `PILOT_RUNTIME_DIRECTORY`): a silent local default once sent
-off-site copies to `.local/pilot-offsite` on the same disk after redeploys (2026-10-17). An S3-compatible bucket with a
-managed key is the P4 target (external gate: bucket, credentials, region).
+off-site copies to `.local/pilot-offsite` on the same disk after redeploys (2026-10-17).
+
+**S3 bucket (DEC-PILOT-OFFSITE-S3, [decision](../spec/design/pilot-hosting-integrations.md))**: replace
+`offsite` with
+
+```json
+"offsite": {
+  "kind": "s3",
+  "bucket": "<bucket>",
+  "region": "<region, e.g. ca-central-1>",
+  "prefix": "<store>/",
+  "keyFile": "offsite-backup-key",
+  "keep": 30,
+  "sseKmsKeyId": "<optional KMS key ARN or alias/...>"
+}
+```
+
+Copies are still AES-256-GCM encrypted on this host; each upload carries its SHA-256 and is then
+read back from the bucket and compared before the copy counts as "Copied" (otherwise the off-site
+alert). Only names under `prefix` are listed and pruned. Credentials: the host's AWS role by
+default (on EC2 set the instance metadata hop limit to 2 so containers can reach it), or name two
+0600 runtime files `accessKeyIdFile`/`secretAccessKeyFile` for an access key limited to
+`s3:PutObject`, `s3:GetObject`, `s3:ListBucket` and `s3:DeleteObject` on that prefix (plus
+`kms:GenerateDataKey`/`kms:Decrypt` on the key when `sseKmsKeyId` is set). An S3-compatible store
+adds `"endpoint": "https://…"` (and `"forcePathStyle": true` if it needs it). Recommended bucket
+settings: block public access, versioning with a noncurrent-version expiry (e.g. 30 days) so a
+pruned or overwritten copy can still be recovered for a while. `PILOT_OFFSITE_DIR` is still required
+by compose; point it at an empty folder when the target is a bucket. External gate: the bucket,
+role or access key and (optional) KMS key.
 
 Key custody: create the key once with `pilot-ops.mjs generate-offsite-key <runtime>`. **Copy the
 key file's content into the Owner's password manager now.** Without it the off-site copies cannot be
@@ -2120,6 +2235,17 @@ node tooling/environment/pilot-ops.mjs decrypt-backup <runtime> <copy>.dump.mani
 node tooling/environment/pilot-ops.mjs decrypt-backup <runtime> <copy>.dump.media.tar.enc <dir>/<name>.dump.media.tar
 tooling/environment/pilot-backup.sh drill --container <postgres container> --port <port> --database <db> --user <migration role> --password-file <file> --dir <dir> --keep-drill
 ```
+
+From a bucket (or the configured folder), fetch and decrypt in one step instead:
+
+```bash
+node tooling/environment/pilot-ops.mjs list-offsite <runtime>
+node tooling/environment/pilot-ops.mjs restore-offsite <runtime> <name>.dump.enc <dir>/<name>.dump
+```
+
+(likewise for `.dump.manifest.json.enc` and `.dump.media.tar.enc`, then `drill` as above). On a
+replacement host this needs the same `ops.json` offsite block, the off-site key from the Owner's
+password manager in the runtime directory, and access to the bucket.
 
 A tampered or wrong-key copy is refused and nothing is written. `--keep-drill` keeps the restored
 database for inspection or cut-over (a cut-over is a maintenance step with the Owner's approval).

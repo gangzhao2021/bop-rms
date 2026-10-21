@@ -60,3 +60,47 @@ it("WP-2423 P1b: a Pilot start names every remaining capability gap; InternalTes
   expect(pilotCapabilityGaps.map((gap) => gap.code)).toContain("PaymentProvider");
   expect(() => assertPilotReady(at("production"))).toThrow("PILOT_ENVIRONMENT_INVALID");
 });
+
+it("DEC-PILOT-SECRETS: Secrets and Tls clear only when checked against this installation's configuration", async () => {
+  const { assertPilotReady, checkConfiguredPilotCapabilities, pilotCapabilityGaps } =
+    await import("./pilot-environment.mjs");
+  const others = pilotCapabilityGaps
+    .map((gap) => gap.code)
+    .filter((code) => !["Secrets", "Tls"].includes(code));
+  expect(() => assertPilotReady({ ...at("production", "Pilot"), met: ["Secrets", "Tls"] })).toThrow(
+    "PILOT_CAPABILITY_MISSING:" + others.join(","),
+  );
+  // Only configurable gaps can be met; a claim for any other code changes nothing.
+  expect(() =>
+    assertPilotReady({ ...at("production", "Pilot"), met: ["PaymentProvider"] }),
+  ).toThrow("PaymentProvider");
+  const hosting = { secretsDirectory: "/run/secrets/bop-rms" };
+  const complete = await checkConfiguredPilotCapabilities("/runtime", {
+    loadHosting: async () => hosting,
+    checkSecrets: async () => ({ missing: [], invalid: [] }),
+    checkTls: async () => null,
+  });
+  expect(complete).toEqual({ met: ["Secrets", "Tls"], problems: [] });
+  const missing = await checkConfiguredPilotCapabilities("/runtime", {
+    loadHosting: async () => hosting,
+    checkSecrets: async () => ({ missing: ["guest-session-key"], invalid: [] }),
+    checkTls: async () => "certificate-not-trusted",
+  });
+  expect(missing.met).toEqual([]);
+  expect(missing.problems.join(" ")).toContain("guest-session-key");
+  expect(missing.problems.join(" ")).toContain("certificate-not-trusted");
+  const unconfigured = await checkConfiguredPilotCapabilities("/runtime", {
+    loadHosting: async () => ({ secretsDirectory: null }),
+    checkSecrets: async () => {
+      throw Error("not called");
+    },
+    checkTls: async () => "customer-origin-not-configured",
+  });
+  expect(unconfigured.met).toEqual([]);
+  const broken = await checkConfiguredPilotCapabilities("/runtime", {
+    loadHosting: async () => {
+      throw Object.assign(Error("PILOT_HOSTING_CONFIG_INVALID"), { reason: "customerOrigin" });
+    },
+  });
+  expect(broken).toEqual({ met: [], problems: ["hosting.json is unusable (customerOrigin)"] });
+});

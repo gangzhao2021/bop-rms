@@ -281,10 +281,16 @@ export async function decryptFile(source, target, key, name) {
 }
 
 /**
- * The off-site target interface: `put(name, source)`, `list()`, `remove(name)`. The pilot ships a
- * directory target (an external drive or a folder a sync client copies off the host; content is
- * encrypted before it is written). S3-compatible object storage is an external gate (P4).
+ * The off-site target interface: `put(name, write)`, `list()`, `remove(name)`, `fetch(name,
+ * destination)`. A directory target (an external drive or a folder a sync client copies off the
+ * host) or an S3 bucket (DEC-PILOT-OFFSITE-S3); content is encrypted before it is written.
  */
+export async function createOffsiteTarget(offsite, options = {}) {
+  if (offsite.kind === "directory") return createDirectoryOffsiteTarget(offsite.path, options);
+  if (offsite.kind === "s3")
+    return (await import("./pilot-offsite-s3.mjs")).createS3OffsiteTarget(offsite, options);
+  throw Error("PILOT_OFFSITE_TARGET_UNAVAILABLE");
+}
 export async function createDirectoryOffsiteTarget(directory, { forbidden = [] } = {}) {
   const stat = await fs.lstat(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error("PILOT_OFFSITE_TARGET_UNAVAILABLE");
@@ -305,6 +311,13 @@ export async function createDirectoryOffsiteTarget(directory, { forbidden = [] }
     async remove(name) {
       await fs.rm(path.join(real, name), { force: true });
     },
+    async fetch(name, destination) {
+      await fs.copyFile(
+        path.join(real, path.basename(name)),
+        destination,
+        fs.constants.COPYFILE_EXCL,
+      );
+    },
   });
 }
 
@@ -320,7 +333,7 @@ export async function runBackupCycle({
   backup,
   status,
   script = runBackupScript,
-  createTarget = createDirectoryOffsiteTarget,
+  createTarget = createOffsiteTarget,
   readKey = readOffsiteKey,
   log = () => undefined,
 }) {
@@ -396,8 +409,10 @@ export async function runBackupCycle({
   if (backup.offsite !== null) {
     try {
       const key = await readKey(runtimeDirectory, backup.offsite.keyFile);
-      const target = await createTarget(backup.offsite.path, {
+      const target = await createTarget(backup.offsite, {
         forbidden: [runtimeDirectory, backup.directory],
+        staging: backup.directory,
+        runtimeDirectory,
       });
       // The dump, its manifest and its product photo archive, each encrypted the same way.
       for (const name of [file, `${file}.manifest.json`, `${file}.media.tar`])
