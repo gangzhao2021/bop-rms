@@ -32,7 +32,9 @@ describe("CUST-ENTRY-CONTEXT", () => {
     expect(html).toContain("Harbour Test Store");
     expect(html).toContain("Ready to order");
     expect(html).toContain("Your table at Harbour Test Store is confirmed for dine-in");
-    expect(html).toContain("Dine in, Pickup");
+    // The service is in the sentence above; open status and hours are said once, in the store card.
+    expect(html).not.toContain("Available service");
+    expect(html).not.toContain("Open for ordering");
     expect(html).toContain("Continue to menu");
     expect(html).not.toContain(context.publicStoreReference);
     expect(html).not.toContain(String(context.publicTableReference));
@@ -61,8 +63,9 @@ describe("CUST-ENTRY-CONTEXT", () => {
       kind: "Established",
       context: { ...context, operatingState: "Closed", availableServiceModes: [] },
     });
-    expect(html).toContain("Not accepting orders");
+    // Said once, in words (never colour alone); open hours live in the store card.
     expect(html).toContain("This location is not accepting orders");
+    expect(html).not.toContain("Location status");
     expect(html).not.toContain("Continue to menu");
   });
 
