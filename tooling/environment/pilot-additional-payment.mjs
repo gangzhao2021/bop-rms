@@ -1,3 +1,4 @@
+import { isPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
 import console from "node:console";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { createHash } from "node:crypto";
@@ -28,7 +29,7 @@ export async function createInternalAdditionalPayment(
     saved.environment !== "InternalTest" ||
     saved.database !== expectedDatabaseName ||
     Object.keys(scope).some((k) => saved.scope[k] !== scope[k]) ||
-    simulator.simulation !== true
+    !isPilotPaymentProvider(simulator)
   )
     throw new Error("INTERNAL_ADDITIONAL_PAYMENT_ONLY");
   async function resolveRequest(input) {

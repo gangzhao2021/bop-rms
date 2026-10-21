@@ -21,7 +21,8 @@ import { createInternalOrderConfirmation } from "./pilot-order-confirmation.mjs"
 import { createInternalPickupProof } from "./pilot-pickup-proof.mjs";
 import { createInternalReceipt } from "./pilot-receipt.mjs";
 import { refreshInternalReceiptObservations } from "./pilot-receipt-observations.mjs";
-import { createInternalSimulatedProvider } from "./pilot-payment-provider.mjs";
+// DEC-STRIPE-PILOT-WIRING: the configured Provider (Stripe test mode or the TEST-ONLY simulator).
+import { createPilotPaymentProvider as createInternalSimulatedProvider } from "./pilot-stripe-provider.mjs";
 import { createInternalKitchenQueue } from "./pilot-kitchen-queue.mjs";
 import { createInternalDiningCheckoutExpiryWorkload } from "./pilot-dining-checkout-expiry.mjs";
 import { createInternalCartExpiryWorkload } from "./pilot-cart-expiry.mjs";
@@ -76,6 +77,7 @@ export function composeConfiguredBusinessWorker({
   const account = { providerAccountReference: config.providerAccountReference };
   const provider = (options = {}) =>
     f.createInternalSimulatedProvider(options, {
+      directory,
       path: join(directory, "simulated-provider.sqlite"),
       loadProfile: installation.loadProfile,
       expectedDatabaseName: installation.database,

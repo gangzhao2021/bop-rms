@@ -77,12 +77,16 @@ export function normalizeStripeOnlineIntentResponse(
     succeeded: "Captured",
   };
   if (typeof raw.status !== "string" || !Object.hasOwn(states, raw.status)) return invalid();
-  const status = states[raw.status];
+  let status = states[raw.status];
   if (status === undefined) return invalid();
   let transaction = null;
   let refunded = 0n;
   if (raw.latest_charge !== null) {
     const charge = object(raw.latest_charge);
+    // DEC-STRIPE-PILOT-WIRING: Stripe returns a declined intent to requires_payment_method with
+    // its failed charge. Payment treats that attempt as Failed (a new card is a new attempt and a
+    // new intent, DEC-PAYMENT-CARD-RETRY), so its client credential is never handed out again.
+    if (raw.status === "requires_payment_method" && charge.status === "failed") status = "Failed";
     if (
       charge.object !== "charge" ||
       charge.payment_intent !== reference ||
@@ -103,7 +107,8 @@ export function normalizeStripeOnlineIntentResponse(
         object(charge.payment_method_details).type !== "card")
     )
       return invalid();
-    transaction = parseProviderReference(charge.id);
+    // A declined charge moved no money; it is not the payment's transaction.
+    transaction = status === "Failed" ? null : parseProviderReference(charge.id);
   }
   if (
     (status === "Captured" && (transaction === null || received !== requested)) ||

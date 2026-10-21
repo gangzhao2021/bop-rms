@@ -1,3 +1,4 @@
+import { isPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
 import process from "node:process";
 import {
   createRetrieveIntentRequest,
@@ -11,7 +12,9 @@ export function createInternalReconciliationTerminalOccurrence({ simulator, scop
     throw Error("RECONCILIATION_TERMINAL_OCCURRENCE_UNAVAILABLE");
   };
   const authorized = () =>
-    process.env.NODE_ENV === "development" && simulator.simulation === true && active() === true;
+    process.env.NODE_ENV === "development" &&
+    isPilotPaymentProvider(simulator) &&
+    active() === true;
   if (!authorized()) return fail();
   return async ({ candidate: rawCandidate, snapshot: rawSnapshot }) => {
     if (!authorized()) return fail();

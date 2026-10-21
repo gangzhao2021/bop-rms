@@ -6,7 +6,8 @@ import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { createPilotRecoverySweep } from "./pilot-recovery-sweep.mjs";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
-import { assertPilotReady, isPilotRuntime } from "./pilot-environment.mjs";
+import { assertPilotReady, currentPilotEnvironment, isPilotRuntime } from "./pilot-environment.mjs";
+import { pilotPaymentProviderReady } from "./pilot-payment-config.mjs";
 import { SUPERVISOR_HEALTH_FILE, writePrivateJson } from "./pilot-ops-files.mjs";
 export async function acquirePilotSupervisorLease(runtimeDirectory) {
   const root = await fs.realpath(process.cwd());
@@ -175,7 +176,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (process.argv.length !== 3 || !isPilotRuntime())
       throw Error("PILOT_SUPERVISOR_ARGUMENT_INVALID");
     try {
-      assertPilotReady();
+      const environment = currentPilotEnvironment();
+      assertPilotReady(undefined, {
+        satisfied: (await pilotPaymentProviderReady(process.argv[2], { environment }))
+          ? ["PaymentProvider"]
+          : [],
+      });
     } catch (error) {
       // WP-2423 P1b: name what a Pilot Store still lacks (capability codes only, no data).
       console.error(

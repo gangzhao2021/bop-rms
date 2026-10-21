@@ -118,6 +118,8 @@ export interface LocalCustomerRuntimeOptions {
     dining: CompleteCheckoutDetailsPort;
   }>;
   readonly paymentIntent?: CustomerPaymentIntentPort;
+  /** WP-2423 DEC-STRIPE-PILOT-WIRING: Stripe webhook receiver (Stripe mode only). */
+  readonly paymentProviderWebhook?: ApiServerRuntimeOptions["paymentProviderWebhook"];
   readonly paymentResult?: Omit<LocalPaymentResult, "access" | "allowedOrigin"> & {
     readonly access: Omit<LocalPaymentResult["access"], "scope" | "credentials" | "now">;
   };
@@ -504,6 +506,9 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
     throw new Error("CUSTOMER_PICKUP_STATUS_REQUIRED");
   return createApiServerRuntime({
     ...(options.merchantRuntime === undefined ? {} : { merchantRuntime: options.merchantRuntime }),
+    ...(options.paymentProviderWebhook === undefined
+      ? {}
+      : { paymentProviderWebhook: options.paymentProviderWebhook }),
     ...(orderSubmission === undefined
       ? {}
       : {

@@ -69,7 +69,11 @@ export const pilotCapabilityGaps = Object.freeze([
   Object.freeze({
     code: "PaymentProvider",
     standIn: "internal payment simulator",
-    needs: "Stripe adapter wiring (repository) and the Owner's Stripe account keys (external)",
+    // DEC-STRIPE-PILOT-WIRING: Stripe test-mode wiring is done (payment.json + secret files);
+    // satisfied only by a configured Stripe Provider whose secrets are present and whose mode
+    // matches the environment (Live for a Pilot Store — not yet accepted by the configuration).
+    needs:
+      "Stripe live-mode Provider environment through the composition (repository) and the Owner's live keys, webhook secret and verified domain (external)",
   }),
   Object.freeze({
     code: "StaffLogin",
@@ -93,12 +97,20 @@ export const pilotCapabilityGaps = Object.freeze([
   }),
 ]);
 
+/**
+ * The gaps that remain once the installation's configured capabilities are taken into account.
+ * `satisfied` holds codes whose real implementation is configured and ready for this
+ * environment (e.g. "PaymentProvider" from `pilotPaymentProviderReady`).
+ */
+export function remainingPilotCapabilityGaps(satisfied = []) {
+  return pilotCapabilityGaps.filter((gap) => !satisfied.includes(gap.code));
+}
+
 /** Refuses a Pilot start while a capability gap remains; InternalTest is unaffected. */
-export function assertPilotReady(options) {
+export function assertPilotReady(options, { satisfied = [] } = {}) {
   const environment = currentPilotEnvironment(options);
-  if (environment === "Pilot" && pilotCapabilityGaps.length > 0)
-    throw new Error(
-      "PILOT_CAPABILITY_MISSING:" + pilotCapabilityGaps.map((gap) => gap.code).join(","),
-    );
+  const remaining = remainingPilotCapabilityGaps(satisfied);
+  if (environment === "Pilot" && remaining.length > 0)
+    throw new Error("PILOT_CAPABILITY_MISSING:" + remaining.map((gap) => gap.code).join(","));
   return environment;
 }
