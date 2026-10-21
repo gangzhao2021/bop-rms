@@ -32,7 +32,9 @@ pilot runtime directory, served at `/bff/customer/payment-configuration`
 (internal simulation and the local root entry for InternalTest when the file is
 absent; Stripe when it is present), so rebuilding the customer frontend uses a
 normal `pnpm --filter @bop-rms/customer-pwa build` with no build-time payment flag.
-No QR-token URL is needed for the local root entry.
+No QR-token URL is needed for the local root entry. Switching the installation to
+Stripe test mode (and the later live-mode gate) follows
+[Switching the pilot to Stripe](./pilot-stripe-switch.md).
 
 Current demonstration entry points:
 
