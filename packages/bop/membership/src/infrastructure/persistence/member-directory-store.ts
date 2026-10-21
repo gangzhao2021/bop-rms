@@ -1,4 +1,7 @@
-import { parseMembershipReference } from "../../domain/membership.js";
+import {
+  parseMembershipReference,
+  parseStoreAssignmentReference,
+} from "../../domain/membership.js";
 
 /**
  * WP-2423: Membership owner's Store staff directory (Section 88 IAM-USER-LIST): the Store's members
@@ -267,4 +270,203 @@ export async function endStoreMemberAssignment(
     retentionPolicyVersion: 1,
   });
   return { status: "Applied", membershipReference: String(latest.membership) };
+}
+
+type AppendAudit = (
+  tx: MemberDirectoryTransaction,
+  record: Record<string, unknown>,
+) => Promise<unknown>;
+const memberAudit = (input: {
+  readonly auditReference: string;
+  readonly brandReference: string;
+  readonly storeReference: string;
+  readonly actorReference: string;
+  readonly actionCode: string;
+  readonly targetId: string;
+  readonly lifecycle: string;
+  readonly correlationId: string;
+  readonly at: string;
+}) => ({
+  auditId: input.auditReference,
+  brandId: input.brandReference,
+  storeId: input.storeReference,
+  actor: { type: "User", reference: input.actorReference },
+  actionCode: input.actionCode,
+  targetType: "Membership",
+  targetId: input.targetId,
+  afterSummary: { lifecycle: input.lifecycle },
+  reasonCode: "STAFF_ONBOARDING",
+  correlationId: input.correlationId,
+  occurredAt: input.at,
+  sourceChannel: "MERCHANT_WEB",
+  dataClassification: "Internal",
+  retentionPolicyCode: "AUDIT_STANDARD",
+  retentionPolicyVersion: 1,
+});
+async function lockMembership(
+  tx: MemberDirectoryTransaction,
+  input: { readonly brandReference: string; readonly actorReference: string },
+  membership: string,
+): Promise<string> {
+  const rows = (
+    await tx.query(
+      "SELECT lifecycle FROM bop_membership.membership WHERE membership_id=$1 AND brand_id=$2 AND actor_id=$3 FOR UPDATE",
+      [membership, input.brandReference, input.actorReference],
+    )
+  ).rows;
+  if (rows[0] === undefined) throw new MemberDirectoryError("MEMBER_DIRECTORY_NOT_FOUND");
+  return String(rows[0].lifecycle);
+}
+
+/**
+ * WP-2423 DEC-COGNITO-STORE-STAFF: an invited person's place at the Store. The Membership waits
+ * for their first sign-in (PendingActivation, so it grants nothing); the Store assignment is
+ * already the Store's, so the staff screen lists the invited person and a role can be requested.
+ */
+export async function addInvitedStoreMember(
+  tx: MemberDirectoryTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly actorReference: string;
+    readonly membershipReference: string;
+    readonly storeAssignmentReference: string;
+    readonly invitedBy: string;
+    readonly invitationReference: string;
+    readonly at: string;
+    readonly auditReference: string;
+  },
+  appendAudit: AppendAudit,
+): Promise<void> {
+  const membership = String(parseMembershipReference(input.membershipReference)),
+    assignment = String(parseStoreAssignmentReference(input.storeAssignmentReference));
+  await tx.query(scopeSql, [input.brandReference, input.storeReference]);
+  await tx.query(
+    `INSERT INTO bop_membership.membership(membership_id,actor_id,brand_id,workforce_relationship_reference,lifecycle,
+       effective_from,effective_until,version,created_at,updated_at)
+     VALUES($1,$2,$3,NULL,'PendingActivation',$4,NULL,1,$4,$4)`,
+    [membership, input.actorReference, input.brandReference, input.at],
+  );
+  await tx.query(
+    `INSERT INTO bop_membership.store_assignment(assignment_id,membership_id,actor_id,brand_id,store_id,lifecycle,
+       effective_from,effective_until,version,created_at,updated_at)
+     VALUES($1,$2,$3,$4,$5,'Active',$6,NULL,1,$6,$6)`,
+    [
+      assignment,
+      membership,
+      input.actorReference,
+      input.brandReference,
+      input.storeReference,
+      input.at,
+    ],
+  );
+  await appendAudit(
+    tx,
+    memberAudit({
+      ...input,
+      actorReference: input.invitedBy,
+      actionCode: "MEMBER_INVITED_TO_STORE",
+      targetId: membership,
+      lifecycle: "PendingActivation",
+      correlationId: input.invitationReference,
+    }),
+  );
+}
+
+/**
+ * WP-2423 DEC-COGNITO-STORE-STAFF: the invited person signed in for the first time; their
+ * Membership becomes Active with the accepted invitation as its workforce relationship evidence.
+ * A Membership that is already Active (a retried sign-in) is left as it is.
+ */
+export async function activateInvitedStoreMember(
+  tx: MemberDirectoryTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly actorReference: string;
+    readonly membershipReference: string;
+    readonly invitationReference: string;
+    readonly at: string;
+    readonly auditReference: string;
+  },
+  appendAudit: AppendAudit,
+): Promise<"Applied" | "AlreadyApplied"> {
+  const membership = String(parseMembershipReference(input.membershipReference));
+  await tx.query(scopeSql, [input.brandReference, input.storeReference]);
+  const lifecycle = await lockMembership(tx, input, membership);
+  if (lifecycle === "Active") return "AlreadyApplied";
+  if (lifecycle !== "PendingActivation")
+    throw new MemberDirectoryError("MEMBER_DIRECTORY_VERSION_CONFLICT");
+  const updated = await tx.query(
+    `UPDATE bop_membership.membership SET lifecycle='Active',workforce_relationship_reference=$2,version=version+1,
+       updated_at=GREATEST(updated_at,$3::timestamptz)
+     WHERE membership_id=$1 AND lifecycle='PendingActivation' RETURNING version`,
+    [membership, input.invitationReference, input.at],
+  );
+  if (updated.rows.length !== 1)
+    throw new MemberDirectoryError("MEMBER_DIRECTORY_VERSION_CONFLICT");
+  await appendAudit(
+    tx,
+    memberAudit({
+      ...input,
+      actionCode: "MEMBER_INVITATION_ACCEPTED",
+      targetId: membership,
+      lifecycle: "Active",
+      correlationId: input.invitationReference,
+    }),
+  );
+  return "Applied";
+}
+
+/**
+ * WP-2423 DEC-COGNITO-STORE-STAFF: a withdrawn invitation ends the waiting Membership and its
+ * Store assignment (history kept). A person who already signed in is removed from the Store on
+ * the staff screen instead.
+ */
+export async function withdrawInvitedStoreMember(
+  tx: MemberDirectoryTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly actorReference: string;
+    readonly membershipReference: string;
+    readonly invitationReference: string;
+    readonly withdrawnBy: string;
+    readonly at: string;
+    readonly auditReference: string;
+  },
+  appendAudit: AppendAudit,
+): Promise<"Applied" | "AlreadyApplied"> {
+  const membership = String(parseMembershipReference(input.membershipReference));
+  await tx.query(scopeSql, [input.brandReference, input.storeReference]);
+  const lifecycle = await lockMembership(tx, input, membership);
+  if (lifecycle === "Ended") return "AlreadyApplied";
+  if (lifecycle !== "PendingActivation")
+    throw new MemberDirectoryError("MEMBER_DIRECTORY_VERSION_CONFLICT");
+  await tx.query(
+    `UPDATE bop_membership.store_assignment SET lifecycle='Ended',effective_until=$3,version=version+1,
+       updated_at=GREATEST(updated_at,$3::timestamptz)
+     WHERE membership_id=$1 AND store_id=$2 AND lifecycle<>'Ended'`,
+    [membership, input.storeReference, input.at],
+  );
+  const updated = await tx.query(
+    `UPDATE bop_membership.membership SET lifecycle='Ended',effective_until=$2,version=version+1,
+       updated_at=GREATEST(updated_at,$2::timestamptz)
+     WHERE membership_id=$1 AND lifecycle='PendingActivation' RETURNING version`,
+    [membership, input.at],
+  );
+  if (updated.rows.length !== 1)
+    throw new MemberDirectoryError("MEMBER_DIRECTORY_VERSION_CONFLICT");
+  await appendAudit(
+    tx,
+    memberAudit({
+      ...input,
+      actorReference: input.withdrawnBy,
+      actionCode: "MEMBER_INVITATION_WITHDRAWN",
+      targetId: membership,
+      lifecycle: "Ended",
+      correlationId: input.invitationReference,
+    }),
+  );
+  return "Applied";
 }

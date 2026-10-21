@@ -40,6 +40,8 @@ const moduleManifestInput = {
       "staff_pin_credential",
       "staff_pin_attempt",
       "staff_pin_session",
+      "store_staff_invitation",
+      "store_staff_account",
     ],
   },
   ownedJobs: [],

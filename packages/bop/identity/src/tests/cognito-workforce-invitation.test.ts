@@ -367,7 +367,81 @@ it("rejects unsupported region, open configuration and explicit credential/endpo
     { ...f.options, endpoint: "https://untrusted.invalid" },
     { ...f.options, credentials: {} },
     { ...f.options, requestTimeoutMs: 5001 },
+    // WP-2423 DEC-COGNITO-STORE-STAFF: only a loopback stand-in may replace the AWS endpoint.
+    {
+      ...f.options,
+      providerEndpoint: {
+        url: "https://untrusted.invalid/",
+        credentials: { accessKeyId: "a", secretAccessKey: "b" },
+      },
+    },
+    {
+      ...f.options,
+      providerEndpoint: {
+        url: "http://127.0.0.1/",
+        credentials: { accessKeyId: "a", secretAccessKey: "b" },
+      },
+    },
+    { ...f.options, markEmailVerified: false },
   ])
     expect(() => createCognitoWorkforceInvitation(value)).toThrow("request denied");
   expect(sdk.construct).toHaveBeenCalledTimes(1);
+});
+it("WP-2423 Store staff: marks the work email verified and talks to a loopback stand-in only when told", async () => {
+  const f = fixture();
+  const source = createCognitoWorkforceInvitation({
+    ...f.options,
+    markEmailVerified: true,
+    providerEndpoint: {
+      url: "http://127.0.0.1:4599/",
+      credentials: { accessKeyId: "TESTONLY", secretAccessKey: "TESTONLY" },
+    },
+  });
+  expect(sdk.construct).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      endpoint: "http://127.0.0.1:4599",
+      credentials: { accessKeyId: "TESTONLY", secretAccessKey: "TESTONLY" },
+    }),
+  );
+  await source.create(request);
+  const command = sdk.send.mock.calls.at(-1)?.[0] as AdminCreateUserCommand;
+  expect(command.input.UserAttributes).toEqual([
+    { Name: "email", Value: "owner@example.invalid" },
+    { Name: "email_verified", Value: "true" },
+    { Name: "custom:bop_invitation_intent", Value: creationIntentDigest },
+  ]);
+});
+it("WP-2423 Store staff: resends to an account still waiting, and removes only an unused tagged account", async () => {
+  const f = fixture();
+  sdk.send.mockImplementation(async () => ({ User: user() }));
+  expect(await f.source.resend({ actorReference })).toBe("Sent");
+  const resend = sdk.send.mock.calls.at(-1)?.[0] as AdminCreateUserCommand;
+  expect(resend.input).toMatchObject({ Username: username, MessageAction: "RESEND" });
+  sdk.send.mockRejectedValueOnce(new UserNotFoundException({ message: "missing", $metadata: {} }));
+  expect(await f.source.resend({ actorReference })).toBe("NotFound");
+  sdk.send.mockRejectedValueOnce(new Error("network"));
+  expect(await f.source.resend({ actorReference })).toBe("Unknown");
+
+  const { Attributes, ...rest } = user();
+  sdk.send.mockReset();
+  sdk.send.mockImplementation(async () => ({ ...rest, UserAttributes: Attributes }));
+  expect(await f.source.remove({ actorReference, creationIntentDigest })).toBe("Removed");
+  expect(sdk.send.mock.calls.map(([command]) => command.constructor.name)).toEqual([
+    "AdminGetUserCommand",
+    "AdminDeleteUserCommand",
+  ]);
+  // Another invitation's account, or one that has signed in, is never deleted.
+  sdk.send.mockReset();
+  sdk.send.mockImplementation(async () => ({ ...rest, UserAttributes: Attributes }));
+  expect(
+    await f.source.remove({ actorReference, creationIntentDigest: `sha256:${"b".repeat(64)}` }),
+  ).toBe("Unknown");
+  sdk.send.mockReset();
+  sdk.send.mockImplementation(async () => ({
+    ...rest,
+    UserStatus: "CONFIRMED",
+    UserAttributes: Attributes,
+  }));
+  expect(await f.source.remove({ actorReference, creationIntentDigest })).toBe("SignedIn");
+  expect(sdk.send).toHaveBeenCalledTimes(1);
 });

@@ -41,6 +41,12 @@ export interface BrowserSessionServiceOptions {
   readonly envelopes: SessionEnvelopeCryptoPort;
   readonly pkce: PkcePort;
   readonly now?: () => unknown;
+  /**
+   * WP-2423 DEC-COGNITO-STORE-STAFF: the session kind a sign-in started for a given allowed
+   * post-login path (for example the kitchen display start); other paths get WorkforceStandard.
+   * The path was fixed server-side when the sign-in started, never taken from the callback.
+   */
+  readonly postLoginPolicies?: Readonly<Record<string, SessionPolicyCode>>;
 }
 
 export interface BrowserCookieMutation {
@@ -99,9 +105,16 @@ export class BrowserSessionService {
   readonly #envelopes: SessionEnvelopeCryptoPort;
   readonly #pkce: PkcePort;
   readonly #now: () => unknown;
+  readonly #postLoginPolicies: ReadonlyMap<string, SessionPolicyCode>;
 
   constructor(options: BrowserSessionServiceOptions) {
+    const policies = new Map(Object.entries(options.postLoginPolicies ?? {}));
     if (
+      [...policies].some(
+        ([path, code]) =>
+          !options.configuration.allowedPostLoginPaths.includes(path) ||
+          !Object.values(sessionPolicies).some((policy) => policy.code === code),
+      ) ||
       !/^[A-Za-z0-9._~-]{1,255}$/u.test(options.configuration.clientId) ||
       !/^[a-z][a-z0-9-]{0,63}$/u.test(options.configuration.environment) ||
       options.configuration.allowedPostLoginPaths.length === 0 ||
@@ -124,6 +137,7 @@ export class BrowserSessionService {
     this.#envelopes = options.envelopes;
     this.#pkce = options.pkce;
     this.#now = options.now ?? (() => new Date().toISOString());
+    this.#postLoginPolicies = policies;
   }
 
   #observedAt() {
@@ -197,7 +211,12 @@ export class BrowserSessionService {
   }> {
     try {
       const observedAt = this.#observedAt();
-      const code = parseRawBrowserCredential(input.code);
+      // WP-2423 DEC-COGNITO-STORE-STAFF: the authorization code is the Provider's own format (a
+      // Cognito code is a UUID), so it is bounded printable text, as the strong Workforce service
+      // accepts; state and the cookie remain this service's own 43-character credentials.
+      if (typeof input.code !== "string" || !/^[\x21-\x7e]{1,4096}$/u.test(input.code))
+        throw new BrowserSessionError("BROWSER_SESSION_DENIED");
+      const code = input.code;
       const state = parseRawBrowserCredential(input.state);
       const authCookie = parseRawBrowserCredential(input.authCookie);
       const transaction = await this.#store.consumeAuthorizationTransaction({
@@ -250,7 +269,8 @@ export class BrowserSessionService {
       const record = await this.#store.createSession({
         sessionReference,
         actor,
-        policyCode: input.policyCode ?? "WorkforceStandard",
+        policyCode:
+          input.policyCode ?? this.#postLoginPolicies.get(postLoginPath) ?? "WorkforceStandard",
         sessionSelectorHash: this.#hasher.hash(selector),
         csrfSelectorHash: this.#hasher.hash(csrf),
         encryptedSecrets,

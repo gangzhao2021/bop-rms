@@ -20,7 +20,21 @@ import {
   type RoleAdministrationTransaction,
   type RoleAssignmentTransaction,
 } from "@bop/permission";
-import { revokeActorSessions } from "@bop/identity";
+import { revokeActorSessions, StoreStaffAccountError } from "@bop/identity";
+import {
+  dispatchStaffInvitation,
+  loadStaffInvitation,
+  normalizeStaffEmail,
+  recordStaffInvitation,
+  recordStaffInvitationDelivery,
+  redispatchStaffInvitation,
+  resendStaffInvitation,
+  revokeStaffInvitation,
+  staffInvitationsByActor,
+  staffInvitationView,
+  type StaffInvitationCommand,
+  type StaffInvitationOptions,
+} from "./merchant-staff-invitation.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { derivedReference } from "./merchant-products.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -49,7 +63,11 @@ export class MerchantStaffAdministrationError extends Error {
       | "LastOwner"
       | "BrandRolesRemain"
       | "PendingRequestsRemain"
-      | "Invalid",
+      | "Invalid"
+      // WP-2423 DEC-COGNITO-STORE-STAFF: an open invitation already goes to this email.
+      | "AlreadyInvited"
+      // The email typed to resend is not the invitation's email (invite again instead).
+      | "EmailMismatch",
   ) {
     super(code);
     this.name = "MerchantStaffAdministrationError";
@@ -89,7 +107,10 @@ export type StaffCommand =
       readonly operation: "RemoveFromStore";
       readonly actorReference: string;
       readonly operationReference: string;
-    };
+    }
+  | StaffInvitationCommand;
+const version = (value: unknown): number =>
+  Number.isSafeInteger(value) && (value as number) >= 1 ? (value as number) : fail("Invalid");
 export function parseStaffCommand(value: unknown): StaffCommand {
   const r = value as Record<string, unknown> | null;
   if (r === null || typeof r !== "object" || Array.isArray(r)) return fail("Invalid");
@@ -138,6 +159,51 @@ export function parseStaffCommand(value: unknown): StaffCommand {
         actorReference: ref(r.actorReference),
         operationReference: ref(r.operationReference),
       };
+    // WP-2423 DEC-COGNITO-STORE-STAFF: name, work email and role are all required.
+    case "Invite": {
+      const email = normalizeStaffEmail(r.email);
+      if (
+        keys !== "displayName,email,operation,operationReference,roleReference" ||
+        typeof r.displayName !== "string" ||
+        email === null
+      )
+        return fail("Invalid");
+      return {
+        operation: "Invite",
+        displayName: r.displayName,
+        email,
+        roleReference: ref(r.roleReference),
+        operationReference: ref(r.operationReference),
+      };
+    }
+    case "ResendInvitation": {
+      const withEmail = Object.hasOwn(r, "email");
+      const email = withEmail ? normalizeStaffEmail(r.email) : null;
+      if (
+        keys !==
+          (withEmail
+            ? "actorReference,email,expectedVersion,operation,operationReference"
+            : "actorReference,expectedVersion,operation,operationReference") ||
+        (withEmail && email === null)
+      )
+        return fail("Invalid");
+      return {
+        operation: "ResendInvitation",
+        actorReference: ref(r.actorReference),
+        expectedVersion: version(r.expectedVersion),
+        operationReference: ref(r.operationReference),
+        email,
+      };
+    }
+    case "RevokeInvitation":
+      if (keys !== "actorReference,expectedVersion,operation,operationReference")
+        return fail("Invalid");
+      return {
+        operation: "RevokeInvitation",
+        actorReference: ref(r.actorReference),
+        expectedVersion: version(r.expectedVersion),
+        operationReference: ref(r.operationReference),
+      };
     default:
       return fail("Invalid");
   }
@@ -175,6 +241,8 @@ export function createMerchantStaffAdministration(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
   references: { next(): string };
+  /** WP-2423 DEC-COGNITO-STORE-STAFF: in-app invitations (staff sign in with Cognito). */
+  invitations?: StaffInvitationOptions;
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
   const resolveBrandScope = createMerchantBrandScope(options.persistence);
@@ -248,6 +316,9 @@ export function createMerchantStaffAdministration(options: {
         ? await listStoreMembers(directoryTx(tx), owner)
         : [await loadStoreMember(directoryTx(tx), owner, actor)];
     const { assignments, pending } = await assignmentsOf(tx, owner);
+    // WP-2423 DEC-COGNITO-STORE-STAFF: who was invited, when it was sent and whether it expired.
+    const invitations =
+      options.invitations === undefined ? null : await staffInvitationsByActor(tx, owner);
     const roles = (await listRoleAdministration(permissionTx(tx), owner, now))
       .filter((role) => role.record.lifecycle === "Active")
       .map((role) => ({
@@ -278,11 +349,27 @@ export function createMerchantStaffAdministration(options: {
     return {
       screenId: actor === null ? "IAM-USER-LIST" : "IAM-USER-DETAIL",
       sourceAsOf: now,
-      viewer: { mayManage, mayApprove, brandMayManage, brandMayApprove },
-      roles: actor === null ? [] : roles,
+      viewer: {
+        mayManage,
+        mayApprove,
+        brandMayManage,
+        brandMayApprove,
+        ...(invitations === null ? {} : { mayInvite: mayManage }),
+      },
+      // The invite form on the list offers the same roles as the detail page.
+      roles: actor === null && invitations === null ? [] : roles,
       staff: members.map((member) => {
         const self = member.actorReference === viewer;
+        // A role for someone still invited can be approved only after they have signed in.
+        const joined = member.membershipLifecycle !== "PendingActivation";
+        const invitation = invitations?.get(member.actorReference);
         return {
+          ...(invitations === null
+            ? {}
+            : {
+                invitation:
+                  invitation === undefined ? null : staffInvitationView(invitation, now, mayManage),
+              }),
           actorReference: member.actorReference,
           displayName: member.displayName,
           label: label(member.actorReference),
@@ -308,11 +395,12 @@ export function createMerchantStaffAdministration(options: {
               scope: item.scope,
               requestedBy: label(item.requestedBy),
               requestedAt: item.requestedAt,
-              mayDecide: approves(item.scope) && !self && item.requestedBy !== viewer,
+              mayDecide: approves(item.scope) && !self && item.requestedBy !== viewer && joined,
               mayWithdraw: manages(item.scope) && item.requestedBy === viewer,
             })),
-          mayRequest: (mayManage || brandMayManage) && !self,
-          mayRemove: mayManage && !self,
+          mayRequest: (mayManage || brandMayManage) && !self && joined,
+          // Someone still invited is withdrawn with "Cancel invitation" instead.
+          mayRemove: mayManage && !self && joined,
           mayRename: mayManage,
         };
       }),
@@ -339,8 +427,249 @@ export function createMerchantStaffAdministration(options: {
     );
   };
 
+  /**
+   * Role requests still open for a person who never joined, closed as their invitation is
+   * withdrawn (withdrawn when the viewer asked for them, otherwise rejected): nobody could ever
+   * approve them, so this needs no approval right.
+   */
+  async function closeOpenRequests(
+    tx: Tx,
+    owner: { brandReference: string; storeReference: string },
+    actorReference: string,
+    viewer: string,
+    at: string,
+  ) {
+    const open = (await assignmentsOf(tx, owner)).pending.filter(
+      (item) => item.actorReference === actorReference,
+    );
+    for (const item of open)
+      await decideRoleAssignment(
+        permissionTx(tx),
+        {
+          ...(item.scope === "Store"
+            ? owner
+            : { brandReference: owner.brandReference, storeReference: null }),
+          changeReference: item.changeReference,
+          decision: item.requestedBy === viewer ? "Withdrawn" : "Rejected",
+          decidedBy: viewer,
+          at,
+          auditReference: options.references.next(),
+          snapshotReference: options.references.next(),
+        },
+        async () => true,
+      );
+  }
+
+  /**
+   * WP-2423 DEC-COGNITO-STORE-STAFF: invite, resend and cancel. Each records its intent first,
+   * asks Cognito outside the transaction, then records what Cognito answered; a retried request
+   * with the same operation reference answers from the record (and finishes a send in progress).
+   */
+  const invitationCommand = async (
+    input: { sessionCookie: unknown; csrf: unknown },
+    command: StaffInvitationCommand,
+    invitations: StaffInvitationOptions,
+  ) => {
+    const current = await session(input);
+    const run = <T>(work: (tx: Tx, context: Awaited<ReturnType<typeof begin>>) => Promise<T>) =>
+      retryTransactionConflict(() =>
+        options.persistence.transactions.run(async (tx) => {
+          try {
+            return await work(tx, await begin(tx));
+          } catch (error) {
+            if (error instanceof StoreStaffAccountError)
+              return fail(
+                error.code === "STORE_STAFF_NOT_FOUND"
+                  ? "NotFound"
+                  : error.code === "STORE_STAFF_INVALID"
+                    ? "Invalid"
+                    : "Conflict",
+              );
+            if (error instanceof MemberDirectoryError)
+              return fail(
+                error.code === "MEMBER_DIRECTORY_NOT_FOUND"
+                  ? "NotFound"
+                  : error.code === "MEMBER_DIRECTORY_INPUT_INVALID"
+                    ? "Invalid"
+                    : "Conflict",
+              );
+            if (error instanceof RoleAssignmentError)
+              return fail(
+                error.code === "ROLE_ASSIGNMENT_NOT_FOUND"
+                  ? "NotFound"
+                  : error.code === "ROLE_ASSIGNMENT_INVALID"
+                    ? "Invalid"
+                    : "Conflict",
+              );
+            throw error;
+          }
+        }),
+      );
+    async function begin(tx: Tx) {
+      const scope = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+      if (!(await may(scope, "organization.staff.manage"))) fail("PermissionDenied");
+      return {
+        scope,
+        owner: {
+          brandReference: String(scope.context.brand.brandReference),
+          storeReference: String(scope.store.storeReference),
+        },
+        viewer: String(scope.actorReference),
+        at: options.persistence.now(),
+        brandAllowed: await brandMay(tx, input.sessionCookie, current.sessionReference),
+      };
+    }
+    const record = (
+      invitation: Parameters<typeof recordStaffInvitationDelivery>[1]["invitation"],
+      delivery: "Sent" | "Unknown",
+    ) =>
+      run((tx, context) =>
+        recordStaffInvitationDelivery(tx, {
+          invitation,
+          delivery,
+          recordedBy: context.viewer,
+          at: context.at,
+          auditReference: options.references.next(),
+        }),
+      );
+    switch (command.operation) {
+      case "Invite": {
+        const op = command.operationReference;
+        const written = await run(async (tx, context) => {
+          const prior = await loadStaffInvitation(tx, context.owner, op);
+          if (prior !== null) {
+            if (prior.invitedBy !== context.viewer) fail("Conflict");
+            return { invitation: prior, replay: true };
+          }
+          const role = (
+            await listRoleAdministration(permissionTx(tx), context.owner, context.at)
+          ).find(
+            (item) =>
+              item.record.roleReference === command.roleReference &&
+              item.record.lifecycle === "Active",
+          );
+          if (role === undefined) return fail("NotFound");
+          const level = role.record.storeReference === null ? "Brand" : "Store";
+          if (level === "Brand" && !(await context.brandAllowed("organization.staff.manage")))
+            fail("PermissionDenied");
+          const actorReference = derivedReference(op, "staff-invitation:actor"),
+            membershipReference = derivedReference(op, "staff-invitation:membership"),
+            storeAssignmentReference = derivedReference(op, "staff-invitation:store-assignment");
+          const invitation = await recordStaffInvitation(tx, {
+            owner: context.owner,
+            pool: invitations.pool,
+            provider: invitations.provider,
+            invitationReference: op,
+            actorReference,
+            membershipReference,
+            storeAssignmentReference,
+            nameOperationReference: derivedReference(op, "staff-invitation:name"),
+            displayName: command.displayName,
+            email: command.email,
+            invitedBy: context.viewer,
+            kind: "Staff",
+            at: context.at,
+            nextReference: () => options.references.next(),
+          });
+          if (invitation === "AlreadyInvited") return fail("AlreadyInvited");
+          await requestRoleAssignment(permissionTx(tx), {
+            ...(level === "Store"
+              ? context.owner
+              : { brandReference: context.owner.brandReference, storeReference: null }),
+            changeReference: derivedReference(op, "staff-invitation:role"),
+            assignmentReference: derivedReference(op, "staff-invitation:role-assignment"),
+            roleReference: command.roleReference,
+            actorReference,
+            membershipReference,
+            storeAssignmentReference: level === "Store" ? storeAssignmentReference : null,
+            requestedBy: context.viewer,
+            at: context.at,
+            auditReference: options.references.next(),
+          });
+          return { invitation, replay: false };
+        });
+        let invitation = written.invitation;
+        if (invitation.status === "Pending" && invitation.delivery === "Sending")
+          invitation = await record(
+            invitation,
+            await dispatchStaffInvitation(invitations.provider, invitation, command.email),
+          );
+        return {
+          status: written.replay ? ("AlreadyApplied" as const) : ("Invited" as const),
+          actorReference: invitation.actorReference,
+          delivery: invitation.delivery,
+        };
+      }
+      case "ResendInvitation": {
+        const resent = await run(async (tx, context) => {
+          const result = await resendStaffInvitation(tx, {
+            owner: context.owner,
+            provider: invitations.provider,
+            actorReference: command.actorReference,
+            expectedVersion: command.expectedVersion,
+            email: command.email,
+            resentBy: context.viewer,
+            at: context.at,
+            auditReference: options.references.next(),
+          });
+          if (result === "NotFound") return fail("NotFound");
+          if (result === "EmailMismatch") return fail("EmailMismatch");
+          return result;
+        });
+        const sent = await redispatchStaffInvitation(invitations.provider, resent, command.email);
+        const recorded = await record(resent, sent.delivery);
+        return {
+          status: "Resent" as const,
+          delivery: recorded.delivery,
+          emailNeeded: sent.emailNeeded,
+        };
+      }
+      case "RevokeInvitation": {
+        const revoked = await run(async (tx, context) => {
+          const result = await revokeStaffInvitation(tx, {
+            owner: context.owner,
+            actorReference: command.actorReference,
+            expectedVersion: command.expectedVersion,
+            revokedBy: context.viewer,
+            at: context.at,
+            nextReference: () => options.references.next(),
+          });
+          if (result === "NotFound") return fail("NotFound");
+          if (result.status === "Applied")
+            await closeOpenRequests(
+              tx,
+              context.owner,
+              command.actorReference,
+              context.viewer,
+              context.at,
+            );
+          return result;
+        });
+        // The unused Cognito account goes too, so the same email can be invited again.
+        const account = await invitations.provider
+          .remove({
+            actorReference: revoked.invitation.actorReference,
+            creationIntentDigest: revoked.invitation.intentDigest,
+          })
+          .catch(() => "Unknown" as const);
+        return {
+          status: revoked.status,
+          accountRemoved: account === "Removed" || account === "NotFound",
+        };
+      }
+    }
+  };
+
   const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
     const command = parseStaffCommand(input.body);
+    if (
+      command.operation === "Invite" ||
+      command.operation === "ResendInvitation" ||
+      command.operation === "RevokeInvitation"
+    ) {
+      if (options.invitations === undefined) return fail("Invalid");
+      return invitationCommand(input, command, options.invitations);
+    }
     const current = await session(input);
     return retryTransactionConflict(() =>
       options.persistence.transactions.run(async (tx) => {

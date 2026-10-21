@@ -60,3 +60,18 @@ it("WP-2423 P1b: a Pilot start names every remaining capability gap; InternalTes
   expect(pilotCapabilityGaps.map((gap) => gap.code)).toContain("PaymentProvider");
   expect(() => assertPilotReady(at("production"))).toThrow("PILOT_ENVIRONMENT_INVALID");
 });
+
+it("WP-2423 DEC-COGNITO-STORE-STAFF: StaffLogin closes only with Cognito configured", async () => {
+  const { assertPilotReady, currentPilotCapabilityGaps } = await import("./pilot-environment.mjs");
+  const codes = (staffSignIn) =>
+    currentPilotCapabilityGaps(staffSignIn === undefined ? undefined : { staffSignIn }).map(
+      (gap) => gap.code,
+    );
+  expect(codes()).toContain("StaffLogin");
+  expect(codes("NotConfigured")).toContain("StaffLogin");
+  expect(codes("CognitoConfigured")).not.toContain("StaffLogin");
+  expect(codes("CognitoConfigured")).toContain("PaymentProvider");
+  expect(() =>
+    assertPilotReady(at("production", "Pilot"), { staffSignIn: "CognitoConfigured" }),
+  ).toThrow(/^PILOT_CAPABILITY_MISSING:PaymentProvider,Secrets,Tls,PricingCurrencyMetadata$/u);
+});

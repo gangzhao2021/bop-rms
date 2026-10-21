@@ -101,7 +101,9 @@ export async function startInternalCustomerServer({
     );
     const terminal = createInternalPaymentTerminal(resources, checkout, intents, simulator);
     const merchant = await createInternalMerchant(resources);
-    installInternalStaffLogin(app, merchant);
+    // WP-2423 DEC-COGNITO-STORE-STAFF: the TEST-ONLY staff sign-in page is not served when staff
+    // sign in with their own Cognito account.
+    if (merchant.staffSignInMode !== "cognito") installInternalStaffLogin(app, merchant);
     app.use("/merchant", createMerchantBffRouter(merchant.bff));
 
     app.post(

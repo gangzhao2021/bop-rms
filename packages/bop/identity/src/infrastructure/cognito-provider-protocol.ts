@@ -28,6 +28,12 @@ export interface CognitoProviderProtocolOptions {
   readonly configuration: CognitoProviderConfiguration;
   readonly clock: { now(): string };
   readonly accountKind: "Platform" | "Workforce";
+  /**
+   * WP-2423 DEC-COGNITO-STORE-STAFF: Workforce sign-in to Store operations (the merchant sign-in
+   * and step-up callbacks) instead of Brand administration. Its verified result also carries the
+   * signed Cognito username, which names the invited person on a first sign-in.
+   */
+  readonly profile?: "StoreOperations";
   readonly http?: typeof globalThis.fetch;
 }
 type StrongAuthorizationRequest = OidcAuthorizationRequest & {
@@ -81,14 +87,21 @@ export function createCognitoProviderProtocol(options: CognitoProviderProtocolOp
       "configuration",
       "clock",
       "accountKind",
+      ...(Object.hasOwn(options, "profile") ? ["profile"] : []),
       ...(Object.hasOwn(options, "http") ? ["http"] : []),
     ]);
     if (o.accountKind !== "Platform" && o.accountKind !== "Workforce") return denied();
     const workforce = o.accountKind === "Workforce";
-    const callbackPath = workforce
-      ? "/merchant/organization/brands/callback"
-      : "/platform/auth/callback";
-    const logoutPath = workforce ? "/app/organization/brands" : "/platform/tenants";
+    const store = Object.hasOwn(o, "profile");
+    if (store && (!workforce || o.profile !== "StoreOperations")) return denied();
+    const callbackPaths = store
+      ? ["/merchant/callback", "/merchant/identity/step-up/callback"]
+      : [workforce ? "/merchant/organization/brands/callback" : "/platform/auth/callback"];
+    const logoutPath = store
+      ? "/app"
+      : workforce
+        ? "/app/organization/brands"
+        : "/platform/tenants";
     const refreshProfile = workforce ? "CognitoWorkforceRefreshV1" : "CognitoPlatformRefreshV1";
     const c = readClosedRecord(o.configuration, configurationKeys);
     const issuer = parseExactHttpsUri(c.issuer),
@@ -110,7 +123,7 @@ export function createCognitoProviderProtocol(options: CognitoProviderProtocolOp
       login.port ||
       !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/u.test(login.hostname) ||
       redirectUri !== c.redirectUri ||
-      callback.pathname !== callbackPath ||
+      !callbackPaths.includes(callback.pathname) ||
       callback.search ||
       logoutReturnUri !== c.logoutReturnUri ||
       logoutReturn.origin !== callback.origin ||
@@ -396,10 +409,19 @@ export function createCognitoProviderProtocol(options: CognitoProviderProtocolOp
             idBinding.authenticatedAt !== accessBinding.authenticatedAt
           )
             return denied();
+          const username = idClaims["cognito:username"];
+          if (
+            store &&
+            (typeof username !== "string" ||
+              username.length > 128 ||
+              !/^[\x21-\x7e]+$/u.test(username))
+          )
+            return denied();
           return Object.freeze({
             issuer,
             clientId,
             ...idBinding,
+            ...(store ? { username: username as string } : {}),
             observedAt: checkedAt,
             nonce: bound.nonce,
             authorizationTransactionReference: bound.transactionReference,

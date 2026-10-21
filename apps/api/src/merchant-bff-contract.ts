@@ -76,6 +76,7 @@ import type { createMerchantCardMachineCancellationRefund } from "./merchant-car
 import type { createMerchantCardMachineOrdinaryRefund } from "./merchant-card-machine-ordinary-refund.js";
 import type { createMerchantUnmatchedCaptureRefund } from "./merchant-unmatched-capture-refund.js";
 import type { createMerchantMfaStepUp } from "./merchant-mfa-step-up.js";
+import type { createMerchantProviderStepUp } from "./merchant-provider-step-up.js";
 import type { createMerchantOrdinaryRefundApproval } from "./merchant-ordinary-refund-approval.js";
 import type { createMerchantOrdinaryRefundDecline } from "./merchant-ordinary-refund-decline.js";
 import type { createMerchantOrdinaryRefundProgress } from "./merchant-ordinary-refund-progress.js";
@@ -455,6 +456,12 @@ export interface MerchantBffRouterOptions {
   readonly unmatchedCaptureRefund?: ReturnType<typeof createMerchantUnmatchedCaptureRefund>;
   /** WP-2423 Q5: the signed-in staff member re-verifies a second factor (MFA step-up). */
   readonly mfaStepUp?: ReturnType<typeof createMerchantMfaStepUp>;
+  /**
+   * WP-2423 DEC-COGNITO-STORE-STAFF: the production step-up — signing in again with the
+   * authenticator at the identity provider. When present it answers the step-up status and the
+   * authenticator-code route is not offered.
+   */
+  readonly providerStepUp?: ReturnType<typeof createMerchantProviderStepUp>;
   /** WP-2423 Q5: an Owner/Finance member approves an escalated refund, which is then sent. */
   readonly ordinaryRefundApproval?: ReturnType<typeof createMerchantOrdinaryRefundApproval>;
   /** WP-2423 Q5: an Owner/Finance member declines a refund nothing was prepared for. */

@@ -7,6 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createPilotRecoverySweep } from "./pilot-recovery-sweep.mjs";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { assertPilotReady, isPilotRuntime } from "./pilot-environment.mjs";
+import { readPilotStaffSignInReadiness } from "./pilot-staff-sign-in.mjs";
 import { SUPERVISOR_HEALTH_FILE, writePrivateJson } from "./pilot-ops-files.mjs";
 export async function acquirePilotSupervisorLease(runtimeDirectory) {
   const root = await fs.realpath(process.cwd());
@@ -175,7 +176,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (process.argv.length !== 3 || !isPilotRuntime())
       throw Error("PILOT_SUPERVISOR_ARGUMENT_INVALID");
     try {
-      assertPilotReady();
+      // WP-2423 DEC-COGNITO-STORE-STAFF: StaffLogin closes only with Cognito configured and its
+      // secret files present (nothing secret is read into this process's output).
+      const root = await fs.realpath(process.cwd());
+      assertPilotReady(undefined, {
+        staffSignIn: await readPilotStaffSignInReadiness(
+          path.join(root, parsePilotRuntimeDirectory(process.argv[2])),
+        ),
+      });
     } catch (error) {
       // WP-2423 P1b: name what a Pilot Store still lacks (capability codes only, no data).
       console.error(

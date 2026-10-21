@@ -26,8 +26,15 @@ import {
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { BrandStoreTopologyError } from "@bop/tenant";
 import { MerchantStepUpError } from "./merchant-mfa-step-up.js";
+import {
+  parseStepUpReturnPath,
+  stepUpCompletePath,
+  stepUpCookieName,
+} from "./merchant-provider-step-up.js";
 
 const signInPathPattern = /^\/(?!\/)[A-Za-z0-9/_?=&.-]{0,200}$/u;
+/** WP-2423 DEC-COGNITO-STORE-STAFF: the staff sign-in page of the merchant app. */
+export const staffSignInPagePath = "/operations/sign-in";
 
 /** WP-2423 Q18: the deadlines staff see; never the Session reference or any credential. */
 function sessionDeadlines(session: AuthenticationSession) {
@@ -139,6 +146,18 @@ export function installMerchantSessionRoutes(
           "Set-Cookie",
           "__Host-bop-auth=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
         );
+        // WP-2423 DEC-COGNITO-STORE-STAFF: a person whose sign-in was refused (no invitation, an
+        // expired one, removed from the Store) lands on the staff sign-in page that says so,
+        // not on a bare error.
+        if (
+          options.signInEntry?.path === staffSignInPagePath &&
+          exactHeader(request, "sec-fetch-dest") === "document"
+        ) {
+          response
+            .set("Cache-Control", NO_STORE)
+            .redirect(303, staffSignInPagePath + "?signIn=failed");
+          return;
+        }
         denied(response);
       });
   });
@@ -244,16 +263,82 @@ export function installMerchantSessionRoutes(
       denied(response);
       return;
     }
-    if (!options.mfaStepUp) {
+    // WP-2423 DEC-COGNITO-STORE-STAFF: with the identity provider's step-up the screen offers
+    // "sign in again" (method SignIn) instead of an authenticator code field.
+    const provider = options.providerStepUp;
+    const port = provider ?? options.mfaStepUp;
+    if (!port) {
       response.status(503).json({ error: "step_up_unavailable" });
       return;
     }
-    const port = options.mfaStepUp;
     void retryTransactionConflict(() => port.status({ sessionCookie }))
       .then((result) =>
-        response.set("Cache-Control", NO_STORE).json({ validUntil: result.validUntil }),
+        response
+          .set("Cache-Control", NO_STORE)
+          .json(
+            provider
+              ? { validUntil: result.validUntil, method: "SignIn" }
+              : { validUntil: result.validUntil },
+          ),
       )
       .catch((error: unknown) => refundReadFailure(response, error));
+  });
+
+  // WP-2423 DEC-COGNITO-STORE-STAFF: the step-up window opens here (a same-origin navigation from
+  // the staff screen) and goes to the identity provider's sign-in; the answer comes back to the
+  // callback, which records the step-up and shows the completion page in that window.
+  const stepUpComplete = (result: string, returnTo: string) =>
+    `${stepUpCompletePath}?result=${encodeURIComponent(result)}&returnTo=${encodeURIComponent(returnTo)}`;
+  router.get("/identity/step-up/start", safeRead(options), (request, response) => {
+    response.set("Cache-Control", NO_STORE);
+    const provider = options.providerStepUp;
+    const query = request.query;
+    const returnTo = parseStepUpReturnPath(query.returnTo);
+    if (
+      !provider ||
+      Object.keys(query).some((key) => key !== "purpose" && key !== "returnTo") ||
+      typeof query.purpose !== "string"
+    ) {
+      response.redirect(303, stepUpComplete("failed", returnTo));
+      return;
+    }
+    void provider
+      .start({
+        sessionCookie: cookie(request, "__Host-bop-merchant"),
+        purpose: query.purpose,
+        returnTo,
+      })
+      .then((result) => {
+        response.set(
+          "Set-Cookie",
+          `${stepUpCookieName}=${result.cookie}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600`,
+        );
+        response.redirect(303, result.authorizationUrl);
+      })
+      .catch(() => response.redirect(303, stepUpComplete("failed", returnTo)));
+  });
+  router.get("/identity/step-up/callback", oidcCallbackNavigation(options), (request, response) => {
+    response.set("Cache-Control", NO_STORE);
+    const provider = options.providerStepUp;
+    if (!provider) {
+      denied(response);
+      return;
+    }
+    void provider
+      .callback({
+        code: request.query.code,
+        state: request.query.state,
+        error: request.query.error,
+        stepUpCookie: cookie(request, stepUpCookieName),
+        sessionCookie: cookie(request, "__Host-bop-merchant"),
+      })
+      .then((outcome) => {
+        response.set(
+          "Set-Cookie",
+          `${stepUpCookieName}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0`,
+        );
+        response.redirect(303, stepUpComplete(outcome.result, outcome.returnTo));
+      });
   });
 
   router.post("/identity/step-up", sameOriginMutation(options), (request, response) => {

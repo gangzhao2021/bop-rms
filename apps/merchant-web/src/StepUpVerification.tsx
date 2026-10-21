@@ -3,8 +3,19 @@ import {
   createRefundApprovalClient,
   StepUpError,
   type StepUpFailure,
+  type StepUpMethod,
   type StepUpPurpose,
 } from "./refund-approval-client.js";
+import {
+  openStepUpSignIn,
+  STEP_UP_SIGN_IN_EXPLANATION,
+  stepUpResultText,
+  stepUpStartPath,
+  subscribeStepUpResult,
+  type ChannelFactory,
+  type StepUpResult,
+  type StepUpWindow,
+} from "./step-up-sign-in.js";
 import { SourceTime } from "./StoreTime.js";
 
 const failureMessage = (error: StepUpError): string => {
@@ -24,10 +35,17 @@ const failureMessage = (error: StepUpError): string => {
   return messages[error.code];
 };
 
+const currentPath = () =>
+  typeof window === "undefined" ? "/app" : window.location.pathname + window.location.search;
+
 /**
  * WP-2423 Q5: the signed-in staff member confirms it is them with the six-digit code from their
  * authenticator app. A verification stays valid for 15 minutes for refund requests and approvals.
  * The code is cleared as soon as it is sent and is never shown again.
+ *
+ * WP-2423 DEC-COGNITO-STORE-STAFF: a staff member signed in with their own account confirms it by
+ * signing in again (password and authenticator app) in a small window instead ("SignIn"); the
+ * server's step-up read says which. No code is entered on this page then.
  */
 export function StepUpVerification({
   purpose,
@@ -39,6 +57,8 @@ export function StepUpVerification({
   loadServerStatus = true,
   explanation,
   hint = true,
+  channel,
+  openWindow,
 }: {
   readonly purpose: StepUpPurpose;
   readonly csrf: string;
@@ -56,6 +76,10 @@ export function StepUpVerification({
    * where the text around the button already says so, so the hint is never shown twice.
    */
   readonly hint?: boolean;
+  /** Test seam: the BroadcastChannel the sign-in window answers on (null: none). */
+  readonly channel?: ChannelFactory | null | undefined;
+  /** Test seam: where the sign-in window is opened. */
+  readonly openWindow?: StepUpWindow | undefined;
 }) {
   const client = useRef(createRefundApprovalClient(fetcher ?? fetch));
   const dialog = useRef<HTMLDialogElement>(null);
@@ -65,16 +89,29 @@ export function StepUpVerification({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [now, setNow] = useState(() => Date.now());
+  // How this sign-in confirms it is the person; null until the server has said.
+  const [method, setMethod] = useState<StepUpMethod | null>(null);
+  const [checkingMethod, setCheckingMethod] = useState(false);
+  // The sign-in window is open and this page waits for its answer.
+  const [waiting, setWaiting] = useState(false);
+  const latestVerified = useRef(onVerified);
+  latestVerified.current = onVerified;
   useEffect(() => () => pending.current?.abort(), []);
   // Start from the server's own record, so every page shows the same verification.
   useEffect(() => {
-    if (verifiedUntil !== null || !loadServerStatus) return;
+    if (!loadServerStatus) return;
     const controller = new AbortController();
     void client.current
-      .stepUpStatus(controller.signal)
-      .then((until) => {
-        if (!controller.signal.aborted && until !== null && Date.parse(until) > Date.now())
-          onVerified(until);
+      .stepUpState(controller.signal)
+      .then((state) => {
+        if (controller.signal.aborted) return;
+        setMethod(state.method);
+        if (
+          verifiedUntil === null &&
+          state.validUntil !== null &&
+          Date.parse(state.validUntil) > Date.now()
+        )
+          onVerified(state.validUntil);
       })
       .catch(() => undefined);
     return () => controller.abort();
@@ -85,6 +122,46 @@ export function StepUpVerification({
     const timer = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(timer);
   }, [verifiedUntil]);
+  // While the sign-in window is open: its answer arrives on the channel; where there is no
+  // channel, coming back to this window re-reads the server's verification once per return.
+  useEffect(() => {
+    if (!waiting) return;
+    let active = true;
+    const recheck = async (result: StepUpResult | null) => {
+      if (result === "cancelled" || result === "failed") {
+        setWaiting(false);
+        setMessage(stepUpResultText[result]);
+        return;
+      }
+      try {
+        const state = await client.current.stepUpState();
+        if (!active) return;
+        if (state.validUntil !== null && Date.parse(state.validUntil) > Date.now()) {
+          setWaiting(false);
+          setMessage("");
+          dialog.current?.close();
+          setNow(Date.now());
+          latestVerified.current(state.validUntil);
+        } else if (result === "verified") {
+          setWaiting(false);
+          setMessage(stepUpResultText.failed);
+        }
+      } catch {
+        if (active && result === "verified") {
+          setWaiting(false);
+          setMessage("We couldn't check your sign-in. Check your connection and try again.");
+        }
+      }
+    };
+    const unsubscribe = subscribeStepUpResult((result) => void recheck(result), channel);
+    const onFocus = () => void recheck(null);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      active = false;
+      unsubscribe();
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [waiting, channel]);
   const current = verifiedUntil !== null && Date.parse(verifiedUntil) > now;
   const submit = async () => {
     if (busy || !/^[0-9]{6}$/u.test(code)) {
@@ -114,8 +191,36 @@ export function StepUpVerification({
       if (!controller.signal.aborted) setBusy(false);
     }
   };
+  const open = () => {
+    setMessage("");
+    dialog.current?.showModal();
+    if (method !== null) {
+      if (method === "Code") input.current?.focus();
+      return;
+    }
+    // The server says how to confirm before a code can be entered; an older server, or one that
+    // cannot be reached, keeps the authenticator code.
+    setCheckingMethod(true);
+    void client.current
+      .stepUpState()
+      .then(
+        (state) => state.method,
+        () => "Code" as const,
+      )
+      .then((found) => {
+        setMethod(found);
+        setCheckingMethod(false);
+        if (found === "Code") setTimeout(() => input.current?.focus(), 0);
+      });
+  };
+  const startSignIn = () => {
+    setMessage("");
+    setWaiting(true);
+    openStepUpSignIn(stepUpStartPath(purpose, currentPath()), openWindow ?? window);
+  };
   // Unique per instance: several cards on one page each label their own code field.
   const titleId = "step-up-" + useId().replace(/[^A-Za-z0-9_-]/gu, "");
+  const signIn = method === "SignIn";
   return (
     <div className="step-up-verification">
       {current || hint ? (
@@ -124,20 +229,15 @@ export function StepUpVerification({
             <>
               Verified until <SourceTime instant={verifiedUntil} />.
             </>
+          ) : signIn ? (
+            "Confirm it is you by signing in again."
           ) : (
             "Confirm it is you with the code from your authenticator app."
           )}
         </p>
       ) : null}
       {current ? null : (
-        <button
-          type="button"
-          onClick={() => {
-            setMessage("");
-            dialog.current?.showModal();
-            input.current?.focus();
-          }}
-        >
+        <button type="button" onClick={open}>
           {label}
         </button>
       )}
@@ -148,43 +248,68 @@ export function StepUpVerification({
         onCancel={(event) => {
           if (busy) event.preventDefault();
         }}
-        onClose={() => setCode("")}
+        onClose={() => {
+          setCode("");
+          setWaiting(false);
+        }}
       >
         <h2 id={titleId}>Confirm it is you</h2>
-        <p>
-          {explanation ??
-            "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, approvals and refunds can go ahead for 15 minutes."}
-        </p>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
-          <label htmlFor={titleId + "-code"}>Six-digit code</label>
-          <input
-            ref={input}
-            id={titleId + "-code"}
-            name="one-time-code"
-            autoComplete="one-time-code"
-            inputMode="numeric"
-            pattern="[0-9]{6}"
-            maxLength={6}
-            required
-            value={code}
-            disabled={busy}
-            onChange={(event) => setCode(event.currentTarget.value.replace(/[^0-9]/gu, ""))}
-          />
-          <div className="card-actions">
-            <button type="submit" disabled={busy || code.length !== 6}>
-              {busy ? "Checking…" : "Verify"}
-            </button>
-            <button type="button" disabled={busy} onClick={() => dialog.current?.close()}>
-              Cancel
-            </button>
-          </div>
-          <p role="alert">{message}</p>
-        </form>
+        {signIn ? (
+          <>
+            <p>{explanation ?? STEP_UP_SIGN_IN_EXPLANATION}</p>
+            {waiting ? (
+              <p role="status">
+                Finish signing in in the new window. This page continues when you are done.
+              </p>
+            ) : null}
+            <div className="card-actions">
+              <button type="button" onClick={startSignIn}>
+                Continue to sign in
+              </button>
+              <button type="button" onClick={() => dialog.current?.close()}>
+                Cancel
+              </button>
+            </div>
+            <p role="alert">{message}</p>
+          </>
+        ) : (
+          <>
+            <p>
+              {explanation ??
+                "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, approvals and refunds can go ahead for 15 minutes."}
+            </p>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submit();
+              }}
+            >
+              <label htmlFor={titleId + "-code"}>Six-digit code</label>
+              <input
+                ref={input}
+                id={titleId + "-code"}
+                name="one-time-code"
+                autoComplete="one-time-code"
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                required
+                value={code}
+                disabled={busy || checkingMethod}
+                onChange={(event) => setCode(event.currentTarget.value.replace(/[^0-9]/gu, ""))}
+              />
+              <div className="card-actions">
+                <button type="submit" disabled={busy || checkingMethod || code.length !== 6}>
+                  {busy ? "Checking…" : "Verify"}
+                </button>
+                <button type="button" disabled={busy} onClick={() => dialog.current?.close()}>
+                  Cancel
+                </button>
+              </div>
+              <p role="alert">{checkingMethod ? "Checking how to confirm it is you…" : message}</p>
+            </form>
+          </>
+        )}
       </dialog>
     </div>
   );

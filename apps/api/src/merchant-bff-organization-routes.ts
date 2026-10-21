@@ -337,6 +337,8 @@ export function installMerchantOrganizationRoutes(
     BrandRolesRemain: 409,
     PendingRequestsRemain: 409,
     Invalid: 400,
+    AlreadyInvited: 409,
+    EmailMismatch: 409,
   } as const;
   const staffFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantStaffAdministrationError)) {

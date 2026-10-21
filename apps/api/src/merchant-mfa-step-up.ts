@@ -26,6 +26,12 @@ const purposes = {
   // sensitive action (refunds, price, staff and role changes, tablets and PINs).
   PinSessionElevation: "IDENTITY_PIN_SESSION_ELEVATION",
 } as const;
+/** The recorded purpose code of a step-up purpose the merchant screens ask for, or null. */
+export function merchantStepUpPurposeCode(purpose: unknown): string | null {
+  return typeof purpose === "string" && Object.hasOwn(purposes, purpose)
+    ? purposes[purpose as keyof typeof purposes]
+    : null;
+}
 export class MerchantStepUpError extends Error {
   constructor(readonly code: "Denied" | "NotSetUp") {
     super("Verification could not be recorded");
@@ -130,9 +136,16 @@ export function createMerchantMfaStepUp(options: {
       throw new MerchantStepUpError("Denied");
     }
   };
-  /** The signed-in member's current verification at this Store: the same Identity recency
-   * (enrollment or latest step-up) refund approval uses. validUntil null: verify again. */
-  const status = async (input: { sessionCookie: unknown }) =>
+  return Object.assign(record, { status: createMerchantStepUpStatus(options.persistence) });
+}
+
+/** The signed-in member's current verification at this Store: the same Identity recency
+ * (enrollment or latest step-up) refund approval uses. validUntil null: verify again.
+ * WP-2423 DEC-COGNITO-STORE-STAFF: shared by the authenticator-code and the sign-in step-up. */
+export function createMerchantStepUpStatus(persistence: PersistentMerchantBffOptions) {
+  const options = { persistence };
+  const resolve = createMerchantStoreScope(persistence);
+  return async (input: { sessionCookie: unknown }) =>
     // WP-2423: resolved in full at the start and before the reply; the two owner reads take the
     // run's no-query guard.
     options.persistence.transactions.run((tx) =>
@@ -179,5 +192,4 @@ export function createMerchantMfaStepUp(options: {
         },
       ),
     );
-  return Object.assign(record, { status });
 }

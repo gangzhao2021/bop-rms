@@ -104,6 +104,8 @@ export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
   route("/operations/receiving/new"),
   route("/operations/receiving/:id"),
   route("/operations/switch-staff"),
+  route("/operations/sign-in"),
+  route("/app/identity/step-up-complete"),
   // Layout reviews without sources: local demo only.
   route("/app/organization/stores", home),
   route("/app/organization/stores/:id", home),
@@ -185,6 +187,8 @@ export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
   route("/operations/delivery/exceptions", "/operations/orders"),
   route("/operations/orders/:id/amend", "/operations/orders"),
   route("/operations/production-batches", "/operations/kitchen"),
+  // Not a screen: the kitchen display sign-in returns here and goes on to the kitchen board.
+  route("/operations/kitchen/start", "/operations/kitchen"),
   route("/operations/reservations", "/operations/dining"),
   route("/operations/reservations/calendar", "/operations/dining"),
   route("/operations/reservations/:id", "/operations/dining"),

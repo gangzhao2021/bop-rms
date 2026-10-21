@@ -26,6 +26,22 @@ export type StepUpPurpose =
   | "SoleOperatorApproval"
   /** WP-2423: a PIN sign-in confirms it is the staff member before sensitive changes. */
   | "PinSessionElevation";
+export const stepUpPurposes: readonly StepUpPurpose[] = Object.freeze([
+  "RefundRequest",
+  "RefundApproval",
+  "SoleOperatorSetting",
+  "SoleOperatorApproval",
+  "PinSessionElevation",
+]);
+/**
+ * WP-2423 DEC-COGNITO-STORE-STAFF: how the signed-in staff member confirms it is them — the
+ * six-digit authenticator code entered here, or signing in again (password and authenticator app).
+ */
+export type StepUpMethod = "Code" | "SignIn";
+export interface StepUpState {
+  readonly validUntil: string | null;
+  readonly method: StepUpMethod;
+}
 export type StepUpFailure =
   "CodeRejected" | "CodeAlreadyUsed" | "TooManyAttempts" | "NotSetUp" | "Denied" | "Unavailable";
 export class StepUpError extends Error {
@@ -229,6 +245,31 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
       signal?.removeEventListener("abort", abort);
     }
   };
+  const stepUpState = async (signal?: AbortSignal): Promise<StepUpState> => {
+    let response: Response;
+    try {
+      response = await request(
+        "/merchant/identity/step-up",
+        { method: "GET", headers: { Accept: "application/json" } },
+        signal,
+      );
+    } catch {
+      throw new StepUpError("Unavailable");
+    }
+    if (response.status === 401 || response.status === 403) throw new StepUpError("Denied");
+    if (response.status !== 200 || response.headers.get("cache-control") !== "no-store")
+      throw new StepUpError("Unavailable");
+    try {
+      const data = await body(response);
+      const withMethod = data !== null && typeof data === "object" && Object.hasOwn(data, "method");
+      const raw = record(data, withMethod ? ["validUntil", "method"] : ["validUntil"]);
+      const method = withMethod ? raw.method : "Code";
+      if (method !== "Code" && method !== "SignIn") return invalid();
+      return Object.freeze({ validUntil: nullable(raw.validUntil, instant), method });
+    } catch {
+      throw new StepUpError("Unavailable");
+    }
+  };
   return Object.freeze({
     /** Re-verify the signed-in staff member. The code is sent once and not retained. */
     async stepUp(purpose: StepUpPurpose, code: string, csrf: string, signal?: AbortSignal) {
@@ -285,26 +326,14 @@ export function createRefundApprovalClient(fetcher: typeof fetch = fetch) {
     },
     /** WP-2423 Q5: the signed-in member's current verification (server-computed), or null. */
     async stepUpStatus(signal?: AbortSignal): Promise<string | null> {
-      let response: Response;
-      try {
-        response = await request(
-          "/merchant/identity/step-up",
-          { method: "GET", headers: { Accept: "application/json" } },
-          signal,
-        );
-      } catch {
-        throw new StepUpError("Unavailable");
-      }
-      if (response.status === 401 || response.status === 403) throw new StepUpError("Denied");
-      if (response.status !== 200 || response.headers.get("cache-control") !== "no-store")
-        throw new StepUpError("Unavailable");
-      try {
-        const raw = record(await body(response), ["validUntil"]);
-        return nullable(raw.validUntil, instant);
-      } catch {
-        throw new StepUpError("Unavailable");
-      }
+      return (await stepUpState(signal)).validUntil;
     },
+    /**
+     * WP-2423 DEC-COGNITO-STORE-STAFF: the current verification and how this sign-in confirms it is
+     * the person: the authenticator code here ("Code", also when the server does not say) or a
+     * fresh sign-in with password and authenticator app ("SignIn").
+     */
+    stepUpState,
     /** Refunds at the selected Store awaiting approval, or approved and not yet sent. */
     async approvals(signal?: AbortSignal) {
       let response: Response;

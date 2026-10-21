@@ -7,6 +7,8 @@ import { createInternalMerchantPickup } from "./pilot-merchant-pickup.mjs";
 import { createInternalKitchenCommand } from "./pilot-kitchen-command.mjs";
 import { createInternalMerchantAcceptance } from "./pilot-merchant-acceptance.mjs";
 import { createInternalMerchantSession } from "./pilot-merchant-session.mjs";
+import { createInternalMerchantCognitoSession } from "./pilot-merchant-cognito-session.mjs";
+import { loadPilotStaffSignIn } from "./pilot-staff-sign-in.mjs";
 import { createInternalMerchant } from "./pilot-merchant.mjs";
 import { createInternalMerchantProduct } from "./pilot-merchant-product.mjs";
 import { createInternalPricingPolicy } from "./pilot-pricing-policy.mjs";
@@ -29,6 +31,8 @@ const factories = {
   createInternalKitchenCommand,
   createInternalMerchantAcceptance,
   createInternalMerchantSession,
+  createInternalMerchantCognitoSession,
+  loadPilotStaffSignIn,
   createInternalMerchant,
   createInternalMerchantProduct,
   createInternalDiningCredentialLoaders,
@@ -235,12 +239,22 @@ export function composeMerchantDependencies(
     createInternalStaffPinCredentials: credentials.createInternalStaffPinCredentials,
     // WP-2423: the settlement page answers a day before coverage with the first covered day.
     loadDailySettlementCoverage: installation.loadDailySettlementCoverage,
-    createInternalMerchantSession: (r) =>
-      f.createInternalMerchantSession(r, {
-        loadEmployee: () => installation.loadCustomerData("internal-test-merchant.json"),
-        expectedDatabaseName: installation.database,
-        createInternalMerchantCredentials: credentials.createInternalMerchantCredentials,
-      }),
+    // WP-2423 DEC-COGNITO-STORE-STAFF: staff-sign-in.json selects Cognito sign-in (own accounts,
+    // in-app invitations, sign-in step-up, PIN keys from secret files); without it the TEST-ONLY
+    // sign-in of the InternalTest pilot is used, unchanged.
+    createInternalMerchantSession: async (r) => {
+      const signIn = await f.loadPilotStaffSignIn(directory);
+      return signIn.mode === "cognito"
+        ? f.createInternalMerchantCognitoSession(r, {
+            signIn,
+            createInternalMerchantCredentials: credentials.createInternalMerchantCredentials,
+          })
+        : f.createInternalMerchantSession(r, {
+            loadEmployee: () => installation.loadCustomerData("internal-test-merchant.json"),
+            expectedDatabaseName: installation.database,
+            createInternalMerchantCredentials: credentials.createInternalMerchantCredentials,
+          });
+    },
   };
 }
 export function composeConfiguredMerchant(

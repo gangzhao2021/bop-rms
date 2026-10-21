@@ -9047,6 +9047,64 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0;
   color: var(--bop-color-text-muted);
 }
+/* WP-2423 DEC-COGNITO-STORE-STAFF: Staff sign-in (each person's own account). */
+.staff-sign-in__primary {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 600;
+  text-decoration: none;
+}
+.staff-sign-in__link {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  min-height: 44px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+/* Invitations on the Staff pages (IAM-USER-LIST / IAM-USER-DETAIL). */
+.staff-invite {
+  display: grid;
+  gap: 12px;
+  max-width: 36rem;
+}
+.staff-invite label {
+  display: grid;
+  gap: 4px;
+  font-weight: 600;
+}
+.staff-invite input,
+.staff-invite select {
+  min-height: 44px;
+  max-width: 100%;
+  font: inherit;
+  font-weight: 400;
+}
+.staff-invite__field {
+  display: grid;
+  gap: 4px;
+}
+.staff-invite__help {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.staff-invite button,
+.staff-invitation button {
+  justify-self: start;
+  min-height: 44px;
+}
+.staff-invitation {
+  display: grid;
+  gap: 8px;
+}
+.staff-invitation p {
+  margin: 0;
+}
+.staff-invitation__status {
+  color: var(--bop-color-text-muted);
+}
 
 /* "My PIN" and the PIN sign-in notice in the workspace footer. */
 .staff-pin {

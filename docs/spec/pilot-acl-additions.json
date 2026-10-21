@@ -4099,6 +4099,116 @@
       "revoke": true,
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
       "justification": "the api only locks Store rows FOR SHARE; the existing column grants (lifecycle, version) cover that lock"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "oidc_authorization_transaction",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-COGNITO-STORE-STAFF 2026-10-20 (Owner \"先把接口都做好\"): staff Cognito sign-in and step-up",
+      "justification": "the sign-in and step-up callbacks consume their one-time authorization transaction (UPDATE ... RETURNING reads the row)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "oidc_authorization_transaction",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-COGNITO-STORE-STAFF 2026-10-20 (Owner \"先把接口都做好\"): staff Cognito sign-in and step-up",
+      "justification": "starting a sign-in or step-up records its hashed state, cookie selector and encrypted PKCE secrets"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "oidc_authorization_transaction",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-COGNITO-STORE-STAFF 2026-10-20 (Owner \"先把接口都做好\"): staff Cognito sign-in and step-up",
+      "justification": "the callback marks the transaction consumed exactly once"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "store_staff_invitation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-COGNITO-STORE-STAFF 2026-10-20 (Owner \"先把接口都做好\"): in-app staff invitations",
+      "justification": "staff screen invitation status; first sign-in reads the person's own pending invitation (RLS)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "store_staff_invitation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-COGNITO-STORE-STAFF 2026-10-20 (Owner \"先把接口都做好\"): in-app staff invitations",
+      "justification": "an Owner or manager invites a staff member"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "store_staff_invitation",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-COGNITO-STORE-STAFF 2026-10-20 (Owner \"先把接口都做好\"): in-app staff invitations",
+      "justification": "record delivery, resend, revoke and acceptance of a pending invitation (trigger allows only these, never after it ended)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "store_staff_account",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-COGNITO-STORE-STAFF 2026-10-20 (Owner \"先把接口都做好\"): staff Cognito sign-in",
+      "justification": "a sign-in finds the person by the keyed subject digest; a session re-checks its person's account (RLS)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "store_staff_account",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-COGNITO-STORE-STAFF 2026-10-20 (Owner \"先把接口都做好\"): staff Cognito sign-in",
+      "justification": "the first sign-in binds the invited person's Cognito account (append-only; no UPDATE or DELETE)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "workforce_mfa_status",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-COGNITO-STORE-STAFF 2026-10-20 (Owner \"先把接口都做好\"): staff Cognito sign-in",
+      "justification": "the first sign-in records that Cognito required the authenticator (TotpVerified), only when no status exists yet"
+    },
+    {
+      "type": "table",
+      "schema": "bop_membership",
+      "object": "membership",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-COGNITO-STORE-STAFF 2026-10-20 (Owner \"先把接口都做好\"): in-app staff invitations",
+      "justification": "an invitation creates the person's Membership as PendingActivation (grants nothing until their first sign-in)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_membership",
+      "object": "store_assignment",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-COGNITO-STORE-STAFF 2026-10-20 (Owner \"先把接口都做好\"): in-app staff invitations",
+      "justification": "an invitation assigns the person to the inviting Store"
     }
   ]
 }

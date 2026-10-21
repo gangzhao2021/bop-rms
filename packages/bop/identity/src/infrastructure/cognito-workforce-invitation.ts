@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   AdminCreateUserCommand,
+  AdminDeleteUserCommand,
   AdminGetUserCommand,
   CognitoIdentityProviderClient,
   UserNotFoundException,
@@ -30,7 +31,23 @@ export interface CognitoWorkforceInvitationOptions {
   readonly clock: { now(): string };
   readonly hasher: BrowserCredentialHasherPort;
   readonly requestTimeoutMs?: number;
+  /**
+   * WP-2423 DEC-COGNITO-STORE-STAFF: Store staff invitations mark the work email verified (the
+   * temporary password is sent to it, so signing in proves the address) so staff sign in with
+   * their email rather than the generated username.
+   */
+  readonly markEmailVerified?: true;
+  /**
+   * TEST-ONLY: a loopback Cognito stand-in (`http(s)://127.0.0.1:<port>`) with its own static
+   * credentials. The composition admits it only in the InternalTest environment.
+   */
+  readonly providerEndpoint?: {
+    readonly url: string;
+    readonly credentials: { readonly accessKeyId: string; readonly secretAccessKey: string };
+  };
 }
+export type CognitoWorkforceInvitationResend = "Sent" | "NotFound" | "Unknown";
+export type CognitoWorkforceInvitationRemoval = "Removed" | "NotFound" | "SignedIn" | "Unknown";
 export interface CognitoWorkforceInvitationProviderAccount {
   readonly username: string;
   readonly subject: string;
@@ -83,7 +100,37 @@ export function createCognitoWorkforceInvitation(options: CognitoWorkforceInvita
       "clock",
       "hasher",
       ...(Object.hasOwn(options, "requestTimeoutMs") ? ["requestTimeoutMs"] : []),
+      ...(Object.hasOwn(options, "markEmailVerified") ? ["markEmailVerified"] : []),
+      ...(Object.hasOwn(options, "providerEndpoint") ? ["providerEndpoint"] : []),
     ]);
+    if (Object.hasOwn(options, "markEmailVerified") && options.markEmailVerified !== true)
+      return denied();
+    const loopback = Object.hasOwn(options, "providerEndpoint")
+      ? (() => {
+          const value = readClosedRecord(options.providerEndpoint, ["url", "credentials"]);
+          const secret = readClosedRecord(value.credentials, ["accessKeyId", "secretAccessKey"]);
+          const url = typeof value.url === "string" ? new URL(value.url) : denied();
+          if (
+            !["http:", "https:"].includes(url.protocol) ||
+            url.hostname !== "127.0.0.1" ||
+            !url.port ||
+            url.pathname !== "/" ||
+            url.search ||
+            url.hash ||
+            typeof secret.accessKeyId !== "string" ||
+            typeof secret.secretAccessKey !== "string"
+          )
+            return denied();
+          return Object.freeze({
+            endpoint: url.origin,
+            credentials: Object.freeze({
+              accessKeyId: secret.accessKeyId,
+              secretAccessKey: secret.secretAccessKey,
+            }),
+          });
+        })()
+      : null;
+    const markEmailVerified = options.markEmailVerified === true;
     const configurationPort = options.configuration,
       raw = readClosedRecord(configurationPort, ["environment", "issuer", "clientId"]),
       configuration = parseWorkforceAccountBindingConfiguration({
@@ -111,11 +158,13 @@ export function createCognitoWorkforceInvitation(options: CognitoWorkforceInvita
     const pool = configuration.issuer.slice(configuration.issuer.lastIndexOf("/") + 1),
       client = new CognitoIdentityProviderClient({
         region: "ca-central-1",
-        endpoint: "https://cognito-idp.ca-central-1.amazonaws.com",
+        endpoint: loopback?.endpoint ?? "https://cognito-idp.ca-central-1.amazonaws.com",
         useFipsEndpoint: false,
         useDualstackEndpoint: false,
         maxAttempts: 1,
         requestHandler: { connectionTimeout: timeout, requestTimeout: timeout },
+        // The SDK annotates the credentials object it is given, so it gets its own copy.
+        ...(loopback === null ? {} : { credentials: { ...loopback.credentials } }),
       }),
       send = client.send;
     let poisoned = false;
@@ -241,6 +290,7 @@ export function createCognitoWorkforceInvitation(options: CognitoWorkforceInvita
                   ForceAliasCreation: false,
                   UserAttributes: [
                     { Name: "email", Value: normalizedEmail ?? denied() },
+                    ...(markEmailVerified ? [{ Name: "email_verified", Value: "true" }] : []),
                     { Name: "custom:bop_invitation_intent", Value: creationIntentDigest },
                   ],
                 })
@@ -331,7 +381,102 @@ export function createCognitoWorkforceInvitation(options: CognitoWorkforceInvita
         abort.abort();
       }
     };
+    /** One bounded Provider call; any failure or timeout is reported as not known. */
+    const call = async <T>(
+      command: AdminCreateUserCommand | AdminGetUserCommand | AdminDeleteUserCommand,
+    ): Promise<
+      { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown }
+    > => {
+      observe();
+      const abort = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const value = await Promise.race([
+          command instanceof AdminCreateUserCommand
+            ? client.send(command, { abortSignal: abort.signal })
+            : command instanceof AdminGetUserCommand
+              ? client.send(command, { abortSignal: abort.signal })
+              : client.send(command, { abortSignal: abort.signal }),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              abort.abort();
+              reject(new Error("Provider call unavailable"));
+            }, timeout);
+          }),
+        ]);
+        observe();
+        return { ok: true, value: value as T };
+      } catch (error) {
+        return { ok: false, error };
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+        abort.abort();
+      }
+    };
+    const status = (user: unknown) => {
+      try {
+        const value = field(user, "UserStatus");
+        return value === "FORCE_CHANGE_PASSWORD" || value === "CONFIRMED" ? value : null;
+      } catch {
+        return null;
+      }
+    };
     return Object.freeze({
+      /**
+       * WP-2423 DEC-COGNITO-STORE-STAFF: Cognito sends the invitation email again with a new
+       * temporary password, for a person who has not signed in yet (a signed-in user is refused).
+       */
+      async resend(input: unknown): Promise<CognitoWorkforceInvitationResend> {
+        try {
+          const r = readClosedRecord(input, ["actorReference"]),
+            username = `bop_${String(parseOpaqueUuidV7(r.actorReference, "ACTOR_REFERENCE_INVALID"))}`;
+          const result = await call(
+            new AdminCreateUserCommand({
+              UserPoolId: pool,
+              Username: username,
+              MessageAction: "RESEND",
+              DesiredDeliveryMediums: ["EMAIL"],
+            }),
+          );
+          if (result.ok) return "Sent";
+          return result.error instanceof UserNotFoundException ? "NotFound" : "Unknown";
+        } catch {
+          return "Unknown";
+        }
+      },
+      /**
+       * WP-2423 DEC-COGNITO-STORE-STAFF: withdraws the account of a revoked invitation that was
+       * never used (still waiting for its first password), so the email can be invited again.
+       * An account that has signed in is kept (removing staff goes through the staff screen).
+       */
+      async remove(input: unknown): Promise<CognitoWorkforceInvitationRemoval> {
+        try {
+          const r = readClosedRecord(input, ["actorReference", "creationIntentDigest"]),
+            username = `bop_${String(parseOpaqueUuidV7(r.actorReference, "ACTOR_REFERENCE_INVALID"))}`,
+            intent = digest(r.creationIntentDigest);
+          const found = await call<unknown>(
+            new AdminGetUserCommand({ UserPoolId: pool, Username: username }),
+          );
+          if (!found.ok)
+            return found.error instanceof UserNotFoundException ? "NotFound" : "Unknown";
+          const attributes = field(found.value, "UserAttributes");
+          if (!Array.isArray(attributes)) return "Unknown";
+          const tagged = attributes.some(
+            (item) =>
+              field(item, "Name") === "custom:bop_invitation_intent" &&
+              field(item, "Value") === intent,
+          );
+          if (!tagged) return "Unknown";
+          if (status(found.value) !== "FORCE_CHANGE_PASSWORD") return "SignedIn";
+          const removed = await call(
+            new AdminDeleteUserCommand({ UserPoolId: pool, Username: username }),
+          );
+          if (removed.ok) return "Removed";
+          return removed.error instanceof UserNotFoundException ? "NotFound" : "Unknown";
+        } catch {
+          return "Unknown";
+        }
+      },
       digestCorporateEmail(corporateEmail: unknown): string {
         try {
           observe();

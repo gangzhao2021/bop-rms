@@ -10,6 +10,9 @@ const ownNavigation = [
   /^\/app\/commerce\/products\/new$/u,
   // WP-2423 (design "A"): the shared tablet's staff PIN switch is a full-screen lock screen.
   /^\/operations\/switch-staff$/u,
+  // WP-2423 DEC-COGNITO-STORE-STAFF: Staff sign-in, and the end of the "confirm it is you" window.
+  /^\/operations\/sign-in$/u,
+  /^\/app\/identity\/step-up-complete$/u,
 ];
 export const usesWorkspaceLayout = (path: string) =>
   (path === "/app" || path.startsWith("/app/") || path.startsWith("/operations/")) &&

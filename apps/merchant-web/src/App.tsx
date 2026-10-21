@@ -20,6 +20,8 @@ import { StaffSessionGuard, StaffSignedOutPanel, StaffSwitchButton } from "./Sta
 import { OwnNamePrompt } from "./OwnNamePrompt.js";
 import { StaffPinControls } from "./StaffPinControls.js";
 import { StaffSwitchPage } from "./StaffSwitchPage.js";
+import { StaffSignInPage } from "./StaffSignInPage.js";
+import { StepUpCompletePage } from "./StepUpCompletePage.js";
 import { pilotHiddenRedirect } from "./pilot-routes.js";
 import { isOperationalScreen } from "./staff-session.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
@@ -426,6 +428,13 @@ function prefetchPilotScreens(): () => void {
   return () => clearTimeout(handle);
 }
 
+/** Screens that work without a sign-in (and the sign-in window's last page). */
+const sessionlessPaths: ReadonlySet<string> = new Set([
+  "/operations/switch-staff",
+  "/operations/sign-in",
+  "/app/identity/step-up-complete",
+]);
+
 type WorkspaceState =
   | { readonly kind: "Loading" }
   | { readonly kind: "SignedOut" }
@@ -553,7 +562,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
   // last knew, labelled with when it was checked; nothing is read without a Session.
   const remembered = useMemo(
     () =>
-      demo === null && (pathname === "/operations/switch-staff" || state.kind === "SignedOut")
+      demo === null &&
+      (pathname === "/operations/switch-staff" ||
+        pathname === "/operations/sign-in" ||
+        state.kind === "SignedOut")
         ? loadLastKnownRefundDeadlines(Date.now())
         : null,
     [demo, pathname, state.kind],
@@ -1970,6 +1982,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         />
         {/* WP-2423 (design "A"): staff switch to themselves with their PIN; no sign-in needed. */}
         <Route path="/operations/switch-staff" element={<StaffSwitchPage />} />
+        {/* WP-2423 DEC-COGNITO-STORE-STAFF: staff sign in with their own account; no sign-in needed. */}
+        <Route path="/operations/sign-in" element={<StaffSignInPage />} />
+        {/* The kitchen display sign-in comes back here; the server started a kitchen display. */}
+        <Route
+          path="/operations/kitchen/start"
+          element={<Navigate replace to="/operations/kitchen" />}
+        />
+        {/* Where the "confirm it is you" sign-in window ends; tells the page that opened it. */}
+        <Route path="/app/identity/step-up-complete" element={<StepUpCompletePage />} />
         {/* WP-2423 (design "A"): Section 88 IAM-SESSION-LIST — shared tablets and staff PINs. */}
         <Route
           path="/app/organization/sessions"
@@ -2011,7 +2032,11 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       <PageChunkBoundary resetKey={pathname}>{routeTree}</PageChunkBoundary>
     );
   // WP-2423 Q18: a staff page opened without a Session offers the sign-in that works here.
-  const staffPage = isOperationalScreen(pathname) || pathname.startsWith("/app/operations/");
+  const staffPage =
+    pathname !== "/operations/kitchen/start" &&
+    (isOperationalScreen(pathname) || pathname.startsWith("/app/operations/"));
+  // Pages shown without a sign-in, or in the sign-in window: no session watch, no store warnings.
+  const sessionless = sessionlessPaths.has(pathname);
   return (
     <StoreTimeZoneContext.Provider
       value={state.kind === "Ready" ? state.workspace.selectedScope.timeZone : undefined}
@@ -2024,7 +2049,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         enabled={state.kind === "Ready" && !state.switching && demo === null && sessionLive}
       >
         {/* WP-2423 "Warn before timeouts": above every screen, before its own header. */}
-        {refundRead !== null && pathname !== "/operations/switch-staff" ? (
+        {refundRead !== null && !sessionless ? (
           <RefundDeadlineWatch
             key={(watchStoreReference ?? "") + (watchCsrf ?? "")}
             read={refundRead}
@@ -2077,7 +2102,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           routes
         )}
         {/* WP-2423 Q18: keep the Session alive while staff work; warn before it ends. */}
-        {state.kind === "Ready" && demo === null && pathname !== "/operations/switch-staff" ? (
+        {state.kind === "Ready" && demo === null && !sessionless ? (
           <StaffSessionGuard
             key={state.csrf}
             csrf={state.csrf}

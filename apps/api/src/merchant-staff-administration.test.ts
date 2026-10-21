@@ -49,6 +49,74 @@ describe("WP-2423 staff administration command input", () => {
   });
 });
 
+describe("WP-2423 DEC-COGNITO-STORE-STAFF invitation commands", () => {
+  const invite = {
+    operation: "Invite",
+    displayName: "Sam Lee",
+    email: " Sam.Lee@Example.test ",
+    roleReference: id(3),
+    operationReference: id(2),
+  };
+  it("normalizes the work email and keeps the name for the owner's own check", () => {
+    expect(parseStaffCommand(invite)).toEqual({ ...invite, email: "sam.lee@example.test" });
+    expect(
+      parseStaffCommand({
+        operation: "ResendInvitation",
+        actorReference: id(1),
+        expectedVersion: 2,
+        operationReference: id(2),
+      }),
+    ).toMatchObject({ operation: "ResendInvitation", email: null });
+    expect(
+      parseStaffCommand({
+        operation: "ResendInvitation",
+        actorReference: id(1),
+        expectedVersion: 2,
+        operationReference: id(2),
+        email: "LEE@example.test",
+      }),
+    ).toMatchObject({ email: "lee@example.test" });
+    expect(
+      parseStaffCommand({
+        operation: "RevokeInvitation",
+        actorReference: id(1),
+        expectedVersion: 3,
+        operationReference: id(2),
+      }).operation,
+    ).toBe("RevokeInvitation");
+  });
+  it.each([
+    ["no name field", { ...invite, displayName: undefined }],
+    ["no email", { ...invite, email: "" }],
+    ["not an email", { ...invite, email: "sam at example" }],
+    ["no role", { ...invite, roleReference: undefined }],
+    ["extra field", { ...invite, kind: "FirstOwner" }],
+    [
+      "version zero",
+      {
+        operation: "RevokeInvitation",
+        actorReference: id(1),
+        expectedVersion: 0,
+        operationReference: id(2),
+      },
+    ],
+    [
+      "bad resend email",
+      {
+        operation: "ResendInvitation",
+        actorReference: id(1),
+        expectedVersion: 1,
+        operationReference: id(2),
+        email: "nope",
+      },
+    ],
+  ])("refuses %s", (_label, value) => {
+    expect(() =>
+      parseStaffCommand(JSON.parse(JSON.stringify(value)) as Record<string, unknown>),
+    ).toThrow(/Invalid/u);
+  });
+});
+
 describe("WP-2423 a member records their own first name", () => {
   it("accepts a name with version 0 and an operation reference", () => {
     expect(

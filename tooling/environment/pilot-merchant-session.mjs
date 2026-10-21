@@ -39,6 +39,44 @@ function data(value, keys, exact = true) {
   }
   return result;
 }
+/**
+ * IDR-0039 / WP-2423: Kitchen records the named operator Start in the session's own creation
+ * transaction and derives a handover from the latest prior operator at this Store whose shift
+ * ended. Shared by the TEST-ONLY sign-in and the Cognito kitchen display sign-in.
+ */
+export async function startNamedKdsOperatorShift(
+  tx,
+  session,
+  scope,
+  { nextReference, recordedAt },
+) {
+  const validUntil =
+    Date.parse(session.idleExpiresAt) < Date.parse(session.absoluteExpiresAt)
+      ? session.idleExpiresAt
+      : session.absoluteExpiresAt;
+  await createPostgresKdsOperatorShiftStore({
+    brandReference: scope.brandReference,
+    storeReference: scope.storeReference,
+    references: { next: nextReference },
+  }).start({
+    transaction: tx,
+    session: {
+      sessionReference: session.sessionReference,
+      actorReference: session.actor.actorReference,
+      brandReference: scope.brandReference,
+      storeReference: scope.storeReference,
+      sessionVersion: session.version,
+      sessionKind: "NamedKdsOperator",
+      state: "Active",
+      observedAt: session.createdAt,
+      validUntil,
+    },
+    recordedAt,
+    // A prior operator who left without Release ended their shift when their session ended.
+    sessionEnds: (sessionReferences) =>
+      loadSessionEnds(tx, { sessionReferences, at: session.createdAt }),
+  });
+}
 export async function createInternalMerchantSession(
   resources,
   { loadEmployee, expectedDatabaseName, createInternalMerchantCredentials },
@@ -206,34 +244,9 @@ export async function createInternalMerchantSession(
       const finalize = finalizers.get(record.session.sessionReference);
       if (finalize !== undefined) await finalize(tx, record.session);
       if (record.session.policy.code !== "NamedKdsOperator") return;
-      // IDR-0039 / WP-2423: Kitchen records the named operator Start in the same transaction and
-      // derives a handover from the latest prior operator at this Store whose shift ended.
-      const session = record.session,
-        validUntil =
-          Date.parse(session.idleExpiresAt) < Date.parse(session.absoluteExpiresAt)
-            ? session.idleExpiresAt
-            : session.absoluteExpiresAt;
-      await createPostgresKdsOperatorShiftStore({
-        brandReference: scope.brandReference,
-        storeReference: scope.storeReference,
-        references: { next: () => credentials.reference() },
-      }).start({
-        transaction: tx,
-        session: {
-          sessionReference: session.sessionReference,
-          actorReference: session.actor.actorReference,
-          brandReference: scope.brandReference,
-          storeReference: scope.storeReference,
-          sessionVersion: session.version,
-          sessionKind: "NamedKdsOperator",
-          state: "Active",
-          observedAt: session.createdAt,
-          validUntil,
-        },
+      await startNamedKdsOperatorShift(tx, record.session, scope, {
+        nextReference: () => credentials.reference(),
         recordedAt: instant(clock()),
-        // A prior operator who left without Release ended their shift when their session ended.
-        sessionEnds: (sessionReferences) =>
-          loadSessionEnds(tx, { sessionReferences, at: session.createdAt }),
       });
     },
   });

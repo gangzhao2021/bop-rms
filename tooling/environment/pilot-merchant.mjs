@@ -166,7 +166,16 @@ export async function createInternalMerchant(
       // Store setup.
       requiredValidationCheckCodes: resources.operating.requiredValidationCheckCodes,
     },
-    initialScope: targetScope,
+    // WP-2423 DEC-COGNITO-STORE-STAFF: a full Cognito sign-in also starts a kitchen display shift
+    // and records its authenticator check, in the session's creation transaction.
+    initialScope:
+      typeof session.onFullSignIn === "function"
+        ? async (tx, authenticated) => {
+            const scope = await targetScope(tx, authenticated);
+            await session.onFullSignIn(tx, authenticated, scope);
+            return scope;
+          }
+        : targetScope,
     targetScope,
     workspace: async (_tx, { context }) => ({
       screenId: "HOME-OVERVIEW",
@@ -956,9 +965,14 @@ export async function createInternalMerchant(
       resolveConfiguration: escalatedRefundConfiguration,
     }),
   );
-  // WP-2423 Q5: TEST-ONLY authenticator step-up (Cognito re-authentication in production).
+  // WP-2423 Q5: TEST-ONLY authenticator step-up; with Cognito sign-in (DEC-COGNITO-STORE-STAFF)
+  // staff step up by signing in again instead, and the test verifier is never offered.
+  const providerStepUp =
+    typeof session.createProviderStepUp === "function"
+      ? session.createProviderStepUp(persistence, service)
+      : undefined;
   const mfaStepUp =
-    staffTotpVerifier === undefined
+    staffTotpVerifier === undefined || session.mode === "cognito"
       ? undefined
       : createMerchantMfaStepUp({
           persistence,
@@ -971,10 +985,14 @@ export async function createInternalMerchant(
         });
   // WP-2423 Q18 option A: staff switch on a registered shared tablet with a six-digit PIN.
   const staffPin =
-    createInternalStaffPinCredentials === undefined
+    createInternalStaffPinCredentials === undefined && session.staffPinCredentials === undefined
       ? undefined
       : await (async () => {
-          const keys = await createInternalStaffPinCredentials();
+          // DEC-COGNITO-STORE-STAFF: with Cognito sign-in the PIN keys come from secret files.
+          const keys =
+            typeof session.staffPinCredentials === "function"
+              ? await session.staffPinCredentials()
+              : await createInternalStaffPinCredentials();
           return createMerchantStaffPin({
             persistence,
             authentication: service,
@@ -1156,6 +1174,8 @@ export async function createInternalMerchant(
     persistence,
     authentication: service,
     references: { next: () => resources.credentials.reference() },
+    // WP-2423 DEC-COGNITO-STORE-STAFF: in-app invitations when staff sign in with Cognito.
+    ...(session.invitations === undefined ? {} : { invitations: session.invitations }),
   });
   const inventoryItems = createMerchantInventoryItems({
     persistence,
@@ -1303,13 +1323,19 @@ export async function createInternalMerchant(
     ordinaryRefundSend,
     // WP-2423 Q18: a full sign-in on a registered tablet ends the PIN sessions left on it, in the
     // transaction that creates the new session.
-    issue: (selector, purpose, deviceCookie) =>
-      staffPin === undefined || deviceCookie === undefined
-        ? session.issue(selector, purpose)
-        : session.issue(selector, purpose, (tx, created) =>
-            staffPin.endTabletPinSessions(tx, deviceCookie, created),
-          ),
-    staffChoices: session.staffChoices,
+    // WP-2423 DEC-COGNITO-STORE-STAFF: the TEST-ONLY sign-in page exists only in its own mode.
+    staffSignInMode: session.mode === "cognito" ? "cognito" : "internal-test",
+    ...(typeof session.issue !== "function"
+      ? {}
+      : {
+          issue: (selector, purpose, deviceCookie) =>
+            staffPin === undefined || deviceCookie === undefined
+              ? session.issue(selector, purpose)
+              : session.issue(selector, purpose, (tx, created) =>
+                  staffPin.endTabletPinSessions(tx, deviceCookie, created),
+                ),
+          staffChoices: session.staffChoices,
+        }),
     persistence,
     service,
     orderQueue,
@@ -1323,9 +1349,9 @@ export async function createInternalMerchant(
     pickupIdentityCheck,
     orderAcceptance,
     bff: {
-      // WP-2423 Q18: TEST-ONLY staff sign-in page of the InternalTest pilot (the Cognito sign-in is
-      // an external gate); staff see it labelled as test sign-in.
-      signInEntry: { path: "/internal-test/staff", testOnly: true },
+      // WP-2423 Q18: TEST-ONLY staff sign-in page of the InternalTest pilot, labelled as test
+      // sign-in for staff; with Cognito (DEC-COGNITO-STORE-STAFF) the staff sign-in page.
+      signInEntry: session.signInEntry ?? { path: "/internal-test/staff", testOnly: true },
       ...(staffPin === undefined ? {} : { staffPin }),
       // WP-2423 Q4: busy mode — a manager pauses and resumes taking new online orders.
       ...(() => {
@@ -1463,6 +1489,7 @@ export async function createInternalMerchant(
       ordinaryRefundApprovals,
       ordinaryRefundDecline,
       ...(mfaStepUp === undefined ? {} : { mfaStepUp }),
+      ...(providerStepUp === undefined ? {} : { providerStepUp }),
       // WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): the Brand Owner turns sole operator on/off.
       soleOperator: (() => {
         const soleOperator = createMerchantSoleOperator({

@@ -51,6 +51,37 @@ export async function confirmStoreMemberScope(
 }
 
 /**
+ * WP-2423 DEC-COGNITO-STORE-STAFF: whether an Actor currently works at the Store — an Active Brand
+ * Membership and an Active Store assignment, both effective at the instant. A signed-in person's
+ * session keeps its Store selection only while this holds. Exposes no Membership content.
+ */
+export async function isActiveStoreMember(
+  tx: StoreMemberScopeTransaction,
+  scope: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly actorReference: string;
+    readonly at: string;
+  },
+): Promise<boolean> {
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    scope.brandReference,
+    scope.storeReference,
+  ]);
+  const result = await tx.query(
+    `SELECT 1 FROM bop_membership.membership m JOIN bop_membership.store_assignment s
+       ON s.membership_id=m.membership_id AND s.actor_id=m.actor_id AND s.brand_id=m.brand_id
+     WHERE m.actor_id=$1 AND m.brand_id=$2 AND s.store_id=$3
+       AND m.lifecycle='Active' AND s.lifecycle='Active'
+       AND m.effective_from<=$4::timestamptz AND (m.effective_until IS NULL OR m.effective_until>$4::timestamptz)
+       AND s.effective_from<=$4::timestamptz AND (s.effective_until IS NULL OR s.effective_until>$4::timestamptz)
+     LIMIT 1`,
+    [scope.actorReference, scope.brandReference, scope.storeReference, scope.at],
+  );
+  return result.rows.length === 1;
+}
+
+/**
  * WP-2423 / DEC-PERM-BRAND-ROLES: Membership owner's confirmation that an Actor holds an Active Brand
  * Membership effective at the given instant (Brand-level roles need no Store assignment).
  */

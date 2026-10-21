@@ -74,7 +74,10 @@ export const pilotCapabilityGaps = Object.freeze([
   Object.freeze({
     code: "StaffLogin",
     standIn: "DEMO staff roster login",
-    needs: "Cognito workforce pool (external: AWS account, user pool, app client, domain)",
+    // WP-2423 DEC-COGNITO-STORE-STAFF: the Cognito sign-in is built; it closes this gap once the
+    // installation's staff-sign-in.json selects it and its secret files are in place.
+    needs:
+      "Cognito workforce pool configured in staff-sign-in.json (external: AWS account, user pool, app client, domain, secrets)",
   }),
   Object.freeze({
     code: "Secrets",
@@ -93,12 +96,24 @@ export const pilotCapabilityGaps = Object.freeze([
   }),
 ]);
 
+/**
+ * The gaps that remain for this installation. WP-2423 DEC-COGNITO-STORE-STAFF: `StaffLogin`
+ * closes only when the staff sign-in is configured for Cognito with every secret file present
+ * and well formed (`readPilotStaffSignInReadiness`); a missing or broken configuration keeps it.
+ */
+export function currentPilotCapabilityGaps({ staffSignIn = "NotConfigured" } = {}) {
+  return Object.freeze(
+    pilotCapabilityGaps.filter(
+      (gap) => !(gap.code === "StaffLogin" && staffSignIn === "CognitoConfigured"),
+    ),
+  );
+}
+
 /** Refuses a Pilot start while a capability gap remains; InternalTest is unaffected. */
-export function assertPilotReady(options) {
+export function assertPilotReady(options, capabilities = {}) {
   const environment = currentPilotEnvironment(options);
-  if (environment === "Pilot" && pilotCapabilityGaps.length > 0)
-    throw new Error(
-      "PILOT_CAPABILITY_MISSING:" + pilotCapabilityGaps.map((gap) => gap.code).join(","),
-    );
+  const gaps = currentPilotCapabilityGaps(capabilities);
+  if (environment === "Pilot" && gaps.length > 0)
+    throw new Error("PILOT_CAPABILITY_MISSING:" + gaps.map((gap) => gap.code).join(","));
   return environment;
 }

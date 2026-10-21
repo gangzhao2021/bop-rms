@@ -259,6 +259,28 @@ it("WP-2423 Q5: reads the server's own verification and names role refusals apar
     await expect(client.approve(command, csrf)).rejects.toMatchObject({ code });
 });
 
+it("WP-2423 DEC-COGNITO-STORE-STAFF: the step-up read says how to confirm, Code when it does not", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(json({ validUntil: null }))
+    .mockResolvedValueOnce(json({ validUntil: "2026-10-12T15:15:00.000Z", method: "SignIn" }))
+    .mockResolvedValueOnce(json({ validUntil: null, method: "Code" }))
+    .mockResolvedValueOnce(json({ validUntil: null, method: "Password" }))
+    .mockResolvedValueOnce(json({ validUntil: null, method: "SignIn", extra: true }))
+    .mockResolvedValueOnce(json({ validUntil: null, method: "SignIn" }));
+  const client = createRefundApprovalClient(fetcher);
+  await expect(client.stepUpState()).resolves.toEqual({ validUntil: null, method: "Code" });
+  await expect(client.stepUpState()).resolves.toEqual({
+    validUntil: "2026-10-12T15:15:00.000Z",
+    method: "SignIn",
+  });
+  await expect(client.stepUpState()).resolves.toEqual({ validUntil: null, method: "Code" });
+  await expect(client.stepUpState()).rejects.toMatchObject({ code: "Unavailable" });
+  await expect(client.stepUpState()).rejects.toMatchObject({ code: "Unavailable" });
+  // The older read keeps answering only the verification end.
+  await expect(client.stepUpStatus()).resolves.toBeNull();
+});
+
 it("WP-2423: approve and decline refused on a PIN sign-in ask to confirm it is them", async () => {
   const fetcher = vi
     .fn<typeof fetch>()

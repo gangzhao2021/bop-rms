@@ -1,5 +1,5 @@
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime, StaffTime } from "./StoreTime.js";
+import { SourceTime, StaffTime, StoreDate } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
@@ -7,10 +7,14 @@ import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { FULL_SIGN_IN_REQUIRED_TEXT, needsFullSignIn } from "./full-sign-in.js";
 import {
   StaffPageError,
+  parseStaffInviteResult,
+  parseStaffResendResult,
+  parseStaffRevokeResult,
   parseStaffPageView,
   parseStaffRouteReference,
   unavailableStaffPageClient,
   type StaffCommandRequest,
+  type StaffInvitationView,
   type StaffMemberView,
   type StaffPageClient,
   type StaffPageErrorCode,
@@ -30,12 +34,376 @@ const copy: Record<StaffPageErrorCode | "Loading", string> = {
   BrandRolesRemain:
     "This person also holds Brand roles (all Stores). Only someone who manages Brand staff can remove them; ask the Owner.",
   Invalid: "The change was refused because the input is invalid.",
+  AlreadyInvited: "This email already has an open invitation.",
+  EmailMismatch:
+    "That's not the email this invitation was sent to. Cancel this invitation and invite again with the new address.",
   Offline: "Offline. Your change was not confirmed; retry sends the same request again.",
   Unavailable: "Staff administration is unavailable.",
 };
 type State =
   | { readonly kind: "Loading" | StaffPageErrorCode }
   | { readonly kind: "Found"; readonly view: StaffPageView };
+
+/** Membership in plain words (never the stored status code). */
+export function membershipText(status: string): string {
+  if (status === "PendingActivation") return "Invited (not signed in yet)";
+  if (status === "Active") return "Active";
+  if (status === "Suspended") return "Suspended";
+  return status;
+}
+
+export const INVITE_NAME_HELP = "Required — orders, refunds and records show who did what.";
+export const INVITE_ROLE_NOTE = "The role starts after another manager approves it.";
+export function inviteSentText(delivery: StaffInvitationView["delivery"]): string {
+  return delivery === "Unknown"
+    ? "The invitation was saved but we couldn't confirm the email went out. Use Resend on their page."
+    : "Invitation sent. They'll get an email with a temporary password; it expires in 7 days.";
+}
+export function resendSentText(delivery: StaffInvitationView["delivery"]): string {
+  return delivery === "Unknown"
+    ? "The invitation was saved but we couldn't confirm the email went out. Try Resend again in a few minutes."
+    : "Invitation sent again. They'll get a new temporary password; it expires in 7 days.";
+}
+/** All three fields are needed (Owner decision 2026-10-18: a name is mandatory). */
+export function inviteReady(name: string, email: string, role: string): boolean {
+  return name.trim() !== "" && email.trim() !== "" && role !== "";
+}
+
+/** The list's one-line invitation state; nothing once accepted or cancelled. */
+export function InvitationStatusLine({
+  invitation,
+}: {
+  readonly invitation: StaffInvitationView | null;
+}) {
+  if (invitation === null) return null;
+  if (invitation.status === "Expired")
+    return <p className="staff-invitation__status">Invitation expired</p>;
+  if (invitation.status !== "Pending") return null;
+  if (invitation.delivery === "Unknown")
+    return <p className="staff-invitation__status">Invited · email not confirmed</p>;
+  return (
+    <p className="staff-invitation__status">
+      Invited · email sent <StaffTime instant={invitation.sentAt} /> · expires{" "}
+      <StoreDate value={invitation.expiresAt} />
+    </p>
+  );
+}
+
+function CommandError({
+  error,
+  csrf,
+  busy,
+  retry,
+  reload,
+  text = copy,
+}: {
+  readonly error: StaffPageErrorCode | null;
+  readonly csrf: string;
+  readonly busy: boolean;
+  readonly retry: (() => void) | null;
+  readonly reload: () => void;
+  readonly text?: Record<StaffPageErrorCode | "Loading", string>;
+}) {
+  if (error === null) return null;
+  if (needsFullSignIn(error))
+    return (
+      <StatePanel heading="Confirm it's you" status>
+        <FullSignInPrompt csrf={csrf} />
+        {retry ? (
+          <button disabled={busy} onClick={retry}>
+            Try again
+          </button>
+        ) : null}
+      </StatePanel>
+    );
+  return (
+    <StatePanel heading="Change not applied" tone="error" status>
+      <p>{text[error]}</p>
+      {retry && error === "Offline" ? (
+        <button disabled={busy} onClick={retry}>
+          Retry
+        </button>
+      ) : (
+        <button onClick={reload}>Refresh</button>
+      )}
+    </StatePanel>
+  );
+}
+
+const inviteCopy: Record<StaffPageErrorCode | "Loading", string> = {
+  ...copy,
+  Invalid: "Check the name and email.",
+};
+
+/** WP-2423 DEC-COGNITO-STORE-STAFF: invite a new staff member to sign in with their own account. */
+function InvitePanel({
+  view,
+  client,
+  csrf,
+  reload,
+}: {
+  readonly view: StaffPageView;
+  readonly client: StaffPageClient;
+  readonly csrf: string;
+  readonly reload: () => void;
+}) {
+  const [name, setName] = useState(""),
+    [email, setEmail] = useState(""),
+    [role, setRole] = useState(""),
+    [pending, setPending] = useState<StaffCommandRequest | null>(null),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState<StaffPageErrorCode | null>(null),
+    [notice, setNotice] = useState("");
+  const run = async (request: StaffCommandRequest) => {
+    if (!client.command || busy) return;
+    setPending(request);
+    setBusy(true);
+    setError(null);
+    setNotice("");
+    try {
+      const result = parseStaffInviteResult(await client.command(request));
+      setPending(null);
+      setName("");
+      setEmail("");
+      setRole("");
+      setNotice(inviteSentText(result.delivery));
+      reload();
+    } catch (failure) {
+      setError(failure instanceof StaffPageError ? failure.code : "Unavailable");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const ready = inviteReady(name, email, role);
+  return (
+    <StatePanel heading="Invite a staff member">
+      <p>
+        They get an email with a temporary password and sign in with their work email, a password
+        they choose and an authenticator app.
+      </p>
+      <form
+        className="staff-invite"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!ready) return;
+          void run({
+            operation: "Invite",
+            displayName: name.trim(),
+            email: email.trim(),
+            roleReference: role,
+            operationReference: newOperationReference(),
+          });
+        }}
+      >
+        <div className="staff-invite__field">
+          <label>
+            Name
+            <input
+              value={name}
+              maxLength={80}
+              required
+              autoComplete="off"
+              aria-describedby="staff-invite-name-help"
+              onChange={(event) => setName(event.currentTarget.value)}
+            />
+          </label>
+          <p id="staff-invite-name-help" className="staff-invite__help">
+            {INVITE_NAME_HELP}
+          </p>
+        </div>
+        <label>
+          Work email
+          <input
+            type="email"
+            value={email}
+            maxLength={254}
+            required
+            autoComplete="off"
+            onChange={(event) => setEmail(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          Role
+          <select
+            value={role}
+            required
+            aria-describedby="staff-invite-role-note"
+            onChange={(event) => setRole(event.currentTarget.value)}
+          >
+            <option value="">Choose a role</option>
+            {view.roles.map((item) => (
+              <option key={item.roleReference} value={item.roleReference}>
+                {item.name}
+                {item.scope === "Brand" ? " — Brand, all Stores" : " — this Store"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p id="staff-invite-role-note" className="staff-invite__help">
+          {INVITE_ROLE_NOTE}
+        </p>
+        <button type="submit" disabled={busy || !ready}>
+          {busy ? "Sending…" : "Send invitation"}
+        </button>
+      </form>
+      {notice ? <p role="status">{notice}</p> : null}
+      <CommandError
+        error={error}
+        csrf={csrf}
+        busy={busy}
+        retry={pending ? () => void run(pending) : null}
+        reload={reload}
+        text={inviteCopy}
+      />
+    </StatePanel>
+  );
+}
+
+/** WP-2423 DEC-COGNITO-STORE-STAFF: an invitation not accepted yet — resend or cancel it. */
+function InvitationPanel({
+  member,
+  invitation,
+  client,
+  csrf,
+  reload,
+}: {
+  readonly member: StaffMemberView;
+  readonly invitation: StaffInvitationView;
+  readonly client: StaffPageClient;
+  readonly csrf: string;
+  readonly reload: () => void;
+}) {
+  const [pending, setPending] = useState<StaffCommandRequest | null>(null),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState<StaffPageErrorCode | null>(null),
+    [notice, setNotice] = useState(""),
+    [needEmail, setNeedEmail] = useState(false),
+    [email, setEmail] = useState(""),
+    [confirmCancel, setConfirmCancel] = useState(false);
+  const navigate = useNavigate();
+  const run = async (request: StaffCommandRequest) => {
+    if (!client.command || busy) return;
+    setPending(request);
+    setBusy(true);
+    setError(null);
+    setNotice("");
+    try {
+      const answer = await client.command(request);
+      setPending(null);
+      if (request.operation === "RevokeInvitation") {
+        parseStaffRevokeResult(answer);
+        void navigate("/app/organization/users");
+        return;
+      }
+      const result = parseStaffResendResult(answer);
+      if (result.emailNeeded) {
+        setNeedEmail(true);
+        return;
+      }
+      setNeedEmail(false);
+      setEmail("");
+      setNotice(resendSentText(result.delivery));
+      reload();
+    } catch (failure) {
+      setError(failure instanceof StaffPageError ? failure.code : "Unavailable");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const resend = (withEmail?: string) =>
+    void run({
+      operation: "ResendInvitation",
+      actorReference: member.actorReference,
+      expectedVersion: invitation.version,
+      operationReference: newOperationReference(),
+      ...(withEmail === undefined ? {} : { email: withEmail }),
+    });
+  return (
+    <StatePanel heading="Invitation">
+      <div className="staff-invitation">
+        <p>
+          {invitation.status === "Expired" ? "Invitation expired" : "Invited"} · sent to{" "}
+          {invitation.emailHint}
+        </p>
+        <p>
+          Sent <StaffTime instant={invitation.sentAt} />
+          {invitation.sendCount > 1 ? ` · sent ${invitation.sendCount} times` : ""} ·{" "}
+          {invitation.status === "Expired" ? "expired" : "expires"}{" "}
+          <StoreDate value={invitation.expiresAt} />
+        </p>
+        {invitation.status === "Pending" && invitation.delivery === "Unknown" ? (
+          <p>We couldn&apos;t confirm the email went out. Resend the invitation.</p>
+        ) : null}
+        {needEmail ? (
+          <form
+            className="staff-invite"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (email.trim()) resend(email.trim());
+            }}
+          >
+            <label>
+              Enter their work email again to send a new invitation
+              <input
+                type="email"
+                value={email}
+                maxLength={254}
+                required
+                autoComplete="off"
+                onChange={(event) => setEmail(event.currentTarget.value)}
+              />
+            </label>
+            <button type="submit" disabled={busy || !email.trim()}>
+              Resend invitation
+            </button>
+          </form>
+        ) : invitation.mayResend ? (
+          <button disabled={busy} onClick={() => resend()}>
+            Resend invitation
+          </button>
+        ) : null}
+        {invitation.mayRevoke ? (
+          confirmCancel ? (
+            <p>
+              <button
+                disabled={busy}
+                onClick={() =>
+                  void run(
+                    pending?.operation === "RevokeInvitation"
+                      ? pending
+                      : {
+                          operation: "RevokeInvitation",
+                          actorReference: member.actorReference,
+                          expectedVersion: invitation.version,
+                          operationReference: newOperationReference(),
+                        },
+                  )
+                }
+              >
+                Confirm: cancel the invitation for {member.label}
+              </button>{" "}
+              <button disabled={busy} onClick={() => setConfirmCancel(false)}>
+                Keep the invitation
+              </button>
+            </p>
+          ) : (
+            <button disabled={busy} onClick={() => setConfirmCancel(true)}>
+              Cancel invitation
+            </button>
+          )
+        ) : null}
+        {notice ? <p role="status">{notice}</p> : null}
+      </div>
+      <CommandError
+        error={error}
+        csrf={csrf}
+        busy={busy}
+        retry={pending ? () => void run(pending) : null}
+        reload={reload}
+      />
+    </StatePanel>
+  );
+}
 
 function Member({
   member,
@@ -79,11 +447,23 @@ function Member({
   );
   const held = new Set(member.assignments.map((item) => item.roleReference));
   const requestable = view.roles.filter((item) => !held.has(item.roleReference));
+  const invitation = member.invitation;
   return (
     <div className="detail-section-grid">
+      {invitation !== null &&
+      (invitation.status === "Pending" || invitation.status === "Expired") ? (
+        <InvitationPanel
+          member={member}
+          invitation={invitation}
+          client={client}
+          csrf={csrf}
+          reload={reload}
+        />
+      ) : null}
       <StatePanel heading="Profile">
         <p>
-          Membership {member.membershipStatus} · Store assignment {member.storeAssignmentStatus}
+          Membership {membershipText(member.membershipStatus)} · Store assignment{" "}
+          {member.storeAssignmentStatus}
         </p>
         {member.mayRename ? (
           <form
@@ -204,7 +584,11 @@ function Member({
                   Withdraw request
                 </button>
               ) : (
-                <span>Waiting for another administrator.</span>
+                <span>
+                  {member.membershipStatus === "PendingActivation"
+                    ? `Starts after ${member.label} accepts the invitation and another manager approves it.`
+                    : "Waiting for another administrator."}
+                </span>
               )}
             </li>
           ))}
@@ -336,6 +720,9 @@ function Page({
           </p>
         </div>
       </header>
+      {!detail && view.viewer.mayInvite ? (
+        <InvitePanel view={view} client={client} csrf={csrf} reload={reload} />
+      ) : null}
       {view.staff.length === 0 ? (
         <StatePanel heading="No staff" status>
           <p>No member is assigned to this Store.</p>
@@ -348,6 +735,7 @@ function Page({
                 {member.assignments.map((item) => item.roleName).join(", ") || "No active role"}
                 {member.pending.length ? ` · ${member.pending.length} pending approval` : ""}
               </p>
+              <InvitationStatusLine invitation={member.invitation} />
               {detail ? (
                 <Link to="/app/organization/users">Back to staff</Link>
               ) : (

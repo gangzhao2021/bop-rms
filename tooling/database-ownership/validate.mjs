@@ -1165,6 +1165,14 @@ async function scanUnsupported(root, module, diagnostics) {
             "workforce_mfa_step_up",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/staff-pin-store.ts";
+        // WP-2423 DEC-COGNITO-STORE-STAFF: Store staff invitations and their Cognito accounts.
+        const acceptedStoreStaffAccountAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          ["store_staff_invitation", "store_staff_account", "workforce_mfa_status"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/store-staff-account-store.ts";
         const acceptedCurrentWorkforceInvitationAsset =
           module.packageName === "@bop/identity" &&
           module.manifest.ownedDatabase?.schema === "bop_identity" &&
@@ -3697,6 +3705,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedUnmatchedCaptureRefundAsset &&
           !acceptedWorkforceMfaStepUpAsset &&
           !acceptedStaffPinAsset &&
+          !acceptedStoreStaffAccountAsset &&
           !acceptedProviderCaptureExceptionAsset &&
           !acceptedPaymentReconciliationExceptionAsset &&
           !acceptedOrdinaryRefundCaptureAsset &&

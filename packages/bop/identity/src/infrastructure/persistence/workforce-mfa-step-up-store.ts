@@ -20,6 +20,8 @@ const failureLimit = 5;
 const failureWindowMilliseconds = 15 * 60 * 1000;
 const methods = ["InternalTestTotp"] as const;
 export type WorkforceStepUpMethod = (typeof methods)[number];
+/** WP-2423 DEC-COGNITO-STORE-STAFF: how long after a Cognito sign-in it still counts as fresh. */
+const reauthenticationFreshMilliseconds = 5 * 60 * 1000;
 export type WorkforceStepUpResult =
   | {
       readonly status: "Verified";
@@ -223,6 +225,127 @@ export function createPostgresWorkforceMfaStepUpStore(options: {
       return unavailable();
     }
     await appendAuditRecordInTransaction(tx, audit("Verified"));
+    await authorize();
+    return Object.freeze({
+      status: "Verified" as const,
+      stepUpReference,
+      verifiedAt: attemptedAt,
+      validUntil: new Date(at + workforceStepUpRecencyMilliseconds).toISOString(),
+    });
+  };
+}
+
+/**
+ * WP-2423 DEC-COGNITO-STORE-STAFF: a Cognito re-authentication (the staff member signed in again
+ * with their password and authenticator, `prompt=login`) recorded as a verified step-up, or a full
+ * Cognito sign-in recorded for the session it created. The verified Provider authentication time
+ * (whole seconds) is the single-use step: one authentication is recorded once, at any Store. The
+ * caller verified the signed tokens and that they name this session's own person.
+ */
+export function createPostgresWorkforceReauthenticationStepUpStore(options: {
+  authorize(
+    tx: Transaction,
+    query: {
+      readonly brandReference: string;
+      readonly storeReference: string;
+      readonly actorReference: string;
+      readonly sessionReference: string;
+    },
+  ): Promise<boolean>;
+  retentionPolicyCode: string;
+  retentionPolicyVersion: number;
+}) {
+  return async (
+    tx: Transaction,
+    value: unknown,
+  ): Promise<Extract<WorkforceStepUpResult, { status: "Verified" }>> => {
+    const raw = readClosedRecord(value, [
+      "brandReference",
+      "storeReference",
+      "actorReference",
+      "sessionReference",
+      "stepUpReference",
+      "auditReference",
+      "purposeCode",
+      "authenticatedAt",
+    ]);
+    const query = {
+      brandReference: ref(raw.brandReference),
+      storeReference: ref(raw.storeReference),
+      actorReference: ref(raw.actorReference),
+      sessionReference: ref(raw.sessionReference),
+    };
+    const stepUpReference = ref(raw.stepUpReference),
+      auditReference = ref(raw.auditReference),
+      authenticatedAt = parseCanonicalInstant(raw.authenticatedAt);
+    if (
+      typeof raw.purposeCode !== "string" ||
+      !/^[A-Z][A-Z0-9_]{0,63}$/u.test(raw.purposeCode) ||
+      Date.parse(authenticatedAt) % 1000 !== 0
+    )
+      return denied();
+    const purposeCode = raw.purposeCode;
+    const authorize = async () => {
+      if ((await options.authorize(tx, query)) !== true) return denied();
+    };
+    await authorize();
+    await setScope(tx, query.brandReference, query.storeReference);
+    await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      "WorkforceMfaStepUp:" + query.actorReference,
+    ]);
+    const clock = rows(
+      await tx.query("SELECT date_trunc('milliseconds',clock_timestamp()) AS now", []),
+    );
+    const attemptedAt = instant(clock[0]?.now);
+    const at = Date.parse(attemptedAt),
+      authenticated = Date.parse(authenticatedAt);
+    // A stale or future authentication is never fresh proof of presence.
+    if (authenticated > at + 1000 || at - authenticated > reauthenticationFreshMilliseconds)
+      return denied();
+    await tx.query("SAVEPOINT workforce_mfa_reauthentication_accept", []);
+    try {
+      await tx.query(
+        "INSERT INTO bop_identity.workforce_mfa_step_up (step_up_id,brand_id,store_id,actor_id,session_id,method,purpose_code,outcome,rejection_reason,time_step,attempted_at,audit_id) VALUES ($1,$2,$3,$4,$5,'CognitoReauthentication',$6,'Verified',NULL,$7,$8,$9)",
+        [
+          stepUpReference,
+          query.brandReference,
+          query.storeReference,
+          query.actorReference,
+          query.sessionReference,
+          purposeCode,
+          authenticated / 1000,
+          attemptedAt,
+          auditReference,
+        ],
+      );
+      await tx.query("RELEASE SAVEPOINT workforce_mfa_reauthentication_accept", []);
+    } catch (error) {
+      await tx.query("ROLLBACK TO SAVEPOINT workforce_mfa_reauthentication_accept", []);
+      await tx.query("RELEASE SAVEPOINT workforce_mfa_reauthentication_accept", []);
+      const descriptor =
+        error !== null && typeof error === "object"
+          ? Object.getOwnPropertyDescriptor(error, "code")
+          : undefined;
+      // The same authentication presented twice (a replayed callback) proves nothing new.
+      if (descriptor && "value" in descriptor && descriptor.value === "23505") return denied();
+      return unavailable();
+    }
+    await appendAuditRecordInTransaction(tx, {
+      auditId: auditReference,
+      brandId: query.brandReference,
+      storeId: query.storeReference,
+      actor: { type: "User" as const, reference: query.actorReference },
+      actionCode: "IDENTITY_MFA_STEP_UP_VERIFIED",
+      targetType: "WorkforceMfaStepUp",
+      targetId: stepUpReference,
+      reasonCode: purposeCode,
+      correlationId: query.sessionReference,
+      occurredAt: attemptedAt,
+      sourceChannel: "MERCHANT_WEB",
+      dataClassification: "Restricted" as const,
+      retentionPolicyCode: options.retentionPolicyCode,
+      retentionPolicyVersion: options.retentionPolicyVersion,
+    });
     await authorize();
     return Object.freeze({
       status: "Verified" as const,
