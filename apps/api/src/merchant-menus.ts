@@ -469,7 +469,7 @@ export function createMerchantMenus(options: {
       brandReference: s.owner.brandReference,
       transactions: { run: (work) => work(ptx(tx)) },
       authorize: async () => true,
-    }).load(menu, options.persistence.now());
+    }).load(menu, () => options.persistence.now());
   const name = (names: Readonly<Record<string, string>>, fallback: string) =>
     names[options.locale] ?? Object.values(names)[0] ?? fallback;
   /** Selling sizes with product names and this Store's current price (cents) when it has one. */

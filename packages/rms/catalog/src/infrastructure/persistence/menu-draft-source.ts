@@ -70,9 +70,15 @@ export function createPostgresMenuDraftSource(options: {
      * The Menu's current version, or (WP-2423, discarding a draft) the given version of the same Menu
      * with the Menu's own fields.
      */
-    async load(menuReference: string, observedAt: string, versionReference?: string) {
+    async load(
+      menuReference: string,
+      observedAt: string | (() => string),
+      versionReference?: string,
+    ) {
       const menu = parseCatalogReference(menuReference),
-        at = parseCatalogInstant(observedAt),
+        observe = () =>
+          parseCatalogInstant(typeof observedAt === "function" ? observedAt() : observedAt),
+        at = observe(),
         version = versionReference === undefined ? null : parseCatalogReference(versionReference);
       return options.transactions.run(async (tx) => {
         const allowed = async () => {
@@ -85,12 +91,30 @@ export function createPostgresMenuDraftSource(options: {
         };
         try {
           await allowed();
-          const result = await tx.query<{ aggregate: unknown; coherent: boolean }>(selectDraft, [
+          let result = await tx.query<{ aggregate: unknown; coherent: boolean }>(selectDraft, [
             brand,
             menu,
             at,
             version,
           ]);
+          // Given the clock, a draft changed by a writer this read waited for (FOR SHARE) is read
+          // again at the time it is read: a newer change is no longer refused as from the future,
+          // and a Menu whose current version moved meanwhile (the locked row then no longer
+          // joins) is read at its new version instead of as absent.
+          if (
+            typeof observedAt === "function" &&
+            (result.rows.length === 0 ||
+              (result.rows.length === 1 && result.rows[0]?.coherent !== true))
+          ) {
+            const held = observe();
+            if (held < at) throw new Error("clock went back");
+            result = await tx.query<{ aggregate: unknown; coherent: boolean }>(selectDraft, [
+              brand,
+              menu,
+              held,
+              version,
+            ]);
+          }
           await allowed();
           if (result.rows.length === 0) return null;
           const row = result.rows[0];

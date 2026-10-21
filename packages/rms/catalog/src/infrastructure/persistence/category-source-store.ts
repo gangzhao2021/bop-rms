@@ -121,7 +121,10 @@ export function createPostgresCategorySourceStore(options: {
     );
     await holdCategorySourceBarrier(tx, brand);
     await requireCategoryCurrentReads(tx);
-    return at;
+    // Observed once the Brand barrier is held, so a change committed while this waited is read.
+    const locked = parseCatalogInstant(options.clock.now());
+    if (locked < at) return fail();
+    return locked;
   };
   const read = async (tx: Transaction, at: string) => {
     const headRows = await rows(

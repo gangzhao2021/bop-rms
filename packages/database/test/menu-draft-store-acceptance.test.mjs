@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { setTimeout } from "node:timers";
 import pg from "pg";
 import { it } from "vitest";
 import { createMerchantProducts } from "../../../apps/api/src/merchant-products.ts";
@@ -510,6 +511,68 @@ it("creates and edits a Menu draft, freezes it once submitted and revises it", a
           .slice(4),
         ["CATALOG_MENU_DISCARDDRAFT", "CATALOG_MENU_REVISE"],
       );
+
+      // Two people change the same Menu at once; the loser's command time precedes the winner's
+      // change and the loser is told the Menu changed (version conflict), not that the service is
+      // unavailable. The winner holds its locks until the loser waits reading the Menu the winner
+      // is changing.
+      const lockWaiter = async () => {
+        for (let attempt = 0; attempt < 400; attempt++) {
+          const waiting = await admin.query(
+            "SELECT count(*)::int n FROM pg_locks WHERE NOT granted",
+          );
+          if (waiting.rows[0].n > 0) return true;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return false;
+      };
+      const separately = async (requestedAt, expectedAggregateVersion, hold = {}) => {
+        const client = new Client(context.clientConfig);
+        await client.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL ROLE " + role);
+          const value = await service(client).reviseMenu({
+            menuReference: menu.menuReference,
+            expectedAggregateVersion,
+            operationReference: op(),
+            requestedAt,
+          });
+          await hold.beforeCommit?.();
+          await client.query("COMMIT");
+          return value;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        } finally {
+          await client.end();
+        }
+      };
+      const concurrently = async (expectedAggregateVersion, point) => {
+        const loserAt = now(),
+          winnerAt = now();
+        let holding,
+          waiterSeen = false;
+        const held = new Promise((resolve) => (holding = resolve));
+        const winning = separately(winnerAt, expectedAggregateVersion, {
+          [point]: async () => {
+            holding();
+            waiterSeen = await lockWaiter();
+          },
+        });
+        await held;
+        const [won, lost] = await Promise.all([
+          winning,
+          separately(loserAt, expectedAggregateVersion).then(
+            (value) => ({ value }),
+            (error) => ({ code: error.code }),
+          ),
+        ]);
+        assert.equal(waiterSeen, true);
+        assert.equal(won.aggregate.aggregateVersion, expectedAggregateVersion + 1);
+        assert.deepEqual(lost, { code: "CATALOG_VERSION_CONFLICT" });
+      };
+      await concurrently(6, "beforeCommit");
     } finally {
       await admin.query("RESET ROLE").catch(() => undefined);
       await admin.query("DROP OWNED BY " + role).catch(() => undefined);

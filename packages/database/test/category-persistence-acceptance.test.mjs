@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout } from "node:timers";
 import pg from "pg";
 import { it, vi } from "vitest";
 import {
@@ -385,6 +386,139 @@ it("commits real Category snapshots Audit Events and ordered receipts; retries a
         await barrierOwner.end();
         await contender.end();
       }
+      // A change committed by another writer while a command waited for the Brand barrier is
+      // judged at the time the tree is read under it: the same Category is a version conflict and
+      // another Category proceeds; neither is an outage. The winner holds the barrier until the
+      // loser (whose clock was read before the winner's change) waits for it.
+      const raced = record(1900, node(60)),
+        bystander = record(1901, node(61));
+      await create(raced);
+      await create(bystander);
+      const barrierWaiter = async () => {
+        for (let attempt = 0; attempt < 400; attempt++) {
+          const waiting = await admin.query(
+            "SELECT count(*)::int n FROM pg_locks WHERE locktype='advisory' AND NOT granted",
+          );
+          if (waiting.rows[0].n > 0) return true;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return false;
+      };
+      const unchecked = {
+        async holdUntilTransactionCompletes(tx) {
+          await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+            authorityLease,
+          ]);
+        },
+      };
+      const race = async (winnerRecord, loserRecord, loserClock, loserRun = null) => {
+        let holding;
+        const held = new Promise((resolve) => (holding = resolve));
+        let waiterSeen = false,
+          clockReads = 0;
+        const winner = createPostgresCategoryRepository({
+          ...options,
+          transactions: {
+            run: (work) =>
+              runner.run(async (tx) => {
+                const result = await work(tx);
+                holding();
+                waiterSeen = await barrierWaiter();
+                return result;
+              }),
+          },
+        });
+        const loserOptions = {
+          ...options,
+          authority: unchecked,
+          clock: { now: () => (clockReads++ === 0 ? loserClock : observedAt) },
+        };
+        const winning = winner.commit(input(winnerRecord));
+        await held;
+        const [won, lost] = await Promise.all([
+          winning,
+          (loserRun === null
+            ? createPostgresCategoryRepository(loserOptions).commit(input(loserRecord))
+            : loserRun(loserOptions)
+          ).then(
+            (value) => ({ value }),
+            (error) => ({ code: error.code }),
+          ),
+        ]);
+        assert.equal(waiterSeen, true);
+        assert.deepEqual(won, winnerRecord);
+        return lost;
+      };
+      const racedActive = record(
+        1902,
+        node(60, {
+          aggregateVersion: 2,
+          lifecycle: "Active",
+          updatedAt: "2026-09-20T00:00:00.000Z",
+        }),
+        "ChangeLifecycle",
+      );
+      assert.deepEqual(
+        await race(
+          racedActive,
+          record(1903, node(60, { aggregateVersion: 2, lifecycle: "Active" }), "ChangeLifecycle"),
+          "2026-09-19T00:00:00.000Z",
+        ),
+        { code: "CATALOG_VERSION_CONFLICT" },
+      );
+      const bystanderActive = record(
+        1905,
+        node(61, {
+          aggregateVersion: 2,
+          lifecycle: "Active",
+          updatedAt: "2026-09-20T06:00:00.000Z",
+        }),
+        "ChangeLifecycle",
+      );
+      assert.deepEqual(
+        await race(
+          record(
+            1904,
+            {
+              ...racedActive.aggregate,
+              aggregateVersion: 3,
+              lifecycle: "Inactive",
+              updatedAt: "2026-09-21T00:00:00.000Z",
+            },
+            "ChangeLifecycle",
+          ),
+          bystanderActive,
+          "2026-09-20T12:00:00.000Z",
+        ),
+        { value: bystanderActive },
+      );
+      // A source read that waited for the writer reads the tree the writer committed.
+      const readWhileWriting = await race(
+        record(
+          1906,
+          {
+            ...bystanderActive.aggregate,
+            aggregateVersion: 3,
+            lifecycle: "Inactive",
+            updatedAt: "2026-09-22T00:00:00.000Z",
+          },
+          "ChangeLifecycle",
+        ),
+        null,
+        "2026-09-21T12:00:00.000Z",
+        (loserOptions) =>
+          createPostgresCategorySourceStore({
+            ...loserOptions,
+            maximumSourceCommits: 100,
+          }).loadSnapshot(),
+      );
+      assert.equal(readWhileWriting.code, undefined);
+      assert.equal(readWhileWriting.value.observedAt, observedAt);
+      assert.equal(
+        readWhileWriting.value.categories.find((category) => category.categoryReference === id(61))
+          .lifecycle,
+        "Inactive",
+      );
       const receipts = (
         await admin.query(
           "SELECT source_revision::text revision,event_type,source_revision::text FROM rms_catalog.category_source_commit ORDER BY rms_catalog.category_source_commit.source_revision",

@@ -198,7 +198,11 @@ export function createPostgresCategoryRepository(options: {
     );
     await holdCategorySourceBarrier(tx, brand);
     await requireCategoryCurrentReads(tx);
-    return at;
+    // The tree is judged at the time it is read under the Brand barrier: a change committed by
+    // another writer while this waited is a version conflict, not an outage.
+    const locked = parseCatalogInstant(options.clock.now());
+    if (locked < at) return fail();
+    return locked;
   };
   const run = async <T>(
     category: string | null,

@@ -46,7 +46,15 @@ export function createPostgresMenuDraftStore(options: {
       brand,
     ]);
   };
-  const read = (tx: ProductLifecycleTransaction, menu: string, at: string, version?: string) =>
+  // Given the clock, a draft changed by a writer this read waited for is judged at the time it is
+  // then held, so the caller sees the newer version (a conflict), not an outage.
+  const clock = () => options.now();
+  const read = (
+    tx: ProductLifecycleTransaction,
+    menu: string,
+    at: string | (() => string),
+    version?: string,
+  ) =>
     createPostgresMenuDraftSource({
       brandReference: brand,
       transactions: { run: (work) => work(tx) },
@@ -288,7 +296,7 @@ export function createPostgresMenuDraftStore(options: {
       options.transactions.run(async (tx) => {
         const menu = parseCatalogReference(reference);
         await scope(tx, menu);
-        return (await read(tx, menu, options.now()))?.aggregate ?? null;
+        return (await read(tx, menu, clock))?.aggregate ?? null;
       }),
     loadLatestRelease: (reference) =>
       options.transactions.run(async (tx) => {
@@ -296,7 +304,7 @@ export function createPostgresMenuDraftStore(options: {
         await scope(tx, menu);
         const version = await latestRelease(tx, menu);
         if (version === null) return null;
-        return (await read(tx, menu, options.now(), version))?.aggregate ?? null;
+        return (await read(tx, menu, clock, version))?.aggregate ?? null;
       }),
     codeAvailable: (input) =>
       options.transactions.run(async (tx) => {
@@ -319,8 +327,8 @@ export function createPostgresMenuDraftStore(options: {
         const base =
           input.baseMenuReference === null
             ? null
-            : ((await read(tx, parseCatalogReference(input.baseMenuReference), options.now()))
-                ?.aggregate ?? null);
+            : ((await read(tx, parseCatalogReference(input.baseMenuReference), clock))?.aggregate ??
+              null);
         const isBase = (
           await tx.query<{ base: boolean }>(
             "SELECT EXISTS(SELECT 1 FROM rms_catalog.menu_version WHERE brand_id=$1 AND base_menu_id=$2) base",
