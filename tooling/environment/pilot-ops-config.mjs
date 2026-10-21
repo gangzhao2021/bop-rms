@@ -168,11 +168,9 @@ export function parsePilotOpsConfig(value, runtimeDirectory) {
     if (typeof b.localTime !== "string" || !/^([01][0-9]|2[0-3]):[0-5][0-9]$/u.test(b.localTime))
       fail("backup.localTime");
     let offsite = null;
-    if (b.offsite !== undefined && b.offsite !== null) {
+    if (b.offsite?.kind === "s3") offsite = parseS3Offsite(b.offsite);
+    else if (b.offsite !== undefined && b.offsite !== null) {
       const o = exactKeys(b.offsite, ["kind", "keyFile"], ["path", "keep"], "backup.offsite");
-      if (o.kind === "s3")
-        // External gate (P4): an S3-compatible target needs the Owner's bucket and credentials.
-        fail("backup.offsite.s3-not-available");
       if (o.kind !== "directory") fail("backup.offsite.kind");
       const target = o.path ?? "/offsite";
       if (
@@ -214,6 +212,67 @@ export function parsePilotOpsConfig(value, runtimeDirectory) {
     webhooks: Object.freeze(webhooks),
     heartbeat,
     backup,
+  });
+}
+const BUCKET = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u;
+const PREFIX = /^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,62}\/){0,4}$/u;
+const REGION = /^[a-z]{2}(?:-[a-z]+){1,2}-[0-9]$/u;
+const KMS_KEY =
+  /^(?:arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:(?:key|alias)\/[A-Za-z0-9/_-]{1,256}|alias\/[A-Za-z0-9/_-]{1,256}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/u;
+/**
+ * DEC-PILOT-OFFSITE-S3: an S3 (or S3-compatible, `endpoint`) bucket. Copies stay AES-256-GCM
+ * encrypted on this host first; `sseKmsKeyId` adds server-side SSE-KMS. Credentials come from the
+ * standard AWS chain (instance/task role, environment) unless both key files are named (runtime
+ * secret files, 0600). The bucket, prefix and region are not secret; nothing here is.
+ */
+function parseS3Offsite(value) {
+  const o = exactKeys(
+    value,
+    ["kind", "keyFile", "bucket", "region"],
+    [
+      "prefix",
+      "keep",
+      "endpoint",
+      "forcePathStyle",
+      "sseKmsKeyId",
+      "accessKeyIdFile",
+      "secretAccessKeyFile",
+    ],
+    "backup.offsite",
+  );
+  if (typeof o.bucket !== "string" || !BUCKET.test(o.bucket) || o.bucket.includes(".."))
+    fail("backup.offsite.bucket");
+  if (typeof o.region !== "string" || !REGION.test(o.region)) fail("backup.offsite.region");
+  const prefix = o.prefix ?? "";
+  if (typeof prefix !== "string" || !PREFIX.test(prefix)) fail("backup.offsite.prefix");
+  if (o.forcePathStyle !== undefined && typeof o.forcePathStyle !== "boolean")
+    fail("backup.offsite.forcePathStyle");
+  if (
+    o.sseKmsKeyId !== undefined &&
+    (typeof o.sseKmsKeyId !== "string" || !KMS_KEY.test(o.sseKmsKeyId))
+  )
+    fail("backup.offsite.sseKmsKeyId");
+  if ((o.accessKeyIdFile === undefined) !== (o.secretAccessKeyFile === undefined))
+    fail("backup.offsite.credentials");
+  return Object.freeze({
+    kind: "s3",
+    bucket: o.bucket,
+    region: o.region,
+    prefix,
+    endpoint: o.endpoint === undefined ? null : httpsUrl(o.endpoint, "backup.offsite.endpoint"),
+    forcePathStyle: o.forcePathStyle === true,
+    sseKmsKeyId: o.sseKmsKeyId ?? null,
+    accessKeyIdFile:
+      o.accessKeyIdFile === undefined
+        ? null
+        : fileName(o.accessKeyIdFile, "backup.offsite.credentials"),
+    secretAccessKeyFile:
+      o.secretAccessKeyFile === undefined
+        ? null
+        : fileName(o.secretAccessKeyFile, "backup.offsite.credentials"),
+    keyFile: fileName(o.keyFile, "backup.offsite.keyFile"),
+    keep: integer(o.keep ?? 30, 1, 365, "backup.offsite.keep"),
+    path: null,
   });
 }
 export async function loadPilotOpsConfig(runtimeDirectory) {

@@ -148,8 +148,11 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "createInternalStaffPinCredentials",
       // WP-2423 menu descriptions and photos: product photo storage in the runtime directory.
       "productImageDirectory",
+      // DEC-PILOT-MAINTENANCE-PAGE: exact origin/host of the staff pages (hosting.json).
+      "publicOrigin",
     ].sort(),
   );
+  expect(dependencies.publicOrigin).toBe("https://127.0.0.1:4443");
   expect(typeof dependencies.refundUnmatchedCapture).toBe("function");
 });
 it("accepts only an explicit safe installation", () => {

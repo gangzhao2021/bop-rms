@@ -1,4 +1,6 @@
 import console from "node:console";
+import { URL } from "node:url";
+import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
 import { createMerchantTaxConfigAuthoring } from "../../apps/api/dist/merchant-tax-config-authoring.js";
 import { createMerchantReconciliationEvidenceQuery } from "../../apps/api/dist/merchant-reconciliation-evidence-query.js";
 import { createMerchantReconciliationFollowUpCommand } from "../../apps/api/dist/merchant-reconciliation-follow-up-command.js";
@@ -137,6 +139,8 @@ export async function createInternalMerchant(
     refreshOrderReceiptObservations,
     createInternalUnpaidRoundCancellation,
     productImageDirectory,
+    // DEC-PILOT-MAINTENANCE-PAGE / Tls: the Store's customer origin from hosting.json.
+    publicOrigin = INTERNAL_CUSTOMER_ORIGIN,
   },
 ) {
   const session = await createInternalMerchantSession(resources);
@@ -1541,8 +1545,8 @@ export async function createInternalMerchant(
       pickupNotCollected,
       pickupIdentityCheck,
       orderAcceptance,
-      exactOrigin: "https://127.0.0.1:4443",
-      acceptedHost: "127.0.0.1:4443",
+      exactOrigin: publicOrigin,
+      acceptedHost: new URL(publicOrigin).host,
     },
   };
 }

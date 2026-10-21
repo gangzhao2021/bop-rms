@@ -35,6 +35,7 @@ import { createCustomerMenuStoreFacts } from "../../apps/api/dist/customer-menu-
 import { createInternalAdditionalPayment } from "./pilot-additional-payment.mjs";
 import { createInternalPaymentIntent } from "./pilot-payment-intent.mjs";
 import { createInternalOrderConfirmation } from "./pilot-order-confirmation.mjs";
+import { INTERNAL_CUSTOMER_ORIGIN, loadPilotHosting } from "./pilot-hosting.mjs";
 
 export async function createConfiguredPilotApiRuntime(
   directory,
@@ -43,11 +44,17 @@ export async function createConfiguredPilotApiRuntime(
     loadInstallation = loadPilotInstallation,
     createResources = createConfiguredPilotResources,
     composeRuntime = createRuntime,
+    loadHosting = loadPilotHosting,
   } = {},
 ) {
   const installation = await loadInstallation(directory);
   const config = await installation.loadCustomerRuntime();
-  const dependencies = composeCustomerDependencies(directory, installation, config);
+  const dependencies = composeCustomerDependencies(
+    directory,
+    installation,
+    config,
+    await loadHosting(directory),
+  );
   return composeRuntime(options, {
     ...dependencies,
     createInternalTestResources: async () => {
@@ -64,7 +71,7 @@ export async function createConfiguredPilotApiRuntime(
     },
   });
 }
-export function composeCustomerDependencies(directory, installation, config) {
+export function composeCustomerDependencies(directory, installation, config, hosting = null) {
   const expectedDatabaseName = installation.database;
   const account = { providerAccountReference: config.providerAccountReference };
   const workflow = { loadWorkflow: installation.loadWorkflow, expectedDatabaseName };
@@ -118,6 +125,8 @@ export function composeCustomerDependencies(directory, installation, config) {
       expectedDatabaseName,
     });
   return {
+    // hosting.json customerOrigin: exact Origin/Host the customer and staff pages are served on.
+    publicOrigin: hosting?.origin ?? INTERNAL_CUSTOMER_ORIGIN,
     paymentChannel: "InternalTestOnlineCardAutomatic",
     ...account,
     createInternalCustomerEntry: entry,

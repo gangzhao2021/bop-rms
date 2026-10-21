@@ -495,6 +495,12 @@ absolute key paths, profile loaders and expected database names. Factory
 construction does not read or provision keys; explicit provisioning methods
 retain their environment and exclusive-create safeguards. Runtime loading
 never replaces a missing or invalid key file. Cryptographic behavior is unchanged.
+In a Pilot process (WP-2423 DEC-PILOT-SECRETS) the same loaders read the hosting's
+managed secret files through `pilot-secrets.mjs` (folder named by
+`<runtime>/hosting.json`, parsed by `pilot-hosting.mjs`); InternalTest is unchanged.
+`pilot-front.mjs` is the `front` compose service (published HTTPS port, update
+page while the entry is down) and `pilot-offsite-s3.mjs` the S3 off-site backup
+target (DEC-PILOT-MAINTENANCE-PAGE, DEC-PILOT-OFFSITE-S3).
 
 `pilot-worker-entry.mjs` supplies business and Kitchen worker startup. Private
 executables pass their configuration factories and health directory. Existing

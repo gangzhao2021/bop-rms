@@ -1,6 +1,7 @@
 import { CustomerStoreClosedError } from "../../apps/api/dist/customer-store-open-gate.js";
 import { createLocalCustomerRuntime } from "../../apps/api/dist/local-customer-runtime.js";
 import { HealthReadinessController } from "../../apps/api/dist/health-readiness.js";
+import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
 /** Internal test composition only. All unconfigured business routes remain unavailable. */
 export async function createRuntime(
   { port },
@@ -23,6 +24,7 @@ export async function createRuntime(
     createInternalTestResources,
     createInternalCustomerEntry,
     providerAccountReference,
+    publicOrigin = INTERNAL_CUSTOMER_ORIGIN,
   },
 ) {
   const resources = await createInternalTestResources();
@@ -156,7 +158,7 @@ export async function createRuntime(
           return result.status === "Available" ? { ...resources.scope, status: "Active" } : null;
         },
       },
-      allowedOrigin: "https://127.0.0.1:4443",
+      allowedOrigin: publicOrigin,
       now: resources.now,
       uuidV7Factory: resources.credentials.reference,
       runtime: {
