@@ -185,6 +185,21 @@ it("labels a cancelled additional Batch distinctly from unaccepted work", () => 
   const html = renderToStaticMarkup(<CurrentOrderQueueRows view={view} />);
   expect(html).toContain("Round cancelled");
   expect(html).not.toContain("Not accepted");
+  // v15 1fc58e90 ⑧: rounds read in staff words; a pickup order's one batch reads as the order.
+  expect(html).toContain("Round 1 · First round");
+  expect(html).toContain("Round 2 · Added round");
+  expect(html).not.toMatch(/Initial|Additional/u);
+  const pickup = {
+    ...view,
+    items: view.items.map((item) => ({
+      ...item,
+      orderType: "Pickup" as const,
+      batches: item.batches.slice(0, 1),
+    })),
+  };
+  const pickupHtml = renderToStaticMarkup(<CurrentOrderQueueRows view={pickup} />);
+  expect(pickupHtml).toContain("<h3>Order</h3>");
+  expect(pickupHtml).not.toContain("Round 1");
 });
 
 it("keeps payments accessible on cancelled Dining without offering unavailable serving, preserving fulfilled history", () => {

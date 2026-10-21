@@ -1278,10 +1278,15 @@ export function CurrentOrderQueueRows({
               ) : null}
               {detail?.(order, opened.has(order.orderReference) || view.items.length === 1)}
               {order.batches.map((batch) => (
-                <section key={batch.orderBatchReference} aria-label={"Round " + batch.sequence}>
+                <section
+                  key={batch.orderBatchReference}
+                  aria-label={order.orderType === "Pickup" ? "Order" : "Round " + batch.sequence}
+                >
                   <h3>
-                    Round {batch.sequence}
-                    {batch.sequence === 1 ? " · Initial" : " · Additional"}
+                    {/* v15 1fc58e90 ⑧: a pickup order has one batch, so it reads as the order. */}
+                    {order.orderType === "Pickup"
+                      ? "Order"
+                      : `Round ${batch.sequence}${batch.sequence === 1 ? " · First round" : " · Added round"}`}
                     {batch.staffRound !== null ? " · Entered by staff" : ""}
                   </h3>
                   {batch.staffRound !== null &&

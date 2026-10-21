@@ -487,7 +487,7 @@ test("@production the order queue marks a round entered by staff and its card-ma
   if (!(await entry.evaluate((element) => (element as HTMLDetailsElement).open)))
     await entry.locator("summary").click();
   await expect(
-    entry.getByRole("heading", { name: "Round 2 · Additional · Entered by staff" }),
+    entry.getByRole("heading", { name: "Round 2 · Added round · Entered by staff" }),
   ).toBeVisible();
   // WP-2423 D5: the summary shows the card-machine total apart from what was paid online.
   await expect(
