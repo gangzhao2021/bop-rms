@@ -538,8 +538,8 @@ function MenuCart({
               </span>
             ) : (
               <span className="menu-cart-bar__total">
+                <span className="menu-cart-bar__caption">Subtotal before tax</span>{" "}
                 {summary.subtotal}
-                <span className="menu-cart-bar__tax"> + tax</span>
               </span>
             )}
           </Link>

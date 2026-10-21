@@ -83,8 +83,11 @@
   color: var(--bop-color-text-default);
   font-weight: 600;
 }
+/* Every page starts at the frame's left edge, under the Store's name; narrow pages simply end
+   sooner on the right. */
 .customer-page .bop-shell__main {
   width: min(var(--customer-column), 100%);
+  margin-inline: calc(var(--customer-edge) - var(--customer-gutter)) 0;
   padding: 1.5rem var(--customer-gutter) 6rem;
 }
 .customer-page--menu,
@@ -811,6 +814,17 @@
   background: var(--bop-color-brand-primary);
   font-weight: 650;
   text-decoration: none;
+}
+/* "Subtotal before tax" over the amount: short, and never read as the amount to pay. */
+.menu-cart-bar__total {
+  display: grid;
+  justify-items: end;
+  line-height: 1.2;
+}
+.menu-cart-bar__caption {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  opacity: 0.85;
 }
 .menu-cart-bar__label {
   text-align: center;
@@ -2199,8 +2213,14 @@
   }
 }
 @media (max-width: 32rem) {
+  /* Phones keep the five tip choices in one even row (each at least 44 px wide down to 320 px). */
   .checkout-tip__choices {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--bop-space-1);
+  }
+  .checkout-tip__choices button {
+    padding: var(--bop-space-1) 2px;
+    font-size: 0.875rem;
+    line-height: 1.2;
   }
   .order-status__summary dl {
     grid-template-columns: 1fr;

@@ -14,12 +14,6 @@ import type {
   CustomerEntryScreenState,
 } from "./types.js";
 
-const serviceModeLabels = Object.freeze({
-  DineIn: "Dine in",
-  Pickup: "Pickup",
-  Delivery: "Delivery",
-});
-
 const unavailableClient: CustomerEntryClient = Object.freeze({
   hasEntry: false,
   async start() {
@@ -415,20 +409,7 @@ function EntryState({
           ? `Your table at ${context.storeDisplayName} is confirmed for dine-in.`
           : `Pickup from ${context.storeDisplayName} is selected.`}
       </p>
-      <dl className="entry-details">
-        <div>
-          <dt>Location status</dt>
-          <dd>{locationOpen ? "Open for ordering" : "Not accepting orders"}</dd>
-        </div>
-        <div>
-          <dt>Available service</dt>
-          <dd>
-            {context.availableServiceModes.length > 0
-              ? context.availableServiceModes.map((mode) => serviceModeLabels[mode]).join(", ")
-              : "None right now"}
-          </dd>
-        </div>
-      </dl>
+      {/* Open now, today's hours and the address are stated once, in the store card below. */}
       {context.channel === "DineIn" &&
       context.publicTableReference !== null &&
       locationOpen &&
