@@ -160,6 +160,7 @@ describe("Customer Menu client", () => {
             sellables: [
               {
                 sellableReference: references.sellable,
+                productVersionReference: references.product,
                 name: "Latte",
                 description: null,
                 photo: null,

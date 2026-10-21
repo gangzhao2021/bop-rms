@@ -147,7 +147,12 @@ export function StripeCardForm({
         <p role="alert">We couldn’t prepare your card payment. Check the form and try again.</p>
       ) : null}
       {!online ? <p role="alert">Reconnect to continue payment.</p> : null}
-      <button type="button" disabled={!ready || busy || !online} onClick={() => void confirm()}>
+      <button
+        className="payment-page__pay"
+        type="button"
+        disabled={!ready || busy || !online}
+        onClick={() => void confirm()}
+      >
         {busy ? "Submitting payment…" : "Pay securely"}
       </button>
     </section>

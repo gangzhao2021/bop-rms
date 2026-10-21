@@ -26,7 +26,7 @@ test("CUST-MENU follows the Figma Review hierarchy at 1440, 390, and 320px @demo
   ]) {
     await page.setViewportSize(viewport);
     const main = page.getByRole("main");
-    const menuHeading = main.getByRole("heading", { name: "Synthetic all-day menu", exact: true });
+    const menuHeading = main.getByRole("heading", { name: "Menu", exact: true });
     await expect(menuHeading).toBeVisible();
     if (viewport.width === 1440) {
       await expect(menuHeading).toBeFocused();
@@ -39,7 +39,9 @@ test("CUST-MENU follows the Figma Review hierarchy at 1440, 390, and 320px @demo
       main.getByRole("link", { name: "View Synthetic mushroom rice bowl" }),
     ).toBeVisible();
     await expect(main.getByText("Priced at checkout", { exact: true }).first()).toBeVisible();
-    await expect(main.getByText("Contains: Soy", { exact: true })).toBeVisible();
+    await expect(
+      main.getByText("Contains Soy · May contain Sesame", { exact: true }),
+    ).toBeVisible();
     await expect(main).not.toContainText("$0");
     await expect(
       page.getByRole("navigation", { name: "Customer journey" }).getByText("Menu", { exact: true }),

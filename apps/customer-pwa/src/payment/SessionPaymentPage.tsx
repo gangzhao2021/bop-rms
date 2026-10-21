@@ -298,7 +298,12 @@ function PreparedSessionPaymentPage({
       ) : null}
       {status === "card" && demo ? (
         <>
-          <button type="button" disabled={!online} onClick={() => void simulate()}>
+          <button
+            className="payment-page__pay"
+            type="button"
+            disabled={!online}
+            onClick={() => void simulate()}
+          >
             Confirm simulated payment
           </button>
           {/* WP-2423 Q20: internal testing of a declined card and paying with another card. */}

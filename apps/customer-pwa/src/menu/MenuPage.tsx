@@ -5,16 +5,17 @@ import {
 } from "./option-configuration.js";
 import { createBrowserPickupCartClient } from "../cart/pickup-cart-client.js";
 import { CustomerPage } from "../journey/CustomerPage.js";
-import { formatDecimalMoney } from "../journey/format.js";
+import { formatDecimalMoney, formatMoney } from "../journey/format.js";
 import { cartIssueMessage } from "../journey/messages.js";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { FormEvent } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
 import {
   checkoutInProgressMessage,
   orderProcessingMessage,
   type CartItemDraft,
+  type CartView,
 } from "../cart/types.js";
 import {
   createConfigureController,
@@ -22,6 +23,20 @@ import {
   type ConfigureState,
 } from "./configure-state.js";
 import { createCustomerMenuClient, normalizeMenuSearch } from "./menu-client.js";
+import {
+  compactAllergenLine,
+  configuredItemTotal,
+  familyAllergens,
+  familyDescription,
+  familyPhoto,
+  familyPriceText,
+  familySoldOut,
+  findMenuFamily,
+  groupMenuFamilies,
+  primaryVariant,
+  type MenuFamily,
+  type MenuVariant,
+} from "./menu-families.js";
 import type {
   CustomerMenuClient,
   MenuJourneyContext,
@@ -38,23 +53,53 @@ type ScreenState =
   | Readonly<{ kind: "Loading" }>
   | MenuLoadResult;
 
-/** How many items are in the current cart; null when unknown. */
-export type CartCountLoader = () => Promise<number | null>;
+/** The guest's current cart in one line: how many items and, when every line is priced, the subtotal. */
+export interface MenuCartSummary {
+  readonly count: number;
+  /** "$14.75" before tax; null while any line is still to be priced by the final quote. */
+  readonly subtotal: string | null;
+}
+
+/** The current cart's summary; null when it can't be read. */
+export type CartSummaryLoader = () => Promise<MenuCartSummary | null>;
 
 interface MenuPageProps {
   readonly context?: MenuJourneyContext | undefined;
   readonly client?: CustomerMenuClient | undefined;
   readonly readOnlyNotice?: React.ReactNode | undefined;
   /** Injected for previews; the browser loader reads the Store cart otherwise. */
-  readonly cartCount?: CartCountLoader | undefined;
+  readonly cartSummary?: CartSummaryLoader | undefined;
 }
 
-const browserCartCount: CartCountLoader = async () => {
-  const cart = await createBrowserCustomerCartClient().loadCurrent();
-  return cart === null || cart.cart.lifecycle.status !== "Active"
-    ? 0
-    : cart.cart.items.reduce((total, item) => total + item.quantity, 0);
-};
+/** Count and pre-tax subtotal of a cart, from its current quote or its priced lines. */
+export function summarizeCart(view: CartView | null): MenuCartSummary {
+  if (view === null || view.cart.lifecycle.status !== "Active") return { count: 0, subtotal: null };
+  const { cart } = view;
+  const count = cart.items.reduce((total, item) => total + item.quantity, 0);
+  if (count === 0) return { count, subtotal: null };
+  if (cart.quote !== null && cart.quote.cartVersion === cart.version)
+    return {
+      count,
+      subtotal: formatMoney(cart.quote.subtotal.amountMinor, cart.quote.subtotal.currency),
+    };
+  let total = 0n;
+  let currency: string | null = null;
+  for (const item of cart.items) {
+    const estimate = item.lineEstimate;
+    if (
+      estimate.status !== "Available" ||
+      (currency !== null && estimate.total.currency !== currency) ||
+      !/^(?:0|[1-9][0-9]{0,20})$/u.test(estimate.total.amountMinor)
+    )
+      return { count, subtotal: null };
+    currency = estimate.total.currency;
+    total += BigInt(estimate.total.amountMinor);
+  }
+  return { count, subtotal: currency === null ? null : formatMoney(total, currency) };
+}
+
+const browserCartSummary: CartSummaryLoader = async () =>
+  summarizeCart(await createBrowserCustomerCartClient().loadCurrent());
 
 function useClient(
   context: MenuJourneyContext | undefined,
@@ -110,22 +155,22 @@ function useMenuLoad(
 /** One choice only: shown as radio buttons. */
 const singleChoice = (rule: MenuOptionRule) =>
   rule.maximumSelections === 1 && rule.options.every((option) => option.maximumQuantity === 1);
-/** "choose 1", "choose up to 3 (optional)", "choose 1 to 2". */
+/** "Required", "Optional · up to 3", "Choose 1 to 2". */
 function choiceText(rule: MenuOptionRule): string {
   const { minimumSelections: min, maximumSelections: max } = rule;
-  if (min === max) return `choose ${max}`;
-  if (min === 0) return `optional, up to ${max}`;
-  return `choose ${min} to ${max}`;
+  if (min === max) return max === 1 ? "Required" : `Required · choose ${max}`;
+  if (min === 0) return max === 1 ? "Optional" : `Optional · up to ${max}`;
+  return `Choose ${min} to ${max}`;
 }
-/** "+ $0.75", "No extra charge", or a note that the quote will price it. */
+/** "+ $0.75", "Included", or a note that the quote will price it. */
 function optionPriceText(price: MenuOptionRule["options"][number]["price"]): string {
-  if (price === null) return "Price shown in your final quote";
-  if (/^0+(\.0+)?$/u.test(price.amount)) return "No extra charge";
+  if (price === null) return "Priced at checkout";
+  if (/^0+(\.0+)?$/u.test(price.amount)) return "Included";
   const amount = formatDecimalMoney(price.amount, price.currency);
-  return amount === null ? "Price shown in your final quote" : `+ ${amount}`;
+  return amount === null ? "Priced at checkout" : `+ ${amount}`;
 }
 
-export function MenuBrowsePage({ context, client, readOnlyNotice, cartCount }: MenuPageProps) {
+export function MenuBrowsePage({ context, client, readOnlyNotice, cartSummary }: MenuPageProps) {
   const resolvedClient = useClient(context, client);
   const input = useMemo(() => ({}), []);
   const loaded = useMenuLoad(resolvedClient, input);
@@ -136,13 +181,13 @@ export function MenuBrowsePage({ context, client, readOnlyNotice, cartCount }: M
       mode="browse"
       onRetry={loaded.retry}
       readOnlyNotice={readOnlyNotice}
-      cartCount={cartCount}
+      cartSummary={cartSummary}
       state={loaded.state}
     />
   );
 }
 
-export function MenuSearchPage({ context, client, readOnlyNotice, cartCount }: MenuPageProps) {
+export function MenuSearchPage({ context, client, readOnlyNotice, cartSummary }: MenuPageProps) {
   const resolvedClient = useClient(context, client);
   const [draft, setDraft] = useState("");
   const [sectionDraft, setSectionDraft] = useState("");
@@ -173,7 +218,7 @@ export function MenuSearchPage({ context, client, readOnlyNotice, cartCount }: M
       mode="search"
       onRetry={loaded.retry}
       readOnlyNotice={readOnlyNotice}
-      cartCount={cartCount}
+      cartSummary={cartSummary}
       search={
         <section className="menu-search-view">
           <form className="menu-search" role="search" onSubmit={submit}>
@@ -244,17 +289,19 @@ export function SellableDetailPage({ context, client, readOnlyNotice }: MenuPage
   const { sellableId = "" } = useParams();
   let state = loaded.state;
   let sellable: MenuSellable | null = null;
+  let family: MenuFamily | null = null;
   if (state.kind === "Found") {
+    family = findMenuFamily(state.menu, sellableId);
     sellable =
-      state.menu.sections
-        .flatMap((section) => section.sellables)
-        .find((item) => item.sellableReference === sellableId) ?? null;
+      family?.variants.find((variant) => variant.sellable.sellableReference === sellableId)
+        ?.sellable ?? null;
     if (sellable === null) state = { kind: "NotFound" };
   }
   return (
     <MenuScreen
       context={context}
       detail={sellable}
+      detailFamily={family}
       headingRef={loaded.heading}
       mode="detail"
       onRetry={loaded.retry}
@@ -267,11 +314,13 @@ export function SellableDetailPage({ context, client, readOnlyNotice }: MenuPage
 export interface MenuScreenProps {
   readonly context?: MenuJourneyContext | undefined;
   readonly detail?: MenuSellable | null | undefined;
+  /** The sizes offered with the detail item; a single-size item when omitted. */
+  readonly detailFamily?: MenuFamily | null | undefined;
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
   readonly mode: "browse" | "search" | "detail";
   readonly onRetry?: (() => void) | undefined;
   readonly readOnlyNotice?: React.ReactNode | undefined;
-  readonly cartCount?: CartCountLoader | undefined;
+  readonly cartSummary?: CartSummaryLoader | undefined;
   readonly search?: React.ReactNode | undefined;
   readonly searchTerm?: string | null | undefined;
   readonly state: ScreenState;
@@ -280,11 +329,12 @@ export interface MenuScreenProps {
 export function MenuScreen({
   context,
   detail,
+  detailFamily,
   headingRef,
   mode,
   onRetry,
   readOnlyNotice,
-  cartCount,
+  cartSummary,
   search,
   searchTerm,
   state,
@@ -292,6 +342,8 @@ export function MenuScreen({
   // The page title never changes when the menu arrives, so a long item name cannot wrap late and
   // push the page down; the item's own heading carries its name.
   const title = mode === "search" ? "Search menu" : "Menu";
+  const browseFound = mode === "browse" && state.kind === "Found";
+  const withCart = context !== undefined && mode !== "detail";
   return (
     <CustomerPage
       step="menu"
@@ -306,73 +358,139 @@ export function MenuScreen({
           : undefined
       }
     >
-      <div className="menu-page-intro">
-        <h2>{title}</h2>
-      </div>
-      <nav className="menu-navigation" aria-label="Menu">
-        {mode === "search" ? (
-          <div className="menu-navigation__links menu-navigation__links--search">
-            <Link to="/menu">← Back to menu</Link>
+      <div className={`menu-layout${withCart ? " menu-layout--with-cart" : ""}`}>
+        <div className="menu-layout__main">
+          {mode === "detail" ? (
+            <h2 className="sr-only">{title}</h2>
+          ) : (
+            <div className="menu-page-intro">
+              {browseFound ? (
+                <h2 ref={headingRef} tabIndex={-1}>
+                  {title}
+                </h2>
+              ) : (
+                <h2>{title}</h2>
+              )}
+              <nav className="menu-navigation" aria-label="Menu">
+                {mode === "search" ? (
+                  <div className="menu-navigation__links menu-navigation__links--search">
+                    <Link to="/menu">← Back to menu</Link>
+                  </div>
+                ) : (
+                  <Link
+                    aria-label="Search menu"
+                    className="menu-navigation__search"
+                    to="/menu/search"
+                  >
+                    Search
+                  </Link>
+                )}
+              </nav>
+            </div>
+          )}
+          {/* Above the menu from the start (also while it loads), so it never pushes the menu down. */}
+          {mode !== "detail" &&
+          state.kind !== "PermissionDenied" &&
+          state.kind !== "MissingContext" ? (
+            <AllergenHelp />
+          ) : null}
+          {state.kind === "MissingContext" ? null : search}
+          {state.kind === "Found" && mode === "search" ? (
+            <section className="menu-search-summary" aria-label="Search results">
+              <h2>Search results</h2>
+              {searchTerm ? <p>Matched term · {searchTerm}</p> : null}
+            </section>
+          ) : null}
+          <div className="menu-content" aria-live="polite" aria-busy={state.kind === "Loading"}>
+            <MenuState
+              key={
+                context ? `${context.publicStoreReference}:${context.channel}` : "missing-context"
+              }
+              channel={context?.channel}
+              detail={detail}
+              detailFamily={detailFamily}
+              headingRef={headingRef}
+              mode={mode}
+              onRetry={onRetry}
+              readOnlyNotice={readOnlyNotice}
+              state={state}
+            />
           </div>
-        ) : (
-          <Link aria-label="Search menu" className="menu-navigation__search" to="/menu/search">
-            Search menu
-          </Link>
-        )}
-      </nav>
-      {state.kind === "MissingContext" ? null : search}
-      {state.kind === "Found" && mode === "search" ? (
-        <section className="menu-search-summary" aria-label="Search results">
-          <h2>Search results</h2>
-          {searchTerm ? <p>Matched term · {searchTerm}</p> : null}
-        </section>
-      ) : null}
-      <div className="menu-content" aria-live="polite" aria-busy={state.kind === "Loading"}>
-        <MenuState
-          key={context ? `${context.publicStoreReference}:${context.channel}` : "missing-context"}
-          channel={context?.channel}
-          detail={detail}
-          headingRef={headingRef}
-          mode={mode}
-          onRetry={onRetry}
-          readOnlyNotice={readOnlyNotice}
-          state={state}
-        />
+          {/* An item's page adds it under the loaded item, never under the short loading notice
+              where the arriving item would push it down. */}
+          {mode === "detail" && state.kind !== "PermissionDenied" && state.kind !== "Loading" ? (
+            <AllergenHelp />
+          ) : null}
+        </div>
+        {withCart ? <MenuCart load={cartSummary ?? browserCartSummary} /> : null}
       </div>
-      {/* Shown with the loaded content, not under the short loading notice: placed there it would
-          be pushed down when the menu or item arrives (a visible layout shift). */}
-      {state.kind === "PermissionDenied" || state.kind === "Loading" ? null : <AllergenHelp />}
-      {context && mode !== "detail" ? <MenuCartBar load={cartCount ?? browserCartCount} /> : null}
     </CustomerPage>
   );
 }
 
-/** U6: the cart is one tap away from anywhere on the menu, with its live line count. */
-function MenuCartBar({ load }: { readonly load: CartCountLoader }) {
-  const [count, setCount] = useState<number | null>(null);
+/**
+ * U6: the cart is one tap away from anywhere on the menu. Wide screens keep an order summary beside
+ * the menu; phones get a bar along the bottom once something is in the cart. Nothing is shown until
+ * the Store's cart has been read, and nothing at all if it can't be.
+ */
+function MenuCart({ load }: { readonly load: CartSummaryLoader }) {
+  const [summary, setSummary] = useState<MenuCartSummary | null>(null);
   useEffect(() => {
     let active = true;
     load()
       .then((value) => {
-        if (active) setCount(value);
+        if (active) setSummary(value);
       })
       .catch(() => {
-        if (active) setCount(null);
+        if (active) setSummary(null);
       });
     return () => {
       active = false;
     };
   }, [load]);
-  if (count === null || count === 0) return null;
+  if (summary === null) return null;
+  const items = `${summary.count} item${summary.count === 1 ? "" : "s"}`;
   return (
-    <div className="menu-cart-bar">
-      <Link className="menu-cart-bar__link" to="/cart">
-        <span>View cart</span>
-        <span className="menu-cart-bar__count" aria-label={`${count} items in cart`}>
-          {count}
-        </span>
-      </Link>
-    </div>
+    <>
+      <aside className="menu-cart-panel" aria-labelledby="menu-cart-heading">
+        <h2 id="menu-cart-heading">Your order</h2>
+        {summary.count === 0 ? (
+          <p className="menu-cart-panel__empty">Your cart is empty. Choose an item to start.</p>
+        ) : (
+          <>
+            <dl className="menu-cart-panel__facts">
+              <div>
+                <dt>Items</dt>
+                <dd>{summary.count}</dd>
+              </div>
+              {summary.subtotal === null ? null : (
+                <div>
+                  <dt>Subtotal</dt>
+                  <dd>{summary.subtotal}</dd>
+                </div>
+              )}
+            </dl>
+            <p className="menu-cart-panel__note">Tax is added at checkout.</p>
+            <Link className="menu-cart-panel__link" to="/cart">
+              View cart
+            </Link>
+          </>
+        )}
+      </aside>
+      {summary.count === 0 ? null : (
+        <div className="menu-cart-bar">
+          <Link className="menu-cart-bar__link" to="/cart">
+            <span className="menu-cart-bar__count" aria-label={`${summary.count} items in cart`}>
+              {summary.count}
+            </span>
+            <span className="menu-cart-bar__label">View cart</span>
+            <span className="menu-cart-bar__total" aria-hidden={summary.subtotal === null}>
+              {summary.subtotal ?? items}
+            </span>
+          </Link>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -401,6 +519,7 @@ function Retry({ onRetry }: { readonly onRetry?: (() => void) | undefined }) {
 function MenuState({
   channel,
   detail,
+  detailFamily,
   headingRef,
   mode,
   onRetry,
@@ -431,9 +550,10 @@ function MenuState({
     );
   if (state.kind === "Loading")
     return (
-      <section className="menu-state" role="status">
+      <section className="menu-state menu-state--loading" role="status">
         <Heading headingRef={headingRef}>Loading the current menu</Heading>
         <p>Checking the latest published items…</p>
+        <MenuSkeleton detail={mode === "detail"} />
       </section>
     );
   if (state.kind === "PermissionDenied")
@@ -496,6 +616,7 @@ function MenuState({
     return (
       <SellableDetail
         channel={channel}
+        family={detailFamily ?? singleFamily(detail)}
         sellable={detail}
         headingRef={headingRef}
         readOnlyNotice={readOnlyNotice}
@@ -504,9 +625,81 @@ function MenuState({
   return <MenuContents menu={state.menu} headingRef={headingRef} mode={mode} />;
 }
 
+function singleFamily(sellable: MenuSellable): MenuFamily {
+  return {
+    key: sellable.sellableReference,
+    name: sellable.name,
+    variants: [{ label: sellable.name, sellable }],
+  };
+}
+
+/** Grey placeholder blocks in the shape of the content, so the page doesn't jump when it arrives. */
+function MenuSkeleton({ detail }: { readonly detail: boolean }) {
+  return (
+    <div className={`menu-skeleton${detail ? " menu-skeleton--detail" : ""}`} aria-hidden="true">
+      {(detail ? [0] : [0, 1, 2, 3]).map((index) => (
+        <span className="menu-skeleton__card" key={index}>
+          <span />
+          <span />
+          <span />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function sectionAnchor(sectionReference: string): string {
+  return `section-${sectionReference}`;
+}
+
+/**
+ * The section bar stays at the top while the guest scrolls and marks the section in view, so the
+ * menu reads like a store's printed board: always clear where you are and one tap to elsewhere.
+ */
+function SectionTabs({ sections }: { readonly sections: MenuView["sections"] }) {
+  const [active, setActive] = useState(sections[0]?.sectionReference ?? "");
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const visible = new Map<string, number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const reference = entry.target.getAttribute("data-section") ?? "";
+          if (entry.isIntersecting) visible.set(reference, entry.boundingClientRect.top);
+          else visible.delete(reference);
+        }
+        const first = sections.find((section) => visible.has(section.sectionReference));
+        if (first) setActive(first.sectionReference);
+      },
+      { rootMargin: "-96px 0px -55% 0px" },
+    );
+    for (const section of sections) {
+      const element = document.getElementById(
+        sectionAnchor(section.sectionReference),
+      )?.parentElement;
+      if (element) observer.observe(element);
+    }
+    return () => observer.disconnect();
+  }, [sections]);
+  if (sections.length < 2) return null;
+  return (
+    <nav className="menu-sections" aria-label="Menu sections">
+      {sections.map((section) => (
+        <a
+          key={section.sectionReference}
+          href={`#${sectionAnchor(section.sectionReference)}`}
+          aria-current={active === section.sectionReference ? "true" : undefined}
+          onClick={() => setActive(section.sectionReference)}
+        >
+          {section.name}
+        </a>
+      ))}
+    </nav>
+  );
+}
+
 function MenuContents({
   menu,
-  headingRef,
   mode,
 }: {
   readonly menu: MenuView;
@@ -517,37 +710,29 @@ function MenuContents({
   if (count === 0)
     return (
       <section className="menu-state menu-state--empty">
-        <Heading headingRef={headingRef}>No items available</Heading>
+        <h2>No items available</h2>
         <p>The current published menu has no matching items.</p>
       </section>
     );
   return (
     <>
-      {mode === "browse" ? <Heading headingRef={headingRef}>{menu.name}</Heading> : null}
-      {mode === "browse" ? (
-        <nav className="menu-sections" aria-label="Menu sections">
-          {menu.sections.map((section) => (
-            <a key={section.sectionReference} href={`#section-${section.sectionReference}`}>
-              {section.name}
-            </a>
-          ))}
-        </nav>
-      ) : null}
+      {mode === "browse" ? <SectionTabs sections={menu.sections} /> : null}
       {menu.sections.map((section) => (
         <section
           className="menu-section"
           key={section.sectionReference}
+          data-section={section.sectionReference}
           aria-label={mode === "search" ? `Results in ${section.name}` : undefined}
-          aria-labelledby={mode === "browse" ? `section-${section.sectionReference}` : undefined}
+          aria-labelledby={mode === "browse" ? sectionAnchor(section.sectionReference) : undefined}
         >
           {mode === "browse" ? (
-            <h3 id={`section-${section.sectionReference}`}>{section.name}</h3>
+            <h3 id={sectionAnchor(section.sectionReference)}>{section.name}</h3>
           ) : null}
           <div className="menu-grid">
-            {section.sellables.map((item) => (
-              <SellableCard
-                key={item.sellableReference}
-                sellable={item}
+            {groupMenuFamilies(section.sellables).map((family) => (
+              <MenuItemCard
+                key={family.key}
+                family={family}
                 {...(mode === "search" ? { sectionName: section.name } : {})}
               />
             ))}
@@ -558,67 +743,65 @@ function MenuContents({
   );
 }
 
-function SellableCard({
-  sellable,
+function MenuItemCard({
+  family,
   sectionName,
 }: {
-  readonly sellable: MenuSellable;
+  readonly family: MenuFamily;
   readonly sectionName?: string | undefined;
 }) {
-  const soldOut = sellable.availability === "SoldOut";
-  const [photo, photoFailed] = useShownPhoto(sellable.photo);
+  const soldOut = familySoldOut(family);
+  const [photo, photoFailed] = useShownPhoto(familyPhoto(family));
+  const opens = primaryVariant(family).sellable;
+  const description = familyDescription(family);
+  const allergens = compactAllergenLine(familyAllergens(family));
+  const price = familyPriceText(family);
+  const role = opens.presentationRole;
   return (
     <article
       className={`menu-card${soldOut ? " menu-card--sold-out" : ""}${photo === null ? "" : " menu-card--with-photo"}`}
     >
       <Link
-        aria-label={`View ${sellable.name}`}
+        aria-label={`View ${family.name}`}
         className="menu-card__link"
-        to={`/menu/items/${sellable.sellableReference}`}
+        to={`/menu/items/${opens.sellableReference}`}
       >
         <span className="menu-card__body">
-          <h4>{sellable.name}</h4>
-          {sellable.presentationRole !== "Standard" ? (
-            <span className="menu-badge">
-              {sellable.presentationRole === "Sponsored"
-                ? "Sponsored"
-                : sellable.presentationRole === "Promotional"
-                  ? "Promotion"
-                  : "Featured"}
+          <span className="menu-card__title">
+            <h4>{family.name}</h4>
+            {role !== "Standard" ? (
+              <span className="menu-badge">
+                {role === "Sponsored"
+                  ? "Sponsored"
+                  : role === "Promotional"
+                    ? "Promotion"
+                    : "Featured"}
+              </span>
+            ) : null}
+          </span>
+          {description === null ? null : (
+            <span className="menu-card__description">{description}</span>
+          )}
+          {family.variants.length > 1 ? (
+            <span className="menu-card__sizes">
+              {family.variants.map((variant) => variant.label).join(" · ")}
             </span>
           ) : null}
-          {sellable.description === null ? null : (
-            <span className="menu-card__description">{sellable.description}</span>
-          )}
           {sectionName ? (
             <span className="menu-result-section">
               <span>Section</span>
               {sectionName}
             </span>
           ) : null}
-          <span className="menu-card__allergens">
-            {sellable.allergens.length === 0 ? (
-              <span>No allergen-free claim is made. Ask staff.</span>
-            ) : (
-              sellable.allergens.map((item, index) => (
-                <span key={`${item.classification}-${item.name}`}>
-                  {index > 0 ? " · " : ""}
-                  <span>
-                    {item.classification === "Contains" ? "Contains" : "Cross-contact possible"}:{" "}
-                    {item.name}
-                  </span>
-                </span>
-              ))
-            )}
+          {allergens === null ? null : <span className="menu-card__allergens">{allergens}</span>}
+          <span className="menu-card__aside">
+            <span
+              className={`menu-card__price${price === null ? " menu-card__price--pending" : ""}`}
+            >
+              {price ?? "Priced at checkout"}
+            </span>
+            {soldOut ? <span className="menu-sold-out">Sold out</span> : null}
           </span>
-        </span>
-        <span className="menu-card__aside">
-          <span
-            className={`menu-card__price${sellable.price === null ? " menu-card__price--pending" : ""}`}
-          >
-            {priceLine(sellable)}
-          </span>
-          {soldOut ? <span className="menu-sold-out">Sold out</span> : null}
         </span>
         {photo === null ? null : (
           <MenuPhotoPicture
@@ -626,7 +809,7 @@ function SellableCard({
             decorative
             onError={photoFailed}
             photo={photo}
-            sizes="88px"
+            sizes="96px"
             widths={[320, 640]}
           />
         )}
@@ -704,34 +887,29 @@ function MenuPhotoPicture({
   );
 }
 
-/** WP-2423 8.6: the Store's base price; options and tax are added in the final quote. */
+/** WP-2423 8.6: the size's own base price; options and tax are added in the final quote. */
 function priceLine(sellable: MenuSellable): string {
   if (sellable.price === null) return "Priced at checkout";
   // Decimal text from the server; never converted to a binary number.
-  const amount = formatDecimalMoney(sellable.price.amount, sellable.price.currency);
-  if (amount === null) return "Priced at checkout";
-  return sellable.optionRules.length === 0 ? amount : `From ${amount}`;
-}
-function AvailabilityLine({ sellable }: { readonly sellable: MenuSellable }) {
-  return sellable.availability === "SoldOut" ? (
-    <p className="menu-sold-out">Sold out</p>
-  ) : (
-    <p className="menu-available">Available now</p>
-  );
+  return formatDecimalMoney(sellable.price.amount, sellable.price.currency) ?? "Priced at checkout";
 }
 
 function SellableDetail({
   channel,
+  family,
   sellable,
   headingRef,
   readOnlyNotice,
 }: {
   readonly channel?: MenuJourneyContext["channel"] | undefined;
+  readonly family: MenuFamily;
   readonly sellable: MenuSellable;
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
   readonly readOnlyNotice?: React.ReactNode | undefined;
 }) {
-  const [photo, photoFailed] = useShownPhoto(sellable.photo);
+  const [photo, photoFailed] = useShownPhoto(sellable.photo ?? familyPhoto(family));
+  const sized = family.variants.length > 1;
+  const description = sellable.description ?? familyDescription(family);
   return (
     <article className={`sellable-detail${photo === null ? "" : " sellable-detail--with-photo"}`}>
       <Link className="sellable-detail__back" to="/menu">
@@ -749,32 +927,46 @@ function SellableDetail({
       )}
       <div className="sellable-detail__content">
         <div className="sellable-detail__heading">
-          <Heading headingRef={headingRef}>{sellable.name}</Heading>
+          <Heading headingRef={headingRef}>{family.name}</Heading>
           <p className="sellable-detail__price">
+            {sized ? (
+              <span className="sellable-detail__size">{currentLabel(family, sellable)} · </span>
+            ) : null}
             {priceLine(sellable)}
             {sellable.price === null ? null : <span> plus tax</span>}
           </p>
         </div>
-        {sellable.description === null ? null : (
-          <p className="sellable-detail__description">{sellable.description}</p>
+        {description === null ? null : (
+          <p className="sellable-detail__description">{description}</p>
         )}
-        {sellable.availability === "SoldOut" ? <AvailabilityLine sellable={sellable} /> : null}
+        {sellable.availability === "SoldOut" ? (
+          <p className="menu-sold-out">{sized ? "This size is sold out" : "Sold out"}</p>
+        ) : null}
         <AllergenSummary sellable={sellable} />
         {readOnlyNotice ? (
           <div className="menu-readonly-boundary" role="status">
             {readOnlyNotice}
           </div>
-        ) : sellable.availability === "SoldOut" ? (
+        ) : sellable.availability === "SoldOut" && !sized ? (
           <p role="status">Sold out at this store right now. Please choose another item.</p>
         ) : (
           <SellableConfigurator
             channel={channel}
-            key={sellable.sellableReference}
+            key={family.key}
             sellable={sellable}
+            variants={family.variants}
           />
         )}
       </div>
     </article>
+  );
+}
+
+function currentLabel(family: MenuFamily, sellable: MenuSellable): string {
+  return (
+    family.variants.find(
+      (variant) => variant.sellable.sellableReference === sellable.sellableReference,
+    )?.label ?? sellable.name
   );
 }
 
@@ -905,15 +1097,43 @@ function ConfigureStatus({
   );
 }
 
+/**
+ * The guest's choices carried to another size: anything the new size also offers stays chosen;
+ * groups the new size changes start from its own defaults.
+ */
+function carryOverSelections(
+  selected: ReadonlyMap<string, number>,
+  rules: readonly MenuOptionRule[],
+): ReadonlyMap<string, number> {
+  const next = new Map<string, number>();
+  for (const rule of rules) {
+    const kept = rule.options.filter((option) => selected.has(option.optionReference));
+    const options =
+      kept.length > 0 ? kept : rule.options.filter((option) => option.selectedByDefault);
+    for (const option of options)
+      next.set(
+        option.optionReference,
+        kept.length > 0
+          ? Math.min(selected.get(option.optionReference) ?? 1, option.maximumQuantity)
+          : (option.defaultQuantity ?? 1),
+      );
+  }
+  return next;
+}
+
 export function SellableConfigurator({
   channel,
   sellable,
+  variants,
   controller: provided,
 }: {
   readonly channel?: MenuJourneyContext["channel"] | undefined;
   readonly sellable: MenuSellable;
+  /** The sizes to choose between; the size is the sellable added. */
+  readonly variants?: readonly MenuVariant[] | undefined;
   readonly controller?: ConfigureController | undefined;
 }) {
+  const navigate = useNavigate();
   const [controller] = useState(
     () =>
       provided ??
@@ -934,10 +1154,22 @@ export function SellableConfigurator({
   const [selected, setSelected] = useState<ReadonlyMap<string, number>>(() =>
     defaultMenuOptionSelections(sellable.optionRules),
   );
-  const activeRules = activeMenuOptionRules(sellable.optionRules, selected);
-  const issues = configurationIssues(sellable, selected, quantity, note);
+  // A different size keeps the quantity, the note and every choice the new size also offers.
+  const [selectionsFor, setSelectionsFor] = useState(sellable.sellableReference);
+  let current = selected;
+  if (selectionsFor !== sellable.sellableReference) {
+    current = carryOverSelections(selected, sellable.optionRules);
+    setSelectionsFor(sellable.sellableReference);
+    setSelected(current);
+  }
+  const activeRules = activeMenuOptionRules(sellable.optionRules, current);
+  const issues = configurationIssues(sellable, current, quantity, note);
   const busy = state.status === "pending";
   const unresolved = state.status === "outcome-unknown" || state.status === "offline";
+  const locked = busy || unresolved || state.status === "added";
+  const soldOut = sellable.availability === "SoldOut";
+  const total =
+    issues.length === 0 ? configuredItemTotal(sellable, activeRules, current, quantity) : null;
   useEffect(() => {
     const offline = () => controller.setOnline(false);
     const online = () => controller.setOnline(true);
@@ -950,48 +1182,73 @@ export function SellableConfigurator({
   }, [controller]);
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (issues.length > 0 || busy || unresolved || state.status === "added") return;
+    if (issues.length > 0 || locked || soldOut) return;
     const draft: CartItemDraft = Object.freeze({
       quantity,
-      optionSelections: selectedMenuOptions(sellable.optionRules, selected),
+      optionSelections: selectedMenuOptions(sellable.optionRules, current),
       customerNote: note.trim() === "" ? null : note.normalize("NFC").trim(),
     });
     void controller.submit(sellable.sellableReference, draft);
   };
+  const sizes = variants !== undefined && variants.length > 1 ? variants : null;
   return (
     <form className="sellable-configurator" aria-labelledby="configure-heading" onSubmit={submit}>
-      <h3 id="configure-heading">
-        {sellable.optionRules.length === 0 ? "Add to your order" : "Make it yours"}
+      <h3 id="configure-heading" className="sr-only">
+        {sellable.optionRules.length === 0 && sizes === null
+          ? "Add to your order"
+          : "Make it yours"}
       </h3>
-      {sellable.optionRules.length === 0 ? null : (
-        <p>Prices shown are what each choice adds now; tax is added at checkout.</p>
-      )}
-      <label htmlFor="configure-quantity">Quantity</label>
-      <input
-        id="configure-quantity"
-        type="number"
-        min={1}
-        max={100}
-        inputMode="numeric"
-        value={quantity}
-        disabled={busy || unresolved || state.status === "added"}
-        onChange={(event) => setQuantity(event.currentTarget.valueAsNumber)}
-      />
-      {activeRules.map((rule, groupIndex) => (
-        <fieldset key={`${rule.minimumSelections}-${rule.maximumSelections}-${groupIndex}`}>
+      {sizes === null ? null : (
+        <fieldset className="configure-group">
           <legend>
-            {rule.name ?? `Choice group ${groupIndex + 1}`} — {choiceText(rule)}
+            <span className="configure-group__name">Size</span>
+            <span className="configure-group__rule">Required</span>
+          </legend>
+          {sizes.map((variant) => {
+            const variantSoldOut = variant.sellable.availability === "SoldOut";
+            return (
+              <label className="configure-option" key={variant.sellable.sellableReference}>
+                <input
+                  type="radio"
+                  name="configure-size"
+                  checked={variant.sellable.sellableReference === sellable.sellableReference}
+                  disabled={locked || (variantSoldOut && variant.sellable !== sellable)}
+                  onChange={() =>
+                    navigate(`/menu/items/${variant.sellable.sellableReference}`, {
+                      replace: true,
+                    })
+                  }
+                />
+                <span className="configure-option__name">{variant.label}</span>
+                <span className="configure-option__price">
+                  {variantSoldOut ? "Sold out" : priceLine(variant.sellable)}
+                </span>
+              </label>
+            );
+          })}
+        </fieldset>
+      )}
+      {activeRules.map((rule, groupIndex) => (
+        <fieldset
+          className="configure-group"
+          key={`${rule.minimumSelections}-${rule.maximumSelections}-${groupIndex}`}
+        >
+          <legend>
+            <span className="configure-group__name">
+              {rule.name ?? `Choice group ${groupIndex + 1}`}
+            </span>
+            <span className="configure-group__rule">{choiceText(rule)}</span>
           </legend>
           {rule.options.map((option) => (
-            <div className="configure-option" key={option.optionReference}>
-              <label>
+            <div className="configure-option configure-option--row" key={option.optionReference}>
+              <label className="configure-option__choice">
                 <input
                   type={singleChoice(rule) ? "radio" : "checkbox"}
                   name={`configure-group-${groupIndex}`}
-                  checked={selected.has(option.optionReference)}
-                  disabled={busy || unresolved || state.status === "added"}
+                  checked={current.has(option.optionReference)}
+                  disabled={locked}
                   onChange={() => {
-                    const next = new Map(selected);
+                    const next = new Map(current);
                     if (singleChoice(rule)) {
                       // Choosing one replaces the group's other choice.
                       for (const other of rule.options) next.delete(other.optionReference);
@@ -1002,45 +1259,47 @@ export function SellableConfigurator({
                     setSelected(next);
                   }}
                 />
-                {option.name}
-                {option.selectedByDefault ? " (default)" : ""}
+                <span className="configure-option__name">{option.name}</span>
               </label>
-              {selected.has(option.optionReference) && option.maximumQuantity > 1 ? (
-                <label>
-                  Quantity for {option.name}
+              <span className="configure-option__price">{optionPriceText(option.price)}</span>
+              {current.has(option.optionReference) && option.maximumQuantity > 1 ? (
+                <label className="configure-option__quantity">
+                  How many {option.name}
                   <input
                     type="number"
                     min={1}
                     max={Math.min(option.maximumQuantity, 100)}
                     inputMode="numeric"
-                    value={selected.get(option.optionReference)}
-                    disabled={busy || unresolved || state.status === "added"}
+                    value={current.get(option.optionReference)}
+                    disabled={locked}
                     onChange={(event) => {
-                      const next = new Map(selected);
+                      const next = new Map(current);
                       next.set(option.optionReference, event.currentTarget.valueAsNumber);
                       setSelected(next);
                     }}
                   />
                 </label>
               ) : null}
-              <span>{optionPriceText(option.price)}</span>
             </div>
           ))}
         </fieldset>
       ))}
-      <label htmlFor="configure-note">Preparation note (optional)</label>
-      <textarea
-        id="configure-note"
-        maxLength={500}
-        value={note}
-        disabled={busy || unresolved || state.status === "added"}
-        aria-describedby="configure-note-help"
-        onChange={(event) => setNote(event.currentTarget.value)}
-      />
-      <p id="configure-note-help">
-        Plain preparation requests only. Do not enter allergy, medical or other sensitive details;
-        ask staff for assistance.
-      </p>
+      <div className="configure-note">
+        <label htmlFor="configure-note">Preparation note (optional)</label>
+        <textarea
+          id="configure-note"
+          maxLength={500}
+          rows={2}
+          value={note}
+          disabled={locked}
+          aria-describedby="configure-note-help"
+          onChange={(event) => setNote(event.currentTarget.value)}
+        />
+        <p id="configure-note-help">
+          Plain preparation requests only. Do not enter allergy, medical or other sensitive details;
+          ask staff for assistance.
+        </p>
+      </div>
       {issues.length > 0 ? (
         <div className="configure-issues" role="alert">
           {issues.map((issue) => (
@@ -1048,33 +1307,88 @@ export function SellableConfigurator({
           ))}
         </div>
       ) : null}
-      <button
-        className="menu-action"
-        type="submit"
-        disabled={issues.length > 0 || busy || unresolved || state.status === "added"}
-      >
-        Add to cart
-      </button>
+      {soldOut ? (
+        <p className="configure-sold-out" role="status">
+          This size is sold out right now. Please choose another size.
+        </p>
+      ) : null}
       <ConfigureStatus state={state} controller={controller} />
+      <div className="configure-actions">
+        <div className="configure-stepper">
+          <button
+            type="button"
+            aria-label="Decrease quantity"
+            disabled={locked || !(quantity > 1)}
+            onClick={() => setQuantity((value) => Math.max(1, Math.min(100, (value || 1) - 1)))}
+          >
+            −
+          </button>
+          <label htmlFor="configure-quantity" className="sr-only">
+            Quantity
+          </label>
+          <input
+            id="configure-quantity"
+            type="number"
+            min={1}
+            max={100}
+            inputMode="numeric"
+            value={quantity}
+            disabled={locked}
+            onChange={(event) => setQuantity(event.currentTarget.valueAsNumber)}
+          />
+          <button
+            type="button"
+            aria-label="Increase quantity"
+            disabled={locked || !(quantity < 100)}
+            onClick={() => setQuantity((value) => Math.max(1, Math.min(100, (value || 0) + 1)))}
+          >
+            +
+          </button>
+        </div>
+        <button
+          className="menu-action configure-actions__submit"
+          type="submit"
+          disabled={issues.length > 0 || locked || soldOut}
+        >
+          Add to cart
+        </button>
+        <p className="configure-actions__total" aria-live="polite">
+          {total === null ? (
+            "Price confirmed at checkout"
+          ) : (
+            <>
+              <strong>{total}</strong> plus tax
+            </>
+          )}
+        </p>
+      </div>
     </form>
   );
 }
 
 function AllergenSummary({ sellable }: { readonly sellable: MenuSellable }) {
+  const contains = sellable.allergens.filter((item) => item.classification === "Contains");
+  const may = sellable.allergens.filter((item) => item.classification !== "Contains");
   return (
     <div className="menu-allergens">
       <p className="menu-allergen-heading">Allergen information</p>
       {sellable.allergens.length === 0 ? (
         <p>No allergen-free claim is made. Ask staff before ordering.</p>
       ) : (
-        <ul>
-          {sellable.allergens.map((item) => (
-            <li key={`${item.classification}-${item.name}`}>
-              {item.classification === "Contains" ? "Contains" : "Cross-contact possible"}:{" "}
-              {item.name}
-            </li>
-          ))}
-        </ul>
+        <dl>
+          {contains.length === 0 ? null : (
+            <div>
+              <dt>Contains</dt>
+              <dd>{contains.map((item) => item.name).join(", ")}</dd>
+            </div>
+          )}
+          {may.length === 0 ? null : (
+            <div>
+              <dt>Cross-contact possible</dt>
+              <dd>{may.map((item) => item.name).join(", ")}</dd>
+            </div>
+          )}
+        </dl>
       )}
     </div>
   );

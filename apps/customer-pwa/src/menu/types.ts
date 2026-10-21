@@ -48,6 +48,11 @@ export interface MenuPhoto {
 
 export interface MenuSellable {
   readonly sellableReference: string;
+  /**
+   * The published Product version. Sizes (SKUs) of one Product share it, which is how the menu shows
+   * them as one item with a size choice; absent for menus built without it (previews).
+   */
+  readonly productVersionReference?: string;
   readonly name: string;
   /** Staff-written plain-text description, in the menu locale; null when none is published. */
   readonly description: string | null;

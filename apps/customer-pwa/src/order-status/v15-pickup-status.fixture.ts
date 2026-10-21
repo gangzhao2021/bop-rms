@@ -66,7 +66,7 @@ export function v15PickupStatusBody(stage: V15PickupStage) {
                 orderItemReference: itemReference,
                 displayName: "Flat White — Small (8 oz)",
                 quantity: 1,
-                lineTotal: { amountMinor: "480", currencyCode: "CAD" },
+                lineTotal: { amountMinor: "542", currencyCode: "CAD" },
               },
             ],
           },

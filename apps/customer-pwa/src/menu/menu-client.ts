@@ -308,7 +308,7 @@ function sellable(value: unknown): MenuSellable {
     "displayPrice",
     "taxDisplayContext",
   ]);
-  reference(raw.productVersionReference);
+  const productVersionReference = reference(raw.productVersionReference);
   const presentationRoles = ["Standard", "Featured", "Promotional", "Sponsored"] as const;
   if (
     !presentationRoles.includes(raw.presentationRole as never) ||
@@ -374,6 +374,7 @@ function sellable(value: unknown): MenuSellable {
   }
   return Object.freeze({
     sellableReference: reference(raw.sellableReference),
+    productVersionReference,
     name: text(raw.name),
     description: raw.description === null ? null : prose(raw.description, 240),
     photo: photo(raw.photo),

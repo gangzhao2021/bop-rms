@@ -7,7 +7,7 @@ const ORDER_REFERENCE = "018f9900-0000-7000-8000-000000000014";
 
 const routes = [
   { path: "/", heading: "Ready to order" },
-  { path: "/menu", heading: "Synthetic all-day menu" },
+  { path: "/menu", heading: "Menu" },
   { path: "/menu/search", heading: "Search this menu" },
   {
     path: `/menu/items/${SELLABLE_REFERENCE}`,
@@ -81,7 +81,7 @@ test.describe("@demo local-only Customer preview", () => {
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/menu$/u);
     await expect(
-      page.getByRole("main").getByRole("heading", { name: "Synthetic all-day menu", exact: true }),
+      page.getByRole("main").getByRole("heading", { name: "Menu", exact: true }),
     ).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("data-navigation-probe", "retained");
     await expectNoHorizontalOverflow(page);
@@ -239,7 +239,7 @@ test.describe("@demo local-only Customer preview", () => {
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/menu$/u);
     await expect(
-      page.getByRole("main").getByRole("heading", { name: "Synthetic all-day menu", exact: true }),
+      page.getByRole("main").getByRole("heading", { name: "Menu", exact: true }),
     ).toBeVisible();
     expect(violations).toEqual([]);
   });

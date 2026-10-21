@@ -147,10 +147,10 @@ describe("WP-2423 menu descriptions and photos", () => {
     expect(withPhoto).toContain(photographed.description);
     expect(withPhoto).toContain('<span class="menu-card__media" aria-hidden="true"><picture>');
     expect(withPhoto).toContain(
-      `<source type="image/webp" srcSet="/media/images/${hash("b")}.webp 320w, /media/images/${hash("d")}.webp 640w" sizes="88px"/>`,
+      `<source type="image/webp" srcSet="/media/images/${hash("b")}.webp 320w, /media/images/${hash("d")}.webp 640w" sizes="96px"/>`,
     );
     expect(withPhoto).toMatch(
-      /<img alt="" decoding="async" height="960" loading="lazy" sizes="88px"/u,
+      /<img alt="" decoding="async" height="960" loading="lazy" sizes="96px"/u,
     );
     expect(withPhoto).toContain(`src="/media/images/${hash("a")}.jpg"`);
     expect(withPhoto).toContain(
@@ -226,12 +226,16 @@ describe("WP-2423 menu descriptions and photos", () => {
 describe("WP-1701 Customer Menu screens", () => {
   it("renders safe published cards without source identifiers or invented price", () => {
     const html = render({ context, mode: "browse", state: { kind: "Found", menu } });
-    expect(html).toContain("All Day");
+    // The menu's name is how staff file it ("All Day"); guests see the store and its sections.
+    expect(html).not.toContain("All Day");
     expect(html).toContain("Drinks");
     expect(html).toContain("Latte");
     expect(html).toContain("Priced at checkout");
-    expect(html).toContain("Contains");
-    expect(html).toContain("Cross-contact possible");
+    // One short allergen line per card; the item page lists them in full.
+    expect(html).toContain(
+      '<span class="menu-card__allergens">Contains Milk · May contain Peanuts</span>',
+    );
+    expect(html).not.toContain("Cross-contact possible:");
     expect(html).not.toContain(context.publicStoreReference);
     expect(html).not.toContain("$0");
   });
@@ -287,7 +291,9 @@ describe("WP-1701 Customer Menu screens", () => {
       mode: "detail",
       state: { kind: "Found", menu },
     });
-    expect(html).toContain("From $5.25");
+    // A single-size item shows its own price; "From" is only for sizes priced differently.
+    expect(html).toContain("$5.25");
+    expect(html).not.toContain("From $5.25");
     expect(html).toContain("plus tax");
     const soldOut = render({
       context,
@@ -326,7 +332,7 @@ describe("WP-1701 Customer Menu screens", () => {
     });
     expect(html).toContain("Allergies or accessibility");
     // The page title stays "Menu"; only the item's own heading carries its name.
-    expect(html).toContain("<h2>Menu</h2>");
+    expect(html).toContain('<h2 class="sr-only">Menu</h2>');
   });
 
   it("offers re-entry without retrying a denied menu request", () => {
@@ -375,12 +381,15 @@ describe("WP-1701 Customer Menu screens", () => {
       </MemoryRouter>,
     );
     expect(html).toContain("Milk requires at least 1");
-    expect(html).toContain("Milk — choose 1");
+    expect(html).toContain(
+      '<span class="configure-group__name">Milk</span><span class="configure-group__rule">Required</span>',
+    );
     expect(html).toContain('type="radio"');
     expect(html).toContain("+ $0.75");
     expect(html).not.toContain("CAD");
     expect(findInternalText([staticText(html)])).toEqual([]);
-    expect(html).toContain("Prices shown are what each choice adds now");
+    // No total is shown while the choices are incomplete or unpriced.
+    expect(html).toContain("Price confirmed at checkout");
     expect(html).toContain("Oat beverage");
     expect(html).toContain("Do not enter allergy, medical or other sensitive details");
     // Guests ask staff (plain role), never "ask Staff".
@@ -571,5 +580,62 @@ describe("WP-2423: a table cart that timed out", () => {
     });
     expect(html).toContain("Wait a moment, then add the item again.");
     expect(html).not.toContain("Ask staff for help continuing your order.");
+  });
+});
+
+describe("WP-2423 sizes of one Product", () => {
+  const product = "018f7500-0000-7000-8000-0000000000a0";
+  const size = (n: number, label: string, amount: string): MenuSellable => ({
+    ...sellable,
+    sellableReference: `018f7500-0000-7000-8000-0000000000b${n}`,
+    productVersionReference: product,
+    name: `Flat White — ${label}`,
+    price: { amount, currency: "CAD" },
+    optionRules: [],
+  });
+  const sizes = [size(1, "Small (8 oz)", "4.25"), size(2, "Regular (12 oz)", "4.95")] as const;
+  const sizedMenu: MenuView = {
+    ...menu,
+    sections: [
+      {
+        sectionReference: "018f7500-0000-7000-8000-000000000006",
+        name: "Drinks",
+        sellables: sizes,
+      },
+    ],
+  };
+
+  it("shows one card with the sizes and the lowest price", () => {
+    const html = render({ context, mode: "browse", state: { kind: "Found", menu: sizedMenu } });
+    expect(cards(html)).toHaveLength(1);
+    expect(html).toContain("<h4>Flat White</h4>");
+    expect(html).toContain('<span class="menu-card__sizes">Small (8 oz) · Regular (12 oz)</span>');
+    expect(html).toContain("From $4.25");
+    expect(html).toContain('aria-label="View Flat White"');
+    expect(html).toContain(`href="/menu/items/${sizes[0].sellableReference}"`);
+    expect(html).not.toContain("Flat White — Small");
+  });
+
+  it("offers the size as the first choice on the item page, priced per size", () => {
+    const html = render({
+      context,
+      detail: sizes[1],
+      detailFamily: {
+        key: sizes[0].sellableReference,
+        name: "Flat White",
+        variants: [
+          { label: "Small (8 oz)", sellable: sizes[0] },
+          { label: "Regular (12 oz)", sellable: sizes[1] },
+        ],
+      },
+      mode: "detail",
+      state: { kind: "Found", menu: sizedMenu },
+    });
+    expect(html).toMatch(/<h2 tabindex="-1">Flat White<\/h2>/u);
+    expect(html).toContain('<span class="configure-group__name">Size</span>');
+    expect(html).toMatch(/name="configure-size" checked=""/u);
+    expect(html).toContain("Regular (12 oz) · </span>$4.95");
+    expect(html).toContain("<strong>$4.95</strong> plus tax");
+    expect(html).toContain('aria-label="Increase quantity"');
   });
 });

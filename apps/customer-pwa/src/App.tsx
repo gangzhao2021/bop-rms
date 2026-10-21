@@ -14,7 +14,8 @@ import {
   MenuBrowsePage,
   MenuSearchPage,
   SellableDetailPage,
-  type CartCountLoader,
+  summarizeCart,
+  type CartSummaryLoader,
 } from "./menu/MenuPage.js";
 import type { MenuJourneyContext } from "./menu/types.js";
 import { PaymentPage } from "./payment/PaymentPage.js";
@@ -140,15 +141,13 @@ export function App({
         serviceMode: menuContext.channel,
       }
     : undefined;
-  // A preview never calls the Store; its cart count comes from the injected controller.
-  const demoCartCount = useMemo<CartCountLoader | undefined>(
+  // A preview never calls the Store; its cart summary comes from the injected controller.
+  const demoCartSummary = useMemo<CartSummaryLoader | undefined>(
     () =>
       demo
         ? async () => {
             const state = demo.cartController.getState();
-            return "cart" in state && state.cart !== null
-              ? state.cart.cart.items.reduce((total, item) => total + item.quantity, 0)
-              : 0;
+            return summarizeCart("cart" in state ? state.cart : null);
           }
         : undefined,
     [demo],
@@ -189,7 +188,7 @@ export function App({
               context={menuContext}
               client={demo?.menuClient}
               readOnlyNotice={demo?.menuReadOnlyNotice}
-              cartCount={demoCartCount}
+              cartSummary={demoCartSummary}
             />
           }
         />
@@ -200,7 +199,7 @@ export function App({
               context={menuContext}
               client={demo?.menuClient}
               readOnlyNotice={demo?.menuReadOnlyNotice}
-              cartCount={demoCartCount}
+              cartSummary={demoCartSummary}
             />
           }
         />

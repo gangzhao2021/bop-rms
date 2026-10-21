@@ -1015,6 +1015,10 @@ test.describe("@production order status HTTP continuity", () => {
     expect(readyAt).not.toBeNull();
     // One 3 s check plus the code read, against up to 15 s before.
     expect(Date.now() - (readyAt ?? 0)).toBeLessThan(5_000);
+    // The pilot's line total includes tax: the order adds up to what was paid ($4.80 + $0.62).
+    await expect(main.locator(".order-status__money")).toContainText("Subtotal$4.80");
+    await expect(main.locator(".order-status__money")).not.toContainText("Discounts and fees");
+    await expect(main.locator(".order-status__total")).toHaveText("Total$5.42");
     await expectNoInternalText(page);
   });
 
