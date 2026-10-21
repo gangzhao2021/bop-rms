@@ -233,6 +233,10 @@ export async function readStoreConfigurationSubmitter(
 /** Latest administration state, not proof of effective published configuration.
  * Caller must retain transaction and current authorization fence while composing
  * this with the independently verified current publication.
+ * `now` may be the trusted clock itself: it is then read again once the head lock is held,
+ * so a head committed by a concurrent writer while this read waited is judged against the
+ * time it is actually read (a version conflict for the caller, not an outage). A fixed
+ * instant keeps the earlier behaviour.
  */
 export function createPostgresStoreConfigurationAuthoringSource(options: {
   readonly brandReference: string;
@@ -250,11 +254,16 @@ export function createPostgresStoreConfigurationAuthoringSource(options: {
   const mode = readMode();
   const brand = parseBrandReference(options.brandReference),
     store = parseStoreReference(options.storeReference);
-  return async (tx: Transaction, now: string): Promise<StoreConfigurationVersion | null> => {
+  return async (
+    tx: Transaction,
+    now: string | (() => string),
+  ): Promise<StoreConfigurationVersion | null> => {
     try {
-      const at = parseCanonicalInstant(now);
+      const observe = () => parseCanonicalInstant(typeof now === "function" ? now() : now);
+      const admittedAt = observe();
       if (readMode() !== mode) return unavailable();
-      if ((await options.authorize(tx, at)) !== true || readMode() !== mode) return unavailable();
+      if ((await options.authorize(tx, admittedAt)) !== true || readMode() !== mode)
+        return unavailable();
       await tx.query(
         "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
         [brand, store],
@@ -271,6 +280,9 @@ export function createPostgresStoreConfigurationAuthoringSource(options: {
           [brand, store],
         ),
       );
+      // The head is judged at the time it is read under the lock (never earlier than admission).
+      const at = observe();
+      if (at < admittedAt) return unavailable();
       if (result.length > 1) return unavailable();
       let configuration: StoreConfigurationVersion | null = null;
       const latest = result[0];

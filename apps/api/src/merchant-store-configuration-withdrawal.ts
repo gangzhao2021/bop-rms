@@ -124,14 +124,16 @@ export function createMerchantStoreConfigurationWithdrawal(options: {
           const { scope, decisions } = authority.scope;
           const brand = scope.context.brand.brandReference,
             store = scope.store.storeReference,
-            actor = String(scope.actorReference),
-            at = options.persistence.now();
+            actor = String(scope.actorReference);
+          // The head is read under its lock at the time it is read, and the withdrawal is
+          // recorded after it, so a change committed while this waited is a conflict, not an outage.
           const latest = await createPostgresStoreConfigurationAuthoringSource({
             brandReference: brand,
             storeReference: store,
             mode: "Write",
             authorize: () => authority.guard(),
-          })(tx, at);
+          })(tx, () => options.persistence.now());
+          const at = options.persistence.now();
           if (
             latest === null ||
             latest.configurationReference !== command.configurationReference ||

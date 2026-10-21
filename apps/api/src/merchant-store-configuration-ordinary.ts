@@ -553,7 +553,7 @@ export function createMerchantStoreConfigurationOrdinary(
               return true;
             },
           });
-        return headReader(tx, check());
+        return headReader(tx, check);
       };
       let checks = false;
       await host.registerBeforeCommit(

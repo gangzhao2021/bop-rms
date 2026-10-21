@@ -456,7 +456,7 @@ export function createMerchantStoreSetup(options: {
           });
           const currentConfiguration = options.currentConfiguration;
           const readHead = async () => {
-            const recorded = await readBase(tx, check());
+            const recorded = await readBase(tx, check);
             if (recorded) return recorded.configurationReference;
             if (currentConfiguration === undefined) return null;
             return currentConfiguration(tx, check(), async () => {

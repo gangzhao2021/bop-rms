@@ -264,7 +264,7 @@ function createStoreHoursSetupRun(
             storeReference: fixed.storeReference,
             mode: "Write",
             authorize: async (actual) => actual === tx && (await authorized()),
-          })(tx, check());
+          })(tx, check);
           const latest: StoreConfigurationVersion | null = recorded ?? published;
           let setupCommand: ReturnType<typeof parseStoreSetupSaveCommand> | null = null;
           const storeOptions: StoreSetupDraftStoreOptions = {

@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import { request } from "node:http";
 import { createRequire } from "node:module";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { setTimeout } from "node:timers";
 import { URL } from "node:url";
 import {
   canonicalizeRfc8785,
@@ -79,10 +80,39 @@ export async function exerciseStoreConfigurationOrdinaryRuntimeHttp(input) {
     lateChildStage = "NotStarted",
     lateChildFailure = null,
     falseFields = [];
+  // Race barrier: the first transaction to take the Store configuration head lock holds it until
+  // another transaction is waiting for that lock, so the loser reads its clock before the winner.
+  const headLock =
+    "LOCK TABLE rms_store.store_configuration_authoring_operation IN SHARE ROW EXCLUSIVE MODE";
+  let headLockBarrier = null;
+  const awaitHeadLockWaiter = async () => {
+    for (let attempt = 0; attempt < 400; attempt++) {
+      const waiting = await admin.query(
+        "SELECT count(*)::int waiting FROM pg_locks WHERE relation='rms_store.store_configuration_authoring_operation'::regclass AND NOT granted",
+      );
+      if (waiting.rows[0].waiting > 0) return true;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return false;
+  };
   const ordinaryTransactions = {
     async run(work) {
       try {
-        return await transactions.run(work);
+        return await transactions.run(async (tx) => {
+          if (headLockBarrier !== null) {
+            const query = tx.query;
+            tx.query = async (sql, values) => {
+              const result = await query.call(tx, sql, values);
+              const barrier = headLockBarrier;
+              if (barrier !== null && !barrier.used && sql === headLock) {
+                barrier.used = true;
+                barrier.observedWaiter = await awaitHeadLockWaiter();
+              }
+              return result;
+            };
+          }
+          return work(tx);
+        });
       } catch (error) {
         const code =
           typeof error?.code === "string" &&
@@ -942,15 +972,23 @@ export async function exerciseStoreConfigurationOrdinaryRuntimeHttp(input) {
       assert.equal(Number(checkedCounts.originals), Number(after.originals) + checked);
       assert.equal(Number(checkedCounts.legacy), Number(after.legacy) + checked);
     }
-    // Optimistic concurrency on a head-changing command: two Submits of the same head, only one
-    // commits; the other is refused (409) or ends unknown (503) and writes nothing.
+    // Optimistic concurrency on a head-changing command: two Submits of the same head. The
+    // winner holds the head lock until the loser waits for it (the loser read its clock before
+    // the winner's change); the loser then reads the winner's head and is refused as changed
+    // (409), writing nothing.
     const beforeRace = await counts();
     const competing = [command("Submit", draftHead), command("Submit", draftHead)];
+    headLockBarrier = { used: false, observedWaiter: false };
     const race = await Promise.all(
       competing.map((own) => send("ordinary-command", { command: own })),
     );
-    assert.equal(race.filter((value) => value.status === 200).length, 1);
-    assert(race.every((value) => [200, 409, 503].includes(value.status)));
+    const barrier = headLockBarrier;
+    headLockBarrier = null;
+    assert.deepEqual(barrier, { used: true, observedWaiter: true });
+    assert.deepEqual(race.map((value) => value.status).sort(), [200, 409]);
+    assert.deepEqual(race.find((value) => value.status === 409).body, {
+      error: "store_configuration_ordinary_conflict",
+    });
     const raceCounts = await counts();
     assert.equal(Number(raceCounts.originals), Number(beforeRace.originals) + 1);
     assert.equal(Number(raceCounts.legacy), Number(beforeRace.legacy) + 1);

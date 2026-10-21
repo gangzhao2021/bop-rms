@@ -150,6 +150,81 @@ const historyRow = (n: number) => ({
   lifecycle: "Draft",
   data_classification: "ConfigurationMetadata",
 });
+describe("head committed while the head lock was awaited", () => {
+  const committedWhileWaiting = "2026-10-05T10:00:00.400Z";
+  const lockedSource = (now: (clock: string) => string) => {
+    const configuration = createStoreConfigurationVersion({
+      ...historicalConfiguration(),
+      updatedAt: committedWhileWaiting,
+    });
+    const authorized: string[] = [];
+    let clock = at;
+    const query = vi.fn(async (sql: string) => {
+      // The concurrent writer commits while this read waits for the head lock.
+      if (sql.startsWith("LOCK TABLE")) clock = "2026-10-05T10:00:00.500Z";
+      return {
+        rows: sql.includes("ORDER BY sequence_number DESC")
+          ? [
+              {
+                sequence_number: "2",
+                configuration_json: configuration,
+                occurred_at: new Date(committedWhileWaiting),
+              },
+            ]
+          : [],
+      };
+    });
+    const source = createPostgresStoreConfigurationAuthoringSource({
+      brandReference: brand,
+      storeReference: store,
+      mode: "Write",
+      authorize: async (_tx, observedAt) => {
+        authorized.push(observedAt);
+        return true;
+      },
+    });
+    return { run: () => source({ query }, () => now(clock)), authorized, configuration };
+  };
+  it("judges the head at the time it is read under the lock when given the clock", async () => {
+    const fixture = lockedSource((clock) => clock);
+    expect(await fixture.run()).toEqual(fixture.configuration);
+    expect(fixture.authorized).toEqual([at, "2026-10-05T10:00:00.500Z"]);
+  });
+  it("still refuses a head later than the time it is read and a clock that goes back", async () => {
+    await expect(lockedSource(() => at).run()).rejects.toMatchObject({
+      code: "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE",
+    });
+    let calls = 0;
+    await expect(
+      lockedSource((clock) => (calls++ === 0 ? clock : "2026-10-05T09:59:59.000Z")).run(),
+    ).rejects.toMatchObject({ code: "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE" });
+  });
+  it("keeps a fixed instant taken before the wait as the bound (earlier behaviour)", async () => {
+    const configuration = createStoreConfigurationVersion({
+      ...historicalConfiguration(),
+      updatedAt: committedWhileWaiting,
+    });
+    const query = vi.fn(async (sql: string) => ({
+      rows: sql.includes("ORDER BY sequence_number DESC")
+        ? [
+            {
+              sequence_number: "2",
+              configuration_json: configuration,
+              occurred_at: new Date(committedWhileWaiting),
+            },
+          ]
+        : [],
+    }));
+    await expect(
+      createPostgresStoreConfigurationAuthoringSource({
+        brandReference: brand,
+        storeReference: store,
+        mode: "Write",
+        authorize: async () => true,
+      })({ query }, at),
+    ).rejects.toMatchObject({ code: "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE" });
+  });
+});
 function historyFixture() {
   const state = { clock: at, until: "2026-10-05T10:00:05.000Z", allowed: true };
   const table = [historyRow(5), historyRow(4), historyRow(3), historyRow(2), historyRow(1)];

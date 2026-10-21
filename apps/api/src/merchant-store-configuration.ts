@@ -478,7 +478,7 @@ export function createMerchantStoreConfiguration(options: {
                   storeReference: scope.store.storeReference,
                   mode: "Write",
                   authorize: async (actual) => actual === tx && (await guard()),
-                })(tx, source.now())) ?? null;
+                })(tx, () => source.now())) ?? null;
               if (recorded?.configurationReference !== candidate.configurationReference) {
                 const base = await storeHoursChangeBase(tx, {
                   brandReference: scope.context.brand.brandReference,
