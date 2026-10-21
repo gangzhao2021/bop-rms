@@ -14,7 +14,7 @@ export const refundErrorText = (error: unknown) =>
   needsFullSignIn(error)
     ? FULL_SIGN_IN_REQUIRED_TEXT
     : error instanceof OrdinaryRefundClientError && error.code === "Denied"
-      ? "Your current permissions do not allow this refund workflow."
+      ? "You don't have access to payments and refunds. Ask a manager."
       : error instanceof OrdinaryRefundClientError && error.code === "Changed"
         ? "This order changed while it was loading. Refresh to see the latest."
         : error instanceof OrdinaryRefundClientError && error.code === "Conflict"

@@ -189,7 +189,11 @@ test("@production the Kitchen and Dining navigation moves between screens withou
     route.fulfill({ headers, json: { canOperateTables: true, items: [] } }),
   );
   await page.goto("/operations/kitchen");
-  const navigation = page.getByRole("navigation", { name: "Primary" });
+  // 2026-10-21 live check: a counter or office sign-in reads the Kitchen inside the shared
+  // workspace frame; its sidebar is router links like every other page's.
+  const navigation = page
+    .getByRole("navigation", { name: "Workspace" })
+    .locator(".workspace-sidebar__links");
   const tables = navigation.getByRole("link", { name: "Tables", exact: true });
   await expect(tables).toHaveAttribute("href", "/operations/dining");
   await expect(navigation.getByRole("link", { name: "Kitchen", exact: true })).toHaveAttribute(

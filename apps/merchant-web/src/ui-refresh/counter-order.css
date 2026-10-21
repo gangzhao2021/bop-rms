@@ -456,6 +456,34 @@
   font-size: 17px;
 }
 
+/* ---- Sent, not paid yet (WP-2423 v15 751dd768) ------------------------------------------ */
+.counter-order .counter-order__awaiting {
+  margin-bottom: var(--bop-space-4);
+}
+.counter-order .counter-order__awaiting h2 {
+  font-size: 17px;
+  font-weight: 650;
+}
+.counter-order .counter-order__awaiting-list {
+  display: grid;
+  gap: var(--bop-space-3);
+  margin: var(--bop-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.counter-order .counter-order__awaiting-list > li {
+  display: grid;
+  gap: var(--bop-space-2);
+  padding-top: var(--bop-space-3);
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.counter-order .counter-order__awaiting-list p {
+  margin: 0;
+}
+.counter-order .counter-order__awaiting-done {
+  margin: 0 0 var(--bop-space-4);
+}
+
 /* Phone summary bar (hidden where the ticket is beside the menu). */
 .counter-order__summary-bar {
   display: none;

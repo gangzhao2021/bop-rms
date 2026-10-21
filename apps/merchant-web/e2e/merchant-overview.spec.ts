@@ -108,6 +108,8 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
     acceptBy: null,
     awaitingPayment: false,
   });
+  // 2026-10-21 live check: whether another page of orders follows the one Home reads.
+  let moreOrders = false;
   await page.route("**/merchant/orders*", (route) =>
     route.fulfill({
       headers,
@@ -123,7 +125,7 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
           order(2, "Submitted", 1),
           order(1, "Accepted", 2),
         ],
-        nextAfterOrderReference: null,
+        nextAfterOrderReference: moreOrders ? id(1) : null,
       },
     }),
   );
@@ -314,6 +316,16 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
     "href",
     "/operations/order-exceptions",
   );
+  // 2026-10-21 live check ("Open orders 3+" was unclear): the whole list was read, so the exact
+  // count; once only the most recent orders were read, a lower bound said in words.
+  const openOrders = now.locator("li").filter({ hasText: "Open orders" });
+  await expect(openOrders.locator(".overview-count__value")).toHaveText("3");
+  moreOrders = true;
+  await now.getByRole("button", { name: "Refresh" }).click();
+  await expect(openOrders.locator(".overview-count__value")).toHaveText("At least 3");
+  await expect(openOrders).toContainText("Counted from the most recent orders only");
+  await expect(checklist.getByText("At least 3 left")).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("3+");
 
   for (const width of [1440, 1024, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });

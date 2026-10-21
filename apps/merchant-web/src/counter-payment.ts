@@ -1,6 +1,7 @@
 import { orderMoney } from "./order-money.js";
-import { storeLocalInstant } from "./StoreTime.js";
+import { storeLocalInstant, storeTime } from "./StoreTime.js";
 import type { CounterOrderClientError } from "./staff-order-entry.js";
+import type { CurrentOrderQueue } from "./current-order-queue-client.js";
 
 /**
  * WP-2423 C2: card-machine payment text and slip time shared by the counter order page and the
@@ -46,4 +47,79 @@ export function paidAtInstant(
   const time = (local === null ? new Date(value) : new Date(local)).getTime();
   if (!Number.isFinite(time) || time > now || now - time > 72 * 60 * 60 * 1000) return null;
   return new Date(Math.floor(time / 1000) * 1000).toISOString();
+}
+
+/** WP-2423 item 5: minutes before the payment time ends when staff are warned urgently. */
+export const paymentUrgentMinutes = 10;
+
+/**
+ * WP-2423 item 5 ("warn before timeouts"): what staff are told about the time left to record a
+ * card-machine payment. A table round not recorded by then is cancelled automatically and never
+ * reaches the kitchen; a counter order is released. Nothing is charged in the system either way.
+ */
+export function paymentWindowNotice(input: {
+  readonly payBy: string;
+  readonly now: number;
+  readonly tableMode: boolean;
+  readonly timeZone?: string | undefined;
+}): { readonly tier: "warning" | "urgent"; readonly ended: boolean; readonly text: string } {
+  const at = storeTime(input.payBy, input.timeZone);
+  const remainingMs = Date.parse(input.payBy) - input.now;
+  if (remainingMs <= 0)
+    return {
+      tier: "urgent",
+      ended: true,
+      text: input.tableMode
+        ? `The time to pay this round ended at ${at}. It was not sent to the kitchen and is cancelled automatically; nothing was charged in the system. If you charged the card machine, refund it on the machine.`
+        : `The time to pay this order ended at ${at}. It is released and its items go back to stock. If you charged the card machine, refund it on the machine.`,
+    };
+  const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+  if (minutes <= paymentUrgentMinutes)
+    return {
+      tier: "urgent",
+      ended: false,
+      text: input.tableMode
+        ? `${minutes} min left: record the payment by ${at} or this round is cancelled and its items go back to stock.`
+        : `${minutes} min left: record the payment by ${at} or the order is released and its items go back to stock.`,
+    };
+  return {
+    tier: "warning",
+    ended: false,
+    text: input.tableMode
+      ? `Record the payment by ${at}. The kitchen starts this order once it is recorded here; if it isn't recorded by then, the round is cancelled.`
+      : `Record the payment by ${at}. If it isn't paid by then the order is released and its items go back to stock.`,
+  };
+}
+
+/**
+ * WP-2423 (v15 751dd768): a counter order sent and not paid on the card machine yet, still payable
+ * (its pickup time not released): staff charge it from Orders or the Counter order page.
+ */
+export function counterAwaitingCardMachine(
+  order: CurrentOrderQueue["items"][number],
+  now = Date.now(),
+): boolean {
+  return (
+    order.counter !== null &&
+    order.counter.paidOnCardMachine === null &&
+    order.counter.payBy !== null &&
+    Date.parse(order.counter.payBy) > now &&
+    order.awaitingPayment &&
+    order.unfulfillable === null &&
+    order.batches[0]?.acceptanceStatus === "NotAccepted"
+  );
+}
+/** The tier of a counter order's pay-by warning: urgent in its last minutes. */
+export function counterPayByTier(payBy: string, now: number | undefined) {
+  return paymentWindowNotice({ payBy, now: now ?? Date.now(), tableMode: false }).tier;
+}
+/** The short row text of a counter order's pay-by time (the form says what to do). */
+export function counterPayByText(payBy: string, timeZone: string | undefined, now?: number) {
+  const left = Date.parse(payBy) - (now ?? Date.now());
+  const at = storeTime(payBy, timeZone);
+  if (left <= 0) return `Payment time ended at ${at} · being released`;
+  const minutes = Math.max(1, Math.ceil(left / 60_000));
+  return minutes <= paymentUrgentMinutes
+    ? `${minutes} min left to charge · released at ${at} if unpaid`
+    : `Charge on card machine by ${at} · released if unpaid`;
 }

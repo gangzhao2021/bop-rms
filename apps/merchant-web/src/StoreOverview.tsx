@@ -223,6 +223,27 @@ export function tablesSummary(
   };
 }
 
+/**
+ * 2026-10-21 live check ("Open orders 3+" was unclear): the Home page reads the first page of each
+ * list only. When more follows, the number is a lower bound and says so in words ("At least 3")
+ * with what was counted; otherwise it is the exact count.
+ */
+export interface CountShown {
+  /** Words before the number ("At least"), or null for an exact count. */
+  readonly qualifier: string | null;
+  readonly number: string;
+  /** What was counted, when the number is only a lower bound. */
+  readonly note: string | null;
+}
+export function countShown(n: number, more: boolean, partOfList: string): CountShown {
+  return more
+    ? {
+        qualifier: n > 0 ? "At least" : null,
+        number: String(n),
+        note: `Counted from ${partOfList} only`,
+      }
+    : { qualifier: null, number: String(n), note: null };
+}
 function Count<T>({
   label,
   read,
@@ -233,19 +254,32 @@ function Count<T>({
 }: {
   readonly label: string;
   readonly read: OverviewRead<T>;
-  readonly value: (summary: T) => string;
+  readonly value: (summary: T) => CountShown | string;
   readonly detail: (summary: T) => string;
   readonly href: string;
   readonly linkLabel: string;
 }) {
   if (read.kind === "Hidden") return null;
+  const shown = read.kind === "Ready" ? value(read.value) : null;
+  const count: CountShown | null =
+    typeof shown === "string" ? { qualifier: null, number: shown, note: null } : shown;
   return (
     <li aria-busy={read.kind === "Loading"}>
       <span className="overview-count__label">{label}</span>
-      {read.kind === "Ready" ? (
+      {read.kind === "Ready" && count !== null ? (
         <>
-          <strong className="overview-count__value">{value(read.value)}</strong>
-          <span className="overview-count__detail">{detail(read.value)}</span>
+          <strong className="overview-count__value">
+            {count.qualifier === null ? null : (
+              <span className="overview-count__qualifier">{count.qualifier} </span>
+            )}
+            {count.number}
+          </strong>
+          <span className="overview-count__detail">
+            {detail(read.value)}
+            {count.note === null ? null : (
+              <span className="overview-count__note">{count.note}</span>
+            )}
+          </span>
         </>
       ) : (
         <span className="overview-count__detail" role="status">
@@ -270,7 +304,6 @@ export function OverviewToday({
   readonly onRefresh?: (() => void) | undefined;
 }) {
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  const count = (n: number, more: boolean) => (more ? `${n}+` : String(n));
   if (
     [state.orders, state.pickups, state.exceptions, state.tables].every(
       (read) => read.kind === "Hidden",
@@ -300,7 +333,7 @@ export function OverviewToday({
         <Count
           label="Open orders"
           read={state.orders}
-          value={(o) => count(o.open, o.more)}
+          value={(o) => countShown(o.open, o.more, "the most recent orders")}
           detail={(o) =>
             awaitingAcceptanceText({
               orders: o.awaitingAcceptance,
@@ -314,7 +347,7 @@ export function OverviewToday({
         <Count
           label="Pickups waiting"
           read={state.pickups}
-          value={(p) => count(p.waiting, p.more)}
+          value={(p) => countShown(p.waiting, p.more, "the first pickups listed")}
           detail={(p) =>
             p.waiting === 0
               ? "Nothing waiting for collection"
@@ -342,7 +375,7 @@ export function OverviewToday({
         <Count
           label="Open tables"
           read={tables}
-          value={(t) => count(t.open, t.more)}
+          value={(t) => countShown(t.open, t.more, "the first tables listed")}
           detail={(t) =>
             t.open === 0
               ? "No tables open"
@@ -407,8 +440,11 @@ function readStatus<T>(
   if (read.kind === "Unavailable") return { status: "Could not be read", done: false };
   return value(read.value);
 }
+// A lower bound says so in words ("At least 3 left"), never as "3+".
 const left = (n: number, more = false) =>
-  n === 0 ? { status: "Done", done: true } : { status: `${more ? `${n}+` : n} left`, done: false };
+  n === 0
+    ? { status: "Done", done: true }
+    : { status: `${more ? "At least " : ""}${n} left`, done: false };
 /**
  * WP-2423 (3cd0f8dd M6): what staff check when they open and close the Store, each line from the
  * same reads as "Right now" (and the last closed day's settlement). Lines whose screen the staff

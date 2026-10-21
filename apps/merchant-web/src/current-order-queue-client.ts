@@ -148,7 +148,13 @@ function parseStaffRound(value: unknown, orderType: unknown) {
 /** WP-2423 Q7: a pickup order staff took at the counter, and its card-machine payment. */
 function parseCounter(value: unknown, sourceChannel: unknown) {
   if (value === null || value === undefined) return null;
-  const raw = exact(value, ["recordedAfterOutage", "paidOnCardMachine"]);
+  // WP-2423 (v15 751dd768): while unpaid, when it is released and (one-order read) what to charge.
+  const withDue = typeof value === "object" && Object.hasOwn(value, "payBy");
+  const raw = exact(value, [
+    "recordedAfterOutage",
+    "paidOnCardMachine",
+    ...(withDue ? ["payBy", "amountDueMinor"] : []),
+  ]);
   if (typeof raw.recordedAfterOutage !== "boolean" || sourceChannel !== "Pos") return fail();
   let paid = null;
   if (raw.paidOnCardMachine !== null) {
@@ -175,7 +181,22 @@ function parseCounter(value: unknown, sourceChannel: unknown) {
       refundedMinor: p.refundedMinor,
     });
   }
-  return Object.freeze({ recordedAfterOutage: raw.recordedAfterOutage, paidOnCardMachine: paid });
+  const payBy = withDue && raw.payBy !== null ? instant(raw.payBy) : null;
+  const due = withDue ? raw.amountDueMinor : null;
+  if (
+    due !== null &&
+    (typeof due !== "string" || !minorPattern.test(due) || due === "0" || payBy === null)
+  )
+    return fail();
+  if (paid !== null && payBy !== null) return fail();
+  return Object.freeze({
+    recordedAfterOutage: raw.recordedAfterOutage,
+    paidOnCardMachine: paid,
+    /** While unpaid: when the order is released if it is not paid (null when paid or unknown). */
+    payBy,
+    /** While unpaid, on the one-order read: what to charge on the card machine (else null). */
+    amountDueMinor: due as string | null,
+  });
 }
 /** WP-2423: the sum of an Order's succeeded online payments, from Payment. */
 function parsePaidOnline(value: unknown) {
@@ -340,7 +361,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     // WP-2423 (v15 2026-10-18): a pickup's kitchen state on the detail (absent from an older server).
     const withKitchen =
       value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenPhase");
+    // WP-2423 (v15 751dd768): what this person may do with the payment (absent from an older server).
+    const withCapabilities =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "canViewPayments");
     const item = exact(value, [
+      ...(withCapabilities ? ["canRecordCardMachinePayment", "canViewPayments"] : []),
       ...(withReady ? ["readyToServeItemCount"] : []),
       ...(withRemaking ? ["remakingItemCount"] : []),
       ...(withKitchen ? ["kitchenPhase"] : []),
@@ -595,6 +620,12 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       });
     });
     const counter = parseCounter(item.counter, item.sourceChannel);
+    if (
+      withCapabilities &&
+      (typeof item.canRecordCardMachinePayment !== "boolean" ||
+        typeof item.canViewPayments !== "boolean")
+    )
+      return fail();
     const paidOnline = parsePaidOnline(item.paidOnline);
     if (paidOnline !== null && counter !== null) return fail();
     const paymentPosition = parsePaymentPosition(item.paymentPosition);
@@ -653,6 +684,15 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       acceptanceHold,
       /** WP-2423 Q1: submitted but the customer's payment is not recorded yet. */
       awaitingPayment: item.awaitingPayment as boolean,
+      /**
+       * WP-2423 (v15 751dd768): this person may record a card-machine payment (counter order,
+       * staff-entered round) and open Payments and refunds. An older server leaves them out: the
+       * actions are offered and the server's refusal is explained.
+       */
+      canRecordCardMachinePayment: withCapabilities
+        ? (item.canRecordCardMachinePayment as boolean)
+        : true,
+      canViewPayments: withCapabilities ? (item.canViewPayments as boolean) : true,
       currentPhase: item.currentPhase as string | null,
       currentVersion: item.currentVersion as number | null,
       /**

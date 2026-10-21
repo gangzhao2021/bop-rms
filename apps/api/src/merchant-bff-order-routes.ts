@@ -58,6 +58,9 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
     awaitingPayment: item.awaitingPayment,
     // WP-2423 Q7: a staff-taken counter order and its card-machine payment.
     counter: item.counter,
+    // WP-2423 (v15 751dd768): what this person may do with the order's payment.
+    canRecordCardMachinePayment: item.canRecordCardMachinePayment,
+    canViewPayments: item.canViewPayments,
     // WP-2423: what the Order was paid online (null for counter or unpaid orders).
     paidOnline: item.paidOnline,
     // WP-2423: refunds of that online payment (the detail's position) when it has any.

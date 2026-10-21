@@ -1,5 +1,8 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import {
+  DiningEntryCode,
   elapsedText,
   guestRoundCancelHint,
   guestRoundPaymentNotice,
@@ -217,4 +220,16 @@ it("WP-2423 abandoned payment: says how to cancel an unpaid round only where the
     guestRoundsAwaitingPayment: [round(1, payBy), round(2, "2027-03-01T14:30:00.000Z")],
   };
   expect(guestRoundCancelHint(mixed, at(5 * 60_000), true)).toBeNull();
+});
+
+it("2026-10-21 live check: keeps the sharing instruction with the entry code it refers to", () => {
+  const html = renderToStaticMarkup(
+    createElement(DiningEntryCode, { code: "123456", onHide: () => undefined }),
+  );
+  // One block: the instruction, the code and the way to hide both; hiding removes the block, so
+  // no sentence is left pointing at a code that is no longer shown.
+  expect(html).toBe(
+    '<div class="dining-entry-code"><p>Share this one-time code with the party at this table.</p>' +
+      "<p>Entry code: <strong>123456</strong></p><button>Hide entry code</button></div>",
+  );
 });

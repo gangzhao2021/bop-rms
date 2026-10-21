@@ -1,10 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
-import { workspaceNavigationLinks } from "./WorkspaceLayout.js";
 
 // v15 run (738b4c8b): the Kitchen, kitchen work item and Dining pages built their own navigation
 // from plain anchors, so every click reloaded the whole app and, offline, showed the browser's
@@ -52,32 +48,11 @@ describe("v15 run: in-app navigation stays inside the loaded app", () => {
   });
 
   // The Tables (dining) page sits in the shared workspace layout since the 2026-10-21 UI refresh;
-  // the Kitchen display and its work item still build their own navigation.
-  it("builds the Kitchen and kitchen work item navigation from router links", () => {
+  // since the 2026-10-21 live check the Kitchen and kitchen work item pages take the same frame
+  // from the app (a counter or office sign-in) instead of building their own list of links.
+  it("gives the Kitchen and kitchen work item pages the shared workspace frame", () => {
     const app = sources.find(({ name }) => name === "App.tsx")?.text ?? "";
-    const navigationProps = [...app.matchAll(/navigation=\{([^\n]*)/gu)].map((match) => match[1]);
-    expect(navigationProps.length).toBeGreaterThanOrEqual(2);
-    for (const prop of navigationProps) expect(prop).toMatch(/^workspaceNavigationLinks\(/u);
-  });
-
-  it("keeps real addresses and marks the current screen", () => {
-    const html = renderToStaticMarkup(
-      createElement(
-        MemoryRouter,
-        null,
-        workspaceNavigationLinks(
-          [
-            { screenId: "KIT-KITCHEN-QUEUE", label: "Kitchen", href: "/operations/kitchen" },
-            { screenId: "DIN-FLOOR-BOARD", label: "Tables", href: "/operations/dining" },
-          ] as never,
-          (item) => item.screenId === "KIT-KITCHEN-QUEUE",
-        ),
-      ),
-    );
-    // React Router marks its own links; a plain anchor would not carry this.
-    expect(html).toBe(
-      '<a aria-current="page" href="/operations/kitchen" data-discover="true">Kitchen</a>' +
-        '<a href="/operations/dining" data-discover="true">Tables</a>',
-    );
+    expect([...app.matchAll(/workspaceFrame=\{workspaceFrame\}/gu)]).toHaveLength(2);
+    expect(app).not.toMatch(/navigation=\{/u);
   });
 });

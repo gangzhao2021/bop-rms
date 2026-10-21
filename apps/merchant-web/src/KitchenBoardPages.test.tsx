@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +10,7 @@ import {
   KitchenDisplayHeaderControls,
   KitchenDisplayNavigation,
   kitchenNavigationFor,
+  kitchenUsesWorkspaceFrame,
   kitchenOrderSearchTerm,
   matchesKitchenOrderSearch,
   kitchenBoardSearch,
@@ -536,6 +538,81 @@ describe("WP-2423 kitchen display search and chrome", () => {
     expect(kitchenNavigationFor(true, null, navigation, kitchenOnly)).toBeUndefined();
     expect(kitchenNavigationFor(true, "Unverified", navigation, kitchenOnly)).toBe(navigation);
     expect(kitchenNavigationFor(false, null, navigation, kitchenOnly)).toBe(navigation);
+  });
+  it("2026-10-21 live check: only a counter or office sign-in reads the Kitchen in the workspace frame", () => {
+    const frame = (content: ReactNode) => content;
+    expect(kitchenUsesWorkspaceFrame(true, "Unverified", frame)).toBe(true);
+    // The kitchen display keeps its own frame; before the board says who it is, no back office.
+    for (const operator of ["Named", "HandoverRequired", "Locked", null] as const)
+      expect(kitchenUsesWorkspaceFrame(true, operator, frame), String(operator)).toBe(false);
+    // The local demo (no sign-in) and an app without the frame keep the kitchen frame.
+    expect(kitchenUsesWorkspaceFrame(false, "Unverified", frame)).toBe(false);
+    expect(kitchenUsesWorkspaceFrame(true, "Unverified", undefined)).toBe(false);
+  });
+  it("2026-10-21 live check: puts the view-only board in the workspace frame, without a second header", () => {
+    const frame = (content: ReactNode) => (
+      <div data-frame="workspace">
+        <nav aria-label="Workspace">Grouped navigation</nav>
+        {content}
+      </div>
+    );
+    const view = parseKitchenBoardView({ ...kitchenBoardFixture(), operatorStatus: "Unverified" });
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={view}
+          workspaceFrame={frame}
+          headerStatus={<span>Screen kept on</span>}
+          soldOutHref="/app/commerce/availability"
+        />
+      </MemoryRouter>,
+    );
+    expect(html.startsWith('<div data-frame="workspace">')).toBe(true);
+    expect(html).toContain('<main class="bop-shell__main" id="main-content" tabindex="-1">');
+    expect(html).toContain("<h1>Kitchen</h1>");
+    expect(html).toContain("Screen kept on");
+    // No kitchen display header or its own list of links inside the workspace page.
+    expect(html).not.toContain("bop-shell__header");
+    expect(html).not.toContain("bop-shell__nav");
+    expect(html).not.toContain('aria-label="Primary"');
+    expect(html).not.toContain(">Kitchen display<");
+    expect(html).toContain("Mark an item sold out");
+    // The kitchen display itself keeps its own frame.
+    const display = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen view={parseKitchenBoardView(kitchenBoardFixture())} />
+      </MemoryRouter>,
+    );
+    expect(display).toContain("bop-shell__header");
+    expect(display).toContain("<h2>Kitchen</h2>");
+  });
+  it("2026-10-21 live check: frames a work item by who the board says is using it", () => {
+    const frame = (content: ReactNode) => <div data-frame="workspace">{content}</div>;
+    const detail = (operatorStatus: "Unverified" | "Named") =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <KitchenWorkItemScreen
+            workspaceFrame={frame}
+            view={parseKitchenWorkItemDetailView({
+              screenId: "KIT-WORK-ITEM",
+              projectionName: "kitchen_work_queue_v1",
+              projectionVersion: 1,
+              storeLabel: "Synthetic Training Store",
+              projectedAt: "2026-08-12T15:18:00.000Z",
+              freshnessStatus: "Fresh",
+              operatorStatus,
+              item: kitchenItemFixture(),
+            })}
+          />
+        </MemoryRouter>,
+      );
+    const office = detail("Unverified");
+    expect(office.startsWith('<div data-frame="workspace">')).toBe(true);
+    expect(office).not.toContain("bop-shell__header");
+    expect(office).toMatch(/<h1>[^<]+<\/h1>/u);
+    const display = detail("Named");
+    expect(display).not.toContain('data-frame="workspace"');
+    expect(display).toContain("bop-shell__header");
   });
   it("offers the kitchen display marking an item sold out in its own navigation (Q17)", () => {
     const board = renderToStaticMarkup(

@@ -3,7 +3,7 @@ import { validSlipReference } from "./CardMachineRefundAction.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { CounterOrderClientError, createCounterOrderClient } from "./staff-order-entry.js";
-import { paidAtInstant, payErrorText } from "./counter-payment.js";
+import { paidAtInstant, payErrorText, paymentWindowNotice } from "./counter-payment.js";
 
 const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CAD" });
 
@@ -16,6 +16,10 @@ const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CA
  *
  * The Orders list (polled by every tablet) does not rebuild each unpaid round's amount; when it is
  * not given, the amount is read for this one order when staff open the form.
+ *
+ * WP-2423 (v15 751dd768): a counter pickup order sent and not paid yet is charged the same way, from
+ * Orders and from the Counter order page after a reload (`kind` "CounterOrder"), with the time left
+ * before it is released shown in the form.
  */
 export function StaffRoundPaymentAction({
   csrf,
@@ -27,6 +31,9 @@ export function StaffRoundPaymentAction({
   recordedAfterOutage,
   timeZone,
   onRecorded,
+  kind = "Round",
+  payBy = null,
+  label,
 }: {
   readonly csrf: string;
   readonly fetcher?: typeof fetch | undefined;
@@ -39,6 +46,12 @@ export function StaffRoundPaymentAction({
   readonly recordedAfterOutage: boolean;
   readonly timeZone?: string | undefined;
   readonly onRecorded: () => void;
+  /** A table round staff entered (default) or a counter pickup order. */
+  readonly kind?: "Round" | "CounterOrder";
+  /** When it is released or cancelled if not recorded (warned in the form), when known. */
+  readonly payBy?: string | null;
+  /** The button text before the amount (default "Record card-machine payment"). */
+  readonly label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [slip, setSlip] = useState("");
@@ -81,8 +94,8 @@ export function StaffRoundPaymentAction({
           }}
         >
           {amount === null
-            ? "Record card-machine payment"
-            : `Record card-machine payment · ${cad(amount)}`}
+            ? (label ?? "Record card-machine payment")
+            : `${label ?? "Record card-machine payment"} · ${cad(amount)}`}
         </button>
       </div>
     );
@@ -91,7 +104,9 @@ export function StaffRoundPaymentAction({
       <div className="staff-round-payment" role="status">
         <p>
           {reading === "NotDue"
-            ? "This round is no longer waiting for a card-machine payment. The order list will update."
+            ? kind === "CounterOrder"
+              ? "This order is no longer waiting for a card-machine payment (paid or released). The list will update."
+              : "This round is no longer waiting for a card-machine payment. The order list will update."
             : reading === "Failed" || loadAmountDue === undefined
               ? "Couldn't read the amount to charge. Check the connection and try again."
               : "Reading the amount to charge…"}
@@ -160,9 +175,28 @@ export function StaffRoundPaymentAction({
       }}
     >
       <p>
-        Charge {cad(amount)} on the card machine first, then record it here. The kitchen starts this
-        round once it is recorded.
+        Charge {cad(amount)} on the card machine first, then record it here. The kitchen starts this{" "}
+        {kind === "CounterOrder" ? "order" : "round"} once it is recorded.
       </p>
+      {payBy !== null
+        ? (() => {
+            const notice = paymentWindowNotice({
+              payBy,
+              now: Date.now(),
+              tableMode: kind === "Round",
+              timeZone,
+            });
+            return (
+              <p
+                className="order-accept-by"
+                data-tier={notice.tier}
+                role={notice.tier === "urgent" ? "alert" : "note"}
+              >
+                {notice.text}
+              </p>
+            );
+          })()
+        : null}
       <label>
         Slip reference (optional)
         <input

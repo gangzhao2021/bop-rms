@@ -31,6 +31,8 @@ import {
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { randomBytes } from "node:crypto";
 import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-payment-preparation.js";
+import { readCounterPaymentPreparation } from "./counter-payment-preparation.js";
+import { counterOrderPermission } from "./merchant-counter-order.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantOrderQueueRead } from "./merchant-order-queue-read.js";
@@ -114,6 +116,11 @@ export function createPersistentMerchantOrderQueue(options: {
               "ordering.operate",
               "order.accept",
               staffOrderCancellationPermission,
+              // WP-2423 (v15 751dd768): what the person may do with an order's payment, so Orders
+              // offers only what the server lets them do (the commands still check).
+              counterOrderPermission,
+              "payment.refund.request",
+              "payment.refund.approve",
             ]);
             if (decisions.get("ordering.operate")?.effect !== "Allow") return unavailable();
             return Object.freeze({
@@ -124,13 +131,27 @@ export function createPersistentMerchantOrderQueue(options: {
                 decisions.get("order.accept")?.effect === "Allow",
               // WP-2423 Q6: staff cancellation is offered only to holders of ordering.order.cancel.
               cancelAllowed: decisions.get(staffOrderCancellationPermission)?.effect === "Allow",
+              // The card-machine payment record (counter orders and staff-entered table rounds).
+              cardMachinePaymentAllowed: decisions.get(counterOrderPermission)?.effect === "Allow",
+              // Payments and refunds are read by refund requesters (Manager) and approvers
+              // (Owner/Finance); the read rechecks the exact role.
+              paymentsAllowed:
+                decisions.get("payment.refund.request")?.effect === "Allow" ||
+                decisions.get("payment.refund.approve")?.effect === "Allow",
             });
           },
           recheck: async ({ resolved }) => (await resolved.allowed()) === true,
           denied: unavailable,
         },
         async (authority) => {
-          const { session, resolved, acceptanceAllowed, cancelAllowed } = authority.scope;
+          const {
+            session,
+            resolved,
+            acceptanceAllowed,
+            cancelAllowed,
+            cardMachinePaymentAllowed,
+            paymentsAllowed,
+          } = authority.scope;
           const businessTransaction: ConsumerTransaction = {
             async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
               const result = await transaction.query(sql, values);
@@ -346,6 +367,13 @@ export function createPersistentMerchantOrderQueue(options: {
                 recordedAfterOutage: boolean;
                 refundedMinor: string;
               } | null;
+              /**
+               * WP-2423 (v15 751dd768): while it is unpaid, when it is released if not paid
+               * (Fulfillment's pickup capacity expiry), else null.
+               */
+              payBy: string | null;
+              /** While unpaid, on the one-order read only: what to charge on the card machine. */
+              amountDueMinor: string | null;
             }
           >();
           /**
@@ -453,10 +481,57 @@ export function createPersistentMerchantOrderQueue(options: {
             const counterPayments = await cardPayments.listByOrders(businessTransaction, [
               ...entries.keys(),
             ]);
+            // WP-2423 (v15 751dd768): a sent counter order not paid yet can be charged from Orders
+            // and the counter page after a reload; staff see when it is released.
+            const unpaidCounter = [...entries.keys()].filter(
+              (order) => counterPayments.get(order)?.[0] === undefined,
+            );
+            const counterPayBy =
+              unpaidCounter.length === 0
+                ? new Map<string, string>()
+                : await listStorePickupAcceptanceDeadlines(
+                    businessTransaction,
+                    scoped,
+                    unpaidCounter,
+                  );
             for (const [order, entry] of entries) {
               const paid = counterPayments.get(order)?.[0];
               if (paid !== undefined) addCardMachineTip(paid.payment);
+              // The amount is rebuilt from five owners' records (as the payment record checks it),
+              // so only the one-order read builds it, like a staff round's amount below.
+              let amountDueMinor: string | null = null;
+              const payBy = paid === undefined ? (counterPayBy.get(order) ?? null) : null;
+              if (
+                payBy !== null &&
+                tenantReference !== null &&
+                input.orderReference !== undefined &&
+                order === input.orderReference
+              ) {
+                const placed = await createPostgresCounterOrderEntryStore({
+                  ...scoped,
+                  authorize: stillAllowed,
+                }).loadOrder(businessTransaction, String(entry.cartReference));
+                if (placed !== null && String(placed.orderReference) === order) {
+                  const due = await readCounterPaymentPreparation(
+                    businessTransaction,
+                    {
+                      scope: { tenantReference, ...scoped },
+                      now: source.now,
+                      nextPreparationReference: transientReference,
+                      authorize: async () => (await stillAllowed()) === true,
+                    },
+                    {
+                      submissionReference: String(placed.submissionReference),
+                      guestSessionReference: String(entry.guestSessionReference),
+                      tipSelectionReference: String(entry.tipSelectionReference),
+                    },
+                  );
+                  amountDueMinor = due?.preparation.total.amountMinor.toString() ?? null;
+                }
+              }
               counter.set(order, {
+                payBy,
+                amountDueMinor,
                 recordedAfterOutage: entry.recordedAfterOutage,
                 paidOnCardMachine:
                   paid === undefined
@@ -870,6 +945,10 @@ export function createPersistentMerchantOrderQueue(options: {
                     payments.awaitingAcceptance.has(item.initialBatchReference) &&
                     item.currentPhase === "Submitted" &&
                     item.currentVersion === 1,
+                  // WP-2423 (v15 751dd768): whether this person may record a card-machine payment
+                  // and open the order's payments and refunds (the commands and reads recheck).
+                  canRecordCardMachinePayment: cardMachinePaymentAllowed,
+                  canViewPayments: paymentsAllowed,
                 });
               }),
             ),

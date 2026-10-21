@@ -11,6 +11,7 @@ import { parseOrderExceptionView } from "./OrderExceptionPage.js";
 import {
   OverviewToday,
   StoreOverview,
+  countShown,
   initialOverviewState,
   summarizeExceptions,
   summarizeOrders,
@@ -247,7 +248,14 @@ describe("WP-2423 P2 store overview", () => {
       </MemoryRouter>,
     );
     expect(html).toContain("Right now");
-    expect(html).toContain('<strong class="overview-count__value">50+</strong>');
+    // 2026-10-21 live check: a count from the first page only says so in words, never "50+".
+    expect(html).toContain(
+      '<strong class="overview-count__value"><span class="overview-count__qualifier">At least </span>50</strong>',
+    );
+    expect(html).toContain(
+      '<span class="overview-count__note">Counted from the most recent orders only</span>',
+    );
+    expect(html).not.toContain("50+");
     expect(html).toContain("4 awaiting acceptance · 2 ready to serve");
     expect(html).toContain("Could not be read");
     expect(html).toContain("None overdue");
@@ -260,6 +268,52 @@ describe("WP-2423 P2 store overview", () => {
     );
     expect(loading).toContain("Reading current work…");
     expect(loading).not.toContain("Refresh");
+  });
+  it("2026-10-21 live check: says an exact count plainly and a partial count as a lower bound", () => {
+    expect(countShown(3, false, "the most recent orders")).toEqual({
+      qualifier: null,
+      number: "3",
+      note: null,
+    });
+    expect(countShown(3, true, "the most recent orders")).toEqual({
+      qualifier: "At least",
+      number: "3",
+      note: "Counted from the most recent orders only",
+    });
+    // "At least 0" says nothing; the note still says only part of the list was counted.
+    expect(countShown(0, true, "the first tables listed")).toEqual({
+      qualifier: null,
+      number: "0",
+      note: "Counted from the first tables listed only",
+    });
+    const exact = renderToStaticMarkup(
+      <MemoryRouter>
+        <OverviewToday
+          state={{
+            orders: {
+              kind: "Ready",
+              value: {
+                open: 3,
+                awaitingAcceptance: 1,
+                awaitingRounds: 1,
+                urgentRounds: 0,
+                readyToServe: 0,
+                dineIn: false,
+                more: false,
+                servedDineIn: new Set(),
+              },
+            },
+            pickups: { kind: "Hidden" },
+            exceptions: { kind: "Hidden" },
+            tables: { kind: "Hidden" },
+            updatedAt: "2026-08-12T16:30:00.000Z",
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(exact).toContain('<strong class="overview-count__value">3</strong>');
+    expect(exact).not.toContain("At least");
+    expect(exact).not.toContain("overview-count__note");
   });
   it('WP-2423: counts overdue exceptions in plain words (v15 showed "15 overdues")', () => {
     const html = renderToStaticMarkup(
@@ -580,6 +634,15 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
       "ordering-off": null,
       "settlement-later": null,
     });
+    // 2026-10-21 live check: a partial count reads "At least 2 left", never "2+ left".
+    if (state.orders.kind !== "Ready") throw new Error("fixture");
+    const partial = dayChecklist(
+      { ...state, orders: { kind: "Ready", value: { ...state.orders.value, more: true } } },
+      settlement,
+      null,
+      "2026-10-17T08:00:00.000Z",
+    );
+    expect(status(partial.closing).orders).toBe("At least 2 left");
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <DayChecklist state={state} settlement={settlement} serviceHref={null} />

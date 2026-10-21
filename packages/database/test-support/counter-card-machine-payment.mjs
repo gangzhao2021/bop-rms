@@ -15,6 +15,8 @@ import { createCustomerIntactReservationPaymentAction } from "../../../apps/api/
 import { createCustomerInventoryPaymentClaimAdmission } from "../../../apps/api/src/customer-inventory-payment-admission.ts";
 import { createCustomerCapacityPaymentClaimAdmission } from "../../../apps/api/src/customer-capacity-payment-admission.ts";
 import { createMerchantCardMachinePayment } from "../../../apps/api/src/merchant-card-machine-payment.ts";
+import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
+import { seedMerchantAcceptanceSession } from "./merchant-acceptance-session.mjs";
 
 /**
  * WP-2423 Q7: a counter (Pos) pickup Order that went through the ordinary customer checkout is paid
@@ -150,6 +152,55 @@ export async function exerciseCounterCardMachinePayment({
       )
     ).rows[0];
   const before = await counts();
+  // WP-2423 (v15 751dd768): before it is paid, the sent counter order is read from the server (a
+  // reload of the counter page or another tablet loses nothing): Orders lists when it is released
+  // if unpaid, the one-order read what to charge (the amount the payment record checks), and what
+  // this person may do with its payment. A counter staff member (front of house) may record it but
+  // may not open payments and refunds.
+  const counterSession = await seedMerchantAcceptanceSession({
+    admin,
+    runner,
+    role,
+    scope,
+    actor: next(),
+    at,
+    extraPermissions: ["ordering.order.create_staff"],
+    referencePrefix: "01909983",
+    sessionReferencePrefix: "01909984",
+  });
+  // The Orders read's Payment status projection (the pilot api role reads it).
+  await admin.query("GRANT SELECT ON rms_payment.payment_status_projection TO " + role);
+  // The one-order read's pickup contact (pilot api SELECT grants).
+  await admin.query(
+    "GRANT SELECT ON rms_ordering.checkout_contact_redaction,rms_ordering.checkout_details_record,rms_ordering.digital_receipt_record,rms_ordering.order_checkout_details_link,rms_ordering.order_submission_record TO " +
+      role,
+  );
+  const unpaidQueue = createPersistentMerchantOrderQueue({
+    persistence: { ...counterSession.persistence, now: () => new Date().toISOString() },
+    quoteVersion,
+    acceptanceConfigured: true,
+  });
+  const orderReference = String(order.order.orderReference);
+  const unpaidListed = (
+    await unpaidQueue({ sessionCookie: counterSession.sessionCookie, afterOrderReference: null })
+  ).items.find((item) => item.orderReference === orderReference);
+  assert.equal(unpaidListed?.awaitingPayment, true);
+  assert.equal(unpaidListed?.counter?.paidOnCardMachine, null);
+  // Released at the pickup capacity expiry the checkout clock set (Fulfillment's record).
+  assert.equal(Date.parse(unpaidListed.counter.payBy), Date.parse(String(clock.capacityExpiresAt)));
+  // The list polled by every tablet leaves the amount out.
+  assert.equal(unpaidListed.counter.amountDueMinor, null);
+  assert.equal(unpaidListed.canRecordCardMachinePayment, true);
+  assert.equal(unpaidListed.canViewPayments, false);
+  const unpaidDetail = (
+    await unpaidQueue({
+      sessionCookie: counterSession.sessionCookie,
+      afterOrderReference: null,
+      orderReference,
+    })
+  ).items[0];
+  assert.equal(unpaidDetail.counter.amountDueMinor, amounts.total.amountMinor.toString());
+  assert.equal(unpaidDetail.counter.payBy, unpaidListed.counter.payBy);
   // Staff key the amount the card machine charged; a different amount is refused with the total.
   await assert.rejects(command(payInput({ expectedTotalMinor: "1" })), {
     code: "CARD_MACHINE_AMOUNT_CHANGED",
@@ -324,6 +375,9 @@ export async function exerciseCounterCardMachinePayment({
             recordedAfterOutage: true,
             refundedMinor: "0",
           },
+          // Paid: nothing left to charge and no release time.
+          payBy: null,
+          amountDueMinor: null,
         });
       },
     });

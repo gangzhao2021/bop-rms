@@ -92,10 +92,16 @@ test("@production current queue pages and clears old orders after denied refresh
   const orderRows = page.locator("details.order-workbench-entry");
   const visibleOrderRows = page.locator("details.order-workbench-entry:visible");
   await expect(visibleOrderRows).toHaveCount(50);
-  await expect(page.getByText("Showing 50 of 50 orders on this page.")).toBeVisible();
+  // v15 751dd768: the count in plain words, with where older orders are.
+  await expect(
+    page.getByText("50 orders, newest first. Older orders are on the next page."),
+  ).toBeVisible();
   await expectNoInternalText(page);
   await page.getByRole("searchbox", { name: "Exact order number" }).fill("ORD-100");
   await expect(visibleOrderRows).toHaveCount(1);
+  await expect(
+    page.getByText("1 of 50 orders on this page match. Other pages are not searched."),
+  ).toBeVisible();
   await expect(orderRows.first()).toContainText("ORD-100");
   await expect(orderRows.first()).toHaveAttribute("open", "");
   // WP-2423: an online order says it is paid, in the row and the detail, with store-time dates

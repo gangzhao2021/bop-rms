@@ -69,6 +69,9 @@ button {
   inset: var(--bop-space-2) auto auto var(--bop-space-2);
   z-index: 10;
   transform: translateY(-200%);
+  /* Also clipped away, so nothing of it is painted until it is focused: moving it above the
+     viewport alone still showed it in a scrolled full-page capture (2026-10-21 live check). */
+  clip-path: inset(50%);
   padding: var(--bop-space-3) var(--bop-space-4);
   color: var(--bop-color-on-primary);
   background: var(--bop-color-brand-primary);
@@ -76,6 +79,7 @@ button {
 /* Shown only when reached by keyboard: a script moving focus, or a tap, never reveals it. */
 .bop-skip-link:focus-visible {
   transform: translateY(0);
+  clip-path: none;
 }
 .bop-shell {
   min-height: 100vh;

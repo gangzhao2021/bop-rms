@@ -187,9 +187,15 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await page.clock.setFixedTime(new Date(projectedAt));
   await page.goto("/operations/kitchen");
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Training Store", exact: true })).toBeVisible();
-  await expect(page.getByText("Kitchen display", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
+  // 2026-10-21 live check: a counter or office sign-in reads the Kitchen inside the shared
+  // workspace frame (grouped sidebar, Switch staff), not a second header with its own links.
+  const workspaceNav = page.getByRole("navigation", { name: "Workspace" });
+  await expect(workspaceNav.locator(".workspace-sidebar__store")).toHaveText("Training Store");
+  await expect(page.getByRole("heading", { level: 1, name: "Kitchen", exact: true })).toBeVisible();
+  await expect(page.locator(".bop-shell__header")).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
+  await expect(page.getByText("Kitchen display", { exact: true })).toHaveCount(0);
+  await expect(workspaceNav.getByRole("button", { name: "Switch staff" }).first()).toBeAttached();
   await expect(page.getByRole("heading", { name: "Queue", exact: true })).toBeVisible();
   await expect(page.locator("body")).not.toContainText("KIT-KITCHEN-QUEUE");
   await expect(page.locator("body")).not.toContainText("OPERATIONS");
@@ -228,13 +234,13 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   for (const label of ["Station", "Allergen", "Exception"])
     await expect(page.getByRole("combobox", { name: label, exact: true })).toHaveCount(0);
   await expect(page.locator("option").filter({ hasText: "Unavailable" })).toHaveCount(0);
-  // A navigation whose only link is the current page is kept in the DOM but not shown.
-  const primaryNav = page.getByRole("navigation", { name: "Primary", includeHidden: true });
-  await expect(
-    primaryNav.getByRole("link", { name: "Kitchen", includeHidden: true }),
-  ).toHaveAttribute("aria-current", "page");
-  await expect(primaryNav.getByRole("link", { name: "Orders" })).toHaveCount(0);
-  await expect(primaryNav).toBeHidden();
+  // The workspace sidebar lists only what this sign-in may open, with Kitchen as the current page.
+  const sidebarLinks = workspaceNav.locator(".workspace-sidebar__links");
+  await expect(sidebarLinks.getByRole("link", { name: "Kitchen", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await expect(sidebarLinks.getByRole("link", { name: "Orders" })).toHaveCount(0);
   await expect(page.getByText("Quantity", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("0 / 2", { exact: true })).toBeVisible();
   // WP-2423 Q3: menu allergens on every card; no placeholder for cues that have no source.
@@ -290,8 +296,9 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Queue", exact: true })).toBeHidden();
     await expect(page.locator(".kitchen-reference-search--desktop")).toBeHidden();
-    // A navigation whose only link is the current page is not shown.
-    await expect(primaryNav).toBeHidden();
+    // On narrow screens the workspace navigation is the Menu drawer, as on every other page.
+    await expect(workspaceNav.locator(".workspace-sidebar__compact > summary")).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
     const filterToggle = page.locator(".kitchen-filter-toggle");
     await expect(filterToggle).toBeVisible();
     await expect(filterToggle).toHaveText("Filters · Active work");
@@ -401,7 +408,9 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   }
 
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(page.locator(".bop-shell__header h1")).toHaveText("Training Store");
+  await expect(
+    page.getByRole("navigation", { name: "Workspace" }).locator(".workspace-sidebar__store"),
+  ).toHaveText("Training Store");
   await expect(page.getByRole("heading", { name: "Queue", exact: true })).toBeVisible();
   await expect(page.locator(".kitchen-filter-toggle")).toBeHidden();
   await expect(page.locator(".kitchen-queue-count")).toHaveText("3 work items");
@@ -482,8 +491,9 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page.locator(".kitchen-work-item__note")).toHaveText(
     "Note: Synthetic note: no onions",
   );
+  // In the workspace frame (a counter or office sign-in) the item is the page heading.
   await expect(
-    page.getByRole("heading", { name: "Synthetic rice", exact: true, level: 2 }),
+    page.getByRole("heading", { name: "Synthetic rice", exact: true, level: 1 }),
   ).toBeVisible();
   await expect(page.locator("body")).not.toContainText("KIT-WORK-ITEM");
   await expect(page.getByRole("heading", { name: "Modifiers" })).toBeVisible();
@@ -536,7 +546,9 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   denied = true;
   await page.getByRole("link", { name: "Synthetic rice", exact: true }).click();
   await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Training Store", exact: true })).toBeVisible();
+  // The board already said this is a counter or office sign-in: the workspace frame stays.
+  await expect(workspaceNav).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Work item detail" })).toBeVisible();
   await page.getByRole("link", { name: "Return to Kitchen queue" }).click();
   await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
   denied = false;
@@ -565,12 +577,16 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   showOrders = true;
   await page.reload();
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(primaryNav).toBeVisible();
-  await expect(primaryNav.getByRole("link", { name: "Orders" })).toBeVisible();
-  await expect(primaryNav.getByRole("link", { name: "Kitchen" })).toHaveAttribute(
+  const menu = workspaceNav.locator(".workspace-sidebar__compact > summary");
+  await expect(menu).toHaveText("Menu · Kitchen");
+  await menu.click();
+  const drawer = workspaceNav.locator(".workspace-drawer");
+  await expect(drawer.getByRole("link", { name: "Orders", exact: true })).toBeVisible();
+  await expect(drawer.getByRole("link", { name: "Kitchen", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
   );
+  await drawer.getByRole("button", { name: "Close menu" }).click();
   await expectNoHorizontalOverflow(page);
 });
 
@@ -1263,6 +1279,8 @@ test("@production a kitchen display shows the kitchen only and keeps focus on th
   // The kitchen only: the board and marking an item sold out (Q17), no back-office navigation.
   const kitchenNav = page.getByRole("navigation", { name: "Primary" });
   await expect(kitchenNav.getByRole("link")).toHaveText(["Kitchen", "Mark an item sold out"]);
+  // 2026-10-21 live check: the back-office workspace frame is for counter and office sign-ins.
+  await expect(page.getByRole("navigation", { name: "Workspace" })).toHaveCount(0);
   await expect(kitchenNav.getByRole("link", { name: "Kitchen" })).toHaveAttribute(
     "aria-current",
     "page",
@@ -1571,6 +1589,10 @@ test("@production a view-only Kitchen starts the kitchen display on this device"
     storeReference: id(99),
   };
   const headers = { "cache-control": "no-store" };
+  // Reads of the other screens this navigation lists are not part of this check.
+  await page.route("**/merchant/**", (route) =>
+    route.fulfill({ status: 503, json: { error: "unavailable" } }),
+  );
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,
@@ -1585,14 +1607,36 @@ test("@production a view-only Kitchen starts the kitchen display on this device"
           storeStatus: "Open",
           freshness: "Current",
           dashboardAvailability: "UnavailableUntilWP1905",
-          navigation: [
-            {
-              screenId: "KIT-KITCHEN-QUEUE",
-              label: "Kitchen",
-              href: "/operations/kitchen",
-              permission: "kitchen.operate",
-            },
-          ],
+          // 2026-10-21 live check: an owner's full navigation (it overflowed a top bar at 1440).
+          navigation: (
+            [
+              ["OPS-ORDER-QUEUE", "Orders", "/operations/orders", "ordering.operate"],
+              [
+                "OPS-ORDER-ENTRY",
+                "Counter order",
+                "/operations/order-entry",
+                "ordering.order.create_staff",
+              ],
+              ["KIT-KITCHEN-QUEUE", "Kitchen", "/operations/kitchen", "kitchen.operate"],
+              ["FUL-PICKUP-QUEUE", "Pickup", "/operations/pickup", "fulfillment.operate"],
+              ["DIN-FLOOR-BOARD", "Tables", "/operations/dining", "dining.operate"],
+              [
+                "OPS-ORDER-EXCEPTION",
+                "Exceptions",
+                "/operations/order-exceptions",
+                "operations.order-exception.manage",
+              ],
+              ["CAT-PRODUCT-LIST", "Products", "/app/commerce/products", "catalog.manage"],
+              [
+                "CAT-AVAILABILITY",
+                "Item availability",
+                "/app/commerce/availability",
+                "catalog.sku.read",
+              ],
+              ["INV-ITEM-LIST", "Inventory items", "/app/supply/items", "inventory.item.read"],
+              ["RPT-OPS-DASHBOARD", "Reports", "/app/reports/operations", "reporting.sales.read"],
+            ] as const
+          ).map(([screenId, label, href, permission]) => ({ screenId, label, href, permission })),
         },
       },
     }),
@@ -1629,9 +1673,28 @@ test("@production a view-only Kitchen starts the kitchen display on this device"
   await page.goto("/operations/kitchen");
   await expect(page.getByRole("heading", { name: "View only on this screen" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Hand over / sign out" })).toHaveCount(0);
+  // The shared workspace frame: grouped navigation, no second header with a row of links.
+  const workspaceNav = page.getByRole("navigation", { name: "Workspace" });
+  await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
+  await expect(page.locator(".bop-shell__header")).toHaveCount(0);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await expectNoHorizontalOverflow(page);
+    if (width > 768) {
+      const sidebar = workspaceNav.locator(".workspace-sidebar__links");
+      await expect(sidebar.getByRole("button", { name: /^Operations/u })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+      await expect(sidebar.getByRole("link", { name: "Kitchen", exact: true })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      await expect(sidebar.getByRole("button", { name: /^Commerce/u })).toBeVisible();
+    } else
+      await expect(workspaceNav.locator(".workspace-sidebar__compact > summary")).toHaveText(
+        "Menu · Kitchen",
+      );
     await page.screenshot({ path: `test-results/kitchen-view-only-${width}.png`, fullPage: true });
   }
   await page.getByRole("button", { name: "Start kitchen display here", exact: true }).click();

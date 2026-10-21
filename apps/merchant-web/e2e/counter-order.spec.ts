@@ -251,6 +251,11 @@ test("@production staff take a counter pickup order, charge it on the card machi
     recordedAfterOutage: false,
   });
   await expect(page.getByText(/Record the payment by \d\d:\d\d/u)).toBeVisible();
+  // v15 751dd768: once sent, the ticket no longer says the total comes later.
+  await expect(
+    page.getByText("Sent. Charge $6.72 with tax and tip on the card machine."),
+  ).toBeVisible();
+  await expect(page.getByText(/The final total comes when you send the order/u)).toHaveCount(0);
   const slip = page.getByRole("textbox", { name: "Slip reference (optional)" });
   await slip.fill("1234 5678 9012 3456");
   await expect(page.getByRole("button", { name: /Paid on card machine/ })).toBeDisabled();
@@ -663,4 +668,172 @@ test("@production the counter menu re-reads what the store can sell after a send
   await page.clock.runFor(30_000);
   await expect.poll(() => menuReads).toBeGreaterThan(before);
   await expect(page.getByRole("button", { name: "Add Banana Bread" })).toBeDisabled();
+});
+
+// WP-2423 (v15 751dd768): a counter order sent but not paid is never lost to a reload. The counter
+// page lists it from the server (Orders) with its release time, and it is charged and recorded from
+// there or from its row on Orders; a cashier without payments access is not offered Payments and
+// refunds.
+test("@production a sent, unpaid counter order is charged after a reload, from Counter order and Orders", async ({
+  page,
+}) => {
+  await signIn(page);
+  const payBy = new Date(Date.now() + 20 * 60_000).toISOString();
+  let paid = false;
+  const row = (amountDueMinor: string | null) => ({
+    orderReference: id(60),
+    orderNumber: "21",
+    orderType: "Pickup",
+    sourceChannel: "Pos",
+    submittedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+    observedAt: new Date().toISOString(),
+    initialBatchReference: id(61),
+    counter: paid
+      ? {
+          recordedAfterOutage: false,
+          paidOnCardMachine: {
+            amountMinor: "1130",
+            takenAt: new Date().toISOString(),
+            recordedAfterOutage: false,
+            refundedMinor: "0",
+          },
+          payBy: null,
+          amountDueMinor: null,
+        }
+      : { recordedAfterOutage: false, paidOnCardMachine: null, payBy, amountDueMinor },
+    canRecordCardMachinePayment: true,
+    canViewPayments: false,
+    batches: [
+      {
+        orderBatchReference: id(61),
+        sequence: 1,
+        acceptanceStatus: paid ? "Accepted" : "NotAccepted",
+        canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
+        canCancelItems: false,
+      },
+    ],
+    canRequestAcceptance: false,
+    currentPhase: paid ? "Accepted" : "Submitted",
+    currentVersion: paid ? 2 : 1,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: !paid,
+  });
+  await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+  await page.route("**/merchant/orders", (route) =>
+    route.fulfill({ headers, json: { items: [row(null)], nextAfterOrderReference: null } }),
+  );
+  await page.route("**/merchant/orders/detail?*", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "OPS-ORDER-DETAIL",
+        pickupContact: null,
+        order: row(paid ? null : "1130"),
+        lines: {
+          items: [
+            {
+              orderItemReference: id(62),
+              orderBatchReference: id(61),
+              name: "Flat White",
+              options: [],
+              quantity: 2,
+              customerNote: null,
+              unitPrice: { amountMinor: "450", currencyCode: "CAD" },
+              subtotal: { amountMinor: "900", currencyCode: "CAD" },
+              discount: { amountMinor: "0", currencyCode: "CAD" },
+              tax: { amountMinor: "117", currencyCode: "CAD" },
+              fee: { amountMinor: "0", currencyCode: "CAD" },
+              total: { amountMinor: "1017", currencyCode: "CAD" },
+              canCancel: false,
+              cancellation: null,
+            },
+          ],
+          totals: {
+            subtotal: { amountMinor: "900", currencyCode: "CAD" },
+            discount: { amountMinor: "0", currencyCode: "CAD" },
+            tax: { amountMinor: "117", currencyCode: "CAD" },
+            fee: { amountMinor: "0", currencyCode: "CAD" },
+            total: { amountMinor: "1017", currencyCode: "CAD" },
+            tip: { amountMinor: "0", currencyCode: "CAD" },
+          },
+        },
+      },
+    }),
+  );
+  const payments: Record<string, unknown>[] = [];
+  await page.route("**/merchant/orders/card-machine-payment", (route) => {
+    payments.push(route.request().postDataJSON() as Record<string, unknown>);
+    paid = true;
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        orderReference: id(60),
+        orderBatchReference: id(61),
+        amountMinor: "1130",
+        recordingReason: "AtCounter",
+        takenAt: new Date().toISOString(),
+        recordedAt: new Date().toISOString(),
+        acceptance: "Accepted",
+      },
+    });
+  });
+
+  // Orders: the row warns when it is released and offers the charge; no Payments and refunds.
+  await page.goto("/operations/orders");
+  const entry = page.locator("details.order-workbench-entry").first();
+  await expect(entry).toContainText(/Charge on card machine by \d\d:\d\d · released if unpaid/u);
+  await expect(page.getByText("1 order.", { exact: true })).toBeVisible();
+  // The only order on the page opens on its own.
+  await expect(entry).toHaveAttribute("open", "");
+  await expect(entry.getByText(/Not paid yet: charge it on the card machine/u)).toBeVisible();
+  await expect(entry.getByRole("button", { name: "Payments and refunds" })).toHaveCount(0);
+  await expect(entry.getByRole("button", { name: "Charge on card machine" })).toBeVisible();
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/counter-unpaid-orders-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Counter order, opened fresh (as after a reload): the sent order is listed from the server.
+  await page.goto("/operations/order-entry");
+  const awaiting = page.getByRole("region", { name: "Sent, not paid yet" });
+  await expect(awaiting).toContainText("Order 21");
+  await expect(awaiting).toContainText(/Charge on card machine by \d\d:\d\d · released if unpaid/u);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/counter-awaiting-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await awaiting.getByRole("button", { name: "Charge on card machine" }).click();
+  const form = awaiting.getByRole("form", { name: "Record card-machine payment" });
+  await expect(form).toContainText("Charge $11.30 on the card machine first");
+  await expect(form).toContainText(/Record the payment by \d\d:\d\d/u);
+  await form.getByRole("textbox", { name: "Slip reference (optional)" }).fill("AUTH 9921");
+  await form.getByRole("button", { name: "Paid on card machine · $11.30" }).click();
+  await expect(page.getByText("Order 21: payment recorded. Orders shows it.")).toBeVisible();
+  expect(payments).toEqual([
+    {
+      operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      orderReference: id(60),
+      orderBatchReference: id(61),
+      expectedTotalMinor: "1130",
+      slipReference: "AUTH 9921",
+      takenAt: null,
+    },
+  ]);
+  await expect(page.getByRole("region", { name: "Sent, not paid yet" })).toHaveCount(0);
 });

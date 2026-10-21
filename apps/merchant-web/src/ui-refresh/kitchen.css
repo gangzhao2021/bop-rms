@@ -536,3 +536,22 @@
     flex-basis: 100%;
   }
 }
+
+/* ---------------------------------------------------------------- Inside the workspace frame */
+/* A counter or office sign-in reads the Kitchen beside the shared workspace navigation: the
+   board's title is the page heading, styled like the kitchen display's. */
+.kitchen-shell--workspace .kitchen-board-heading h1,
+.kitchen-shell--workspace .kitchen-workspace-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+.kitchen-shell--workspace .kitchen-workspace-title {
+  margin-bottom: 12px;
+}
+.kitchen-workspace-status {
+  display: flex;
+  justify-content: flex-end;
+}

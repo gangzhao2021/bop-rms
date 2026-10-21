@@ -9,7 +9,13 @@ import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
-import { paidAtInstant, payErrorText } from "./counter-payment.js";
+import { CounterAwaitingPayment } from "./CounterAwaitingPayment.js";
+import {
+  paidAtInstant,
+  payErrorText,
+  paymentUrgentMinutes,
+  paymentWindowNotice,
+} from "./counter-payment.js";
 import {
   CounterOrderClientError,
   createCounterOrderClient,
@@ -19,7 +25,7 @@ import {
   type PlacedCounterOrder,
 } from "./staff-order-entry.js";
 
-export { paidAtInstant, payErrorText };
+export { paidAtInstant, payErrorText, paymentUrgentMinutes, paymentWindowNotice };
 
 const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CAD" });
 
@@ -163,49 +169,8 @@ export function placeErrorText(
   }
 }
 
-/** WP-2423 item 5: minutes before the payment time ends when staff are warned urgently. */
-export const paymentUrgentMinutes = 10;
 /** v15 run: how often the counter menu re-reads what the store can sell while staff build an order. */
 export const MENU_REFRESH_MS = 30_000;
-
-/**
- * WP-2423 item 5 ("warn before timeouts"): what staff are told about the time left to record a
- * card-machine payment. A table round not recorded by then is cancelled automatically and never
- * reaches the kitchen; a counter order is released. Nothing is charged in the system either way.
- */
-export function paymentWindowNotice(input: {
-  readonly payBy: string;
-  readonly now: number;
-  readonly tableMode: boolean;
-  readonly timeZone?: string | undefined;
-}): { readonly tier: "warning" | "urgent"; readonly ended: boolean; readonly text: string } {
-  const at = storeTime(input.payBy, input.timeZone);
-  const remainingMs = Date.parse(input.payBy) - input.now;
-  if (remainingMs <= 0)
-    return {
-      tier: "urgent",
-      ended: true,
-      text: input.tableMode
-        ? `The time to pay this round ended at ${at}. It was not sent to the kitchen and is cancelled automatically; nothing was charged in the system. If you charged the card machine, refund it on the machine.`
-        : `The time to pay this order ended at ${at}. It is released and its items go back to stock. If you charged the card machine, refund it on the machine.`,
-    };
-  const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
-  if (minutes <= paymentUrgentMinutes)
-    return {
-      tier: "urgent",
-      ended: false,
-      text: input.tableMode
-        ? `${minutes} min left: record the payment by ${at} or this round is cancelled and its items go back to stock.`
-        : `${minutes} min left: record the payment by ${at} or the order is released and its items go back to stock.`,
-    };
-  return {
-    tier: "warning",
-    ended: false,
-    text: input.tableMode
-      ? `Record the payment by ${at}. The kitchen starts this order once it is recorded here; if it isn't recorded by then, the round is cancelled.`
-      : `Record the payment by ${at}. If it isn't paid by then the order is released and its items go back to stock.`,
-  };
-}
 
 /**
  * WP-2423 Q7 (OPS-ORDER-ENTRY, DEC-COUNTER-PAYMENT-RECORD): staff take a pickup order at the
@@ -261,6 +226,8 @@ export function StaffOrderEntryPage({
   const [problem, setProblem] = useState<string | null>(null);
   const [problemNeedsTableCode, setProblemNeedsTableCode] = useState(false);
   const [paidNote, setPaidNote] = useState<string | null>(null);
+  // WP-2423 (v15 751dd768): re-read the sent, unpaid counter orders after a send or a payment.
+  const [awaitingKey, setAwaitingKey] = useState(0);
   const placeOperation = useRef<string | null>(null);
   const payOperation = useRef<string | null>(null);
   const chargeHeading = useRef<HTMLHeadingElement>(null);
@@ -431,6 +398,7 @@ export function StaffOrderEntryPage({
       setPlaced(order);
       payOperation.current = null;
       setPhase("Charge");
+      setAwaitingKey((value) => value + 1);
       refreshMenu();
     } catch (error) {
       const failure =
@@ -485,6 +453,7 @@ export function StaffOrderEntryPage({
       return;
     }
     refreshMenu();
+    setAwaitingKey((value) => value + 1);
     // WP-2423 D1: the server accepts the paid order or round with the payment record (at the
     // Order's current version), so it reaches the kitchen even if this page is closed now.
     if (recorded.acceptance === "Accepted") {
@@ -578,6 +547,20 @@ export function StaffOrderEntryPage({
       }
       className="counter-order"
     >
+      {/* WP-2423 (v15 751dd768): sent counter orders not paid yet, from the server. */}
+      {tableMode ? null : (
+        <CounterAwaitingPayment
+          csrf={csrf}
+          timeZone={timeZone}
+          fetcher={fetcher}
+          refreshKey={awaitingKey}
+          excludeOrderReference={
+            placed !== null && (phase === "Charge" || phase === "Recording")
+              ? placed.orderReference
+              : null
+          }
+        />
+      )}
       <div className="counter-order__layout">
         <section className="counter-order__menu" aria-labelledby="counter-menu-heading">
           <h2 id="counter-menu-heading">Menu</h2>
@@ -849,8 +832,11 @@ export function StaffOrderEntryPage({
                 <span>{cad(estimate.toString())}</span>
               </p>
               <p className="counter-order__estimate">
-                About {cad(estimate.toString())} before tax and tip. The final total comes when you
-                send the order.
+                {placed !== null && !ordering
+                  ? phase === "Paid" || phase === "Accepted"
+                    ? `Sent and paid: ${cad(placed.totalMinor)} with tax and tip.`
+                    : `Sent. Charge ${cad(placed.totalMinor)} with tax and tip on the card machine.`
+                  : `About ${cad(estimate.toString())} before tax and tip. The final total comes when you send the order.`}
               </p>
             </div>
           ) : null}

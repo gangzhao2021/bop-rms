@@ -288,6 +288,67 @@ export function kitchenNavigationFor(
   return kitchenHandoverOffered(named, operator) ? kitchenOnly : navigation;
 }
 
+/**
+ * WP-2423 (2026-10-21 live check): the shared workspace frame (grouped sidebar, Switch staff, My
+ * PIN) supplied by the app. A counter or office sign-in reads the Kitchen inside it like any other
+ * back-office page; the kitchen display keeps its own kitchen-only frame.
+ */
+export type KitchenWorkspaceFrame = (content: ReactNode) => ReactNode;
+
+/**
+ * Which frame a kitchen screen uses: the workspace frame only once the board said this is a counter
+ * or office sign-in (never before, so a cook never sees the back office flash past).
+ */
+export function kitchenUsesWorkspaceFrame(
+  named: boolean,
+  operator: KitchenBoardView["operatorStatus"] | null,
+  workspaceFrame: KitchenWorkspaceFrame | undefined,
+): workspaceFrame is KitchenWorkspaceFrame {
+  return named && operator === "Unverified" && workspaceFrame !== undefined;
+}
+
+/** The kitchen screens' frame: the app's workspace frame, or the kitchen display's own. */
+function KitchenFrame({
+  workspaceFrame,
+  title,
+  navigation,
+  headerStatus,
+  children,
+}: {
+  readonly workspaceFrame?: KitchenWorkspaceFrame | undefined;
+  readonly title: string;
+  readonly navigation?: ReactNode;
+  readonly headerStatus?: ReactNode;
+  readonly children: ReactNode;
+}) {
+  if (workspaceFrame)
+    return (
+      <>
+        {workspaceFrame(
+          <div className="kitchen-shell kitchen-shell--workspace">
+            <main className="bop-shell__main" id="main-content" tabIndex={-1}>
+              {headerStatus === undefined ? null : (
+                <div className="kitchen-workspace-status">{headerStatus}</div>
+              )}
+              {children}
+            </main>
+          </div>,
+        )}
+      </>
+    );
+  return (
+    <AppFrame
+      title={title}
+      description="Kitchen display"
+      navigation={navigation}
+      headerStatus={headerStatus}
+      className="kitchen-shell"
+    >
+      {children}
+    </AppFrame>
+  );
+}
+
 /** WP-2423 Q17: where the kitchen display's sold-out link leads (the page offers the way back). */
 export const kitchenSoldOutHref = (soldOutHref: string) => `${soldOutHref}?from=kitchen`;
 
@@ -949,8 +1010,11 @@ export function KitchenBoardScreen({
   earlierDays,
   headerStatus,
   notices,
+  workspaceFrame,
 }: {
   readonly view: KitchenBoardView;
+  /** A counter or office sign-in: the app's workspace frame instead of the kitchen display's. */
+  readonly workspaceFrame?: KitchenWorkspaceFrame | undefined;
   /** What happened to the last kitchen step, remake or ticket close. */
   readonly notices?: ReactNode;
   /** WP-2423: the kitchen display's own controls (screen awake, handover) in the header. */
@@ -1322,17 +1386,16 @@ export function KitchenBoardScreen({
     </div>
   );
   return (
-    <AppFrame
+    <KitchenFrame
+      workspaceFrame={workspaceFrame}
       title={view.storeLabel}
-      description="Kitchen display"
       navigation={navigation}
       headerStatus={headerStatus}
-      className="kitchen-shell"
     >
       <div className="kitchen-board-workspace" ref={workspaceRef}>
         <header className="screen-heading kitchen-board-heading">
           <div>
-            <h2>Kitchen</h2>
+            {workspaceFrame ? <h1>Kitchen</h1> : <h2>Kitchen</h2>}
             <p className="kitchen-board-freshness">
               <Freshness
                 status={stale ? "Stale" : view.freshnessStatus}
@@ -1652,7 +1715,7 @@ export function KitchenBoardScreen({
           />
         ) : null}
       </div>
-    </AppFrame>
+    </KitchenFrame>
   );
 }
 
@@ -1660,10 +1723,13 @@ export function KitchenWorkItemScreen({
   view,
   onRefresh,
   navigation,
+  workspaceFrame,
 }: {
   readonly view: KitchenWorkItemDetailView;
   readonly onRefresh?: () => void;
   readonly navigation?: ReactNode;
+  /** A counter or office sign-in: the app's workspace frame instead of the kitchen display's. */
+  readonly workspaceFrame?: KitchenWorkspaceFrame | undefined;
 }) {
   const clockAt = useKitchenClock(view.projectedAt);
   const location = useLocation();
@@ -1679,18 +1745,21 @@ export function KitchenWorkItemScreen({
       : []),
   ].sort((left, right) => left.at.localeCompare(right.at) || left.label.localeCompare(right.label));
   return (
-    <AppFrame
+    <KitchenFrame
+      workspaceFrame={view.operatorStatus === "Unverified" ? workspaceFrame : undefined}
       title={view.storeLabel}
-      description="Kitchen display"
       // WP-2423: a kitchen display shows the kitchen only; "Return to Kitchen queue" leads back.
       navigation={view.operatorStatus === "Unverified" ? navigation : undefined}
-      className="kitchen-shell"
     >
       <div className="kitchen-board-workspace kitchen-work-item-screen">
         <header className="screen-heading kitchen-board-heading">
           <div>
             <p className="kitchen-board-eyebrow">{kitchenOrderLabel(view.item)}</p>
-            <h2>{view.item.displayName}</h2>
+            {workspaceFrame && view.operatorStatus === "Unverified" ? (
+              <h1>{view.item.displayName}</h1>
+            ) : (
+              <h2>{view.item.displayName}</h2>
+            )}
             <p className="kitchen-board-freshness">
               <Freshness status={view.freshnessStatus} at={view.projectedAt} />
               <span data-operator={view.operatorStatus}>
@@ -1756,7 +1825,7 @@ export function KitchenWorkItemScreen({
           </p>
         </section>
       </div>
-    </AppFrame>
+    </KitchenFrame>
   );
 }
 
@@ -1766,25 +1835,22 @@ function KitchenWorkItemUnavailableScreen({
   storeLabel,
   navigation,
   queueState,
+  workspaceFrame,
 }: {
   readonly state: Exclude<LoadState<never>["kind"], "Found" | "Loading">;
   readonly onRefresh: () => void;
   readonly storeLabel: string;
   readonly navigation?: ReactNode;
   readonly queueState?: KitchenQueueScope;
+  readonly workspaceFrame?: KitchenWorkspaceFrame | undefined;
 }) {
   return (
-    <AppFrame
-      title={storeLabel}
-      description="Kitchen display"
-      navigation={navigation}
-      className="kitchen-shell"
-    >
+    <KitchenFrame workspaceFrame={workspaceFrame} title={storeLabel} navigation={navigation}>
       <div className="kitchen-board-workspace kitchen-work-item-screen">
         <header className="screen-heading kitchen-board-heading">
           <div>
             <p className="kitchen-board-eyebrow">Work item</p>
-            <h2>Work item detail</h2>
+            {workspaceFrame ? <h1>Work item detail</h1> : <h2>Work item detail</h2>}
           </div>
           <div className="kitchen-work-item-screen__heading-actions">
             <Link
@@ -1798,7 +1864,7 @@ function KitchenWorkItemUnavailableScreen({
         </header>
         <KitchenBoardStatePanel state={state} />
       </div>
-    </AppFrame>
+    </KitchenFrame>
   );
 }
 
@@ -1810,6 +1876,12 @@ interface KitchenPageProps {
   readonly navigation?: ReactNode;
   /** WP-2423 Q17: the Item availability page, when the role may mark items sold out. */
   readonly soldOutHref?: string | undefined;
+  /** The app's workspace frame, used once the board says this is a counter or office sign-in. */
+  readonly workspaceFrame?: KitchenWorkspaceFrame | undefined;
+  /** Who the board last said was using it in this sign-in (kept by the app between pages). */
+  readonly knownOperator?: KitchenBoardView["operatorStatus"] | null | undefined;
+  /** Tells the app who the board says is using it. */
+  readonly onKnownOperator?: ((status: KitchenBoardView["operatorStatus"]) => void) | undefined;
 }
 function useClient({ client, csrf, storeLabel, storeReference }: KitchenPageProps) {
   return useMemo(
@@ -1965,6 +2037,10 @@ function KitchenBoardContent(
           <KitchenDisplayNavigation current="Kitchen" soldOutHref={props.soldOutHref} />,
         );
   const kitchenDisplay = kitchenHandoverOffered(named, operator);
+  // A counter or office sign-in reads the board inside the workspace frame (grouped sidebar).
+  const workspaceFrame = kitchenUsesWorkspaceFrame(named, operator, props.workspaceFrame)
+    ? props.workspaceFrame
+    : undefined;
   const headerStatus = props.headerStatus?.(operator);
   // WP-2423: what happened to the last step is said inside the board, under its heading, not
   // above the page frame.
@@ -2014,6 +2090,7 @@ function KitchenBoardContent(
           actionsBlocked={actions.blocked || stale !== undefined}
           navigation={navigation}
           headerStatus={headerStatus}
+          workspaceFrame={workspaceFrame}
           soundOn={soundOn}
           onSoundToggle={toggleSound}
           autoRefresh
@@ -2044,13 +2121,13 @@ function KitchenBoardContent(
           }
         />
       ) : (
-        <AppFrame
+        <KitchenFrame
+          workspaceFrame={workspaceFrame}
           title={props.storeLabel ?? "Kitchen"}
-          description="Kitchen display"
           navigation={navigation}
           headerStatus={headerStatus}
-          className="kitchen-shell"
         >
+          {workspaceFrame ? <h1 className="kitchen-workspace-title">Kitchen</h1> : null}
           {notices}
           <KitchenBoardStatePanel state={state.kind} />
           {state.kind !== "Loading" ? (
@@ -2058,7 +2135,7 @@ function KitchenBoardContent(
               Refresh
             </button>
           ) : null}
-        </AppFrame>
+        </KitchenFrame>
       )}
     </>
   );
@@ -2169,10 +2246,23 @@ export function KitchenBoardPage(
   const named = Boolean(props.csrf && props.storeReference);
   // A counter or office sign-in has no kitchen shift to hand over; its board offers
   // "Start kitchen display here" instead (WP-2423).
-  const [operator, setOperator] = useState<KitchenBoardView["operatorStatus"] | null>(null);
+  const [operator, setOperator] = useState<KitchenBoardView["operatorStatus"] | null>(
+    props.knownOperator ?? null,
+  );
+  const { onKnownOperator } = props;
+  const reportOperator = useCallback(
+    (status: KitchenBoardView["operatorStatus"]) => {
+      setOperator(status);
+      onKnownOperator?.(status);
+    },
+    [onKnownOperator],
+  );
+  // A view-only (counter or office) sign-in cannot work tickets, so there is no operator to
+  // protect: leaving the tab does not cover its board (IDR-0039 covers the kitchen display).
+  const viewOnly = named && operator === "Unverified";
   const awake = useKitchenScreenAwake(!covered && handover !== "SignedOut");
   if (handover === "SignedOut") return <KitchenSignedOutPanel />;
-  if (covered)
+  if (covered && !viewOnly)
     return (
       <StatePanel heading="Kitchen display covered" tone="offline" status>
         <p>
@@ -2194,7 +2284,7 @@ export function KitchenBoardPage(
       key={resumed}
       {...props}
       operator={operator}
-      onOperatorStatus={setOperator}
+      onOperatorStatus={reportOperator}
       headerStatus={
         named
           ? (current) => (
@@ -2226,6 +2316,20 @@ export function KitchenWorkItemPage(props: KitchenPageProps) {
     return parseKitchenWorkItemDetailView(await client.loadWorkItem(reference));
   }, [client, id]);
   const state = useLoad(load, id + ":" + revision);
+  const named = Boolean(props.csrf && props.storeReference);
+  const operator = state.kind === "Found" ? state.view.operatorStatus : null;
+  const { onKnownOperator } = props;
+  useEffect(() => {
+    if (operator !== null) onKnownOperator?.(operator);
+  }, [operator, onKnownOperator]);
+  // While the item cannot be read, the frame follows who the board last said was using it.
+  const unavailableFrame = kitchenUsesWorkspaceFrame(
+    named,
+    props.knownOperator ?? null,
+    props.workspaceFrame,
+  )
+    ? props.workspaceFrame
+    : undefined;
   return (
     <>
       {state.kind === "Found" ? (
@@ -2233,13 +2337,19 @@ export function KitchenWorkItemPage(props: KitchenPageProps) {
           view={state.view}
           onRefresh={() => setRevision((value) => value + 1)}
           navigation={props.navigation}
+          workspaceFrame={named ? props.workspaceFrame : undefined}
         />
-      ) : state.kind === "Loading" ? null : (
+      ) : state.kind === "Loading" ? (
+        unavailableFrame ? (
+          <>{unavailableFrame(null)}</>
+        ) : null
+      ) : (
         <KitchenWorkItemUnavailableScreen
           state={state.kind}
           onRefresh={() => setRevision((value) => value + 1)}
           storeLabel={props.storeLabel ?? "Selected Store"}
           navigation={props.navigation}
+          workspaceFrame={unavailableFrame}
           {...(queueState ? { queueState } : {})}
         />
       )}

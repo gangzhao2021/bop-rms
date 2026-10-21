@@ -11,8 +11,10 @@ import { Link } from "react-router";
 import type { MerchantNavigationItem } from "./merchant-workspace.js";
 
 /**
- * Pages that render their own full-screen chrome (kitchen display) or must guard leaving. The
- * dining floor (Tables) uses the workspace layout since the 2026-10-21 UI refresh.
+ * Pages that render their own full-screen chrome or must guard leaving. The Kitchen pages pick
+ * their frame once the board says who is using it: the workspace frame (passed in by the app) for
+ * a counter or office sign-in, the kitchen display's own kitchen-only frame otherwise. The dining
+ * floor (Tables) uses the workspace layout since the 2026-10-21 UI refresh.
  */
 const ownNavigation = [
   /^\/operations\/kitchen(\/|$)/u,
@@ -161,23 +163,6 @@ export function workspaceNavigationSections(
     if (members.length > 0) sections.push({ group, label: GROUP_LABELS[group], items: members });
   }
   return sections;
-}
-
-/**
- * v15 run (738b4c8b): the navigation that full-screen pages (Kitchen, kitchen work item, Brand
- * administration) pass to their own frame. Router links, like the workspace sidebar, so a
- * click stays inside the loaded app (no document reload, and no browser "No internet" page when
- * the screen was already fetched); the real href stays for new tabs and assistive technology.
- */
-export function workspaceNavigationLinks(
-  items: readonly MerchantNavigationItem[],
-  isCurrent: (item: MerchantNavigationItem) => boolean,
-): ReactNode[] {
-  return items.map((item) => (
-    <Link key={item.screenId} to={item.href} aria-current={isCurrent(item) ? "page" : undefined}>
-      {item.label}
-    </Link>
-  ));
 }
 
 /** Matches the stylesheet: at or below this width the sidebar becomes the Menu drawer. */

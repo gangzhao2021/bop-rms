@@ -81,7 +81,7 @@ test("@production staff starts a table and recovers a lost entry code without du
           },
           {
             tableReference: id(5),
-            stableLabel: "T3",
+            stableLabel: "DEMO-03",
             areaCode: "MAIN",
             capacity: 2,
             lifecycle: "Published",
@@ -93,7 +93,7 @@ test("@production staff starts a table and recovers a lost entry code without du
           },
           {
             tableReference: id(6),
-            stableLabel: "T4",
+            stableLabel: "Window counter seat 14",
             areaCode: "MAIN",
             capacity: 4,
             lifecycle: "Published",
@@ -324,6 +324,19 @@ test("@production staff starts a table and recovers a lost entry code without du
   ]);
   if (!desktopLabel || !desktopState) throw new Error("Dining card heading/state must be visible");
   expect(desktopState.y).toBeGreaterThan(desktopLabel.y + desktopLabel.height - 1);
+  // 2026-10-21 live check ("DEMO-" / "01"): a table name stays on one line in every tile; a name
+  // wider than its tile ends in an ellipsis and keeps the full name in its title.
+  for (const name of ["DEMO-03", "Window counter seat 14"]) {
+    const heading = page.locator(".dining-table-tile h3", { hasText: name });
+    await expect(heading).toHaveAttribute("title", name);
+    const lines = await heading.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+    });
+    expect(lines, name).toBe(1);
+    await expect(page.getByRole("button", { name: `Select ${name}`, exact: true })).toBeAttached();
+  }
   await page.screenshot({ path: "test-results/dining-board-1440.png", fullPage: true });
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
@@ -371,11 +384,21 @@ test("@production staff starts a table and recovers a lost entry code without du
   await confirm.check();
   await replace.click();
   await expect(page.getByText("123456", { exact: true })).toBeVisible();
+  // 2026-10-21 live check: the sharing instruction sits with the code and goes away with it.
+  const shareCode = page.getByText("Share this one-time code with the party at this table.");
+  await expect(page.locator(".dining-entry-code")).toContainText(
+    "Share this one-time code with the party at this table.",
+  );
   expect(starts).toHaveLength(2);
   expect(starts[1]).toBe(starts[0]);
   expect(regens).toHaveLength(1);
   await page.getByRole("button", { name: "Hide entry code", exact: true }).click();
   await expect(page.getByText("123456", { exact: true })).toHaveCount(0);
+  await expect(shareCode).toHaveCount(0);
+  // The skip link is painted only while it has keyboard focus (it showed in a scrolled capture).
+  const skipLink = page.locator(".bop-skip-link");
+  await expect(skipLink).toHaveCount(1);
+  await expect(skipLink).toHaveCSS("clip-path", "inset(50%)");
   expect(page.url()).not.toContain("123456");
 });
 

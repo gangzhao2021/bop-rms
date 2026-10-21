@@ -217,6 +217,16 @@
   font-size: 13px;
   line-height: 1.4;
 }
+/* "At least 3": the words sit small before the number, so the tile keeps its width. */
+.workspace-page--overview .overview-card--today .overview-count__qualifier {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.workspace-page--overview .overview-card--today .overview-count__note {
+  display: block;
+  color: var(--bop-color-text-muted);
+}
 .workspace-page--overview .overview-card--today .overview-counts a {
   justify-self: start;
   min-height: 44px;

@@ -244,6 +244,28 @@ export function tableAttentionNotices(
   return notices;
 }
 
+/**
+ * A newly issued table entry code with what to do with it. Hiding the code hides the instruction
+ * too, so no sentence is left pointing at a code that is no longer shown.
+ */
+export function DiningEntryCode({
+  code,
+  onHide,
+}: {
+  readonly code: string;
+  readonly onHide: () => void;
+}) {
+  return (
+    <div className="dining-entry-code">
+      <p>Share this one-time code with the party at this table.</p>
+      <p>
+        Entry code: <strong>{code}</strong>
+      </p>
+      <button onClick={onHide}>Hide entry code</button>
+    </div>
+  );
+}
+
 export function DiningSessionWorkspace({
   csrf,
   storeLabel,
@@ -454,9 +476,10 @@ export function DiningSessionWorkspace({
         operation.current = null;
         setUnknownAction(null);
         setState("Idle");
+        // 2026-10-21 live check: the sharing instruction sits with the code and goes with it.
         setMessage(
           result.joinCredential
-            ? "Share this one-time code with the party at this table."
+            ? ""
             : "The request already completed. Its code cannot be displayed again. Confirm replacement to generate a new code.",
         );
       }
@@ -679,7 +702,7 @@ export function DiningSessionWorkspace({
                           data-attention={notices.length > 0}
                         >
                           <div className="dining-table-tile__identity">
-                            <h3>{table.stableLabel}</h3>
+                            <h3 title={table.stableLabel}>{table.stableLabel}</h3>
                             <span>
                               {floor.label.split(" · ").map((part, index) => (
                                 <span key={index}>
@@ -985,14 +1008,7 @@ export function DiningSessionWorkspace({
                   )}
                 </section>
               ) : null}
-              {code ? (
-                <div className="dining-entry-code">
-                  <p>
-                    Entry code: <strong>{code}</strong>
-                  </p>
-                  <button onClick={() => setCode(null)}>Hide entry code</button>
-                </div>
-              ) : null}
+              {code ? <DiningEntryCode code={code} onHide={() => setCode(null)} /> : null}
             </>
           ) : (
             <div className="dining-session-detail__empty">

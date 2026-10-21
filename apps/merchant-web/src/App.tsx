@@ -11,11 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router";
-import {
-  usesWorkspaceLayout,
-  WorkspaceLayout,
-  workspaceNavigationLinks,
-} from "./WorkspaceLayout.js";
+import { usesWorkspaceLayout, WorkspaceLayout } from "./WorkspaceLayout.js";
 import { StaffSessionGuard, StaffSignedOutPanel, StaffSwitchButton } from "./StaffSession.js";
 import { OwnNamePrompt } from "./OwnNamePrompt.js";
 import { StaffPinControls } from "./StaffPinControls.js";
@@ -31,7 +27,7 @@ import { StoreOverview } from "./StoreOverview.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
-import { parseKitchenBoardView } from "./kitchen-board.js";
+import { parseKitchenBoardView, type KitchenBoardView } from "./kitchen-board.js";
 import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
 import {
   RefundDeadlineWatch,
@@ -652,6 +648,52 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       switching.current = false;
     }
   };
+
+  // WP-2423 (2026-10-21 live check): who the kitchen board says is using this sign-in, kept while
+  // the sign-in lasts, so the Kitchen pages open in the right frame without waiting for a read.
+  const kitchenOperatorKey =
+    state.kind === "Ready" ? state.workspace.selectedScope.storeReference + state.csrf : "";
+  const [kitchenOperator, setKitchenOperator] = useState<{
+    readonly key: string;
+    readonly status: KitchenBoardView["operatorStatus"];
+  } | null>(null);
+  const knownKitchenOperator =
+    kitchenOperator !== null && kitchenOperator.key === kitchenOperatorKey
+      ? kitchenOperator.status
+      : null;
+  const onKnownKitchenOperator = useCallback(
+    (status: KitchenBoardView["operatorStatus"]) =>
+      setKitchenOperator((current) =>
+        current?.key === kitchenOperatorKey && current.status === status
+          ? current
+          : { key: kitchenOperatorKey, status },
+      ),
+    [kitchenOperatorKey],
+  );
+  // The shared workspace frame: grouped navigation with the session actions beneath it.
+  const workspaceFrame = (content: ReactNode) =>
+    state.kind === "Ready" ? (
+      <WorkspaceLayout
+        items={state.workspace.navigation}
+        path={pathname}
+        storeLabel={state.workspace.selectedScope.storeLabel}
+        footer={
+          demo === null ? (
+            <>
+              <StaffSwitchButton />
+              <StaffPinControls
+                csrf={state.csrf}
+                timeZone={state.workspace.selectedScope.timeZone}
+              />
+            </>
+          ) : null
+        }
+      >
+        {content}
+      </WorkspaceLayout>
+    ) : (
+      content
+    );
 
   const routeTree = (
     <Suspense
@@ -1803,10 +1845,9 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                         (item) => item.screenId === "CAT-AVAILABILITY",
                       )?.href
                     }
-                    navigation={workspaceNavigationLinks(
-                      state.workspace.navigation,
-                      (item) => item.screenId === "KIT-KITCHEN-QUEUE",
-                    )}
+                    workspaceFrame={workspaceFrame}
+                    knownOperator={knownKitchenOperator}
+                    onKnownOperator={onKnownKitchenOperator}
                   />
                 ) : (
                   <StatePanel heading="Kitchen unavailable">
@@ -1862,10 +1903,9 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     csrf={state.csrf}
                     storeReference={state.workspace.selectedScope.storeReference}
                     storeLabel={state.workspace.selectedScope.storeLabel}
-                    navigation={workspaceNavigationLinks(
-                      state.workspace.navigation,
-                      (item) => item.href === "/operations/kitchen",
-                    )}
+                    workspaceFrame={workspaceFrame}
+                    knownOperator={knownKitchenOperator}
+                    onKnownOperator={onKnownKitchenOperator}
                   />
                 ) : (
                   <StatePanel heading="Kitchen work item unavailable">
@@ -2072,24 +2112,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           />
         ) : null}
         {state.kind === "Ready" && usesWorkspaceLayout(pathname) && !soldOutFromKitchen ? (
-          <WorkspaceLayout
-            items={state.workspace.navigation}
-            path={pathname}
-            storeLabel={state.workspace.selectedScope.storeLabel}
-            footer={
-              demo === null ? (
-                <>
-                  <StaffSwitchButton />
-                  <StaffPinControls
-                    csrf={state.csrf}
-                    timeZone={state.workspace.selectedScope.timeZone}
-                  />
-                </>
-              ) : null
-            }
-          >
-            {routes}
-          </WorkspaceLayout>
+          workspaceFrame(routes)
         ) : state.kind === "SignedOut" && demo === null && staffPage ? (
           <AppFrame title="Operations" description="Store workspace">
             <StaffSignedOutPanel />

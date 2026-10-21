@@ -32,9 +32,15 @@ import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
 import { playKitchenChime } from "./alert-chime.js";
 import { storeTime } from "./StoreTime.js";
+import {
+  counterAwaitingCardMachine,
+  counterPayByText,
+  counterPayByTier,
+} from "./counter-payment.js";
 import { businessDateLabel, openedEarlierText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 export { storeTime } from "./StoreTime.js";
+export { counterAwaitingCardMachine, counterPayByText, counterPayByTier };
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link, useParams } from "react-router";
@@ -653,6 +659,38 @@ export function orderAmountTaken(order: QueuedOrder) {
     currencyCode,
   };
 }
+/**
+ * WP-2423 (v15 751dd768): an order cancelled with no payment recorded (for example a table whose
+ * rounds were never paid, or a counter order released unpaid); its row says so instead of a dash.
+ */
+export function cancelledUnpaid(order: QueuedOrder): boolean {
+  return (
+    order.currentPhase === "Cancelled" &&
+    orderAmountTaken(order) === null &&
+    order.unfulfillable === null &&
+    order.batches.every((batch) => batch.staffCancellation === null)
+  );
+}
+/**
+ * WP-2423 (v15 751dd768): how many orders the list shows, in plain words. A page holds the 50
+ * newest orders (or, after Next page, the next older ones); filters narrow that page only.
+ */
+export function orderCountText(input: {
+  readonly shown: number;
+  readonly total: number;
+  readonly filtered: boolean;
+  readonly olderPage: boolean;
+  readonly morePages: boolean;
+}): string {
+  const orders = (count: number) => (count === 1 ? "1 order" : `${count} orders`);
+  if (input.filtered)
+    return input.morePages || input.olderPage
+      ? `${input.shown} of ${input.total} ${input.olderPage ? "older " : ""}orders on this page match. Other pages are not searched.`
+      : `${input.shown} of ${input.total} orders match.`;
+  if (input.morePages)
+    return `${orders(input.total)}${input.olderPage ? " (older)" : ", newest first"}. Older orders are on the next page.`;
+  return input.olderPage ? `${orders(input.total)} (the oldest).` : `${orders(input.total)}.`;
+}
 /** WP-2423 UI refresh: the rounds of an order by acceptance ("1 accepted · 1 not accepted"). */
 function roundSummary(order: QueuedOrder): string {
   const cancelled = order.batches.filter(
@@ -1111,6 +1149,18 @@ export function CurrentOrderQueueRows({
                   </span>
                 ) : null}
                 {now === undefined ? null : <AcceptanceDeadline order={order} now={now} />}
+                {/* WP-2423 (v15 751dd768): warn before a sent counter order is released unpaid. */}
+                {counterAwaitingCardMachine(order, now ?? Date.now()) && order.counter?.payBy ? (
+                  <span
+                    className="order-accept-by"
+                    data-tier={counterPayByTier(order.counter.payBy, now)}
+                  >
+                    {counterPayByText(order.counter.payBy, timeZone, now)}
+                  </span>
+                ) : null}
+                {cancelledUnpaid(order) ? (
+                  <span className="order-staff-cancelled">Cancelled before payment</span>
+                ) : null}
                 {order.batches.map((batch) =>
                   batch.paymentDue === null ? null : (
                     <span
@@ -1195,7 +1245,9 @@ export function CurrentOrderQueueRows({
                 <p className="order-counter-note" role="note">
                   Taken at the counter.{" "}
                   {order.counter.paidOnCardMachine === null
-                    ? "Not paid yet: charge it on the card machine from Counter order."
+                    ? counterAwaitingCardMachine(order, now ?? Date.now())
+                      ? "Not paid yet: charge it on the card machine, then record it below (or from Counter order)."
+                      : "Not paid on the card machine."
                     : `Paid on the store's card machine (${orderMoney({
                         amountMinor: order.counter.paidOnCardMachine.amountMinor,
                         currencyCode: "CAD",
@@ -1366,7 +1418,10 @@ export function CurrentOrderDetails({
           refund, makes it on the card machine and records it there.
         </p>
       ) : null}
-      <OrderPaymentLinks orderReference={order.orderReference} csrf={csrf} fetcher={fetcher} />
+      {/* WP-2423 (v15 751dd768): offered only to people the server lets read payments. */}
+      {order.canViewPayments ? (
+        <OrderPaymentLinks orderReference={order.orderReference} csrf={csrf} fetcher={fetcher} />
+      ) : null}
       {order.orderType === "DineIn" && order.currentPhase !== "Cancelled" ? (
         <DiningOrderProgress
           orderReference={order.orderReference}
@@ -1711,7 +1766,13 @@ export function CurrentOrderQueuePage({
                 </select>
               </label>
               <p className="order-queue-filter-count" aria-live="polite">
-                Showing {filteredOrders.length} of {state.view.items.length} orders on this page.
+                {orderCountText({
+                  shown: filteredOrders.length,
+                  total: state.view.items.length,
+                  filtered: hasOrderFilters,
+                  olderPage: after !== null,
+                  morePages: state.view.nextAfterOrderReference !== null,
+                })}
               </p>
               {hasOrderFilters ? (
                 <button type="button" onClick={clearOrderFilters}>
@@ -1824,9 +1885,36 @@ export function CurrentOrderQueuePage({
                           }}
                         />
                       </fieldset>
+                    ) : // WP-2423 (v15 751dd768): a sent counter order not paid yet is charged and
+                    // recorded here too (the counter page may have been reloaded or closed).
+                    batch.sequence === 1 &&
+                      order.canRecordCardMachinePayment &&
+                      counterAwaitingCardMachine(order, now ?? Date.now()) ? (
+                      <fieldset disabled={servingBusy}>
+                        <StaffRoundPaymentAction
+                          key={"counter-pay-" + batch.orderBatchReference}
+                          kind="CounterOrder"
+                          label="Charge on card machine"
+                          csrf={csrf}
+                          fetcher={fetcher}
+                          orderReference={order.orderReference}
+                          orderBatchReference={batch.orderBatchReference}
+                          amountDueMinor={order.counter?.amountDueMinor ?? null}
+                          payBy={order.counter?.payBy ?? null}
+                          loadAmountDue={(signal) =>
+                            client
+                              .loadDetail(order.orderReference, signal)
+                              .then((detail) => detail.order.counter?.amountDueMinor ?? null)
+                          }
+                          recordedAfterOutage={order.counter?.recordedAfterOutage ?? false}
+                          timeZone={timeZone}
+                          onRecorded={() => reload(after)}
+                        />
+                      </fieldset>
                     ) : // WP-2423 D5: an unpaid round staff entered is recorded as paid here too. The list
                     // leaves its amount out (the one-order read builds it when the form is opened).
-                    batch.staffRound != null &&
+                    order.canRecordCardMachinePayment &&
+                      batch.staffRound != null &&
                       batch.staffRound.paidOnCardMachine === null &&
                       batch.acceptanceStatus === "NotAccepted" &&
                       batch.paymentDue !== null &&
