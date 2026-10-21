@@ -86,7 +86,7 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await expect(heading("Order " + first)).toBeVisible();
   const orderSearch = page.getByRole("searchbox", { name: "Order number" });
   await orderSearch.fill("missing");
-  await expect(heading("No pickups waiting")).toBeVisible();
+  await expect(heading("No matching pickups")).toBeVisible();
   const clearFilters = page.getByRole("button", { name: "Clear filters", exact: true });
   await expect(clearFilters).toBeEnabled();
   await clearFilters.click();
@@ -173,7 +173,7 @@ test("@production Pickup paging, current scope and permission recovery", async (
     exact: true,
   });
   await orderSearch.fill("missing");
-  await expect(heading("No pickups waiting")).toBeVisible();
+  await expect(heading("No matching pickups")).toBeVisible();
   const firstCard = page.locator("article.store-card").first();
   await expect(firstCard).toHaveAttribute("hidden", "");
   const hiddenRetry = firstCard.locator("button").filter({ hasText: "Try the check again" });

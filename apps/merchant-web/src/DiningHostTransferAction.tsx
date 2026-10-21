@@ -125,7 +125,7 @@ export function DiningHostTransferAction({
   };
   return (
     <section aria-label="Dining host transfer">
-      <h4>Order host</h4>
+      <h3>Order host</h3>
       <p>
         The host manages the shared cart. A transfer changes future permissions and preserves
         previous actions.

@@ -54,6 +54,28 @@ export function kitchenAgeTier(minutes: number): "ok" | "warning" | "late" {
       : "ok";
 }
 
+/**
+ * WP-2423 UI refresh: a ticket's timer is its longest-waiting unfinished dish (a table's rounds can
+ * differ); null minutes when everything on it is finished. Derived from the board's own clock.
+ */
+export function kitchenTicketAge(
+  items: readonly KitchenBoardItem[],
+  at: string,
+): { readonly minutes: number | null; readonly tier: "ok" | "warning" | "late" | "done" } {
+  const open = items.filter(isActiveKitchenWork);
+  if (open.length === 0) return { minutes: null, tier: "done" };
+  const minutes = Math.max(
+    ...open.map((item) =>
+      Math.max(0, Math.floor((Date.parse(at) - Date.parse(item.createdAt)) / 60_000)),
+    ),
+  );
+  return { minutes, tier: kitchenAgeTier(minutes) };
+}
+/** The waiting tier in words, so a ticket's urgency never rests on colour alone. */
+export function kitchenTicketTierText(tier: "ok" | "warning" | "late" | "done"): string | null {
+  return tier === "late" ? "Overdue" : tier === "warning" ? "Running long" : null;
+}
+
 import { playKitchenChime } from "./alert-chime.js";
 export { playKitchenChime };
 
@@ -712,6 +734,11 @@ function WorkCard({
     >
       <div className="kitchen-work-item__summary">
         <h3>
+          {/* WP-2423 UI refresh: "2×" leads the line as on a kitchen ticket; the quantity is also
+              read out below ("Quantity 0 / 2"), so the prefix is not repeated to screen readers. */}
+          <span className="kitchen-work-item__count" aria-hidden="true">
+            {item.requiredQuantity}×
+          </span>
           {showDetails ? (
             <Link
               className="kitchen-work-item__detail-link"
@@ -1356,17 +1383,19 @@ export function KitchenBoardScreen({
             freshnessStatus={view.freshnessStatus}
           />
         ) : null}
-        <header className="kitchen-queue-heading">
-          <h2 id="kitchen-queue-heading" tabIndex={-1}>
-            Queue
-          </h2>
-        </header>
-        <div className="kitchen-filter-toolbar">
-          {renderOrderSearch("desktop")}
-          {renderFilters("desktop")}
-          <span className="kitchen-queue-count" aria-live="polite">
-            {items.length} work {items.length === 1 ? "item" : "items"}
-          </span>
+        <div className="kitchen-queue-bar">
+          <header className="kitchen-queue-heading">
+            <h2 id="kitchen-queue-heading" tabIndex={-1}>
+              Queue
+            </h2>
+          </header>
+          <div className="kitchen-filter-toolbar">
+            {renderOrderSearch("desktop")}
+            {renderFilters("desktop")}
+            <span className="kitchen-queue-count" aria-live="polite">
+              {items.length} work {items.length === 1 ? "item" : "items"}
+            </span>
+          </div>
         </div>
         <dialog
           className="kitchen-filter-sheet"
@@ -1472,40 +1501,42 @@ export function KitchenBoardScreen({
           </p>
         ) : null}
         {items.length === 0 ? (
-          <StatePanel
-            heading={
-              searchApplied || (hasFilters && view.items.length > earlierOpen.size)
-                ? "No matching work"
-                : "No active work"
-            }
-            status
-          >
-            <p>
-              {orderSearch !== null && awaitingNotice !== null
-                ? awaitingNotice
-                : orderSearch !== null
-                  ? searchMatches.length > 0
-                    ? kitchenSearchHiddenText({
-                        matches: searchMatches,
-                        search: orderSearch,
-                        inRecentlyFinished:
-                          remakes !== undefined &&
-                          onRemake !== undefined &&
-                          recentlyFinishedKitchenItems(board.items, view.projectedAt).some((item) =>
-                            searchMatches.includes(item),
-                          ),
-                      })
-                    : earlierElsewhere !== null
-                      ? `Nothing from today for order or table “${orderSearch}”. ${earlierElsewhere}: see From earlier days above.`
-                      : `Nothing on the board for order or table “${orderSearch}”. Clear the search to see the whole queue.`
-                  : view.items.length > 0 && view.items.length === earlierOpen.size
-                    ? "Nothing from today is waiting. Earlier days' tickets are listed above."
-                    : !hasFilters || view.items.length === 0
-                      ? // v15 2026-10-16: an empty board with no filter set is simply quiet.
-                        "Nothing to make right now."
-                      : "Nothing matches these filters. Clear the filters to see all work."}
-            </p>
-          </StatePanel>
+          <div className="kitchen-board-empty">
+            <StatePanel
+              heading={
+                searchApplied || (hasFilters && view.items.length > earlierOpen.size)
+                  ? "No matching work"
+                  : "No active work"
+              }
+              status
+            >
+              <p>
+                {orderSearch !== null && awaitingNotice !== null
+                  ? awaitingNotice
+                  : orderSearch !== null
+                    ? searchMatches.length > 0
+                      ? kitchenSearchHiddenText({
+                          matches: searchMatches,
+                          search: orderSearch,
+                          inRecentlyFinished:
+                            remakes !== undefined &&
+                            onRemake !== undefined &&
+                            recentlyFinishedKitchenItems(board.items, view.projectedAt).some(
+                              (item) => searchMatches.includes(item),
+                            ),
+                        })
+                      : earlierElsewhere !== null
+                        ? `Nothing from today for order or table “${orderSearch}”. ${earlierElsewhere}: see From earlier days above.`
+                        : `Nothing on the board for order or table “${orderSearch}”. Clear the search to see the whole queue.`
+                    : view.items.length > 0 && view.items.length === earlierOpen.size
+                      ? "Nothing from today is waiting. Earlier days' tickets are listed above."
+                      : !hasFilters || view.items.length === 0
+                        ? // v15 2026-10-16: an empty board with no filter set is simply quiet.
+                          "Nothing to make right now."
+                        : "Nothing matches these filters. Clear the filters to see all work."}
+              </p>
+            </StatePanel>
+          </div>
         ) : (
           <div className="kitchen-board-lanes">
             {stationLanes.map((lane) => {
@@ -1534,34 +1565,53 @@ export function KitchenBoardScreen({
                     </span>
                   </header>
                   <div className="kitchen-station-lane__items">
-                    {groupKitchenItemsByOrder(stationItems).map((group) => (
-                      <section
-                        className="kitchen-order-group"
-                        key={group.orderReference}
-                        aria-label={dayLabel(group.items[0] as KitchenBoardItem)}
-                      >
-                        <h4 className="kitchen-order-group__label">
-                          {dayLabel(group.items[0] as KitchenBoardItem)}
-                        </h4>
-                        {group.items.map((item) => (
-                          <WorkCard
-                            key={item.workItemReference}
-                            item={item}
-                            readOnly={readOnly || actionsBlocked || stale !== undefined}
-                            {...(guardedAction ? { onAction: guardedAction } : {})}
-                            onRemake={onRemake}
-                            observedAt={view.projectedAt}
-                            ageAt={clockAt}
-                            detailState={{
-                              station: activeStation,
-                              status,
-                              allergen,
-                              exception,
-                            }}
-                          />
-                        ))}
-                      </section>
-                    ))}
+                    {groupKitchenItemsByOrder(stationItems).map((group) => {
+                      const ticket = kitchenTicketAge(group.items, clockAt);
+                      const tierText = kitchenTicketTierText(ticket.tier);
+                      return (
+                        <section
+                          className="kitchen-order-group kitchen-ticket"
+                          key={group.orderReference}
+                          data-age={ticket.tier}
+                          aria-label={dayLabel(group.items[0] as KitchenBoardItem)}
+                        >
+                          <header className="kitchen-ticket__header">
+                            <h4 className="kitchen-order-group__label">
+                              {dayLabel(group.items[0] as KitchenBoardItem)}
+                            </h4>
+                            <p className="kitchen-ticket__wait">
+                              {ticket.minutes === null ? (
+                                <span className="kitchen-ticket__timer">Done</span>
+                              ) : (
+                                <span className="kitchen-ticket__timer" data-age={ticket.tier}>
+                                  {kitchenWaitText(ticket.minutes)}
+                                </span>
+                              )}
+                              {tierText ? (
+                                <span className="kitchen-ticket__tier">{tierText}</span>
+                              ) : null}
+                            </p>
+                          </header>
+                          {group.items.map((item) => (
+                            <WorkCard
+                              key={item.workItemReference}
+                              item={item}
+                              readOnly={readOnly || actionsBlocked || stale !== undefined}
+                              {...(guardedAction ? { onAction: guardedAction } : {})}
+                              onRemake={onRemake}
+                              observedAt={view.projectedAt}
+                              ageAt={clockAt}
+                              detailState={{
+                                station: activeStation,
+                                status,
+                                allergen,
+                                exception,
+                              }}
+                            />
+                          ))}
+                        </section>
+                      );
+                    })}
                   </div>
                 </section>
               );

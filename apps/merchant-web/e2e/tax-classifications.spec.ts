@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { followWorkspaceLink } from "./workspace-navigation";
 
 /**
  * WP-2423 Store setup in product: the Brand Owner adds, renames, sets the default and retires the
@@ -170,15 +171,8 @@ test("@production the Brand Owner adds, renames, sets the default and retires ta
 }) => {
   const state = await install(page);
   await page.goto("/app");
-  const workspaceNav = page.getByRole("navigation", { name: "Workspace" });
-  await workspaceNav.waitFor();
-  const compactMenu = workspaceNav.locator(".workspace-sidebar__compact > summary");
-  if (await compactMenu.isVisible()) await compactMenu.click();
-  await page
-    .getByRole("link", { name: "Tax classifications", exact: true })
-    .filter({ visible: true })
-    .first()
-    .click();
+  // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
+  await followWorkspaceLink(page, "Tax classifications");
   await expect(page).toHaveURL(/\/app\/commerce\/tax-classifications$/u);
   await expect(page.getByText("No tax classifications yet.")).toBeVisible();
   await expect(page.getByText("No rates are set here")).toBeVisible();

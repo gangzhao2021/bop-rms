@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router";
 import { playKitchenChime } from "./alert-chime.js";
@@ -201,6 +201,24 @@ export function RefundDeadlineWatch({
     const timer = setInterval(() => setNow(clock()), tickMs);
     return () => clearInterval(timer);
   }, [clock, tickMs]);
+  // UI refresh: the warning is pinned to the top edge; pages that pin their own bar (Orders
+  // filters, Counter order categories, Tables details) sit below it through this height.
+  const pinWarning = useCallback((node: HTMLElement | null) => {
+    if (node === null) return;
+    const root = document.documentElement;
+    const publish = () =>
+      root.style.setProperty(
+        "--bop-pinned-top",
+        `${Math.ceil(node.getBoundingClientRect().height)}px`,
+      );
+    publish();
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(publish) : null;
+    observer?.observe(node);
+    return () => {
+      observer?.disconnect();
+      root.style.removeProperty("--bop-pinned-top");
+    };
+  }, []);
   const warnings = refundWarnings(deadlines, now);
   // Out of date without a sign-in: no sound or announcement for an order that may be handled.
   const unsure = refundCountdownUnsure(signedOut, checkedAt, now);
@@ -222,6 +240,7 @@ export function RefundDeadlineWatch({
         }`;
   const section = (
     <section
+      ref={pinWarning}
       className="refund-deadline-warning"
       data-tier={unsure ? "unsure" : warnings[0]?.tier}
       data-signed-out={signedOut ? "true" : undefined}

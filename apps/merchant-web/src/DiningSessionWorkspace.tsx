@@ -1,9 +1,9 @@
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import { paidRoundWait, tableRoundWaitText, type PaidRoundWaitTier } from "./paid-round-wait.js";
 import { DiningHostTransferAction } from "./DiningHostTransferAction.js";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
-import { AppFrame } from "@bop-rms/ui";
+import { WorkspacePage } from "./WorkspacePage.js";
 import { Link } from "react-router";
 import {
   createDiningSessionClient,
@@ -213,11 +213,41 @@ export function paidRoundAcceptanceNotice(
   };
 }
 
+/**
+ * What a table tile flags for staff, in the order they act on it: a paid round waiting for
+ * acceptance, a staff round or guest round waiting for payment (warn before timeouts), a table
+ * open so long the guests may have left, and a missing or expiring table QR code. `tier` is null
+ * for plain guidance.
+ */
+export function tableAttentionNotices(
+  table: StaffDiningTable,
+  now: number,
+  timeZone: string | undefined,
+  canCloseSessions: boolean,
+): { readonly tier: PaidRoundWaitTier | "warning" | "urgent" | null; readonly text: string }[] {
+  const notices: { tier: PaidRoundWaitTier | "warning" | "urgent" | null; text: string }[] = [];
+  for (const notice of [
+    paidRoundAcceptanceNotice(table, now),
+    staffRoundPaymentNotice(table, now, timeZone),
+    guestRoundPaymentNotice(table, now, timeZone),
+  ])
+    if (notice !== null) notices.push(notice);
+  if (tableFloorStatus(table).state === "LongOpen")
+    notices.push({
+      tier: null,
+      text: canCloseSessions
+        ? "Open for a long time — if the guests have left, select the table and close it."
+        : "Open for a long time — if the guests have left, ask a manager or the owner to close the table.",
+    });
+  const code = tableCodeNotice(table, now);
+  if (code !== null) notices.push({ tier: null, text: code });
+  return notices;
+}
+
 export function DiningSessionWorkspace({
   csrf,
   storeLabel,
   timeZone,
-  navigation,
   canTakeOrders = false,
   tableQrHref,
 }: {
@@ -225,7 +255,6 @@ export function DiningSessionWorkspace({
   readonly storeLabel: string;
   /** The Store's IANA time zone, for the times staff are told (WP-2423 item 5). */
   readonly timeZone?: string | undefined;
-  readonly navigation?: ReactNode;
   /** WP-2423 Q7 slice 2: the staff member may enter a round for a table (staff ordering). */
   readonly canTakeOrders?: boolean;
   /** The Table QR codes page, when this staff member may create codes there. */
@@ -238,6 +267,7 @@ export function DiningSessionWorkspace({
     [code, setCode] = useState<string | null>(null),
     [message, setMessage] = useState(""),
     [state, setState] = useState<"Idle" | "Loading" | "Submitting" | "Unknown">("Idle");
+  const detailRef = useRef<HTMLElement | null>(null);
   const pending = useRef<AbortController | null>(null),
     operation = useRef<Operation | null>(null),
     availabilityOperation = useRef<AvailabilityOperation | null>(null);
@@ -527,111 +557,147 @@ export function DiningSessionWorkspace({
     () => [...new Set(visibleTables.map((table) => table.areaCode))],
     [visibleTables],
   );
+  const attention = (table: StaffDiningTable) =>
+    tableAttentionNotices(table, now, timeZone, canCloseSessions);
+  const seatedCount = tables.filter((table) => table.currentDiningSessionReference !== null).length;
+  const freeCount = tables.filter((table) => tableFloorStatus(table).state === "Available").length;
+  const attentionCount = tables.filter((table) => attention(table).length > 0).length;
+  const select = (table: StaffDiningTable) => {
+    setSelected(table);
+    setConfirmed(false);
+    setCode(null);
+    setMessage("");
+    operation.current = null;
+    availabilityOperation.current = null;
+    setBlockReasonCode("");
+    // Presentation only: below the desktop width the details sit under the floor, so bring them
+    // into view (the way a phone POS opens the table).
+    if (typeof window.matchMedia === "function" && window.matchMedia("(max-width: 1023px)").matches)
+      requestAnimationFrame(() => detailRef.current?.scrollIntoView?.({ block: "start" }));
+  };
   return (
-    <AppFrame title="OPERATIONS" description="" navigation={navigation}>
-      <div className="dining-workspace">
-        <header className="screen-heading dining-floor-heading">
-          <div>
-            <h2>Tables</h2>
-            <p className="dining-store-label">{storeLabel}</p>
-          </div>
-          <div className="dining-floor-toolbar">
-            <button disabled={locked} onClick={() => void load()}>
-              Refresh tables
-            </button>
-            {next ? (
-              <button disabled={locked || stale !== null} onClick={() => void load(true)}>
-                Load more tables
-              </button>
+    <WorkspacePage
+      className="dining-floor"
+      title="Tables"
+      meta={storeLabel}
+      status={
+        tables.length > 0 ? (
+          <span className="dining-floor-summary">
+            <span>{`${String(freeCount)} available`}</span>
+            <span>{`${String(seatedCount)} seated`}</span>
+            {attentionCount > 0 ? (
+              <span data-attention="true">{`${String(attentionCount)} need${attentionCount === 1 ? "s" : ""} attention`}</span>
             ) : null}
-          </div>
-        </header>
-        <section className="dining-table-browser" aria-labelledby="dining-table-browser-title">
-          <h3 id="dining-table-browser-title">Find a table</h3>
-          <p>
-            Start a session when a party sits down and give them the table code. Their orders and
-            payments are on the Orders page.
-          </p>
-          <div className="dining-floor-filters" role="search">
-            <label>
-              Table
-              <input
-                placeholder="Search labels"
-                value={search}
-                onChange={(event) => setSearch(event.currentTarget.value)}
-              />
-            </label>
-            <label>
-              Area
-              <select
-                value={areaFilter}
-                onChange={(event) => setAreaFilter(event.currentTarget.value)}
-              >
-                <option>All</option>
-                {areas.map((value) => (
-                  <option key={value}>{value}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Table state
-              <select
-                value={stateFilter}
-                onChange={(event) => setStateFilter(event.currentTarget.value)}
-              >
-                <option>All</option>
-                <option value="Available">Available</option>
-                <option value="Seated">Seated</option>
-                <option value="TemporarilyBlocked">Temporarily unavailable</option>
-              </select>
-            </label>
-          </div>
-        </section>
-        {stale ? <StaleReadNotice stale={stale} /> : null}
-        <div className="dining-floor-layout">
-          <section className="dining-floor-board" aria-label="Dining tables by area">
-            {visibleAreas.length === 0 ? (
-              <p role="status">
-                {tables.length === 0
-                  ? state === "Loading"
-                    ? "Loading tables…"
-                    : message || "No tables have been loaded."
-                  : "No tables match the current filters."}
-              </p>
-            ) : (
-              visibleAreas.map((area) => {
-                const areaTables = visibleTables.filter((table) => table.areaCode === area);
-                return (
-                  <section className="dining-area-lane" key={area} aria-label={`${area} area`}>
-                    <header>
-                      <h3>{area}</h3>
-                      <span>{areaTables.length}</span>
-                    </header>
-                    <div className="dining-table-grid">
-                      {areaTables.map((table) => (
+          </span>
+        ) : null
+      }
+      actions={
+        <>
+          <button disabled={locked} onClick={() => void load()}>
+            Refresh tables
+          </button>
+          {next ? (
+            <button disabled={locked || stale !== null} onClick={() => void load(true)}>
+              Load more tables
+            </button>
+          ) : null}
+        </>
+      }
+    >
+      <section className="dining-table-browser" aria-labelledby="dining-table-browser-title">
+        <h2 id="dining-table-browser-title" className="visually-hidden">
+          Find a table
+        </h2>
+        <div className="dining-floor-filters" role="search" aria-label="Find a table">
+          <label>
+            <span className="visually-hidden">Table</span>
+            <input
+              type="search"
+              placeholder="Search tables"
+              value={search}
+              onChange={(event) => setSearch(event.currentTarget.value)}
+            />
+          </label>
+          <label>
+            <span className="visually-hidden">Area</span>
+            <select
+              value={areaFilter}
+              onChange={(event) => setAreaFilter(event.currentTarget.value)}
+            >
+              <option value="All">All areas</option>
+              {areas.map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span className="visually-hidden">Table state</span>
+            <select
+              value={stateFilter}
+              onChange={(event) => setStateFilter(event.currentTarget.value)}
+            >
+              <option value="All">All tables</option>
+              <option value="Available">Available</option>
+              <option value="Seated">Seated</option>
+              <option value="TemporarilyBlocked">Temporarily unavailable</option>
+            </select>
+          </label>
+        </div>
+      </section>
+      {stale ? <StaleReadNotice stale={stale} /> : null}
+      <div className="dining-floor-layout">
+        <section className="dining-floor-board" aria-label="Dining tables by area">
+          {visibleAreas.length === 0 ? (
+            <p role="status" className="dining-floor-empty" data-loading={state === "Loading"}>
+              {tables.length === 0
+                ? state === "Loading"
+                  ? "Loading tables…"
+                  : message || "No tables have been loaded."
+                : "No tables match the current filters."}
+            </p>
+          ) : (
+            visibleAreas.map((area) => {
+              const areaTables = visibleTables.filter((table) => table.areaCode === area);
+              return (
+                <section className="dining-area-lane" key={area} aria-label={`${area} area`}>
+                  <header>
+                    <h2>{area}</h2>
+                    <span>{`${String(areaTables.length)} table${areaTables.length === 1 ? "" : "s"}`}</span>
+                  </header>
+                  <div className="dining-table-grid">
+                    {areaTables.map((table) => {
+                      const floor = tableFloorStatus(table);
+                      const notices = attention(table);
+                      return (
                         <article
                           className="dining-table-tile"
                           key={table.tableReference}
                           data-selected={selected?.tableReference === table.tableReference}
                           data-state={table.operationalState}
                           data-session={table.currentDiningSessionReference ? "linked" : "none"}
-                          data-floor={tableFloorStatus(table).state}
+                          data-floor={floor.state}
+                          data-attention={notices.length > 0}
                         >
                           <div className="dining-table-tile__identity">
-                            <h4>{table.stableLabel}</h4>
-                            <span>{tableFloorStatus(table).label}</span>
+                            <h3>{table.stableLabel}</h3>
+                            <span>
+                              {floor.label.split(" · ").map((part, index) => (
+                                <span key={index}>
+                                  {index > 0 ? (
+                                    <span className="dining-table-tile__separator"> · </span>
+                                  ) : null}
+                                  {part}
+                                </span>
+                              ))}
+                            </span>
                           </div>
-                          <hr className="dining-table-tile__divider" />
                           <p className="dining-table-tile__capacity">Seats {table.capacity}</p>
-                          {tableCodeNotice(table) ? (
-                            <p className="dining-table-tile__notice">{tableCodeNotice(table)}</p>
-                          ) : null}
-                          {[
-                            paidRoundAcceptanceNotice(table, now),
-                            staffRoundPaymentNotice(table, now, timeZone),
-                            guestRoundPaymentNotice(table, now, timeZone),
-                          ].map((notice, index) =>
-                            notice === null ? null : (
+                          {notices.map((notice, index) =>
+                            notice.tier === null ? (
+                              <p key={index} className="dining-table-tile__notice">
+                                {notice.text}
+                              </p>
+                            ) : (
                               <p
                                 key={index}
                                 className="dining-table-tile__notice order-accept-by"
@@ -642,312 +708,306 @@ export function DiningSessionWorkspace({
                               </p>
                             ),
                           )}
-                          {tableFloorStatus(table).state === "LongOpen" ? (
-                            <p className="dining-table-tile__notice">
-                              {canCloseSessions
-                                ? "Open for a long time — if the guests have left, select the table and close it."
-                                : "Open for a long time — if the guests have left, ask a manager or the owner to close the table."}
-                            </p>
-                          ) : null}
                           <button
+                            className="dining-table-tile__select"
                             disabled={locked || stale !== null}
                             aria-pressed={selected?.tableReference === table.tableReference}
-                            onClick={() => {
-                              setSelected(table);
-                              setConfirmed(false);
-                              setCode(null);
-                              setMessage("");
-                              operation.current = null;
-                              availabilityOperation.current = null;
-                              setBlockReasonCode("");
-                            }}
+                            onClick={() => select(table)}
                           >
-                            Select {table.stableLabel}
+                            <span className="visually-hidden">Select {table.stableLabel}</span>
                           </button>
                         </article>
-                      ))}
-                    </div>
-                  </section>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })
+          )}
+        </section>
+        <aside
+          ref={detailRef}
+          className="dining-session-detail"
+          aria-label="Selected table details"
+          aria-live="polite"
+        >
+          {selected ? (
+            <>
+              <p className="bop-eyebrow">
+                {selected.areaCode} · {tableFloorStatus(selected).label}
+              </p>
+              <h2>Table {selected.stableLabel}</h2>
+              <dl>
+                <div>
+                  <dt>Capacity</dt>
+                  <dd>{selected.capacity}</dd>
+                </div>
+                <div>
+                  <dt>Session</dt>
+                  <dd>
+                    {selected.currentDiningSessionReference
+                      ? selected.elapsedMinutes === null
+                        ? "Linked · elapsed time unavailable"
+                        : `Linked · open ${elapsedText(selected.elapsedMinutes)}`
+                      : "None"}
+                  </dd>
+                </div>
+              </dl>
+              {(() => {
+                // WP-2423: paid rounds waiting for staff to accept them (never refunded by a timer).
+                const notice = paidRoundAcceptanceNotice(selected, now);
+                return notice === null ? null : (
+                  <p className="order-accept-by" data-tier={notice.tier} role="note">
+                    {notice.text}
+                  </p>
                 );
-              })
-            )}
-          </section>
-          <aside
-            className="dining-session-detail"
-            aria-label="Selected table details"
-            aria-live="polite"
-          >
-            {selected ? (
-              <>
-                <p className="bop-eyebrow">
-                  {selected.areaCode} · {tableFloorStatus(selected).label}
-                </p>
-                <h3>Table {selected.stableLabel}</h3>
-                <dl>
-                  <div>
-                    <dt>Capacity</dt>
-                    <dd>{selected.capacity}</dd>
-                  </div>
-                  <div>
-                    <dt>Session</dt>
-                    <dd>
-                      {selected.currentDiningSessionReference
-                        ? selected.elapsedMinutes === null
-                          ? "Linked · elapsed time unavailable"
-                          : `Linked · open ${elapsedText(selected.elapsedMinutes)}`
-                        : "None"}
-                    </dd>
-                  </div>
-                </dl>
-                {(() => {
-                  // WP-2423: paid rounds waiting for staff to accept them (never refunded by a timer).
-                  const notice = paidRoundAcceptanceNotice(selected, now);
-                  return notice === null ? null : (
+              })()}
+              {(() => {
+                // WP-2423 item 5: the same payment warning as the tile, beside the table's actions.
+                const notice = staffRoundPaymentNotice(selected, now, timeZone);
+                return notice === null ? null : (
+                  <p className="order-accept-by" data-tier={notice.tier} role="note">
+                    {notice.text} The table&apos;s rounds and payments are on the Orders page.
+                  </p>
+                );
+              })()}
+              {(() => {
+                // WP-2423 abandoned payment: unpaid guest rounds, and cancelling them now.
+                const notice = guestRoundPaymentNotice(selected, now, timeZone);
+                const hint = guestRoundCancelHint(selected, now, canCancelUnpaidRounds);
+                return notice === null ? null : (
+                  <section aria-label="Unpaid rounds">
                     <p className="order-accept-by" data-tier={notice.tier} role="note">
                       {notice.text}
+                      {hint === null ? null : " " + hint}
                     </p>
-                  );
-                })()}
-                {(() => {
-                  // WP-2423 item 5: the same payment warning as the tile, beside the table's actions.
-                  const notice = staffRoundPaymentNotice(selected, now, timeZone);
-                  return notice === null ? null : (
-                    <p className="order-accept-by" data-tier={notice.tier} role="note">
-                      {notice.text} The table&apos;s rounds and payments are on the Orders page.
-                    </p>
-                  );
-                })()}
-                {(() => {
-                  // WP-2423 abandoned payment: unpaid guest rounds, and cancelling them now.
-                  const notice = guestRoundPaymentNotice(selected, now, timeZone);
-                  const hint = guestRoundCancelHint(selected, now, canCancelUnpaidRounds);
-                  return notice === null ? null : (
-                    <section aria-label="Unpaid rounds">
-                      <p className="order-accept-by" data-tier={notice.tier} role="note">
-                        {notice.text}
-                        {hint === null ? null : " " + hint}
-                      </p>
-                      {canCancelUnpaidRounds
-                        ? selected.guestRoundsAwaitingPayment.map((round) => (
-                            <UnpaidRoundCancelAction
-                              key={round.orderBatchReference}
-                              orderReference={round.orderReference}
-                              orderBatchReference={round.orderBatchReference}
-                              roundNumber={round.roundNumber}
-                              orderLabel={"table " + selected.stableLabel}
-                              csrf={csrf}
-                              paymentUnconfirmed={isPaymentUnconfirmed(round.payBy, now)}
-                              onSettled={() => void loadRef.current(false, true)}
-                            />
-                          ))
-                        : null}
-                    </section>
-                  );
-                })()}
-                {selected.currentDiningSessionReference !== null &&
-                canCloseSessions &&
-                selected.session ? (
-                  // WP-2423 D4: close the table's session here, after checking its rounds.
-                  <TableSessionClose
-                    key={selected.currentDiningSessionReference}
-                    table={selected}
-                    session={selected.session}
-                    csrf={csrf}
-                    timeZone={timeZone}
-                    locked={locked || paused}
-                    onBusy={() => undefined}
-                    onClosed={() => {
-                      void loadRef
-                        .current()
-                        .then(() =>
-                          setMessage(
-                            `Table ${selected.stableLabel} is closed and free for the next party.`,
-                          ),
-                        );
-                    }}
-                    onRefresh={() => void loadRef.current(false, true)}
-                  />
-                ) : selected.currentDiningSessionReference !== null && !canCloseSessions ? (
-                  // WP-2423 (3cd0f8dd M7): closing a table stays with the Owner and Store Manager;
-                  // say who, so staff know whom to tell when the guests have left.
-                  <p role="note" className="dining-close-who">
-                    A manager or the owner closes the table. Tell them when the guests have left.
-                  </p>
-                ) : null}
-                {canTakeOrders && eligible ? (
-                  // WP-2423 Q7 slice 2: a round for guests who can't or won't order on a phone.
-                  <section aria-label="Take an order for this table">
-                    <p>
-                      Order for guests who can&apos;t or won&apos;t use their phone, or enter a
-                      paper order after an outage. It joins this table&apos;s order.
-                    </p>
-                    {selected.qrCodeValidUntil === null ? (
-                      // DEC-STAFF-DINE-IN-ROUND (2026-10-15): a staff round joins the table the
-                      // way a guest does, through the table's code, so it needs one first.
-                      <p role="note">
-                        Orders can&apos;t be taken for table {selected.stableLabel} yet: it has no
-                        table QR code.{" "}
-                        {tableQrHref !== undefined ? (
-                          <>
-                            Create one on <Link to={tableQrHref}>Table QR codes</Link> (it can be
-                            printed later), then take the order.
-                          </>
-                        ) : (
-                          "Ask a manager to create one on the Table QR codes page, then take the order."
-                        )}
-                      </p>
-                    ) : (
-                      <Link
-                        className="dining-take-order"
-                        to={`/operations/order-entry?table=${encodeURIComponent(selected.tableReference)}`}
-                      >
-                        Take order for table {selected.stableLabel}
-                      </Link>
-                    )}
+                    {canCancelUnpaidRounds
+                      ? selected.guestRoundsAwaitingPayment.map((round) => (
+                          <UnpaidRoundCancelAction
+                            key={round.orderBatchReference}
+                            orderReference={round.orderReference}
+                            orderBatchReference={round.orderBatchReference}
+                            roundNumber={round.roundNumber}
+                            orderLabel={"table " + selected.stableLabel}
+                            csrf={csrf}
+                            paymentUnconfirmed={isPaymentUnconfirmed(round.payBy, now)}
+                            onSettled={() => void loadRef.current(false, true)}
+                          />
+                        ))
+                      : null}
                   </section>
-                ) : null}
-                {selected.currentDiningSessionReference === null &&
-                selected.qrCodeValidUntil === null ? (
-                  // WP-2423 item 7: guests join a session by scanning the table's QR code and
-                  // then entering its code, so a session for a table without one can't be used.
-                  <section aria-label="Dining session action">
+                );
+              })()}
+              {selected.currentDiningSessionReference !== null &&
+              canCloseSessions &&
+              selected.session ? (
+                // WP-2423 D4: close the table's session here, after checking its rounds.
+                <TableSessionClose
+                  key={selected.currentDiningSessionReference}
+                  table={selected}
+                  session={selected.session}
+                  csrf={csrf}
+                  timeZone={timeZone}
+                  locked={locked || paused}
+                  onBusy={() => undefined}
+                  onClosed={() => {
+                    void loadRef
+                      .current()
+                      .then(() =>
+                        setMessage(
+                          `Table ${selected.stableLabel} is closed and free for the next party.`,
+                        ),
+                      );
+                  }}
+                  onRefresh={() => void loadRef.current(false, true)}
+                />
+              ) : selected.currentDiningSessionReference !== null && !canCloseSessions ? (
+                // WP-2423 (3cd0f8dd M7): closing a table stays with the Owner and Store Manager;
+                // say who, so staff know whom to tell when the guests have left.
+                <p role="note" className="dining-close-who">
+                  A manager or the owner closes the table. Tell them when the guests have left.
+                </p>
+              ) : null}
+              {canTakeOrders && eligible ? (
+                // WP-2423 Q7 slice 2: a round for guests who can't or won't order on a phone.
+                <section aria-label="Take an order for this table">
+                  <p>
+                    Order for guests who can&apos;t or won&apos;t use their phone, or enter a paper
+                    order after an outage. It joins this table&apos;s order.
+                  </p>
+                  {selected.qrCodeValidUntil === null ? (
+                    // DEC-STAFF-DINE-IN-ROUND (2026-10-15): a staff round joins the table the
+                    // way a guest does, through the table's code, so it needs one first.
                     <p role="note">
-                      A dining session can&apos;t be started for table {selected.stableLabel} yet:
-                      it has no table QR code, so guests can&apos;t join.{" "}
+                      Orders can&apos;t be taken for table {selected.stableLabel} yet: it has no
+                      table QR code.{" "}
                       {tableQrHref !== undefined ? (
                         <>
-                          Create one on <Link to={tableQrHref}>Table QR codes</Link> first.
+                          Create one on <Link to={tableQrHref}>Table QR codes</Link> (it can be
+                          printed later), then take the order.
                         </>
                       ) : (
-                        "Ask a manager to create one on the Table QR codes page."
+                        "Ask a manager to create one on the Table QR codes page, then take the order."
                       )}
                     </p>
-                  </section>
-                ) : (
-                  <section aria-label="Dining session action">
-                    <p>
-                      {selected.currentDiningSessionReference
-                        ? "Replacing the entry code invalidates the previous code. Existing participants remain joined."
-                        : "Start a new dining session for this party."}
-                    </p>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={confirmed}
-                        disabled={locked || paused}
-                        onChange={(event) => setConfirmed(event.target.checked)}
-                      />
-                      I confirm the selected table and session action
-                    </label>
-                    <button
-                      disabled={
-                        paused ||
-                        hostLocked ||
-                        state === "Loading" ||
-                        state === "Submitting" ||
-                        (state === "Unknown" && unknownAction !== "Session") ||
-                        (state !== "Unknown" && (!confirmed || !eligible))
-                      }
-                      onClick={() => void execute()}
+                  ) : (
+                    <Link
+                      className="dining-take-order"
+                      to={`/operations/order-entry?table=${encodeURIComponent(selected.tableReference)}`}
                     >
-                      {state === "Unknown" && unknownAction === "Session"
-                        ? "Retry same session request"
-                        : state === "Submitting"
-                          ? "Submitting…"
-                          : selected.currentDiningSessionReference
-                            ? "Replace entry code"
-                            : "Start dining session"}
-                    </button>
-                    {selected.currentDiningSessionReference && canTransferHost ? (
-                      <DiningHostTransferAction
-                        key={selected.currentDiningSessionReference}
-                        diningSessionReference={selected.currentDiningSessionReference}
-                        csrf={csrf}
-                        disabled={state !== "Idle" || paused}
-                        onLocked={setHostLocked}
-                      />
-                    ) : null}
-                  </section>
-                )}
-                {canOperateTables ? (
-                  <section aria-label="Table availability action">
-                    <p>Mark a table unavailable while it can&apos;t be seated.</p>
-                    {selected.operationalState === "Available" ? (
+                      Take order for table {selected.stableLabel}
+                    </Link>
+                  )}
+                </section>
+              ) : null}
+              {selected.currentDiningSessionReference === null &&
+              selected.qrCodeValidUntil === null ? (
+                // WP-2423 item 7: guests join a session by scanning the table's QR code and
+                // then entering its code, so a session for a table without one can't be used.
+                <section aria-label="Dining session action">
+                  <p role="note">
+                    A dining session can&apos;t be started for table {selected.stableLabel} yet: it
+                    has no table QR code, so guests can&apos;t join.{" "}
+                    {tableQrHref !== undefined ? (
                       <>
-                        <label className="dining-table-reason">
-                          Reason
-                          <select
-                            value={blockReasonCode}
-                            aria-describedby="dining-table-reason-help"
-                            disabled={locked || paused}
-                            onChange={(event) => setBlockReasonCode(event.target.value)}
-                          >
-                            <option value="">Choose a reason</option>
-                            {tableBlockReasons.map(([code, label]) => (
-                              <option key={code} value={code}>
-                                {label}
-                              </option>
-                            ))}
-                          </select>
-                          <small id="dining-table-reason-help">
-                            Required. Guests can&apos;t be seated here until you mark it available.
-                          </small>
-                        </label>
-                        <button
-                          disabled={
-                            paused ||
-                            hostLocked ||
-                            state === "Loading" ||
-                            state === "Submitting" ||
-                            (state === "Unknown" && unknownAction !== "Availability") ||
-                            (state !== "Unknown" &&
-                              !/^[A-Z][A-Z0-9_-]{0,63}$/.test(blockReasonCode))
-                          }
-                          onClick={() => void executeAvailability("SetBlock")}
-                        >
-                          {state === "Unknown" && unknownAction === "Availability"
-                            ? "Retry same availability request"
-                            : state === "Submitting"
-                              ? "Updating availability…"
-                              : "Mark table unavailable"}
-                        </button>
+                        Create one on <Link to={tableQrHref}>Table QR codes</Link> first.
                       </>
                     ) : (
+                      "Ask a manager to create one on the Table QR codes page."
+                    )}
+                  </p>
+                </section>
+              ) : (
+                <section aria-label="Dining session action">
+                  <p>
+                    {selected.currentDiningSessionReference
+                      ? "Replacing the entry code invalidates the previous code. Existing participants remain joined."
+                      : "Start a new dining session for this party."}
+                  </p>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={confirmed}
+                      disabled={locked || paused}
+                      onChange={(event) => setConfirmed(event.target.checked)}
+                    />
+                    I confirm the selected table and session action
+                  </label>
+                  <button
+                    disabled={
+                      paused ||
+                      hostLocked ||
+                      state === "Loading" ||
+                      state === "Submitting" ||
+                      (state === "Unknown" && unknownAction !== "Session") ||
+                      (state !== "Unknown" && (!confirmed || !eligible))
+                    }
+                    onClick={() => void execute()}
+                  >
+                    {state === "Unknown" && unknownAction === "Session"
+                      ? "Retry same session request"
+                      : state === "Submitting"
+                        ? "Submitting…"
+                        : selected.currentDiningSessionReference
+                          ? "Replace entry code"
+                          : "Start dining session"}
+                  </button>
+                  {selected.currentDiningSessionReference && canTransferHost ? (
+                    <DiningHostTransferAction
+                      key={selected.currentDiningSessionReference}
+                      diningSessionReference={selected.currentDiningSessionReference}
+                      csrf={csrf}
+                      disabled={state !== "Idle" || paused}
+                      onLocked={setHostLocked}
+                    />
+                  ) : null}
+                </section>
+              )}
+              {canOperateTables ? (
+                <section aria-label="Table availability action">
+                  <p>Mark a table unavailable while it can&apos;t be seated.</p>
+                  {selected.operationalState === "Available" ? (
+                    <>
+                      <label className="dining-table-reason">
+                        Reason
+                        <select
+                          value={blockReasonCode}
+                          aria-describedby="dining-table-reason-help"
+                          disabled={locked || paused}
+                          onChange={(event) => setBlockReasonCode(event.target.value)}
+                        >
+                          <option value="">Choose a reason</option>
+                          {tableBlockReasons.map(([code, label]) => (
+                            <option key={code} value={code}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                        <small id="dining-table-reason-help">
+                          Required. Guests can&apos;t be seated here until you mark it available.
+                        </small>
+                      </label>
                       <button
                         disabled={
                           paused ||
                           hostLocked ||
                           state === "Loading" ||
                           state === "Submitting" ||
-                          (state === "Unknown" && unknownAction !== "Availability")
+                          (state === "Unknown" && unknownAction !== "Availability") ||
+                          (state !== "Unknown" && !/^[A-Z][A-Z0-9_-]{0,63}$/.test(blockReasonCode))
                         }
-                        onClick={() => void executeAvailability("ClearBlock")}
+                        onClick={() => void executeAvailability("SetBlock")}
                       >
                         {state === "Unknown" && unknownAction === "Availability"
                           ? "Retry same availability request"
                           : state === "Submitting"
                             ? "Updating availability…"
-                            : "Mark table available"}
+                            : "Mark table unavailable"}
                       </button>
-                    )}
-                  </section>
-                ) : null}
-                {code ? (
-                  <div className="dining-entry-code">
-                    <p>
-                      Entry code: <strong>{code}</strong>
-                    </p>
-                    <button onClick={() => setCode(null)}>Hide entry code</button>
-                  </div>
-                ) : null}
-              </>
-            ) : (
+                    </>
+                  ) : (
+                    <button
+                      disabled={
+                        paused ||
+                        hostLocked ||
+                        state === "Loading" ||
+                        state === "Submitting" ||
+                        (state === "Unknown" && unknownAction !== "Availability")
+                      }
+                      onClick={() => void executeAvailability("ClearBlock")}
+                    >
+                      {state === "Unknown" && unknownAction === "Availability"
+                        ? "Retry same availability request"
+                        : state === "Submitting"
+                          ? "Updating availability…"
+                          : "Mark table available"}
+                    </button>
+                  )}
+                </section>
+              ) : null}
+              {code ? (
+                <div className="dining-entry-code">
+                  <p>
+                    Entry code: <strong>{code}</strong>
+                  </p>
+                  <button onClick={() => setCode(null)}>Hide entry code</button>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="dining-session-detail__empty">
               <p>Select a table to review its current state and available session action.</p>
-            )}
-          </aside>
-        </div>
-        <p role="status">{state === "Loading" ? "Loading tables…" : message}</p>
+              <p>
+                Start a session when a party sits down and give them the table code. Their orders
+                and payments are on the Orders page.
+              </p>
+            </div>
+          )}
+        </aside>
       </div>
-    </AppFrame>
+      <p role="status" className="dining-floor-message">
+        {state === "Loading" ? "Loading tables…" : message}
+      </p>
+    </WorkspacePage>
   );
 }

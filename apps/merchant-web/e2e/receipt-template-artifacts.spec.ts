@@ -8,6 +8,7 @@ import {
   type DigitalReceiptTemplateArtifactVersion,
 } from "../../../packages/rms/printing-device/src/contracts/digital-receipt-template-artifact.js";
 import { canonicalPublicationValue } from "../src/product-publication-command-client-v2.js";
+import { followWorkspaceLink } from "./workspace-navigation";
 // Production App/client and real IndexedDB. HTTP facts are synthetic; no native
 // IAM, PostgreSQL, template publication or professional review is claimed.
 const id = (n: number) => `01902501-0000-7000-8000-${n.toString(16).padStart(12, "0")}`,
@@ -239,16 +240,8 @@ async function install(page: Page) {
 }
 async function open(page: Page) {
   await page.goto("/app");
-  // On narrow screens the workspace navigation sits behind the Menu disclosure (WP-2423 M1).
-  const workspaceNav = page.getByRole("navigation", { name: "Workspace" });
-  await workspaceNav.waitFor();
-  const compactMenu = workspaceNav.locator(".workspace-sidebar__compact > summary");
-  if (await compactMenu.isVisible()) await compactMenu.click();
-  await page
-    .getByRole("link", { name: "Store setup", exact: true })
-    .filter({ visible: true })
-    .first()
-    .click();
+  // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
+  await followWorkspaceLink(page, "Store setup");
   await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "5. Tax and payment", exact: true }).click();
   await expect(

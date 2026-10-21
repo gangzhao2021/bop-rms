@@ -403,3 +403,48 @@ it("WP-2423 Q26: long waits read in hours or days and earlier days' orders are s
   expect(html).toContain("Ready for 5 days");
   expect(html.indexOf("Ready for 20 min")).toBeLessThan(html.indexOf("From earlier days"));
 });
+it("WP-2423 UI refresh: the card lists what is in the bag and the page counts what waits", () => {
+  const fixture = pickupQueueFixture();
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <PickupQueueScreen
+        view={parsePickupQueueView({
+          ...fixture,
+          items: fixture.items.map((item) => ({
+            ...item,
+            execution: {
+              aggregateVersion: "3",
+              publicOrderReference: null,
+              proof: { kind: "HumanCode", generation: 1, expiresAt: "2026-08-12T16:00:00.000Z" },
+              items: [
+                {
+                  fulfillmentItemReference: "01900000-0000-7000-8000-000000000003",
+                  orderedQuantity: 2,
+                  readyQuantity: 2,
+                  handedOverQuantity: 0,
+                  name: "Latte",
+                  options: [{ name: "Oat milk", quantity: 1 }],
+                },
+              ],
+            },
+          })),
+        })}
+      />
+    </MemoryRouter>,
+  );
+  expect(html).toContain('aria-label="Items in order ORD-1001"');
+  expect(html).toContain("2 ×</span> Latte (Oat milk)");
+  expect(html).toContain("1 order waiting");
+  // One page only: no page buttons to press.
+  expect(html).not.toContain("Next page");
+});
+it("WP-2423 UI refresh: an empty queue and a filtered-out page read differently", () => {
+  const empty = renderToStaticMarkup(
+    <MemoryRouter>
+      <PickupQueueScreen view={parsePickupQueueView({ ...pickupQueueFixture(), items: [] })} />
+    </MemoryRouter>,
+  );
+  expect(empty).toContain("No pickups waiting");
+  expect(empty).not.toContain("No matching pickups");
+  expect(empty).not.toContain("order waiting");
+});

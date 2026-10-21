@@ -17,6 +17,8 @@ import {
   kitchenSearchAwaitingText,
   KitchenWorkItemScreen,
   kitchenAgeTier,
+  kitchenTicketAge,
+  kitchenTicketTierText,
   kitchenLateMinutes,
   kitchenWarningMinutes,
   newQueuedReferences,
@@ -1337,4 +1339,26 @@ it("v15 2026-10-16: a board with only finished work and no filter set says nothi
     </MemoryRouter>,
   );
   expect(empty).toContain("Nothing to make right now.");
+});
+it("times a ticket by its longest-waiting unfinished dish and says its tier in words", () => {
+  const [item] = parseKitchenBoardView(kitchenBoardFixture()).items;
+  if (!item) throw new Error("fixture item missing");
+  const newer = { ...item, workItemReference: "018f0f58-767a-7f3b-a1d0-000000000499" };
+  const older = { ...item, createdAt: "2026-08-12T14:50:00.000Z" };
+  const done = { ...older, status: "Cancelled" as const };
+  const at = "2026-08-12T15:12:00.000Z";
+  expect(kitchenTicketAge([newer, older], at)).toEqual({ minutes: 22, tier: "late" });
+  // Finished dishes do not age the ticket; a ticket with nothing open is done.
+  expect(kitchenTicketAge([newer, done], at)).toEqual({ minutes: 12, tier: "warning" });
+  expect(kitchenTicketAge([done], at)).toEqual({ minutes: null, tier: "done" });
+  expect(kitchenTicketTierText("late")).toBe("Overdue");
+  expect(kitchenTicketTierText("warning")).toBe("Running long");
+  expect(kitchenTicketTierText("ok")).toBeNull();
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <KitchenBoardScreen view={parseKitchenBoardView(kitchenBoardFixture())} />
+    </MemoryRouter>,
+  );
+  expect(html).toContain('class="kitchen-ticket__timer" data-age="warning">12 min</span>');
+  expect(html).toContain('<span class="kitchen-ticket__tier">Running long</span>');
 });

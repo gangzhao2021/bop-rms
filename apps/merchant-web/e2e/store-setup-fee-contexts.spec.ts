@@ -13,6 +13,7 @@ import {
 } from "../../../packages/rms/store/src/contracts/store-setup-operation.js";
 import { parseTaxConfigClassificationChoices } from "../../api/src/merchant-tax-config-workbench-values.js";
 import { canonicalPublicationValue } from "../src/product-publication-command-client-v2.js";
+import { followWorkspaceLink } from "./workspace-navigation";
 // Production-built React, actual browser client/IndexedDB and public owning
 // parsers. Session, IAM and HTTP persistence below are controlled synthetic
 // fixtures; these cases do not prove PostgreSQL or actual permission authority.
@@ -350,16 +351,8 @@ async function install(page: Page) {
 }
 async function open(page: Page) {
   await page.goto("/app");
-  // On narrow screens the workspace navigation sits behind the Menu disclosure (WP-2423 M1).
-  const workspaceNav = page.getByRole("navigation", { name: "Workspace" });
-  await workspaceNav.waitFor();
-  const compactMenu = workspaceNav.locator(".workspace-sidebar__compact > summary");
-  if (await compactMenu.isVisible()) await compactMenu.click();
-  await page
-    .getByRole("link", { name: "Store setup", exact: true })
-    .filter({ visible: true })
-    .first()
-    .click();
+  // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
+  await followWorkspaceLink(page, "Store setup");
   await expect(page).toHaveURL(new RegExp(`/app/organization/stores/${id(3)}/setup$`));
   await expect(page.getByRole("button", { name: "Save setup draft", exact: true })).toBeEnabled();
 }

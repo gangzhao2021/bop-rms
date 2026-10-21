@@ -267,15 +267,22 @@ export function KitchenRemakeLane({
             className="kitchen-work-item kitchen-work-item--remake"
             data-status={rework.status}
           >
-            <p className="kitchen-remake-badge">{kitchenReworkBadge(rework.reasonCode)}</p>
-            <h4 className="kitchen-order-group__label">
-              {orderText(rework.orderLabel)}
-              {fromEarlierKitchenDay(rework, today) && rework.businessDate
-                ? ` · ${earlierDayText(rework.businessDate)}`
-                : ""}
-            </h4>
+            <header className="kitchen-ticket__header">
+              <h4 className="kitchen-order-group__label">
+                {orderText(rework.orderLabel)}
+                {fromEarlierKitchenDay(rework, today) && rework.businessDate
+                  ? ` · ${earlierDayText(rework.businessDate)}`
+                  : ""}
+              </h4>
+              <p className="kitchen-remake-badge">{kitchenReworkBadge(rework.reasonCode)}</p>
+            </header>
             <div className="kitchen-work-item__summary">
-              <h3>{rework.displayName}</h3>
+              <h3>
+                <span className="kitchen-work-item__count" aria-hidden="true">
+                  {rework.quantity}×
+                </span>
+                {rework.displayName}
+              </h3>
             </div>
             <div className="kitchen-work-item__state">
               <strong data-status={rework.status}>

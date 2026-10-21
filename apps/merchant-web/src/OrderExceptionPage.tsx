@@ -38,6 +38,7 @@ export {
   type OrderExceptionView,
 } from "./order-exception-view.js";
 import {
+  exceptionOpenForText,
   isExceptionOverdue,
   isRefundedAwaitingCheck,
   parseOrderExceptionView,
@@ -210,11 +211,14 @@ export function OrderExceptionScreen({
           {view.items.map((item) => (
             <article
               className="store-card order-exception__card"
+              data-status={item.status}
+              data-overdue={isExceptionOverdue(item, view.projectedAt) ? "true" : undefined}
               hidden={!visibleReferences.has(item.exceptionReference)}
               key={item.exceptionReference}
             >
               <OrderExceptionCard
                 item={item}
+                openFor={exceptionOpenForText(item, view.projectedAt)}
                 overdue={isExceptionOverdue(item, view.projectedAt)}
                 csrf={csrf}
                 readOnly={readOnly}
@@ -259,11 +263,14 @@ const settlementLink = (businessDate: string | null) =>
 /** WP-2423: one exception card, worded for what the exception is about. */
 function OrderExceptionCard({
   item,
+  openFor,
   overdue,
   csrf,
   readOnly,
 }: {
   readonly item: OrderExceptionItem;
+  /** WP-2423 UI refresh: how long an unresolved case has been open (null once resolved). */
+  readonly openFor: string | null;
   /** WP-2423: past its due time and still open (same rule as the filter and Home). */
   readonly overdue: boolean;
   readonly csrf: string | undefined;
@@ -290,9 +297,12 @@ function OrderExceptionCard({
         )}
         <h3>{title}</h3>
       </div>
-      <strong className="order-exception__status" data-status={item.status}>
-        {item.status}
-      </strong>
+      <div className="order-exception__state">
+        <strong className="order-exception__status" data-status={item.status}>
+          {item.status}
+        </strong>
+        {openFor === null ? null : <span className="order-exception__open-for">{openFor}</span>}
+      </div>
     </header>
   );
   if (payment && detail?.type === "Unavailable") {

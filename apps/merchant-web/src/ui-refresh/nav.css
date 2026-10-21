@@ -1,0 +1,314 @@
+/* WP-2423 merchant UI refresh (2026-10-21): workspace navigation. Section 88 groups (Home,
+   Operations, Commerce, Supply, ...), collapsible, the current page and its group marked; a
+   compact sidebar on tablets and a full-height drawer on phones. */
+
+.workspace-layout {
+  grid-template-columns: 15rem minmax(0, 1fr);
+}
+.workspace-sidebar {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px 24px;
+  scrollbar-width: thin;
+  /* Pinned below the refund-deadline warning while it is shown (it publishes its height). */
+  top: var(--bop-pinned-top, 0px);
+  height: calc(100vh - var(--bop-pinned-top, 0px));
+}
+.workspace-sidebar__identity {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0 8px 16px;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.workspace-sidebar__identity .workspace-sidebar__brand,
+.workspace-sidebar__identity .workspace-sidebar__store {
+  margin: 0;
+}
+.workspace-sidebar__identity .workspace-sidebar__store {
+  color: var(--bop-color-text-default);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.workspace-nav__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-nav__list[hidden] {
+  display: none;
+}
+.workspace-sidebar .workspace-nav__list a {
+  min-height: 44px;
+  padding: 6px 12px;
+  font-size: 14px;
+  line-height: 1.3;
+}
+.workspace-sidebar .workspace-nav__group .workspace-nav__list a {
+  padding-inline-start: 20px;
+}
+.workspace-sidebar .workspace-nav__list a[aria-current="page"] {
+  font-weight: 600;
+}
+
+.workspace-nav__group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.workspace-nav__group-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: transparent;
+  color: var(--bop-color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: start;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.workspace-nav__group-toggle:hover {
+  background: var(--bop-color-surface-raised);
+  color: var(--bop-color-text-default);
+}
+/* A chevron drawn with borders: no icon font, follows the text colour. */
+.workspace-nav__group-toggle::after {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-inline-start: auto;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform var(--bop-motion-fast) ease;
+  content: "";
+}
+.workspace-nav__group-toggle[aria-expanded="false"]::after {
+  transform: rotate(-45deg);
+}
+.workspace-nav__group[data-current="true"] > .workspace-nav__group-toggle {
+  color: var(--bop-color-text-default);
+}
+/* The page you are on, named under its closed group so it is never lost. */
+.workspace-nav__group-current {
+  overflow: hidden;
+  color: var(--bop-color-text-default);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.workspace-sidebar .workspace-sidebar__footer {
+  margin-top: auto;
+  padding-top: 16px;
+}
+.workspace-sidebar .workspace-sidebar__footer .staff-session__switch button {
+  min-height: 44px;
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-nav__group-toggle::after {
+    transition: none;
+  }
+}
+
+/* Tablet (iPad landscape 1024 and portrait 768+): keep the sidebar, narrower and tighter. */
+@media (max-width: 64rem) and (min-width: 48.0625rem) {
+  .workspace-layout {
+    grid-template-columns: 12.5rem minmax(0, 1fr);
+  }
+  .workspace-sidebar {
+    position: sticky;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    height: calc(100vh - var(--bop-pinned-top, 0px));
+    padding: 12px 8px 16px;
+    border-right: 1px solid var(--bop-color-border-default);
+    border-bottom: 0;
+  }
+  .workspace-sidebar__identity {
+    padding: 0 8px 12px;
+  }
+  .workspace-sidebar__links {
+    display: block;
+  }
+  .workspace-sidebar__compact {
+    display: none;
+  }
+  .workspace-sidebar .workspace-nav__list a {
+    padding: 6px 10px;
+    font-size: 14px;
+  }
+  .workspace-sidebar .workspace-nav__group .workspace-nav__list a {
+    padding-inline-start: 16px;
+  }
+  .workspace-nav__group-toggle {
+    padding-inline: 10px;
+  }
+  .workspace-sidebar__footer {
+    display: block;
+  }
+}
+
+/* Phone: a bar with the Store and the page you are on; the Menu opens a full-height drawer. */
+@media (max-width: 48rem) {
+  /* One column: the bar above the page, never a sidebar beside it. */
+  .workspace-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* Not sticky: the refund-deadline warning owns the top edge while it is shown. */
+  .workspace-sidebar {
+    position: static;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    height: auto;
+    padding: 4px 8px 4px 16px;
+  }
+  .workspace-sidebar__identity {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .workspace-sidebar__identity .workspace-sidebar__store {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .workspace-sidebar__compact {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .workspace-sidebar__compact > summary {
+    display: flex;
+    min-height: 44px;
+    max-width: 14rem;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    border: 1px solid var(--bop-color-border-default);
+    border-radius: var(--bop-radius-control);
+    overflow: hidden;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    list-style: none;
+  }
+  .workspace-sidebar__compact > summary::-webkit-details-marker {
+    display: none;
+  }
+  .workspace-sidebar__compact[open] > .workspace-drawer {
+    position: fixed;
+    inset: 0;
+    /* Above the sticky refund-deadline warning while open; it is back the moment the menu closes. */
+    z-index: 80;
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .workspace-drawer__panel {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 1;
+    display: flex;
+    width: min(20rem, 86vw);
+    flex-direction: column;
+    gap: 0;
+    overflow-y: auto;
+    padding: 8px 12px 24px;
+    background: var(--bop-color-surface-default);
+    box-shadow: 0 0 0 1px var(--bop-color-border-default);
+  }
+  .workspace-drawer__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgb(0 0 0 / 32%);
+  }
+  .workspace-drawer__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0 0 8px;
+    padding: 0 0 8px 8px;
+    border-bottom: 1px solid var(--bop-color-border-default);
+  }
+  .workspace-drawer__store {
+    margin: 0;
+    overflow: hidden;
+    font-size: 14px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .workspace-drawer__head button {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--bop-color-border-default);
+    border-radius: var(--bop-radius-control);
+    background: var(--bop-color-surface-default);
+    color: var(--bop-color-text-default);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .workspace-drawer__panel .workspace-nav__list a {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    padding: 6px 12px;
+    border-radius: var(--bop-radius-control);
+    color: var(--bop-color-text-default);
+    font-size: 15px;
+    text-decoration: none;
+  }
+  .workspace-drawer__panel .workspace-nav__group .workspace-nav__list a {
+    padding-inline-start: 20px;
+  }
+  /* The page you are on: same black bar as the sidebar, its label in white. */
+  .workspace-drawer__panel .workspace-nav__list a[aria-current="page"] {
+    color: var(--bop-color-on-primary);
+    background: var(--bop-color-brand-primary);
+    font-weight: 600;
+  }
+  .workspace-drawer__panel .staff-session__switch {
+    margin-top: 16px;
+  }
+  .workspace-layout[data-menu-open="true"] {
+    overflow: hidden;
+  }
+}
+@media (max-width: 22rem) {
+  .workspace-sidebar__identity .workspace-sidebar__store {
+    display: none;
+  }
+}

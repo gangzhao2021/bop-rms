@@ -21,6 +21,7 @@ import {
 } from "./stale-read.js";
 import {
   parsePickupQueueView,
+  pickupItemLabel,
   PickupClientError,
   unavailablePickupClient,
   type PickupClient,
@@ -148,16 +149,23 @@ function PickupCard({
   const orderLabel =
     item.publicOrderNumber ?? item.execution?.publicOrderReference ?? "number unavailable";
   const recorded = onHandedOver ? () => onHandedOver(orderLabel) : undefined;
+  const tier = waitTier(wait, completed);
+  // What is in the bag, as ordered, for a quick match at the counter.
+  const contents = item.execution?.items ?? [];
   return (
-    <article className="store-card pickup-queue__card" hidden={hidden}>
+    <article
+      className="store-card pickup-queue__card"
+      hidden={hidden}
+      data-wait={tier}
+      data-completed={completed}
+    >
       <header>
         <div>
-          <p className="bop-eyebrow pickup-queue__phase" data-wait={waitTier(wait, completed)}>
+          <p className="bop-eyebrow pickup-queue__phase" data-wait={tier}>
             {completed ? "Completed" : `Ready for ${pickupWaitText(wait)}`}
           </p>
-          <h3>
-            Order{" "}
-            {item.publicOrderNumber ?? item.execution?.publicOrderReference ?? "number unavailable"}
+          <h3 className="pickup-queue__number">
+            Order <span className="pickup-queue__number-value">{orderLabel}</span>
           </h3>
           {earlier && item.businessDate ? (
             <p className="pickup-queue__day">From {businessDateText(item.businessDate)}</p>
@@ -178,6 +186,16 @@ function PickupCard({
           {item.remakeQuantity === 1 ? "1 item" : `${item.remakeQuantity} items`} — wait for it
           before handing this order over.
         </p>
+      ) : null}
+      {contents.length > 0 ? (
+        <ul className="pickup-queue__items" aria-label={`Items in order ${orderLabel}`}>
+          {contents.map((line, index) => (
+            <li key={line.fulfillmentItemReference}>
+              <span className="pickup-queue__item-quantity">{line.orderedQuantity} ×</span>{" "}
+              {pickupItemLabel(line, index)}
+            </li>
+          ))}
+        </ul>
       ) : null}
       <dl>
         <div>
@@ -358,6 +376,8 @@ export function PickupQueueScreen({
   const today = useStoreBusinessDay()?.businessDate ?? null;
   const earlierItems = view.items.filter((item) => fromEarlierDay(item, today));
   const todayItems = view.items.filter((item) => !fromEarlierDay(item, today));
+  const completedCount = view.items.filter((item) => item.phase === "Completed").length;
+  const waitingCount = view.items.length - completedCount;
   return (
     <WorkspacePage
       className="pickup-queue"
@@ -464,14 +484,13 @@ export function PickupQueueScreen({
             Clear filters
           </button>
         </div>
-        <nav className="pickup-pagination" aria-label="Pickup pages">
-          <button disabled={!onPrevious} onClick={onPrevious}>
-            Previous page
-          </button>
-          <button disabled={!onNext} onClick={onNext}>
-            Next page
-          </button>
-        </nav>
+        {view.items.length > 0 ? (
+          <p className="pickup-queue__summary">
+            {waitingCount === 1 ? "1 order waiting" : `${waitingCount} orders waiting`}
+            {completedCount > 0 ? ` · ${completedCount} handed over` : ""}
+            {onNext || onPrevious ? " on this page" : ""}
+          </p>
+        ) : null}
         {todayItems.length ? (
           <div className="store-card-grid pickup-queue__cards">
             {todayItems.map((item) => (
@@ -523,13 +542,30 @@ export function PickupQueueScreen({
           </section>
         ) : null}
         {items.length === 0 ? (
-          <StatePanel heading="No pickups waiting" status>
-            <p>
-              {view.items.length === 0
-                ? "Nothing is waiting for pickup right now."
-                : "No pickup on this page matches the filters."}
-            </p>
-          </StatePanel>
+          <div className="pickup-queue__empty" data-filtered={view.items.length > 0}>
+            <StatePanel
+              heading={view.items.length === 0 ? "No pickups waiting" : "No matching pickups"}
+              status
+            >
+              <p>
+                {view.items.length === 0
+                  ? includeCompleted
+                    ? "Nothing is waiting or handed over on this page. Ready orders show here as soon as the kitchen marks them ready."
+                    : "Nothing is waiting for pickup right now. Ready orders show here as soon as the kitchen marks them ready."
+                  : "No pickup on this page matches the filters. Clear the filters to see every pickup."}
+              </p>
+            </StatePanel>
+          </div>
+        ) : null}
+        {onPrevious || onNext ? (
+          <nav className="pickup-pagination" aria-label="Pickup pages">
+            <button disabled={!onPrevious} onClick={onPrevious}>
+              Previous page
+            </button>
+            <button disabled={!onNext} onClick={onNext}>
+              Next page
+            </button>
+          </nav>
         ) : null}
       </>
     </WorkspacePage>

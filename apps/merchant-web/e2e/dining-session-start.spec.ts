@@ -170,23 +170,20 @@ test("@production staff starts a table and recovers a lost entry code without du
     });
   });
   await page.goto("/operations/dining");
-  await expect(page.getByRole("heading", { name: "OPERATIONS", level: 1 })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Tables", level: 2 })).toBeVisible();
-  expect(
-    await page
-      .locator(".bop-shell__header")
-      .evaluate((header) => getComputedStyle(header).backgroundColor),
-  ).toBe("rgb(23, 23, 23)");
+  // UI refresh 2026-10-21: Tables sits in the shared workspace frame like every back-office page.
+  await expect(page.getByRole("heading", { name: "Tables", level: 1 })).toBeVisible();
+  await expect(page.locator(".bop-shell__header")).toHaveCount(0);
   // WP-2423 Q8: the board is in the navigation; staff never see internal screen codes.
-  const primary = page.getByRole("navigation", { name: "Primary" });
-  await expect(primary.getByRole("link")).toHaveCount(2);
-  await expect(primary.getByRole("link", { name: "Tables" })).toHaveAttribute(
-    "aria-current",
-    "page",
-  );
+  const workspace = page.getByRole("navigation", { name: "Workspace" });
+  await expect(
+    workspace
+      .locator(".workspace-sidebar__links")
+      .getByRole("link", { name: "Tables", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
   await expect(page.getByText(/DIN-FLOOR-BOARD|TemporarilyBlocked|projection/u)).toHaveCount(0);
   await expect(page.locator('section[aria-label="MAIN area"]')).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Find a table" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Find a table" })).toHaveCount(1);
+  await expect(page.getByRole("search", { name: "Find a table" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Select T1", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Select T2", exact: true })).toBeVisible();
   const elapsedTile = page
@@ -275,44 +272,58 @@ test("@production staff starts a table and recovers a lost entry code without du
   await expect(page.getByRole("complementary", { name: "Selected table details" })).toContainText(
     "Table T1",
   );
-  await page.locator(".dining-floor-heading h2").click();
+  await page.getByRole("heading", { name: "Tables", level: 1 }).click();
+  // UI refresh 2026-10-21 (POS floor grid): compact square-ish tiles; the selected table's details
+  // sit to the right of the floor on desktop and under it on a phone.
   const tableTile = page
     .locator(".dining-table-tile")
     .filter({ has: page.getByRole("button", { name: "Select T1", exact: true }) });
   const desktopTile = await tableTile.boundingBox();
-  // Tile columns are rem-based; at the 15px root font a tile is about 342px wide.
-  expect(desktopTile?.width).toBeGreaterThanOrEqual(330);
-  expect(desktopTile?.width).toBeLessThanOrEqual(380);
+  expect(desktopTile?.width).toBeGreaterThanOrEqual(130);
+  expect(desktopTile?.width).toBeLessThanOrEqual(260);
+  // The whole tile selects the table: the button covers everything inside the tile's border.
+  const selectBox = await tableTile
+    .getByRole("button", { name: "Select T1", exact: true })
+    .boundingBox();
+  const tileInner = await tableTile.evaluate((tile) => ({
+    width: tile.clientWidth,
+    height: tile.clientHeight,
+  }));
+  expect(Math.abs((selectBox?.width ?? 0) - tileInner.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs((selectBox?.height ?? 0) - tileInner.height)).toBeLessThanOrEqual(1);
   const [desktopBoard, desktopDetails] = await Promise.all([
     page.locator(".dining-floor-board").boundingBox(),
     page.getByRole("complementary", { name: "Selected table details" }).boundingBox(),
   ]);
   if (!desktopBoard || !desktopDetails)
     throw new Error("Desktop floor and selected detail must be visible");
-  expect(desktopDetails.y).toBeGreaterThanOrEqual(desktopBoard.y + desktopBoard.height);
-  const mainTiles = page.locator('section[aria-label="MAIN area"]').locator(".dining-table-tile");
+  expect(desktopDetails.x).toBeGreaterThanOrEqual(desktopBoard.x + desktopBoard.width);
+  expect(Math.abs(desktopDetails.y - desktopBoard.y)).toBeLessThan(40);
+  const mainTiles = page
+    .locator('section[aria-label="MAIN area"]')
+    .locator('.dining-table-tile[data-attention="false"]');
   const mainTileBoxes = await mainTiles.evaluateAll((tiles) =>
     tiles.map((tile) => {
       const { x, y, width } = tile.getBoundingClientRect();
       return { x, y, width };
     }),
   );
-  expect(mainTileBoxes).toHaveLength(3);
-  expect(mainTileBoxes.every((tile) => tile.width >= 330 && tile.width <= 380)).toBe(true);
+  expect(mainTileBoxes.length).toBeGreaterThanOrEqual(2);
+  expect(mainTileBoxes.every((tile) => tile.width >= 130 && tile.width <= 260)).toBe(true);
   const [firstMainTile, secondMainTile] = mainTileBoxes;
   if (!firstMainTile || !secondMainTile)
     throw new Error("Dining Main area must have at least two measured tiles");
-  expect(mainTileBoxes.every((tile) => Math.abs(tile.y - firstMainTile.y) < 2)).toBe(true);
+  expect(Math.abs(secondMainTile.y - firstMainTile.y)).toBeLessThan(2);
   // Tile gap is the 0.75rem token: 11.25px at the 15px root font.
   const tileGap = secondMainTile.x - (firstMainTile.x + firstMainTile.width);
   expect(tileGap).toBeGreaterThanOrEqual(11);
   expect(tileGap).toBeLessThanOrEqual(12);
   const [desktopLabel, desktopState] = await Promise.all([
-    tableTile.locator("h4").boundingBox(),
+    tableTile.locator("h3").boundingBox(),
     tableTile.locator(".dining-table-tile__identity > span").boundingBox(),
   ]);
   if (!desktopLabel || !desktopState) throw new Error("Dining card heading/state must be visible");
-  expect(desktopState.y).toBeGreaterThan(desktopLabel.y + desktopLabel.height);
+  expect(desktopState.y).toBeGreaterThan(desktopLabel.y + desktopLabel.height - 1);
   await page.screenshot({ path: "test-results/dining-board-1440.png", fullPage: true });
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });

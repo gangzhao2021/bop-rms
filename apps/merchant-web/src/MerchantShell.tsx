@@ -134,12 +134,15 @@ export function MerchantShell({
         {prompt}
         {overview ?? (
           <div className="overview-grid">
-            <section className="overview-card" aria-labelledby="live-store-status-heading">
+            <section
+              className="overview-card overview-card--status"
+              aria-labelledby="live-store-status-heading"
+            >
               <h3 id="live-store-status-heading">Store status</h3>
               <p className="overview-status-value">
                 <span>{ready.workspace.storeStatus}</span>
               </p>
-              <p>Business date {businessDateText(businessDate)}</p>
+              <p className="overview-status-date">Business date {businessDateText(businessDate)}</p>
             </section>
             {today ?? (
               <section className="overview-card" aria-labelledby="today-summary-heading">

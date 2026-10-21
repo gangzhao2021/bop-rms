@@ -264,6 +264,8 @@ export function StaffOrderEntryPage({
   const placeOperation = useRef<string | null>(null);
   const payOperation = useRef<string | null>(null);
   const chargeHeading = useRef<HTMLHeadingElement>(null);
+  const ticketHeading = useRef<HTMLHeadingElement>(null);
+  const chooseHeading = useRef<HTMLHeadingElement>(null);
   // WP-2423 item 5: the clock behind the payment-time warning, ticking while payment is due.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -322,6 +324,11 @@ export function StaffOrderEntryPage({
   useEffect(() => {
     if (phase === "Charge") chargeHeading.current?.focus();
   }, [phase]);
+  // The item's options open beside the menu (a sheet on a phone); move focus there.
+  const choosingItem = choosing?.item.sellableReference ?? null;
+  useEffect(() => {
+    if (choosingItem !== null) chooseHeading.current?.focus();
+  }, [choosingItem]);
 
   // v15 run: what the store can sell changes with every order (stock used, items sold out), so
   // the menu is re-read quietly after each send or payment, every 30 s while staff build an
@@ -383,6 +390,7 @@ export function StaffOrderEntryPage({
     const value = estimatedLineMinor(line);
     return sum === null || value === null ? null : sum + value;
   }, 0n);
+  const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
   const canSend =
     phase === "Building" &&
     lines.length > 0 &&
@@ -573,8 +581,37 @@ export function StaffOrderEntryPage({
       <div className="counter-order__layout">
         <section className="counter-order__menu" aria-labelledby="counter-menu-heading">
           <h2 id="counter-menu-heading">Menu</h2>
+          {menu.menu.sections.length > 1 ? (
+            // Square/Toast-style category jump bar: stays at the top while the menu scrolls.
+            <nav className="counter-order__categories" aria-label="Menu categories">
+              {menu.menu.sections.map((section) => (
+                <button
+                  key={section.sectionReference}
+                  type="button"
+                  onClick={() =>
+                    document
+                      .getElementById(`counter-section-${section.sectionReference}`)
+                      ?.scrollIntoView({ block: "start" })
+                  }
+                >
+                  {section.name}
+                </button>
+              ))}
+            </nav>
+          ) : null}
+          {menu.menu.sections.length === 0 ? (
+            <p className="counter-order__menu-empty">
+              Nothing is on the menu right now. Check the menu&apos;s hours and items on the Menus
+              page.
+            </p>
+          ) : null}
           {menu.menu.sections.map((section) => (
-            <section key={section.sectionReference} aria-label={section.name}>
+            <section
+              key={section.sectionReference}
+              id={`counter-section-${section.sectionReference}`}
+              className="counter-order__section"
+              aria-label={section.name}
+            >
               <h3>{section.name}</h3>
               <ul className="counter-order__items">
                 {section.items.map((item) => (
@@ -587,6 +624,7 @@ export function StaffOrderEntryPage({
                           : cad(item.priceMinor)
                         : "Sold out"}
                     </span>
+                    {/* The Add button covers the whole tile (CSS), so the tile is the tap target. */}
                     <button
                       type="button"
                       disabled={!item.available || !ordering || item.priceMinor === null}
@@ -604,8 +642,21 @@ export function StaffOrderEntryPage({
           ))}
         </section>
 
-        <section className="counter-order__ticket store-card" aria-labelledby="counter-ticket">
-          <h2 id="counter-ticket">Order</h2>
+        <section
+          id="counter-order-ticket"
+          className="counter-order__ticket store-card"
+          aria-labelledby="counter-ticket"
+        >
+          <header className="counter-order__ticket-header">
+            <h2 id="counter-ticket" ref={ticketHeading} tabIndex={-1}>
+              Order
+            </h2>
+            {itemCount > 0 ? (
+              <span className="counter-order__count">
+                {itemCount === 1 ? "1 item" : `${itemCount} items`}
+              </span>
+            ) : null}
+          </header>
           {choosing !== null ? (
             <form
               className="counter-order__choose"
@@ -638,7 +689,9 @@ export function StaffOrderEntryPage({
                 setChoosing(null);
               }}
             >
-              <h3>{choosing.item.name}</h3>
+              <h3 ref={chooseHeading} tabIndex={-1}>
+                {choosing.item.name}
+              </h3>
               {choosing.item.rules.map((rule) => {
                 const single = rule.maximumSelections === 1;
                 const picked = choosing.choices[rule.bindingReference] ?? [];
@@ -723,14 +776,21 @@ export function StaffOrderEntryPage({
             </form>
           ) : null}
           {lines.length === 0 ? (
-            <p className="bop-muted">Add items from the menu.</p>
+            <div className="counter-order__empty">
+              <p className="counter-order__empty-title">No items yet</p>
+              <p className="bop-muted">Add items from the menu.</p>
+            </div>
           ) : (
             <ul className="counter-order__lines" aria-label="Items in this order">
               {lines.map((line) => {
                 const each = estimatedLineMinor(line);
+                const setQuantity = (quantity: number) =>
+                  changeLines(
+                    lines.map((other) => (other.key === line.key ? { ...other, quantity } : other)),
+                  );
                 return (
                   <li key={line.key}>
-                    <span>
+                    <span className="counter-order__line-name">
                       {line.quantity} × {line.item.name}
                       {line.options.length > 0 ? (
                         <span className="bop-muted">
@@ -740,17 +800,42 @@ export function StaffOrderEntryPage({
                       ) : null}
                       {line.note ? <span className="bop-muted"> · Note: {line.note}</span> : null}
                     </span>
-                    <span>{each === null ? "" : cad(each.toString())}</span>
+                    <span className="counter-order__line-price">
+                      {each === null ? "" : cad(each.toString())}
+                    </span>
                     {/* WP-2423 D5: once sent, an item is changed by cancelling it on the order. */}
                     {ordering ? (
-                      <button
-                        type="button"
-                        disabled={phase !== "Building"}
-                        aria-label={`Remove ${line.item.name}`}
-                        onClick={() => changeLines(lines.filter((other) => other.key !== line.key))}
-                      >
-                        Remove
-                      </button>
+                      <span className="counter-order__line-actions">
+                        <button
+                          type="button"
+                          className="counter-order__step"
+                          disabled={phase !== "Building" || line.quantity <= 1}
+                          aria-label={`One less ${line.item.name}`}
+                          onClick={() => setQuantity(line.quantity - 1)}
+                        >
+                          −
+                        </button>
+                        <button
+                          type="button"
+                          className="counter-order__step"
+                          disabled={phase !== "Building" || line.quantity >= 99}
+                          aria-label={`One more ${line.item.name}`}
+                          onClick={() => setQuantity(line.quantity + 1)}
+                        >
+                          +
+                        </button>
+                        <button
+                          type="button"
+                          className="counter-order__remove"
+                          disabled={phase !== "Building"}
+                          aria-label={`Remove ${line.item.name}`}
+                          onClick={() =>
+                            changeLines(lines.filter((other) => other.key !== line.key))
+                          }
+                        >
+                          Remove
+                        </button>
+                      </span>
                     ) : null}
                   </li>
                 );
@@ -758,10 +843,16 @@ export function StaffOrderEntryPage({
             </ul>
           )}
           {estimate !== null && lines.length > 0 ? (
-            <p className="counter-order__estimate">
-              About {cad(estimate.toString())} before tax and tip. The final total comes when you
-              send the order.
-            </p>
+            <div className="counter-order__totals">
+              <p className="counter-order__subtotal">
+                <span>Subtotal</span>
+                <span>{cad(estimate.toString())}</span>
+              </p>
+              <p className="counter-order__estimate">
+                About {cad(estimate.toString())} before tax and tip. The final total comes when you
+                send the order.
+              </p>
+            </div>
           ) : null}
           <fieldset className="counter-order__tip" disabled={!ordering}>
             <legend>Tip</legend>
@@ -854,7 +945,7 @@ export function StaffOrderEntryPage({
             </p>
           ) : null}
           {ordering ? (
-            <div className="card-actions">
+            <div className="card-actions counter-order__send">
               <button
                 type="button"
                 className="counter-order__primary"
@@ -866,6 +957,29 @@ export function StaffOrderEntryPage({
             </div>
           ) : null}
         </section>
+
+        {ordering && lines.length > 0 ? (
+          // Phone layout only (CSS): the ticket sits below the menu, so a bottom bar keeps the
+          // order's count and estimate in view and takes staff to it to send.
+          <div className="counter-order__summary-bar">
+            <span className="counter-order__summary-text">
+              <span>{itemCount === 1 ? "1 item" : `${itemCount} items`}</span>
+              {estimate !== null ? <strong>{cad(estimate.toString())}</strong> : null}
+            </span>
+            <button
+              type="button"
+              className="counter-order__primary"
+              onClick={() => {
+                document
+                  .getElementById("counter-order-ticket")
+                  ?.scrollIntoView({ block: "start", behavior: "smooth" });
+                ticketHeading.current?.focus({ preventScroll: true });
+              }}
+            >
+              View order
+            </button>
+          </div>
+        ) : null}
 
         {placed !== null && !ordering ? (
           <section

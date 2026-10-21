@@ -1835,10 +1835,6 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     state.workspace.navigation.find((item) => item.screenId === "DIN-TABLE-LIST")
                       ?.href
                   }
-                  navigation={workspaceNavigationLinks(
-                    state.workspace.navigation,
-                    (item) => item.screenId === "DIN-FLOOR-BOARD",
-                  )}
                 />
               ) : (
                 <StatePanel heading="Dining unavailable">

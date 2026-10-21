@@ -71,6 +71,21 @@ export function isRefundedAwaitingCheck(item: OrderExceptionItem): boolean {
 export function isExceptionOverdue(item: OrderExceptionItem, projectedAt: string): boolean {
   return item.status !== "Resolved" && Date.parse(projectedAt) > Date.parse(item.dueAt);
 }
+/**
+ * WP-2423 UI refresh: how long an unresolved case has been open, as of the projection's time
+ * ("Open 25 min", "Open 3 h 10 min", "Open 2 days"); null once resolved.
+ */
+export function exceptionOpenForText(item: OrderExceptionItem, projectedAt: string): string | null {
+  if (item.status === "Resolved") return null;
+  const minutes = Math.floor((Date.parse(projectedAt) - Date.parse(item.createdAt)) / 60_000);
+  if (!Number.isFinite(minutes) || minutes < 0) return null;
+  if (minutes < 1) return "Open less than a minute";
+  if (minutes < 60) return `Open ${minutes} min`;
+  if (minutes < 24 * 60)
+    return `Open ${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")} min`;
+  const days = Math.floor(minutes / (24 * 60));
+  return `Open ${days} ${days === 1 ? "day" : "days"}`;
+}
 const REF = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const SAFE = /^[^\p{Cc}\p{Cf}]{1,100}$/u;

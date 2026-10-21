@@ -51,10 +51,12 @@ describe("v15 run: in-app navigation stays inside the loaded app", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("builds the Kitchen, kitchen work item and Dining navigation from router links", () => {
+  // The Tables (dining) page sits in the shared workspace layout since the 2026-10-21 UI refresh;
+  // the Kitchen display and its work item still build their own navigation.
+  it("builds the Kitchen and kitchen work item navigation from router links", () => {
     const app = sources.find(({ name }) => name === "App.tsx")?.text ?? "";
     const navigationProps = [...app.matchAll(/navigation=\{([^\n]*)/gu)].map((match) => match[1]);
-    expect(navigationProps.length).toBeGreaterThanOrEqual(3);
+    expect(navigationProps.length).toBeGreaterThanOrEqual(2);
     for (const prop of navigationProps) expect(prop).toMatch(/^workspaceNavigationLinks\(/u);
   });
 

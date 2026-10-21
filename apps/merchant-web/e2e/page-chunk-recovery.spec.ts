@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { followWorkspaceLink } from "./workspace-navigation";
 
 // WP-2423 C2: screens outside the first download load on first use. When a screen's code does
 // not arrive (old files gone after a deploy, or dropped Wi-Fi), the app reloads once to pick up
@@ -197,11 +198,15 @@ test("@production the Kitchen and Dining navigation moves between screens withou
   );
   await tables.click();
   await expect(page).toHaveURL(/\/operations\/dining$/u);
-  await expect(navigation.getByRole("link", { name: "Tables", exact: true })).toHaveAttribute(
-    "aria-current",
-    "page",
-  );
-  await navigation.getByRole("link", { name: "Kitchen", exact: true }).click();
+  // UI refresh 2026-10-21: Tables sits in the shared workspace frame; its sidebar is router links too.
+  await expect(page.getByRole("heading", { level: 1, name: "Tables" })).toBeVisible();
+  await expect(
+    page
+      .getByRole("navigation", { name: "Workspace" })
+      .locator(".workspace-sidebar__links")
+      .getByRole("link", { name: "Tables", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  await followWorkspaceLink(page, "Kitchen");
   await expect(page).toHaveURL(/\/operations\/kitchen$/u);
   await expect(navigation.getByRole("link", { name: "Kitchen", exact: true })).toHaveAttribute(
     "aria-current",

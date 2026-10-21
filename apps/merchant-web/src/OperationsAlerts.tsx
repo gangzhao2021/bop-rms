@@ -213,6 +213,12 @@ export function OperationsAlertsCard({
     view !== null &&
     (view.monitor !== "Reporting" || view.active.some((item) => item.severity === "critical"));
   const warning = view !== null && !critical && view.active.length > 0;
+  // Everything working and no update running: a calm one-line status, not a full card.
+  const clear =
+    view !== null &&
+    view.monitor === "Reporting" &&
+    view.active.length === 0 &&
+    view.plannedUpdate === null;
   return (
     <section
       className={
@@ -221,7 +227,9 @@ export function OperationsAlertsCard({
           ? " overview-card--alerts-critical"
           : warning
             ? " overview-card--alerts-warning"
-            : "")
+            : clear
+              ? " overview-card--alerts-clear"
+              : "")
       }
       aria-labelledby="system-alerts-heading"
     >
@@ -294,7 +302,7 @@ export function OperationsAlertsCard({
         )}
       </div>
       {view !== null && view.monitor === "Reporting" ? (
-        <>
+        <div className="system-alert__footer">
           {view.recentlyCleared.length > 0 ? (
             <p className="system-alert__resolved">
               Resolved recently:{" "}
@@ -314,7 +322,7 @@ export function OperationsAlertsCard({
               : ` · Last checked ${storeTime(view.observedAt, timeZone)}`}
           </p>
           <p className="overview-updated">{outboundNote(view.outbound)}</p>
-        </>
+        </div>
       ) : null}
     </section>
   );

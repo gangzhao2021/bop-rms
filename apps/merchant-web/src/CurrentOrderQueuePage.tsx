@@ -580,6 +580,100 @@ export function orderPhaseLabel(
 // WP-2423 (DEC-ORDER-CHANNEL-LABEL): one channel mapping, shared with the Operational dashboard.
 export { orderChannel, orderChannelLabel, orderTypeLabel };
 
+type QueuedOrder = CurrentOrderQueue["items"][number];
+/** WP-2423 UI refresh: an order still being worked on (not finished, cancelled or closed). */
+export function isActiveOrder(order: QueuedOrder): boolean {
+  return (
+    order.unfulfillable === null &&
+    !order.pickupNotCollected &&
+    order.currentPhase !== null &&
+    order.currentPhase !== "Fulfilled" &&
+    order.currentPhase !== "Cancelled" &&
+    order.currentPhase !== "Rejected"
+  );
+}
+/**
+ * WP-2423 UI refresh: how long an active order has been in, from its submission and the page's
+ * clock ("4 min", "1 h 05 min"); null for a finished order, a future time, or a day or more.
+ */
+export function orderAgeText(order: QueuedOrder, now: number): string | null {
+  if (!isActiveOrder(order)) return null;
+  const minutes = Math.floor((now - Date.parse(order.submittedAt)) / 60_000);
+  if (!Number.isFinite(minutes) || minutes < 0 || minutes >= 24 * 60) return null;
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")} min`;
+}
+/**
+ * WP-2423 UI refresh: how loud an order's status reads in the list. Waiting on staff or payment
+ * is a warning, an order past its acceptance window or closed unfulfilled is danger, a finished
+ * order is muted; the label always carries the meaning.
+ */
+export function orderStatusTone(
+  order: QueuedOrder,
+  now: number | undefined,
+): "danger" | "warning" | "ready" | "muted" | "neutral" {
+  if (order.unfulfillable !== null || order.pickupNotCollected) return "danger";
+  if (order.acceptanceHold !== null) return "warning";
+  if (isAwaitingAcceptance(order)) {
+    const tier = now === undefined ? null : acceptanceWindow(order.acceptBy, now)?.tier;
+    return tier === "urgent" || tier === "lapsed" ? "danger" : "warning";
+  }
+  if (order.awaitingPayment || order.currentPhase === null) return "warning";
+  if (
+    order.currentPhase === "Fulfilled" ||
+    order.currentPhase === "Cancelled" ||
+    order.currentPhase === "Rejected"
+  )
+    return "muted";
+  const label = orderPhaseLabel(order);
+  return label === "Ready" || label === "Ready for pickup" ? "ready" : "neutral";
+}
+/**
+ * WP-2423 UI refresh: what was taken for the order — paid online plus paid on the store's card
+ * machine (a counter order, or rounds staff entered). Null when no payment is recorded; never a
+ * guessed order total.
+ */
+export function orderAmountTaken(order: QueuedOrder) {
+  const parts: { readonly amountMinor: string; readonly currencyCode: string }[] = [];
+  if (order.paidOnline !== null) parts.push(order.paidOnline);
+  if (order.counter?.paidOnCardMachine)
+    parts.push({ amountMinor: order.counter.paidOnCardMachine.amountMinor, currencyCode: "CAD" });
+  for (const batch of order.batches)
+    if (batch.staffRound?.paidOnCardMachine != null)
+      parts.push({
+        amountMinor: batch.staffRound.paidOnCardMachine.amountMinor,
+        currencyCode: "CAD",
+      });
+  const currencyCode = parts[0]?.currencyCode;
+  if (currencyCode === undefined || parts.some((part) => part.currencyCode !== currencyCode))
+    return null;
+  return {
+    amountMinor: parts.reduce((sum, part) => sum + BigInt(part.amountMinor), 0n).toString(),
+    currencyCode,
+  };
+}
+/** WP-2423 UI refresh: the rounds of an order by acceptance ("1 accepted · 1 not accepted"). */
+function roundSummary(order: QueuedOrder): string {
+  const cancelled = order.batches.filter(
+    (batch) => batch.acceptanceStatus === "Cancelled" || batch.staffCancellation,
+  ).length;
+  const accepted = order.batches.filter(
+    (batch) => batch.acceptanceStatus === "Accepted" && !batch.staffCancellation,
+  ).length;
+  const notAccepted = order.batches.filter(
+    (batch) => batch.acceptanceStatus === "NotAccepted",
+  ).length;
+  // WP-2423 Q6: a batch the store cancelled after accepting counts as cancelled.
+  const parts = [
+    accepted > 0 ? `${accepted} accepted` : null,
+    notAccepted > 0 ? `${notAccepted} not accepted` : null,
+    cancelled > 0 ? `${cancelled} cancelled` : null,
+  ].filter((part) => part !== null);
+  if (parts.length === 0) return "";
+  return (order.orderType === "DineIn" ? "Rounds: " : "") + parts.join(" · ");
+}
+
 /** WP-2423 item 5: minutes before an unpaid round's cancellation when staff are warned urgently. */
 export const unpaidRoundUrgentMinutes = 10;
 
@@ -885,6 +979,17 @@ export function CurrentOrderQueueRows({
       <p className="order-workbench-count" hidden={single}>
         {visibleOrderReferences?.size ?? view.items.length} matching orders on this page
       </p>
+      {single ? null : (
+        // WP-2423 UI refresh: column labels for the one-line rows (the rows carry their own words).
+        <div className="order-workbench-columns" aria-hidden="true">
+          <span>Order</span>
+          <span>Type</span>
+          <span>Placed</span>
+          <span>Status</span>
+          <span>Details</span>
+          <span>Paid</span>
+        </div>
+      )}
       {view.items.map((order) => (
         <Fragment key={order.orderReference}>
           {dayHeadings.has(order.orderReference) ? (
@@ -916,18 +1021,33 @@ export function CurrentOrderQueueRows({
           >
             <summary>
               <span className="order-workbench-identity">
-                <h2>
-                  {order.orderNumber}{" "}
-                  <span className="order-workbench-disclosure" aria-hidden="true">
-                    ⌄
-                  </span>
-                </h2>
-                <span>
+                <h2>{order.orderNumber}</h2>
+                <span className="order-workbench-type">
                   {orderTypeLabel[order.orderType]} · {orderChannelLabel(orderChannel(order))}
                 </span>
               </span>
+              <span className="order-workbench-when">
+                <time
+                  className="order-workbench-time"
+                  dateTime={order.submittedAt}
+                  title={order.submittedAt}
+                >
+                  {storeTime(order.submittedAt, timeZone)}
+                </time>
+                {now === undefined || orderAgeText(order, now) === null ? null : (
+                  <span
+                    className="order-workbench-age"
+                    data-tone={
+                      isAwaitingAcceptance(order) ? orderStatusTone(order, now) : "neutral"
+                    }
+                  >
+                    {orderAgeText(order, now)}
+                  </span>
+                )}
+              </span>
               <span
                 className="order-workbench-phase"
+                data-tone={orderStatusTone(order, now)}
                 data-phase={
                   order.awaitingPayment
                     ? "AwaitingPayment"
@@ -951,25 +1071,9 @@ export function CurrentOrderQueueRows({
                       : orderPhaseLabel(order)}
               </span>
               <span className="order-workbench-batches">
-                {
-                  order.batches.filter(
-                    (batch) => batch.acceptanceStatus === "Accepted" && !batch.staffCancellation,
-                  ).length
-                }{" "}
-                accepted ·{" "}
-                {order.batches.filter((batch) => batch.acceptanceStatus === "NotAccepted").length}{" "}
-                not accepted
-                {/* WP-2423 Q6: a batch the store cancelled after accepting counts as cancelled. */}
-                {order.batches.some(
-                  (batch) => batch.acceptanceStatus === "Cancelled" || batch.staffCancellation,
-                )
-                  ? ` · ${
-                      order.batches.filter(
-                        (batch) =>
-                          batch.acceptanceStatus === "Cancelled" || batch.staffCancellation,
-                      ).length
-                    } cancelled`
-                  : ""}
+                {roundSummary(order) === "" ? null : (
+                  <span className="order-workbench-rounds">{roundSummary(order)}</span>
+                )}
                 {order.heldStock !== null && order.businessDate !== null ? (
                   <span className="order-held-stock-tag">
                     {businessDateLabel(order.businessDate, today)} ·{" "}
@@ -1020,13 +1124,17 @@ export function CurrentOrderQueueRows({
                   ),
                 )}
               </span>
-              <time
-                className="order-workbench-time"
-                dateTime={order.submittedAt}
-                title={order.submittedAt}
-              >
-                {storeTime(order.submittedAt, timeZone)}
-              </time>
+              <span className="order-workbench-amount">
+                {orderAmountTaken(order) === null ? (
+                  <>
+                    <span aria-hidden="true">—</span>
+                    <span className="visually-hidden">No payment recorded</span>
+                  </>
+                ) : (
+                  orderMoney(orderAmountTaken(order) ?? { amountMinor: "0", currencyCode: "CAD" })
+                )}
+              </span>
+              <span className="order-workbench-disclosure" aria-hidden="true" />
             </summary>
             <div className="order-workbench-detail">
               <dl>

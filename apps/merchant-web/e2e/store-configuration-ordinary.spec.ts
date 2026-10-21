@@ -19,6 +19,7 @@ import {
   parseMerchantStoreConfigurationOrdinaryWorkspace,
 } from "../../api/src/merchant-store-configuration-ordinary-values.js";
 import { canonicalPublicationValue as canonical } from "../src/product-publication-command-client-v2.js";
+import { followWorkspaceLink } from "./workspace-navigation";
 // Actual production React/router/HTTP client/IndexedDB. HTTP, Session, eligibility,
 // approvals and persistence below are explicitly synthetic controlled facts,
 // not evidence of native IAM, professional qualification or live Store readiness.
@@ -587,12 +588,8 @@ const panel = (page: Page) =>
   page.getByRole("region", { name: "Store configuration publication", exact: true });
 async function enter(page: Page) {
   await page.goto("/app");
-  // On narrow screens the workspace navigation sits behind the Menu disclosure (WP-2423 M1).
-  const workspaceNav = page.getByRole("navigation", { name: "Workspace" });
-  await workspaceNav.waitFor();
-  const compactMenu = workspaceNav.locator(".workspace-sidebar__compact > summary");
-  if (await compactMenu.isVisible()) await compactMenu.click();
-  await page.getByRole("link", { name: "Store setup", exact: true }).click();
+  // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
+  await followWorkspaceLink(page, "Store setup");
   await page.getByRole("button", { name: /^8\. Review$/u }).click();
   await expect(
     panel(page).getByRole("button", { name: "Create configuration from saved setup" }),
@@ -806,11 +803,8 @@ test("a deployment without configuration publication hides the panel instead of 
     (route) => respond(route, { error: "store_configuration_publication_not_offered" }, 404),
   );
   await page.goto("/app");
-  const workspaceNav = page.getByRole("navigation", { name: "Workspace" });
-  await workspaceNav.waitFor();
-  const compactMenu = workspaceNav.locator(".workspace-sidebar__compact > summary");
-  if (await compactMenu.isVisible()) await compactMenu.click();
-  await page.getByRole("link", { name: "Store setup", exact: true }).click();
+  // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
+  await followWorkspaceLink(page, "Store setup");
   await page.getByRole("button", { name: /^8\. Review$/u }).click();
   await expect(page.getByRole("heading", { name: "Review", exact: true })).toBeVisible();
   await expect(panel(page)).toHaveCount(0);
@@ -1041,11 +1035,8 @@ test("WP-2423 v15: 'Use the live Store's settings' fills time zone, business day
     live: true,
   });
   await page.goto("/app");
-  const workspaceNav = page.getByRole("navigation", { name: "Workspace" });
-  await workspaceNav.waitFor();
-  const compactMenu = workspaceNav.locator(".workspace-sidebar__compact > summary");
-  if (await compactMenu.isVisible()) await compactMenu.click();
-  await page.getByRole("link", { name: "Store setup", exact: true }).click();
+  // The Menu drawer on phones, the closed navigation group on wider screens (UI refresh 2026-10-21).
+  await followWorkspaceLink(page, "Store setup");
   await page.getByRole("button", { name: /^8\. Review$/u }).click();
   const missing = page.getByRole("region", { name: "Settings not set yet" });
   await expect(missing).toContainText("Time zone: set it in step 2, Address and timezone");

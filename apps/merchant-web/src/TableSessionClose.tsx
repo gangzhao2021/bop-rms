@@ -298,7 +298,7 @@ export function TableSessionClose({
 
   return (
     <section aria-label="Close this table" className="dining-table-close">
-      <h4>Close the table</h4>
+      <h3>Close the table</h3>
       {check.kind === "Checking" ? (
         <p role="status">Checking this table&apos;s orders…</p>
       ) : check.kind === "Failed" ? (

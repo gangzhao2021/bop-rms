@@ -283,11 +283,18 @@ export function OverviewToday({
     <section className="overview-card overview-card--today" aria-labelledby="today-summary-heading">
       <header>
         <h3 id="today-summary-heading">Right now</h3>
-        {onRefresh ? (
-          <button type="button" onClick={onRefresh} disabled={busy}>
-            Refresh
-          </button>
-        ) : null}
+        <div className="overview-card__tools">
+          <p className="overview-updated">
+            {state.updatedAt === null
+              ? "Reading current work…"
+              : `Last checked ${storeTime(state.updatedAt, timeZone)}`}
+          </p>
+          {onRefresh ? (
+            <button type="button" onClick={onRefresh} disabled={busy}>
+              Refresh
+            </button>
+          ) : null}
+        </div>
       </header>
       <ul className="overview-counts">
         <Count
@@ -357,11 +364,6 @@ export function OverviewToday({
           linkLabel="View exceptions"
         />
       </ul>
-      <p className="overview-updated">
-        {state.updatedAt === null
-          ? "Reading current work…"
-          : `Last checked ${storeTime(state.updatedAt, timeZone)}`}
-      </p>
     </section>
   );
 }

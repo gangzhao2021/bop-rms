@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { MemoryRouter } from "react-router";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { findInternalText } from "../e2e/internal-text-patterns.js";
-import { isExceptionOverdue } from "./order-exception-view.js";
+import { exceptionOpenForText, isExceptionOverdue } from "./order-exception-view.js";
 import { summarizeExceptions } from "./StoreOverview.js";
 import {
   OrderExceptionPage,
@@ -495,4 +495,24 @@ it("WP-2423: offers older resolved exceptions only when the server has more", ()
   );
   // An older server without history paging still parses.
   expect(parseOrderExceptionView(input).olderResolvedBefore).toBeNull();
+});
+
+it("WP-2423 UI refresh: an open case says how long it has been open and marks overdue in words", () => {
+  const view = parseOrderExceptionView(fixture());
+  const item = view.items[0];
+  if (item === undefined) throw new Error("no exception");
+  expect(exceptionOpenForText(item, view.projectedAt)).toBe("Open 14 min");
+  expect(exceptionOpenForText(item, "2026-08-12T19:05:00.000Z")).toBe("Open 3 h 05 min");
+  expect(exceptionOpenForText(item, "2026-08-14T17:00:00.000Z")).toBe("Open 2 days");
+  expect(exceptionOpenForText({ ...item, status: "Resolved" }, view.projectedAt)).toBeNull();
+  const html = renderToStaticMarkup(<OrderExceptionScreen view={view} />);
+  expect(html).toContain('<span class="order-exception__open-for">Open 14 min</span>');
+  expect(html).not.toContain('data-overdue="true"');
+  const overdue = renderToStaticMarkup(
+    <OrderExceptionScreen
+      view={parseOrderExceptionView({ ...fixture(), projectedAt: "2026-08-12T16:20:00.000Z" })}
+    />,
+  );
+  expect(overdue).toContain('data-overdue="true"');
+  expect(overdue).toContain("overdue since");
 });

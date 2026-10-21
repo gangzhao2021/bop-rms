@@ -24,6 +24,9 @@ import {
   unpaidCancelledBatches,
   unpaidCancelledTotal,
   orderRefundRows,
+  orderAgeText,
+  orderAmountTaken,
+  orderStatusTone,
 } from "./CurrentOrderQueuePage.js";
 import {
   ordersAwaitingAcceptance,
@@ -449,6 +452,85 @@ it("WP-2423 Q1: grades the acceptance window and shows it only while the order c
   expect(renderToStaticMarkup(<CurrentOrderQueueRows view={readOnly} now={at} />)).not.toContain(
     "Accept within",
   );
+});
+
+it("WP-2423 UI refresh: a row reads the order's age, status tone and amount taken from its own data", () => {
+  const at = Date.parse("2026-10-10T12:00:00.000Z");
+  const by = (minutes: number) => new Date(at + minutes * 60_000).toISOString();
+  const waiting = {
+    orderReference: "01909968-0000-7000-8000-000000000021",
+    orderNumber: "21",
+    orderType: "Pickup",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-10T11:48:00.000Z",
+    observedAt: "2026-10-10T11:59:00.000Z",
+    initialBatchReference: "01909968-0000-7000-8000-000000000092",
+    batches: [
+      {
+        orderBatchReference: "01909968-0000-7000-8000-000000000092",
+        sequence: 1,
+        acceptanceStatus: "NotAccepted",
+        canRequestAcceptance: true,
+        canCancel: false,
+        staffCancellation: null,
+        canCancelItems: false,
+      },
+    ],
+    canRequestAcceptance: true,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: by(8),
+    awaitingPayment: false,
+    paidOnline: { amountMinor: "1130", currencyCode: "CAD" },
+    currentPhase: "Submitted",
+    currentVersion: 1,
+  };
+  const one = (value: object) => {
+    const item = parseCurrentOrderQueue({ items: [value], nextAfterOrderReference: null }).items[0];
+    if (item === undefined) throw new Error("no order");
+    return item;
+  };
+  const order = one(waiting);
+  expect(orderAgeText(order, at)).toBe("12 min");
+  expect(orderAgeText(order, at + 60 * 60_000)).toBe("1 h 12 min");
+  expect(orderAgeText(order, Date.parse(waiting.submittedAt) + 10_000)).toBe("Just now");
+  // Waiting for acceptance is a warning, then danger in the last five minutes.
+  expect(orderStatusTone(order, at)).toBe("warning");
+  expect(orderStatusTone(order, at + 4 * 60_000)).toBe("danger");
+  expect(orderAmountTaken(order)).toEqual({ amountMinor: "1130", currencyCode: "CAD" });
+  const finished = one({
+    ...waiting,
+    canRequestAcceptance: false,
+    acceptBy: null,
+    currentPhase: "Fulfilled",
+    currentVersion: 3,
+    batches: [{ ...waiting.batches[0], acceptanceStatus: "Accepted", canRequestAcceptance: false }],
+  });
+  expect(orderAgeText(finished, at)).toBeNull();
+  expect(orderStatusTone(finished, at)).toBe("muted");
+  expect(orderAmountTaken(one({ ...waiting, paidOnline: null }))).toBeNull();
+  const html = renderToStaticMarkup(
+    <CurrentOrderQueueRows
+      view={parseCurrentOrderQueue({ items: [waiting], nextAfterOrderReference: null })}
+      now={at}
+    />,
+  );
+  expect(html).toContain('<span class="order-workbench-age" data-tone="warning">12 min</span>');
+  expect(html).toContain('data-tone="warning" data-phase="Submitted"');
+  expect(html).toContain('<span class="order-workbench-amount">$11.30</span>');
+  expect(html).toContain("<h2>21</h2>");
+  // No payment recorded is said, never shown as a made-up amount.
+  expect(
+    renderToStaticMarkup(
+      <CurrentOrderQueueRows
+        view={parseCurrentOrderQueue({
+          items: [{ ...waiting, paidOnline: null }],
+          nextAfterOrderReference: null,
+        })}
+        now={at}
+      />,
+    ),
+  ).toContain("No payment recorded");
 });
 
 it("WP-2423 Q1: shows an unpaid submission as awaiting payment, never acceptable or counted", () => {
