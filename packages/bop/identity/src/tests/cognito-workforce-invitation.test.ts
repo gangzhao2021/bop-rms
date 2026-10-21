@@ -382,7 +382,7 @@ it("rejects unsupported region, open configuration and explicit credential/endpo
         credentials: { accessKeyId: "a", secretAccessKey: "b" },
       },
     },
-    { ...f.options, markEmailVerified: false },
+    { ...f.options, markEmailVerified: false as unknown as true },
   ])
     expect(() => createCognitoWorkforceInvitation(value)).toThrow("request denied");
   expect(sdk.construct).toHaveBeenCalledTimes(1);

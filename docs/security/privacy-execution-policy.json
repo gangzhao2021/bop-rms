@@ -67,6 +67,23 @@
       "sourceFiles": ["apps/api/src/merchant-staff-pin-http.ts"],
       "design": "docs/spec/design/staff-session-continuity.md",
       "webStorage": false
+    },
+    {
+      "name": "__Host-bop-step-up",
+      "purpose": "staff-reauthentication-window-for-approvals",
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "path": "/",
+      "domain": null,
+      "persistence": "10-minutes",
+      "serverAuthority": "Identity OIDC authorization transaction; only a hash of the value is stored, single use, cleared when the re-authentication returns",
+      "sourceFiles": [
+        "apps/api/src/merchant-bff-session-routes.ts",
+        "apps/api/src/merchant-provider-step-up.ts"
+      ],
+      "design": "docs/spec/design/cognito-store-staff.md",
+      "webStorage": false
     }
   ],
   "prohibitedTracking": [

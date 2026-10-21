@@ -24,10 +24,10 @@ const poolAdmin = vi.hoisted(() => ({ calls: [] as string[] }));
 vi.mock(
   "../../../packages/bop/identity/node_modules/@aws-sdk/client-cognito-identity-provider",
   async (importOriginal) => {
-    const actual =
-      await importOriginal<
-        typeof import("../../../packages/bop/identity/node_modules/@aws-sdk/client-cognito-identity-provider")
-      >();
+    const actual = await importOriginal<{
+      readonly GetUserPoolMfaConfigCommand: abstract new (...args: never[]) => unknown;
+      readonly DescribeUserPoolCommand: abstract new (...args: never[]) => unknown;
+    }>();
     return {
       ...actual,
       CognitoIdentityProviderClient: class {
@@ -40,7 +40,7 @@ vi.mock(
             poolAdmin.calls.push("DescribeUserPool");
             return {
               UserPool: {
-                Id: (command.input as { UserPoolId: string }).UserPoolId,
+                Id: (command as { input: { UserPoolId: string } }).input.UserPoolId,
                 MfaConfiguration: "ON",
                 Policies: { SignInPolicy: { AllowedFirstAuthFactors: ["PASSWORD"] } },
               },
