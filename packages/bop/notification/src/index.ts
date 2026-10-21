@@ -15,3 +15,10 @@ export * from "./application/communication-governance-service.js";
 export * from "./contracts/customer-order-message.js";
 export * from "./application/customer-order-notification-service.js";
 export * from "./infrastructure/persistence/customer-order-notification-store.js";
+// DEC-PILOT-NOTIFICATIONS (2026-10-20): provider adapters, configuration and delivery feedback.
+export * from "./infrastructure/providers/provider-configuration.js";
+export * from "./infrastructure/providers/ses-email-adapter.js";
+export * from "./infrastructure/providers/sns-sms-adapter.js";
+export * from "./infrastructure/providers/sns-signature-verifier.js";
+export * from "./infrastructure/persistence/delivery-feedback-store.js";
+export * from "./application/delivery-feedback-endpoint.js";

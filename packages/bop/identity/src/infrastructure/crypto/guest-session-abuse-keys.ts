@@ -2,7 +2,7 @@ import { createHmac, createSecretKey } from "node:crypto";
 import { isIP } from "node:net";
 import type { GuestSessionAbuseKeys } from "../../application/guest-session-request-admission.js";
 
-function canonicalPeer(address: string): string {
+export function canonicalPeer(address: string): string {
   if (typeof address !== "string" || address.length > 64) throw new Error("ABUSE_KEY_UNAVAILABLE");
   const version = isIP(address);
   if (version === 4) return "v4:" + address;
@@ -50,4 +50,21 @@ export function createGuestSessionAbuseKeys(pepper: Uint8Array): GuestSessionAbu
     store: (scope: Parameters<GuestSessionAbuseKeys["store"]>[0]) =>
       digest("store", JSON.stringify([scope.brandReference, scope.storeReference])),
   });
+}
+
+/**
+ * DEC-PILOT-NOTIFICATIONS R1: keyed bucket for order recovery attempts — one bucket per Order and
+ * peer when the token names a known Order, else per peer (§87.4.2 "Order / contact / IP").
+ */
+export function createOrderRecoveryAbuseKey(pepper: Uint8Array) {
+  if (!(pepper instanceof Uint8Array) || pepper.byteLength !== 32)
+    throw new Error("ABUSE_KEY_UNAVAILABLE");
+  const copied = Buffer.from(pepper);
+  const key = createSecretKey(copied);
+  copied.fill(0);
+  return (orderReference: string | null, peerAddress: string) =>
+    createHmac("sha256", key)
+      .update("bop-rms:order-recovery-abuse:v1\0", "utf8")
+      .update(JSON.stringify([orderReference ?? "unknown", canonicalPeer(peerAddress)]), "utf8")
+      .digest();
 }

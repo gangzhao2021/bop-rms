@@ -269,6 +269,13 @@ export const checkoutText = Object.freeze({
   pickupEmail: "Pickup email",
   dineInNoContact: "No contact details are required for your dine-in order.",
   receiptOnOrderPage: "Your receipt appears on your order page, where you can print or save it.",
+  /** DEC-PILOT-NOTIFICATIONS: shown only when the store can actually send that message. */
+  orderTextsPhone: "We’ll also text you when the store has your order and when it’s ready.",
+  orderTextsEmail: "We’ll also email you when the store has your order and when it’s ready.",
+  emailReceipt: "Email my receipt",
+  receiptEmail: "Receipt email",
+  receiptEmailPurpose:
+    "We send your receipt to this address once. It’s deleted 30 days after your order, and you can remove it sooner from your order page.",
   agreePolicies: "I’ve read and agree to the policies above",
   detailsExpired:
     "Checkout information expired. Get a current quote and reload details before saving.",
@@ -504,3 +511,17 @@ export const orderStatusText = Object.freeze({
   }),
 });
 // --- end order status page ---
+
+/** DEC-PILOT-NOTIFICATIONS R1: the page a one-time order link opens (IDR-0031). */
+export const orderRecoveryText = Object.freeze({
+  openingHeading: "Opening your order",
+  opening: "Opening your order on this phone…",
+  expiredHeading: "This link can’t open your order",
+  expired: "The link has expired or was already used. Each link works once, for 30 minutes.",
+  tooManyTries: "There were too many tries with this link. Please wait an hour or ask the store.",
+  staff: "The store still has your order. Give your name or order number to a staff member.",
+  start: "Go to the start",
+  tryAgainHeading: "We couldn’t reach the store",
+  tryAgain: "Check your connection, then try again.",
+  tryAgainButton: "Try again",
+});

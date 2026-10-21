@@ -31,8 +31,12 @@ import { createInternalContactRetentionWorkload } from "./pilot-contact-retentio
 import { createInternalPickupCapacityScheduleWorkload } from "./pilot-pickup-capacity-schedule.mjs";
 import { createInternalWorkerServices } from "./pilot-worker-services.mjs";
 import { createInternalWorker } from "./pilot-worker.mjs";
+import { createInternalCustomerOrderMessageConsumers } from "./pilot-order-messaging.mjs";
+import { createCustomerOrderNotificationTrigger } from "../../apps/api/dist/customer-order-notification-trigger.js";
 
 const factories = {
+  createInternalCustomerOrderMessageConsumers,
+  createCustomerOrderNotificationTrigger,
   createInternalRefundConsumers,
   createInternalBatchCancellationDispatcher,
   createInternalCompensationService,
@@ -139,6 +143,14 @@ export function composeConfiguredBusinessWorker({
       }),
     createInternalOrderCompletionConsumer: (r) =>
       f.createInternalOrderCompletionConsumer(r, { createCompletion: completion }),
+    // DEC-PILOT-NOTIFICATIONS: registered only when `notification.json` enables a channel.
+    createInternalCustomerOrderMessageConsumers: (r) =>
+      r.orderMessaging === undefined
+        ? []
+        : f.createInternalCustomerOrderMessageConsumers(r, {
+            orderMessaging: r.orderMessaging,
+            createTrigger: f.createCustomerOrderNotificationTrigger,
+          }),
   };
   return (resources, observers, options) => {
     if (

@@ -157,6 +157,18 @@ export async function createRuntime(
         },
       },
       allowedOrigin: "https://127.0.0.1:4443",
+      // DEC-PILOT-NOTIFICATIONS: order-message options, one-time order link, SES feedback.
+      // Without composed order messaging (no runtime directory) nothing is offered.
+      orderMessaging:
+        resources.orderMessaging === undefined
+          ? { availability: () => ({ sms: false, email: false }) }
+          : {
+              availability: resources.orderMessaging.availability,
+              recovery: resources.orderMessaging.recovery,
+              ...(resources.orderMessaging.feedback === undefined
+                ? {}
+                : { feedback: resources.orderMessaging.feedback }),
+            },
       now: resources.now,
       uuidV7Factory: resources.credentials.reference,
       runtime: {

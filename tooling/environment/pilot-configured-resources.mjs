@@ -4,6 +4,7 @@ import { createApplicationDatabase } from "./pilot-connections.mjs";
 import { createInternalCredentialLoaders } from "./pilot-credentials.mjs";
 import { createCustomerRequestAdmission } from "./pilot-customer-admission.mjs";
 import { createInternalTestResources } from "./pilot-resources.mjs";
+import { createPilotOrderMessaging } from "./pilot-order-messaging.mjs";
 /** Loads existing scoped configuration. Never provisions secrets, roles or business facts. */
 export async function createConfiguredPilotResources(directory) {
   const installation = await loadPilotInstallation(directory);
@@ -12,7 +13,7 @@ export async function createConfiguredPilotResources(directory) {
     loadProfile: installation.loadProfile,
     expectedDatabaseName: installation.database,
   });
-  return createInternalTestResources({
+  const resources = await createInternalTestResources({
     createApplicationDatabase: (service) =>
       createApplicationDatabase(service, installation.connection),
     createInternalTestCredentials: credentials.createInternalTestCredentials,
@@ -22,4 +23,16 @@ export async function createConfiguredPilotResources(directory) {
     loadMenu: installation.loadMenu,
     expectedDatabaseName: installation.database,
   });
+  // DEC-PILOT-NOTIFICATIONS: order messages (disabled unless `notification.json` names providers).
+  try {
+    const orderMessaging = await createPilotOrderMessaging({
+      resources,
+      directory,
+      loadRecoveryKeys: credentials.createInternalOrderRecoveryKeys,
+    });
+    return Object.freeze({ ...resources, orderMessaging });
+  } catch (error) {
+    await resources.close();
+    throw error;
+  }
 }

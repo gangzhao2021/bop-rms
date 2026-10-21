@@ -3285,6 +3285,22 @@ async function scanUnsupported(root, module, diagnostics) {
             (table) => module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/customer-order-notification-store.ts";
+        // DEC-PILOT-NOTIFICATIONS: SES feedback Inbox, suppression list and delivery issues.
+        const acceptedNotificationDeliveryFeedbackAsset =
+          module.packageName === "@bop/notification" &&
+          module.manifest.ownedDatabase?.schema === "bop_notification" &&
+          ["delivery_provider_event", "contact_suppression", "delivery_issue_case"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/delivery-feedback-store.ts";
+        // DEC-PILOT-NOTIFICATIONS R1: one-time order recovery authorization and its consumption.
+        const acceptedOrderRecoveryAsset =
+          module.packageName === "@bop/identity" &&
+          module.manifest.ownedDatabase?.schema === "bop_identity" &&
+          ["order_recovery_authorization", "order_recovery_consumption"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/order-recovery-store.ts";
         const acceptedOrderSettledFinalityAsset =
           module.packageName === "@rms/payment" &&
           module.manifest.ownedDatabase?.schema === "rms_payment" &&
@@ -3768,6 +3784,8 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedOrderPaymentWaitAsset &&
           !acceptedTaskStoreAsset &&
           !acceptedCustomerOrderNotificationAsset &&
+          !acceptedNotificationDeliveryFeedbackAsset &&
+          !acceptedOrderRecoveryAsset &&
           !acceptedOrderSettledFinalityAsset &&
           !acceptedBatchCheckoutExpiryAsset &&
           !acceptedOrderClosurePositionAsset &&

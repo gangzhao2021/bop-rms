@@ -19,6 +19,31 @@ const databaseAccessManifestInput = {
       retentionCategory: "transactional",
       piiClassification: ["indirect_identifier"],
     },
+    // DEC-PILOT-NOTIFICATIONS: signed SES feedback, suppression list (keyed digest), issues.
+    {
+      table: "delivery_provider_event",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/notification" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "contact_suppression",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/notification" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "delivery_issue_case",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/notification" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
   ],
   accesses: [],
 } as const;

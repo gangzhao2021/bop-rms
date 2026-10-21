@@ -21,6 +21,7 @@ export async function createInternalWorkerServices(
     createInternalPickupProofConsumer,
     createInternalOrderCompletionConsumer,
     createInternalRefundConsumers,
+    createInternalCustomerOrderMessageConsumers,
   } = dependencies;
   if (!isPilotRuntime()) throw new Error("INTERNAL_WORKER_ONLY");
   const paid = await createInternalPaidOutcome(resources, { persistentWaiting }),
@@ -51,6 +52,10 @@ export async function createInternalWorkerServices(
     createInternalPickupProofConsumer(resources),
     await createInternalOrderCompletionConsumer(resources),
     ...(createInternalRefundConsumers ? createInternalRefundConsumers(resources) : []),
+    // DEC-PILOT-NOTIFICATIONS: customer order messages (none while no provider is configured).
+    ...(createInternalCustomerOrderMessageConsumers
+      ? createInternalCustomerOrderMessageConsumers(resources)
+      : []),
     status.completed,
     // WP-2423: OrderCancelled (an unpaid dine-in round the System cancelled).
     ...(status.cancelled ? [status.cancelled] : []),

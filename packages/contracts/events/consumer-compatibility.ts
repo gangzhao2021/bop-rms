@@ -138,6 +138,31 @@ const contract = (
 });
 
 export const eventConsumerContracts = defineEventConsumerContracts([
+  // DEC-PILOT-NOTIFICATIONS (2026-10-20): customer order messages, once per Order and purpose.
+  contract(
+    "notification.customer-order-placed",
+    "@bop/notification",
+    "PaymentSucceeded",
+    "store",
+    "send_customer_order_message",
+    "none",
+  ),
+  contract(
+    "notification.customer-receipt-email",
+    "@bop/notification",
+    "PaymentSucceeded",
+    "store",
+    "send_customer_order_message",
+    "none",
+  ),
+  contract(
+    "notification.customer-order-ready",
+    "@bop/notification",
+    "KitchenOrderReady",
+    "store",
+    "send_customer_order_message",
+    "none",
+  ),
   ...[
     "CategoryCreated",
     "CategoryUpdated",

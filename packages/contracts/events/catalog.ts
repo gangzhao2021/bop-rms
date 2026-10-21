@@ -1663,7 +1663,12 @@ export const eventCatalog = defineEventCatalog([
     ownerModule: "@rms/kitchen",
     producerModule: "@rms/kitchen",
     stability: "stable",
-    consumers: ["fulfillment.kitchen-order-ready:v1", "ordering.kitchen-progress:v1"],
+    consumers: [
+      "fulfillment.kitchen-order-ready:v1",
+      "ordering.kitchen-progress:v1",
+      // DEC-PILOT-NOTIFICATIONS: "your order is ready" to the pickup contact (provider-gated).
+      "notification.customer-order-ready:v1",
+    ],
     tenantScope: "store",
     dataClassification: "indirect_identifier",
     compatibility: "additive",
@@ -1928,7 +1933,13 @@ export const eventCatalog = defineEventCatalog([
     ownerModule: "@rms/payment",
     producerModule: "@rms/payment",
     stability: "stable",
-    consumers: ["ordering.payment-outcome:v1", "payment.status-projection:v1"],
+    consumers: [
+      "ordering.payment-outcome:v1",
+      "payment.status-projection:v1",
+      // DEC-PILOT-NOTIFICATIONS: "we have your order" and "Email my receipt" (provider-gated).
+      "notification.customer-order-placed:v1",
+      "notification.customer-receipt-email:v1",
+    ],
     tenantScope: "store",
     dataClassification: "payment",
     compatibility: "additive",

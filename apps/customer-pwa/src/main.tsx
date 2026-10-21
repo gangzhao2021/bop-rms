@@ -18,6 +18,8 @@ import { AppErrorBoundary } from "@bop-rms/ui";
 import { App } from "./App.js";
 import { createCustomerEntryClient } from "./entry/entry-client.js";
 import "./styles.css";
+import { ResumeScreen } from "./resume/ResumeScreen.js";
+import { orderRecoveryPath, takeOrderRecoveryToken } from "./resume/order-recovery.js";
 import { startCustomerServiceWorker } from "./pwa/register-service-worker.js";
 const root = document.getElementById("root");
 if (!root) throw new Error("Application root is missing");
@@ -35,6 +37,29 @@ protectCustomerHistoryRestore({
   reload: () => window.location.reload(),
 });
 async function start() {
+  // DEC-PILOT-NOTIFICATIONS R1 (IDR-0031): a one-time order link. The token leaves the address bar
+  // before anything else runs; nothing else (session bootstrap, entry, service worker) starts here.
+  if (window.location.pathname === orderRecoveryPath) {
+    const token = takeOrderRecoveryToken({
+      pathname: window.location.pathname,
+      search: window.location.search,
+      hash: window.location.hash,
+      replaceState: window.history.replaceState.bind(window.history),
+    });
+    if (!root) throw new Error("Application root is missing");
+    createRoot(root).render(
+      <StrictMode>
+        <AppErrorBoundary>
+          <ResumeScreen
+            token={token}
+            fetcher={window.fetch.bind(window)}
+            open={(path) => window.location.replace(path)}
+          />
+        </AppErrorBoundary>
+      </StrictMode>,
+    );
+    return;
+  }
   let initialMenuContext: MenuJourneyContext | undefined;
   let currentOrder: CustomerCurrentOrder | undefined;
   const hash = window.location.hash;

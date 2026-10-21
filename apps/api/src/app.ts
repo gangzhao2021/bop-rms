@@ -1,4 +1,12 @@
 import {
+  createCustomerOrderMessagingOptionsHandler,
+  createCustomerOrderRecoveryHandler,
+  createNotificationFeedbackHandlers,
+  customerOrderMessagingOptionsRoute,
+  customerOrderRecoveryRoute,
+  notificationFeedbackRoute,
+} from "./customer-order-messaging-http.js";
+import {
   createCustomerContactRemovalHandler,
   customerContactRemovalRoute,
 } from "./customer-contact-removal.js";
@@ -163,6 +171,12 @@ export interface AppOptions {
   /** WP-2423 Q16: the customer removes their own pickup contact from the order page. */
   customerContactRemoval?: RequestHandler;
   customerCheckoutDetails?: CustomerCheckoutDetailsHandler;
+  /** DEC-PILOT-NOTIFICATIONS: which order-message channels can send (default: none). */
+  customerOrderMessagingOptions?: RequestHandler;
+  /** DEC-PILOT-NOTIFICATIONS R1: IDR-0031 one-time order link consume. */
+  customerOrderRecovery?: RequestHandler;
+  /** DEC-PILOT-NOTIFICATIONS: SNS HTTPS subscription for SES feedback (absent: 404). */
+  notificationFeedback?: RequestHandler[];
   deploymentEnvironment?: DeploymentEnvironment;
   errorLogger?: RequestErrorLogger;
   healthReadiness?: HealthReadinessController;
@@ -218,6 +232,9 @@ function createErrorHandler(errorLogger: RequestErrorLogger | undefined): ErrorR
 }
 
 export function createApp({
+  customerOrderMessagingOptions,
+  customerOrderRecovery,
+  notificationFeedback,
   correlationAcceptanceHandler,
   customerCart,
   customerCartBinding,
@@ -283,6 +300,11 @@ export function createApp({
       createMerchantBrandAdministrationRouter(brandAdministration),
     );
   if (merchantBff !== undefined) app.use("/merchant", createMerchantBffRouter(merchantBff));
+  // SNS posts JSON as text/plain: parsed by its own route-level text parser, before JSON parsing.
+  app.post(
+    notificationFeedbackRoute,
+    ...(notificationFeedback ?? createNotificationFeedbackHandlers({})),
+  );
   app.use(express.json({ limit: "64kb", strict: true }));
   app.use((_request, response, next) => {
     response.setHeader("Cache-Control", "no-store");
@@ -389,6 +411,18 @@ export function createApp({
     customerContactRemovalRoute,
     customerContactRemoval ??
       createCustomerContactRemovalHandler({ allowedOrigin: "https://127.0.0.1" }),
+  );
+  app.get(
+    customerOrderMessagingOptionsRoute,
+    customerOrderMessagingOptions ??
+      createCustomerOrderMessagingOptionsHandler({
+        availability: () => ({ sms: false, email: false }),
+      }),
+  );
+  app.post(
+    customerOrderRecoveryRoute,
+    customerOrderRecovery ??
+      createCustomerOrderRecoveryHandler({ allowedOrigin: "https://127.0.0.1" }),
   );
   app.get(
     customerOrderStatusRoute,

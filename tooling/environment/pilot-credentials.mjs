@@ -206,7 +206,37 @@ export function createInternalCredentialLoaders({ file, loadProfile, expectedDat
       root.fill(0);
     }
   }
+  /**
+   * DEC-PILOT-NOTIFICATIONS R1: the order recovery token pepper (version 1) and the recovery abuse
+   * key, each derived for its own purpose from the Guest Session key (no new key file entry).
+   * TEST-ONLY: a live store keeps them in the managed secret store (capability gap "Secrets").
+   */
+  async function createInternalOrderRecoveryKeys() {
+    const saved = await load(),
+      root = Buffer.from(saved.keys.guestSession, "hex");
+    const derive = (purpose) =>
+      Buffer.from(
+        hkdfSync(
+          "sha256",
+          root,
+          Buffer.from(expectedDatabaseName, "utf8"),
+          Buffer.from(purpose, "utf8"),
+          32,
+        ),
+      );
+    try {
+      return Object.freeze({
+        peppers: Object.freeze([
+          { version: 1, key: derive("bop-rms/internal-test/order-recovery-pepper/v1") },
+        ]),
+        abuse: derive("bop-rms/internal-test/order-recovery-abuse/v1"),
+      });
+    } finally {
+      root.fill(0);
+    }
+  }
   return {
+    createInternalOrderRecoveryKeys,
     provisionInternalTestCredentials,
     createInternalTestCredentials,
     createInternalMerchantCredentials,

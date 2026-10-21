@@ -58,6 +58,17 @@ for (const screen of [
               warnings: [],
             },
           };
+          // DEC-PILOT-NOTIFICATIONS: the store's answer while no message channel is connected.
+          await page.route("**/api/v1/customer/order-messages", (route) =>
+            route.fulfill({
+              status: 200,
+              headers: { "content-type": "application/json", "cache-control": "no-store" },
+              body: JSON.stringify({
+                schemaVersion: 1,
+                orderMessages: { sms: false, email: false },
+              }),
+            }),
+          );
           await page.route("**/bff/customer/entry", (route) =>
             route.fulfill({
               status: 201,

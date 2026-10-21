@@ -218,6 +218,11 @@ export interface LocalCustomerRuntimeOptions {
   readonly now: () => string;
   readonly uuidV7Factory: () => string;
   readonly runtime?: Pick<ApiServerRuntimeOptions, "port" | "logger" | "healthReadiness">;
+  /** DEC-PILOT-NOTIFICATIONS: order messages (absent: nothing offered, link and feedback 503/404). */
+  readonly orderMessaging?: Omit<
+    NonNullable<ApiServerRuntimeOptions["customerOrderMessaging"]>,
+    "allowedOrigin"
+  >;
 }
 
 // The caller owns the injected database resources; close them after runtime.shutdown().
@@ -578,6 +583,14 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
               credentials: entry.session.credentials,
               now,
             },
+          },
+        }),
+    ...(options.orderMessaging === undefined
+      ? {}
+      : {
+          customerOrderMessaging: {
+            ...options.orderMessaging,
+            allowedOrigin: options.allowedOrigin,
           },
         }),
     ...(options.orderStatus === undefined

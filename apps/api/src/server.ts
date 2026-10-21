@@ -1,4 +1,11 @@
 import {
+  createCustomerOrderMessagingOptionsHandler,
+  createCustomerOrderRecoveryHandler,
+  createNotificationFeedbackHandlers,
+  type CustomerOrderRecoveryPort,
+  type NotificationFeedbackPort,
+} from "./customer-order-messaging-http.js";
+import {
   createCustomerSessionBootstrapHandler,
   createCustomerSessionBootstrapRead,
 } from "./customer-session-bootstrap.js";
@@ -146,6 +153,13 @@ export interface ApiServerRuntimeOptions {
   customerOrderStatus?: Parameters<typeof createCustomerOrderStatusRead>[0] & {
     allowedOrigin: string;
   };
+  /** DEC-PILOT-NOTIFICATIONS: order-message options, one-time order link and SES feedback. */
+  customerOrderMessaging?: {
+    readonly allowedOrigin: string;
+    readonly availability: () => { readonly sms: boolean; readonly email: boolean };
+    readonly recovery?: CustomerOrderRecoveryPort;
+    readonly feedback?: NotificationFeedbackPort;
+  };
   healthReadiness?: HealthReadinessController;
   host?: string;
   logger?: StructuredLogger;
@@ -217,6 +231,7 @@ export function createApiServerRuntime({
   customerPickupCode,
   customerReceipt,
   customerContactRemoval,
+  customerOrderMessaging,
   healthReadiness = new HealthReadinessController(),
   host = "127.0.0.1",
   logger = createApiRuntimeLogger(),
@@ -349,6 +364,24 @@ export function createApiServerRuntime({
             allowedOrigin: customerReceipt.allowedOrigin,
             port: createCustomerReceiptRead(customerReceipt),
           }),
+        }),
+    ...(customerOrderMessaging === undefined
+      ? {}
+      : {
+          customerOrderMessagingOptions: createCustomerOrderMessagingOptionsHandler({
+            availability: customerOrderMessaging.availability,
+          }),
+          customerOrderRecovery: createCustomerOrderRecoveryHandler({
+            allowedOrigin: customerOrderMessaging.allowedOrigin,
+            ...(customerOrderMessaging.recovery === undefined
+              ? {}
+              : { port: customerOrderMessaging.recovery }),
+          }),
+          notificationFeedback: createNotificationFeedbackHandlers(
+            customerOrderMessaging.feedback === undefined
+              ? {}
+              : { port: customerOrderMessaging.feedback },
+          ),
         }),
     ...(customerContactRemoval === undefined
       ? {}
