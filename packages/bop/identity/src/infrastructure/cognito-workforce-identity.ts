@@ -13,6 +13,7 @@ import {
   type WorkforceAuthenticationSourceOptions,
 } from "./persistence/workforce-authentication-source.js";
 import type { CurrentWorkforceAccountTransaction } from "./persistence/current-workforce-account-source.js";
+import { createCognitoPoolMfaPolicy } from "./cognito-pool-mfa-policy.js";
 
 export interface CognitoWorkforceIdentityOptions {
   readonly configuration: CognitoWorkforceProviderOptions["configuration"] & {
@@ -272,10 +273,18 @@ export function createCognitoWorkforceIdentity(options: CognitoWorkforceIdentity
       }
     },
   });
+  // WP-2423 DEC-COGNITO-STORE-STAFF: real Cognito tokens carry no acr/amr; the pool itself must
+  // require the authenticator app (checked at most five minutes before each sign-in).
+  const userPoolId =
+    /^https:\/\/cognito-idp\.ca-central-1\.amazonaws\.com\/(ca-central-1_[A-Za-z0-9]{1,42})$/u.exec(
+      configuration.issuer,
+    )?.[1];
+  if (!userPoolId) return denied();
   const provider = createCognitoWorkforceProvider({
     configuration: Object.freeze(providerConfiguration),
     clock,
     nextEvidenceReference: next,
+    poolPolicy: createCognitoPoolMfaPolicy({ userPoolId, clock }),
     resolveVerifiedSubject: (input) =>
       transactions.run((tx) =>
         withSource(tx, input.observedAt, (source) => source.resolveVerifiedSubject(input)),

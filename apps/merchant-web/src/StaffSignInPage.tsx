@@ -15,7 +15,20 @@ export const KITCHEN_SIGN_IN_HREF = "/merchant/login?returnTo=/operations/kitche
 export const SIGN_IN_FAILED_TEXT =
   "We couldn't sign you in. If you were invited, sign in with the email address the invitation was sent to; an invitation expires 7 days after it was sent. If it keeps happening, ask your manager.";
 
-export function StaffSignInView({ failed = false }: { readonly failed?: boolean }) {
+/**
+ * The sign-in service's own check (it must require the authenticator app) did not pass or could not
+ * be read, so no one can sign in with their account for now. Signed-in staff keep working.
+ */
+export const SIGN_IN_UNAVAILABLE_TEXT =
+  "Signing in isn't available right now. Staff who are already signed in can keep working, and a shared store tablet still switches staff with a PIN. Try again in a few minutes; if it keeps happening, tell your manager so they can contact BOP support.";
+
+export function StaffSignInView({
+  failed = false,
+  unavailable = false,
+}: {
+  readonly failed?: boolean;
+  readonly unavailable?: boolean;
+}) {
   return (
     <main id="main-content" tabIndex={-1} className="bop-shell__main staff-switch staff-sign-in">
       <header className="staff-switch__header">
@@ -24,9 +37,9 @@ export function StaffSignInView({ failed = false }: { readonly failed?: boolean 
         </p>
         <h1>Staff sign-in</h1>
       </header>
-      {failed ? (
+      {failed || unavailable ? (
         <p role="alert" className="staff-switch__message">
-          {SIGN_IN_FAILED_TEXT}
+          {unavailable ? SIGN_IN_UNAVAILABLE_TEXT : SIGN_IN_FAILED_TEXT}
         </p>
       ) : null}
       <section className="staff-switch__panel" aria-labelledby="staff-sign-in-own">
@@ -71,5 +84,6 @@ export function StaffSignInView({ failed = false }: { readonly failed?: boolean 
 
 export function StaffSignInPage() {
   const { search } = useLocation();
-  return <StaffSignInView failed={new URLSearchParams(search).get("signIn") === "failed"} />;
+  const signIn = new URLSearchParams(search).get("signIn");
+  return <StaffSignInView failed={signIn === "failed"} unavailable={signIn === "unavailable"} />;
 }

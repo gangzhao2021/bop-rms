@@ -9,7 +9,8 @@ import type { StepUpPurpose } from "./refund-approval-client.js";
  */
 export const STEP_UP_CHANNEL = "bop-staff-step-up";
 export const STEP_UP_COMPLETE_PATH = "/app/identity/step-up-complete";
-export type StepUpResult = "verified" | "cancelled" | "failed";
+/** `unavailable`: the sign-in could not be started now (the sign-in service's check did not pass). */
+export type StepUpResult = "verified" | "cancelled" | "failed" | "unavailable";
 
 export function stepUpStartPath(purpose: StepUpPurpose, returnTo: string): string {
   return (
@@ -41,7 +42,12 @@ export function safeReturnPath(value: string | null | undefined): string {
 }
 
 export function parseStepUpResult(value: unknown): StepUpResult | null {
-  return value === "verified" || value === "cancelled" || value === "failed" ? value : null;
+  return value === "verified" ||
+    value === "cancelled" ||
+    value === "failed" ||
+    value === "unavailable"
+    ? value
+    : null;
 }
 
 /** A channel message `{type:"step-up", result}`, or null for anything else. */
@@ -122,4 +128,6 @@ export const STEP_UP_SIGN_IN_EXPLANATION =
 export const stepUpResultText: Record<Exclude<StepUpResult, "verified">, string> = {
   cancelled: "You didn't finish signing in. Try again when you're ready.",
   failed: "We couldn't confirm it's you. Try again, or ask a manager if it keeps happening.",
+  unavailable:
+    "Signing in again isn't available right now, so nothing was changed. Try again in a few minutes; if it keeps happening, tell your manager.",
 };

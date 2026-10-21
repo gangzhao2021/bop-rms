@@ -6,6 +6,7 @@ import {
   announceStepUpResult,
   openStepUpSignIn,
   parseStepUpMessage,
+  parseStepUpResult,
   safeReturnPath,
   STEP_UP_CHANNEL,
   STEP_UP_SIGN_IN_EXPLANATION,
@@ -15,11 +16,13 @@ import {
   type ChannelFactory,
 } from "./step-up-sign-in.js";
 import { finishStepUp, StepUpCompleteView, stepUpCompleteText } from "./StepUpCompletePage.js";
-import { StepUpVerification } from "./StepUpVerification.js";
+import { StepUpVerification, stepUpExplanationText } from "./StepUpVerification.js";
+import { PIN_ELEVATION_EXPLANATION } from "./StaffPinControls.js";
 import {
   KITCHEN_SIGN_IN_HREF,
   SIGN_IN_FAILED_TEXT,
   SIGN_IN_HREF,
+  SIGN_IN_UNAVAILABLE_TEXT,
   StaffSignInView,
 } from "./StaffSignInPage.js";
 
@@ -128,7 +131,7 @@ describe("WP-2423 DEC-COGNITO-STORE-STAFF confirm it is you by signing in again"
   });
 
   it("says how it went in plain words", () => {
-    for (const result of ["verified", "cancelled", "failed"] as const) {
+    for (const result of ["verified", "cancelled", "failed", "unavailable"] as const) {
       const html = renderToStaticMarkup(
         <MemoryRouter>
           <StepUpCompleteView result={result} returnTo="/app/approvals" />
@@ -145,6 +148,20 @@ describe("WP-2423 DEC-COGNITO-STORE-STAFF confirm it is you by signing in again"
       "We couldn't confirm it's you. Try again, or ask a manager if it keeps happening.",
     );
     expect(STEP_UP_SIGN_IN_EXPLANATION).toContain("password and authenticator app");
+  });
+
+  it("never asks for a six-digit code when the PIN session confirms by signing in again", () => {
+    const signIn = stepUpExplanationText("SignIn", PIN_ELEVATION_EXPLANATION);
+    expect(signIn).toBe(
+      "Confirm it is you by signing in again with your password and authenticator app. After you verify, refunds, price changes and staff changes can go ahead on this PIN sign-in until the time shown.",
+    );
+    expect(signIn).not.toMatch(/six-digit|code shown/iu);
+    // The internal-test authenticator code keeps its own wording.
+    expect(stepUpExplanationText("Code", PIN_ELEVATION_EXPLANATION)).toContain(
+      "enter the six-digit code shown for this store",
+    );
+    expect(stepUpExplanationText("SignIn", undefined)).toBe(STEP_UP_SIGN_IN_EXPLANATION);
+    expect(stepUpExplanationText("Code", undefined)).toContain("approvals and refunds");
   });
 
   it("offers the code until the server says to sign in again", () => {
@@ -194,5 +211,18 @@ describe("WP-2423 DEC-COGNITO-STORE-STAFF Staff sign-in", () => {
     expect(html.indexOf('role="alert"')).toBeLessThan(html.indexOf(SIGN_IN_HREF));
     expect(html).toContain(SIGN_IN_FAILED_TEXT.replace(/'/gu, "&#x27;"));
     plain(html);
+  });
+  it("says when signing in is unavailable and who can keep working", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <StaffSignInView unavailable />
+      </MemoryRouter>,
+    );
+    expect(html).toContain(SIGN_IN_UNAVAILABLE_TEXT.replace(/'/gu, "&#x27;"));
+    expect(html).not.toContain(SIGN_IN_FAILED_TEXT.replace(/'/gu, "&#x27;"));
+    expect(SIGN_IN_UNAVAILABLE_TEXT).toContain("already signed in can keep working");
+    plain(html);
+    expect(parseStepUpResult("unavailable")).toBe("unavailable");
+    expect(stepUpResultText.unavailable).toContain("nothing was changed");
   });
 });

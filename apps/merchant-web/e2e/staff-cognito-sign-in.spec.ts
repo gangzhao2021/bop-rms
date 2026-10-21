@@ -168,6 +168,14 @@ test("@production staff sign in with their own account from the sign-in page", a
     "We couldn't sign you in. If you were invited, sign in with the email address the invitation was sent to; an invitation expires 7 days after it was sent. If it keeps happening, ask your manager.",
   );
   await checkScreen(page, "sign-in-failed", [1440, 390]);
+
+  // The sign-in service's own check (authenticator app required) did not pass: staff are told
+  // that signing in is unavailable for now and who can keep working.
+  await page.goto("/operations/sign-in?signIn=unavailable");
+  await expect(page.getByRole("alert")).toHaveText(
+    "Signing in isn't available right now. Staff who are already signed in can keep working, and a shared store tablet still switches staff with a PIN. Try again in a few minutes; if it keeps happening, tell your manager so they can contact BOP support.",
+  );
+  await checkScreen(page, "sign-in-unavailable", [1440, 390]);
 });
 
 test("@production signing out returns to the staff sign-in page", async ({ page }) => {
@@ -540,8 +548,46 @@ test("@production the end of the sign-in window, opened on its own, goes back", 
   );
   await checkScreen(page, "step-up-failed", [1440, 390]);
   await page.goto(
+    "/app/identity/step-up-complete?result=unavailable&returnTo=" +
+      encodeURIComponent("/app/approvals"),
+  );
+  await expect(page.getByRole("alert")).toHaveText(
+    "Signing in again isn't available right now, so nothing was changed. Try again in a few minutes; if it keeps happening, tell your manager.",
+  );
+  await page.goto(
     "/app/identity/step-up-complete?result=cancelled&returnTo=" +
       encodeURIComponent("//evil.example/x"),
   );
   await page.waitForURL((url) => url.pathname === "/app");
+});
+
+test("@production a PIN sign-in confirms it is you by signing in again, without a code field", async ({
+  page,
+}) => {
+  await session(page, { value: true });
+  // A PIN sign-in on a shared tablet; this Store confirms by signing in again (Cognito).
+  await page.route("**/merchant/staff-pin", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        pin: { state: "Set", changedAt: "2026-10-01T15:00:00.000Z", lockedUntil: null },
+        signIn: "Pin",
+        verifiedUntil: null,
+      },
+    }),
+  );
+  await page.route("**/merchant/identity/step-up", (route) =>
+    route.fulfill({ headers, json: { validUntil: null, method: "SignIn" } }),
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/app");
+  const footer = page.locator(".workspace-sidebar__footer");
+  await footer.getByRole("button", { name: "Verify it's you" }).click();
+  const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
+  await expect(dialog).toContainText(
+    "Confirm it is you by signing in again with your password and authenticator app. After you verify, refunds, price changes and staff changes can go ahead on this PIN sign-in until the time shown.",
+  );
+  await expect(dialog).not.toContainText("six-digit");
+  await expect(dialog.getByLabel("Six-digit code")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Continue to sign in" })).toBeVisible();
 });

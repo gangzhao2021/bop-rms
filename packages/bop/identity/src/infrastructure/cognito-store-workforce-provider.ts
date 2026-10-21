@@ -17,6 +17,11 @@ import {
   createCognitoProviderProtocol,
   type CognitoProviderConfiguration,
 } from "./cognito-provider-protocol.js";
+import {
+  createCognitoPoolMfaPolicy,
+  type CognitoPoolMfaPolicy,
+  type CognitoPoolMfaPolicyOptions,
+} from "./cognito-pool-mfa-policy.js";
 
 /**
  * WP-2423 DEC-COGNITO-STORE-STAFF: the Store staff sign-in (ordinary `WorkforceStandard` and
@@ -26,6 +31,11 @@ import {
  * (an existing account, or the first sign-in of an invited person); the result is never a grant.
  * Step-up uses the same protocol on its own callback: the staff member signs in again with their
  * authenticator and the caller records the fresh authentication for their current session.
+ *
+ * Real Cognito tokens carry no `acr`/`amr`: both sign-in and step-up first need a recent check that
+ * the pool requires the authenticator app (`pool`, see `createCognitoPoolMfaPolicy`), and the signed
+ * `auth_time` must fall after the authorization was started (`authorizationStartedAt`, at most
+ * `authenticationSkewMs` earlier) and within five minutes of the callback.
  */
 export interface CognitoStoreWorkforceProviderOptions {
   /** `redirectUri` is `<origin>/merchant/callback`; `logoutReturnUri` is `<origin>/app`. */
@@ -35,6 +45,8 @@ export interface CognitoStoreWorkforceProviderOptions {
   readonly clock: { now(): string };
   readonly nextReference: () => string;
   readonly resolveSubject: (input: CognitoStoreVerifiedSubject) => Promise<IdentityActor>;
+  /** TEST-ONLY: the loopback Cognito stand-in answering the pool check (InternalTest only). */
+  readonly providerEndpoint?: CognitoPoolMfaPolicyOptions["providerEndpoint"];
   readonly http?: typeof globalThis.fetch;
 }
 export interface CognitoStoreVerifiedSubject {
@@ -46,6 +58,8 @@ export interface CognitoStoreVerifiedSubject {
   readonly observedAt: string;
 }
 export interface CognitoStoreWorkforceProvider extends OidcProviderPort {
+  /** The pool's MFA check: refresh at startup and every few minutes (`monitor`), and its status. */
+  readonly pool: Pick<CognitoPoolMfaPolicy, "refresh" | "status" | "monitor">;
   readonly stepUp: {
     readonly redirectUri: string;
     createAuthorizationUrl(request: OidcAuthorizationRequest): Promise<string>;
@@ -56,6 +70,13 @@ export interface CognitoStoreWorkforceProvider extends OidcProviderPort {
 const denied = (): never => {
   throw new BrowserSessionError("BROWSER_SESSION_DENIED");
 };
+const rethrowUnavailable = (error: unknown): never => {
+  if (error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_UNAVAILABLE")
+    throw new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE");
+  return denied();
+};
+/** How much earlier than the authorization start Cognito's clock may date the sign-in. */
+export const authenticationSkewMs = 10_000;
 const protocolKeys = [
   "issuer",
   "clientId",
@@ -75,6 +96,7 @@ export function createCognitoStoreWorkforceProvider(
       "clock",
       "nextReference",
       "resolveSubject",
+      ...(Object.hasOwn(options, "providerEndpoint") ? ["providerEndpoint"] : []),
       ...(Object.hasOwn(options, "http") ? ["http"] : []),
     ]);
     const configuration = readClosedRecord(
@@ -84,10 +106,23 @@ export function createCognitoStoreWorkforceProvider(
     const resolve = o.resolveSubject,
       next = o.nextReference;
     if (typeof resolve !== "function" || typeof next !== "function") return denied();
+    const userPoolId =
+      /^https:\/\/cognito-idp\.ca-central-1\.amazonaws\.com\/(ca-central-1_[A-Za-z0-9]{1,42})$/u.exec(
+        configuration.issuer,
+      )?.[1];
+    if (!userPoolId) return denied();
+    const poolPolicy = createCognitoPoolMfaPolicy({
+      userPoolId,
+      clock: options.clock,
+      ...(options.providerEndpoint === undefined
+        ? {}
+        : { providerEndpoint: options.providerEndpoint }),
+    });
     const shared = {
       clock: options.clock,
       accountKind: "Workforce" as const,
       profile: "StoreOperations" as const,
+      poolPolicy,
       ...(options.http === undefined ? {} : { http: options.http }),
     };
     const login = createCognitoProviderProtocol({
@@ -113,21 +148,28 @@ export function createCognitoStoreWorkforceProvider(
       readonly tokenBundle: string;
       readonly assertCurrent: () => string;
     }> => {
+      const { authorizationStartedAt, ...exchange } = readClosedRecord(request, [
+        "issuer",
+        "clientId",
+        "redirectUri",
+        "code",
+        "nonce",
+        "codeVerifier",
+        "authorizationStartedAt",
+      ]);
+      const startedAt = Date.parse(parseCanonicalInstant(authorizationStartedAt));
       const result = await protocol.exchangeVerifiedCode({
-        ...readClosedRecord(request, [
-          "issuer",
-          "clientId",
-          "redirectUri",
-          "code",
-          "nonce",
-          "codeVerifier",
-        ]),
+        ...exchange,
         prompt: "login",
         requireTotp: true,
         transactionReference: transaction(),
       } as Parameters<typeof protocol.exchangeVerifiedCode>[0]);
       const username = (result as { readonly username?: unknown }).username;
       if (typeof username !== "string") return denied();
+      // prompt=login/max_age=0: the password and authenticator were entered for this request,
+      // not reused from an earlier Cognito sign-in (auth_time is whole seconds).
+      if (Date.parse(result.authenticatedAt) + 1000 <= startedAt - authenticationSkewMs)
+        return denied();
       return {
         subject: Object.freeze({
           issuer: result.issuer,
@@ -150,8 +192,8 @@ export function createCognitoStoreWorkforceProvider(
             requireTotp: true,
             transactionReference: transaction(),
           });
-        } catch {
-          return denied();
+        } catch (error) {
+          return rethrowUnavailable(error);
         }
       },
       async exchangeCode(request: OidcCodeExchangeRequest) {
@@ -175,6 +217,11 @@ export function createCognitoStoreWorkforceProvider(
       async revokeOrLogout(tokenBundle: string) {
         return login.revokeRefreshTokens(tokenBundle);
       },
+      pool: Object.freeze({
+        refresh: poolPolicy.refresh,
+        status: poolPolicy.status,
+        monitor: poolPolicy.monitor,
+      }),
       stepUp: Object.freeze({
         redirectUri: stepUpRedirectUri,
         async createAuthorizationUrl(request: OidcAuthorizationRequest) {
@@ -185,8 +232,8 @@ export function createCognitoStoreWorkforceProvider(
               requireTotp: true,
               transactionReference: transaction(),
             });
-          } catch {
-            return denied();
+          } catch (error) {
+            return rethrowUnavailable(error);
           }
         },
         async verify(request: OidcCodeExchangeRequest) {

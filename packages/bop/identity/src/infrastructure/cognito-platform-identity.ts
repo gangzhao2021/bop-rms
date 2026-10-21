@@ -9,6 +9,7 @@ import {
   type CognitoPlatformProviderOptions,
 } from "./cognito-platform-provider.js";
 import { createCognitoPlatformSubjectStatus } from "./cognito-platform-subject-status.js";
+import { createCognitoPoolMfaPolicy } from "./cognito-pool-mfa-policy.js";
 import {
   createPostgresPlatformActorDirectorySource,
   type PlatformActorDirectorySourceOptions,
@@ -131,6 +132,9 @@ export function createCognitoPlatformIdentity(options: CognitoPlatformIdentityOp
     configuration: providerConfiguration,
     clock,
     nextEvidenceReference: options.nextEvidenceReference,
+    // WP-2423 DEC-COGNITO-STORE-STAFF: real Cognito tokens carry no acr/amr; the pool itself must
+    // require the authenticator app (checked at most five minutes before each sign-in).
+    poolPolicy: createCognitoPoolMfaPolicy({ userPoolId, clock }),
     resolveVerifiedSubject: (input) =>
       transactions.run((tx) => source(tx, input.observedAt).resolveVerifiedSubject(input)),
   });

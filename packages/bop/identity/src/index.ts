@@ -296,6 +296,7 @@ export * from "./infrastructure/persistence/staff-pin-store.js";
 // WP-2423 DEC-COGNITO-STORE-STAFF: Store staff invitations, their Cognito accounts and sign-in.
 export * from "./infrastructure/persistence/store-staff-account-store.js";
 export * from "./infrastructure/cognito-store-workforce-provider.js";
+export * from "./infrastructure/cognito-pool-mfa-policy.js";
 
 export * from "./infrastructure/persistence/guest-entry-admission-store.js";
 

@@ -17,11 +17,14 @@ import { URL, URLSearchParams } from "node:url";
  *   POST /oauth2/revoke                     refresh token revocation
  *   GET  /logout                            managed-login sign-out
  *   POST /  (X-Amz-Target AWSCognitoIdentityProviderService.AdminCreateUser | AdminGetUser |
- *            AdminDeleteUser)              the admin API, AWS JSON 1.1
+ *            AdminDeleteUser | GetUserPoolMfaConfig | DescribeUserPool)   the admin API, AWS JSON 1.1
  *
  * Invitation "emails" are kept in memory (`invitations`), never sent. Faults can be injected per
- * endpoint (`fail("token", "status-500")`, `"hang"`, `"invalid-json"`), and token claims changed
- * for the next sign-in (`nextClaims`). It refuses to start in a production process.
+ * endpoint (`fail("token", "status-500")`, `"hang"`, `"invalid-json"`; `fail("admin:<Op>", …)`),
+ * and token claims changed for the next sign-in (`nextClaims`). Tokens have the real user-pool
+ * shape by default (no `acr`/`amr`; `tokenShape: "acr-amr"` adds them), and the pool's MFA
+ * settings answer as required authenticator-app MFA unless `setPoolMfa` says otherwise. It refuses
+ * to start in a production process.
  */
 const managedLoginOriginDefault = "https://bop-test-only.auth.ca-central-1.amazoncognito.com";
 const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -32,6 +35,54 @@ const escapeHtml = (value) =>
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
   );
 
+/**
+ * The pool MFA settings the stand-in reports: `on-totp` (required, authenticator app only — what
+ * the runbook sets up), `optional`, `off`, `sms` (text-message MFA also on), `email`,
+ * `passwordless` (one-time-password or passkey first sign-in factors), `remembered-devices`
+ * (remembered devices skip MFA).
+ */
+export const testPoolMfaModes = Object.freeze([
+  "on-totp",
+  "optional",
+  "off",
+  "sms",
+  "email",
+  "passwordless",
+  "remembered-devices",
+]);
+const poolMfaAnswer = (pool, mode) => {
+  const mfa = {
+    MfaConfiguration: mode === "optional" ? "OPTIONAL" : mode === "off" ? "OFF" : "ON",
+    SoftwareTokenMfaConfiguration: { Enabled: mode !== "off" },
+    ...(mode === "sms"
+      ? { SmsMfaConfiguration: { SmsAuthenticationMessage: "TEST-ONLY {####}" } }
+      : {}),
+    ...(mode === "email" ? { EmailMfaConfiguration: { Subject: "TEST-ONLY" } } : {}),
+    WebAuthnConfiguration: { UserVerification: "preferred" },
+  };
+  const described = {
+    UserPool: {
+      Id: pool,
+      MfaConfiguration: mfa.MfaConfiguration,
+      Policies: {
+        SignInPolicy: {
+          AllowedFirstAuthFactors:
+            mode === "passwordless" ? ["PASSWORD", "EMAIL_OTP", "WEB_AUTHN"] : ["PASSWORD"],
+        },
+      },
+      ...(mode === "remembered-devices"
+        ? {
+            DeviceConfiguration: {
+              ChallengeRequiredOnNewDevice: true,
+              DeviceOnlyRememberedOnUserPrompt: false,
+            },
+          }
+        : {}),
+    },
+  };
+  return { mfa, described };
+};
+
 export async function startCognitoTestProvider({
   pool = "ca-central-1_TestOnly",
   clientId = "testonlystaffclient",
@@ -39,6 +90,8 @@ export async function startCognitoTestProvider({
   managedLoginOrigin = managedLoginOriginDefault,
   callbackUrls = [],
   https = null,
+  tokenShape = "cognito",
+  poolMfa = "on-totp",
 } = {}) {
   if (process.env.NODE_ENV === "production") throw new Error("TEST_ONLY");
   const issuer = "https://cognito-idp.ca-central-1.amazonaws.com/" + pool;
@@ -51,6 +104,18 @@ export async function startCognitoTestProvider({
   const calls = [];
   const faults = new Map(); // endpoint -> [mode]
   let nextClaims = null;
+  let shape = tokenShape,
+    poolMode = poolMfa;
+  const setShape = (value) => {
+    if (value !== "cognito" && value !== "acr-amr") throw new Error("TEST_ONLY_TOKEN_SHAPE");
+    shape = value;
+  };
+  const setPoolMode = (value) => {
+    if (!testPoolMfaModes.includes(value)) throw new Error("TEST_ONLY_POOL_MFA");
+    poolMode = value;
+  };
+  setShape(tokenShape);
+  setPoolMode(poolMfa);
   const fault = (endpoint) => {
     const queue = faults.get(endpoint);
     return queue?.length ? queue.shift() : null;
@@ -205,8 +270,8 @@ export async function startCognitoTestProvider({
           auth_time: grant.authTime,
           iat: now,
           exp: now + 3600,
-          acr: "urn:cognito:loa:4",
-          amr: ["pwd", "otp", "mfa"],
+          // Real user-pool tokens carry no acr/amr; "acr-amr" is the older expected shape.
+          ...(shape === "acr-amr" ? { acr: "urn:cognito:loa:4", amr: ["pwd", "otp", "mfa"] } : {}),
           ...(nextClaims?.common ?? {}),
         };
         const id_token = jwt({
@@ -253,6 +318,15 @@ export async function startCognitoTestProvider({
         const input = JSON.parse((await readBody(request)) || "{}");
         if (input.UserPoolId !== pool)
           return awsError(response, "ResourceNotFoundException", "pool");
+        if (operation === "GetUserPoolMfaConfig" || operation === "DescribeUserPool") {
+          const answer = poolMfaAnswer(pool, poolMode);
+          return json(
+            response,
+            200,
+            operation === "GetUserPoolMfaConfig" ? answer.mfa : answer.described,
+            "application/x-amz-json-1.1",
+          );
+        }
         const user = users.get(input.Username);
         if (operation === "AdminCreateUser") {
           if (input.MessageAction === "RESEND") {
@@ -379,6 +453,10 @@ export async function startCognitoTestProvider({
     setNextClaims(claims) {
       nextClaims = claims;
     },
+    /** "cognito" (real user-pool tokens, no acr/amr) or "acr-amr" (both claims present). */
+    setTokenShape: setShape,
+    /** What the pool MFA admin calls report from now on (one of `testPoolMfaModes`). */
+    setPoolMfa: setPoolMode,
     /**
      * Signs in at the stand-in like a browser would: from the authorization URL the app redirected
      * to (any origin), with the person's email, password (or temporary password plus a new one on

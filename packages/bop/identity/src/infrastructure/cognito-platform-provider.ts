@@ -13,6 +13,7 @@ import {
   createCognitoProviderProtocol,
   type CognitoProviderConfiguration,
 } from "./cognito-provider-protocol.js";
+import type { CognitoPoolMfaPolicy } from "./cognito-pool-mfa-policy.js";
 export interface CognitoPlatformProviderOptions {
   readonly configuration: CognitoProviderConfiguration;
   readonly clock: { now(): string };
@@ -24,6 +25,11 @@ export interface CognitoPlatformProviderOptions {
     readonly authenticatedAt: string;
     readonly observedAt: string;
   }) => Promise<IdentityActor>;
+  /**
+   * WP-2423 DEC-COGNITO-STORE-STAFF: the pool's MFA check. With it, real Cognito tokens without
+   * `acr`/`amr` are accepted once the pool is verified to require the authenticator app.
+   */
+  readonly poolPolicy?: Pick<CognitoPoolMfaPolicy, "assertRequiredTotp">;
   readonly http?: typeof globalThis.fetch;
 }
 const denied = (): never => {
@@ -39,6 +45,7 @@ export function createCognitoPlatformProvider(
         "clock",
         "nextEvidenceReference",
         "resolveVerifiedSubject",
+        ...(Object.hasOwn(options, "poolPolicy") ? ["poolPolicy"] : []),
         ...(Object.hasOwn(options, "http") ? ["http"] : []),
       ]),
       resolve = o.resolveVerifiedSubject,
@@ -48,6 +55,7 @@ export function createCognitoPlatformProvider(
       configuration: options.configuration,
       clock: options.clock,
       accountKind: "Platform",
+      ...(options.poolPolicy === undefined ? {} : { poolPolicy: options.poolPolicy }),
       ...(options.http === undefined ? {} : { http: options.http }),
     });
     return Object.freeze({

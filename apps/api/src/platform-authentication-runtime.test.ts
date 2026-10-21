@@ -17,6 +17,42 @@ import {
   type PlatformAuthenticationRuntimeOptions,
 } from "./platform-authentication-runtime.js";
 
+// WP-2423 DEC-COGNITO-STORE-STAFF: the Cognito composition checks the pool's MFA settings before a
+// sign-in starts (real tokens carry no acr/amr). Only the AWS SDK send boundary is synthetic; it
+// answers a pool that requires authenticator-app MFA.
+const poolAdmin = vi.hoisted(() => ({ calls: [] as string[] }));
+vi.mock(
+  "../../../packages/bop/identity/node_modules/@aws-sdk/client-cognito-identity-provider",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("../../../packages/bop/identity/node_modules/@aws-sdk/client-cognito-identity-provider")
+      >();
+    return {
+      ...actual,
+      CognitoIdentityProviderClient: class {
+        send = async (command: unknown) => {
+          if (command instanceof actual.GetUserPoolMfaConfigCommand) {
+            poolAdmin.calls.push("GetUserPoolMfaConfig");
+            return { MfaConfiguration: "ON", SoftwareTokenMfaConfiguration: { Enabled: true } };
+          }
+          if (command instanceof actual.DescribeUserPoolCommand) {
+            poolAdmin.calls.push("DescribeUserPool");
+            return {
+              UserPool: {
+                Id: (command.input as { UserPoolId: string }).UserPoolId,
+                MfaConfiguration: "ON",
+                Policies: { SignInPolicy: { AllowedFirstAuthFactors: ["PASSWORD"] } },
+              },
+            };
+          }
+          throw new Error("UNEXPECTED_SYNTHETIC_SDK_COMMAND");
+        };
+      },
+    };
+  },
+);
+
 const id = (n: number) => `01902627-0010-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const initial = "2026-10-06T12:00:00.000Z";
 type Row = Record<string, unknown>;
@@ -334,6 +370,7 @@ it("starts actual Cognito composition with encrypted authorization state and fix
     runtime = createCognitoPlatformAuthenticationRuntime(options);
   const started = await runtime.service.start("/platform/tenants"),
     target = new URL(started.authorizationUrl);
+  expect([...poolAdmin.calls].sort()).toEqual(["DescribeUserPool", "GetUserPoolMfaConfig"]);
   expect(target.origin).toBe(options.configuration.managedLoginOrigin);
   expect(target.pathname).toBe("/oauth2/authorize");
   expect(Object.fromEntries(target.searchParams)).toMatchObject({

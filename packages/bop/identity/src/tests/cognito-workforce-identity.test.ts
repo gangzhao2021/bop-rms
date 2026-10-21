@@ -246,8 +246,14 @@ describe("concrete Cognito Workforce Identity composition", () => {
       "configuration",
       "clock",
       "nextEvidenceReference",
+      "poolPolicy",
       "resolveVerifiedSubject",
     ]);
+    // WP-2423 DEC-COGNITO-STORE-STAFF: the pool's MFA check guards tokens without acr/amr.
+    expect(
+      typeof (ports.provider.mock.calls[0]?.[0] as { poolPolicy: { assertRequiredTotp: unknown } })
+        .poolPolicy.assertRequiredTotp,
+    ).toBe("function");
     expect(ports.source).toHaveBeenCalledWith(
       expect.objectContaining({
         transaction: f.transactions[0],

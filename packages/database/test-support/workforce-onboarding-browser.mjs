@@ -31,9 +31,28 @@ import { createCognitoWorkforceOnboardingBrowser } from "../../../apps/api/src/w
 import { createMerchantCategoryTransactions } from "../../../apps/api/src/merchant-category-transactions.ts";
 
 const requireIdentity = createRequire(new URL("../../bop/identity/package.json", import.meta.url));
-const { CognitoIdentityProviderClient, AdminGetUserCommand } = requireIdentity(
-  "@aws-sdk/client-cognito-identity-provider",
-);
+const {
+  CognitoIdentityProviderClient,
+  AdminGetUserCommand,
+  GetUserPoolMfaConfigCommand,
+  DescribeUserPoolCommand,
+} = requireIdentity("@aws-sdk/client-cognito-identity-provider");
+/**
+ * WP-2423 DEC-COGNITO-STORE-STAFF: the Cognito compositions check the pool's MFA settings (real
+ * user-pool tokens carry no acr/amr). Synthetic answer: MFA required, authenticator app only.
+ */
+const syntheticPoolMfaAnswer = (command) =>
+  command instanceof GetUserPoolMfaConfigCommand
+    ? { MfaConfiguration: "ON", SoftwareTokenMfaConfiguration: { Enabled: true } }
+    : command instanceof DescribeUserPoolCommand
+      ? {
+          UserPool: {
+            Id: command.input.UserPoolId,
+            MfaConfiguration: "ON",
+            Policies: { SignInPolicy: { AllowedFirstAuthFactors: ["PASSWORD"] } },
+          },
+        }
+      : null;
 const id = (n) => `0190ed60-0401-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const hash = (value) => `sha256:${sha256Hex(canonicalizeRfc8785(value))}`;
 const offset = (at, n) => new Date(Date.parse(at) + n).toISOString();
@@ -776,6 +795,8 @@ export async function verifyWorkforceOnboardingBrowser(context) {
     sdkSpy = vi
       .spyOn(CognitoIdentityProviderClient.prototype, "send")
       .mockImplementation(async (command) => {
+        const pool = syntheticPoolMfaAnswer(command);
+        if (pool !== null) return pool;
         assert(command instanceof AdminGetUserCommand);
         assert.equal(command.input.UserPoolId, "ca-central-1_OnboardNative");
         assert.equal(command.input.Username, subject);
