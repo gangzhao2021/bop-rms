@@ -78,7 +78,12 @@ export const pilotCapabilityGaps = Object.freeze([
   Object.freeze({
     code: "PaymentProvider",
     standIn: "internal payment simulator",
-    needs: "Stripe adapter wiring (repository) and the Owner's Stripe account keys (external)",
+    // DEC-STRIPE-PILOT-WIRING: Stripe test-mode wiring is done (payment.json + secret files);
+    // satisfied only by a configured Stripe Provider whose secrets are present and whose mode
+    // matches the environment (Live for a Pilot Store — not yet accepted by the configuration).
+    needs:
+      "Stripe live-mode Provider environment through the composition (repository) and the Owner's live keys, webhook secret and verified domain (external)",
+    configurable: true,
   }),
   Object.freeze({
     code: "StaffLogin",
@@ -107,13 +112,20 @@ export const pilotCapabilityGaps = Object.freeze([
 ]);
 
 /**
- * Refuses a Pilot start while a capability gap remains; InternalTest is unaffected. `met` lists
- * configurable gaps this installation's configuration was checked to satisfy (never the others).
+ * The gaps that remain once this installation's checked configuration is taken into account. `met`
+ * lists configurable gaps the configuration was checked to satisfy (never the others), e.g.
+ * "Secrets"/"Tls" from `checkConfiguredPilotCapabilities` or "PaymentProvider" from
+ * `pilotPaymentProviderReady`.
  */
+export function remainingPilotCapabilityGaps(met = []) {
+  const satisfied = new Set(met);
+  return pilotCapabilityGaps.filter((gap) => !(gap.configurable && satisfied.has(gap.code)));
+}
+
+/** Refuses a Pilot start while a capability gap remains; InternalTest is unaffected. */
 export function assertPilotReady(options = {}) {
   const environment = currentPilotEnvironment(options);
-  const met = new Set(options.met ?? []);
-  const remaining = pilotCapabilityGaps.filter((gap) => !(gap.configurable && met.has(gap.code)));
+  const remaining = remainingPilotCapabilityGaps(options.met ?? []);
   if (environment === "Pilot" && remaining.length > 0)
     throw new Error("PILOT_CAPABILITY_MISSING:" + remaining.map((gap) => gap.code).join(","));
   return environment;

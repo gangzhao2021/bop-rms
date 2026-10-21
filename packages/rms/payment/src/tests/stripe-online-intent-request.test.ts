@@ -25,7 +25,7 @@ function request(amount = 1250n) {
     idempotencyKey: "SYNTHETIC:CREATE:0001" as never,
   });
 }
-it("encodes exact amount and stable idempotency without owner IDs or customer data", () => {
+it("encodes exact amount, stable idempotency and only Payment's own opaque references", () => {
   const result = encodeStripeOnlineIntentRequest(request());
   expect(result.method).toBe("POST");
   expect(result.path).toBe("/v1/payment_intents");
@@ -38,6 +38,8 @@ it("encodes exact amount and stable idempotency without owner IDs or customer da
     "payment_method_types[]": "card",
     confirm: "false",
     "expand[]": "latest_charge",
+    "metadata[bop_payment_operation]": context.operationReference,
+    "metadata[bop_payment_attempt]": context.paymentAttemptReference,
   });
   expect(encodeStripeOnlineIntentRequest(request())).toEqual(result);
 });

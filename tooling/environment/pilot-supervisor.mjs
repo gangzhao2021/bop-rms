@@ -9,9 +9,11 @@ import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import {
   assertPilotReady,
   checkConfiguredPilotCapabilities,
+  currentPilotEnvironment,
   isPilotRuntime,
   isPilotStore,
 } from "./pilot-environment.mjs";
+import { pilotPaymentProviderReady } from "./pilot-payment-config.mjs";
 import { SUPERVISOR_HEALTH_FILE, writePrivateJson } from "./pilot-ops-files.mjs";
 export async function acquirePilotSupervisorLease(runtimeDirectory) {
   const root = await fs.realpath(process.cwd());
@@ -190,6 +192,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         met = checked.met;
         for (const problem of checked.problems) console.error("PILOT_NOT_READY " + problem);
       }
+      // DEC-STRIPE-PILOT-WIRING: a configured Provider whose secrets are present and whose mode
+      // matches the environment meets the PaymentProvider gap.
+      if (
+        await pilotPaymentProviderReady(process.argv[2], { environment: currentPilotEnvironment() })
+      )
+        met = [...met, "PaymentProvider"];
       assertPilotReady({ met });
     } catch (error) {
       // WP-2423 P1b: name what a Pilot Store still lacks (capability codes only, no data).

@@ -1,3 +1,4 @@
+import { isPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
 import { createHash } from "node:crypto";
 import { pilotCreateIntentIdempotencyKey } from "./pilot-open-payment-resolution.mjs";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
@@ -48,7 +49,7 @@ export async function createInternalPaymentIntent(
     saved.environment !== "InternalTest" ||
     saved.database !== expectedDatabaseName ||
     saved.scope.storeReference !== scope.storeReference ||
-    simulator.simulation !== true
+    !isPilotPaymentProvider(simulator)
   )
     throw new Error("INTERNAL_PAYMENT_ONLY");
   const prepared = createInternalPaymentPreparation(resources, checkout, orders, orderType),

@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import process from "node:process";
 import { createConfiguredPilotResources } from "./pilot-configured-resources.mjs";
 import { loadPilotInstallation } from "./pilot-installation.mjs";
 import { createRuntime } from "./pilot-api.mjs";
@@ -10,7 +11,10 @@ import { createInternalPickupReadiness } from "./pilot-pickup-readiness.mjs";
 import { createInternalPickupProof } from "./pilot-pickup-proof.mjs";
 import { createInternalPaymentTerminal } from "./pilot-payment-terminal.mjs";
 import { createInternalChannelPayment } from "./pilot-channel-payment.mjs";
-import { createInternalSimulatedProvider } from "./pilot-payment-provider.mjs";
+import { createPilotPaymentProvider, isStripeProvider } from "./pilot-stripe-provider.mjs";
+import { loadPilotPaymentConfig } from "./pilot-payment-config.mjs";
+import { createPilotStripeWebhookReceiver } from "./pilot-stripe-webhook.mjs";
+import { currentPilotEnvironment } from "./pilot-environment.mjs";
 import { createInternalOrder } from "./pilot-order.mjs";
 import { createInternalCheckout } from "./pilot-checkout.mjs";
 import { createInternalCheckoutDetails } from "./pilot-checkout-details.mjs";
@@ -174,12 +178,18 @@ export function composeCustomerDependencies(directory, installation, config, hos
       createInternalOrder(r, c, items, type, workflow),
     createInternalPickupReadiness: readiness,
     createInternalPickupProof: proof,
+    // DEC-STRIPE-PILOT-WIRING: the configured Provider (payment.json): Stripe test mode, or the
+    // TEST-ONLY internal simulator when the installation has no Stripe configuration.
     createInternalSimulatedProvider: (opts = {}) =>
-      createInternalSimulatedProvider(opts, {
+      createPilotPaymentProvider(opts, {
+        directory,
         path: join(directory, "simulated-provider.sqlite"),
         loadProfile: installation.loadProfile,
         expectedDatabaseName,
       }),
+    // Stripe mode only: the webhook receiver of the API runtime.
+    createPaymentWebhookReceiver: (resources, provider) =>
+      createPaymentWebhookReceiver(directory, resources, provider, account),
     createInternalPaymentTerminal: (r, c, i, s) =>
       createInternalPaymentTerminal(r, c, i, s, account),
     createInternalChannelPayment: (r, c, d, o, orders, simulator, items) =>
@@ -214,4 +224,23 @@ export function composeCustomerDependencies(directory, installation, config, hos
           ),
       }),
   };
+}
+/** DEC-STRIPE-PILOT-WIRING: the Stripe webhook receiver, or null in simulation mode. */
+async function createPaymentWebhookReceiver(directory, resources, provider, account) {
+  if (!isStripeProvider(provider)) return null;
+  const config = await loadPilotPaymentConfig(directory, {
+    environment: currentPilotEnvironment(),
+  });
+  if (config.provider !== "stripe") return null;
+  return createPilotStripeWebhookReceiver(resources, {
+    provider,
+    directory,
+    stripe: config.stripe,
+    providerAccountReference: account.providerAccountReference,
+    // Reason code only; never the body, signature, Provider IDs or payment data.
+    onRejected: (reasonCode) =>
+      process.stderr.write(
+        JSON.stringify({ event: "payment_webhook_rejected", reasonCode }) + "\n",
+      ),
+  });
 }

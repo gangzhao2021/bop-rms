@@ -23,6 +23,7 @@ export async function createRuntime(
     createInternalTestCart,
     createInternalTestResources,
     createInternalCustomerEntry,
+    createPaymentWebhookReceiver,
     providerAccountReference,
     publicOrigin = INTERNAL_CUSTOMER_ORIGIN,
   },
@@ -45,6 +46,11 @@ export async function createRuntime(
       "DineIn",
     );
     simulator = await createInternalSimulatedProvider();
+    // DEC-STRIPE-PILOT-WIRING: Stripe mode receives Stripe's signed events on the API runtime.
+    const paymentProviderWebhook =
+      createPaymentWebhookReceiver === undefined
+        ? null
+        : await createPaymentWebhookReceiver(resources, simulator);
     const paymentIntent = await createInternalChannelPayment(
       resources,
       checkout,
@@ -98,6 +104,7 @@ export async function createRuntime(
         },
       },
       paymentResult: paymentTerminal.resultOptions,
+      ...(paymentProviderWebhook === null ? {} : { paymentProviderWebhook }),
       receipt: {
         financial: {
           scope: {

@@ -1,3 +1,4 @@
+import { isPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
 import process from "node:process";
 import { createHash } from "node:crypto";
 import {
@@ -50,7 +51,7 @@ export function createInternalProviderCaptureReview({
     };
   const active = () =>
     process.env.NODE_ENV === "development" &&
-    simulator.simulation === true &&
+    isPilotPaymentProvider(simulator) &&
     r.publicProfile.binding.brandReference === scope.brandReference &&
     r.publicProfile.binding.storeReference === scope.storeReference &&
     parsePaymentInstant(r.now()) < parsePaymentInstant(r.publicProfile.binding.validUntil);

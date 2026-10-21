@@ -81,6 +81,11 @@ import {
   unavailableCustomerCartBindingHandler,
 } from "./customer-cart-binding.js";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
+import {
+  type PaymentProviderWebhookHandler,
+  paymentProviderWebhookRoute,
+  unavailablePaymentProviderWebhookHandler,
+} from "./payment-provider-webhook.js";
 import type { CoreTelemetry } from "@bop-rms/observability";
 import {
   sendInvalidCustomerEntryRequest,
@@ -163,6 +168,8 @@ export interface AppOptions {
   /** WP-2423 Q16: the customer removes their own pickup contact from the order page. */
   customerContactRemoval?: RequestHandler;
   customerCheckoutDetails?: CustomerCheckoutDetailsHandler;
+  /** WP-2423 DEC-STRIPE-PILOT-WIRING: Stripe webhook (raw body, before JSON parsing). */
+  paymentProviderWebhook?: PaymentProviderWebhookHandler;
   deploymentEnvironment?: DeploymentEnvironment;
   errorLogger?: RequestErrorLogger;
   healthReadiness?: HealthReadinessController;
@@ -240,6 +247,7 @@ export function createApp({
   customerReceipt,
   customerContactRemoval,
   customerCheckoutDetails,
+  paymentProviderWebhook,
   deploymentEnvironment = "development",
   errorLogger,
   healthReadiness,
@@ -283,6 +291,10 @@ export function createApp({
       createMerchantBrandAdministrationRouter(brandAdministration),
     );
   if (merchantBff !== undefined) app.use("/merchant", createMerchantBffRouter(merchantBff));
+  // Stripe signs the exact bytes: this route reads its body raw, before the JSON parser.
+  if (paymentProviderWebhook !== undefined)
+    app.post(paymentProviderWebhookRoute, ...paymentProviderWebhook.handlers());
+  else app.post(paymentProviderWebhookRoute, unavailablePaymentProviderWebhookHandler);
   app.use(express.json({ limit: "64kb", strict: true }));
   app.use((_request, response, next) => {
     response.setHeader("Cache-Control", "no-store");

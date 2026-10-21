@@ -39,6 +39,8 @@ it("passes all existing customer routes and configured resources to the API runt
             "createInternalTestCart",
             "createInternalTestResources",
             "createInternalCustomerEntry",
+            // DEC-STRIPE-PILOT-WIRING: the Stripe webhook receiver (null with the simulator).
+            "createPaymentWebhookReceiver",
             "providerAccountReference",
             "paymentChannel",
             // DEC-PILOT-MAINTENANCE-PAGE: hosting.json customerOrigin (default the local entry).

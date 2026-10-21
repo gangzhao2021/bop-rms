@@ -71,9 +71,9 @@ it("DEC-PILOT-SECRETS: Secrets and Tls clear only when checked against this inst
     "PILOT_CAPABILITY_MISSING:" + others.join(","),
   );
   // Only configurable gaps can be met; a claim for any other code changes nothing.
-  expect(() =>
-    assertPilotReady({ ...at("production", "Pilot"), met: ["PaymentProvider"] }),
-  ).toThrow("PaymentProvider");
+  expect(() => assertPilotReady({ ...at("production", "Pilot"), met: ["StaffLogin"] })).toThrow(
+    "StaffLogin",
+  );
   const hosting = { secretsDirectory: "/run/secrets/bop-rms" };
   const complete = await checkConfiguredPilotCapabilities("/runtime", {
     loadHosting: async () => hosting,

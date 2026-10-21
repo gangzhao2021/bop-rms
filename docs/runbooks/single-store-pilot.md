@@ -27,18 +27,14 @@ existing startup/readiness command from `/home/gangzhao/src/bop-rms` using the p
 Node/pnpm toolchain. Start supervision after readiness succeeds. If maintenance is
 present, follow its diagnosis rather than force a start.
 
-When rebuilding the customer frontend for this local InternalTest installation,
-use the explicit configuration below; an ordinary production build disables the
-internal root-entry loader and simulated-payment UI:
-
-```bash
-VITE_BOP_INTERNAL_SIMULATED_PAYMENT=1 pnpm --filter @bop-rms/customer-pwa build
-```
-
-This flag is for the existing localhost simulation only; keep it absent for formal
-production builds. After browser/test harness builds, restore this configured
-artifact before continuing the local demonstration. Batch617repairs an observed
-root-page fallback caused by a disabled build-time flag; no QR-token URL is needed.
+The customer payment mode now comes from the runtime file `payment.json` in the
+pilot runtime directory, served at `/bff/customer/payment-configuration`
+(internal simulation and the local root entry for InternalTest when the file is
+absent; Stripe when it is present), so rebuilding the customer frontend uses a
+normal `pnpm --filter @bop-rms/customer-pwa build` with no build-time payment flag.
+No QR-token URL is needed for the local root entry. Switching the installation to
+Stripe test mode (and the later live-mode gate) follows
+[Switching the pilot to Stripe](./pilot-stripe-switch.md).
 
 Current demonstration entry points:
 

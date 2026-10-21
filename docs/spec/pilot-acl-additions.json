@@ -4099,6 +4099,56 @@
       "revoke": true,
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
       "justification": "the api only locks Store rows FOR SHARE; the existing column grants (lifecycle, version) cover that lock"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_webhook_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-20 DEC-STRIPE-PILOT-WIRING: Stripe webhook receiver (Payment Webhook Inbox)",
+      "justification": "accept one immutable receipt per verified Stripe event (SELECT already granted)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_webhook_raw_evidence",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-20 DEC-STRIPE-PILOT-WIRING: Stripe webhook receiver (Payment Webhook Inbox)",
+      "justification": "Restricted raw event bytes for 30 days, written with the receipt"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_webhook_raw_evidence",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-20 DEC-STRIPE-PILOT-WIRING: Stripe webhook receiver (Payment Webhook Inbox)",
+      "justification": "the mapper reads the accepted raw event once to record the payment outcome"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_webhook_processing_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-20 DEC-STRIPE-PILOT-WIRING: Stripe webhook receiver (Payment Webhook Inbox)",
+      "justification": "one append-only completion marker per processed receipt"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_webhook_processing_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-20 DEC-STRIPE-PILOT-WIRING: Stripe webhook receiver (Payment Webhook Inbox)",
+      "justification": "a redelivered event finds its completion and is not processed twice"
     }
   ]
 }

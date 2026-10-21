@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import process from "node:process";
 import { loadPilotInstallation } from "./pilot-installation.mjs";
-import { createInternalSimulatedProvider } from "./pilot-payment-provider.mjs";
+import { createPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
 import { createInternalReconciliationRuntime } from "./pilot-reconciliation-runtime.mjs";
 import { createInternalDailySettlementSource } from "./pilot-daily-settlement-source.mjs";
 import { createInternalSettlementDays } from "./pilot-settlement-window.mjs";
@@ -15,9 +15,10 @@ export async function createConfiguredDailySettlementExecution(directory, resour
   const installation = await loadPilotInstallation(directory),
     config = await installation.loadCustomerRuntime(),
     coverage = await installation.loadDailySettlementCoverage();
-  const simulator = await createInternalSimulatedProvider(
+  const simulator = await createPilotPaymentProvider(
     {},
     {
+      directory,
       path: join(directory, "simulated-provider.sqlite"),
       loadProfile: installation.loadProfile,
       expectedDatabaseName: installation.database,

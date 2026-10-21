@@ -8,6 +8,7 @@ import { customerDiningInvitationRoute } from "./customer-dining-invitation.js";
 import { customerPaymentResultRoute } from "./customer-payment-result.js";
 import { customerPaymentHandoffRoute } from "./customer-payment-handoff.js";
 import { customerPaymentIntentRoute } from "./customer-payment-intent.js";
+import { paymentProviderWebhookRoute } from "./payment-provider-webhook.js";
 import {
   customerCheckoutSessionRoute,
   customerCheckoutSessionReadRoute,
@@ -37,6 +38,7 @@ export const apiRouteTemplates = Object.freeze([
   customerPaymentIntentRoute,
   customerPaymentHandoffRoute,
   customerPaymentResultRoute,
+  paymentProviderWebhookRoute,
   "/__acceptance/request-command-event",
   "/bff/customer/entry",
   ...Object.values(customerCartBindingRoutes),
