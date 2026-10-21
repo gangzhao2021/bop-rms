@@ -824,7 +824,23 @@ test("@production a sent, unpaid counter order is charged after a reload, from C
   await expect(form).toContainText(/Record the payment by \d\d:\d\d/u);
   await form.getByRole("textbox", { name: "Slip reference (optional)" }).fill("AUTH 9921");
   await form.getByRole("button", { name: "Paid on card machine · $11.30" }).click();
-  await expect(page.getByText("Order 21: payment recorded. Orders shows it.")).toBeVisible();
+  // v15 f971cecb: the same "Order N paid" panel as after a direct charge, with the next step.
+  const paidPanel = page.getByRole("region", { name: "Order 21 paid" });
+  await expect(paidPanel.getByRole("heading", { name: "Order 21 paid" })).toBeFocused();
+  await expect(paidPanel).toContainText("Paid on card machine$11.30");
+  await expect(paidPanel.getByRole("status")).toHaveText("Paid and sent to the kitchen.");
+  await expect(paidPanel.getByRole("link", { name: "Open Orders" })).toBeVisible();
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/counter-awaiting-paid-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   expect(payments).toEqual([
     {
       operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
@@ -836,4 +852,6 @@ test("@production a sent, unpaid counter order is charged after a reload, from C
     },
   ]);
   await expect(page.getByRole("region", { name: "Sent, not paid yet" })).toHaveCount(0);
+  await paidPanel.getByRole("button", { name: "Done" }).click();
+  await expect(page.getByRole("region", { name: "Order 21 paid" })).toHaveCount(0);
 });

@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   counterAwaitingCardMachine,
@@ -12,6 +13,9 @@ import {
 import { StaffRoundPaymentAction } from "./StaffRoundPaymentAction.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { storeTime } from "./StoreTime.js";
+import { orderMoney } from "./order-money.js";
+import { paidNoteText } from "./counter-payment.js";
+import type { RecordedCardPayment } from "./staff-order-entry.js";
 
 /** How often the counter re-reads its sent, unpaid orders (their pay-by time moves on its own). */
 export const COUNTER_AWAITING_REFRESH_MS = 30_000;
@@ -45,8 +49,57 @@ export function CounterAwaitingPayment({
   const [failed, setFailed] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [reads, setReads] = useState(0);
-  /** The last order recorded here (it leaves the list, so staff are told it went through). */
-  const [recorded, setRecorded] = useState<string | null>(null);
+  /**
+   * The last order recorded here. It leaves the list, so staff get the same "Order N paid" panel
+   * as after a direct charge, with what to do next, until they dismiss it.
+   */
+  const [recorded, setRecorded] = useState<{
+    readonly orderNumber: string;
+    readonly payment: RecordedCardPayment;
+  } | null>(null);
+  const paidHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (recorded !== null) paidHeading.current?.focus();
+  }, [recorded]);
+  const paidPanel =
+    recorded === null ? null : (
+      <section
+        className="counter-order__charge counter-order__awaiting-paid store-card"
+        aria-labelledby="counter-awaiting-paid"
+        data-phase={recorded.payment.acceptance === "Accepted" ? "Accepted" : "Paid"}
+      >
+        <h2 id="counter-awaiting-paid" ref={paidHeading} tabIndex={-1}>
+          Order {recorded.orderNumber} paid
+        </h2>
+        <dl>
+          <div>
+            <dt>Order</dt>
+            <dd>{recorded.orderNumber}</dd>
+          </div>
+          <div>
+            <dt>Paid on card machine</dt>
+            <dd>
+              <strong>
+                {orderMoney({ amountMinor: recorded.payment.amountMinor, currencyCode: "CAD" })}
+              </strong>
+            </dd>
+          </div>
+        </dl>
+        <p role="status">
+          {paidNoteText({
+            tableMode: false,
+            recordedAfterOutage: recorded.payment.recordingReason === "RecordedAfterOutage",
+            acceptance: recorded.payment.acceptance,
+          })}
+        </p>
+        <div className="card-actions">
+          <button type="button" onClick={() => setRecorded(null)}>
+            Done
+          </button>
+          <Link to="/operations/orders">Open Orders</Link>
+        </div>
+      </section>
+    );
   const pending = useRef<AbortController | null>(null);
   const live = useStaffSessionLive();
   const read = useCallback(() => {
@@ -89,77 +142,75 @@ export function CounterAwaitingPayment({
       order.counter?.payBy != null &&
       Date.parse(order.counter.payBy) > now,
   );
-  if (!failed && shown.length === 0)
-    return recorded === null ? null : (
-      <p className="counter-order__awaiting-done" role="status">
-        {recorded}
-      </p>
-    );
+  if (!failed && shown.length === 0) return paidPanel;
   return (
-    <section
-      className="counter-order__awaiting store-card"
-      aria-labelledby="counter-awaiting-heading"
-    >
-      <h2 id="counter-awaiting-heading">Sent, not paid yet</h2>
-      {failed ? (
-        <div role="status">
-          <p>Couldn&apos;t check for sent orders waiting for payment. Orders lists them too.</p>
-          <button type="button" onClick={() => setReads((value) => value + 1)}>
-            Try again
-          </button>
-        </div>
-      ) : (
-        <p className="bop-muted">
-          Charge each on the card machine and record it here before its time ends, or it is released
-          and its items go back to stock.
-        </p>
-      )}
-      {recorded !== null ? <p role="status">{recorded}</p> : null}
-      <ul className="counter-order__awaiting-list">
-        {shown.map((order) => {
-          const payBy = order.counter?.payBy ?? "";
-          const batch = order.batches[0];
-          return (
-            <li key={order.orderReference}>
-              <p className="counter-order__awaiting-title">
-                <strong>Order {order.orderNumber}</strong>{" "}
-                <span className="bop-muted">
-                  sent {storeTime(order.submittedAt, timeZone)}
-                  {order.counter?.recordedAfterOutage ? " · paper order" : ""}
-                </span>
-              </p>
-              <p className="order-accept-by" data-tier={counterPayByTier(payBy, now)}>
-                {counterPayByText(payBy, timeZone, now)}
-              </p>
-              {batch === undefined || !order.canRecordCardMachinePayment ? (
-                <p className="bop-muted">Ask a manager to record its payment.</p>
-              ) : (
-                <StaffRoundPaymentAction
-                  subject="order"
-                  label="Charge on card machine"
-                  csrf={csrf}
-                  fetcher={fetcher}
-                  orderReference={order.orderReference}
-                  orderBatchReference={batch.orderBatchReference}
-                  amountDueMinor={null}
-                  payBy={payBy}
-                  loadAmountDue={(signal) =>
-                    client
-                      .loadDetail(order.orderReference, signal)
-                      .then((detail) => detail.order.counter?.amountDueMinor ?? null)
-                  }
-                  recordedAfterOutage={order.counter?.recordedAfterOutage ?? false}
-                  timeZone={timeZone}
-                  onRecorded={() => {
-                    setRecorded(`Order ${order.orderNumber}: payment recorded. Orders shows it.`);
-                    setReads((value) => value + 1);
-                  }}
-                />
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </section>
+    <>
+      {paidPanel}
+      <section
+        className="counter-order__awaiting store-card"
+        aria-labelledby="counter-awaiting-heading"
+      >
+        <h2 id="counter-awaiting-heading">Sent, not paid yet</h2>
+        {failed ? (
+          <div role="status">
+            <p>Couldn&apos;t check for sent orders waiting for payment. Orders lists them too.</p>
+            <button type="button" onClick={() => setReads((value) => value + 1)}>
+              Try again
+            </button>
+          </div>
+        ) : (
+          <p className="bop-muted">
+            Charge each on the card machine and record it here before its time ends, or it is
+            released and its items go back to stock.
+          </p>
+        )}
+        <ul className="counter-order__awaiting-list">
+          {shown.map((order) => {
+            const payBy = order.counter?.payBy ?? "";
+            const batch = order.batches[0];
+            return (
+              <li key={order.orderReference}>
+                <p className="counter-order__awaiting-title">
+                  <strong>Order {order.orderNumber}</strong>{" "}
+                  <span className="bop-muted">
+                    sent {storeTime(order.submittedAt, timeZone)}
+                    {order.counter?.recordedAfterOutage ? " · paper order" : ""}
+                  </span>
+                </p>
+                <p className="order-accept-by" data-tier={counterPayByTier(payBy, now)}>
+                  {counterPayByText(payBy, timeZone, now)}
+                </p>
+                {batch === undefined || !order.canRecordCardMachinePayment ? (
+                  <p className="bop-muted">Ask a manager to record its payment.</p>
+                ) : (
+                  <StaffRoundPaymentAction
+                    subject="order"
+                    label="Charge on card machine"
+                    csrf={csrf}
+                    fetcher={fetcher}
+                    orderReference={order.orderReference}
+                    orderBatchReference={batch.orderBatchReference}
+                    amountDueMinor={null}
+                    payBy={payBy}
+                    loadAmountDue={(signal) =>
+                      client
+                        .loadDetail(order.orderReference, signal)
+                        .then((detail) => detail.order.counter?.amountDueMinor ?? null)
+                    }
+                    recordedAfterOutage={order.counter?.recordedAfterOutage ?? false}
+                    timeZone={timeZone}
+                    onRecorded={(payment) => {
+                      if (payment !== undefined)
+                        setRecorded({ orderNumber: order.orderNumber, payment });
+                      setReads((value) => value + 1);
+                    }}
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    </>
   );
 }

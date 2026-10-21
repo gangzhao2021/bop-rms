@@ -123,3 +123,26 @@ export function counterPayByText(payBy: string, timeZone: string | undefined, no
     ? `${minutes} min left to charge · released at ${at} if unpaid`
     : `Charge on card machine by ${at} · released if unpaid`;
 }
+
+/**
+ * WP-2423 D1: what staff are told once a card-machine payment is recorded. The server accepts the
+ * paid order or round with the record (it then goes to the kitchen) or leaves it for acceptance.
+ * Shared by the counter's own charge step and its "Sent, not paid yet" list (v15 f971cecb).
+ */
+export function paidNoteText(input: {
+  readonly tableMode: boolean;
+  readonly recordedAfterOutage: boolean;
+  readonly acceptance: "Accepted" | "NotAccepted";
+}): string {
+  if (input.acceptance === "NotAccepted")
+    return "Paid, but not sent to the kitchen yet. Accept it in Orders now (or ask a manager to): an order that isn't accepted in time expires and must be refunded on the card machine.";
+  // A paper order was usually made and handed over already; it still goes through the list so its
+  // records close, and nothing expires or is refunded by mistake.
+  if (input.tableMode)
+    return input.recordedAfterOutage
+      ? "Recorded after the outage and added to the table's order. If it was already made and served, mark it ready in Kitchen and served on the order."
+      : "Paid and sent to the kitchen. It shows on the table's order as entered by staff.";
+  return input.recordedAfterOutage
+    ? "Recorded after the outage and accepted. If it was already made and handed over, mark it ready in Kitchen and handed over in Pickup."
+    : "Paid and sent to the kitchen.";
+}

@@ -11,6 +11,7 @@ import {
   counterAwaitingCardMachine,
   counterPayByText,
   counterPayByTier,
+  paidNoteText,
 } from "./counter-payment.js";
 import { refundErrorText } from "./OrderPaymentLinks.js";
 import { OrdinaryRefundClientError } from "./ordinary-refund-client.js";
@@ -208,4 +209,19 @@ it("says how many orders the list shows without page jargon", () => {
   expect(
     orderCountText({ shown: 3, total: 9, filtered: true, olderPage: false, morePages: false }),
   ).toBe("3 of 9 orders match.");
+});
+
+it("v15 f971cecb: a payment recorded from the list reads like a direct charge", () => {
+  expect(
+    paidNoteText({ tableMode: false, recordedAfterOutage: false, acceptance: "Accepted" }),
+  ).toBe("Paid and sent to the kitchen.");
+  expect(
+    paidNoteText({ tableMode: false, recordedAfterOutage: true, acceptance: "Accepted" }),
+  ).toMatch(/^Recorded after the outage and accepted\./u);
+  expect(
+    paidNoteText({ tableMode: false, recordedAfterOutage: false, acceptance: "NotAccepted" }),
+  ).toMatch(/^Paid, but not sent to the kitchen yet\. Accept it in Orders now/u);
+  expect(
+    paidNoteText({ tableMode: true, recordedAfterOutage: false, acceptance: "Accepted" }),
+  ).toBe("Paid and sent to the kitchen. It shows on the table's order as entered by staff.");
 });

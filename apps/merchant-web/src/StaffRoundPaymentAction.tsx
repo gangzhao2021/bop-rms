@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { validSlipReference } from "./CardMachineRefundAction.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import { CounterOrderClientError, createCounterOrderClient } from "./staff-order-entry.js";
+import {
+  CounterOrderClientError,
+  createCounterOrderClient,
+  type RecordedCardPayment,
+} from "./staff-order-entry.js";
 import { paidAtInstant, payErrorText, paymentWindowNotice } from "./counter-payment.js";
 
 const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CAD" });
@@ -45,7 +49,8 @@ export function StaffRoundPaymentAction({
   readonly loadAmountDue?: ((signal: AbortSignal) => Promise<string | null>) | undefined;
   readonly recordedAfterOutage: boolean;
   readonly timeZone?: string | undefined;
-  readonly onRecorded: () => void;
+  /** The recorded payment, or nothing when the order no longer waits for one. */
+  readonly onRecorded: (recorded?: RecordedCardPayment) => void;
   /** What staff are charging for: a table round (default) or a counter order. */
   readonly subject?: "round" | "order";
   /** When it is released or cancelled if not recorded (warned in the form), when known. */
@@ -151,7 +156,7 @@ export function StaffRoundPaymentAction({
           ? "Paid and sent to the kitchen."
           : "Paid, but not sent to the kitchen yet. Accept it on this order now.",
       );
-      onRecorded();
+      onRecorded(result);
     } catch (error) {
       const failure =
         error instanceof CounterOrderClientError

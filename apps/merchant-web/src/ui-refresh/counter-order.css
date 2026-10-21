@@ -480,7 +480,7 @@
 .counter-order .counter-order__awaiting-list p {
   margin: 0;
 }
-.counter-order .counter-order__awaiting-done {
+.counter-order .counter-order__awaiting-paid {
   margin: 0 0 var(--bop-space-4);
 }
 

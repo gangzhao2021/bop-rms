@@ -338,6 +338,23 @@ test("@production staff starts a table and recovers a lost entry code without du
     await expect(page.getByRole("button", { name: `Select ${name}`, exact: true })).toBeAttached();
   }
   await page.screenshot({ path: "test-results/dining-board-1440.png", fullPage: true });
+  // v15 f971cecb live check (blank strip above the sidebar on Tables): nothing sits above the
+  // workspace frame, and the sidebar stays pinned to the top of the window when the page scrolls.
+  const sidebarTop = () =>
+    page
+      .getByRole("navigation", { name: "Workspace" })
+      .evaluate((element) => Math.abs(Math.round(element.getBoundingClientRect().top)));
+  expect(await sidebarTop()).toBe(0);
+  await page.setViewportSize({ width: 1440, height: 600 });
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  expect(await sidebarTop()).toBe(0);
+  await page.screenshot({ path: "test-results/dining-board-1440-scrolled.png" });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.setViewportSize({ width: 1024, height: 900 });
+  expect(await sidebarTop()).toBe(0);
+  await page.screenshot({ path: "test-results/dining-board-1024.png", fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     expect(

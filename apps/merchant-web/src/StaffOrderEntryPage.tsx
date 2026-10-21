@@ -13,6 +13,7 @@ import { CounterAwaitingPayment } from "./CounterAwaitingPayment.js";
 import {
   paidAtInstant,
   payErrorText,
+  paidNoteText,
   paymentUrgentMinutes,
   paymentWindowNotice,
 } from "./counter-payment.js";
@@ -456,24 +457,13 @@ export function StaffOrderEntryPage({
     setAwaitingKey((value) => value + 1);
     // WP-2423 D1: the server accepts the paid order or round with the payment record (at the
     // Order's current version), so it reaches the kitchen even if this page is closed now.
-    if (recorded.acceptance === "Accepted") {
-      setPhase("Accepted");
-      // A paper order was usually made and handed over already; it still goes through the list so
-      // its records close, and nothing expires or is refunded by mistake.
-      setPaidNote(
-        tableMode
-          ? placed.recordedAfterOutage
-            ? "Recorded after the outage and added to the table's order. If it was already made and served, mark it ready in Kitchen and served on the order."
-            : "Paid and sent to the kitchen. It shows on the table's order as entered by staff."
-          : placed.recordedAfterOutage
-            ? "Recorded after the outage and accepted. If it was already made and handed over, mark it ready in Kitchen and handed over in Pickup."
-            : "Paid and sent to the kitchen.",
-      );
-      return;
-    }
-    setPhase("Paid");
+    setPhase(recorded.acceptance === "Accepted" ? "Accepted" : "Paid");
     setPaidNote(
-      "Paid, but not sent to the kitchen yet. Accept it in Orders now (or ask a manager to): an order that isn't accepted in time expires and must be refunded on the card machine.",
+      paidNoteText({
+        tableMode,
+        recordedAfterOutage: placed.recordedAfterOutage,
+        acceptance: recorded.acceptance,
+      }),
     );
   };
 
