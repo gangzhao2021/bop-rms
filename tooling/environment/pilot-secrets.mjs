@@ -46,6 +46,9 @@ export const MANAGED_SECRET_KEYS = Object.freeze([
   Object.freeze({ name: "store-device-key", purpose: "registered store tablets" }),
   Object.freeze({ name: "staff-pin-choice-key", purpose: "tablet lock screen" }),
   Object.freeze({ name: "dining-key", purpose: "table join codes" }),
+  // DEC-PILOT-INSTALLATION: one-time order links sent to guests (DEC-PILOT-NOTIFICATIONS R1).
+  Object.freeze({ name: "order-recovery-pepper", purpose: "order links", versioned: true }),
+  Object.freeze({ name: "order-recovery-abuse-key", purpose: "order link request limits" }),
 ]);
 /** Table QR signing: current private key and kid, optional previous public key (Overlap). */
 export const QR_SECRET_FILES = Object.freeze({

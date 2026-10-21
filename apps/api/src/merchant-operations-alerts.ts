@@ -30,6 +30,7 @@ export const operationsAlertKeys = Object.freeze([
   "backup.restore_check",
   "backup.offsite",
   "certificate.expiring",
+  "installation.validity",
   "disk.low",
   "monitor.source",
   "channel.delivery",

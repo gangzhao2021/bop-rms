@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { open, readFile, rename, unlink } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import process from "node:process";
@@ -11,7 +11,8 @@ import {
   parseWorkflowDefinitionVersion,
 } from "../../packages/bop/workflow/src/index.ts";
 import { createPostgresPublishingMutationStore } from "../../packages/bop/publishing/src/index.ts";
-import { platformWorkflows } from "./platform-workflows.mjs";
+import { orderWorkflowRules, platformWorkflows } from "./platform-workflows.mjs";
+import { uuidV7 } from "./permission-catalog-install.mjs";
 
 /**
  * WP-2423 Q6 / DEC-ORDER-CANCELLATION-PILOT: Platform release step that installs a repository-defined
@@ -20,7 +21,7 @@ import { platformWorkflows } from "./platform-workflows.mjs";
  *
  *   node --import ./tooling/environment/register-workspace-typescript.mjs \
  *     tooling/environment/workflow-release-install.mjs --env-file <path>
- *     --confirm-target <environment>:<database> --workflow UnpaidDineInBatchCancellation
+ *     --confirm-target <environment>:<database> --workflow <release>
  *     --runtime-environment <InternalTest|Pilot> --tenant <uuid> --brand <uuid> --store <uuid>
  *     --operator <uuid> --approved-by <uuid> --approval-evidence <uuid> --operation <uuidv7>
  *     --output <path>
@@ -29,6 +30,14 @@ import { platformWorkflows } from "./platform-workflows.mjs";
  * it exactly. A new operation must be fresh (issued within 15 minutes). `--approved-by` is the
  * independent Platform approver (never the operator). `--store` only binds the runtime file the
  * worker loads; the Workflow itself is Brand-wide. Prints only the purpose, version and status.
+ *
+ * Releases (platform-workflows.mjs): `UnpaidDineInBatchCancellation` writes the cancellation
+ * runtime file (`cancellation-workflow-draft-result.json`); the order Workflows
+ * (DEC-PILOT-INSTALLATION) `OrderFulfillmentPickup`, `OrderFulfillmentDineIn` and
+ * `OrderFulfillmentAdditionalRound` each write their runtime binding
+ * (`internal-test-workflow-Pickup|DineIn|AdditionalRelease.json`): the published version and
+ * transition references the order compositions evaluate. `new-operation` prints a fresh UUIDv7
+ * for `--operation` (keep it to replay the same release).
  */
 const require = createRequire(new URL("../../packages/database/package.json", import.meta.url));
 const pg = require("pg");
@@ -36,7 +45,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const flagNames = Object.freeze({
   "--env-file": "envFile",
   "--confirm-target": "confirmTarget",
-  "--workflow": "purposeCode",
+  "--workflow": "release",
   "--runtime-environment": "runtimeEnvironment",
   "--tenant": "tenantReference",
   "--brand": "brandReference",
@@ -82,7 +91,7 @@ export function parseArguments(args) {
   }
   if (Object.keys(values).length !== Object.keys(flagNames).length) throw new Error(usage);
   if (
-    !Object.hasOwn(platformWorkflows, values.purposeCode) ||
+    !Object.hasOwn(platformWorkflows, values.release) ||
     !["InternalTest", "Pilot"].includes(values.runtimeEnvironment) ||
     [
       values.tenantReference,
@@ -105,7 +114,7 @@ export function planWorkflowRelease(options) {
   const operation = options.operationReference,
     at = operationInstant(operation),
     ref = (label) => derivedReference(operation, label);
-  const workflow = platformWorkflows[options.purposeCode];
+  const workflow = platformWorkflows[options.release];
   const draft = parseWorkflowDefinitionVersion({
     schemaVersion: 1,
     workflowReference: ref("workflow"),
@@ -114,7 +123,7 @@ export function planWorkflowRelease(options) {
     tenantReference: options.tenantReference,
     brandReference: options.brandReference,
     storeReference: null,
-    purposeCode: options.purposeCode,
+    purposeCode: workflow.purposeCode,
     applicabilityCode: workflow.applicabilityCode,
     lifecycle: "Draft",
     baseVersionReference: null,
@@ -333,11 +342,108 @@ export async function applyWorkflowRelease(client, options, now = () => Date.now
   });
 }
 
+/**
+ * The runtime file of one release. The cancellation release keeps its established shape; an order
+ * release writes the binding the order compositions load (`loadWorkflow(kind)`): the published
+ * version, the purpose and the transition references they evaluate, never a gate or a secret.
+ */
+export function workflowRuntimeFile(
+  plan,
+  { environment, database, scope, operationReference, release },
+) {
+  const workflow = platformWorkflows[release];
+  if (workflow.binding === undefined)
+    return { environment, database, scope, operationReference, definition: plan.published };
+  const transition = (currentState, action) => {
+    const found = plan.published.transitions.filter(
+      (t) => t.currentState === currentState && t.action === action,
+    );
+    if (found.length !== 1) throw new Error("WORKFLOW_RELEASE_BINDING_UNAVAILABLE");
+    return found[0];
+  };
+  const submit = transition("CartReady", "SubmitOrder"),
+    pay = transition("Submitted", "CreatePaymentIntent");
+  return {
+    environment,
+    database,
+    scope,
+    operationReference,
+    release,
+    workflow: {
+      payment: {
+        fulfillmentTransitionReference: transition("Accepted", "FulfillOrder").transitionReference,
+        acceptanceTransitionReference: transition("Submitted", "Accept").transitionReference,
+        releaseTransitionReference: transition("Accepted", "ReleasePaidOrder").transitionReference,
+        workflowVersionReference: plan.published.versionReference,
+        purposeCode: plan.published.purposeCode,
+        action: pay.action,
+        permissionCode: pay.permissionCode,
+        paymentCommandCode: pay.effects[0].commandCode,
+        intactReservationRuleReference: orderWorkflowRules.intactReservation,
+      },
+      purposeCode: plan.published.purposeCode,
+      applicabilityCode: plan.published.applicabilityCode,
+      currentState: submit.currentState,
+      action: submit.action,
+      reserveCommandCode: submit.effects[0].commandCode,
+      deferredActionCode: null,
+    },
+  };
+}
+
+/** Owner-only (0600) file replaced atomically, so a reader never sees a partial binding. */
+export async function writePrivateFileAtomically(file, text) {
+  const staging = file + ".staging-" + randomBytes(6).toString("hex");
+  const handle = await open(staging, "wx", 0o600);
+  try {
+    await handle.writeFile(text);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await rename(staging, file);
+  } catch (error) {
+    await unlink(staging).catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Refuses a runtime directory whose installation profile names another environment or Store. */
+export async function requireMatchingProfile(directory, expected) {
+  let profile;
+  try {
+    profile = JSON.parse(
+      await readFile(path.join(directory, "internal-test-profile.json"), "utf8"),
+    );
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw new Error("WORKFLOW_RELEASE_PROFILE_UNREADABLE", { cause: error });
+  }
+  if (
+    profile?.environment !== expected.environment ||
+    profile.database !== expected.database ||
+    Object.entries(expected.scope).some(([key, value]) => profile.binding?.[key] !== value)
+  )
+    throw new Error("WORKFLOW_RELEASE_PROFILE_MISMATCH");
+}
+
 export async function installWorkflowRelease(args, now = () => Date.now()) {
   const options = parseArguments(args);
   const config = await loadMigrationConnectionConfig(root, options.envFile);
   if (options.confirmTarget !== `${config.environment}:${config.database}`)
     throw new Error("WORKFLOW_RELEASE_TARGET_NOT_CONFIRMED");
+  // DEC-PILOT-INSTALLATION: written into an issued runtime directory, the binding must belong to
+  // its profile (same environment, database and Store) before anything is released.
+  await requireMatchingProfile(path.dirname(path.resolve(options.output)), {
+    environment: options.runtimeEnvironment,
+    database: config.database,
+    scope: {
+      tenantReference: options.tenantReference,
+      brandReference: options.brandReference,
+      storeReference: options.storeReference,
+    },
+  });
   const client = new pg.Client({
     application_name: "bop-rms-workflow-release",
     connectionTimeoutMillis: 10_000,
@@ -360,11 +466,11 @@ export async function installWorkflowRelease(args, now = () => Date.now()) {
   } finally {
     await client.end().catch(() => undefined);
   }
-  // The runtime binding the worker loads; written only after the release committed.
-  await writeFile(
+  // The runtime file the services load; written only after the release committed.
+  await writePrivateFileAtomically(
     options.output,
     JSON.stringify(
-      {
+      workflowRuntimeFile(result.plan, {
         environment: options.runtimeEnvironment,
         database: config.database,
         scope: {
@@ -373,22 +479,25 @@ export async function installWorkflowRelease(args, now = () => Date.now()) {
           storeReference: options.storeReference,
         },
         operationReference: options.operationReference,
-        definition: result.plan.published,
-      },
+        release: options.release,
+      }),
       null,
       2,
     ) + "\n",
-    { mode: 0o600 },
   );
   return {
-    purposeCode: options.purposeCode,
+    release: options.release,
+    purposeCode: result.plan.published.purposeCode,
     versionReference: result.plan.published.versionReference,
     status: result.status,
   };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  installWorkflowRelease(process.argv.slice(2)).then(
+  (process.argv.length === 3 && process.argv[2] === "new-operation"
+    ? Promise.resolve({ operationReference: uuidV7() })
+    : installWorkflowRelease(process.argv.slice(2))
+  ).then(
     (result) => process.stdout.write(JSON.stringify(result) + "\n"),
     (error) => {
       process.stderr.write(

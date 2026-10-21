@@ -82,7 +82,8 @@ const host = "order.store-pilot.ca",
  * 0. Start check: a throwaway runtime directory with hosting.json (test origin, `front` test
  *    certificate), managed secrets generated into a temp secrets folder, payment.json in Stripe
  *    live mode and staff-sign-in.json in Cognito mode. The supervisor's start check meets every
- *    configurable gap and still refuses with exactly `PricingCurrencyMetadata` (the reviewed tax
+ *    configurable gap but the issued installation (pilot-installation-acceptance covers it) and
+ *    still refuses with `PricingCurrencyMetadata` (the reviewed tax
  *    configuration; no override exists anywhere). The only harness routes are code arguments: a
  *    test certificate root for the TLS check, and api.stripe.com / the Cognito hosts mapped to
  *    their local stand-ins. Every InternalTest-only stand-in refuses in this process.
@@ -201,9 +202,12 @@ it("a Pilot Store process starts with only the tax gap and runs sign-in, live pa
           checkCapabilities,
           report: (line) => notReady.push(line),
         }),
-        { message: "PILOT_CAPABILITY_MISSING:PricingCurrencyMetadata" },
+        // DEC-PILOT-INSTALLATION: this smoke runs without issued installation files (the issue,
+        // its Workflows and the full start check are pilot-installation-acceptance).
+        { message: "PILOT_CAPABILITY_MISSING:Installation,PricingCurrencyMetadata" },
       );
-      assert.deepEqual(notReady, []);
+      assert.deepEqual(notReady, ["PILOT_NOT_READY Installation: not-issued"]);
+      notReady.length = 0;
       // Without the harness root the same certificate is not one phones trust: Tls stays open.
       await assert.rejects(
         checkPilotStartReadiness({
@@ -211,9 +215,12 @@ it("a Pilot Store process starts with only the tax gap and runs sign-in, live pa
           absoluteDirectory: runtime,
           report: (line) => notReady.push(line),
         }),
-        { message: "PILOT_CAPABILITY_MISSING:Tls,PricingCurrencyMetadata" },
+        { message: "PILOT_CAPABILITY_MISSING:Tls,Installation,PricingCurrencyMetadata" },
       );
-      assert.deepEqual(notReady, ["PILOT_NOT_READY Tls: certificate-not-trusted"]);
+      assert.deepEqual(notReady, [
+        "PILOT_NOT_READY Tls: certificate-not-trusted",
+        "PILOT_NOT_READY Installation: not-issued",
+      ]);
 
       // InternalTest-only stand-ins and switches refuse in this process.
       const testOnlyPayment = (stripeChanges) =>

@@ -177,7 +177,8 @@ export async function runPilotSupervisor({
 /**
  * WP-2423 P1b / DEC-PILOT-RUNTIME-ENVIRONMENT: the start check of the supervisor. In a Pilot
  * Store it checks the hosting's secrets and certificate (DEC-PILOT-SECRETS, printing one
- * `PILOT_NOT_READY` line per problem: file names and fixed reasons only), the payment Provider
+ * `PILOT_NOT_READY` line per problem: file names and fixed reasons only), the issued installation
+ * files (DEC-PILOT-INSTALLATION, `checkInstallation`), the payment Provider
  * (DEC-STRIPE-PILOT-WIRING) and the staff sign-in (DEC-COGNITO-STORE-STAFF), then refuses with
  * `PILOT_CAPABILITY_MISSING:<codes>` while any gap remains. `checkCapabilities` exists for the
  * test harness only (a test certificate root); the supervisor itself never passes it.
@@ -186,6 +187,8 @@ export async function checkPilotStartReadiness({
   runtimeDirectory,
   absoluteDirectory,
   checkCapabilities = checkConfiguredPilotCapabilities,
+  checkInstallation = async (directory) =>
+    (await import("./pilot-installation-issue.mjs")).checkPilotInstallation(directory),
   report = (line) => console.error(line),
 }) {
   let met = [];
@@ -193,6 +196,10 @@ export async function checkPilotStartReadiness({
     const checked = await checkCapabilities(absoluteDirectory);
     met = checked.met;
     for (const problem of checked.problems) report("PILOT_NOT_READY " + problem);
+    // DEC-PILOT-INSTALLATION: the issued runtime files, loaded exactly as the services load them.
+    const installation = await checkInstallation(absoluteDirectory);
+    for (const problem of installation) report("PILOT_NOT_READY " + problem);
+    if (installation.length === 0) met = [...met, "Installation"];
   }
   // A configured Provider whose secrets are present and whose mode matches the environment.
   if (await pilotPaymentProviderReady(runtimeDirectory, { environment: currentPilotEnvironment() }))

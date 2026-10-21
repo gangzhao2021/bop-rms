@@ -236,11 +236,27 @@ export function createInternalCredentialLoaders({ file, loadProfile, expectedDat
     }
   }
   /**
-   * DEC-PILOT-NOTIFICATIONS R1: the order recovery token pepper (version 1) and the recovery abuse
-   * key, each derived for its own purpose from the Guest Session key (no new key file entry).
-   * TEST-ONLY: a live store keeps them in the managed secret store (capability gap "Secrets").
+   * DEC-PILOT-NOTIFICATIONS R1: the order recovery token pepper and the recovery abuse key. In
+   * InternalTest each is derived for its own purpose from the Guest Session key (no new key file
+   * entry); a Pilot Store reads `order-recovery-pepper-v<N>` and `order-recovery-abuse-key` from
+   * the managed secrets (every pepper version verifies; the newest issues).
    */
   async function createInternalOrderRecoveryKeys() {
+    // DEC-PILOT-INSTALLATION: a Pilot Store keeps both in the managed secret store; before this
+    // every Pilot service that composes order messaging failed on the InternalTest key file.
+    if (isPilotStore()) {
+      const secrets = await managed(),
+        peppers = secrets.versions("order-recovery-pepper"),
+        abuse = secrets.key("order-recovery-abuse-key");
+      return Object.freeze({
+        peppers: Object.freeze(
+          [...peppers.keys()]
+            .sort((a, b) => a - b)
+            .map((version) => Object.freeze({ version, key: peppers.get(version) })),
+        ),
+        abuse,
+      });
+    }
     const saved = await load(),
       root = Buffer.from(saved.keys.guestSession, "hex");
     const derive = (purpose) =>

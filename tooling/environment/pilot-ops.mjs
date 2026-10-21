@@ -50,6 +50,7 @@ import {
   observeBackup,
   observeCertificate,
   observeDisks,
+  observeInstallationValidity,
   observeProbes,
   observeSupervisor,
   probeTargetsFor,
@@ -129,6 +130,7 @@ export async function runMonitorCycle({ now, state, config, io }) {
     business: await io.observeBusiness(now),
     backup: await io.observeBackup(config.backup !== null),
     certificate: await io.observeCertificate(probes.liveCertificateValidTo),
+    ...(io.observeInstallation ? { installation: await io.observeInstallation() } : {}),
     disks: await io.observeDisks(config),
     channels: io.channels.map((channel) => ({
       kind: channel.kind,
@@ -212,6 +214,7 @@ function createIo(runtimeDirectory, opsDirectory, config, log) {
         hosted?.tls.mode === "front" ? hosted.tls.certificateFile : undefined,
       );
     },
+    observeInstallation: () => observeInstallationValidity(absolute),
     observeDisks: async (current) =>
       observeDisks({
         runtime: absolute,

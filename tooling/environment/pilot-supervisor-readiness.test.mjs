@@ -43,11 +43,13 @@ test("a Pilot Store without configuration names every gap and the hosting proble
         report: (line) => lines.push(line),
       }),
     ).rejects.toThrow(
-      "PILOT_CAPABILITY_MISSING:PaymentProvider,StaffLogin,Secrets,Tls,PricingCurrencyMetadata",
+      "PILOT_CAPABILITY_MISSING:PaymentProvider,StaffLogin,Secrets,Tls,Installation,PricingCurrencyMetadata",
     );
     expect(lines).toEqual([
       "PILOT_NOT_READY Secrets: no secretsDirectory in hosting.json",
       "PILOT_NOT_READY Tls: customer-origin-not-configured",
+      // DEC-PILOT-INSTALLATION: nothing issued yet.
+      "PILOT_NOT_READY Installation: not-issued",
     ]);
   });
 });
@@ -64,7 +66,38 @@ test("met hosting capabilities leave only the remaining gaps", async () => {
         report: () => undefined,
       }),
     ).rejects.toThrow(
+      "PILOT_CAPABILITY_MISSING:PaymentProvider,StaffLogin,Installation,PricingCurrencyMetadata",
+    );
+  });
+});
+
+test("DEC-PILOT-INSTALLATION: a complete issued installation meets Installation; each problem is named", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("BOP_PILOT_ENVIRONMENT", "Pilot");
+  await withDirectory(async (directory) => {
+    const lines = [];
+    const start = (problems) =>
+      checkPilotStartReadiness({
+        runtimeDirectory: directory,
+        absoluteDirectory: directory,
+        checkCapabilities: async () => ({ met: ["Secrets", "Tls"], problems: [] }),
+        checkInstallation: async (value) => {
+          expect(value).toBe(directory);
+          return problems;
+        },
+        report: (line) => lines.push(line),
+      });
+    await expect(start([])).rejects.toThrow(
       "PILOT_CAPABILITY_MISSING:PaymentProvider,StaffLogin,PricingCurrencyMetadata",
     );
+    expect(lines).toEqual([]);
+    await expect(
+      start(["Installation: missing internal-test-workflow-Pickup.json"]),
+    ).rejects.toThrow(
+      "PILOT_CAPABILITY_MISSING:PaymentProvider,StaffLogin,Installation,PricingCurrencyMetadata",
+    );
+    expect(lines).toEqual([
+      "PILOT_NOT_READY Installation: missing internal-test-workflow-Pickup.json",
+    ]);
   });
 });

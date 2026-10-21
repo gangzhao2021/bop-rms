@@ -9,6 +9,7 @@ import { runMonitorCycle } from "./pilot-ops.mjs";
 import {
   createBusinessObserver,
   observeDisks,
+  observeInstallationValidity,
   observeProbes,
   observeSupervisor,
   readBusinessSignals,
@@ -478,5 +479,24 @@ describe("WP-2423 Q13 test alert command", () => {
     expect(log).not.toContain("secret-path");
     expect((await sendTestAlert(dir, { channels: [] })).note).toBe("NoOutboundChannels");
     await fs.rm(dir, { recursive: true });
+  });
+  it("DEC-PILOT-INSTALLATION: reads only the installation's end instant and alerts two weeks ahead", async () => {
+    const profile = (validUntil) => async () =>
+      JSON.stringify({ environment: "Pilot", binding: { validUntil, storeReference: "x" } });
+    expect(await observeInstallationValidity("/r", profile("2026-11-14T02:26:31.598Z"))).toEqual({
+      validUntil: "2026-11-14T02:26:31.598Z",
+    });
+    expect(await observeInstallationValidity("/r", profile("tomorrow"))).toBe("unreadable");
+    expect(
+      await observeInstallationValidity("/r", async () => {
+        throw Error("ENOENT");
+      }),
+    ).toBe("unreadable");
+    const io = fakeIo({ apiUp: () => true, channels: [] });
+    io.observeInstallation = async () => ({
+      validUntil: new Date(T0 + 5 * 86400_000).toISOString(),
+    });
+    await runMonitorCycle({ now: T0, state: fresh(), config, io });
+    expect(io.boards.at(-1).active.map((item) => item.key)).toContain("installation.validity");
   });
 });

@@ -3,13 +3,20 @@ import pg from "pg";
 import { it } from "vitest";
 import { createPostgresWorkflowDefinitionStore } from "../../bop/workflow/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
-import { applyWorkflowRelease } from "../../../tooling/environment/workflow-release-install.mjs";
-import { matchesPlatformWorkflow } from "../../../tooling/environment/platform-workflows.mjs";
+import {
+  applyWorkflowRelease,
+  workflowRuntimeFile,
+} from "../../../tooling/environment/workflow-release-install.mjs";
+import {
+  matchesPlatformWorkflow,
+  orderWorkflowReleases,
+  platformWorkflows,
+} from "../../../tooling/environment/platform-workflows.mjs";
 const { Client } = pg;
 const id = (n) => "0190999a-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const issuedAt = Date.now() - 60_000;
 const options = {
-  purposeCode: "UnpaidDineInBatchCancellation",
+  release: "UnpaidDineInBatchCancellation",
   tenantReference: id(1),
   brandReference: id(2),
   operatorReference: id(5),
@@ -151,6 +158,95 @@ it("installs the released cancellation Workflow through Publishing, replays it e
           );
         }),
       );
+
+      // DEC-PILOT-INSTALLATION: the order Workflows release the same way (Brand-wide, approved by
+      // the independent approver) and their runtime bindings name exactly the published version
+      // and transitions the restricted role evaluates.
+      const bindings = {};
+      for (const [index, name] of orderWorkflowReleases.entries()) {
+        const hex = (issuedAt + index + 1).toString(16).padStart(12, "0");
+        const orderOperation = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-7000-8000-00000000001${index}`;
+        const released = await inTransaction(admin, () =>
+          applyWorkflowRelease(
+            admin,
+            { ...options, release: name, operationReference: orderOperation },
+            now,
+          ),
+        );
+        assert.equal(released.status, "Applied");
+        assert.equal(matchesPlatformWorkflow(released.plan.published), true);
+        const file = workflowRuntimeFile(released.plan, {
+          environment: "Pilot",
+          database: context.databaseName,
+          scope: { tenantReference: id(1), brandReference: id(2), storeReference: id(3) },
+          operationReference: orderOperation,
+          release: name,
+        });
+        bindings[platformWorkflows[name].binding] = file.workflow;
+      }
+      assert.equal(bindings.Pickup.purposeCode, bindings.DineIn.purposeCode);
+      assert.notEqual(bindings.AdditionalRelease.purposeCode, bindings.DineIn.purposeCode);
+      const allow = {
+        authorizeResource: async () => true,
+        authorizeAction: async () => true,
+        evaluateRule: async () => true,
+        authorizeOverride: async () => false,
+      };
+      const evaluate = (binding, applicabilityCode, currentState, action) =>
+        store.evaluatePublishedAction(
+          {
+            tenantReference: id(1),
+            brandReference: id(2),
+            storeReference: id(3),
+            actorReference: id(40),
+            resourceReference: id(41),
+            resourceVersion: 1,
+            purposeCode: binding.purposeCode,
+            applicabilityCode,
+            expectedVersionReference: binding.payment.workflowVersionReference,
+            currentState,
+            action,
+            observedAt,
+          },
+          allow,
+        );
+      for (const [kind, applicability] of [
+        ["Pickup", "Pickup"],
+        ["DineIn", "DineIn"],
+        ["AdditionalRelease", "DineIn"],
+      ]) {
+        const binding = bindings[kind];
+        const submitted = await evaluate(binding, applicability, "CartReady", "SubmitOrder");
+        assert.deepEqual(submitted.transition.effects, [
+          { ownerModule: "inventory", commandCode: binding.reserveCommandCode },
+        ]);
+        const paying = await evaluate(binding, applicability, "Submitted", "CreatePaymentIntent");
+        assert.equal(paying.transition.permissionCode, binding.payment.permissionCode);
+        assert.deepEqual(paying.transition.ruleReferences, [
+          binding.payment.intactReservationRuleReference,
+        ]);
+        const fulfilled = await evaluate(binding, applicability, "Accepted", "FulfillOrder");
+        assert.equal(
+          fulfilled.transition.transitionReference,
+          binding.payment.fulfillmentTransitionReference,
+        );
+        assert.equal(fulfilled.transition.permissionCode, "order.fulfill");
+        const accepted = await evaluate(binding, applicability, "Submitted", "Accept");
+        assert.equal(
+          accepted.transition.transitionReference,
+          binding.payment.acceptanceTransitionReference,
+        );
+        assert.equal(accepted.transition.permissionCode, "order.accept");
+      }
+      // Only the additional round keeps an in-progress table order's phase on its paid release.
+      const inProgress = await evaluate(
+        bindings.AdditionalRelease,
+        "DineIn",
+        "InProgress",
+        "ReleasePaidOrder",
+      );
+      assert.equal(inProgress.transition.nextState, "InProgress");
+      await assert.rejects(evaluate(bindings.DineIn, "DineIn", "InProgress", "ReleasePaidOrder"));
     } finally {
       await admin.query("DROP ROLE IF EXISTS " + role).catch(() => undefined);
       await admin.end();

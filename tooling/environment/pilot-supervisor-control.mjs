@@ -13,6 +13,16 @@ import {
 const fail = () => {
   throw Error("PILOT_SUPERVISOR_CONTROL_UNAVAILABLE");
 };
+// The supervisor imports workspace TypeScript packages (since c5f7e437), so it runs with the
+// workspace loader exactly as the container entrypoint (pilot-container-start.sh) starts it.
+export function pilotSupervisorArguments(runtimeDirectory) {
+  return [
+    "--import",
+    "./tooling/environment/register-workspace-typescript.mjs",
+    "tooling/environment/pilot-supervisor.mjs",
+    parsePilotRuntimeDirectory(runtimeDirectory),
+  ];
+}
 export function verifySupervisorProcess({
   root,
   runtimeDirectory,
@@ -26,7 +36,8 @@ export function verifySupervisorProcess({
     .slice(stat.lastIndexOf(")") + 2)
     .trim()
     .split(/\s+/u);
-  const args = cmdline.replace(/\0$/u, "").split("\0");
+  const args = cmdline.replace(/\0$/u, "").split("\0"),
+    expected = [process.execPath, ...pilotSupervisorArguments(runtimeDirectory)];
   if (
     !Number.isSafeInteger(lease?.pid) ||
     lease.pid < 1 ||
@@ -36,10 +47,8 @@ export function verifySupervisorProcess({
     pilotProcessIsStopped(stat) ||
     cwd !== root ||
     executable !== process.execPath ||
-    args.length !== 3 ||
-    args[0] !== process.execPath ||
-    args[1] !== "tooling/environment/pilot-supervisor.mjs" ||
-    args[2] !== parsePilotRuntimeDirectory(runtimeDirectory)
+    args.length !== expected.length ||
+    args.some((arg, index) => arg !== expected[index])
   )
     return fail();
   return lease.pid;
@@ -149,7 +158,7 @@ export async function runPilotSupervisorControl(action, runtimeDirectory) {
     const log = await fs.open(path.join(directory, "supervisor.log"), "a", 0o600);
     let child;
     try {
-      child = spawn(process.execPath, ["tooling/environment/pilot-supervisor.mjs", directoryName], {
+      child = spawn(process.execPath, pilotSupervisorArguments(directoryName), {
         cwd: root,
         env: pilotLaunchEnvironment("business-worker", process.env),
         detached: true,

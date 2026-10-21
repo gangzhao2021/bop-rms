@@ -119,6 +119,16 @@ export const pilotCapabilityGaps = Object.freeze([
     needs: "public customer domain and its certificate (hosting.json customerOrigin and tls)",
     configurable: true,
   }),
+  // DEC-PILOT-INSTALLATION: met when the runtime directory holds a complete issued installation
+  // (pilot-installation-issue: every service file, the released order and cancellation Workflow
+  // bindings, the service role passwords, no InternalTest-only file, binding window in force).
+  Object.freeze({
+    code: "Installation",
+    standIn: "hand-made InternalTest installation files",
+    needs:
+      "runtime files issued by pilot-installation-issue (prepare/sign/apply) and the order Workflows released by workflow-release-install",
+    configurable: true,
+  }),
   Object.freeze({
     code: "PricingCurrencyMetadata",
     standIn: "TEST-ONLY synthetic CAD metadata",

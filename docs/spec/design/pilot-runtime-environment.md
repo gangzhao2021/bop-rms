@@ -78,9 +78,7 @@ staff-sign-in.json Cognito）→ 启动检查只剩 `PricingCurrencyMetadata`；
 ## 仍阻止真实 Pilot 启动
 
 1. `PricingCurrencyMetadata`：真实门店的币种与税务配置及专业审查（外部 + P5），不可伪造。
-2. **Pilot 安装签发（仓库 + 外部）**：没有从空库签发 Pilot 运行目录的工具——档案（绑定与有效期窗口）、菜单、库存、名单/任务队列、
-   各 worker 配置、日结覆盖，以及**取餐/堂食/加单（OrderFulfillment）工作流的发布与绑定文件**（v15 的这些文件是 WP-2402 时期手工
-   生成，仓库只有测试种子定义，`platform-workflows` 只含取消工作流）。品牌/门店初始化本身走受治理流程（B2，外部身份与审批）。
-   需另立工作：把 OrderFulfillment 工作流纳入 `workflow-release-install` 平台发布（独立审批人），并为其余运行文件提供 Pilot 签发。
-3. 绑定有效期：Pilot 档案 `binding.validUntil` 到期即停止服务，续期工具只做 InternalTest；Pilot 续期应随第 2 项由签发工具重新签发。
-4. 外部：Stripe live、Cognito 池、托管主机/域名/证书/受管密钥/S3、通知账户与实测（各决定已列）。
+2. ~~Pilot 安装签发~~、3. ~~Pilot 续期~~：已由 [DEC-PILOT-INSTALLATION](pilot-installation.md)（2026-10-20）完成——`pilot-installation-issue`
+   从数据库已发布事实签发运行目录（prepare/sign/apply，审计、可重放），`workflow-release-install` 发布取餐/堂食/加单工作流并写绑定文件，
+   Pilot 续期需 Owner 批准原话与平台签名并提前 14 天告警；启动检查新增 `Installation` 缺口。品牌/门店初始化（B2）仍属外部。
+3. 外部：Stripe live、Cognito 池、托管主机/域名/证书/受管密钥/S3、通知账户与实测（各决定已列）。

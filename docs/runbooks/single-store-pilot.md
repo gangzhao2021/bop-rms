@@ -2020,48 +2020,179 @@ approval) before then while the store still runs InternalTest.
 
 ## Switching a Store to Pilot (DEC-PILOT-RUNTIME-ENVIRONMENT)
 
-Decision: [Pilot runtime environment](../spec/design/pilot-runtime-environment.md). A Pilot Store is
-a **new installation** (its own database and runtime directory with the real Store's facts). Never
+Decisions: [Pilot runtime environment](../spec/design/pilot-runtime-environment.md) and
+[Pilot installation](../spec/design/pilot-installation.md) (DEC-PILOT-INSTALLATION). A Pilot Store is
+a **new installation**: its own database and runtime directory with the real Store's facts. Never
 relabel, copy or edit an InternalTest runtime directory (v15) into a Pilot one: every file there is
-TEST data. v15 keeps running InternalTest unchanged.
+TEST data, and the installer refuses a directory holding any InternalTest-only file. v15 keeps running
+InternalTest unchanged.
 
-**Not possible yet:** the start check still refuses with
-`PILOT_CAPABILITY_MISSING:PricingCurrencyMetadata` (reviewed currency and tax configuration, P5), and
-there is no tool yet that issues the Pilot runtime files and the pickup/dine-in order workflows
-(design note, "仍阻止真实 Pilot 启动" 2). The steps below are the order to follow once those exist; each
-external item has its own runbook.
+**Still blocked:** the start check refuses with `PILOT_CAPABILITY_MISSING:PricingCurrencyMetadata`
+until the Store's reviewed currency and tax configuration exists (P5, external). Everything below can
+be done before that; the Store cannot take orders until it is resolved.
 
-1. **Runtime files** (`<runtime>` 0700, every file 0600, owned by the pilot operator): each file
-   declares `"environment": "Pilot"` — `installation.json`, `internal-test-profile.json` (the Store's
-   binding and validity window, real `operating.liveGateRequirementCodes`, no `SYNTHETIC_` code),
-   menu, inventory, merchant and customer runtime, task queue, worker files, workflow bindings and
-   day-end coverage. `customer-runtime.json` lists `"diningTableFiles": []` (no DEMO table launcher).
-   The unpaid dine-in round cancellation workflow is released with
-   `workflow-release-install … --runtime-environment Pilot`.
-2. **Hosting and managed secrets:** `hosting.json` and the secrets folder as in
-   [Hosting](#hosting-customer-domain-certificate-and-managed-secrets-wp-2423), including the
-   `cognito-client-secret` file; `pilot-secrets.mjs check` prints `PILOT_SECRETS_COMPLETE`.
-3. **Local entry certificate** (the `front` service re-encrypts to it; phones never see it):
-   `NODE_ENV=production BOP_PILOT_ENVIRONMENT=Pilot node --import ./tooling/environment/register-workspace-typescript.mjs tooling/environment/pilot-provision-tls.mjs issue <absolute runtime> <database>`.
-   It is valid for 30 days: run the same command with `renew` (and restart in an update window)
-   before it expires.
-4. **Payments:** `payment.json` in Stripe live mode — [Stripe switch](./pilot-stripe-switch.md) B.
-5. **Staff sign-in:** `staff-sign-in.json` in Cognito mode (Pilot form: no `staffPin` and no
-   `clientSecretFile`; PIN keys and the client secret come from the managed secrets), then the first
-   Owner — [Cognito store staff](./cognito-store-staff.md).
-6. **Start** with the compose override of the Hosting section (`NODE_ENV=production`,
+Every repository command runs from the repository root of the deployed revision, with the pinned Node
+and `node --import ./tooling/environment/register-workspace-typescript.mjs` (written `node --import …`
+below), as the pilot operator account. Installation commands run as a Pilot process:
+`NODE_ENV=production BOP_PILOT_ENVIRONMENT=Pilot`. `<runtime>` is the absolute runtime directory
+(`0700`, owned by the pilot operator); `<migration env>` is the database's migration authority file
+(inside the repository, password file under `.local`, the role may create roles); `<target>` is
+`<environment>:<database>` from that file. Two Platform people are involved: the **operator** runs
+the tools, an independent **approver** signs; neither is the Store's Owner. Record each step's printed
+result (references, digests, statuses; never secrets) in WP-2423.
+
+### 1. Accounts (Owner, external)
+
+Before anything is installed the Owner has: the Stripe account in live mode (PILOT-PAY-01/02), the AWS
+account for Cognito, SES/SNS and the S3 off-site target, the hosting (host, public customer domain,
+certificate), and the real Store facts (legal name, address, tax registration). Each has its own
+runbook: [Stripe](./pilot-stripe-switch.md), [Cognito](./cognito-store-staff.md),
+[notifications](./notification-deliverability.md), [hosting](#hosting-customer-domain-certificate-and-managed-secrets-wp-2423).
+
+### 2. Managed secrets
+
+`node tooling/environment/pilot-secrets.mjs generate <new private folder>` creates every managed value
+(including `order-recovery-pepper-v1` and `order-recovery-abuse-key` for one-time order links) and a
+table QR key; upload each file to the hosting's secret store
+([key and secret rotation](key-secret-rotation.md#pilot-secret-files-wp-2423-dec-pilot-secrets)) and add
+the Cognito client secret as `cognito-client-secret`. Delete the local folder.
+
+### 3. Hosting
+
+Create `<runtime>` (`mkdir -m 0700`), write `hosting.json` and the compose override as in
+[Hosting](#hosting-customer-domain-certificate-and-managed-secrets-wp-2423), then
+`node tooling/environment/pilot-secrets.mjs check <runtime>` must print `PILOT_SECRETS_COMPLETE`. Issue
+the local entry certificate the `front` service re-encrypts to (after step 5, it reads the profile):
+`node --import … tooling/environment/pilot-provision-tls.mjs issue <runtime> <database>`; it is valid for
+30 days, renew it with `renew` in a planned update window.
+
+### 4. Database
+
+1. Start the Pilot database (its own volume and port; never the InternalTest one).
+2. Migrations: `pnpm db:migrate -- apply --env-file <migration env> --confirm-target <target>`.
+3. Permission catalog: `node --import … tooling/environment/permission-catalog-install.mjs --env-file <migration env> --confirm-target <target> --operator <operator> --approved-by <approver> --approval-evidence <uuid>`.
+4. Brand and Store records: the governed Brand/Store opening (B2, external identity and approval).
+5. Store roles: `store-role-provisioning.mjs` `keygen` (approver, once; publish the key with purpose
+   `STORE_ROLE_PROVISIONING`), `prepare --templates owner,store-manager,front-of-house,kitchen,inventory-manager …`,
+   `sign`, `apply` (no Owner yet; the first Owner comes in step 7).
+6. In the product, the Owner (with the Platform operator for the first sign-in, step 7) publishes
+   Store setup with its approved go-live check, the menu, and the stock site **at least one full
+   business day before step 5 of this procedure**: the first day-end settlement window is the last
+   closed business day, so the installer refuses (`no-closed-business-day`) until one exists.
+
+### 5. Installation files (`pilot-installation-issue`)
+
+1. Approver, once: `node --import … tooling/environment/pilot-installation-issue.mjs keygen --private-key <approver key>`;
+   publish the printed key in the trust file with purpose `PILOT_INSTALLATION` (same trust format as
+   Store roles: `StoreRoleProvisioningTrustV1`).
+2. Owner approves the validity window in writing (at most 92 days; the installation stops serving at
+   its end). Operator prepares:
+
+   ```bash
+   NODE_ENV=production BOP_PILOT_ENVIRONMENT=Pilot node --import ./tooling/environment/register-workspace-typescript.mjs \
+     tooling/environment/pilot-installation-issue.mjs prepare --env-file <migration env> --directory <runtime> \
+     --environment <environment uuid> --operator <operator> --tenant <tenant> --brand <brand> --store <store> \
+     --valid-until <ISO instant> --api-role <api role> --worker-role <worker role> --database-port <port> \
+     --owner-approved-by "<Owner name>" --owner-approval "<Owner's words>" --reason "<why>" --out <plan.json>
+   ```
+
+   It reads the facts in a transaction it rolls back and prints the plan digest, the window and each
+   file's SHA-256. A refusal prints `PILOT_INSTALLATION_ISSUE_UNAVAILABLE (<reason>)`, e.g.
+   `store-roles-not-provisioned`, `store-configuration-not-published`, `launch-gate-synthetic`,
+   `menu-ambiguous` (add `--menu <uuid>`), `stock-site-ambiguous` (add `--stock-site <uuid>`).
+
+3. Approver reviews the plan file and signs: `sign --plan <plan.json> --private-key <approver key> --approved-by <approver> --approval-evidence <uuid> --key <key uuid> --valid-hours <1..72> --out <approval.json>`.
+4. Operator dry run: `apply --env-file <migration env> --plan <plan.json> --approval <approval.json> --trust <trust.json>`
+   prints `DryRun`, the roles it would create and the files; nothing is written.
+5. Operator apply: the same command with `--confirm-target <target>`. It creates the services' database
+   roles (`LOGIN NOSUPERUSER NOBYPASSRLS`; their passwords only in `<runtime>/api-password` and
+   `worker-password`), applies the rendered pilot ACL, records the Platform audit, then writes every
+   file (`0600`, the profile last), a `pilot-installation-install-<time>/record.json` and one line in
+   `pilot-installation-log.jsonl`. Rerun the same command after an interruption; it reports
+   `AlreadyApplied` once complete.
+
+### 6. Workflows (`workflow-release-install`)
+
+For each release, with a fresh operation reference from
+`node --import … tooling/environment/workflow-release-install.mjs new-operation` (keep it to replay):
+
+| `--workflow`                      | `--output`                                                |
+| --------------------------------- | --------------------------------------------------------- |
+| `OrderFulfillmentPickup`          | `<runtime>/internal-test-workflow-Pickup.json`            |
+| `OrderFulfillmentDineIn`          | `<runtime>/internal-test-workflow-DineIn.json`            |
+| `OrderFulfillmentAdditionalRound` | `<runtime>/internal-test-workflow-AdditionalRelease.json` |
+| `UnpaidDineInBatchCancellation`   | `<runtime>/cancellation-workflow-draft-result.json`       |
+
+```bash
+node --import ./tooling/environment/register-workspace-typescript.mjs tooling/environment/workflow-release-install.mjs \
+  --env-file <migration env> --confirm-target <target> --workflow <release> --runtime-environment Pilot \
+  --tenant <tenant> --brand <brand> --store <store> --operator <operator> --approved-by <approver> \
+  --approval-evidence <uuid> --operation <operation> --output <file>
+```
+
+A directory whose profile names another environment, database or Store is refused
+(`WORKFLOW_RELEASE_PROFILE_MISMATCH`) before anything is released.
+
+### 7. Staff
+
+`staff-sign-in.json` in Cognito mode (Pilot form: no `staffPin`, no `clientSecretFile`), then the first
+Owner: [Cognito store staff](./cognito-store-staff.md) section 6 (`store-staff-sign-in.mjs invite-first-owner`,
+the Owner's first sign-in, Platform approval of the Owner role with `store-role-provisioning`
+`prepare-assignment`/`sign-assignment`/`apply-assignment`). The Owner invites the other staff in the app.
+
+### 8. Stripe
+
+`payment.json` in live mode with the live key files: [Stripe switch](./pilot-stripe-switch.md) B steps 1–3
+(`pilot-stripe-operations.mjs check` reads live keys and a live-mode webhook endpoint).
+
+### 9. Notifications and alerts
+
+`notification.json` ([notifications](./notification-deliverability.md) section 4) and `ops.json` alert
+channels ([Alerts](#alerts-and-scheduled-backups-wp-2423-q13)); send a test alert.
+
+### 10. Start and first live checks
+
+1. Start with the compose override of the Hosting section (`NODE_ENV=production`,
    `BOP_PILOT_ENVIRONMENT=Pilot` for `pilot`, `ops` and `front`). The supervisor prints one
-   `PILOT_NOT_READY …` line per hosting problem and refuses with `PILOT_CAPABILITY_MISSING:<codes>`
-   while anything is missing; fix what it names and start again.
-7. **In the Store:** print the pickup poster as a QR code of the customer address itself
-   (`https://order.<store domain>/` opens pickup ordering; it never needs reprinting when keys
-   rotate), create and print every table code on **Table QR codes** (Create code, then Print all
-   codes — [Table QR codes](#table-qr-codes-wp-2423-q11)), and staff sign in at
-   `/operations/sign-in`. Nothing simulated (test payment buttons, DEMO staff list, table launcher)
-   exists in a Pilot Store.
+   `PILOT_NOT_READY …` line per problem (hosting, `Installation: missing <file>` /
+   `invalid <file>` / `internal-test-file-present <file>` / `validity-window-not-in-force`) and refuses
+   with `PILOT_CAPABILITY_MISSING:<codes>` while anything is missing; fix what it names and start again.
+   Until the tax review exists the only code left is `PricingCurrencyMetadata`.
+2. In the Store: print the pickup poster as a QR code of the customer address itself
+   (`https://order.<store domain>/` opens pickup ordering; it never needs reprinting when keys rotate),
+   create and print every table code on **Table QR codes** ([Table QR codes](#table-qr-codes-wp-2423-q11)),
+   and staff sign in at `/operations/sign-in`. Nothing simulated (test payment buttons, DEMO staff list,
+   table launcher) exists in a Pilot Store.
+3. First live checks (one WP-2423 line each): Stripe B.4 (one real paid pickup order, full refund,
+   day-end matches Stripe), Cognito section 8, notification section 5, the Home "Store system" card shows
+   "Everything is working" and the next scheduled backup and restore check succeed.
+
+### 11. Launch approval
+
+The Owner approves go-live in writing after the staff UAT business day and the outage rehearsal
+(see [Store outage procedure](#store-outage-procedure-wp-2423-q9)); record the words in WP-2423.
 
 **Rollback:** stop the Pilot services; the InternalTest installation is separate and unaffected.
 Payments already taken stay in Stripe live and in the Pilot database.
+
+### Renewing a Pilot installation (DEC-PILOT-INSTALLATION)
+
+The installation serves until `binding.validUntil`. From 14 days before it, the Home "Store system"
+card and the alert channels show "The store's ordering setup expires soon" (Urgent in the last 3
+days). Renew in a planned update window:
+
+1. Owner approves the new end date in writing (at most 92 days from now, later than the current end).
+2. Operator: `pilot-installation-issue.mjs prepare-renewal --env-file <migration env> --directory <runtime> --environment <uuid> --operator <operator> --valid-until <ISO> --owner-approved-by "<Owner>" --owner-approval "<Owner's words>" --reason "<why>" --out <renew-plan.json>`.
+   It re-reads the Store's published facts; `launch-gate-changed` means the Owner's go-live check
+   changed and the installation must be re-issued instead.
+3. Approver: `sign` the renewal plan (as in step 5.3).
+4. Operator: `apply … --confirm-target <target>` inside `maintenance start`/`maintenance end`, then
+   restart the services (they read the profile at start). Only the profile window and the task queue
+   windows change; the previous files stay in `pilot-installation-renew-<time>/` with `record.json`
+   (Owner's words, approver, from → to) and one log line.
+
+An installation that already expired is renewed the same way (guests could not order meanwhile). The
+InternalTest renewal tool refuses a Pilot directory.
 
 ## Alerts and scheduled backups (WP-2423 Q13)
 
@@ -2319,6 +2450,7 @@ anything that stops ordering; the pilot operator fixes the cause.
 | <a id="alert-backup-restore-check"></a>The newest backup could not be restored       | The scratch restore, row comparison or photo check failed (`media missing`: photos the menu uses are not in the photo folder)                                                                                                                               | Nothing in store                                                                                                                                                                                                                                                                                                             | Keep older backups; run `drill` by hand on the newest and on the previous one; take a new backup                                                                                                                                                                                                                                                             |
 | <a id="alert-backup-offsite"></a>Off-site backup copy failed                         | The encrypted copy could not be written (drive missing, full, key missing)                                                                                                                                                                                  | Owner: reconnect the drive or check the sync folder                                                                                                                                                                                                                                                                          | Check the `/offsite` mount, free space and the key file                                                                                                                                                                                                                                                                                                      |
 | <a id="alert-certificate-expiring"></a>Secure connection certificate expires soon    | Within 7 days ("Urgent" within 2 days or expired)                                                                                                                                                                                                           | Plan the renewal before it expires                                                                                                                                                                                                                                                                                           | `pilot-provision-tls.mjs renew` (see its README), restart, re-trust on staff devices                                                                                                                                                                                                                                                                         |
+| <a id="alert-installation-validity"></a>The store's ordering setup expires soon      | The installation's validity window (`binding.validUntil`) ends within 14 days ("Urgent" within 3 days or ended)                                                                                                                                             | Owner: approve a new end date in writing                                                                                                                                                                                                                                                                                     | Pilot: `pilot-installation-issue prepare-renewal` → `sign` → `apply` in a planned update window ([Renewing a Pilot installation](#renewing-a-pilot-installation-dec-pilot-installation)); InternalTest: [Renewing the internal test installation](#renewing-the-internal-test-installation)                                                                  |
 | <a id="alert-disk-low"></a>Disk space is running low                                 | Under 15% or 5 GB free ("Urgent" under 5% or 1 GB) on a named folder or the database disk                                                                                                                                                                   | Nothing in store until it is full                                                                                                                                                                                                                                                                                            | Remove old logs and old local backups beyond `keep`; `docker system df` for the database volume; add storage                                                                                                                                                                                                                                                 |
 | <a id="alert-monitor-source"></a>Some checks could not run                           | A source could not be read for 5+ minutes (for example the database for payment checks)                                                                                                                                                                     | Treat the named checks as unknown                                                                                                                                                                                                                                                                                            | `ops/alerts.log`; database and runtime directory permissions                                                                                                                                                                                                                                                                                                 |
 | <a id="alert-channel-delivery"></a>Alert messages are not being delivered            | An email or phone channel has failed for 30+ minutes                                                                                                                                                                                                        | Owner: watch the Home card; check the account                                                                                                                                                                                                                                                                                | `ops/alerts.log` code; fix the account file; `test-alert`                                                                                                                                                                                                                                                                                                    |

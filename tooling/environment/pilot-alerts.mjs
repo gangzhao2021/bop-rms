@@ -289,6 +289,24 @@ export const ALERT_CATALOG = Object.freeze({
       "Ask the pilot operator to renew the secure connection certificate and trust the new one on staff devices.",
     runbook: "alert-certificate-expiring",
   },
+  // DEC-PILOT-INSTALLATION: the installation's validity window (internal-test-profile.json
+  // binding.validUntil). When it ends guests can no longer order and staff lose access, so the
+  // Owner hears about it two weeks ahead; renewal needs the Owner's approval.
+  "installation.validity": {
+    severity: "warning",
+    raiseAfterMs: 0,
+    title: (p) =>
+      p.remainingMs <= 0
+        ? "The store's ordering setup has expired"
+        : "The store's ordering setup expires soon",
+    summary: (p) =>
+      p.remainingMs <= 0
+        ? "Guests cannot order and staff cannot use the store screens until it is renewed."
+        : `It expires in ${formatDuration(p.remainingMs)}. After that, guests cannot order and staff cannot use the store screens.`,
+    action: () =>
+      "Approve a new end date and ask the pilot operator to renew it during a planned update before it expires.",
+    runbook: "alert-installation-validity",
+  },
   "disk.low": {
     severity: "warning",
     raiseAfterMs: 0,
@@ -325,6 +343,7 @@ const SOURCE_NAMES = Object.freeze({
   business: "payment and settlement status",
   backup: "the backup status",
   certificate: "the certificate",
+  installation: "the store setup end date",
   disk: "disk space",
   receipts: "the receipt template check",
   heldStock: "the check for orders holding stock",
@@ -342,6 +361,8 @@ export const DEFAULT_THRESHOLDS = Object.freeze({
   backupStaleMs: 26 * HOUR,
   certificateWarnMs: 7 * 24 * HOUR,
   certificateCriticalMs: 2 * 24 * HOUR,
+  installationWarnMs: 14 * 24 * HOUR,
+  installationCriticalMs: 3 * 24 * HOUR,
   diskWarnPercent: 15,
   diskWarnBytes: 5 * 1024 ** 3,
   diskCriticalPercent: 5,
@@ -477,6 +498,20 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
         "certificate.expiring",
         { remainingMs: remaining },
         remaining <= thresholds.certificateCriticalMs ? "critical" : "warning",
+      );
+  }
+
+  // Absent (undefined) for monitors without an installation observation (older callers).
+  const installation = observations.installation;
+  if (installation === "unreadable") unreadable.push("installation");
+  else if (installation !== undefined && installation !== null) {
+    const remaining = Date.parse(installation.validUntil) - now;
+    if (!Number.isFinite(remaining)) unreadable.push("installation");
+    else if (remaining <= thresholds.installationWarnMs)
+      raise(
+        "installation.validity",
+        { remainingMs: remaining },
+        remaining <= thresholds.installationCriticalMs ? "critical" : "warning",
       );
   }
 

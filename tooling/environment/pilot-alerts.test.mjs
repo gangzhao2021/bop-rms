@@ -77,6 +77,30 @@ describe("WP-2423 Q13 alert rules", () => {
     expect(c.get("certificate.expiring").severity).toBe("critical");
     expect(c.get("disk.low").severity).toBe("critical");
   });
+  it("DEC-PILOT-INSTALLATION: warns two weeks before the installation's validity ends, urgent in the last 3 days", () => {
+    const at = (days) => {
+      const o = healthy();
+      o.installation = { validUntil: new Date(T0 + days * 86400_000).toISOString() };
+      return evaluateAlertConditions(o);
+    };
+    expect(keys(at(30))).toEqual([]);
+    expect(keys(at(15))).toEqual([]);
+    expect(at(13).get("installation.validity").severity).toBe("warning");
+    expect(at(2).get("installation.validity").severity).toBe("critical");
+    expect(at(-1).get("installation.validity").severity).toBe("critical");
+    const soon = renderAlert("installation.validity", at(13).get("installation.validity").params);
+    expect(soon.title).toBe("The store's ordering setup expires soon");
+    expect(soon.summary).toContain("It expires in 13 days");
+    expect(soon.action).toContain("Approve a new end date");
+    expect(
+      renderAlert("installation.validity", at(-1).get("installation.validity").params).title,
+    ).toBe("The store's ordering setup has expired");
+    const o = healthy();
+    o.installation = "unreadable";
+    expect(evaluateAlertConditions(o).get("monitor.source").params.sources).toEqual([
+      "the store setup end date",
+    ]);
+  });
   it("treats an unreadable source as an alert, never as healthy; a missing supervisor report too", () => {
     const o = healthy();
     o.business = "unreadable";

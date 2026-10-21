@@ -135,6 +135,16 @@ it("DEC-PILOT-SECRETS: a Pilot process reads every consumer's keys from the mana
   await expect(v2.envelopes.decrypt(envelope, "other")).rejects.toThrow("INTERNAL_SESSION_DENIED");
   const pin = await loaders.createInternalStaffPinCredentials();
   expect(Object.keys(pin).sort()).toEqual(["choiceTokens", "deviceHasher", "kdf"]);
+  // DEC-PILOT-INSTALLATION: one-time order links use the managed pepper and abuse key (before,
+  // every Pilot service composing order messaging failed on the InternalTest key file).
+  const recovery = await loaders.createInternalOrderRecoveryKeys();
+  expect(recovery.peppers.map((entry) => entry.version)).toEqual([1]);
+  expect(recovery.peppers[0].key.toString("hex")).toBe(
+    (await fs.readFile(path.join(secrets, "order-recovery-pepper-v1"), "utf8")).trim(),
+  );
+  expect(recovery.abuse.toString("hex")).toBe(
+    (await fs.readFile(path.join(secrets, "order-recovery-abuse-key"), "utf8")).trim(),
+  );
   const dining = createInternalDiningCredentialLoaders({
     path: path.join(runtime, "internal-test-dining-key"),
   });
@@ -223,6 +233,8 @@ it("DEC-PILOT-SECRETS: the catalog covers every key the internal test key file a
       "guest-session-key",
       "merchant-encryption-key",
       "merchant-selector-key",
+      "order-recovery-abuse-key",
+      "order-recovery-pepper",
       "pickup-derivation-key",
       "pickup-selector-key",
       "staff-pin-choice-key",

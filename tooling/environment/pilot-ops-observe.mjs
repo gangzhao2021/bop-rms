@@ -160,6 +160,32 @@ export async function observeCertificate(
   }
 }
 
+/**
+ * DEC-PILOT-INSTALLATION: the end of the installation's validity window (the profile's
+ * `binding.validUntil`), read as a plain file so the monitor needs neither the database nor the
+ * workspace loader. Only the instant is returned; nothing else in the file is used.
+ */
+export async function observeInstallationValidity(
+  runtimeDirectory,
+  read = (file) => fs.readFile(file, "utf8"),
+) {
+  try {
+    const profile = JSON.parse(
+      await read(path.join(runtimeDirectory, "internal-test-profile.json")),
+    );
+    const validUntil = profile?.binding?.validUntil;
+    if (
+      typeof validUntil !== "string" ||
+      !Number.isFinite(Date.parse(validUntil)) ||
+      new Date(Date.parse(validUntil)).toISOString() !== validUntil
+    )
+      return "unreadable";
+    return { validUntil };
+  } catch {
+    return "unreadable";
+  }
+}
+
 export async function observeDisks(paths, statfs = fs.statfs) {
   try {
     const disks = [];
