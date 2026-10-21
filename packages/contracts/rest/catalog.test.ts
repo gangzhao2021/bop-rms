@@ -157,3 +157,38 @@ it("binds customer submission to a closed request and unpaid minimal result", ()
     "503",
   ]);
 });
+
+it("documents the Provider callbacks and the customer order-message routes", () => {
+  const document = JSON.parse(renderOpenApi());
+  const webhook = document.paths["/api/v1/payment-provider/stripe/webhook"].post;
+  expect(webhook.operationId).toBe("receiveStripeWebhook");
+  const names = webhook.parameters.map((p: { name: string }) => p.name);
+  expect(names).toContain("stripe-signature");
+  expect(names).not.toContain("idempotency-key");
+  expect(Object.keys(webhook.responses).sort()).toEqual(["200", "400", "500", "503"]);
+  const feedback = document.paths["/api/v1/provider/ses-feedback"].post;
+  expect(Object.keys(feedback.requestBody.content)).toEqual(["text/plain"]);
+  expect(Object.keys(feedback.responses).sort()).toEqual([
+    "200",
+    "400",
+    "403",
+    "404",
+    "413",
+    "500",
+    "503",
+  ]);
+  expect(
+    document.components.schemas.CustomerOrderMessageOptions.properties.orderMessages.required,
+  ).toEqual(["sms", "email"]);
+  const link = document.paths["/api/v1/customer/order-recovery"].post;
+  expect(link.requestBody.content["application/json"].schema.$ref).toContain(
+    "CustomerOrderLinkRequest",
+  );
+  expect(
+    document.components.schemas.CustomerOrderLinkError.properties.error.properties.code.enum,
+  ).toEqual([
+    "order_link_unavailable",
+    "order_link_rate_limited",
+    "order_link_service_unavailable",
+  ]);
+});

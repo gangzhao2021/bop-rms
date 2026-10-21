@@ -57,6 +57,13 @@ export const publicRestOperations = Object.freeze([
     "archiveMenu",
     true,
   ],
+  // DEC-STRIPE-PILOT-WIRING / DEC-PILOT-NOTIFICATIONS: Provider callbacks deduplicate by the
+  // Provider's own event/message ID and the order link is single-use, so none takes an
+  // Idempotency-Key (mutation flag false).
+  ["post", "/api/v1/payment-provider/stripe/webhook", "receiveStripeWebhook", false],
+  ["post", "/api/v1/provider/ses-feedback", "receiveNotificationFeedback", false],
+  ["get", "/api/v1/customer/order-messages", "getCustomerOrderMessageOptions", false],
+  ["post", "/api/v1/customer/order-recovery", "consumeCustomerOrderLink", false],
 ] as const);
 
 const Reference = z.string().uuid().openapi({ example: "018f0f58-767a-7f3b-a1d0-000000000001" });
@@ -648,6 +655,228 @@ export function buildRestRegistry(): OpenAPIRegistry {
             content: content(OrderSubmissionError),
           },
           500: { description: "Safe transport failure", content: content(ErrorBody) },
+        },
+      });
+      continue;
+    }
+    if (operationId === "receiveStripeWebhook") {
+      // DEC-STRIPE-PILOT-WIRING: Stripe's signed callback, not a customer or merchant route.
+      const json = (schema: z.ZodTypeAny) => ({ "application/json": { schema } });
+      registry.registerPath({
+        method,
+        path,
+        operationId,
+        description:
+          "Stripe webhook endpoint (Payment Webhook Inbox). The exact raw bytes are verified against the Stripe-Signature header (current or next signing secret, five-minute tolerance) before anything is stored; the event's livemode must equal the installation's Provider environment. Deduplicated by Provider event ID, so no Idempotency-Key: Stripe redelivers after any non-2xx answer. 200 means durably accepted and processed. Raw evidence is Restricted and kept 30 days. No body, signature, key or Provider ID is logged or echoed.",
+        request: {
+          headers: z.object({
+            "stripe-signature": z.string().min(1).max(8192),
+            "content-type": z.literal("application/json"),
+          }),
+          body: {
+            required: true,
+            description: "Stripe event JSON, read as raw bytes (at most 1 MiB)",
+            content: json(z.object({}).passthrough()),
+          },
+        },
+        responses: {
+          200: {
+            description: "Event accepted and processed (or already processed)",
+            headers: { "Cache-Control": { schema: { type: "string", enum: ["no-store"] } } },
+            content: json(
+              z
+                .object({ received: z.literal(true) })
+                .strict()
+                .openapi("ProviderWebhookAccepted"),
+            ),
+          },
+          400: {
+            description:
+              "Signature, timestamp, environment or payload invalid; redelivery cannot succeed",
+            content: json(ErrorBody),
+          },
+          503: {
+            description: "Dependency unavailable; Stripe redelivers (Retry-After: 30)",
+            headers: { "Retry-After": { schema: { type: "string", enum: ["30"] } } },
+            content: json(ErrorBody),
+          },
+          500: {
+            description: "Safe internal failure; Stripe redelivers",
+            content: json(ErrorBody),
+          },
+        },
+      });
+      continue;
+    }
+    if (operationId === "receiveNotificationFeedback") {
+      // DEC-PILOT-NOTIFICATIONS: the SNS HTTPS subscription for SES bounces and complaints.
+      const Outcome = z
+        .object({
+          outcome: z.enum([
+            "authorized",
+            "failed",
+            "forbidden",
+            "rejected",
+            "retry",
+            "unauthenticated",
+            "unavailable",
+          ]),
+        })
+        .strict()
+        .openapi("NotificationFeedbackOutcome");
+      const json = { "application/json": { schema: Outcome } };
+      registry.registerPath({
+        method,
+        path,
+        operationId,
+        description:
+          "Amazon SNS HTTPS subscription for Amazon SES bounce and complaint feedback. SNS posts JSON as text/plain; the message is authenticated (SNS signature version 2, fixed topic) before anything is stored, and only SubscriptionConfirmation for that topic is confirmed. Deduplicated by SNS message ID, so no Idempotency-Key. 404 while customer messages are not configured. Bodies and addresses are never logged or echoed.",
+        request: {
+          headers: z.object({
+            "x-amz-sns-message-type": z.enum([
+              "Notification",
+              "SubscriptionConfirmation",
+              "UnsubscribeConfirmation",
+            ]),
+          }),
+          body: {
+            required: true,
+            description: "SNS message JSON sent as text/plain (at most 128 KiB)",
+            content: { "text/plain": { schema: z.string().max(131072) } },
+          },
+        },
+        responses: {
+          200: { description: "Authenticated and recorded (or already recorded)", content: json },
+          400: { description: "Malformed message", content: json },
+          403: { description: "Signature or topic not accepted", content: json },
+          404: { description: "Customer messages are not configured", content: json },
+          413: { description: "Message too large", content: json },
+          503: { description: "Dependency unavailable; SNS retries", content: json },
+          500: {
+            description: "Safe internal failure; SNS retries",
+            content: { "application/json": { schema: ErrorBody } },
+          },
+        },
+      });
+      continue;
+    }
+    if (operationId === "getCustomerOrderMessageOptions") {
+      registry.registerPath({
+        method,
+        path,
+        operationId,
+        description:
+          "Which customer order-message channels can actually send now (DEC-PILOT-NOTIFICATIONS). Checkout offers a contact purpose only when it will really be used; unknown means nothing is offered. No query, no personal data. Response is no-store/no-referrer.",
+        responses: {
+          200: {
+            description: "Channels that can send now",
+            headers: {
+              "Cache-Control": { schema: { type: "string", enum: ["no-store"] } },
+              "Referrer-Policy": { schema: { type: "string", enum: ["no-referrer"] } },
+            },
+            content: {
+              "application/json": {
+                schema: z
+                  .object({
+                    schemaVersion: z.literal(1),
+                    orderMessages: z.object({ sms: z.boolean(), email: z.boolean() }).strict(),
+                  })
+                  .strict()
+                  .openapi("CustomerOrderMessageOptions"),
+              },
+            },
+          },
+          400: {
+            description: "Query parameters are not accepted",
+            content: {
+              "application/json": {
+                schema: z
+                  .object({
+                    schemaVersion: z.literal(1),
+                    error: z.object({ code: z.literal("request_invalid") }).strict(),
+                  })
+                  .strict(),
+              },
+            },
+          },
+          500: {
+            description: "Safe internal failure",
+            content: { "application/json": { schema: ErrorBody } },
+          },
+        },
+      });
+      continue;
+    }
+    if (operationId === "consumeCustomerOrderLink") {
+      const error = z
+        .object({
+          schemaVersion: z.literal(1),
+          error: z
+            .object({
+              code: z.enum([
+                "order_link_unavailable",
+                "order_link_rate_limited",
+                "order_link_service_unavailable",
+              ]),
+            })
+            .strict(),
+        })
+        .strict()
+        .openapi("CustomerOrderLinkError");
+      const json = { "application/json": { schema: error } };
+      registry.registerPath({
+        method,
+        path,
+        operationId,
+        description:
+          "IDR-0031 one-time order link (DEC-PILOT-NOTIFICATIONS R1). The page reads the 256-bit token from the URL fragment, clears the address bar and sends it once in this body. Success re-keys the Order's own Guest Session (Set-Cookie) and returns only the order path; the link and its siblings stop working. Every invalid, used or expired link gets the same answer. The single-use token is the idempotency control, so no Idempotency-Key. Never logged or echoed.",
+        request: {
+          headers: z.object({
+            origin: z.string().min(1),
+            "sec-fetch-site": z.literal("same-origin"),
+          }),
+          body: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: z
+                  .object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/u) })
+                  .strict()
+                  .openapi("CustomerOrderLinkRequest"),
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: "Order reopened in this browser",
+            headers: {
+              "Set-Cookie": { schema: { type: "string" }, description: "__Host-bop-guest" },
+              "Cache-Control": { schema: { type: "string", enum: ["no-store"] } },
+            },
+            content: {
+              "application/json": {
+                schema: z
+                  .object({
+                    schemaVersion: z.literal(1),
+                    redirectPath: z
+                      .string()
+                      .regex(
+                        /^\/orders\/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+                      ),
+                  })
+                  .strict()
+                  .openapi("CustomerOrderLinkResult"),
+              },
+            },
+          },
+          400: { description: "Link unavailable (uniform answer)", content: json },
+          429: { description: "Too many tries; Retry-After in seconds", content: json },
+          503: { description: "Service unavailable; Retry-After: 30", content: json },
+          500: {
+            description: "Safe internal failure",
+            content: { "application/json": { schema: ErrorBody } },
+          },
         },
       });
       continue;

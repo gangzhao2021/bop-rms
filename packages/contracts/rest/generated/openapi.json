@@ -572,6 +572,140 @@
           "resolution"
         ],
         "additionalProperties": false
+      },
+      "ProviderWebhookAccepted": {
+        "type": "object",
+        "properties": {
+          "received": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "received"
+        ],
+        "additionalProperties": false
+      },
+      "NotificationFeedbackOutcome": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "authorized",
+              "failed",
+              "forbidden",
+              "rejected",
+              "retry",
+              "unauthenticated",
+              "unavailable"
+            ]
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "additionalProperties": false
+      },
+      "CustomerOrderMessageOptions": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "orderMessages": {
+            "type": "object",
+            "properties": {
+              "sms": {
+                "type": "boolean"
+              },
+              "email": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "sms",
+              "email"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "orderMessages"
+        ],
+        "additionalProperties": false
+      },
+      "CustomerOrderLinkResult": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "redirectPath": {
+            "type": "string",
+            "pattern": "^\\/orders\\/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "redirectPath"
+        ],
+        "additionalProperties": false
+      },
+      "CustomerOrderLinkError": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "order_link_unavailable",
+                  "order_link_rate_limited",
+                  "order_link_service_unavailable"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "CustomerOrderLinkRequest": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$/u"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {}
@@ -3087,6 +3221,405 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/payment-provider/stripe/webhook": {
+      "post": {
+        "operationId": "receiveStripeWebhook",
+        "description": "Stripe webhook endpoint (Payment Webhook Inbox). The exact raw bytes are verified against the Stripe-Signature header (current or next signing secret, five-minute tolerance) before anything is stored; the event's livemode must equal the installation's Provider environment. Deduplicated by Provider event ID, so no Idempotency-Key: Stripe redelivers after any non-2xx answer. 200 means durably accepted and processed. Raw evidence is Restricted and kept 30 days. No body, signature, key or Provider ID is logged or echoed.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192
+            },
+            "required": true,
+            "name": "stripe-signature",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "application/json"
+              ]
+            },
+            "required": true,
+            "name": "content-type",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Stripe event JSON, read as raw bytes (at most 1 MiB)",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Event accepted and processed (or already processed)",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderWebhookAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Signature, timestamp, environment or payload invalid; redelivery cannot succeed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe internal failure; Stripe redelivers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable; Stripe redelivers (Retry-After: 30)",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "30"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/provider/ses-feedback": {
+      "post": {
+        "operationId": "receiveNotificationFeedback",
+        "description": "Amazon SNS HTTPS subscription for Amazon SES bounce and complaint feedback. SNS posts JSON as text/plain; the message is authenticated (SNS signature version 2, fixed topic) before anything is stored, and only SubscriptionConfirmation for that topic is confirmed. Deduplicated by SNS message ID, so no Idempotency-Key. 404 while customer messages are not configured. Bodies and addresses are never logged or echoed.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "Notification",
+                "SubscriptionConfirmation",
+                "UnsubscribeConfirmation"
+              ]
+            },
+            "required": true,
+            "name": "x-amz-sns-message-type",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "SNS message JSON sent as text/plain (at most 128 KiB)",
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string",
+                "maxLength": 131072
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated and recorded (or already recorded)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationFeedbackOutcome"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationFeedbackOutcome"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signature or topic not accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationFeedbackOutcome"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer messages are not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationFeedbackOutcome"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Message too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationFeedbackOutcome"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe internal failure; SNS retries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable; SNS retries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationFeedbackOutcome"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/customer/order-messages": {
+      "get": {
+        "operationId": "getCustomerOrderMessageOptions",
+        "description": "Which customer order-message channels can actually send now (DEC-PILOT-NOTIFICATIONS). Checkout offers a contact purpose only when it will really be used; unknown means nothing is offered. No query, no personal data. Response is no-store/no-referrer.",
+        "responses": {
+          "200": {
+            "description": "Channels that can send now",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              },
+              "Referrer-Policy": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-referrer"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerOrderMessageOptions"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Query parameters are not accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "request_invalid"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe internal failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/customer/order-recovery": {
+      "post": {
+        "operationId": "consumeCustomerOrderLink",
+        "description": "IDR-0031 one-time order link (DEC-PILOT-NOTIFICATIONS R1). The page reads the 256-bit token from the URL fragment, clears the address bar and sends it once in this body. Success re-keys the Order's own Guest Session (Set-Cookie) and returns only the order path; the link and its siblings stop working. Every invalid, used or expired link gets the same answer. The single-use token is the idempotency control, so no Idempotency-Key. Never logged or echoed.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "origin",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "same-origin"
+              ]
+            },
+            "required": true,
+            "name": "sec-fetch-site",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerOrderLinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Order reopened in this browser",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "__Host-bop-guest"
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerOrderLinkResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Link unavailable (uniform answer)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerOrderLinkError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many tries; Retry-After in seconds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerOrderLinkError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe internal failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable; Retry-After: 30",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerOrderLinkError"
                 }
               }
             }
