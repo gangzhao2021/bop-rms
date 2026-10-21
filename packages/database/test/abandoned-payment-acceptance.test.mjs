@@ -107,7 +107,7 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
       const release = await applyWorkflowRelease(
         admin,
         {
-          purposeCode: "UnpaidDineInBatchCancellation",
+          release: "UnpaidDineInBatchCancellation",
           tenantReference: tenant,
           brandReference: brand,
           operatorReference: operator,

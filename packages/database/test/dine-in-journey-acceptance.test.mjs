@@ -317,7 +317,7 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       const release = await applyWorkflowRelease(
         admin,
         {
-          purposeCode: "UnpaidDineInBatchCancellation",
+          release: "UnpaidDineInBatchCancellation",
           tenantReference: tenant,
           brandReference: scope.brandReference,
           operatorReference: workflowOperator,
