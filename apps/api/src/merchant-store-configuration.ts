@@ -492,6 +492,37 @@ export function createMerchantStoreConfiguration(options: {
                 }
               }
             }
+            // An approval or publication of an hours change takes the Store configuration head
+            // lock first (as every configuration writer does) and acts only on the head it was
+            // asked about. A second person approving or publishing the same change at the same
+            // moment then waits and is told it changed (409), instead of the two deadlocking on
+            // the review snapshot (503).
+            if (
+              (bound.method === "approve" || bound.method === "publish") &&
+              bound.input.configuration.setupBasis === undefined &&
+              options.review
+            ) {
+              const head = await createPostgresStoreConfigurationAuthoringSource({
+                brandReference: scope.context.brand.brandReference,
+                storeReference: scope.store.storeReference,
+                mode: "Write",
+                authorize: async (actual) => actual === tx && (await guard()),
+              })(tx, () => source.now());
+              // The head may already be the result of this command (a retry is answered as before).
+              const states =
+                bound.method === "approve"
+                  ? ["PendingApproval", "Approved"]
+                  : ["Approved", "Published"];
+              if (
+                head === null ||
+                head.configurationReference !== bound.input.configuration.configurationReference ||
+                head.configurationVersion !== bound.input.expectedVersion ||
+                !states.includes(head.lifecycle)
+              )
+                throw new StoreConfigurationAdministrationServiceError(
+                  "STORE_CONFIGURATION_VERSION_CONFLICT",
+                );
+            }
             const baseOptions = storeConfigurationAdministrationOptions({
               configured,
               scope,
@@ -644,12 +675,14 @@ export function createMerchantStoreConfiguration(options: {
         },
         async (authority) => {
           const scope = runScope(authority.scope, () => authority.guard());
-          const observedAt = source.now();
+          // The head is read under its lock at the time it is read, and this read is observed
+          // after it, so a change committed while the read waited is shown, not an outage.
           const latest = await createPostgresStoreConfigurationAuthoringSource({
             brandReference: scope.context.brand.brandReference,
             storeReference: scope.store.storeReference,
             authorize: () => authority.guard(),
-          })(tx, observedAt);
+          })(tx, () => source.now());
+          const observedAt = source.now();
           const configured = options.configure(tx, scope, refusePublishing());
           const baseline = await configured.publishedBaseline(tx);
           const current = baseline === null ? null : createStoreConfigurationVersion(baseline);

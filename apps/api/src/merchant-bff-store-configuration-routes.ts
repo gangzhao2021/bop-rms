@@ -557,8 +557,10 @@ export function installMerchantStoreConfigurationRoutes(
           response.status(409).json({ error: "approval_needs_another_person" });
         else if (code === "STORE_CONFIGURATION_WITHDRAWN")
           response.status(409).json({ error: "store_configuration_withdrawn" });
+        // A step on a change that moved on meanwhile (e.g. another Owner approved it first).
         else if (
           code === "STORE_CONFIGURATION_VERSION_CONFLICT" ||
+          code === "STORE_CONFIGURATION_LIFECYCLE_CONFLICT" ||
           code === "STORE_CONFIGURATION_IDEMPOTENCY_CONFLICT"
         )
           response.status(409).json({ error: "store_configuration_conflict" });

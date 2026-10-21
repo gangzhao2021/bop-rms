@@ -725,10 +725,15 @@ it("protects store-configuration transport and exposes only bounded results", as
     csrf,
     command: { command: "SaveDraft" },
   });
-  control.mockRejectedValueOnce(
-    Object.assign(new Error("safe"), { code: "STORE_CONFIGURATION_VERSION_CONFLICT" }),
-  );
-  expect((await submit()).status).toBe(409);
+  for (const code of [
+    "STORE_CONFIGURATION_VERSION_CONFLICT",
+    "STORE_CONFIGURATION_LIFECYCLE_CONFLICT",
+  ]) {
+    control.mockRejectedValueOnce(Object.assign(new Error("safe"), { code }));
+    const conflict = await submit();
+    expect(conflict.status, code).toBe(409);
+    expect(await conflict.json(), code).toEqual({ error: "store_configuration_conflict" });
+  }
   for (const rejected of [
     Object.assign(new Error("safe"), { code: "STORE_CONFIGURATION_REFERENCE_INVALID" }),
     Object.assign(new Error("safe"), { code: "STORE_CONFIGURATION_APPROVAL_INVALID" }),

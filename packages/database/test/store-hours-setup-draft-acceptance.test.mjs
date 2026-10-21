@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { setTimeout } from "node:timers";
 import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
@@ -69,16 +70,77 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         ),
       );
       await admin.query(renderPilotAclSql(matrices, { api, worker }));
+      // Read-while-writing barrier: the reader stops just before taking the head lock (its clock
+      // already read); the writer then starts, takes the head lock and holds it until the reader
+      // waits for it, so the head the reader finds is newer than its first clock reading.
+      let headBarrier = null;
+      const headLock = "LOCK TABLE rms_store.store_configuration_authoring_operation IN ";
+      const headLockWaiter = async () => {
+        for (let attempt = 0; attempt < 400; attempt++) {
+          const waiting = await admin.query(
+            "SELECT count(*)::int n FROM pg_locks WHERE relation='rms_store.store_configuration_authoring_operation'::regclass AND NOT granted",
+          );
+          if (waiting.rows[0].n > 0) return true;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return false;
+      };
+      let approvalBarrier = null;
+      const snapshotLock = "LOCK TABLE rms_store.store_configuration_review_snapshot IN ";
+      const anyLockWaiter = async () =>
+        (await admin.query("SELECT count(*)::int n FROM pg_locks WHERE NOT granted")).rows[0].n > 0;
       const transactions = {
         async run(work) {
           const client = new Client(context.clientConfig);
           await client.connect();
+          const self = {};
           try {
             await client.query("BEGIN");
             await client.query("SET LOCAL ROLE " + api);
             await client.query("SET LOCAL statement_timeout = '20s'");
             const result = await work({
-              query: (sql, values) => client.query(sql, values === undefined ? [] : [...values]),
+              query: async (sql, values) => {
+                const approval = approvalBarrier;
+                if (approval !== null) {
+                  if (
+                    sql === snapshotLock + "SHARE ROW EXCLUSIVE MODE" &&
+                    approval.winner === null
+                  ) {
+                    approval.winner = self;
+                    approval.winnerAtSave();
+                    for (let attempt = 0; attempt < 400; attempt++) {
+                      if (approval.loserShared || (await anyLockWaiter())) break;
+                      await new Promise((resolve) => setTimeout(resolve, 10));
+                    }
+                  } else if (
+                    sql === snapshotLock + "SHARE MODE" &&
+                    approval.winner !== null &&
+                    approval.winner !== self
+                  ) {
+                    const shared = await client.query(sql, values === undefined ? [] : [...values]);
+                    approval.loserShared = true;
+                    return shared;
+                  }
+                }
+                const barrier = headBarrier;
+                if (barrier !== null && sql === headLock + "SHARE MODE" && !barrier.readerHeld) {
+                  barrier.readerHeld = true;
+                  barrier.readerAtLock();
+                  await barrier.writerLocked;
+                }
+                const result = await client.query(sql, values === undefined ? [] : [...values]);
+                if (
+                  barrier !== null &&
+                  barrier.readerHeld &&
+                  sql === headLock + "SHARE ROW EXCLUSIVE MODE" &&
+                  !barrier.writerHeld
+                ) {
+                  barrier.writerHeld = true;
+                  barrier.lockTaken();
+                  barrier.waiterSeen = await headLockWaiter();
+                }
+                return result;
+              },
             });
             await client.query("COMMIT");
             return result;
@@ -367,7 +429,25 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
             () => act(people.manager, command),
             isCode("STORE_CONFIGURATION_NOT_YOUR_CHANGE"),
           );
-        await act(people.owner, "Validate");
+        // A read that waited for the Owner's change (committed after the read began) shows that
+        // change; it is not reported as unavailable.
+        {
+          let readerAtLock, lockTaken;
+          const atLock = new Promise((resolve) => (readerAtLock = resolve));
+          const writerLocked = new Promise((resolve) => (lockTaken = resolve));
+          headBarrier = { readerAtLock, lockTaken, writerLocked, waiterSeen: false };
+          const reading = (await hoursFor(people.manager)).read(people.manager.sessionCookie);
+          await atLock;
+          const validated = act(people.owner, "Validate");
+          const [view] = await Promise.all([reading, validated]);
+          const barrier = headBarrier;
+          headBarrier = null;
+          assert.equal(barrier.writerHeld, true);
+          assert.equal(barrier.waiterSeen, true);
+          const after = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
+          assert.deepEqual(view.latest, after.latest);
+          assert.equal(view.latest.lifecycle, "Draft");
+        }
         await act(people.owner, "Submit");
         // The Owner's own approval: refused unless asked alone; sole operator off says so.
         let read = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
@@ -814,7 +894,64 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         // Manager, reading the Owner's change below, may not.
         read = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
         assert.equal(read.viewerMayDecline, true);
-        await act(people.owner, "Approve");
+        // Two Owners approve the Store Manager's change at the same moment: one approval is
+        // recorded and the other is told the change moved on (409), never an outage or a refusal
+        // of access (they deadlocked on the review snapshot before). The first
+        // approver holds its place just before recording its review snapshot until the second has
+        // read the same review state or waits behind it.
+        {
+          const prepared = await Promise.all(
+            [people.owner, people.secondOwner].map(async (person) => {
+              const composition = await hoursFor(person);
+              const current = await composition.read(person.sessionCookie);
+              return () =>
+                composition({
+                  sessionCookie: person.sessionCookie,
+                  csrf: person.csrf,
+                  command: {
+                    command: "Approve",
+                    operationReference: reference(),
+                    auditReference: reference(),
+                    expectedVersion: current.expectedVersion,
+                    configuration: {
+                      ...current.latest,
+                      lifecycle: "PendingApproval",
+                      updatedAt: current.observedAt,
+                    },
+                  },
+                });
+            }),
+          );
+          let winnerAtSave;
+          const atSave = new Promise((resolve) => (winnerAtSave = resolve));
+          approvalBarrier = { winnerAtSave, winner: null, loserShared: false };
+          const before = await counts();
+          const winning = prepared[0]().then(
+            (value) => ({ value }),
+            (error) => ({ error }),
+          );
+          await atSave;
+          const losing = prepared[1]().then(
+            (value) => ({ value }),
+            (error) => ({ error }),
+          );
+          const [won, lost] = await Promise.all([winning, losing]);
+          approvalBarrier = null;
+          const describe = (outcome) =>
+            outcome.error === undefined
+              ? "Applied"
+              : String(outcome.error?.code ?? outcome.error?.message ?? "Unknown");
+          assert.deepEqual(
+            [describe(won), describe(lost)],
+            [
+              "Applied",
+              // Answered 409 store_configuration_conflict by the route (merchant-bff.test.ts).
+              "STORE_CONFIGURATION_LIFECYCLE_CONFLICT",
+            ],
+          );
+          const after = await counts();
+          assert.equal(after.authoring, before.authoring + 1);
+        }
         await act(people.owner, "Publish");
         read = await (await hoursFor(people.owner)).read(people.owner.sessionCookie);
         assert.equal(read.current.authoredByReference, people.manager.actor);

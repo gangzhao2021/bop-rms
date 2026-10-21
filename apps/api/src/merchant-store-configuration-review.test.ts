@@ -108,6 +108,8 @@ function setup() {
     ),
   };
   mocks.resolve.mockResolvedValue(scope);
+  // The Store configuration head under its writer lock: the change awaiting approval.
+  mocks.authoring.mockReturnValue(async () => configuration("PendingApproval"));
   const prepare = vi.fn(async () => ({
     kind: "Approve",
     configuration: configuration("Approved"),
@@ -192,6 +194,24 @@ it("preserves supplied V1 hashing and supplies owning V2 content and Setup diges
   expect(references?.hashIntent(references.canonicalize(modern))).toBe(
     "sha256:" + sha256Hex(canonicalizeRfc8785(modern)),
   );
+});
+it("refuses an approval of a change that moved on under the head lock before preparing it", async () => {
+  for (const head of [
+    configuration("Draft"),
+    configuration("Published"),
+    { ...configuration("PendingApproval"), configurationVersion: 2 },
+    { ...configuration("PendingApproval"), configurationReference: id(40) },
+    null,
+  ]) {
+    const f = setup();
+    mocks.authoring.mockReturnValue(async () => head);
+    await expect(f.service(f.request)).rejects.toMatchObject({
+      code: "STORE_CONFIGURATION_VERSION_CONFLICT",
+    });
+    expect(f.prepare).not.toHaveBeenCalled();
+    expect(f.inputs).toEqual([]);
+    expect(mocks.authoring.mock.calls.at(-1)?.[0]).toMatchObject({ mode: "Write" });
+  }
 });
 it("routes approval through atomic workflow using server context and current Publishing decision", async () => {
   const f = setup();
