@@ -7,6 +7,7 @@ import { createMerchantProducts } from "../../../apps/api/src/merchant-products.
 import { createBrand, createTenantContext } from "../../bop/tenant/src/index.ts";
 import {
   createCategoryMenuService,
+  createPostgresMenuDraftSource,
   createPostgresMenuDraftStore,
   parseCatalogHash,
 } from "../../rms/catalog/src/index.ts";
@@ -526,19 +527,27 @@ it("creates and edits a Menu draft, freezes it once submitted and revises it", a
         }
         return false;
       };
-      const separately = async (requestedAt, expectedAggregateVersion, hold = {}) => {
+      // One transaction under the restricted role; `hold.at(sql, values)` selects the statement
+      // after which `hold.run()` runs once (the transaction keeps every lock it holds meanwhile).
+      const separately = async (work, hold = null) => {
         const client = new Client(context.clientConfig);
         await client.connect();
+        let fired = false;
+        const tx = {
+          query: async (sql, values) => {
+            const result = await client.query(sql, values);
+            if (hold?.at !== undefined && !fired && hold.at(sql, values ?? [])) {
+              fired = true;
+              await hold.run();
+            }
+            return result;
+          },
+        };
         try {
           await client.query("BEGIN");
           await client.query("SET LOCAL ROLE " + role);
-          const value = await service(client).reviseMenu({
-            menuReference: menu.menuReference,
-            expectedAggregateVersion,
-            operationReference: op(),
-            requestedAt,
-          });
-          await hold.beforeCommit?.();
+          const value = await work(tx);
+          if (hold?.at === undefined && hold !== null) await hold.run();
           await client.query("COMMIT");
           return value;
         } catch (error) {
@@ -548,14 +557,20 @@ it("creates and edits a Menu draft, freezes it once submitted and revises it", a
           await client.end();
         }
       };
-      const concurrently = async (expectedAggregateVersion, point) => {
-        const loserAt = now(),
-          winnerAt = now();
+      const revise = (requestedAt, expectedAggregateVersion) => (tx) =>
+        service(tx).reviseMenu({
+          menuReference: menu.menuReference,
+          expectedAggregateVersion,
+          operationReference: op(),
+          requestedAt,
+        });
+      const concurrently = async (winnerWork, loserWork, at) => {
         let holding,
           waiterSeen = false;
         const held = new Promise((resolve) => (holding = resolve));
-        const winning = separately(winnerAt, expectedAggregateVersion, {
-          [point]: async () => {
+        const winning = separately(winnerWork, {
+          at,
+          run: async () => {
             holding();
             waiterSeen = await lockWaiter();
           },
@@ -563,16 +578,55 @@ it("creates and edits a Menu draft, freezes it once submitted and revises it", a
         await held;
         const [won, lost] = await Promise.all([
           winning,
-          separately(loserAt, expectedAggregateVersion).then(
+          separately(loserWork).then(
             (value) => ({ value }),
             (error) => ({ code: error.code }),
           ),
         ]);
         assert.equal(waiterSeen, true);
-        assert.equal(won.aggregate.aggregateVersion, expectedAggregateVersion + 1);
-        assert.deepEqual(lost, { code: "CATALOG_VERSION_CONFLICT" });
+        return { won, lost };
       };
-      await concurrently(6, "beforeCommit");
+      // (1) The second command waits for the first after the first has committed its change.
+      let loserAt = now();
+      const first = await concurrently(revise(now(), 6), revise(loserAt, 6));
+      assert.equal(first.won.aggregate.aggregateVersion, 7);
+      assert.deepEqual(first.lost, { code: "CATALOG_VERSION_CONFLICT" });
+      // Saves of the open (unsubmitted) draft the revision above started.
+      const replace = (current, requestedAt, name) => (tx) =>
+        service(tx).replaceMenuDraft({
+          menuReference: menu.menuReference,
+          expectedAggregateVersion: current.aggregateVersion,
+          operationReference: op(),
+          requestedAt,
+          draft: { ...current.draft, localizedNames: { "en-CA": name }, updatedAt: requestedAt },
+        });
+      // (2) The first holds the Menu's writer lock while the second starts: before, both held the
+      // Menu row FOR SHARE and then deadlocked at commit (one refused as unavailable).
+      loserAt = now();
+      const second = await concurrently(
+        replace(first.won.aggregate, now(), "All day, first save"),
+        replace(first.won.aggregate, loserAt, "All day, second save"),
+        (sql, values) =>
+          sql.includes("pg_advisory_xact_lock") && String(values[0]).startsWith("CatalogMenu:"),
+      );
+      assert.equal(second.won.aggregate.aggregateVersion, 8);
+      assert.deepEqual(second.lost, { code: "CATALOG_VERSION_CONFLICT" });
+      // (3) A reader of the draft (FOR SHARE OF Menu, version) while a save rewrites it: the save
+      // holds after changing the version row. Before, the reader held the Menu row and waited for
+      // the version row while the save waited for the Menu row (a deadlock).
+      const third = await concurrently(
+        replace(second.won.aggregate, now(), "All day, saved while read"),
+        (tx) =>
+          createPostgresMenuDraftSource({
+            brandReference,
+            transactions: { run: (work) => work(tx) },
+            authorize: async () => true,
+          }).load(menu.menuReference, now),
+        (sql) => sql.startsWith("UPDATE rms_catalog.menu_version SET"),
+      );
+      assert.equal(third.won.aggregate.aggregateVersion, 9);
+      assert.equal(third.lost.code, undefined);
+      assert.deepEqual(third.lost.value.aggregate, third.won.aggregate);
     } finally {
       await admin.query("RESET ROLE").catch(() => undefined);
       await admin.query("DROP OWNED BY " + role).catch(() => undefined);

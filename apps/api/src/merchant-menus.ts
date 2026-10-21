@@ -937,9 +937,11 @@ export function createMerchantMenus(options: {
               });
               return { status: result.status, menu: menuView(result.aggregate) };
             }
-            const loaded = await draft(tx, s, edit.menuReference);
-            if (loaded === null) return fail("NotFound");
-            const currentMenu = loaded.aggregate;
+            // Read under the Menu's writer lock (taken by the Menu store, after the operation lock
+            // above), so two saves of the same Menu serialize: the second reads the first's result
+            // and is answered as a conflict.
+            const currentMenu = await menus.load(parseCatalogReference(edit.menuReference));
+            if (currentMenu === null) return fail("NotFound");
             if (currentMenu.aggregateVersion !== edit.expectedAggregateVersion) fail("Conflict");
             const locale = currentMenu.draft.defaultLocale;
             const sections = edit.sections.map((input, sortOrder) => {

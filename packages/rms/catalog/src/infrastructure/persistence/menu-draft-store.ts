@@ -292,16 +292,22 @@ export function createPostgresMenuDraftStore(options: {
         await lock(tx, "CatalogMenuOperation:" + brand + ":" + operation);
         return replay(tx, operation);
       }),
+    // A Menu command reads the Menu it changes under that Menu's writer lock (after its operation
+    // lock, as commit takes them): a second command on the same Menu waits here, before holding
+    // any Menu row, then reads the newer Menu (a version conflict), instead of deadlocking with
+    // the first at commit.
     load: (reference) =>
       options.transactions.run(async (tx) => {
         const menu = parseCatalogReference(reference);
         await scope(tx, menu);
+        await lock(tx, "CatalogMenu:" + brand + ":" + menu);
         return (await read(tx, menu, clock))?.aggregate ?? null;
       }),
     loadLatestRelease: (reference) =>
       options.transactions.run(async (tx) => {
         const menu = parseCatalogReference(reference);
         await scope(tx, menu);
+        await lock(tx, "CatalogMenu:" + brand + ":" + menu);
         const version = await latestRelease(tx, menu);
         if (version === null) return null;
         return (await read(tx, menu, clock, version))?.aggregate ?? null;
@@ -400,6 +406,13 @@ export function createPostgresMenuDraftStore(options: {
           return prior;
         }
         await lock(tx, "CatalogMenu:" + brand + ":" + menu);
+        // The Menu row is taken for update before its version row: a reader holding both FOR
+        // SHARE (Menu first) then never waits on this writer for the version while this writer
+        // waits on it for the Menu.
+        await tx.query(
+          "SELECT 1 FROM rms_catalog.menu WHERE brand_id=$1 AND menu_id=$2 FOR NO KEY UPDATE",
+          [brand, menu],
+        );
         const current = await read(tx, menu, aggregate.updatedAt);
         if (
           current === null ||
