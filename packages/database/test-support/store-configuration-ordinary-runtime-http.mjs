@@ -929,27 +929,33 @@ export async function exerciseStoreConfigurationOrdinaryRuntimeHttp(input) {
     ).body;
     assert.deepEqual(workspace.original, materialized.body);
     assert.equal(workspace.latest.setupBasis.sourceSnapshotDigest, hash(setup));
-    const competing = [
-      command("Validate", workspace.expectedHead),
-      command("Validate", workspace.expectedHead),
-    ];
+    // Validate is a recorded check (Draft to Draft, same version and content), so it keeps the
+    // head: a second check of the same head is a new check, not a lost update.
+    const draftHead = workspace.expectedHead;
+    for (let checked = 1; checked <= 2; checked++) {
+      const response = await send("ordinary-command", { command: command("Validate", draftHead) });
+      assert.equal(response.status, 200);
+      assert.equal(parseStoreConfigurationOrdinaryReceipt(response.body).outcome, "Committed");
+      workspace = (await send("ordinary?expectedStoreReference=" + store)).body;
+      assert.deepEqual(workspace.expectedHead, draftHead);
+      const checkedCounts = await counts();
+      assert.equal(Number(checkedCounts.originals), Number(after.originals) + checked);
+      assert.equal(Number(checkedCounts.legacy), Number(after.legacy) + checked);
+    }
+    // Optimistic concurrency on a head-changing command: two Submits of the same head, only one
+    // commits; the other is refused (409) or ends unknown (503) and writes nothing.
+    const beforeRace = await counts();
+    const competing = [command("Submit", draftHead), command("Submit", draftHead)];
     const race = await Promise.all(
       competing.map((own) => send("ordinary-command", { command: own })),
     );
     assert.equal(race.filter((value) => value.status === 200).length, 1);
     assert(race.every((value) => [200, 409, 503].includes(value.status)));
     const raceCounts = await counts();
-    assert.equal(Number(raceCounts.originals), Number(after.originals) + 1);
-    assert.equal(Number(raceCounts.legacy), Number(after.legacy) + 1);
+    assert.equal(Number(raceCounts.originals), Number(beforeRace.originals) + 1);
+    assert.equal(Number(raceCounts.legacy), Number(beforeRace.legacy) + 1);
     workspace = (await send("ordinary?expectedStoreReference=" + store)).body;
-    for (const action of ["Validate", "Submit"]) {
-      const response = await send("ordinary-command", {
-        command: command(action, workspace.expectedHead),
-      });
-      assert.equal(response.status, 200);
-      parseStoreConfigurationOrdinaryReceipt(response.body);
-      workspace = (await send("ordinary?expectedStoreReference=" + store)).body;
-    }
+    assert.notDeepEqual(workspace.expectedHead, draftHead);
     assert.equal(workspace.latest.lifecycle, "PendingApproval");
     await listen(manager, async (second, managerScope) => {
       let state = (await second("ordinary?expectedStoreReference=" + store)).body;
