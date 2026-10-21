@@ -3,6 +3,11 @@ import { createRefundPaymentRequest } from "../../application/payment-provider-a
 import type { RefundPaymentRequest } from "../../contracts/payment-provider-adapter.js";
 import type { StripeOnlineIntentRequest } from "./stripe-online-intent-request.js";
 
+const refundKeyPrefixes = [
+  "ordinary-refund:",
+  "compensation-refund:",
+  "unmatched-capture-refund:",
+] as const;
 const fail = (): never => {
   throw new Error("STRIPE_ORDINARY_REFUND_REQUEST_INVALID");
 };
@@ -13,7 +18,11 @@ function parse(input: RefundPaymentRequest) {
     request.amount.currencyCode !== "CAD" ||
     request.amount.amountMinor > 99_999_999n ||
     !/^pi_[A-Za-z0-9]+$/u.test(request.providerIntentReference) ||
-    request.idempotencyKey !== "ordinary-refund:" + request.context.operationReference
+    // One refund operation, one key: ordinary refunds, paid-without-fulfillable compensation and
+    // staff-approved refunds of unmatched captures use the same Stripe refund journal.
+    !refundKeyPrefixes.some(
+      (prefix) => request.idempotencyKey === prefix + request.context.operationReference,
+    )
   )
     return fail();
   return request;

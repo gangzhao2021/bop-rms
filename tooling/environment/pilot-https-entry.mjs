@@ -9,6 +9,7 @@ import { composeConfiguredMerchant } from "./pilot-merchant-composition.mjs";
 import { createInternalQrLoaders } from "./pilot-qr.mjs";
 import { startInternalCustomerServer } from "./pilot-customer-server.mjs";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
+import { loadPilotHosting } from "./pilot-hosting.mjs";
 export function parsePilotHttpsArguments(args) {
   if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== "string")
     throw Error("PILOT_HTTPS_ARGUMENT_INVALID");
@@ -23,6 +24,7 @@ export async function startConfiguredPilotHttps(
     composeMerchant = composeConfiguredMerchant,
     createQr = createInternalQrLoaders,
     startServer = startInternalCustomerServer,
+    loadHosting = loadPilotHosting,
   } = {},
 ) {
   const installation = await loadInstallation(directory),
@@ -32,7 +34,12 @@ export async function startConfiguredPilotHttps(
     Object.entries(customerConfig.scope).some(([key, value]) => merchantConfig.scope[key] !== value)
   )
     throw Error("PILOT_HTTPS_SCOPE_CHANGED");
-  const customer = composeCustomer(directory, installation, customerConfig);
+  const customer = composeCustomer(
+    directory,
+    installation,
+    customerConfig,
+    await loadHosting(directory),
+  );
   const merchant = composeMerchant(
     directory,
     installation,

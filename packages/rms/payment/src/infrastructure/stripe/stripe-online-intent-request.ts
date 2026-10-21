@@ -59,6 +59,9 @@ export function encodeStripeOnlineIntentRequest(
     throw new PaymentProviderContractError("PAYMENT_PROVIDER_POLICY_VIOLATION");
   if (request.amount.currencyCode !== "CAD" || request.amount.amountMinor > 99_999_999n)
     throw new PaymentProviderContractError("PAYMENT_PROVIDER_INPUT_INVALID");
+  // DEC-STRIPE-PILOT-WIRING: Payment's own opaque operation/attempt references let Provider-first
+  // capture discovery link a charge back to its Payment operation (also after a lost create
+  // answer). No Order, Guest, Actor, contact or customer fact is ever sent to the Provider.
   const body = new URLSearchParams({
     amount: request.amount.amountMinor.toString(),
     currency: "cad",
@@ -67,6 +70,8 @@ export function encodeStripeOnlineIntentRequest(
     "payment_method_types[]": "card",
     confirm: "false",
     "expand[]": "latest_charge",
+    "metadata[bop_payment_operation]": request.context.operationReference,
+    "metadata[bop_payment_attempt]": request.context.paymentAttemptReference,
   });
   return Object.freeze({
     method: "POST",

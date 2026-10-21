@@ -2489,6 +2489,16 @@ async function scanUnsupported(root, module, diagnostics) {
             "payment_provider_observation",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/payment-terminal-store.ts";
+        // WP-2423 DEC-STRIPE-PILOT-WIRING: the Payment Webhook Inbox over its own WP-1304 tables.
+        const acceptedPaymentWebhookInboxStoreAsset =
+          module.packageName === "@rms/payment" &&
+          module.manifest.ownedDatabase?.schema === "rms_payment" &&
+          [
+            "provider_webhook_record",
+            "provider_webhook_raw_evidence",
+            "provider_webhook_processing_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/payment-webhook-inbox-store.ts";
         const acceptedOrderExceptionSourceAsset =
           module.packageName === "@bop/projection" &&
           module.manifest.ownedDatabase?.schema === null &&
@@ -3733,6 +3743,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPaymentProviderObservationAsset &&
           !acceptedPaymentStatusStoreAsset &&
           !acceptedPaymentTerminalStoreAsset &&
+          !acceptedPaymentWebhookInboxStoreAsset &&
           !acceptedCartQueryAsset &&
           !acceptedOrderCreationQueryAsset &&
           !acceptedOrderCreationWriterAsset &&

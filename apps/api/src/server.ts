@@ -86,6 +86,10 @@ import { HealthReadinessController } from "./health-readiness.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff.js";
 import type { MerchantCatalogRouterOptions } from "./merchant-catalog.js";
 import type { RealtimeTransport } from "./realtime.js";
+import {
+  PaymentProviderWebhookHandler,
+  type PaymentProviderWebhookPort,
+} from "./payment-provider-webhook.js";
 
 const apiLogEvents = [
   "http_request_completed",
@@ -140,6 +144,8 @@ export interface ApiServerRuntimeOptions {
   customerPaymentHandoff?: CustomerPaymentHandoffRuntimeOptions;
   customerPaymentResult?: CustomerPaymentResultRuntimeOptions;
   customerReceipt?: Parameters<typeof createCustomerReceiptRead>[0] & { allowedOrigin: string };
+  /** WP-2423 DEC-STRIPE-PILOT-WIRING: the Stripe webhook receiver (Payment-owned port). */
+  paymentProviderWebhook?: PaymentProviderWebhookPort;
   /** WP-2423 Q16: "Remove my contact details" on the customer's own order page. */
   customerContactRemoval?: Parameters<typeof createCustomerContactRemoval>[0] & {
     allowedOrigin: string;
@@ -232,6 +238,7 @@ export function createApiServerRuntime({
   customerReceipt,
   customerContactRemoval,
   customerOrderMessaging,
+  paymentProviderWebhook,
   healthReadiness = new HealthReadinessController(),
   host = "127.0.0.1",
   logger = createApiRuntimeLogger(),
@@ -382,6 +389,13 @@ export function createApiServerRuntime({
               ? {}
               : { port: customerOrderMessaging.feedback },
           ),
+        }),
+    ...(paymentProviderWebhook === undefined
+      ? {}
+      : {
+          paymentProviderWebhook: new PaymentProviderWebhookHandler({
+            port: paymentProviderWebhook,
+          }),
         }),
     ...(customerContactRemoval === undefined
       ? {}

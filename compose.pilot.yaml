@@ -38,9 +38,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.pilot
-      args:
-        # InternalTest simulated payments only; remove when switching to a real Provider.
-        VITE_BOP_INTERNAL_SIMULATED_PAYMENT: "1"
     image: bop-rms-pilot:local
     restart: unless-stopped
     init: true
@@ -85,16 +82,34 @@ services:
     command: [sh, tooling/environment/pilot-ops-container-start.sh]
     stop_grace_period: 90s
 
+  # WP-2423 (DEC-PILOT-MAINTENANCE-PAGE): owns the published HTTPS port (14443 → host 4443). It
+  # relays to the pilot entry (127.0.0.1:4443) unchanged and, while that entry is down (a deploy
+  # recreates `pilot`, a crash), answers guests and staff with a plain "back in a minute" page
+  # instead of a connection reset. Not recreated by `up -d pilot ops`, so it stays up during deploys.
+  # Reads only the runtime's certificate, hosting.json and ops/maintenance.json (read-only mount).
+  front:
+    image: bop-rms-pilot:local
+    restart: unless-stopped
+    init: true
+    user: "${PILOT_UID:?Set PILOT_UID to the owner of the runtime directory}:${PILOT_GID:?Set PILOT_GID}"
+    network_mode: service:postgres
+    depends_on: [postgres]
+    volumes:
+      - ${PILOT_RUNTIME_ROOT:-./.local/pilot-runtime}:/app/.local:ro
+    environment:
+      PILOT_RUNTIME_DIRECTORY: ${PILOT_RUNTIME_DIRECTORY:?Set PILOT_RUNTIME_DIRECTORY, e.g. .local/pilot-v15}
+    command: [sh, -c, 'exec node tooling/environment/pilot-front.mjs "$$PILOT_RUNTIME_DIRECTORY"']
+    stop_grace_period: 10s
+
   proxy:
     image: alpine/socat:1.8.0.3@sha256:beb4a68d9e4fe6b0f21ea774a0fde6c31f580dde6368939ed70100c5385b015e
     restart: unless-stopped
     network_mode: service:postgres
     depends_on: [postgres]
     entrypoint: [sh, -c]
+    # The HTTPS port 14443 belongs to `front` (DEC-PILOT-MAINTENANCE-PAGE).
     command:
-      - >-
-        socat TCP-LISTEN:14300,fork,reuseaddr TCP:127.0.0.1:4300 &
-        exec socat TCP-LISTEN:14443,fork,reuseaddr TCP:127.0.0.1:4443
+      - exec socat TCP-LISTEN:14300,fork,reuseaddr TCP:127.0.0.1:4300
 
 volumes:
   pilot-data:

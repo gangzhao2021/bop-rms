@@ -1,3 +1,5 @@
+import { isPilotPaymentProvider, isStripeProvider } from "./pilot-stripe-provider.mjs";
+import { createStripeTerminalRecorder } from "./pilot-stripe-webhook.mjs";
 import process from "node:process";
 import { createCustomerCheckoutSessionRead } from "../../apps/api/dist/customer-checkout-session-read.js";
 import {
@@ -18,7 +20,7 @@ export function createInternalPaymentTerminal(
   simulator,
   { providerAccountReference },
 ) {
-  if (process.env.NODE_ENV !== "development" || simulator.simulation !== true)
+  if (process.env.NODE_ENV !== "development" || !isPilotPaymentProvider(simulator))
     throw new Error("SIMULATION_ONLY");
   const { scope, transactions, now, credentials } = resources,
     reference = credentials.reference;
@@ -75,6 +77,9 @@ export function createInternalPaymentTerminal(
     occurrenceVerification,
   );
   const observations = createPostgresPaymentProviderObservationStore(transactions, scope, { now });
+  const stripeRecorder = isStripeProvider(simulator)
+    ? createStripeTerminalRecorder(resources, { provider: simulator, providerAccountReference })
+    : null;
   const resultOptions = { access: checkout.accessOptions, history, terminal };
   const reader = createCustomerSessionPaymentResult(resultOptions);
   const service = createPaymentTerminalService({
@@ -172,6 +177,19 @@ export function createInternalPaymentTerminal(
         throw new Error("SIMULATION_RECOVERY_CONFLICT");
       const snapshot = record.providerOutcome;
       if (snapshot?.kind !== "Snapshot") return reader.read(input);
+      // DEC-STRIPE-PILOT-WIRING: the guest's "check payment" reads Stripe's current state and
+      // records the outcome exactly as a webhook would (same recorder, idempotent).
+      if (stripeRecorder !== null) {
+        const current = await reader.read(input);
+        if (current.paymentIntentReference !== before.paymentIntentReference)
+          throw new Error("SIMULATION_RECOVERY_CONFLICT");
+        if (current.status === "Succeeded" || current.status === "Failed") return current;
+        await stripeRecorder.record({
+          paymentOperationReference: session.paymentOperationReference,
+          providerIntentReference: snapshot.providerIntentReference,
+        });
+        return reader.read(input);
+      }
       const causationReference = reference(),
         observationReference = reference();
       const retrieval = {
@@ -204,6 +222,8 @@ export function createInternalPaymentTerminal(
      * Provider declines or approves that attempt. Returns the attempt's creation result.
      */
     async confirm(input, confirmation, { retry = false, resume = false } = {}) {
+      // The simulated card confirmation exists only with the TEST-ONLY simulator.
+      if (simulator.simulation !== true) throw new Error("SIMULATION_ONLY");
       if (!["SIMULATE_CAPTURE", "SIMULATE_FAILURE"].includes(confirmation))
         throw new Error("SIMULATION_CONFIRMATION_REQUIRED");
       const expected = confirmation === "SIMULATE_CAPTURE" ? "Captured" : "Failed";

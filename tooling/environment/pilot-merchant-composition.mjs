@@ -20,6 +20,7 @@ import { createMerchantDiningTableQr } from "../../apps/api/dist/merchant-dining
 import { createPilotAlertBoardReader } from "./pilot-ops-files.mjs";
 import { createInternalBatchCancellation } from "./pilot-batch-cancellation.mjs";
 import { createInternalOpenPaymentResolution } from "./pilot-open-payment-resolution.mjs";
+import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
 const factories = {
   createInternalRefundReconciliation,
   createInternalRefundSend,
@@ -57,7 +58,9 @@ export function composeMerchantDependencies(
     path: join(directory, "internal-test-dining-key"),
   });
   const provider = customer.createInternalSimulatedProvider;
+  const publicOrigin = customer.publicOrigin ?? INTERNAL_CUSTOMER_ORIGIN;
   return {
+    publicOrigin,
     exceptionPaymentMode: customer.paymentChannel,
     ...account,
     // WP-2423 Q13: the operations monitor's alert board (ops container) for the Home.
@@ -193,7 +196,9 @@ export function composeMerchantDependencies(
             ? { publicStoreReference: profile.binding.publicStoreReference, locale: "en-CA" }
             : null;
         },
-        customerOrigin: "https://127.0.0.1:4443",
+        // hosting.json customerOrigin (default the local entry). Changing it means reprinting
+        // every table code: printed codes keep the origin they were issued with.
+        customerOrigin: publicOrigin,
       });
     },
     // WP-2423 abandoned payment: managers cancel an unpaid dine-in round before its deadline with

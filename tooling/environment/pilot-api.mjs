@@ -1,6 +1,7 @@
 import { CustomerStoreClosedError } from "../../apps/api/dist/customer-store-open-gate.js";
 import { createLocalCustomerRuntime } from "../../apps/api/dist/local-customer-runtime.js";
 import { HealthReadinessController } from "../../apps/api/dist/health-readiness.js";
+import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
 /** Internal test composition only. All unconfigured business routes remain unavailable. */
 export async function createRuntime(
   { port },
@@ -22,7 +23,9 @@ export async function createRuntime(
     createInternalTestCart,
     createInternalTestResources,
     createInternalCustomerEntry,
+    createPaymentWebhookReceiver,
     providerAccountReference,
+    publicOrigin = INTERNAL_CUSTOMER_ORIGIN,
   },
 ) {
   const resources = await createInternalTestResources();
@@ -43,6 +46,11 @@ export async function createRuntime(
       "DineIn",
     );
     simulator = await createInternalSimulatedProvider();
+    // DEC-STRIPE-PILOT-WIRING: Stripe mode receives Stripe's signed events on the API runtime.
+    const paymentProviderWebhook =
+      createPaymentWebhookReceiver === undefined
+        ? null
+        : await createPaymentWebhookReceiver(resources, simulator);
     const paymentIntent = await createInternalChannelPayment(
       resources,
       checkout,
@@ -96,6 +104,7 @@ export async function createRuntime(
         },
       },
       paymentResult: paymentTerminal.resultOptions,
+      ...(paymentProviderWebhook === null ? {} : { paymentProviderWebhook }),
       receipt: {
         financial: {
           scope: {
@@ -156,7 +165,7 @@ export async function createRuntime(
           return result.status === "Available" ? { ...resources.scope, status: "Active" } : null;
         },
       },
-      allowedOrigin: "https://127.0.0.1:4443",
+      allowedOrigin: publicOrigin,
       // DEC-PILOT-NOTIFICATIONS: order-message options, one-time order link, SES feedback.
       // Without composed order messaging (no runtime directory) nothing is offered.
       orderMessaging:

@@ -15,6 +15,16 @@ export * from "./application/payment-webhook-inbox-service.js";
 export * from "./application/ports/payment-webhook-inbox-ports.js";
 export * from "./application/ports/provider-webhook-verification-ports.js";
 export * from "./infrastructure/stripe/stripe-webhook-signature.js";
+// DEC-STRIPE-PILOT-WIRING: Stripe transport, refunds, read-only Provider facts and the inbox store.
+export {
+  createStripeOnlineTransport,
+  StripeOnlineTransportError,
+  type StripeOnlineReadScope,
+  type StripeOnlineTransportOptions,
+} from "./infrastructure/stripe/stripe-online-transport.js";
+export { createStripeOrdinaryRefundAdapter } from "./infrastructure/stripe/stripe-ordinary-refund-adapter.js";
+export * from "./infrastructure/stripe/stripe-provider-reads.js";
+export { createPostgresPaymentWebhookInboxStore } from "./infrastructure/persistence/payment-webhook-inbox-store.js";
 export * from "./contracts/payment-terminal-event.js";
 export * from "./application/payment-terminal-fact.js";
 export * from "./application/payment-terminal-event.js";
