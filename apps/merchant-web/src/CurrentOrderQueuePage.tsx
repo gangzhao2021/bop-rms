@@ -1893,7 +1893,7 @@ export function CurrentOrderQueuePage({
                       <fieldset disabled={servingBusy}>
                         <StaffRoundPaymentAction
                           key={"counter-pay-" + batch.orderBatchReference}
-                          kind="CounterOrder"
+                          subject="order"
                           label="Charge on card machine"
                           csrf={csrf}
                           fetcher={fetcher}

@@ -143,7 +143,7 @@ it("Orders offers the card-machine charge on the row and says when it is release
 it("the counter charge form names the order and warns before release", () => {
   const html = renderToStaticMarkup(
     <StaffRoundPaymentAction
-      kind="CounterOrder"
+      subject="order"
       label="Charge on card machine"
       csrf="csrf"
       orderReference={ref(1)}
@@ -170,7 +170,7 @@ it("Payments and refunds is hidden from people who can't read payments", () => {
   expect(details(false)).not.toContain("Payments and refunds");
   expect(details(true)).toContain("Payments and refunds");
   expect(refundErrorText(new OrdinaryRefundClientError("Denied"))).toBe(
-    "You don't have access to payments and refunds. Ask a manager.",
+    "Payments and refunds for this order are handled by a manager. Ask a manager if the guest needs a refund.",
   );
 });
 

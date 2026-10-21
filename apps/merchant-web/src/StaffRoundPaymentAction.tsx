@@ -18,7 +18,7 @@ const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CA
  * not given, the amount is read for this one order when staff open the form.
  *
  * WP-2423 (v15 751dd768): a counter pickup order sent and not paid yet is charged the same way, from
- * Orders and from the Counter order page after a reload (`kind` "CounterOrder"), with the time left
+ * Orders and from the Counter order page after a reload (`subject` "order"), with the time left
  * before it is released shown in the form.
  */
 export function StaffRoundPaymentAction({
@@ -31,7 +31,7 @@ export function StaffRoundPaymentAction({
   recordedAfterOutage,
   timeZone,
   onRecorded,
-  kind = "Round",
+  subject = "round",
   payBy = null,
   label,
 }: {
@@ -46,8 +46,8 @@ export function StaffRoundPaymentAction({
   readonly recordedAfterOutage: boolean;
   readonly timeZone?: string | undefined;
   readonly onRecorded: () => void;
-  /** A table round staff entered (default) or a counter pickup order. */
-  readonly kind?: "Round" | "CounterOrder";
+  /** What staff are charging for: a table round (default) or a counter order. */
+  readonly subject?: "round" | "order";
   /** When it is released or cancelled if not recorded (warned in the form), when known. */
   readonly payBy?: string | null;
   /** The button text before the amount (default "Record card-machine payment"). */
@@ -104,7 +104,7 @@ export function StaffRoundPaymentAction({
       <div className="staff-round-payment" role="status">
         <p>
           {reading === "NotDue"
-            ? kind === "CounterOrder"
+            ? subject === "order"
               ? "This order is no longer waiting for a card-machine payment (paid or released). The list will update."
               : "This round is no longer waiting for a card-machine payment. The order list will update."
             : reading === "Failed" || loadAmountDue === undefined
@@ -176,14 +176,14 @@ export function StaffRoundPaymentAction({
     >
       <p>
         Charge {cad(amount)} on the card machine first, then record it here. The kitchen starts this{" "}
-        {kind === "CounterOrder" ? "order" : "round"} once it is recorded.
+        {subject} once it is recorded.
       </p>
       {payBy !== null
         ? (() => {
             const notice = paymentWindowNotice({
               payBy,
               now: Date.now(),
-              tableMode: kind === "Round",
+              tableMode: subject === "round",
               timeZone,
             });
             return (

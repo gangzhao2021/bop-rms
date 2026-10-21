@@ -1009,3 +1009,39 @@ it("WP-2423 D4: an older table's Order with a round today is listed first under 
     }),
   ).toThrow();
 });
+
+it("v15 751dd768 ①: reads what an unsent counter order still has to be charged, and refuses contradictions", () => {
+  const counterRow = (counter: unknown) => ({
+    ...row(),
+    sourceChannel: "Pos",
+    currentPhase: "Submitted",
+    batches: [{ ...row().batches[0], acceptanceStatus: "NotAccepted" }],
+    counter,
+  });
+  const read = (counter: unknown) =>
+    parseCurrentOrderQueue({ items: [counterRow(counter)], nextAfterOrderReference: null }).items[0]
+      ?.counter;
+  expect(
+    read({ recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: "1130" }),
+  ).toEqual({
+    recordedAfterOutage: false,
+    paidOnCardMachine: null,
+    amountDueMinor: "1130",
+    // v15 751dd768: an older server sends no release time.
+    payBy: null,
+  });
+  // An older server, and the list polled by every tablet, leave the amount out.
+  expect(read({ recordedAfterOutage: false, paidOnCardMachine: null })?.amountDueMinor).toBeNull();
+  const paid = {
+    amountMinor: "1130",
+    takenAt: "2026-09-14T00:00:10.000Z",
+    recordedAfterOutage: false,
+    refundedMinor: "0",
+  };
+  for (const bad of [
+    { recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: "0" },
+    { recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: "11.30" },
+    { recordedAfterOutage: false, paidOnCardMachine: paid, amountDueMinor: "1130" },
+  ])
+    expect(() => read(bad)).toThrow(CurrentOrderQueueError);
+});

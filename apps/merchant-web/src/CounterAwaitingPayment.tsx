@@ -135,7 +135,7 @@ export function CounterAwaitingPayment({
                 <p className="bop-muted">Ask a manager to record its payment.</p>
               ) : (
                 <StaffRoundPaymentAction
-                  kind="CounterOrder"
+                  subject="order"
                   label="Charge on card machine"
                   csrf={csrf}
                   fetcher={fetcher}

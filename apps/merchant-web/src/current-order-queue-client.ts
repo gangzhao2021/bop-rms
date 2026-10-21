@@ -148,12 +148,15 @@ function parseStaffRound(value: unknown, orderType: unknown) {
 /** WP-2423 Q7: a pickup order staff took at the counter, and its card-machine payment. */
 function parseCounter(value: unknown, sourceChannel: unknown) {
   if (value === null || value === undefined) return null;
-  // WP-2423 (v15 751dd768): while unpaid, when it is released and (one-order read) what to charge.
-  const withDue = typeof value === "object" && Object.hasOwn(value, "payBy");
+  // WP-2423 (v15 751dd768): while unpaid, when it is released and (one-order read) what to charge
+  // (older servers send neither, or only the amount).
+  const withPayBy = typeof value === "object" && Object.hasOwn(value, "payBy");
+  const withDue = typeof value === "object" && Object.hasOwn(value, "amountDueMinor");
   const raw = exact(value, [
     "recordedAfterOutage",
     "paidOnCardMachine",
-    ...(withDue ? ["payBy", "amountDueMinor"] : []),
+    ...(withPayBy ? ["payBy"] : []),
+    ...(withDue ? ["amountDueMinor"] : []),
   ]);
   if (typeof raw.recordedAfterOutage !== "boolean" || sourceChannel !== "Pos") return fail();
   let paid = null;
@@ -181,11 +184,15 @@ function parseCounter(value: unknown, sourceChannel: unknown) {
       refundedMinor: p.refundedMinor,
     });
   }
-  const payBy = withDue && raw.payBy !== null ? instant(raw.payBy) : null;
+  const payBy = withPayBy && raw.payBy !== null ? instant(raw.payBy) : null;
   const due = withDue ? raw.amountDueMinor : null;
   if (
     due !== null &&
-    (typeof due !== "string" || !minorPattern.test(due) || due === "0" || payBy === null)
+    (typeof due !== "string" ||
+      !minorPattern.test(due) ||
+      due === "0" ||
+      paid !== null ||
+      (withPayBy && payBy === null))
   )
     return fail();
   if (paid !== null && payBy !== null) return fail();
