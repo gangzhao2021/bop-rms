@@ -733,7 +733,7 @@ describe("migration catalog", () => {
       "2000_089_alter_stock_waste_beyond_open_orders",
       "2000_090_create_consumer_retry_expedite_action",
       "2000_091_alter_asap_capacity_walk_up_admission",
-      "2000_092_create_cognito_store_staff_sign_in",
+      "2000_094_create_cognito_store_staff_sign_in",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

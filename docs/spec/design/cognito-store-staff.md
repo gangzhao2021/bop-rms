@@ -15,7 +15,7 @@
    `NamedKdsOperator`（`/operations/kitchen/start` 登录即开始具名班次）、PIN 快速切换、会话结束覆盖层与超时提醒。会话只在本人仍是本店在职
    成员（Membership 与门店分配均 Active）时选中本店。退出时撤销本会话并吊销 Cognito 刷新令牌；因每次登录都 `prompt=login`，共享设备上
    托管登录的残留不会让下一人免密进入。登录被拒（无邀请、邀请过期、已离职）回到登录页并以员工能读懂的话说明。
-2. **账号绑定（Identity 所有，迁移 `2000_092`）**：`store_staff_invitation`（邀请：只存邮箱的带密钥摘要与掩码提示，如 `m•••@example.com`；
+2. **账号绑定（Identity 所有，迁移 `2000_094`）**：`store_staff_invitation`（邀请：只存邮箱的带密钥摘要与掩码提示，如 `m•••@example.com`；
    Pending/Accepted/Revoked，最后一次发送起 7 天到期，触发器只允许发送记录、重发、接受、撤销，结束后不可改）与 `store_staff_account`
    （本人首次登录时绑定的 Cognito 账号，只存 subject 的带密钥摘要，只追加）。首次登录：已签名的 `cognito:username`（`bop_<人员引用>`）
    指向待接受的邀请，且 Cognito 管理接口当时确认该账号属于这份邀请（同一邀请意图摘要与邮箱、已启用、已设密码）且 subject 一致，才绑定；

@@ -78,7 +78,7 @@ TEST-ONLY sign-in. With it, the `StaffLogin` capability gap closes (`pilot-super
 
 ## 4. Database (before the code that needs it)
 
-Apply migration `2000_092_create_cognito_store_staff_sign_in` and the api grants listed in
+Apply migration `2000_094_create_cognito_store_staff_sign_in` and the api grants listed in
 `docs/spec/pilot-acl-additions.json` under "DEC-COGNITO-STORE-STAFF" (oidc_authorization_transaction
 SELECT/INSERT/UPDATE; store_staff_invitation SELECT/INSERT/UPDATE; store_staff_account SELECT/INSERT;
 workforce_mfa_status INSERT; bop_membership.membership INSERT; bop_membership.store_assignment
