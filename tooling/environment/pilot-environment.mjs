@@ -53,6 +53,17 @@ export function isPilotStore(options) {
   }
 }
 
+/**
+ * DEC-STRIPE-PILOT-WIRING (Live): the Payment Provider environment every pilot composition path
+ * uses. A Pilot Store accepts only Stripe live mode (payment.json `mode: "live"`), InternalTest only
+ * the simulator or Stripe test mode, so the Provider environment follows the process environment;
+ * the configured Stripe binding re-checks its own mode against this value. Never throws: any
+ * process that is not a Pilot Store is "Test", and a Pilot Store can never run simulated.
+ */
+export function pilotProviderEnvironment(options) {
+  return isPilotStore(options) ? "Live" : "Test";
+}
+
 /** A configuration file must declare the environment this process runs in. */
 export function matchesPilotEnvironment(declared, options) {
   try {
@@ -78,11 +89,11 @@ export const pilotCapabilityGaps = Object.freeze([
   Object.freeze({
     code: "PaymentProvider",
     standIn: "internal payment simulator",
-    // DEC-STRIPE-PILOT-WIRING: Stripe test-mode wiring is done (payment.json + secret files);
-    // satisfied only by a configured Stripe Provider whose secrets are present and whose mode
-    // matches the environment (Live for a Pilot Store — not yet accepted by the configuration).
+    // DEC-STRIPE-PILOT-WIRING: satisfied only by payment.json selecting Stripe in the mode of the
+    // environment (live for a Pilot Store) with its live secret files present and well-formed
+    // (pilotPaymentProviderReady); the Provider environment is "Live" through the composition.
     needs:
-      "Stripe live-mode Provider environment through the composition (repository) and the Owner's live keys, webhook secret and verified domain (external)",
+      "Stripe live mode in payment.json with the Owner's live keys and webhook signing secret (external: Stripe account, live webhook endpoint)",
     configurable: true,
   }),
   Object.freeze({

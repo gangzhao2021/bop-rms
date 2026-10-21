@@ -4,7 +4,7 @@ import {
   parsePaymentReference,
 } from "../../packages/rms/payment/src/index.ts";
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
-import { isPilotRuntime } from "./pilot-environment.mjs";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 /** Retained transaction for scoped owner reads and an explicit projection consumer. */
 export function createInternalReconciliationExceptionPageRunner(resources, consume) {
   const deny = () => {
@@ -16,7 +16,7 @@ export function createInternalReconciliationExceptionPageRunner(resources, consu
     tenantReference: String(parsePaymentReference(binding.tenantReference)),
     brandReference: String(parsePaymentReference(resources.scope.brandReference)),
     storeReference: String(parsePaymentReference(resources.scope.storeReference)),
-    environment: "Test",
+    environment: pilotProviderEnvironment(),
   });
   const validUntil = parseCanonicalInstant(binding.validUntil);
   if (
@@ -42,7 +42,7 @@ export function createInternalReconciliationExceptionPageRunner(resources, consu
         authorize: async (t, q) =>
           sameScope(t, q) &&
           q.tenantReference === scope.tenantReference &&
-          q.environment === "Test" &&
+          q.environment === pilotProviderEnvironment() &&
           q.observedAt === observedAt,
       });
       const reader = createPostgresPaymentReconciliationExceptionSource({

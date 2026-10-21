@@ -171,6 +171,7 @@ vi.mock("./pilot-payment-preparation.mjs", () => ({
 vi.mock("./pilot-expiry-cutoff.mjs", () => ({ createInternalExpiryCutoff: () => "cutoff" }));
 vi.mock("./pilot-environment.mjs", () => ({
   matchesPilotEnvironment: (value) => value === "InternalTest",
+  pilotProviderEnvironment: () => "Test",
 }));
 
 const { createInternalCounterOrder } = await import("./pilot-counter-order.mjs");

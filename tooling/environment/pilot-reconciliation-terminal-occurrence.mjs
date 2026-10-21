@@ -1,20 +1,18 @@
 import { isPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
-import process from "node:process";
 import {
   createRetrieveIntentRequest,
   parseOperationalReconciliationCandidate,
   parsePaymentProviderOutcome,
   parsePaymentInstant,
 } from "../../packages/rms/payment/src/index.ts";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 /** Reads the existing simulator's persisted occurrence; never creates a Provider outcome. */
 export function createInternalReconciliationTerminalOccurrence({ simulator, scope, active }) {
   const fail = () => {
     throw Error("RECONCILIATION_TERMINAL_OCCURRENCE_UNAVAILABLE");
   };
   const authorized = () =>
-    process.env.NODE_ENV === "development" &&
-    isPilotPaymentProvider(simulator) &&
-    active() === true;
+    isPilotRuntime() && isPilotPaymentProvider(simulator) && active() === true;
   if (!authorized()) return fail();
   return async ({ candidate: rawCandidate, snapshot: rawSnapshot }) => {
     if (!authorized()) return fail();
@@ -22,8 +20,8 @@ export function createInternalReconciliationTerminalOccurrence({ simulator, scop
       snapshot = parsePaymentProviderOutcome(rawSnapshot);
     if (
       snapshot.kind !== "Snapshot" ||
-      candidate.environment !== "Test" ||
-      snapshot.context.environment !== "Test" ||
+      candidate.environment !== pilotProviderEnvironment() ||
+      snapshot.context.environment !== pilotProviderEnvironment() ||
       candidate.brandReference !== scope.brandReference ||
       candidate.storeReference !== scope.storeReference ||
       candidate.providerAccountReference !== scope.providerAccountReference ||

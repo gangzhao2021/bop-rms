@@ -100,6 +100,11 @@ export async function createInternalWorker(resources, observers = {}, options = 
       })),
       // WP-2423 Q10 (Owner-approved 30 days): always on; daily removal of expired checkout contacts.
       dependencies.createInternalContactRetentionWorkload(resources, observers.contactRetention),
+      // DEC-STRIPE-PILOT-WIRING: always on; daily deletion of raw webhook evidence after 30 days.
+      dependencies.createInternalWebhookEvidenceRetentionWorkload(
+        resources,
+        observers.webhookEvidenceRetention,
+      ),
       // DEC-PICKUP-CAPACITY-SCHEDULE: always on; without slots no pickup order can be taken.
       dependencies.createInternalPickupCapacityScheduleWorkload(
         resources,

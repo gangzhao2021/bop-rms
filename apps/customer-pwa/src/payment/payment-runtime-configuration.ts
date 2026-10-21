@@ -2,7 +2,13 @@ export const internalSimulationOrigin = "https://127.0.0.1:4443";
 
 export type PaymentConfiguration =
   | { readonly mode: "simulation" }
-  | { readonly mode: "stripe"; readonly publishableKey: string; readonly returnUrl: string };
+  | {
+      readonly mode: "stripe";
+      readonly publishableKey: string;
+      readonly returnUrl: string;
+      /** Apple Pay / Google Pay: only on a wallet domain registered and verified with Stripe. */
+      readonly wallets: boolean;
+    };
 
 /**
  * Validates a Stripe publishable key and return URL. The return URL must be HTTPS, carry no
@@ -12,6 +18,7 @@ export function stripePaymentConfiguration(
   key: unknown,
   target: unknown,
   currentHostname: string | undefined,
+  wallets = false,
 ): PaymentConfiguration | null {
   if (
     typeof key !== "string" ||
@@ -30,7 +37,7 @@ export function stripePaymentConfiguration(
       (currentHostname !== undefined && url.hostname === currentHostname)
     )
       return null;
-    return { mode: "stripe", publishableKey: key, returnUrl: url.href };
+    return { mode: "stripe", publishableKey: key, returnUrl: url.href, wallets };
   } catch {
     return null;
   }
@@ -82,21 +89,19 @@ export function parseRuntimePaymentConfiguration(
     return { payment: { mode: "simulation" }, internalTestEntry: true };
   }
   if (record.mode === "stripe") {
+    // `wallets` is optional for hosts that predate wallet support; absent means card only.
+    const keys = ["schemaVersion", "mode", "publishableKey", "returnUrl", "internalTestEntry"];
     if (
-      !hasExactKeys(record, [
-        "schemaVersion",
-        "mode",
-        "publishableKey",
-        "returnUrl",
-        "internalTestEntry",
-      ]) ||
-      typeof record.internalTestEntry !== "boolean"
+      !hasExactKeys(record, "wallets" in record ? [...keys, "wallets"] : keys) ||
+      typeof record.internalTestEntry !== "boolean" ||
+      ("wallets" in record && typeof record.wallets !== "boolean")
     )
       return undefined;
     const payment = stripePaymentConfiguration(
       record.publishableKey,
       record.returnUrl,
       location.hostname,
+      record.wallets === true,
     );
     return payment ? { payment, internalTestEntry: record.internalTestEntry } : undefined;
   }

@@ -57,7 +57,7 @@ import { createPostgresPublishedStoreOperatingStatusReader } from "../../package
 import { createInternalPaymentPreparation } from "./pilot-payment-preparation.mjs";
 import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
-import { matchesPilotEnvironment } from "./pilot-environment.mjs";
+import { matchesPilotEnvironment, pilotProviderEnvironment } from "./pilot-environment.mjs";
 
 /**
  * WP-2423 Q7 slice 1 (DEC-COUNTER-PAYMENT-RECORD): staff take a pickup order at the counter for a
@@ -297,7 +297,7 @@ export async function createInternalCounterOrder(
       persistence,
       authentication,
       // TEST-ONLY: the pilot payment environment is Test (internal testing).
-      environment: "Test",
+      environment: pilotProviderEnvironment(),
       nextReference: reference,
       onUnexpected: (error) => reportUnexpected("INTERNAL_CARD_MACHINE_PAYMENT_UNAVAILABLE", error),
       // The same owner admission an online payment of a pickup Order passes (order payable,

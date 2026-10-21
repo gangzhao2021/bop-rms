@@ -27,6 +27,7 @@ const COMPONENT_NAMES = Object.freeze({
   pickupPaymentExpiry: "unpaid pickup expiry",
   diningCheckoutExpiry: "table checkout expiry",
   contactRetention: "customer contact deletion",
+  webhookEvidenceRetention: "old card payment message deletion",
   pickupCapacitySchedule: "pickup times",
   batchCancellation: "cancellations",
   compensation: "automatic refunds",

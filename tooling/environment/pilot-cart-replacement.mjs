@@ -1,4 +1,5 @@
 import { createCustomerDiningCartReplacement } from "../../apps/api/dist/customer-dining-cart-replacement.js";
+import { pilotProviderEnvironment } from "./pilot-environment.mjs";
 export function createInternalCartReplacement(
   resources,
   entry,
@@ -11,7 +12,10 @@ export function createInternalCartReplacement(
     credentials: credentials.sessions,
     binding: (tx) => entry.binding({ run: (work) => work(tx) }),
     policy: createCart(resources).cartBinding.ordering.policy,
-    payment: { providerAccountReference: providerAccountReference, environment: "Test" },
+    payment: {
+      providerAccountReference: providerAccountReference,
+      environment: pilotProviderEnvironment(),
+    },
     generateReference: credentials.reference,
     now,
     audit: (record) => ({

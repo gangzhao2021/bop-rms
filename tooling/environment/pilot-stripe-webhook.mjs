@@ -34,7 +34,7 @@ export function createStripeTerminalRecorder(resources, { provider, providerAcco
   if (!isStripeProvider(provider)) throw Error("PILOT_STRIPE_PROVIDER_REQUIRED");
   const { scope, transactions, now, credentials } = resources,
     reference = credentials.reference;
-  const terminalScope = { ...scope, providerAccountReference, environment: "Test" };
+  const terminalScope = { ...scope, providerAccountReference, environment: provider.environment };
   // A retrieval-sourced outcome must equal Stripe's own record of when it happened.
   const verification = {
     verifyOccurrence: async (_tx, observation) => {
@@ -44,7 +44,7 @@ export function createStripeTerminalRecorder(resources, { provider, providerAcco
         context: {
           ...scope,
           provider: "Stripe",
-          environment: "Test",
+          environment: provider.environment,
           paymentAttemptReference: observation.paymentAttemptReference,
           operationReference: observation.causationReference,
         },
@@ -142,7 +142,7 @@ export function createStripeTerminalRecorder(resources, { provider, providerAcco
         providerEventReference: fromEvent ? webhook.receipt.providerEventReference : null,
         providerAccountReference,
         providerIntentReference,
-        environment: "Test",
+        environment: provider.environment,
         paymentIntentReference: record.intent.paymentIntentReference,
         paymentAttemptReference: record.attempt.paymentAttemptReference,
         ...scope,
@@ -199,13 +199,13 @@ export function createPilotStripeWebhookReceiver(
     configuration: {
       resolve: async (input) => {
         if (
-          input.environment !== "Test" ||
+          input.environment !== provider.environment ||
           input.providerAccountReference !== providerAccountReference
         )
           return null;
         return {
           provider: "Stripe",
-          environment: "Test",
+          environment: provider.environment,
           providerAccountReference,
           brandReference: scope.brandReference,
           storeReference: scope.storeReference,
@@ -251,7 +251,7 @@ export function createPilotStripeWebhookReceiver(
     async receive({ signatureHeader, rawBody, receivedAt }) {
       const verified = await verification.verify({
         provider: "Stripe",
-        environment: "Test",
+        environment: provider.environment,
         providerAccountReference,
         receivedAt,
         signatureHeader,

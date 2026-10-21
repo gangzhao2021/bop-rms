@@ -41,7 +41,7 @@ async function connect({ directory, environment, loadProfile, fetch }) {
   const scope = {
     brandReference: profile.binding.brandReference,
     storeReference: profile.binding.storeReference,
-    environment: "Test",
+    environment: config.stripe.environment,
   };
   const transport = createStripeOnlineTransport({
     ...scope,
@@ -79,7 +79,13 @@ export async function runStripeReadinessCheck({ directory, environment, loadProf
     (await stripeSecretsPresent(directory, stripe)) ? "ok" : "fail",
     "secret key and webhook signing secret files (0600)",
   );
-  add("key-mode", "ok", "test keys (sk_test_/pk_test_); live keys are not accepted yet");
+  add(
+    "key-mode",
+    "ok",
+    stripe.mode === "live"
+      ? "live keys (sk_live_/rk_live_, pk_live_) for this Pilot Store"
+      : "test keys (sk_test_/rk_test_, pk_test_); live keys are Pilot only",
+  );
   if (stripe.testApiBaseUrl !== null)
     add("api-endpoint", "ok", "TEST-ONLY local Stripe stand-in on loopback");
   const read = async (resource) => {
@@ -112,14 +118,14 @@ export async function runStripeReadinessCheck({ directory, environment, loadProf
       const missing = events.includes("*")
         ? []
         : STRIPE_WEBHOOK_EVENTS.filter((event) => !events.includes(event));
+      const modeMatches = endpoint.livemode === (stripe.mode === "live");
       add(
         "webhook-endpoint",
-        endpoint.status === "enabled" && missing.length === 0 && endpoint.livemode === false
-          ? "ok"
-          : "fail",
+        endpoint.status === "enabled" && missing.length === 0 && modeMatches ? "ok" : "fail",
         "status " +
           endpoint.status +
-          (missing.length === 0 ? ", events complete" : ", missing " + missing.join(" ")),
+          (missing.length === 0 ? ", events complete" : ", missing " + missing.join(" ")) +
+          (modeMatches ? "" : ", endpoint is not a " + stripe.mode + "-mode endpoint"),
       );
       add(
         "webhook-api-version",
@@ -153,6 +159,23 @@ export async function runStripeReadinessCheck({ directory, environment, loadProf
     } catch (error) {
       add("payment-method-domain", "fail", "domains unreadable: " + error.message);
     }
+  // Customers see Apple Pay / Google Pay only with walletsEnabled; it must not be on while the
+  // domain is not registered and verified, or wallets would silently disappear for customers.
+  const domainItem = items.find((item) => item.check === "payment-method-domain");
+  if (stripe.walletsEnabled === true)
+    add(
+      "wallets",
+      domainItem?.status === "ok" ? "ok" : "fail",
+      domainItem?.status === "ok"
+        ? "Apple Pay / Google Pay shown on " + stripe.paymentMethodDomain
+        : "walletsEnabled is on but the domain is not verified; turn it off or fix the domain",
+    );
+  else
+    add(
+      "wallets",
+      "skipped",
+      "card only; set walletsEnabled after the payment-method-domain check passes",
+    );
   return { ok: items.every((item) => item.status !== "fail"), items };
 }
 

@@ -76,11 +76,24 @@ describe("runtime payment configuration", () => {
       fetcher: jsonFetcher({ ...stripe, internalTestEntry: entry }),
     });
     expect(result).toEqual({
-      payment: { mode: "stripe", publishableKey: key, returnUrl },
+      payment: { mode: "stripe", publishableKey: key, returnUrl, wallets: false },
       internalTestEntry: entry,
     });
     vi.stubGlobal("window", { location: hosted });
-    expect(paymentConfiguration()).toEqual({ mode: "stripe", publishableKey: key, returnUrl });
+    expect(paymentConfiguration()).toEqual({
+      mode: "stripe",
+      publishableKey: key,
+      returnUrl,
+      wallets: false,
+    });
+  });
+
+  it.each([true, false])("carries the host's wallet decision %s", async (wallets) => {
+    const result = await loadRuntimePaymentConfiguration({
+      location: hosted,
+      fetcher: jsonFetcher({ ...stripe, internalTestEntry: false, wallets }),
+    });
+    expect(result?.payment).toEqual({ mode: "stripe", publishableKey: key, returnUrl, wallets });
   });
 
   it("accepts a live publishable key", async () => {
@@ -104,6 +117,7 @@ describe("runtime payment configuration", () => {
     ["stripe extra key", { ...stripe, internalTestEntry: false, secretKey: "sk_test_x" }],
     ["stripe missing entry", stripe],
     ["stripe entry not boolean", { ...stripe, internalTestEntry: "true" }],
+    ["wallets not boolean", { ...stripe, internalTestEntry: false, wallets: "yes" }],
     ["secret key", { ...stripe, publishableKey: "sk_test_Abc", internalTestEntry: false }],
     ["key with symbols", { ...stripe, publishableKey: "pk_test_a-b", internalTestEntry: false }],
     ["key wrong prefix", { ...stripe, publishableKey: "pk_prod_Abc", internalTestEntry: false }],
@@ -151,6 +165,7 @@ describe("runtime payment configuration", () => {
       mode: "stripe",
       publishableKey: "pk_test_Build1",
       returnUrl,
+      wallets: false,
     });
   });
 

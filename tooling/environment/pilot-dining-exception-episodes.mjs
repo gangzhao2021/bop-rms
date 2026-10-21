@@ -7,6 +7,7 @@ import {
   parseDiningReference,
 } from "../../packages/rms/dining/src/index.ts";
 import { createInternalDiningExceptionPageRunner } from "./pilot-dining-exceptions.mjs";
+import { pilotProviderEnvironment } from "./pilot-environment.mjs";
 /** Read original episode outcomes in the same transaction as current Task/association. */
 export function createInternalDiningExceptionEpisodePageRunner(
   { resources, providerAccountReference },
@@ -43,7 +44,7 @@ export function createInternalDiningExceptionEpisodePageRunner(
         const readFinality = createOrderClosureFinalityEvidence({
           scope,
           providerAccountReference: account,
-          environment: "Test",
+          environment: pilotProviderEnvironment(),
           authorize: async (t, q) => allowed(t, q),
         });
         const resolver = createDiningExceptionEpisodeResolution({

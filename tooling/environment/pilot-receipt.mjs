@@ -1,7 +1,11 @@
 import { createPersistentReceiptRuntime } from "../../apps/api/dist/persistent-receipt-runtime.js";
 import { createPublishedReceiptTemplateSource } from "../../apps/api/dist/published-receipt-template-source.js";
 import { createStoreReceiptDetailsSource } from "../../apps/api/dist/store-receipt-details-source.js";
-import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
+import {
+  isPilotRuntime,
+  matchesPilotEnvironment,
+  pilotProviderEnvironment,
+} from "./pilot-environment.mjs";
 export async function createInternalReceipt(
   resources,
   transactions = resources.transactions,
@@ -13,7 +17,7 @@ export async function createInternalReceipt(
     ...resources.scope,
     tenantReference: resources.publicProfile.binding.tenantReference,
     providerAccountReference: providerAccountReference,
-    environment: "Test",
+    environment: pilotProviderEnvironment(),
   };
   const active = () => resources.now() < resources.publicProfile.binding.validUntil,
     ref = resources.credentials.reference;

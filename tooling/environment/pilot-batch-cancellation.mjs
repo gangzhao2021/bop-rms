@@ -9,6 +9,7 @@ import {
   currentPilotEnvironment,
   isPilotRuntime,
   matchesPilotEnvironment,
+  pilotProviderEnvironment,
 } from "./pilot-environment.mjs";
 import { matchesPlatformWorkflow } from "./platform-workflows.mjs";
 const unavailable = () => {
@@ -97,7 +98,7 @@ export async function createInternalBatchCancellation(
     // WP-2423 abandoned payment: Payment's terminal facts for this Store's Provider account.
     ...(providerAccountReference === undefined
       ? {}
-      : { paymentAccount: { providerAccountReference, environment: "Test" } }),
+      : { paymentAccount: { providerAccountReference, environment: pilotProviderEnvironment() } }),
     resolvePolicy: async (tx, evidence) => {
       // WP-2423 abandoned payment: a manager's cancellation before the deadline has no expiry
       // evidence; the service proved from Payment that nothing was charged.

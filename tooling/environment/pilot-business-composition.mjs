@@ -29,6 +29,7 @@ import { createInternalCartExpiryWorkload } from "./pilot-cart-expiry.mjs";
 import { createInternalPaidWithoutFulfillableInventoryWorkload } from "./pilot-paid-without-fulfillable-inventory.mjs";
 import { createInternalPickupPaymentExpiryWorkload } from "./pilot-pickup-payment-expiry.mjs";
 import { createInternalContactRetentionWorkload } from "./pilot-contact-retention.mjs";
+import { createInternalWebhookEvidenceRetentionWorkload } from "./pilot-webhook-evidence-retention.mjs";
 import { createInternalPickupCapacityScheduleWorkload } from "./pilot-pickup-capacity-schedule.mjs";
 import { createInternalWorkerServices } from "./pilot-worker-services.mjs";
 import { createInternalWorker } from "./pilot-worker.mjs";
@@ -67,6 +68,7 @@ const factories = {
   createInternalPaidWithoutFulfillableInventoryWorkload,
   createInternalPickupPaymentExpiryWorkload,
   createInternalContactRetentionWorkload,
+  createInternalWebhookEvidenceRetentionWorkload,
   createInternalPickupCapacityScheduleWorkload,
   createInternalWorkerServices,
   createInternalWorker,
@@ -199,6 +201,9 @@ export function composeConfiguredBusinessWorker({
       // WP-2423 Q10: always on; daily removal of checkout contacts past the 30-day retention.
       createInternalContactRetentionWorkload: (r, observer) =>
         f.createInternalContactRetentionWorkload(r, observer),
+      // DEC-STRIPE-PILOT-WIRING: always on; daily deletion of raw webhook evidence after 30 days.
+      createInternalWebhookEvidenceRetentionWorkload: (r, observer) =>
+        f.createInternalWebhookEvidenceRetentionWorkload(r, observer),
       // DEC-PICKUP-CAPACITY-SCHEDULE: always on; pickup slots 14 days ahead from published hours.
       createInternalPickupCapacityScheduleWorkload: (r, observer) =>
         f.createInternalPickupCapacityScheduleWorkload(r, observer),

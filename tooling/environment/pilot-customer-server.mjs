@@ -128,7 +128,7 @@ export async function startInternalCustomerServer({
       res.setHeader("Cache-Control", "no-store");
       if (
         req.headers["sec-fetch-site"] !== "same-origin" ||
-        (req.headers.origin !== undefined && req.headers.origin !== "https://127.0.0.1:4443") ||
+        (req.headers.origin !== undefined && req.headers.origin !== origin) ||
         Object.keys(req.query).length !== 0
       )
         return res.status(400).json({ code: "PAYMENT_CONFIGURATION_UNAVAILABLE" });
@@ -139,6 +139,10 @@ export async function startInternalCustomerServer({
               mode: "stripe",
               publishableKey: simulator.publishableKey,
               returnUrl: simulator.returnUrl,
+              // Apple Pay / Google Pay only on the domain registered and verified with Stripe.
+              wallets:
+                simulator.walletDomain !== null &&
+                new URL(origin).hostname === simulator.walletDomain,
               internalTestEntry: true,
             }
           : { schemaVersion: 1, mode: "simulation", internalTestEntry: true },
@@ -156,7 +160,7 @@ export async function startInternalCustomerServer({
         "/api/v1/checkout-sessions/:checkout_session_id/payment-handoff",
         express.json({ limit: "2kb", strict: true }),
         new CustomerPaymentHandoffHandler({
-          allowedOrigin: "https://127.0.0.1:4443",
+          allowedOrigin: origin,
           port: {
             async retrieve(input) {
               const prepared = await intents.resolveRequest(input);

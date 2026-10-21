@@ -14,23 +14,29 @@ import {
   createStripeSettlementWindowSource,
   createStripeTerminalObservationReader,
 } from "../../packages/rms/payment/src/index.ts";
-import { currentPilotEnvironment } from "./pilot-environment.mjs";
+import {
+  currentPilotEnvironment,
+  isInternalTest,
+  isPilotRuntime,
+  pilotProviderEnvironment,
+} from "./pilot-environment.mjs";
 import { loadPilotPaymentConfig, readStripeSecretKey } from "./pilot-payment-config.mjs";
 import { createInternalSimulatedProvider } from "./pilot-payment-provider.mjs";
 
 const STRIPE_BASE = "https://api.stripe.com";
 
-/** Either configured Provider (simulator in InternalTest, or Stripe test mode). */
+/**
+ * Either configured Provider of this process: the TEST-ONLY simulator (InternalTest only), or the
+ * Stripe binding whose mode is this process's Provider environment (test mode in InternalTest,
+ * live mode in a Pilot Store). A Provider of the other environment is never accepted.
+ */
 export function isPilotPaymentProvider(provider) {
-  return (
-    provider !== null &&
-    typeof provider === "object" &&
-    (provider.simulation === true ||
-      (provider.providerKind === "StripeTest" && provider.environment === "Test"))
-  );
+  if (provider === null || typeof provider !== "object" || !isPilotRuntime()) return false;
+  if (provider.simulation === true) return isInternalTest();
+  return provider.providerKind === "Stripe" && provider.environment === pilotProviderEnvironment();
 }
 export const isStripeProvider = (provider) =>
-  isPilotPaymentProvider(provider) && provider.providerKind === "StripeTest";
+  isPilotPaymentProvider(provider) && provider.providerKind === "Stripe";
 
 /** TEST-ONLY: routes the adapters' fixed Stripe origin to the loopback stand-in. */
 function loopbackFetch(base) {
@@ -52,10 +58,13 @@ export function createPilotStripeProvider({
   now = () => new Date().toISOString(),
   fetch,
 }) {
+  // The configured mode is the Provider environment; a key of the other mode never gets here.
+  const environment = stripe.environment;
+  if (environment !== "Test" && environment !== "Live") throw Error("PILOT_STRIPE_MODE_INVALID");
   const options = {
     brandReference: scope.brandReference,
     storeReference: scope.storeReference,
-    environment: "Test",
+    environment,
     apiVersion: stripe.apiVersion,
     secretKey,
     connectedAccount: stripe.connectedAccount,
@@ -71,7 +80,7 @@ export function createPilotStripeProvider({
     reader = createStripeTerminalObservationReader(options);
   const inScope = (context) => {
     if (
-      context?.environment !== "Test" ||
+      context?.environment !== environment ||
       context.brandReference !== scope.brandReference ||
       context.storeReference !== scope.storeReference
     )
@@ -87,10 +96,18 @@ export function createPilotStripeProvider({
     });
   return Object.freeze({
     simulation: false,
-    providerKind: "StripeTest",
-    environment: "Test",
+    providerKind: "Stripe",
+    environment,
     publishableKey: stripe.publishableKey,
     returnUrl: stripe.returnUrl,
+    /**
+     * The domain on which Apple Pay / Google Pay may show (registered and verified with Stripe,
+     * confirmed by the operator), or null: the card form stays card-only.
+     */
+    walletDomain:
+      stripe.walletsEnabled === true && typeof stripe.paymentMethodDomain === "string"
+        ? stripe.paymentMethodDomain
+        : null,
     adapter: Object.freeze({
       async createIntent(value) {
         inScope(value.context);
@@ -173,8 +190,10 @@ export function createPilotStripeProvider({
 }
 
 /**
- * The configured payment Provider of this installation: Stripe test mode when payment.json says
- * so (secret key read from its private file now), otherwise the TEST-ONLY internal simulator.
+ * The configured payment Provider of this installation: Stripe (test mode in InternalTest, live
+ * mode in a Pilot Store) when payment.json says so (secret key read from its private file now),
+ * otherwise the TEST-ONLY internal simulator. The Stripe mode must be this process's Provider
+ * environment, so a Pilot Store never runs on test keys and InternalTest never on live keys.
  */
 export async function createPilotPaymentProvider(
   options = {},
@@ -186,6 +205,8 @@ export async function createPilotPaymentProvider(
     return createInternalSimulatedProvider(options, { path, loadProfile, expectedDatabaseName });
   const profile = await loadProfile();
   if (profile.database !== expectedDatabaseName) throw Error("PILOT_STRIPE_PROFILE_MISMATCH");
+  if (config.stripe.environment !== pilotProviderEnvironment())
+    throw Error("PILOT_STRIPE_MODE_ENVIRONMENT_MISMATCH");
   return createPilotStripeProvider({
     stripe: config.stripe,
     secretKey: await readStripeSecretKey(directory, config.stripe),

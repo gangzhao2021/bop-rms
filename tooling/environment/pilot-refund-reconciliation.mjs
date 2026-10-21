@@ -1,5 +1,6 @@
 import { createMerchantOrdinaryRefundReconciliationCommand } from "../../apps/api/dist/merchant-ordinary-refund-reconciliation-command.js";
 import { createRefundReceiptIssuance } from "../../apps/api/dist/refund-receipt-issuance.js";
+import { pilotProviderEnvironment } from "./pilot-environment.mjs";
 export function createInternalRefundReconciliationConfiguration(
   resources,
   context,
@@ -15,7 +16,7 @@ export function createInternalRefundReconciliationConfiguration(
   const scope = {
     ...expected,
     providerAccountReference: providerAccountReference,
-    environment: "Test",
+    environment: pilotProviderEnvironment(),
   };
   const active = async (tx) =>
     resources.now() < resources.publicProfile.binding.validUntil &&

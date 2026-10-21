@@ -149,6 +149,7 @@ export function ResumePaymentPanel({
         <StripeCardForm
           publishableKey={configuration.publishableKey}
           returnUrl={configuration.returnUrl}
+          wallets={configuration.wallets === true}
           clientSecret={state.secret}
           onSubmitted={() => {
             setState({ step: "offer" });

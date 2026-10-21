@@ -4341,6 +4341,16 @@
     },
     {
       "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_webhook_raw_evidence",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-20 DEC-STRIPE-PILOT-WIRING (Owner \"先把接口都做好\"): 30-day raw webhook evidence retention run by the pilot worker under the api role",
+      "justification": "delete raw Stripe event bytes after their 30-day retention (payment-webhook-inbox-store.ts purgeExpiredPaymentWebhookRawEvidence); the provider_webhook_raw_evidence_no_early_delete rule refuses any deletion before expires_at and the receipt rows stay append-only"
+    },
+    {
+      "type": "table",
       "schema": "bop_identity",
       "object": "oidc_authorization_transaction",
       "column": null,

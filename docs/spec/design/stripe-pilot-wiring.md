@@ -48,17 +48,41 @@ TEST-ONLY 模拟服务商：没有 Webhook 路由与收件箱存储、没有事�
 10. **运维工具** `tooling/environment/pilot-stripe-operations.mjs`：`check` 只读报告（密钥模式、账户可收 CAD、本安装 Webhook URL
     的端点已启用且事件齐全、端点 API 版本等于固定版本、钱包域名已注册）；`register-domain` 默认试运行，`--apply --confirm-target <domain>`
     才向 Stripe 注册。输出不含密钥、签名密钥、客户端凭证或完整账户号。
-11. **能力缺口诚实**：`PaymentProvider` 只在 `payment.json` 为 Stripe 且全部密钥文件存在、模式与环境相符时解除；Pilot 门店需要 Live，
-    当前配置拒绝 `mode: "live"`，所以 Pilot 环境下该缺口仍在。
+11. **能力缺口诚实**：`PaymentProvider` 只在 `payment.json` 为 Stripe 且全部密钥文件存在、模式与环境相符时解除：InternalTest 只接受
+    `mode: "test"`，Pilot 门店只接受 `mode: "live"`（见第 13 项）。
 12. **本地 Stripe 替身**（`pilot-stripe-fake.mjs`，TEST-ONLY）：实现所用的 REST 子集与 Stripe 幂等语义、签名 Webhook 投递与故障注入
     （应答丢失、延迟、5xx、重复与乱序事件）。数据库验收 `stripe-pilot`（受限 NOBYPASSRLS 角色，渲染后的试点授权）以它验证：签名
     Webhook 记账、重复与重签投递无副作用、伪造/篡改/过期请求被拒且不落库、拒卡失败并取消意图、Webhook 丢失时顾客查看记账且迟到事件无副作用、
     **创建应答丢失**（`ab88fc83` ④）由重复创建得到同一意图并取消、不扣款。
+13. **Live 模式贯穿装配（2026-10-20 补充，Owner"先把接口都做好"）**：Provider 环境不再写死。`pilotProviderEnvironment()`
+    （`pilot-environment.mjs`）在 Pilot 门店进程为 `Live`、其余为 `Test`；试点装配约 50 处付款范围、终态、对账、日结、退款、补偿与
+    收据读取都取此值。`payment.json`：`mode: "live"` 只在 Pilot、`mode: "test"` 与模拟器只在 InternalTest；可发布密钥须为该模式前缀
+    （`pk_live_`/`pk_test_`），密钥文件须为 `sk_live_`/`rk_live_` 或 `sk_test_`/`rk_test_`，否则拒绝。Stripe 绑定以配置模式为环境，
+    并在创建时核对等于进程的 Provider 环境（`PILOT_STRIPE_MODE_ENVIRONMENT_MISMATCH`）；`isPilotPaymentProvider` 只接受本进程环境的
+    服务商（模拟器仅 InternalTest）。Webhook 以服务商环境核验：事件 `livemode` 必须与之相符（Payment 既有校验），测试事件即使签名正确
+    也不会写入 Live 安装；Stripe 意图应答的 `livemode` 同样核对。`pilot-stripe-operations check` 按模式报告密钥，并要求端点
+    `livemode` 与模式一致。付款路径上原"仅 development"的守卫改为"试点进程"（`isPilotRuntime()`）加服务商核对。InternalTest 行为不变。
+14. **原始证据 30 天删除**：worker 常开循环 `business-webhook-evidence-retention`（`pilot-webhook-evidence-retention.mjs`，api 角色
+    资源，60 秒轮询，每日一轮，每批 ≤100、满批续跑、失败整批回滚）调用 Payment 所有者操作 `purgeExpiredPaymentWebhookRawEvidence`：
+    只删除 `expires_at` 已过（应用时钟与数据库时钟同时满足）的原始字节；回执（事件身份、证据摘要、时间）与处理记录保持只追加，
+    90 天内重发仍按回执去重。数据库规则 `provider_webhook_raw_evidence_no_early_delete` 使提前删除成为空操作，作业随后核对无残留，
+    否则失败并由健康文件显示。无新迁移（WP-1304 表已允许过期后删除）。
+15. **Apple Pay / Google Pay**：`payment.json` 可选 `walletsEnabled`（默认 false，必须同时有 `paymentMethodDomain`）。运维在
+    `register-domain` 后 `check` 显示域名 `ok` 才开启；开启后 `check` 多一项 `wallets`，域名未验证即 `fail`。顾客端
+    `/bff/customer/payment-configuration` 仅当开启且请求所在主机等于该域名时返回 `wallets: true`，卡表单此时显示 Apple Pay /
+    Google Pay（`paymentMethodOrder` apple_pay、google_pay、card）；其余情况（含旧主机不返回该字段）保持仅卡表单。钱包仍是卡类付款，
+    意图 `payment_method_types` 仍为 `card`，记账、退款、对账不变。
+16. **OpenAPI**：公开 REST 目录收录 `POST /api/v1/payment-provider/stripe/webhook`、`POST /api/v1/provider/ses-feedback`、
+    `GET /api/v1/customer/order-messages`、`POST /api/v1/customer/order-recovery`（服务商回调以服务商事件/消息 ID 去重、找回链接单次
+    使用，故不带 Idempotency-Key）。Cognito 员工登录、回调与加验回调是 `/merchant` 下的同源 BFF 浏览器跳转（302 + 状态 Cookie），
+    与 `/merchant/session`、`/bff/*` 一样不属于公开 REST 目录，由 Section 88 路由/屏幕登记约束，不收录。
 
 ## 授权
 
 API 角色新增（`docs/spec/pilot-acl-additions.json`，Owner 2026-10-14 常设批准）：`provider_webhook_record` INSERT；
 `provider_webhook_raw_evidence` INSERT、SELECT；`provider_webhook_processing_record` INSERT、SELECT。无新迁移。
+2026-10-20 补充：`provider_webhook_raw_evidence` DELETE（30 天保留删除，由 worker 以 api 角色执行；数据库规则拒绝提前删除，带
+justification 计入 `pilot-acl-append-only` 允许清单）。
 
 ## 故障时
 
@@ -71,8 +95,8 @@ API 角色新增（`docs/spec/pilot-acl-additions.json`，Owner 2026-10-14 常�
 
 - **真实账户验证（Owner）**：测试账户密钥、Webhook 端点与签名密钥、钱包域名验证；用真实 Stripe 测试模式跑一次付款、拒卡、退款、
   创建应答丢失与日结，记录 API 版本。
-- **Live 模式（仓库）**：Pilot 生产环境需要把 Provider 环境 `Live` 贯穿试点装配（现有约 50 处固定为 `Test`），与 Pilot 环境其他缺口
-  （员工登录、托管密钥、TLS）一起交付；在此之前配置拒绝 Live。
-- **原始证据 30 天清除**：表已允许过期后删除，尚无定时清除作业（需 worker 授权与作业）。
-- **钱包按钮**：域名注册后，卡表单仍为 `wallets: never`，开启属后续变更。
-- 公开 REST 目录（OpenAPI）未收录服务商回调路由（非顾客/商户接口）。
+- **Live 真实验证（Owner）**：PILOT-PAY-01/02（账户/KYC、live 密钥、live Webhook 端点与签名密钥、钱包域名与 Apple Pay 域名关联文件、
+  轮换与吊销负责人）与上线批准；按 [Stripe 切换 runbook](../../runbooks/pilot-stripe-switch.md) B 节执行。
+- **Pilot 进程本身（仓库，付款以外）**：Provider 环境已贯穿，但 Pilot 门店进程仍被非付款部分阻止——不可配置缺口
+  `PricingCurrencyMetadata`（税务审查），以及顾客 HTTPS 入口、顾客服务器、员工会话、业务 worker 事件授权、已保存工作流
+  （`environment: "InternalTest"`）等仍只接受 development/InternalTest 的守卫；需另一项"Pilot 运行环境"工作统一处理。

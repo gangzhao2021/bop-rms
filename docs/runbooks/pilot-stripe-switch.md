@@ -59,7 +59,11 @@ https://127.0.0.1:4443/api/v1/payment-provider/stripe/webhook` prints a temporar
    `… pilot-stripe-operations.mjs register-domain .local/pilot-v16`
    `… pilot-stripe-operations.mjs register-domain .local/pilot-v16 --apply --confirm-target <customer host>`
    Apple Pay additionally needs the Stripe-hosted domain association file served by the hosting
-   front end (hosting gate). The card form keeps wallets off until a later change turns them on.
+   front end (hosting gate). Run `check` again: only when `payment-method-domain` is `ok`, add
+   `"walletsEnabled": true` to `payment.json` and restart in an update window. `check` then
+   reports `wallets ok`; if the domain later stops verifying it reports `wallets fail` — turn
+   `walletsEnabled` off again. Guests see Apple Pay / Google Pay only on that exact host; every
+   other host, and any installation without `walletsEnabled`, shows the plain card form.
 5. **Restart the pilot services** in a planned update window (the provider is chosen at start).
    The customer app reads `/bff/customer/payment-configuration` and shows the Stripe form; no
    frontend rebuild is needed.
@@ -79,14 +83,46 @@ need Stripe mode back on.
 the `webhookSecretFile` and remove the old file. A new API key replaces `stripe-secret-key` and
 takes effect at the next restart.
 
-## B. Live mode (real Store) — not available yet
+## B. Live mode (real Store)
 
-The configuration refuses `"mode": "live"` and the supervisor keeps the `PaymentProvider`
-capability gap open for a Pilot Store. Before live: the repository must carry the Live Provider
-environment through the pilot composition (with the other Pilot gaps: staff login, managed
-secrets, TLS/hosting), and the Owner must complete PILOT-PAY-01/02 (account/KYC, live keys,
-webhook trust, rotation and revocation owners). Then repeat section A with live keys, a live
-webhook endpoint and its secret, `mode: "live"`, and the Owner's go-live approval.
+Live mode exists only in a Pilot Store process (`NODE_ENV=production`,
+`BOP_PILOT_ENVIRONMENT=Pilot`); there every payment record carries the Provider environment
+`Live`. Test keys are refused there, and live keys are refused in InternalTest, so a mixed
+setup cannot start. Prerequisites outside this procedure: the Owner completes PILOT-PAY-01/02
+(account/KYC, live keys, webhook trust, rotation and revocation owners) and approves go-live;
+the other Pilot gaps (staff login, managed secrets, TLS/hosting, the reviewed tax/currency
+configuration) are closed.
+
+1. **Owner, in the Stripe Dashboard (live mode):** same as A.1 with live objects: a restricted or
+   secret live key (`rk_live_…`/`sk_live_…`), the live publishable key (`pk_live_…`), and a
+   **live-mode** webhook endpoint on the public customer host with the three events, pinned to the
+   API version, and its signing secret. Test-mode endpoints do not receive live events.
+2. **Operator:** write the live key and live signing secret to their own `0600` files (new names,
+   e.g. `stripe-live-secret-key`, `stripe-live-webhook-secret`; never reuse test files) and set
+   `payment.json` as in A.2 with `"mode": "live"`, `"publishableKey": "pk_live_…"` and those file
+   names. `testApiBaseUrl` is not accepted. Add `paymentMethodDomain` (and later `walletsEnabled`)
+   as in A.4.
+3. **Check:** `NODE_ENV=production BOP_PILOT_ENVIRONMENT=Pilot node --import ./tooling/environment/register-workspace-typescript.mjs tooling/environment/pilot-stripe-operations.mjs check <runtime>`.
+   `key-mode` must read "live keys …", and `webhook-endpoint` fails if the endpoint is not a
+   live-mode endpoint. The supervisor clears the `PaymentProvider` gap only for this
+   configuration with its live secret files present.
+4. **Go-live verification** (one WP-2423 line per item, real card, smallest amount): one paid
+   pickup order reaches the kitchen; refund it in full from the merchant screen and see the
+   refund in the Dashboard; the next day-end settlement matches Stripe's balance transactions;
+   Dashboard webhook deliveries show `200`.
+
+**Rollback in a Store that is open:** keep the live configuration (refunds of live payments need
+it). If Stripe itself is unusable, take payment on the counter card machine (Q7) until it
+recovers; payments already started are finished by webhooks, the guest's "check payment" and the
+payment-window expiry.
+
+## C. Raw webhook evidence retention
+
+The business worker loop `business-webhook-evidence-retention` deletes raw Stripe event bytes
+30 days after receipt (daily, batches of 100). The receipt rows (event ID, evidence digest,
+times) stay. Its health file is `business-webhook-evidence-retention.health.json`; a failed cycle
+appears there and in the alert as "old card payment message deletion". The database refuses to
+delete evidence before its 30 days, whatever the worker does.
 
 ## If something fails
 

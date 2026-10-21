@@ -4,6 +4,7 @@ import {
   parseDiningReference,
 } from "../../packages/rms/dining/src/index.ts";
 import { createInternalDiningExceptionPageRunner } from "./pilot-dining-exceptions.mjs";
+import { pilotProviderEnvironment } from "./pilot-environment.mjs";
 /** Current owner resolution only; does not persist or terminalize a projection. */
 export function createInternalDiningExceptionResolution({ resources, providerAccountReference }) {
   const account = String(parseDiningReference(providerAccountReference));
@@ -26,7 +27,7 @@ export function createInternalDiningExceptionResolution({ resources, providerAcc
         const financial = await createDiningExceptionFinancialEvidence({
           scope,
           providerAccountReference: account,
-          environment: "Test",
+          environment: pilotProviderEnvironment(),
           authorize: async (t, q) => allowedQuery(t, q),
         })(tx, query);
         const resolver = createDiningExceptionResolution({

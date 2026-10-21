@@ -1,6 +1,5 @@
 import { isPilotPaymentProvider, isStripeProvider } from "./pilot-stripe-provider.mjs";
 import { createStripeTerminalRecorder } from "./pilot-stripe-webhook.mjs";
-import process from "node:process";
 import { createCustomerCheckoutSessionRead } from "../../apps/api/dist/customer-checkout-session-read.js";
 import {
   createPostgresPaymentIntentCreationStore,
@@ -12,6 +11,7 @@ import {
   parsePaymentIntentCreationRecord,
 } from "../../packages/rms/payment/src/index.ts";
 import { createCustomerSessionPaymentResult } from "../../apps/api/dist/customer-session-payment-result.js";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 /** InternalTest simulated channel only. Does not perform Ordering settlement. */
 export function createInternalPaymentTerminal(
   resources,
@@ -20,14 +20,13 @@ export function createInternalPaymentTerminal(
   simulator,
   { providerAccountReference },
 ) {
-  if (process.env.NODE_ENV !== "development" || !isPilotPaymentProvider(simulator))
-    throw new Error("SIMULATION_ONLY");
+  if (!isPilotRuntime() || !isPilotPaymentProvider(simulator)) throw new Error("SIMULATION_ONLY");
   const { scope, transactions, now, credentials } = resources,
     reference = credentials.reference;
   const terminalScope = {
     ...scope,
     providerAccountReference: providerAccountReference,
-    environment: "Test",
+    environment: pilotProviderEnvironment(),
   };
   const history = createPostgresPaymentIntentCreationStore(transactions, scope, {
     now,
@@ -53,7 +52,7 @@ export function createInternalPaymentTerminal(
           context: {
             ...scope,
             provider: "Stripe",
-            environment: "Test",
+            environment: pilotProviderEnvironment(),
             paymentAttemptReference: observation.paymentAttemptReference,
             operationReference: observation.causationReference,
           },
@@ -146,7 +145,7 @@ export function createInternalPaymentTerminal(
       providerEventReference: null,
       providerAccountReference: terminalScope.providerAccountReference,
       providerIntentReference: captured.providerIntentReference,
-      environment: "Test",
+      environment: pilotProviderEnvironment(),
       paymentIntentReference: record.intent.paymentIntentReference,
       paymentAttemptReference: record.attempt.paymentAttemptReference,
       ...scope,

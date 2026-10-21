@@ -107,6 +107,7 @@ import {
 } from "../../apps/api/dist/refund-receipt-issuance.js";
 import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
+import { pilotProviderEnvironment } from "./pilot-environment.mjs";
 export async function createInternalMerchant(
   resources,
   {
@@ -642,7 +643,7 @@ export async function createInternalMerchant(
   const refundConfiguration = async (_tx, scope) => {
     for (const key of ["tenantReference", "brandReference", "storeReference"])
       if (scope[key] !== selected[key]) throw new Error("INTERNAL_REFUND_SCOPE_DENIED");
-    return { providerAccountReference, environment: "Test", roleMapping };
+    return { providerAccountReference, environment: pilotProviderEnvironment(), roleMapping };
   };
   const settlement = logUnexpected(
     "INTERNAL_SETTLEMENT_UNAVAILABLE",
@@ -833,7 +834,11 @@ export async function createInternalMerchant(
   // The item cancellation above calls it only at run time, after this declaration has run.
   const issueOrderRefundReceipt = async ({ orderReference }) => {
     const active = async () => resources.now() < resources.publicProfile.binding.validUntil;
-    const receiptScope = { ...selected, providerAccountReference, environment: "Test" };
+    const receiptScope = {
+      ...selected,
+      providerAccountReference,
+      environment: pilotProviderEnvironment(),
+    };
     const has = await persistence.transactions.run((tx) =>
       hasDigitalReceipt(tx, { ...resources.scope, orderReference, authorize: active }),
     );
@@ -1047,7 +1052,7 @@ export async function createInternalMerchant(
     persistence,
     authentication: service,
     providerAccountReference,
-    environment: "Test",
+    environment: pilotProviderEnvironment(),
     newReference: () => resources.credentials.reference(),
     retentionPolicyCode: "AUDIT_DEFAULT",
     retentionPolicyVersion: 1,
@@ -1058,7 +1063,7 @@ export async function createInternalMerchant(
     resolveConfiguration: createDiningOrderCloseConfiguration({
       ...selected,
       providerAccountReference,
-      environment: "Test",
+      environment: pilotProviderEnvironment(),
     }),
     newReference: () => resources.credentials.reference(),
     audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },

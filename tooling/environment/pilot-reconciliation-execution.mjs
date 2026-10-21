@@ -1,6 +1,5 @@
 import { createInternalProviderCaptureReview } from "./pilot-provider-capture-review.mjs";
 import { join } from "node:path";
-import process from "node:process";
 import { loadPilotInstallation } from "./pilot-installation.mjs";
 import { createPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
 import { createInternalReconciliationRuntime } from "./pilot-reconciliation-runtime.mjs";
@@ -9,6 +8,7 @@ import {
   createPostgresPaymentReconciliationRunSource,
   createPostgresPaymentReconciliationCandidates,
 } from "../../packages/rms/payment/src/index.ts";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 export async function createConfiguredReconciliationExecution(
   directory,
   resources,
@@ -27,8 +27,7 @@ export async function createConfiguredReconciliationExecution(
   );
   try {
     const active = async () =>
-      process.env.NODE_ENV === "development" &&
-      resources.now() < resources.publicProfile.binding.validUntil;
+      isPilotRuntime() && resources.now() < resources.publicProfile.binding.validUntil;
     const runtime = createInternalReconciliationRuntime({
       resources,
       simulator,
@@ -39,7 +38,7 @@ export async function createConfiguredReconciliationExecution(
       authorize: active,
     });
     const due = createPostgresPaymentReconciliationCandidates({
-      scope: { ...resources.scope, environment: "Test" },
+      scope: { ...resources.scope, environment: pilotProviderEnvironment() },
       authorize: active,
     });
     const runOnce = createOperationalReconciliationScheduler({

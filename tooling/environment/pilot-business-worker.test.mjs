@@ -229,6 +229,24 @@ it("WP-2423 Q10: always composes the daily contact retention removal with its he
   expect(await compose("resources", { contactRetention: "observer" }, {})).toBe("workload");
   expect(retention).toHaveBeenCalledWith("resources", "observer");
 });
+it("DEC-STRIPE-PILOT-WIRING: always composes the 30-day raw webhook evidence deletion with its health observer", async () => {
+  const retention = vi.fn(() => "workload");
+  const compose = composeConfiguredBusinessWorker({
+    directory: "/synthetic",
+    config,
+    installation: {},
+    implementations: {
+      createInternalWorker: async (r, observers, _options, dependencies) =>
+        dependencies.createInternalWebhookEvidenceRetentionWorkload(
+          r,
+          observers.webhookEvidenceRetention,
+        ),
+      createInternalWebhookEvidenceRetentionWorkload: retention,
+    },
+  });
+  expect(await compose("resources", { webhookEvidenceRetention: "observer" }, {})).toBe("workload");
+  expect(retention).toHaveBeenCalledWith("resources", "observer");
+});
 it("DEC-PICKUP-CAPACITY-SCHEDULE: always composes the pickup slot schedule with its health observer", async () => {
   const schedule = vi.fn(() => "workload");
   const compose = composeConfiguredBusinessWorker({

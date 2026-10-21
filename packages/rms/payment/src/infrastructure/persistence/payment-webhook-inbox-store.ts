@@ -305,3 +305,72 @@ export function createPostgresPaymentWebhookInboxStore(
     },
   });
 }
+
+/** DEC-STRIPE-PILOT-WIRING: Restricted raw webhook bytes are kept 30 days (WP-1304 schema). */
+export const paymentWebhookRawEvidenceRetention = Object.freeze({
+  retentionDays: 30,
+  maximumBatch: 500,
+});
+
+/**
+ * Deletes one bounded batch of this Store's raw webhook evidence whose 30-day retention has
+ * ended. Only the raw bytes go: the receipt (event identity, evidence digest, times) and its
+ * processing record stay append-only, and the database itself refuses any deletion before
+ * `expires_at` (`provider_webhook_raw_evidence_no_early_delete`). Idempotent; returns how many
+ * were removed so the caller continues while a full batch was due.
+ */
+export async function purgeExpiredPaymentWebhookRawEvidence(
+  transaction: AuditTransaction,
+  scopeInput: unknown,
+  input: { readonly observedAt: string; readonly limit: number },
+): Promise<{ readonly purged: number }> {
+  const scope = exactPaymentObject(scopeInput, ["brandReference", "storeReference"]);
+  const brand = parsePaymentReference(scope.brandReference),
+    store = parsePaymentReference(scope.storeReference),
+    observedAt = parseWebhookInstant(input.observedAt);
+  if (
+    !Number.isSafeInteger(input.limit) ||
+    input.limit < 1 ||
+    input.limit > paymentWebhookRawEvidenceRetention.maximumBatch
+  )
+    return fail();
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  // Due by both clocks: the application's observation and the database's own rule time.
+  const due = rowsOf(
+    await transaction.query(
+      `SELECT webhook_receipt_id::text AS "webhookReceiptReference"
+         FROM rms_payment.provider_webhook_raw_evidence
+        WHERE brand_id=$1 AND store_id=$2 AND expires_at<=$3::timestamptz
+          AND expires_at<=CURRENT_TIMESTAMP
+        ORDER BY expires_at,webhook_receipt_id LIMIT $4::int`,
+      [brand, store, observedAt, input.limit],
+    ),
+  ).map((row) =>
+    String(
+      parsePaymentReference(
+        exactPaymentObject(row, ["webhookReceiptReference"]).webhookReceiptReference,
+      ),
+    ),
+  );
+  if (due.length === 0) return Object.freeze({ purged: 0 });
+  await transaction.query(
+    `DELETE FROM rms_payment.provider_webhook_raw_evidence
+      WHERE brand_id=$1 AND store_id=$2 AND webhook_receipt_id=ANY($3::uuid[])
+        AND expires_at<=$4::timestamptz AND expires_at<=CURRENT_TIMESTAMP`,
+    [brand, store, due, observedAt],
+  );
+  // The append-only rule turns a refused deletion into a silent no-op: confirm none remain.
+  const remaining = rowsOf(
+    await transaction.query(
+      `SELECT count(*)::int AS remaining FROM rms_payment.provider_webhook_raw_evidence
+        WHERE brand_id=$1 AND store_id=$2 AND webhook_receipt_id=ANY($3::uuid[])`,
+      [brand, store, due],
+    ),
+  );
+  const left = exactPaymentObject(remaining[0], ["remaining"]).remaining;
+  if (left !== 0) return fail();
+  return Object.freeze({ purged: due.length });
+}

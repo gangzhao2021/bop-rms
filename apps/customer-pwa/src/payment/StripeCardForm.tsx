@@ -8,6 +8,11 @@ export interface StripeCardFormProps {
   /** Approved dedicated payment-return sanitizer origin, never the BOP application origin. */
   readonly returnUrl: string;
   readonly clientSecret: string;
+  /**
+   * Apple Pay / Google Pay buttons: only when the host confirmed this domain is registered and
+   * verified with Stripe. Otherwise the form is card only (plain fallback).
+   */
+  readonly wallets?: boolean;
   readonly onSubmitted: () => void;
 }
 /** Stripe owns card inputs. Credential lives only in component/SDK memory. */
@@ -15,6 +20,7 @@ export function StripeCardForm({
   publishableKey,
   returnUrl,
   clientSecret,
+  wallets = false,
   onSubmitted,
 }: StripeCardFormProps) {
   const host = useRef<HTMLDivElement>(null);
@@ -62,10 +68,18 @@ export function StripeCardForm({
         if (disposed || !current()) return;
         if (!stripe || !host.current) throw new Error();
         const elements = stripe.elements({ clientSecret });
-        const payment = elements.create("payment", {
-          paymentMethodOrder: ["card"],
-          wallets: { applePay: "never", googlePay: "never" },
-        });
+        const payment = elements.create(
+          "payment",
+          wallets
+            ? {
+                paymentMethodOrder: ["apple_pay", "google_pay", "card"],
+                wallets: { applePay: "auto", googlePay: "auto" },
+              }
+            : {
+                paymentMethodOrder: ["card"],
+                wallets: { applePay: "never", googlePay: "never" },
+              },
+        );
         cleanup = () => {
           payment.destroy();
           sdk.current = null;
@@ -90,7 +104,7 @@ export function StripeCardForm({
       cleanup?.();
       sdk.current = null;
     };
-  }, [publishableKey, returnUrl, clientSecret]);
+  }, [publishableKey, returnUrl, clientSecret, wallets]);
   const confirm = async () => {
     const active = sdk.current;
     if (!active || !active.current() || !online || flight.current || !ready) return;

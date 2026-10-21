@@ -1,5 +1,4 @@
 import { isPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
-import process from "node:process";
 import { createHash } from "node:crypto";
 import {
   createPaymentReconciliationService,
@@ -17,6 +16,7 @@ import {
 } from "../../packages/rms/payment/src/index.ts";
 import { createInternalReconciliationLease } from "./pilot-reconciliation-lease.mjs";
 import { createInternalReconciliationTerminalOccurrence } from "./pilot-reconciliation-terminal-occurrence.mjs";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 const factories = {
   createPaymentReconciliationService,
   createPostgresPaymentReconciliationRepository,
@@ -41,14 +41,14 @@ export function createInternalReconciliationRuntime(
   const scope = {
     ...r.scope,
     providerAccountReference: String(parsePaymentReference(providerAccountReference)),
-    environment: "Test",
+    environment: pilotProviderEnvironment(),
   };
   const fullScope = {
     tenantReference: String(parsePaymentReference(r.publicProfile.binding.tenantReference)),
     ...scope,
   };
   const active = () =>
-    process.env.NODE_ENV === "development" &&
+    isPilotRuntime() &&
     isPilotPaymentProvider(simulator) &&
     r.now() < r.publicProfile.binding.validUntil &&
     r.scope.brandReference === r.publicProfile.binding.brandReference &&
@@ -112,7 +112,7 @@ export function createInternalReconciliationRuntime(
                 context: {
                   ...r.scope,
                   provider: "Stripe",
-                  environment: "Test",
+                  environment: pilotProviderEnvironment(),
                   paymentAttemptReference: o.paymentAttemptReference,
                   operationReference: o.causationReference,
                 },
@@ -230,7 +230,7 @@ export function createInternalReconciliationRuntime(
                 return fail();
               const routes = await transactions.run((tx) =>
                 f.createPostgresPaymentReconciliationCandidates({
-                  scope: { ...r.scope, environment: "Test" },
+                  scope: { ...r.scope, environment: pilotProviderEnvironment() },
                   authorize: held,
                 })(tx, { cutoffAt: q.cutoffAt, limit: q.limit }),
               );

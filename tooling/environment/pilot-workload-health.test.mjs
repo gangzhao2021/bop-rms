@@ -116,6 +116,7 @@ it("keeps business loop reports separate and refuses arbitrary file targets", ()
       pickupPaymentExpiry: "business-pickup-payment-expiry.health.json",
       diningCheckoutExpiry: "business-dining-checkout-expiry.health.json",
       contactRetention: "business-contact-retention.health.json",
+      webhookEvidenceRetention: "business-webhook-evidence-retention.health.json",
       pickupCapacitySchedule: "business-pickup-capacity-schedule.health.json",
     });
     expect(() => createPilotWorkloadHealthObserver(directory, "../other")).toThrow();

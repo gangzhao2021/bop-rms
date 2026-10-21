@@ -24,7 +24,11 @@ export {
 } from "./infrastructure/stripe/stripe-online-transport.js";
 export { createStripeOrdinaryRefundAdapter } from "./infrastructure/stripe/stripe-ordinary-refund-adapter.js";
 export * from "./infrastructure/stripe/stripe-provider-reads.js";
-export { createPostgresPaymentWebhookInboxStore } from "./infrastructure/persistence/payment-webhook-inbox-store.js";
+export {
+  createPostgresPaymentWebhookInboxStore,
+  paymentWebhookRawEvidenceRetention,
+  purgeExpiredPaymentWebhookRawEvidence,
+} from "./infrastructure/persistence/payment-webhook-inbox-store.js";
 export * from "./contracts/payment-terminal-event.js";
 export * from "./application/payment-terminal-fact.js";
 export * from "./application/payment-terminal-event.js";

@@ -341,6 +341,7 @@ export async function seedJourneyPayment(
     occurredAt,
     totalMinor,
     idempotencyDigest,
+    providerEnvironment = "Test",
   },
 ) {
   const r = round.f.request.record,
@@ -373,7 +374,7 @@ export async function seedJourneyPayment(
     ],
   );
   await client.query(
-    "INSERT INTO rms_payment.payment_attempt (payment_attempt_id,brand_id,store_id,payment_intent_id,attempt_number,provider,provider_environment,provider_idempotency_digest,created_at) VALUES ($1,$2,$3,$4,1,'Stripe','Test',$5,$6)",
+    "INSERT INTO rms_payment.payment_attempt (payment_attempt_id,brand_id,store_id,payment_intent_id,attempt_number,provider,provider_environment,provider_idempotency_digest,created_at) VALUES ($1,$2,$3,$4,1,'Stripe',$7,$5,$6)",
     [
       refs.attempt,
       s.brandReference,
@@ -381,6 +382,7 @@ export async function seedJourneyPayment(
       key,
       idempotencyDigest ?? hash(["idempotency", key]),
       requestedAt,
+      providerEnvironment,
     ],
   );
   await client.query(

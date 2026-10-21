@@ -1,5 +1,4 @@
 import { isPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
-import process from "node:process";
 import { createHash } from "node:crypto";
 import {
   createPostgresProviderCaptureExceptionStore,
@@ -7,6 +6,7 @@ import {
   parsePaymentInstant,
   parseProviderCaptureReconciliationEvidence,
 } from "../../packages/rms/payment/src/index.ts";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 const json = (value) => JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v));
 const hash = (value) => createHash("sha256").update(json(value)).digest("hex");
 const identity = (kind, entry, account) => {
@@ -50,7 +50,7 @@ export function createInternalProviderCaptureReview({
       storeReference: String(parsePaymentReference(r.scope.storeReference)),
     };
   const active = () =>
-    process.env.NODE_ENV === "development" &&
+    isPilotRuntime() &&
     isPilotPaymentProvider(simulator) &&
     r.publicProfile.binding.brandReference === scope.brandReference &&
     r.publicProfile.binding.storeReference === scope.storeReference &&
@@ -63,7 +63,7 @@ export function createInternalProviderCaptureReview({
     simulator.readCaptureJournal({
       brandReference: scope.brandReference,
       storeReference: scope.storeReference,
-      environment: "Test",
+      environment: pilotProviderEnvironment(),
       observedAt,
       afterProviderIntentReference: after,
       limit: 5,
@@ -96,7 +96,7 @@ export function createInternalProviderCaptureReview({
         if (
           entry.brandReference !== scope.brandReference ||
           entry.storeReference !== scope.storeReference ||
-          entry.environment !== "Test" ||
+          entry.environment !== pilotProviderEnvironment() ||
           (previous !== null && entry.providerIntentReference <= previous)
         )
           return fail();
@@ -115,7 +115,7 @@ export function createInternalProviderCaptureReview({
         const owner = createPostgresProviderCaptureExceptionStore({
           scope,
           providerAccountReference: account,
-          environment: "Test",
+          environment: pilotProviderEnvironment(),
           authorize: async () => active(),
           verifyEvidence: async (_tx, current) => {
             if (!active()) return false;

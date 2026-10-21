@@ -1,5 +1,4 @@
 import { isPilotPaymentProvider, isStripeProvider } from "./pilot-stripe-provider.mjs";
-import process from "node:process";
 import { createHash } from "node:crypto";
 import { createInternalClosedSettlementWindow } from "./pilot-settlement-window.mjs";
 import {
@@ -12,6 +11,7 @@ import {
   parsePaymentReference,
 } from "../../packages/rms/payment/src/index.ts";
 import { bindOrdinaryRefundProviderOutcome } from "../../packages/rms/payment/src/application/ordinary-refund-provider-result.ts";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 const json = (value) => JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v));
 const digest = (value) => createHash("sha256").update(json(value)).digest("hex");
 /** Complete local simulator comparison sources. Never a real Provider balance statement. */
@@ -28,14 +28,10 @@ export function createInternalDailySettlementSource({
     ...r.scope,
     tenantReference: r.publicProfile.binding.tenantReference,
     providerAccountReference,
-    environment: "Test",
+    environment: pilotProviderEnvironment(),
   };
   const guard = async () => {
-    if (
-      process.env.NODE_ENV !== "development" ||
-      !isPilotPaymentProvider(simulator) ||
-      (await active()) !== true
-    )
+    if (!isPilotRuntime() || !isPilotPaymentProvider(simulator) || (await active()) !== true)
       return fail();
     return true;
   };
@@ -130,7 +126,7 @@ export function createInternalDailySettlementSource({
       );
       for (const state of page.states) {
         if (
-          state.environment !== "Test" ||
+          state.environment !== pilotProviderEnvironment() ||
           state.providerAccountReference !== providerAccountReference
         )
           continue;
@@ -193,7 +189,7 @@ export function createInternalDailySettlementSource({
     const provider = await simulator.readSettlementWindow({
       brandReference: r.scope.brandReference,
       storeReference: r.scope.storeReference,
-      environment: "Test",
+      environment: pilotProviderEnvironment(),
       startsAt: window.startsAt,
       endsAt: window.endsAt,
     });

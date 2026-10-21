@@ -9,7 +9,12 @@ import { StripeCardForm } from "./StripeCardForm.js";
 
 export type RetryCardConfiguration =
   | { readonly mode: "simulation" }
-  | { readonly mode: "stripe"; readonly publishableKey: string; readonly returnUrl: string };
+  | {
+      readonly mode: "stripe";
+      readonly publishableKey: string;
+      readonly returnUrl: string;
+      readonly wallets?: boolean;
+    };
 
 type RetryState =
   | { readonly step: "offer" }
@@ -150,6 +155,7 @@ export function RetryCardPanel({
         <StripeCardForm
           publishableKey={configuration.publishableKey}
           returnUrl={configuration.returnUrl}
+          wallets={configuration.wallets === true}
           clientSecret={state.secret}
           onSubmitted={() => {
             setState({ step: "offer" });

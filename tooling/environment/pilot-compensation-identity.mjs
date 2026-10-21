@@ -5,7 +5,7 @@ import {
   parsePaymentDigest,
   parseProviderIdempotencyKey,
 } from "../../packages/rms/payment/src/index.ts";
-import { isPilotRuntime } from "./pilot-environment.mjs";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 /** Versioned deterministic names for one InternalTest payment; never allocation or authorization. */
 export function createInternalCompensationIdentity(value, now) {
   const deny = () => {
@@ -14,7 +14,7 @@ export function createInternalCompensationIdentity(value, now) {
   if (!isPilotRuntime()) return deny();
   const d = parsePaidWithoutFulfillableOrderDisposition(value);
   const base = {
-    environment: "Test",
+    environment: pilotProviderEnvironment(),
     brandReference: d.brandReference,
     storeReference: d.storeReference,
     orderReference: d.orderReference,
@@ -61,7 +61,7 @@ export function createInternalCompensationIdentity(value, now) {
       return deny();
   };
   const payment = {
-    environment: "Test",
+    environment: pilotProviderEnvironment(),
     paymentTransactionReference: base.paymentTransactionReference,
     paymentAttemptReference: base.paymentAttemptReference,
   };

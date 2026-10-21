@@ -1,9 +1,9 @@
-import process from "node:process";
 import { createPostgresPaymentCompensationExceptionSource } from "../../packages/rms/payment/src/index.ts";
 import { createPostgresDigitalReceiptStore } from "../../packages/rms/ordering/src/index.ts";
 import { createRefundReceiptIssuance } from "../../apps/api/dist/refund-receipt-issuance.js";
 import { mapInternalCompensationSource } from "./pilot-compensation-projection.mjs";
 import { refreshInternalOrderReceiptObservations } from "./pilot-receipt-observations.mjs";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 /** Repair receipt evidence after confirmed compensation, including already closed Cases.
  *
  * WP-2423 pilot resilience (2026-10-15): a repair asks the Provider again and appends a fresh
@@ -28,12 +28,12 @@ export function createInternalCompensationReceiptRecovery({
     while (repaired.size > maximumRememberedCases) repaired.delete(repaired.values().next().value);
   };
   const active = () =>
-    process.env.NODE_ENV === "development" &&
+    isPilotRuntime() &&
     resources.now() < resources.publicProfile.binding.validUntil &&
     tenantReference === resources.publicProfile.binding.tenantReference &&
     scope.brandReference === resources.scope.brandReference &&
     scope.storeReference === resources.scope.storeReference &&
-    scope.environment === "Test";
+    scope.environment === pilotProviderEnvironment();
   const fail = () => {
     throw Error("INTERNAL_COMPENSATION_RECEIPT_UNAVAILABLE");
   };

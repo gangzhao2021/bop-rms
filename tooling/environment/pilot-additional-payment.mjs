@@ -8,6 +8,7 @@ import { paymentProviderAdmissionKillSwitchKey } from "../../packages/rms/paymen
 import { createCustomerAdmittedAdditionalDiningPayment } from "../../apps/api/dist/customer-admitted-additional-dining-payment.js";
 import { createCustomerAdditionalDiningPaymentAdmission } from "../../apps/api/dist/customer-additional-dining-payment-store.js";
 import { createInternalAdditionalSubmission } from "./pilot-additional-submission.mjs";
+import { pilotProviderEnvironment } from "./pilot-environment.mjs";
 function frozen(value) {
   for (const child of Object.values(value)) if (child && typeof child === "object") frozen(child);
   return Object.freeze(value);
@@ -74,7 +75,7 @@ export async function createInternalAdditionalPayment(
         }),
         nextPreparationReference: reference,
         ports: () => ({
-          providerEnvironment: "Test",
+          providerEnvironment: pilotProviderEnvironment(),
           clock: { now },
           provider: simulator.adapter,
           killSwitch: {

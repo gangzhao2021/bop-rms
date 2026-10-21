@@ -8,12 +8,16 @@ const intent = "0190fa21-0000-7000-8000-000000000012";
 const order = "0190fa21-0000-7000-8000-000000000013";
 test.use({ serviceWorkers: "block" });
 
-const syntheticStripe = `window.syntheticCard = { mounts: 0, confirms: 0 };
+const syntheticStripe = `window.syntheticCard = { mounts: 0, confirms: 0, wallets: null };
 window.Stripe = function() { return {
   elements: function() { return {
     create: function(type, options) {
-      if (type !== "payment" || options.wallets.applePay !== "never" ||
-          options.wallets.googlePay !== "never") throw Error("invalid secure options");
+      var on = options.wallets.applePay === "auto" && options.wallets.googlePay === "auto" &&
+        options.paymentMethodOrder.join() === "apple_pay,google_pay,card";
+      var off = options.wallets.applePay === "never" && options.wallets.googlePay === "never" &&
+        options.paymentMethodOrder.join() === "card";
+      if (type !== "payment" || (!on && !off)) throw Error("invalid secure options");
+      window.syntheticCard.wallets = on;
       var handlers = {}, host;
       return {
         on: function(event, callback) { handlers[event] = callback; },
@@ -33,7 +37,25 @@ window.Stripe = function() { return {
   }
 }; };`;
 
-async function fixture(page: Page, options: { retry?: { status: number; code?: string } } = {}) {
+async function fixture(
+  page: Page,
+  options: { retry?: { status: number; code?: string }; wallets?: boolean } = {},
+) {
+  // DEC-STRIPE-PILOT-WIRING wallets: the host says whether this domain is verified for wallets.
+  if (options.wallets !== undefined)
+    await page.route("**/bff/customer/payment-configuration", (route) =>
+      route.fulfill({
+        json: {
+          schemaVersion: 1,
+          mode: "stripe",
+          publishableKey: "pk_test_SyntheticBrowserOnly",
+          returnUrl: "https://synthetic-return.invalid/return",
+          wallets: options.wallets,
+          internalTestEntry: false,
+        },
+        headers: { "cache-control": "no-store" },
+      }),
+    );
   const calls: { path: string; body: string | null; key: string | undefined }[] = [];
   let result: "Failed" | "Succeeded" = "Failed";
   await page.route("https://js.stripe.com/**", (route) =>
@@ -190,6 +212,26 @@ for (const [code, status, text] of [
         .filter((path) => path !== "payment-reconciliation"),
     ).toEqual(["payment-intents"]);
     await expect(page.locator("body")).not.toContainText(code);
+    await noOverflowOrBlockingAxe(page);
+  });
+}
+
+for (const wallets of [true, false, undefined] as const) {
+  test(`@production shows Apple Pay / Google Pay only on a verified wallet domain (${String(wallets)})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await fixture(page, wallets === undefined ? {} : { wallets });
+    await page.goto("/checkout/result");
+    await page.getByRole("button", { name: "Try another card", exact: true }).click();
+    await expect(page.getByText("Synthetic secure card component")).toBeVisible();
+    // Unverified or unknown: the plain card form, never wallet buttons.
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { syntheticCard: { wallets: boolean } }).syntheticCard.wallets,
+      ),
+    ).toBe(wallets === true);
+    await expect(page.getByRole("button", { name: "Pay securely", exact: true })).toBeEnabled();
     await noOverflowOrBlockingAxe(page);
   });
 }

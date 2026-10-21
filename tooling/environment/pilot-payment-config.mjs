@@ -63,8 +63,8 @@ const DOMAIN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2
 
 /**
  * Parses payment.json. `environment` is the process environment ("InternalTest" | "Pilot").
- * Simulation is refused outside InternalTest. Stripe Live mode is refused until the pilot
- * composition carries a Live Provider environment end to end (DEC-STRIPE-PILOT-WIRING, "Live").
+ * Simulation and Stripe test mode are InternalTest only; Stripe live mode is Pilot only, and the
+ * publishable/secret keys must carry the configured mode's prefix (DEC-STRIPE-PILOT-WIRING, Live).
  */
 export function parsePilotPaymentConfig(value, { environment }) {
   if (value === null) {
@@ -94,16 +94,23 @@ export function parsePilotPaymentConfig(value, { environment }) {
       "nextWebhookSecret",
       "connectedAccount",
       "paymentMethodDomain",
+      "walletsEnabled",
       "captureLookbackDays",
       "testApiBaseUrl",
     ],
     "stripe",
   );
-  if (s.mode === "live") fail("stripe.mode.live-not-available");
-  if (s.mode !== "test") fail("stripe.mode");
+  // A Pilot Store takes real money: live mode only. InternalTest never touches live mode.
+  if (s.mode !== "test" && s.mode !== "live") fail("stripe.mode");
+  if (s.mode === "live" && environment !== "Pilot") fail("stripe.mode.live-pilot-only");
+  if (s.mode === "test" && environment !== "InternalTest")
+    fail("stripe.mode.test-internal-test-only");
   if (typeof s.apiVersion !== "string" || !/^\d{4}-\d{2}-\d{2}(?:\.[a-z]+)?$/u.test(s.apiVersion))
     fail("stripe.apiVersion");
-  if (typeof s.publishableKey !== "string" || !/^pk_test_[A-Za-z0-9]+$/u.test(s.publishableKey))
+  if (
+    typeof s.publishableKey !== "string" ||
+    !new RegExp("^pk_" + s.mode + "_[A-Za-z0-9]+$", "u").test(s.publishableKey)
+  )
     fail("stripe.publishableKey");
   let next = null;
   if (s.nextWebhookSecret !== undefined && s.nextWebhookSecret !== null) {
@@ -138,6 +145,11 @@ export function parsePilotPaymentConfig(value, { environment }) {
       : typeof s.paymentMethodDomain === "string" && DOMAIN.test(s.paymentMethodDomain)
         ? s.paymentMethodDomain
         : fail("stripe.paymentMethodDomain");
+  // Apple Pay / Google Pay show only after the operator confirmed the wallet domain is registered
+  // and verified with Stripe (`pilot-stripe-operations check`); never without a configured domain.
+  const walletsEnabled = s.walletsEnabled ?? false;
+  if (typeof walletsEnabled !== "boolean") fail("stripe.walletsEnabled");
+  if (walletsEnabled && paymentMethodDomain === null) fail("stripe.walletsEnabled.domain-missing");
   const captureLookbackDays = s.captureLookbackDays ?? 7;
   if (
     !Number.isSafeInteger(captureLookbackDays) ||
@@ -169,8 +181,8 @@ export function parsePilotPaymentConfig(value, { environment }) {
   return Object.freeze({
     provider: "stripe",
     stripe: Object.freeze({
-      mode: "test",
-      environment: "Test",
+      mode: s.mode,
+      environment: s.mode === "live" ? "Live" : "Test",
       apiVersion: s.apiVersion,
       publishableKey: s.publishableKey,
       secretKeyFile: fileName(s.secretKeyFile, "stripe.secretKeyFile"),
@@ -180,6 +192,7 @@ export function parsePilotPaymentConfig(value, { environment }) {
       returnUrl,
       webhookUrl,
       paymentMethodDomain,
+      walletsEnabled,
       captureLookbackDays,
       testApiBaseUrl,
     }),
@@ -191,10 +204,15 @@ export async function loadPilotPaymentConfig(runtimeDirectory, { environment }) 
     { environment },
   );
 }
-/** The Stripe secret API key (sk_test_/rk_test_), read from its private file on each use. */
+/**
+ * The Stripe secret API key of the configured mode (sk_test_/rk_test_ or sk_live_/rk_live_), read
+ * from its private file on each use. A key of the other mode is refused.
+ */
 export async function readStripeSecretKey(runtimeDirectory, stripe) {
+  if (stripe.mode !== "test" && stripe.mode !== "live") throw Error("PILOT_STRIPE_MODE_INVALID");
   const key = await readPilotSecret(runtimeDirectory, stripe.secretKeyFile);
-  if (!/^(?:sk|rk)_test_[A-Za-z0-9]+$/u.test(key)) throw Error("PILOT_STRIPE_SECRET_KEY_INVALID");
+  if (!new RegExp("^(?:sk|rk)_" + stripe.mode + "_[A-Za-z0-9]+$", "u").test(key))
+    throw Error("PILOT_STRIPE_SECRET_KEY_INVALID");
   return key;
 }
 /** Webhook signing secrets as owned bytes (the verifier zeroes them after use). */
@@ -220,13 +238,13 @@ export async function readStripeWebhookSecrets(runtimeDirectory, stripe) {
 /**
  * DEC-STRIPE-PILOT-WIRING: the "PaymentProvider" capability is satisfied only by a configured
  * Stripe Provider whose secret files are present and whose mode fits the environment: test mode
- * serves InternalTest; a Pilot Store needs Live mode, which the configuration does not accept yet.
+ * serves InternalTest; a Pilot Store needs live mode (the parser refuses any other pairing).
  */
 export async function pilotPaymentProviderReady(runtimeDirectory, { environment }) {
   try {
     const config = await loadPilotPaymentConfig(runtimeDirectory, { environment });
     if (config.provider !== "stripe") return false;
-    if (environment === "Pilot" && config.stripe.mode !== "live") return false;
+    if (config.stripe.mode !== (environment === "Pilot" ? "live" : "test")) return false;
     return await stripeSecretsPresent(runtimeDirectory, config.stripe);
   } catch {
     return false;

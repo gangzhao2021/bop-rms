@@ -53,6 +53,10 @@ export async function startPilotBusinessWorker({
           directory,
           "business-contact-retention",
         ),
+        webhookEvidenceRetention: createPilotWorkloadHealthObserver(
+          directory,
+          "business-webhook-evidence-retention",
+        ),
         pickupCapacitySchedule: createPilotWorkloadHealthObserver(
           directory,
           "business-pickup-capacity-schedule",

@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import process from "node:process";
 import { createOpenPaymentAttemptResolution } from "../../apps/api/dist/open-payment-attempt-resolution.js";
 import {
   createPaymentTerminalService,
@@ -10,7 +9,7 @@ import {
   createPostgresPaymentTerminalStore,
   parsePaymentInstant,
 } from "../../packages/rms/payment/src/index.ts";
-import { isPilotRuntime } from "./pilot-environment.mjs";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 
 /**
  * WP-2423 abandoned payment: the Provider idempotency key of an attempt's create, derived from the
@@ -34,11 +33,14 @@ export function createInternalOpenPaymentResolution(
   resources,
   { createSimulatedProvider, providerAccountReference },
 ) {
-  if (process.env.NODE_ENV !== "development" || !isPilotRuntime())
-    throw new Error("SIMULATION_ONLY");
+  if (!isPilotRuntime()) throw new Error("SIMULATION_ONLY");
   const { scope, transactions, now, credentials } = resources,
     reference = credentials.reference;
-  const terminalScope = { ...scope, providerAccountReference, environment: "Test" };
+  const terminalScope = {
+    ...scope,
+    providerAccountReference,
+    environment: pilotProviderEnvironment(),
+  };
   const history = createPostgresPaymentIntentCreationStore(transactions, scope, {
     now,
     generateObservationReference: reference,
@@ -59,7 +61,7 @@ export function createInternalOpenPaymentResolution(
               context: {
                 ...scope,
                 provider: "Stripe",
-                environment: "Test",
+                environment: pilotProviderEnvironment(),
                 paymentAttemptReference: observation.paymentAttemptReference,
                 operationReference: observation.causationReference,
               },
@@ -153,7 +155,7 @@ export function createInternalOpenPaymentResolution(
               providerEventReference: null,
               providerAccountReference,
               providerIntentReference: snapshot.providerIntentReference,
-              environment: "Test",
+              environment: pilotProviderEnvironment(),
               paymentIntentReference: record.intent.paymentIntentReference,
               paymentAttemptReference: record.attempt.paymentAttemptReference,
               ...scope,

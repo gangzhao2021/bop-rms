@@ -4,14 +4,14 @@ import {
   createPostgresCardMachinePaymentStore,
   createPostgresPaymentStatusStore,
 } from "../../packages/rms/payment/src/index.ts";
-import { isPilotRuntime } from "./pilot-environment.mjs";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 export function createInternalPaymentStatus(resources, { providerAccountReference }) {
   if (!isPilotRuntime()) throw new Error("INTERNAL_PAYMENT_STATUS_ONLY");
   const active = () => resources.now() < resources.publicProfile.binding.validUntil;
   const scope = {
     ...resources.scope,
     providerAccountReference: providerAccountReference,
-    environment: "Test",
+    environment: pilotProviderEnvironment(),
   };
   const projections = createPostgresPaymentStatusStore({
     scope,

@@ -63,6 +63,7 @@ test("business worker claims its Store and its Brand, and publishes undeployed-c
       createInternalPaidWithoutFulfillableInventoryWorkload: workload,
       createInternalPickupPaymentExpiryWorkload: workload,
       createInternalContactRetentionWorkload: workload,
+      createInternalWebhookEvidenceRetentionWorkload: workload,
       createInternalPickupCapacityScheduleWorkload: workload,
     },
   );

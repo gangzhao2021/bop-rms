@@ -9,7 +9,7 @@ import {
   supervisedCycleFailures,
 } from "../../apps/worker/dist/outbox-workload.js";
 import { parseOrderingReference } from "../../packages/rms/ordering/src/index.ts";
-import { isPilotRuntime } from "./pilot-environment.mjs";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 import { createInternalOpenPaymentResolution } from "./pilot-open-payment-resolution.mjs";
 const unavailable = () => {
   throw new Error("INTERNAL_PICKUP_PAYMENT_EXPIRY_UNAVAILABLE");
@@ -30,7 +30,7 @@ export function createInternalPickupPaymentExpiry(
     brandReference: String(parseOrderingReference(resources.scope.brandReference)),
     storeReference: String(parseOrderingReference(resources.scope.storeReference)),
     providerAccountReference: String(parseOrderingReference(providerAccountReference)),
-    environment: "Test",
+    environment: pilotProviderEnvironment(),
   };
   if (
     binding.brandReference !== scope.brandReference ||

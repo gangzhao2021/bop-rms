@@ -13,7 +13,11 @@ import {
   createOrderPaymentOutcomeConsumerService,
   createPostgresOrderPaymentOutcomeStore,
 } from "../../packages/rms/ordering/src/index.ts";
-import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
+import {
+  isPilotRuntime,
+  matchesPilotEnvironment,
+  pilotProviderEnvironment,
+} from "./pilot-environment.mjs";
 export async function createInternalPaidOutcome(
   resources,
   { persistentWaiting = false } = {},
@@ -62,7 +66,7 @@ export async function createInternalPaidOutcome(
     scope: {
       ...resources.scope,
       providerAccountReference: providerAccountReference,
-      environment: "Test",
+      environment: pilotProviderEnvironment(),
     },
     now: resources.now,
     authorize: async (_tx, event) =>
@@ -81,7 +85,7 @@ export async function createInternalPaidOutcome(
     scope: {
       ...resources.scope,
       providerAccountReference: providerAccountReference,
-      environment: "Test",
+      environment: pilotProviderEnvironment(),
     },
     tenantReference: scope.tenantReference,
     quoteVersion: 2,

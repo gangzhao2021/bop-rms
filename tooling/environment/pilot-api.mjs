@@ -2,6 +2,7 @@ import { CustomerStoreClosedError } from "../../apps/api/dist/customer-store-ope
 import { createLocalCustomerRuntime } from "../../apps/api/dist/local-customer-runtime.js";
 import { HealthReadinessController } from "../../apps/api/dist/health-readiness.js";
 import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
+import { pilotProviderEnvironment } from "./pilot-environment.mjs";
 /** Internal test composition only. All unconfigured business routes remain unavailable. */
 export async function createRuntime(
   { port },
@@ -112,7 +113,7 @@ export async function createRuntime(
             ...resources.scope,
           },
           providerAccountReference,
-          environment: "Test",
+          environment: pilotProviderEnvironment(),
         },
         transactions: resources.transactions,
         binding: (tx) => configuredEntry.binding({ run: (work) => work(tx) }),
@@ -126,13 +127,17 @@ export async function createRuntime(
         },
         transactions: resources.transactions,
         binding: (tx) => configuredEntry.binding({ run: (work) => work(tx) }),
-        paymentScope: { ...resources.scope, providerAccountReference, environment: "Test" },
+        paymentScope: {
+          ...resources.scope,
+          providerAccountReference,
+          environment: pilotProviderEnvironment(),
+        },
         // WP-2423 Q16: the order page offers "Remove my contact details" and the privacy notice.
         contactPrivacy: true,
         itemRefundScope: {
           tenantReference: resources.publicProfile.binding.tenantReference,
           providerAccountReference,
-          environment: "Test",
+          environment: pilotProviderEnvironment(),
         },
       },
       checkoutSessions: diningCheckout.checkoutSessions,

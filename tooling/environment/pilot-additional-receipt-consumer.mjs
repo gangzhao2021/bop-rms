@@ -2,7 +2,7 @@ import { createOrderCapturedPaymentSource } from "../../apps/api/dist/order-capt
 import { createPostgresOrderBatchIdentitySource } from "../../packages/rms/ordering/src/index.ts";
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
 import { parsePaymentSucceededEnvelope } from "../../packages/rms/payment/src/index.ts";
-import { isPilotRuntime } from "./pilot-environment.mjs";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 export function createInternalAdditionalReceiptConsumer(
   resources,
   { refreshObservations, createReceipt, providerAccountReference },
@@ -29,7 +29,7 @@ export function createInternalAdditionalReceiptConsumer(
         scope: {
           ...resources.scope,
           providerAccountReference: providerAccountReference,
-          environment: "Test",
+          environment: pilotProviderEnvironment(),
         },
         now: resources.now,
         authorize: async (_tx, value) => authorize(value),

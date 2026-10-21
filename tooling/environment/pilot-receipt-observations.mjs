@@ -1,4 +1,3 @@
-import process from "node:process";
 import {
   createPostgresReceiptOrderSource,
   listStoreUnpaidBatchCancellations,
@@ -9,6 +8,7 @@ import {
   parsePaymentSucceededEnvelope,
 } from "../../packages/rms/payment/src/index.ts";
 import { createOrderCapturedPaymentSource } from "../../apps/api/dist/order-captured-payment-source.js";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 /** DEMO observation refresh only. No receipt/capture mutation; Order locks end before retrieval. */
 export async function refreshInternalReceiptObservations(
   resources,
@@ -36,14 +36,14 @@ export async function refreshInternalOrderReceiptObservations(
   { providerAccountReference, createSimulatedProvider },
 ) {
   const allowed = async () =>
-    process.env.NODE_ENV === "development" &&
+    isPilotRuntime() &&
     resources.now() < resources.publicProfile.binding.validUntil &&
     (await authorize());
   if (!(await allowed())) throw new Error("INTERNAL_RECEIPT_SCOPE_DENIED");
   const scope = {
     ...resources.scope,
     providerAccountReference: providerAccountReference,
-    environment: "Test",
+    environment: pilotProviderEnvironment(),
   };
   const plans = await resources.transactions.run(async (transaction) => {
     const order = await createPostgresReceiptOrderSource({

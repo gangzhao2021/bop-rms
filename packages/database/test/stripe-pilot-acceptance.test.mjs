@@ -17,6 +17,7 @@ import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render
 import { parsePilotPaymentConfig } from "../../../tooling/environment/pilot-payment-config.mjs";
 import { createInternalOpenPaymentResolution } from "../../../tooling/environment/pilot-open-payment-resolution.mjs";
 import { startStripeFake } from "../../../tooling/environment/pilot-stripe-fake.mjs";
+import { createWebhookEvidenceRetentionDispatcher } from "../../../tooling/environment/pilot-webhook-evidence-retention.mjs";
 import { createPilotStripeProvider } from "../../../tooling/environment/pilot-stripe-provider.mjs";
 import {
   createPilotStripeWebhookReceiver,
@@ -59,7 +60,7 @@ it("records Stripe payments from signed webhooks, guest checks and lost create a
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("BOP_PILOT_ENVIRONMENT", undefined);
     const directory = mkdtempSync(join(tmpdir(), "bop-stripe-acceptance-"));
-    let fake, server;
+    let fake, server, liveFake, liveServer;
     try {
       for (const name of [role, worker])
         await admin.query(
@@ -421,18 +422,176 @@ it("records Stripe payments from signed webhooks, guest checks and lost create a
         { outcome: "Failed", reason: "Cancelled", source: "ProviderRetrieval", webhook: false },
       ]);
 
-      // Receipts are append-only and the API role cannot remove Restricted raw evidence.
+      // ── 5. Retention: receipts are append-only; Restricted raw evidence goes after 30 days.
       const kept = await counts();
       await transactions.run((tx) => tx.query("DELETE FROM rms_payment.provider_webhook_record"));
-      await assert.rejects(
-        transactions.run((tx) => tx.query("DELETE FROM rms_payment.provider_webhook_raw_evidence")),
-        /permission denied/u,
+      // The api role's delete grant cannot remove evidence before it expires (database rule).
+      await transactions.run((tx) =>
+        tx.query("DELETE FROM rms_payment.provider_webhook_raw_evidence"),
       );
       assert.deepEqual(await counts(), kept);
+      const retention = createWebhookEvidenceRetentionDispatcher({ resources, batchSize: 1 });
+      assert.equal(await retention.runOnce(), 0, "nothing is due within 30 days");
+      // Test-only: the owner ages two receipts past their 30-day retention (rules skipped).
+      const aged = (
+        await one(
+          "SELECT webhook_receipt_id::text AS id FROM rms_payment.provider_webhook_raw_evidence ORDER BY webhook_receipt_id LIMIT 2",
+        )
+      ).map((row) => row.id);
+      const keptDigests = await one(
+        "SELECT webhook_receipt_id::text AS id,evidence_digest FROM rms_payment.provider_webhook_record WHERE webhook_receipt_id=ANY($1::uuid[]) ORDER BY 1",
+        [aged],
+      );
+      await admin.query("SET session_replication_role = replica");
+      try {
+        const back = "-interval '31 days'";
+        await admin.query(
+          `UPDATE rms_payment.provider_webhook_record SET provider_created_at=provider_created_at${back},
+             received_at=received_at${back},signature_timestamp=signature_timestamp${back},
+             accepted_at=accepted_at${back},raw_evidence_expires_at=raw_evidence_expires_at${back},
+             dedupe_expires_at=dedupe_expires_at${back} WHERE webhook_receipt_id=ANY($1::uuid[])`,
+          [aged],
+        );
+        await admin.query(
+          `UPDATE rms_payment.provider_webhook_raw_evidence SET expires_at=expires_at${back}
+             WHERE webhook_receipt_id=ANY($1::uuid[])`,
+          [aged],
+        );
+      } finally {
+        await admin.query("SET session_replication_role = origin");
+      }
+      // A later day's sweep (a fresh dispatcher) deletes them in bounded batches as the api role.
+      const sweep = createWebhookEvidenceRetentionDispatcher({ resources, batchSize: 1 });
+      assert.equal(await sweep.runOnce(), 1, "a full batch: more are due");
+      assert.equal(await sweep.runOnce(), 1);
+      assert.equal(await sweep.runOnce(), 0, "the day's sweep is done");
+      assert.deepEqual(await counts(), { ...kept, raw: kept.raw - 2 });
+      // Only the bytes went: the receipts with their evidence digests and completions remain.
+      assert.deepEqual(
+        await one(
+          "SELECT webhook_receipt_id::text AS id,evidence_digest FROM rms_payment.provider_webhook_record WHERE webhook_receipt_id=ANY($1::uuid[]) ORDER BY 1",
+          [aged],
+        ),
+        keptDigests,
+      );
+      assert.deepEqual(
+        await one(
+          "SELECT count(*)::int AS n FROM rms_payment.provider_webhook_raw_evidence WHERE webhook_receipt_id=ANY($1::uuid[])",
+          [aged],
+        ),
+        [{ n: 0 }],
+      );
+      // A redelivery of an aged event is still deduplicated by its receipt (90 days).
+      const beforeRedelivery = await counts();
+      assert.equal(await fake.deliver(succeeded, { timestamp: realSeconds() }), 200);
+      assert.deepEqual(await counts(), beforeRedelivery);
+
+      // ── 6. Live mode (a Pilot Store process): live keys, livemode events, Live payment facts.
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("BOP_PILOT_ENVIRONMENT", "Pilot");
+      liveFake = await startStripeFake({
+        clock: () => stripeNow,
+        secretKey: "sk_live_" + "FAKE".repeat(6),
+        livemode: true,
+      });
+      secretFile("stripe-live-secret-key", liveFake.secretKey);
+      const { stripe: liveStripe } = parsePilotPaymentConfig(
+        {
+          schemaVersion: 1,
+          provider: "stripe",
+          stripe: {
+            mode: "live",
+            apiVersion: liveFake.apiVersion,
+            publishableKey: "pk_live_SYNTHETIC0001",
+            secretKeyFile: "stripe-live-secret-key",
+            webhookSecretFile: "stripe-webhook-secret",
+            returnUrl: "https://pay-return.example.ca/return",
+            webhookUrl: "https://order.example.ca" + paymentProviderWebhookRoute,
+          },
+        },
+        { environment: "Pilot" },
+      );
+      assert.equal(liveStripe.environment, "Live");
+      // The stand-in replaces api.stripe.com only inside this test (no testApiBaseUrl in Pilot).
+      const liveProvider = createPilotStripeProvider({
+        stripe: liveStripe,
+        secretKey: liveFake.secretKey,
+        scope: { brandReference: brand, storeReference: store },
+        fetch: (input, init) =>
+          globalThis.fetch(
+            liveFake.url + String(input).slice("https://api.stripe.com".length),
+            init,
+          ),
+      });
+      const live = refsOf(5);
+      await admin.query("SET session_replication_role = replica");
+      try {
+        await seedJourneyPayment(admin, {
+          scope: { brandReference: brand, storeReference: store },
+          providerAccountReference: account,
+          round: round(5),
+          refs: live,
+          outcome: "Open",
+          requestedAt,
+          occurredAt: new Date(Date.parse(requestedAt) + 1000).toISOString(),
+          totalMinor: 1689,
+          idempotencyDigest: digest("create-intent:" + live.attempt),
+          providerEnvironment: "Live",
+        });
+      } finally {
+        await admin.query("SET session_replication_role = origin");
+      }
+      liveFake.seedIntent({
+        id: live.providerIntent,
+        amount: 1689,
+        metadata: {
+          bop_payment_operation: live.paymentOperation,
+          bop_payment_attempt: live.attempt,
+        },
+      });
+      const liveRejected = [];
+      const liveReceiver = createPilotStripeWebhookReceiver(resources, {
+        provider: liveProvider,
+        directory,
+        stripe: liveStripe,
+        providerAccountReference: account,
+        onRejected: (code) => liveRejected.push(code),
+      });
+      liveServer = createServer(
+        createApp({
+          paymentProviderWebhook: new PaymentProviderWebhookHandler({ port: liveReceiver }),
+        }),
+      );
+      await new Promise((resolve) => liveServer.listen(0, "127.0.0.1", resolve));
+      const liveUrl = "http://127.0.0.1:" + liveServer.address().port + paymentProviderWebhookRoute;
+      liveFake.setWebhookTarget(liveUrl);
+      // A test-mode event, correctly signed, never reaches a live installation's records.
+      fake.setWebhookTarget(liveUrl);
+      const beforeLive = await counts();
+      assert.equal(await fake.deliver(succeeded, { timestamp: realSeconds() }), 400);
+      assert.deepEqual(await counts(), beforeLive);
+      assert.equal(liveRejected.length, 1);
+      // The live payment is recorded from its livemode event as a Live terminal fact.
+      stripeNow = base - minutes(3);
+      const liveSucceeded = liveFake.confirm(live.providerIntent, "succeeded");
+      assert.equal(liveSucceeded.livemode, true);
+      assert.equal(await liveFake.deliver(liveSucceeded, { timestamp: realSeconds() }), 200);
+      assert.deepEqual(await terminal(live), [
+        { outcome: "Succeeded", reason: null, source: "VerifiedWebhook", webhook: true },
+      ]);
+      assert.deepEqual(
+        await one(
+          "SELECT f.provider_environment AS fact, r.provider_environment AS receipt FROM rms_payment.payment_terminal_fact f JOIN rms_payment.provider_webhook_record r ON r.webhook_receipt_id=f.webhook_receipt_id WHERE f.payment_intent_id=$1",
+          [live.paymentIntent],
+        ),
+        [{ fact: "Live", receipt: "Live" }],
+      );
     } finally {
       vi.unstubAllEnvs();
       await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
+      await new Promise((resolve) => (liveServer ? liveServer.close(resolve) : resolve()));
       await fake?.close();
+      await liveFake?.close();
       rmSync(directory, { recursive: true, force: true });
       for (const name of [role, worker]) {
         await admin.query("DROP OWNED BY " + name);

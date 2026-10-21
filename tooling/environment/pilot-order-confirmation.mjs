@@ -4,7 +4,7 @@ import {
   createPostgresOrderPaymentOutcomeStore,
 } from "../../packages/rms/ordering/src/index.ts";
 import { createPostgresCapturedBatchPaymentSource } from "../../packages/rms/payment/src/index.ts";
-import { isPilotRuntime } from "./pilot-environment.mjs";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 export function createInternalOrderConfirmation(resources, { providerAccountReference }) {
   const scope = resources.scope,
     active = () => isPilotRuntime() && resources.now() < resources.publicProfile.binding.validUntil;
@@ -17,7 +17,11 @@ export function createInternalOrderConfirmation(resources, { providerAccountRefe
     }).loadByOrder({ transaction, orderReference });
     if (!lookup) throw new Error("INTERNAL_CONFIRMATION_UNAVAILABLE");
     const captured = await createPostgresCapturedBatchPaymentSource({
-      scope: { ...scope, providerAccountReference: providerAccountReference, environment: "Test" },
+      scope: {
+        ...scope,
+        providerAccountReference: providerAccountReference,
+        environment: pilotProviderEnvironment(),
+      },
       authorize: async () => active(),
     }).load(transaction, {
       orderReference,

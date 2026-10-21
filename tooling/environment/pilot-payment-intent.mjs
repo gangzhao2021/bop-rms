@@ -19,6 +19,7 @@ import {
   paymentProviderAdmissionKillSwitchKey,
 } from "../../packages/rms/payment/src/index.ts";
 import { createInternalPaymentPreparation } from "./pilot-payment-preparation.mjs";
+import { pilotProviderEnvironment } from "./pilot-environment.mjs";
 function frozen(value) {
   for (const child of Object.values(value)) if (child && typeof child === "object") frozen(child);
   return Object.freeze(value);
@@ -137,7 +138,7 @@ export async function createInternalPaymentIntent(
       history: store,
       nextPreparationReference: reference,
       payment: (context) => ({
-        providerEnvironment: "Test",
+        providerEnvironment: pilotProviderEnvironment(),
         clock: { now },
         repository: store,
         provider: simulator.adapter,

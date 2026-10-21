@@ -5,7 +5,6 @@ import { createInternalCompensationProjectionRecovery } from "./pilot-compensati
 import { appendAuditRecordInTransaction } from "../../packages/bop/audit/src/index.ts";
 import { createPaymentCompensationDispositionEvidence } from "../../apps/api/dist/payment-compensation-disposition-evidence.js";
 import { createInternalCompensationProjection } from "./pilot-compensation-projection.mjs";
-import process from "node:process";
 import console from "node:console";
 import { createPaymentCompensationComposition } from "../../apps/api/dist/payment-compensation-composition.js";
 import {
@@ -16,6 +15,7 @@ import {
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
 import { createInternalCompensationCandidates } from "./pilot-compensation-candidates.mjs";
 import { createInternalCompensationIdentity } from "./pilot-compensation-identity.mjs";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 /** Local OnlineCard worker binding. Named-actor writes belong to the merchant command. */
 export function createInternalCompensationService({
   resources,
@@ -29,7 +29,7 @@ export function createInternalCompensationService({
   const reportedFailures = new Set();
   const binding = resources.publicProfile.binding;
   if (
-    process.env.NODE_ENV !== "development" ||
+    !isPilotRuntime() ||
     !Array.isArray(additionalRefundOwners) ||
     additionalRefundOwners.length !== 0 ||
     typeof createSimulatedProvider !== "function"
@@ -39,7 +39,7 @@ export function createInternalCompensationService({
     brandReference: String(parsePaymentReference(resources.scope.brandReference)),
     storeReference: String(parsePaymentReference(resources.scope.storeReference)),
     providerAccountReference: String(parsePaymentReference(providerAccountReference)),
-    environment: "Test",
+    environment: pilotProviderEnvironment(),
   });
   const tenantReference = String(parsePaymentReference(binding.tenantReference)),
     validUntil = parseCanonicalInstant(binding.validUntil);
@@ -48,8 +48,7 @@ export function createInternalCompensationService({
     binding.storeReference !== scope.storeReference
   )
     return deny();
-  const active = () =>
-    process.env.NODE_ENV === "development" && parseCanonicalInstant(resources.now()) < validUntil;
+  const active = () => isPilotRuntime() && parseCanonicalInstant(resources.now()) < validUntil;
   if (!active()) return deny();
   const candidates = createInternalCompensationCandidates(resources, {
     includeStaffCancellations: true,
@@ -80,7 +79,7 @@ export function createInternalCompensationService({
       async (request) => {
         if (
           !active() ||
-          request.context.environment !== "Test" ||
+          request.context.environment !== pilotProviderEnvironment() ||
           request.context.brandReference !== scope.brandReference ||
           request.context.storeReference !== scope.storeReference
         )

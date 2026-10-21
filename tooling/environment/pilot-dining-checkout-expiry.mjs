@@ -3,7 +3,7 @@ import {
   createOutboxWorkload,
   supervisedCycleFailures,
 } from "../../apps/worker/dist/outbox-workload.js";
-import { isPilotRuntime } from "./pilot-environment.mjs";
+import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 export function createInternalDiningCheckoutExpiryWorkload(
   resources,
   onSnapshot,
@@ -16,7 +16,7 @@ export function createInternalDiningCheckoutExpiryWorkload(
       ...resources.scope,
       tenantReference: resources.publicProfile.binding.tenantReference,
       providerAccountReference: providerAccountReference,
-      environment: "Test",
+      environment: pilotProviderEnvironment(),
     },
     transactions: resources.transactions,
     authorize: async () => allowed(),

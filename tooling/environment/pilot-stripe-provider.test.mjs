@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Buffer } from "node:buffer";
@@ -24,7 +24,11 @@ import {
   registerStripePaymentMethodDomain,
   runStripeReadinessCheck,
 } from "./pilot-stripe-operations.mjs";
-import { assertPilotReady, remainingPilotCapabilityGaps } from "./pilot-environment.mjs";
+import {
+  assertPilotReady,
+  pilotProviderEnvironment,
+  remainingPilotCapabilityGaps,
+} from "./pilot-environment.mjs";
 
 const id = (n) => "0190fa71-0000-7000-8000-" + String(n).padStart(12, "0");
 const scope = { brandReference: id(1), storeReference: id(2) };
@@ -123,7 +127,7 @@ async function stripeProvider(f) {
   return provider;
 }
 
-test("payment.json: simulator by default in InternalTest only, Stripe test mode, Live refused", () => {
+test("payment.json: simulator and Stripe test mode in InternalTest only, Stripe live mode in Pilot only", () => {
   expect(parsePilotPaymentConfig(null, { environment: "InternalTest" })).toEqual({
     provider: "simulated",
   });
@@ -140,8 +144,23 @@ test("payment.json: simulator by default in InternalTest only, Stripe test mode,
       return error.reason;
     }
   };
-  expect(reason(stripeJson({ mode: "live" }))).toBe("stripe.mode.live-not-available");
+  const live = (extra = {}) =>
+    stripeJson({ mode: "live", publishableKey: "pk_live_SYNTHETIC0001", ...extra });
+  expect(parsePilotPaymentConfig(live(), { environment: "Pilot" }).stripe).toMatchObject({
+    mode: "live",
+    environment: "Live",
+    publishableKey: "pk_live_SYNTHETIC0001",
+  });
+  // Live keys never serve InternalTest; test keys never serve a Pilot Store; keys match the mode.
+  expect(reason(live())).toBe("stripe.mode.live-pilot-only");
+  expect(reason(stripeJson(), "Pilot")).toBe("stripe.mode.test-internal-test-only");
+  expect(reason(stripeJson({ mode: "sandbox" }))).toBe("stripe.mode");
   expect(reason(stripeJson({ publishableKey: "pk_live_X1" }))).toBe("stripe.publishableKey");
+  expect(reason(stripeJson({ walletsEnabled: true }))).toBe("stripe.walletsEnabled.domain-missing");
+  expect(
+    reason(stripeJson({ paymentMethodDomain: "order.example.ca", walletsEnabled: "yes" })),
+  ).toBe("stripe.walletsEnabled");
+  expect(reason(live({ publishableKey: "pk_test_X1" }), "Pilot")).toBe("stripe.publishableKey");
   expect(reason(stripeJson({ secretKey: "sk_test_inline" }))).toBe("stripe");
   expect(reason(stripeJson({ returnUrl: "https://order.example.ca/return" }))).toBe(
     "stripe.returnUrl.same-origin",
@@ -149,7 +168,7 @@ test("payment.json: simulator by default in InternalTest only, Stripe test mode,
   expect(reason(stripeJson({ webhookUrl: "https://order.example.ca/hook" }))).toBe(
     "stripe.webhookUrl",
   );
-  expect(reason(stripeJson({ testApiBaseUrl: "http://127.0.0.1:9" }), "Pilot")).toBe(
+  expect(reason(live({ testApiBaseUrl: "http://127.0.0.1:9" }), "Pilot")).toBe(
     "stripe.testApiBaseUrl.internal-test-only",
   );
   expect(reason(stripeJson({ testApiBaseUrl: "http://10.0.0.1:9" }))).toBe("stripe.testApiBaseUrl");
@@ -172,8 +191,26 @@ test("payment.json: simulator by default in InternalTest only, Stripe test mode,
 test("the PaymentProvider gap clears only for configured Stripe with its secret files present", async () => {
   const f = await fixture();
   expect(await pilotPaymentProviderReady(f.directory, { environment: "InternalTest" })).toBe(true);
-  // A Pilot Store needs Live mode, which the configuration does not accept yet.
+  // A Pilot Store needs live mode: test keys never clear its gap.
   expect(await pilotPaymentProviderReady(f.directory, { environment: "Pilot" })).toBe(false);
+  // A live configuration with live secret files clears it in Pilot only.
+  const liveDirectory = mkdtempSync(join(tmpdir(), "bop-stripe-live-"));
+  cleanups.push(() => rmSync(liveDirectory, { recursive: true, force: true }));
+  const writeLive = (name, value) =>
+    writeFileSync(join(liveDirectory, name), value, { mode: 0o600 });
+  writeLive(
+    "payment.json",
+    JSON.stringify(stripeJson({ mode: "live", publishableKey: "pk_live_SYNTHETIC0001" })),
+  );
+  writeLive("stripe-secret-key", "sk_test_SYNTHETIC0001\n");
+  writeLive("stripe-webhook-secret", f.fake.webhookSecret);
+  // A test-mode secret key in a live configuration is refused.
+  expect(await pilotPaymentProviderReady(liveDirectory, { environment: "Pilot" })).toBe(false);
+  writeLive("stripe-secret-key", "rk_live_SYNTHETIC0001\n");
+  expect(await pilotPaymentProviderReady(liveDirectory, { environment: "Pilot" })).toBe(true);
+  expect(await pilotPaymentProviderReady(liveDirectory, { environment: "InternalTest" })).toBe(
+    false,
+  );
   rmSync(join(f.directory, "stripe-webhook-secret"));
   expect(await pilotPaymentProviderReady(f.directory, { environment: "InternalTest" })).toBe(false);
   const simulated = await fixture({ paymentJson: null });
@@ -468,6 +505,18 @@ test("operator tool: readiness report and dry-run-by-default domain registration
   });
   report = await runStripeReadinessCheck(options);
   expect(report.ok).toBe(true);
+  // Wallets stay off until the operator turns them on for the verified domain.
+  expect(status("wallets")).toBe("skipped");
+  expect((await stripeProvider(f)).walletDomain).toBeNull();
+  const configured = JSON.parse(readFileSync(join(f.directory, "payment.json"), "utf8"));
+  writeFileSync(
+    join(f.directory, "payment.json"),
+    JSON.stringify({ ...configured, stripe: { ...configured.stripe, walletsEnabled: true } }),
+    { mode: 0o600 },
+  );
+  report = await runStripeReadinessCheck(options);
+  expect(status("wallets")).toBe("ok");
+  expect((await stripeProvider(f)).walletDomain).toBe("order.example.ca");
   expect(parseStripeOperationsArguments(["check", ".local/pilot-v16"])).toEqual({
     command: "check",
     directory: ".local/pilot-v16",
@@ -480,6 +529,8 @@ test("operator tool: readiness report and dry-run-by-default domain registration
 test("the binding refuses requests outside its Store and has no capture operation", async () => {
   const provider = createPilotStripeProvider({
     stripe: {
+      mode: "test",
+      environment: "Test",
       apiVersion: "2025-01-27.acacia",
       connectedAccount: null,
       testApiBaseUrl: null,
@@ -502,4 +553,100 @@ test("the binding refuses requests outside its Store and has no capture operatio
       context: { ...context(1), environment: "Live" },
     }),
   ).rejects.toThrow("PILOT_STRIPE_SCOPE_DENIED");
+});
+
+test("live mode: a Pilot Store's binding carries the Live environment end to end", async () => {
+  const fake = await startStripeFake({ secretKey: "sk_live_" + "FAKE".repeat(6), livemode: true });
+  cleanups.push(() => fake.close());
+  const viaFake = (input, init) =>
+    globalThis.fetch(fake.url + String(input).slice("https://api.stripe.com".length), init);
+  const liveStripe = {
+    mode: "live",
+    environment: "Live",
+    apiVersion: "2025-01-27.acacia",
+    connectedAccount: null,
+    testApiBaseUrl: null,
+    publishableKey: "pk_live_SYNTHETIC0001",
+    returnUrl: "https://r.example/x",
+    captureLookbackDays: 7,
+  };
+  const provider = createPilotStripeProvider({
+    stripe: liveStripe,
+    secretKey: fake.secretKey,
+    scope,
+    fetch: viaFake,
+  });
+  expect(provider).toMatchObject({ providerKind: "Stripe", environment: "Live" });
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("BOP_PILOT_ENVIRONMENT", "Pilot");
+  expect(pilotProviderEnvironment()).toBe("Live");
+  expect(isStripeProvider(provider)).toBe(true);
+  const liveContext = { ...context(1), environment: "Live" };
+  const created = await provider.adapter.createIntent({
+    operation: "CreateIntent",
+    purpose: "CreatePaymentIntent",
+    context: liveContext,
+    paymentMethod: "OnlineCard",
+    captureMode: "Automatic",
+    amount: { amountMinor: 1250n, currencyCode: "CAD" },
+    idempotencyKey: "create-intent:" + id(101),
+  });
+  expect(created).toMatchObject({ kind: "Snapshot", status: "RequiresCustomerAction" });
+  expect(created.context.environment).toBe("Live");
+  // A test-mode request never reaches the live binding.
+  await expect(
+    provider.adapter.retrieveIntent({ ...retrieval(1, created.providerIntentReference) }),
+  ).rejects.toThrow("PILOT_STRIPE_SCOPE_DENIED");
+  // A live binding is not this process's Provider in InternalTest, nor a test binding in Pilot.
+  vi.stubEnv("NODE_ENV", "development");
+  vi.stubEnv("BOP_PILOT_ENVIRONMENT", undefined);
+  expect(pilotProviderEnvironment()).toBe("Test");
+  expect(isPilotPaymentProvider(provider)).toBe(false);
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("BOP_PILOT_ENVIRONMENT", "Pilot");
+  expect(isPilotPaymentProvider({ simulation: true })).toBe(false);
+  // A live key against a Stripe answer that is not live mode is never taken as an outcome.
+  const testModeFake = await startStripeFake({ secretKey: "sk_live_" + "FAKE".repeat(6) });
+  cleanups.push(() => testModeFake.close());
+  const mismatched = createPilotStripeProvider({
+    stripe: liveStripe,
+    secretKey: testModeFake.secretKey,
+    scope,
+    fetch: (input, init) =>
+      globalThis.fetch(
+        testModeFake.url + String(input).slice("https://api.stripe.com".length),
+        init,
+      ),
+  });
+  const refused = await mismatched.adapter.createIntent({
+    operation: "CreateIntent",
+    purpose: "CreatePaymentIntent",
+    context: { ...context(2), environment: "Live" },
+    paymentMethod: "OnlineCard",
+    captureMode: "Automatic",
+    amount: { amountMinor: 1250n, currencyCode: "CAD" },
+    idempotencyKey: "create-intent:" + id(102),
+  });
+  expect(refused.kind).not.toBe("Snapshot");
+  // The configured mode must be this process's Provider environment.
+  vi.stubEnv("NODE_ENV", "development");
+  vi.stubEnv("BOP_PILOT_ENVIRONMENT", undefined);
+  await expect(
+    createPilotPaymentProvider(
+      {},
+      {
+        directory: "/nonexistent",
+        loadProfile: async () => ({ database: "local_test", binding: scope }),
+        expectedDatabaseName: "local_test",
+        loadConfig: async () => ({ provider: "stripe", stripe: liveStripe }),
+      },
+    ),
+  ).rejects.toThrow("PILOT_STRIPE_MODE_ENVIRONMENT_MISMATCH");
+  expect(() =>
+    createPilotStripeProvider({
+      stripe: { ...liveStripe, environment: "Sandbox" },
+      secretKey: fake.secretKey,
+      scope,
+    }),
+  ).toThrow("PILOT_STRIPE_MODE_INVALID");
 });

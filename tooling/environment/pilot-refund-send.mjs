@@ -1,6 +1,7 @@
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
 import { createMerchantOrdinaryRefundSendCommand } from "../../apps/api/dist/merchant-ordinary-refund-send-command.js";
 import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
+import { pilotProviderEnvironment } from "./pilot-environment.mjs";
 /** Internal authenticated send only; construction never calls the Provider. */
 export function createInternalRefundSend({
   resources,
@@ -47,13 +48,16 @@ export function createInternalRefundSend({
       const configuration = async (tx) => {
         await current(tx, resources.now());
         const c = await resolveRefundConfiguration(tx, { ...scope, actorReference });
-        if (c.providerAccountReference !== providerAccountReference || c.environment !== "Test")
+        if (
+          c.providerAccountReference !== providerAccountReference ||
+          c.environment !== pilotProviderEnvironment()
+        )
           deny();
         return c;
       };
       return {
         providerAccountReference: providerAccountReference,
-        environment: "Test",
+        environment: pilotProviderEnvironment(),
         workforce: {
           // WP-2423 Q5: the other party of an escalated refund is resolved for that person through
           // owners; the session's own identity is never lent to someone else.
