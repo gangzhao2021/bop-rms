@@ -9,12 +9,15 @@ import { FULL_SIGN_IN_REQUIRED_TEXT, needsFullSignIn } from "./full-sign-in.js";
  */
 const client = createOrdinaryRefundClient();
 
+const DENIED_TEXT =
+  "Payments and refunds for this order are handled by a manager. Ask a manager if the guest needs a refund.";
+
 /** What staff are told when a payment or refund read or command fails. */
 export const refundErrorText = (error: unknown) =>
   needsFullSignIn(error)
     ? FULL_SIGN_IN_REQUIRED_TEXT
     : error instanceof OrdinaryRefundClientError && error.code === "Denied"
-      ? "Your current permissions do not allow this refund workflow."
+      ? DENIED_TEXT
       : error instanceof OrdinaryRefundClientError && error.code === "Changed"
         ? "This order changed while it was loading. Refresh to see the latest."
         : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
@@ -37,7 +40,9 @@ export function OrderPaymentLinks({
   );
   const [links, setLinks] = useState<readonly string[]>([]),
     [message, setMessage] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    // v15 751dd768 ②: a refusal is final for this sign-in, so the button gives way to who to ask.
+    [denied, setDenied] = useState(false);
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
   const load = async () => {
@@ -60,7 +65,10 @@ export function OrderPaymentLinks({
         if (!ids.length) setMessage("This order has no paid payment yet.");
       }
     } catch (error) {
-      if (!controller.signal.aborted) setMessage(refundErrorText(error));
+      if (!controller.signal.aborted) {
+        setMessage(refundErrorText(error));
+        setDenied(error instanceof OrdinaryRefundClientError && error.code === "Denied");
+      }
     } finally {
       pending.current = null;
       if (!controller.signal.aborted) setBusy(false);
@@ -68,9 +76,11 @@ export function OrderPaymentLinks({
   };
   return (
     <section aria-label="Order payments">
-      <button disabled={busy} onClick={() => void load()}>
-        Payments and refunds
-      </button>
+      {denied ? null : (
+        <button disabled={busy} onClick={() => void load()}>
+          Payments and refunds
+        </button>
+      )}
       <p role="status">{message}</p>
       {links.map((reference, index) => (
         <p key={reference}>

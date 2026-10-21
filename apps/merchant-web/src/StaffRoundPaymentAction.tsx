@@ -16,6 +16,10 @@ const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CA
  *
  * The Orders list (polled by every tablet) does not rebuild each unpaid round's amount; when it is
  * not given, the amount is read for this one order when staff open the form.
+ *
+ * WP-2423 (v15 751dd768 ①): a counter pickup order uses the same form (`subject="order"`), so a
+ * payment can still be recorded after the counter screen was refreshed, closed or lost its
+ * connection between sending the order and charging the card.
  */
 export function StaffRoundPaymentAction({
   csrf,
@@ -26,6 +30,7 @@ export function StaffRoundPaymentAction({
   loadAmountDue,
   recordedAfterOutage,
   timeZone,
+  subject = "round",
   onRecorded,
 }: {
   readonly csrf: string;
@@ -38,6 +43,8 @@ export function StaffRoundPaymentAction({
   readonly loadAmountDue?: ((signal: AbortSignal) => Promise<string | null>) | undefined;
   readonly recordedAfterOutage: boolean;
   readonly timeZone?: string | undefined;
+  /** What staff are charging for: a table round (default) or a counter order. */
+  readonly subject?: "round" | "order";
   readonly onRecorded: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -91,7 +98,7 @@ export function StaffRoundPaymentAction({
       <div className="staff-round-payment" role="status">
         <p>
           {reading === "NotDue"
-            ? "This round is no longer waiting for a card-machine payment. The order list will update."
+            ? `This ${subject} is no longer waiting for a card-machine payment. The order list will update.`
             : reading === "Failed" || loadAmountDue === undefined
               ? "Couldn't read the amount to charge. Check the connection and try again."
               : "Reading the amount to charge…"}
@@ -160,8 +167,8 @@ export function StaffRoundPaymentAction({
       }}
     >
       <p>
-        Charge {cad(amount)} on the card machine first, then record it here. The kitchen starts this
-        round once it is recorded.
+        Charge {cad(amount)} on the card machine first, then record it here. The kitchen starts this{" "}
+        {subject} once it is recorded.
       </p>
       <label>
         Slip reference (optional)

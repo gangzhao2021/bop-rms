@@ -90,3 +90,20 @@ it("WP-2423 D5: the Orders list leaves the amount out; it is read when the form 
   expect(html).toContain("Record card-machine payment</button>");
   expect(html).not.toMatch(/\$|0198a7c0|undefined|null/u);
 });
+
+it("v15 751dd768 ①: a counter order sent but not recorded as paid is charged from Orders as an order", () => {
+  const html = renderToStaticMarkup(
+    <StaffRoundPaymentAction
+      csrf={"a".repeat(43)}
+      orderReference="0198a7c0-0000-7000-8000-000000000001"
+      orderBatchReference="0198a7c0-0000-7000-8000-000000000002"
+      amountDueMinor={null}
+      loadAmountDue={async () => "1130"}
+      recordedAfterOutage={false}
+      subject="order"
+      onRecorded={() => undefined}
+    />,
+  );
+  expect(html).toContain("Record card-machine payment</button>");
+  expect(html).not.toMatch(/round|0198a7c0|undefined|null/u);
+});

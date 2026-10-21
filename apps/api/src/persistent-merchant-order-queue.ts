@@ -30,6 +30,7 @@ import {
 } from "@rms/payment";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { randomBytes } from "node:crypto";
+import { readCounterPaymentPreparation } from "./counter-payment-preparation.js";
 import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-payment-preparation.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -346,6 +347,12 @@ export function createPersistentMerchantOrderQueue(options: {
                 recordedAfterOutage: boolean;
                 refundedMinor: string;
               } | null;
+              /**
+               * What to charge on the card machine while it is unpaid and its payment clock is
+               * open (else null), so staff can still record the payment from Orders after the
+               * counter screen was refreshed or closed. One-order read only, like staff rounds.
+               */
+              amountDueMinor: string | null;
             }
           >();
           /**
@@ -441,10 +448,11 @@ export function createPersistentMerchantOrderQueue(options: {
                 refundAmountMinor: card?.amountMinor ?? online?.amountMinor ?? null,
               });
             }
-            const entries = await createPostgresCounterOrderEntryStore({
+            const counterEntries = createPostgresCounterOrderEntryStore({
               ...scoped,
               authorize: stillAllowed,
-            }).listByOrders(businessTransaction, orderReferences);
+            });
+            const entries = await counterEntries.listByOrders(businessTransaction, orderReferences);
             const cardPayments = createPostgresCardMachinePaymentStore({
               scope: scoped,
               authorize: async () => stillAllowed(),
@@ -456,8 +464,37 @@ export function createPersistentMerchantOrderQueue(options: {
             for (const [order, entry] of entries) {
               const paid = counterPayments.get(order)?.[0];
               if (paid !== undefined) addCardMachineTip(paid.payment);
+              let amountDueMinor: string | null = null;
+              if (
+                paid === undefined &&
+                tenantReference !== null &&
+                input.orderReference !== undefined
+              ) {
+                const placed = await counterEntries.loadOrder(
+                  businessTransaction,
+                  String(entry.cartReference),
+                );
+                if (placed !== null && String(placed.orderReference) === order) {
+                  const due = await readCounterPaymentPreparation(
+                    businessTransaction,
+                    {
+                      scope: { tenantReference, ...scoped },
+                      now: source.now,
+                      nextPreparationReference: transientReference,
+                      authorize: async () => (await stillAllowed()) === true,
+                    },
+                    {
+                      submissionReference: String(placed.submissionReference),
+                      guestSessionReference: String(entry.guestSessionReference),
+                      tipSelectionReference: String(entry.tipSelectionReference),
+                    },
+                  );
+                  amountDueMinor = due?.preparation.total.amountMinor.toString() ?? null;
+                }
+              }
               counter.set(order, {
                 recordedAfterOutage: entry.recordedAfterOutage,
+                amountDueMinor,
                 paidOnCardMachine:
                   paid === undefined
                     ? null

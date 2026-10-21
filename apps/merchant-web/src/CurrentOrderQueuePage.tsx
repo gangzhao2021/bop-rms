@@ -1195,7 +1195,7 @@ export function CurrentOrderQueueRows({
                 <p className="order-counter-note" role="note">
                   Taken at the counter.{" "}
                   {order.counter.paidOnCardMachine === null
-                    ? "Not paid yet: charge it on the card machine from Counter order."
+                    ? "Not paid yet: charge it on the card machine, then record the payment on this order."
                     : `Paid on the store's card machine (${orderMoney({
                         amountMinor: order.counter.paidOnCardMachine.amountMinor,
                         currencyCode: "CAD",
@@ -1853,6 +1853,34 @@ export function CurrentOrderQueuePage({
                               )
                           }
                           recordedAfterOutage={batch.staffRound.recordedAfterOutage}
+                          timeZone={timeZone}
+                          onRecorded={() => reload(after)}
+                        />
+                      </fieldset>
+                    ) : // v15 751dd768 ①: a counter order sent but not yet recorded as paid (the
+                    // counter screen was refreshed or closed) is charged and recorded here. The
+                    // amount is read for this one order on opening; a released order reads none.
+                    order.counter !== null &&
+                      order.counter.paidOnCardMachine === null &&
+                      batch.sequence === 1 &&
+                      batch.acceptanceStatus === "NotAccepted" &&
+                      order.currentPhase === "Submitted" &&
+                      order.unfulfillable === null ? (
+                      <fieldset disabled={servingBusy}>
+                        <StaffRoundPaymentAction
+                          key={"counter-pay-" + batch.orderBatchReference}
+                          csrf={csrf}
+                          fetcher={fetcher}
+                          subject="order"
+                          orderReference={order.orderReference}
+                          orderBatchReference={batch.orderBatchReference}
+                          amountDueMinor={order.counter.amountDueMinor}
+                          loadAmountDue={(signal) =>
+                            client
+                              .loadDetail(order.orderReference, signal)
+                              .then((detail) => detail.order.counter?.amountDueMinor ?? null)
+                          }
+                          recordedAfterOutage={order.counter.recordedAfterOutage}
                           timeZone={timeZone}
                           onRecorded={() => reload(after)}
                         />

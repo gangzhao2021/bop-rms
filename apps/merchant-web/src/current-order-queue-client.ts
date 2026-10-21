@@ -148,7 +148,13 @@ function parseStaffRound(value: unknown, orderType: unknown) {
 /** WP-2423 Q7: a pickup order staff took at the counter, and its card-machine payment. */
 function parseCounter(value: unknown, sourceChannel: unknown) {
   if (value === null || value === undefined) return null;
-  const raw = exact(value, ["recordedAfterOutage", "paidOnCardMachine"]);
+  // What to charge while unpaid, on the one-order read (older servers don't send it).
+  const withDue = typeof value === "object" && Object.hasOwn(value, "amountDueMinor");
+  const raw = exact(value, [
+    "recordedAfterOutage",
+    "paidOnCardMachine",
+    ...(withDue ? ["amountDueMinor"] : []),
+  ]);
   if (typeof raw.recordedAfterOutage !== "boolean" || sourceChannel !== "Pos") return fail();
   let paid = null;
   if (raw.paidOnCardMachine !== null) {
@@ -175,7 +181,17 @@ function parseCounter(value: unknown, sourceChannel: unknown) {
       refundedMinor: p.refundedMinor,
     });
   }
-  return Object.freeze({ recordedAfterOutage: raw.recordedAfterOutage, paidOnCardMachine: paid });
+  const due = raw.amountDueMinor ?? null;
+  if (
+    due !== null &&
+    (typeof due !== "string" || !minorPattern.test(due) || due === "0" || paid !== null)
+  )
+    return fail();
+  return Object.freeze({
+    recordedAfterOutage: raw.recordedAfterOutage,
+    paidOnCardMachine: paid,
+    amountDueMinor: due as string | null,
+  });
 }
 /** WP-2423: the sum of an Order's succeeded online payments, from Payment. */
 function parsePaidOnline(value: unknown) {
