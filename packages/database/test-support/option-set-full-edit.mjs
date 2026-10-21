@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout } from "node:timers";
 import pg from "pg";
 import {
   createPostgresFullOptionSetDraftStore,
@@ -105,12 +106,12 @@ export async function exerciseOptionSetFullEdit(context) {
     retentionPolicyCode: "OPERATIONAL",
     retentionPolicyVersion: 1,
   });
-  const owner = () =>
+  const owner = (clock = now) =>
     createPostgresFullOptionSetDraftStore({
       tenantReference: tenant,
       brandReference: brand,
       actorReference: actor,
-      clock: { now },
+      clock: { now: clock },
       transactions,
       authority: { holdUntilTransactionCompletes: permit },
       creation: {
@@ -130,12 +131,12 @@ export async function exerciseOptionSetFullEdit(context) {
       audit: { create: audit },
       events: { generateReference: reference },
     });
-  const read = (set, root) =>
+  const read = (set, root, clock = now) =>
     createPostgresCurrentFullOptionSetDraftStore({
       tenantReference: tenant,
       brandReference: brand,
       actorReference: actor,
-      clock: { now },
+      clock: { now: clock },
       transactions,
       authority: { holdUntilTransactionCompletes: permit },
     }).readCurrent({ optionSetReference: set, expectedAggregateVersion: root });
@@ -354,6 +355,40 @@ export async function exerciseOptionSetFullEdit(context) {
     });
     assert.deepEqual((await read(set, 2)).content, changed.content);
     assert.deepEqual(await counts(), committedCounts);
+    // A draft read that waits behind an edit committed after the read began reads that edit;
+    // it is not refused as from the future (an outage). The editor holds its locks until the
+    // reader waits for them.
+    const later = (ms) => new Date(Date.parse(at) + ms).toISOString();
+    let editorHolding,
+      waiterSeen = false;
+    const holding = new Promise((resolve) => (editorHolding = resolve));
+    afterWork = async () => {
+      editorHolding();
+      for (let attempt = 0; attempt < 400 && !waiterSeen; attempt++) {
+        const waiting = await admin.query("SELECT count(*)::int n FROM pg_locks WHERE NOT granted");
+        if (waiting.rows[0].n > 0) waiterSeen = true;
+        else await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    };
+    const editing = owner(() => later(2000)).edit({
+      ...next,
+      operationReference: reference(),
+      occurredAt: later(2000),
+    });
+    await holding;
+    let readerClock = 0;
+    const [edited, readWhileEditing] = await Promise.all([
+      editing,
+      read(set, null, () => (readerClock++ === 0 ? later(1000) : later(3000))).then(
+        (value) => ({ value }),
+        (error) => ({ code: error.code }),
+      ),
+    ]);
+    assert.equal(waiterSeen, true);
+    assert.equal(edited.status, "Applied");
+    assert.equal(readWhileEditing.code, undefined);
+    assert.deepEqual(readWhileEditing.value.content, edited.content);
+    assert.equal(readWhileEditing.value.content.sourceAggregate.aggregateVersion, 3);
   } finally {
     try {
       if (createdRole) {

@@ -1399,7 +1399,7 @@ function createCurrentFullOptionSetDraftStoreKernel(
     try {
       const result = await options.transactions.run(async (tx) => {
         if (++invocations !== 1) return fail();
-        const observedAt = now();
+        let observedAt = now();
         let deadline = Math.min(
           Date.parse(observedAt) + 30000,
           originalValidUntil === undefined
@@ -1502,6 +1502,12 @@ function createCurrentFullOptionSetDraftStoreKernel(
           "SELECT option_id FROM rms_catalog.option_conflict WHERE option_set_id=$1 AND brand_id=$2 ORDER BY option_id,conflict_option_id FOR SHARE",
           [set, brand],
         );
+        // The draft is observed once its source lock and rows are held: a change a writer
+        // committed while this read waited for them is read, not refused as from the future.
+        const locked = now();
+        if (locked < observedAt) return fail();
+        observedAt = locked;
+        check();
         const read = async () => {
           const result = await queryCurrent<CurrentRow>(currentSql, [set, brand]),
             row = result.rows[0];
