@@ -43,8 +43,11 @@ export const pilotStaffOrigin = "https://127.0.0.1:4443";
 
 export async function createInternalMerchantCognitoSession(
   resources,
-  { signIn, createInternalMerchantCredentials, staffOrigin = pilotStaffOrigin },
+  { signIn, createInternalMerchantCredentials, staffOrigin = pilotStaffOrigin, harness },
 ) {
+  // `harness` ({ http, providerEndpoint }): an in-process test harness's route to a local Cognito
+  // stand-in for a Pilot-mode smoke (DEC-PILOT-RUNTIME-ENVIRONMENT). Code only: no file,
+  // environment variable or request can set it, and no runtime entry point passes it.
   if (signIn?.mode !== "cognito") return denied();
   // The Cognito callbacks are registered on the origin this HTTPS server answers on.
   if (signIn.exactOrigin !== staffOrigin) return denied();
@@ -61,7 +64,8 @@ export async function createInternalMerchantCognitoSession(
   )
     return denied();
   const crypto = await createInternalMerchantCredentials();
-  const http = signIn.testProvider === null ? undefined : createTestProviderFetch(signIn);
+  const http =
+    harness?.http ?? (signIn.testProvider === null ? undefined : createTestProviderFetch(signIn));
   const pool = Object.freeze({
     environment: signIn.cognito.environment,
     issuer: signIn.cognito.issuer,
@@ -70,12 +74,13 @@ export async function createInternalMerchantCognitoSession(
   const origin = signIn.exactOrigin;
   // TEST-ONLY loopback stand-in with static synthetic credentials (admin API and pool check).
   const providerEndpoint =
-    signIn.testProvider === null
+    harness?.providerEndpoint ??
+    (signIn.testProvider === null
       ? null
       : {
           url: signIn.testProvider.origin + "/",
           credentials: { accessKeyId: "TESTONLY", secretAccessKey: "TESTONLY" },
-        };
+        });
   const invitation = createCognitoWorkforceInvitation({
     configuration: { ...pool },
     clock: { now: clock },

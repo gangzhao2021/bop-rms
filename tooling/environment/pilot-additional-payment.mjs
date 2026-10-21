@@ -1,4 +1,5 @@
 import { isPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
+import { matchesPilotEnvironment } from "./pilot-environment.mjs";
 import console from "node:console";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { createHash } from "node:crypto";
@@ -27,7 +28,7 @@ export async function createInternalAdditionalPayment(
     reference = credentials.reference,
     scope = { tenantReference: resources.publicProfile.binding.tenantReference, ...identityScope };
   if (
-    saved.environment !== "InternalTest" ||
+    !matchesPilotEnvironment(saved.environment) ||
     saved.database !== expectedDatabaseName ||
     Object.keys(scope).some((k) => saved.scope[k] !== scope[k]) ||
     !isPilotPaymentProvider(simulator)

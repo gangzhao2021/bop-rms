@@ -1,16 +1,16 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, expect, test } from "vitest";
 import process from "node:process";
 import { createInternalWorker } from "./pilot-worker.mjs";
 
 const brandReference = "0190fa46-0000-7000-8000-000000000001";
 const storeReference = "0190fa46-0000-7000-8000-000000000002";
-const originalEnvironment = process.env.NODE_ENV;
-beforeEach(() => {
-  process.env.NODE_ENV = "development";
-});
-afterEach(() => {
-  process.env.NODE_ENV = originalEnvironment;
-});
+const original = { node: process.env.NODE_ENV, pilot: process.env.BOP_PILOT_ENVIRONMENT };
+const setEnvironment = (node, pilot) => {
+  process.env.NODE_ENV = node;
+  if (pilot === undefined) delete process.env.BOP_PILOT_ENVIRONMENT;
+  else process.env.BOP_PILOT_ENVIRONMENT = pilot;
+};
+afterEach(() => setEnvironment(original.node, original.pilot));
 
 const workload = () => ({
   start: async () => undefined,
@@ -18,7 +18,7 @@ const workload = () => ({
   completion: new Promise(() => undefined),
 });
 
-test("business worker claims its Store and its Brand, and publishes undeployed-consumer events (WP-2423 5e)", async () => {
+async function composeWorker() {
   const contexts = [];
   let sequence = 0;
   const resources = {
@@ -67,6 +67,12 @@ test("business worker claims its Store and its Brand, and publishes undeployed-c
       createInternalPickupCapacityScheduleWorkload: workload,
     },
   );
+  return { worker, contexts };
+}
+
+test("business worker claims its Store and its Brand, and publishes undeployed-consumer events (WP-2423 5e)", async () => {
+  setEnvironment("development", undefined);
+  const { worker, contexts } = await composeWorker();
   await worker.dispatcher.runOnce();
   expect(contexts).toEqual([
     [brandReference, storeReference],
@@ -78,4 +84,21 @@ test("business worker claims its Store and its Brand, and publishes undeployed-c
   await expect(
     worker.recoveryAdapter.publish({ eventType: "RecallInitiated" }, { attemptCount: 1 }),
   ).resolves.toEqual({ status: "failed", errorCode: "TRANSPORT_REJECTED" });
+});
+
+test("DEC-PILOT-RUNTIME-ENVIRONMENT: a Pilot Store worker dispatches its own Store's events", async () => {
+  setEnvironment("production", "Pilot");
+  const { worker, contexts } = await composeWorker();
+  await worker.dispatcher.runOnce();
+  expect(contexts).toEqual([
+    [brandReference, storeReference],
+    [brandReference, ""],
+  ]);
+});
+
+test("a production process that is not a declared Pilot Store dispatches nothing", async () => {
+  setEnvironment("production", undefined);
+  const { worker, contexts } = await composeWorker();
+  await worker.dispatcher.runOnce().catch(() => undefined);
+  expect(contexts).toEqual([]);
 });

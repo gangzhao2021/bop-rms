@@ -1,4 +1,5 @@
 import { isPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
+import { matchesPilotEnvironment } from "./pilot-environment.mjs";
 import { createHash } from "node:crypto";
 import { pilotCreateIntentIdempotencyKey } from "./pilot-open-payment-resolution.mjs";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
@@ -47,7 +48,8 @@ export async function createInternalPaymentIntent(
   };
   const saved = await loadWorkflow(orderType);
   if (
-    saved.environment !== "InternalTest" ||
+    // DEC-PILOT-RUNTIME-ENVIRONMENT: the installed Workflow binding of this process's environment.
+    !matchesPilotEnvironment(saved.environment) ||
     saved.database !== expectedDatabaseName ||
     saved.scope.storeReference !== scope.storeReference ||
     !isPilotPaymentProvider(simulator)

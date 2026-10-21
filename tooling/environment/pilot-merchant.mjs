@@ -107,7 +107,7 @@ import {
 } from "../../apps/api/dist/refund-receipt-issuance.js";
 import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
-import { pilotProviderEnvironment } from "./pilot-environment.mjs";
+import { matchesPilotEnvironment, pilotProviderEnvironment } from "./pilot-environment.mjs";
 export async function createInternalMerchant(
   resources,
   {
@@ -432,7 +432,7 @@ export async function createInternalMerchant(
   };
   const queue = await loadTaskQueue();
   if (
-    queue.environment !== "InternalTest" ||
+    !matchesPilotEnvironment(queue.environment) ||
     queue.database !== expectedDatabaseName ||
     queue.tenantReference !== selected.tenantReference ||
     queue.brandReference !== selected.brandReference ||

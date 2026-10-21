@@ -2018,6 +2018,51 @@ that name) and its certificate-expiry alert reads the hosted certificate. The in
 certificate expires **2026-11-14T05:15:40Z**; renew it (with the internal test installation, Owner
 approval) before then while the store still runs InternalTest.
 
+## Switching a Store to Pilot (DEC-PILOT-RUNTIME-ENVIRONMENT)
+
+Decision: [Pilot runtime environment](../spec/design/pilot-runtime-environment.md). A Pilot Store is
+a **new installation** (its own database and runtime directory with the real Store's facts). Never
+relabel, copy or edit an InternalTest runtime directory (v15) into a Pilot one: every file there is
+TEST data. v15 keeps running InternalTest unchanged.
+
+**Not possible yet:** the start check still refuses with
+`PILOT_CAPABILITY_MISSING:PricingCurrencyMetadata` (reviewed currency and tax configuration, P5), and
+there is no tool yet that issues the Pilot runtime files and the pickup/dine-in order workflows
+(design note, "仍阻止真实 Pilot 启动" 2). The steps below are the order to follow once those exist; each
+external item has its own runbook.
+
+1. **Runtime files** (`<runtime>` 0700, every file 0600, owned by the pilot operator): each file
+   declares `"environment": "Pilot"` — `installation.json`, `internal-test-profile.json` (the Store's
+   binding and validity window, real `operating.liveGateRequirementCodes`, no `SYNTHETIC_` code),
+   menu, inventory, merchant and customer runtime, task queue, worker files, workflow bindings and
+   day-end coverage. `customer-runtime.json` lists `"diningTableFiles": []` (no DEMO table launcher).
+   The unpaid dine-in round cancellation workflow is released with
+   `workflow-release-install … --runtime-environment Pilot`.
+2. **Hosting and managed secrets:** `hosting.json` and the secrets folder as in
+   [Hosting](#hosting-customer-domain-certificate-and-managed-secrets-wp-2423), including the
+   `cognito-client-secret` file; `pilot-secrets.mjs check` prints `PILOT_SECRETS_COMPLETE`.
+3. **Local entry certificate** (the `front` service re-encrypts to it; phones never see it):
+   `NODE_ENV=production BOP_PILOT_ENVIRONMENT=Pilot node --import ./tooling/environment/register-workspace-typescript.mjs tooling/environment/pilot-provision-tls.mjs issue <absolute runtime> <database>`.
+   It is valid for 30 days: run the same command with `renew` (and restart in an update window)
+   before it expires.
+4. **Payments:** `payment.json` in Stripe live mode — [Stripe switch](./pilot-stripe-switch.md) B.
+5. **Staff sign-in:** `staff-sign-in.json` in Cognito mode (Pilot form: no `staffPin` and no
+   `clientSecretFile`; PIN keys and the client secret come from the managed secrets), then the first
+   Owner — [Cognito store staff](./cognito-store-staff.md).
+6. **Start** with the compose override of the Hosting section (`NODE_ENV=production`,
+   `BOP_PILOT_ENVIRONMENT=Pilot` for `pilot`, `ops` and `front`). The supervisor prints one
+   `PILOT_NOT_READY …` line per hosting problem and refuses with `PILOT_CAPABILITY_MISSING:<codes>`
+   while anything is missing; fix what it names and start again.
+7. **In the Store:** print the pickup poster as a QR code of the customer address itself
+   (`https://order.<store domain>/` opens pickup ordering; it never needs reprinting when keys
+   rotate), create and print every table code on **Table QR codes** (Create code, then Print all
+   codes — [Table QR codes](#table-qr-codes-wp-2423-q11)), and staff sign in at
+   `/operations/sign-in`. Nothing simulated (test payment buttons, DEMO staff list, table launcher)
+   exists in a Pilot Store.
+
+**Rollback:** stop the Pilot services; the InternalTest installation is separate and unaffected.
+Payments already taken stay in Stripe live and in the Pilot database.
+
 ## Alerts and scheduled backups (WP-2423 Q13)
 
 Decision: [DEC-PILOT-ALERTS-BACKUP](../spec/design/pilot-alerts-backup.md). The compose service

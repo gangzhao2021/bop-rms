@@ -299,7 +299,11 @@ export async function loadPilotInstallation(directory) {
               ([key, v]) => typeof v !== "string" || !ref.test(v) || profile.binding?.[key] !== v,
             ) ||
             !Array.isArray(value.diningTableFiles) ||
-            value.diningTableFiles.length < 1 ||
+            // DEC-PILOT-RUNTIME-ENVIRONMENT: the DEMO table launcher files are InternalTest only
+            // (at least one there); a Pilot Store lists none — guests scan the printed codes.
+            (value.environment === "Pilot"
+              ? value.diningTableFiles.length !== 0
+              : value.diningTableFiles.length < 1) ||
             value.diningTableFiles.length > 100 ||
             new Set(value.diningTableFiles).size !== value.diningTableFiles.length ||
             value.diningTableFiles.some(

@@ -197,7 +197,17 @@ export function createPilotStripeProvider({
  */
 export async function createPilotPaymentProvider(
   options = {},
-  { directory, path, loadProfile, expectedDatabaseName, loadConfig = loadPilotPaymentConfig },
+  {
+    directory,
+    path,
+    loadProfile,
+    expectedDatabaseName,
+    loadConfig = loadPilotPaymentConfig,
+    // An in-process test harness's route from api.stripe.com to the local Stripe stand-in, for a
+    // Pilot-mode (live) smoke (DEC-PILOT-RUNTIME-ENVIRONMENT). Code only: no file, environment
+    // variable or request can set it, and no runtime entry point passes it.
+    harness,
+  },
 ) {
   const environment = currentPilotEnvironment();
   const config = await loadConfig(directory, { environment });
@@ -214,5 +224,6 @@ export async function createPilotPaymentProvider(
       brandReference: profile.binding.brandReference,
       storeReference: profile.binding.storeReference,
     },
+    ...(harness?.fetch === undefined ? {} : { fetch: harness.fetch }),
   });
 }

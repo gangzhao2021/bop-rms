@@ -7,6 +7,7 @@ import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import console from "node:console";
 import { pilotCertificatePublicKeyPin } from "./pilot-tls-trust.mjs";
+import { isPilotRuntime, isPilotStore, matchesPilotEnvironment } from "./pilot-environment.mjs";
 const execute = promisify(execFile);
 /**
  * Refuses with a fixed, non-secret requirement code (`error.reason`) so the operator can see
@@ -123,7 +124,10 @@ async function generatePair(stage, { subject, subjectAltName }) {
   return { key, certificate };
 }
 async function prepareDirectory({ directory, expectedDatabaseName }) {
-  if (process.env.NODE_ENV !== "development") return unavailable("not-development-mode");
+  // DEC-PILOT-RUNTIME-ENVIRONMENT: the 127.0.0.1 entry pair is the local hop in both pilot
+  // environments (a Pilot Store's `front` re-encrypts to it with it as the only trust root, or a
+  // TLS-terminating proxy talks to it); the public certificate is the hosting's (hosting.json).
+  if (!isPilotRuntime()) return unavailable("not-pilot-process");
   if (typeof expectedDatabaseName !== "string" || !expectedDatabaseName)
     return unavailable("expected-database-missing");
   if (typeof directory !== "string" || !isAbsolute(directory))
@@ -139,7 +143,8 @@ async function prepareDirectory({ directory, expectedDatabaseName }) {
   } catch {
     return unavailable("profile-unreadable");
   }
-  if (profile?.environment !== "InternalTest") return unavailable("profile-not-internal-test");
+  if (!matchesPilotEnvironment(profile?.environment))
+    return unavailable("profile-environment-mismatch");
   if (profile.database !== expectedDatabaseName) return unavailable("profile-database-mismatch");
 }
 /** Local demo TLS only; no trust-store installation or existing key replacement. */
@@ -166,7 +171,7 @@ export async function provisionPilotTls({ directory, expectedDatabaseName }) {
     await mkdir(stage, { mode: 0o700 });
     staged = true;
     const { key, certificate } = await generatePair(stage, {
-      subject: DEFAULT_SUBJECT,
+      subject: isPilotStore() ? "/CN=BOP-RMS Store local entry" : DEFAULT_SUBJECT,
       subjectAltName: DEFAULT_SUBJECT_ALT_NAME,
     });
     // Hard links publish without replacing any existing target, even after a race.
@@ -256,17 +261,26 @@ export async function renewPilotTls({
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const [mode, directory, expectedDatabaseName, days] = process.argv.slice(2);
-    if (mode !== "renew" || !directory || !expectedDatabaseName || process.argv.length > 6)
+    if (
+      !["renew", "issue"].includes(mode) ||
+      !directory ||
+      !expectedDatabaseName ||
+      process.argv.length > (mode === "issue" ? 5 : 6)
+    )
       throw new Error("PILOT_TLS_ARGUMENTS_INVALID");
     if (days !== undefined && !/^\d{1,2}$/.test(days))
       throw new Error("PILOT_TLS_ARGUMENTS_INVALID");
     console.log(
       JSON.stringify(
-        await renewPilotTls({
-          directory,
-          expectedDatabaseName,
-          ...(days === undefined ? {} : { renewWithinDays: Number(days) }),
-        }),
+        mode === "issue"
+          ? // DEC-PILOT-RUNTIME-ENVIRONMENT: a new Pilot installation's local entry pair (never
+            // replaces an existing pair; InternalTest issues it with pilot-provision-local-security).
+            await provisionPilotTls({ directory, expectedDatabaseName })
+          : await renewPilotTls({
+              directory,
+              expectedDatabaseName,
+              ...(days === undefined ? {} : { renewWithinDays: Number(days) }),
+            }),
       ),
     );
   } catch (error) {
@@ -279,7 +293,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.error(
       "PILOT_TLS_RENEWAL_UNAVAILABLE (" +
         reason +
-        "): requires development mode, a matching InternalTest profile, a private absolute directory and a complete owner-only certificate pair. Nothing was replaced.",
+        "): requires a pilot process (InternalTest or Pilot) whose installation profile declares the same environment, a private absolute directory and a complete owner-only certificate pair. Nothing was replaced.",
     );
     process.exitCode = 1;
   }

@@ -337,6 +337,51 @@ it("validates customer runtime scope, cart timeouts and bounded table file names
   );
 });
 
+it("DEC-PILOT-RUNTIME-ENVIRONMENT: a Pilot installation loads its own files and lists no DEMO launcher tables", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("BOP_PILOT_ENVIRONMENT", "Pilot");
+  const ref = "0190fa30-0000-7000-8000-000000000004",
+    scope = { tenantReference: ref, brandReference: ref, storeReference: ref };
+  await save("installation.json", { ...config(), environment: "Pilot" });
+  await save("internal-test-profile.json", {
+    environment: "Pilot",
+    database: "synthetic_pilot",
+    binding: scope,
+  });
+  const runtime = {
+    schemaVersion: 1,
+    environment: "Pilot",
+    database: "synthetic_pilot",
+    providerAccountReference: ref,
+    controlReference: ref,
+    scope,
+    cart: { policyVersionReference: ref, idleTimeoutSeconds: 3600, absoluteTimeoutSeconds: 86400 },
+    diningTableFiles: [],
+  };
+  await save("customer-runtime.json", runtime);
+  const installation = await loadPilotInstallation(directory);
+  expect(await installation.loadCustomerRuntime()).toEqual(runtime);
+  // Guests of a Pilot Store scan the printed table codes; a DEMO launcher table is refused.
+  await save("customer-runtime.json", {
+    ...runtime,
+    diningTableFiles: ["internal-test-dining-table.json"],
+  });
+  await expect(installation.loadCustomerRuntime()).rejects.toThrow(
+    "PILOT_INSTALLATION_UNAVAILABLE",
+  );
+  // Workflow bindings are issued per environment: an InternalTest one never loads in a Pilot Store.
+  const workflow = { environment: "Pilot", database: "synthetic_pilot", scope, workflow: {} };
+  await save("internal-test-workflow-Pickup.json", workflow);
+  expect(await installation.loadWorkflow("Pickup")).toEqual(workflow);
+  await save("internal-test-workflow-Pickup.json", { ...workflow, environment: "InternalTest" });
+  await expect(installation.loadWorkflow("Pickup")).rejects.toThrow(
+    "PILOT_INSTALLATION_UNAVAILABLE",
+  );
+  // The InternalTest installation itself does not load in the Pilot process.
+  await save("installation.json", config());
+  await expect(loadPilotInstallation(directory)).rejects.toThrow("PILOT_INSTALLATION_UNAVAILABLE");
+});
+
 it("loads exact merchant mapping and workstation without adding authority and binds task queue scope", async () => {
   const ref = "0190fa30-0000-7000-8000-000000000004",
     scope = { tenantReference: ref, brandReference: ref, storeReference: ref };

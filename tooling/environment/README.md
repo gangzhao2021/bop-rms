@@ -556,8 +556,8 @@ it expires (WP-2423). From the repository root, as the owner of the runtime dire
 NODE_ENV=development node tooling/environment/pilot-provision-tls.mjs renew /absolute/private/runtime-directory expected_database_name [within_days]
 ```
 
-`renewPilotTls` applies the same development-mode, owner-only `0700` directory and matching
-InternalTest profile checks, and needs a complete owner-only `0600` pair whose key matches
+`renewPilotTls` applies the same pilot-process, owner-only `0700` directory and matching
+profile checks, and needs a complete owner-only `0600` pair whose key matches
 the certificate (it may already be expired; an earlier self-signed loopback pair issued with
 the OpenSSL default `CA:TRUE` constraint is accepted for renewal only and is replaced by a
 `CA:FALSE` server certificate). A refusal prints the failed requirement as a fixed code, for
@@ -568,6 +568,13 @@ pair as hard links in a new owner-only `tls-backup-<time>` directory and then re
 `customer-tls-key.pem` and `customer-tls-cert.pem`. It prints the new expiry, the backup
 name and the new public-key pin; it never prints key material, installs trust or restarts
 anything. A second renewal into an existing backup name is refused.
+
+DEC-PILOT-RUNTIME-ENVIRONMENT: a Pilot Store (`NODE_ENV=production BOP_PILOT_ENVIRONMENT=Pilot`,
+profile `"environment": "Pilot"`) uses the same local entry pair as the hop behind `front` (the
+public certificate is the hosting's). Issue it once with
+`pilot-provision-tls.mjs issue <absolute runtime> <database>` (never replaces an existing pair;
+subject `BOP-RMS Store local entry`) and renew it with `renew` as above. The process and the
+profile must declare the same environment (`not-pilot-process`, `profile-environment-mismatch`).
 
 After a renewal:
 

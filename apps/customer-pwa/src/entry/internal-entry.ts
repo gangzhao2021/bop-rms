@@ -13,18 +13,16 @@ export async function loadInternalEntryToken({
   readonly location: InternalLocation;
   readonly fetcher: typeof fetch;
 }): Promise<string | undefined> {
-  if (
-    !enabled ||
-    location.origin !== "https://127.0.0.1:4443" ||
-    location.pathname !== "/" ||
-    location.search !== ""
-  )
-    return undefined;
+  if (!enabled || location.pathname !== "/" || location.search !== "") return undefined;
   const dining = /^#internal-dining=([a-z][a-z0-9-]{0,39})$/.exec(location.hash);
   if (location.hash !== "" && !dining) return undefined;
+  // DEC-PILOT-RUNTIME-ENVIRONMENT: the Store's own address opens pickup ordering on whichever
+  // origin served the app (the server answers same-origin only); the DEMO table launcher exists
+  // only on the local InternalTest entry.
+  if (dining && location.origin !== "https://127.0.0.1:4443") return undefined;
   const path = dining
     ? `/bff/internal-test/dining-entry?table=${dining[1]}`
-    : "/bff/internal-test/pickup-entry";
+    : "/bff/customer/pickup-entry";
   try {
     const response = await fetcher(path, {
       credentials: "same-origin",

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import process from "node:process";
 import { loadPilotInstallation } from "./pilot-installation.mjs";
+import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 import { createPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
 import { createInternalReconciliationRuntime } from "./pilot-reconciliation-runtime.mjs";
 import { createInternalDailySettlementSource } from "./pilot-daily-settlement-source.mjs";
@@ -28,7 +29,9 @@ export async function createConfiguredDailySettlementExecution(directory, resour
     const active = async () => {
       const p = await installation.loadProfile();
       return (
-        process.env.NODE_ENV === "development" &&
+        // DEC-PILOT-RUNTIME-ENVIRONMENT: either pilot process; the profile declares the same one.
+        isPilotRuntime() &&
+        matchesPilotEnvironment(p.environment) &&
         p.database === installation.database &&
         p.binding.brandReference === resources.scope.brandReference &&
         p.binding.storeReference === resources.scope.storeReference &&

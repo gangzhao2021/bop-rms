@@ -174,6 +174,34 @@ export async function runPilotSupervisor({
     await release();
   }
 }
+/**
+ * WP-2423 P1b / DEC-PILOT-RUNTIME-ENVIRONMENT: the start check of the supervisor. In a Pilot
+ * Store it checks the hosting's secrets and certificate (DEC-PILOT-SECRETS, printing one
+ * `PILOT_NOT_READY` line per problem: file names and fixed reasons only), the payment Provider
+ * (DEC-STRIPE-PILOT-WIRING) and the staff sign-in (DEC-COGNITO-STORE-STAFF), then refuses with
+ * `PILOT_CAPABILITY_MISSING:<codes>` while any gap remains. `checkCapabilities` exists for the
+ * test harness only (a test certificate root); the supervisor itself never passes it.
+ */
+export async function checkPilotStartReadiness({
+  runtimeDirectory,
+  absoluteDirectory,
+  checkCapabilities = checkConfiguredPilotCapabilities,
+  report = (line) => console.error(line),
+}) {
+  let met = [];
+  if (isPilotStore()) {
+    const checked = await checkCapabilities(absoluteDirectory);
+    met = checked.met;
+    for (const problem of checked.problems) report("PILOT_NOT_READY " + problem);
+  }
+  // A configured Provider whose secrets are present and whose mode matches the environment.
+  if (await pilotPaymentProviderReady(runtimeDirectory, { environment: currentPilotEnvironment() }))
+    met = [...met, "PaymentProvider"];
+  // Staff sign in with Cognito and its client secret is present (no local stand-in).
+  if ((await readPilotStaffSignInReadiness(absoluteDirectory)) === "CognitoConfigured")
+    met = [...met, "StaffLogin"];
+  return assertPilotReady({ met });
+}
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const controller = new globalThis.AbortController();
   const stop = () => controller.abort();
@@ -183,30 +211,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (process.argv.length !== 3 || !isPilotRuntime())
       throw Error("PILOT_SUPERVISOR_ARGUMENT_INVALID");
     try {
-      // DEC-PILOT-SECRETS: a Pilot start checks the hosting's secrets and certificate first and
-      // names what is missing (file names and fixed reasons only, never values).
-      let met = [];
-      if (isPilotStore()) {
-        const checked = await checkConfiguredPilotCapabilities(
-          path.join(await fs.realpath(process.cwd()), parsePilotRuntimeDirectory(process.argv[2])),
-        );
-        met = checked.met;
-        for (const problem of checked.problems) console.error("PILOT_NOT_READY " + problem);
-      }
-      // DEC-STRIPE-PILOT-WIRING: a configured Provider whose secrets are present and whose mode
-      // matches the environment meets the PaymentProvider gap.
-      if (
-        await pilotPaymentProviderReady(process.argv[2], { environment: currentPilotEnvironment() })
-      )
-        met = [...met, "PaymentProvider"];
-      // DEC-COGNITO-STORE-STAFF: staff sign in with Cognito and its client secret is present.
-      if (
-        (await readPilotStaffSignInReadiness(
-          path.join(await fs.realpath(process.cwd()), parsePilotRuntimeDirectory(process.argv[2])),
-        )) === "CognitoConfigured"
-      )
-        met = [...met, "StaffLogin"];
-      assertPilotReady({ met });
+      const directory = parsePilotRuntimeDirectory(process.argv[2]);
+      await checkPilotStartReadiness({
+        runtimeDirectory: directory,
+        absoluteDirectory: path.join(await fs.realpath(process.cwd()), directory),
+      });
     } catch (error) {
       // WP-2423 P1b: name what a Pilot Store still lacks (capability codes only, no data).
       console.error(

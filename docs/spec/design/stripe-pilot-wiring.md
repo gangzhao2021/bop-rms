@@ -97,6 +97,7 @@ justification 计入 `pilot-acl-append-only` 允许清单）。
   创建应答丢失与日结，记录 API 版本。
 - **Live 真实验证（Owner）**：PILOT-PAY-01/02（账户/KYC、live 密钥、live Webhook 端点与签名密钥、钱包域名与 Apple Pay 域名关联文件、
   轮换与吊销负责人）与上线批准；按 [Stripe 切换 runbook](../../runbooks/pilot-stripe-switch.md) B 节执行。
-- **Pilot 进程本身（仓库，付款以外）**：Provider 环境已贯穿，但 Pilot 门店进程仍被非付款部分阻止——不可配置缺口
-  `PricingCurrencyMetadata`（税务审查），以及顾客 HTTPS 入口、顾客服务器、员工会话、业务 worker 事件授权、已保存工作流
-  （`environment: "InternalTest"`）等仍只接受 development/InternalTest 的守卫；需另一项"Pilot 运行环境"工作统一处理。
+- **Pilot 进程本身（仓库，付款以外）**：守卫已由 [DEC-PILOT-RUNTIME-ENVIRONMENT](pilot-runtime-environment.md)（2026-10-20）
+  统一处理（顾客入口与服务器、员工会话、worker 事件授权、已保存文件按环境）；Pilot 模式冒烟以本地 Stripe 替身（代码注入，不可配置）
+  跑通 live 付款、Webhook、退款与日结。剩余：不可配置缺口 `PricingCurrencyMetadata`（税务审查）与 Pilot 安装签发（含取餐/堂食
+  工作流发布），见该决定"仍阻止真实 Pilot 启动"。

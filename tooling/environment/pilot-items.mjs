@@ -1,5 +1,6 @@
 import { createInternalReadTransactions } from "./pilot-read-transactions.mjs";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
+import { matchesPilotEnvironment } from "./pilot-environment.mjs";
 import { createHash } from "node:crypto";
 import {
   createCustomerCatalogInventoryPort,
@@ -8,7 +9,7 @@ import {
 } from "../../apps/api/dist/customer-menu-inventory-evidence.js";
 function checkedInventory(resources, { saved, expectedDatabaseName }) {
   if (
-    saved.environment !== "InternalTest" ||
+    !matchesPilotEnvironment(saved.environment) ||
     saved.database !== expectedDatabaseName ||
     saved.scope.brandReference !== resources.scope.brandReference ||
     saved.scope.storeReference !== resources.scope.storeReference

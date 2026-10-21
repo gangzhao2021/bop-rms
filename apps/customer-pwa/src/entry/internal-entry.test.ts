@@ -20,8 +20,25 @@ test("selected Dining and default Pickup use separate no-store exchange; locatio
     expect.objectContaining({ cache: "no-store", credentials: "same-origin", redirect: "error" }),
   );
   await loadInternalEntryToken({ enabled: true, location: { ...location, hash: "" }, fetcher });
-  expect(fetcher).toHaveBeenLastCalledWith("/bff/internal-test/pickup-entry", expect.anything());
+  expect(fetcher).toHaveBeenLastCalledWith("/bff/customer/pickup-entry", expect.anything());
   expect(location.hash).toBe("#internal-dining=table-2");
+});
+test("a Pilot Store's own address opens pickup ordering; the DEMO table launcher stays local", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => response());
+  const store = { ...location, origin: "https://order.store.example", hash: "" };
+  expect(await loadInternalEntryToken({ enabled: true, location: store, fetcher })).toBe(
+    "synthetic.qr.token",
+  );
+  expect(fetcher).toHaveBeenCalledWith("/bff/customer/pickup-entry", expect.anything());
+  fetcher.mockClear();
+  expect(
+    await loadInternalEntryToken({
+      enabled: true,
+      location: { ...store, hash: "#internal-dining=table-2" },
+      fetcher,
+    }),
+  ).toBeUndefined();
+  expect(fetcher).not.toHaveBeenCalled();
 });
 test.each([
   { enabled: false },

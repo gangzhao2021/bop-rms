@@ -28,7 +28,7 @@ import { createInternalCustomerEntry } from "./pilot-customer-entry.mjs";
 import { createInternalPickupEntry } from "./pilot-entry.mjs";
 import { createIssuedDiningEntries } from "./pilot-dining-issued-entry.mjs";
 import { createInternalDiningSession } from "./pilot-dining-session.mjs";
-import { createInternalMerchantSession } from "./pilot-merchant-session.mjs";
+import { createPilotStaffSessionFactory } from "./pilot-staff-session.mjs";
 import { createInternalQrLoaders } from "./pilot-qr.mjs";
 import { createInternalDiningCredentialLoaders } from "./pilot-dining-credentials.mjs";
 import { createInternalCredentialLoaders } from "./pilot-credentials.mjs";
@@ -92,12 +92,12 @@ export function composeCustomerDependencies(directory, installation, config, hos
   const diningCredentials = createInternalDiningCredentialLoaders({
     path: join(directory, "internal-test-dining-key"),
   });
-  const merchant = (r) =>
-    createInternalMerchantSession(r, {
-      loadEmployee: () => installation.loadCustomerData("internal-test-merchant.json"),
-      expectedDatabaseName,
-      createInternalMerchantCredentials: credentials.createInternalMerchantCredentials,
-    });
+  // DEC-PILOT-RUNTIME-ENVIRONMENT: dining staff commands (open a table, new join code) authorize
+  // with the installation's staff sign-in — Cognito in a Pilot Store — not the DEMO roster.
+  const merchant = createPilotStaffSessionFactory(directory, installation, {
+    credentials,
+    publicOrigin: hosting?.origin ?? INTERNAL_CUSTOMER_ORIGIN,
+  });
   const entry = (r) =>
     createInternalCustomerEntry(r, {
       createInternalPickupEntry: (resources) =>

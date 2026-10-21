@@ -1,6 +1,6 @@
 import { createOptionalCompensationWorkloads } from "./pilot-compensation-workload.mjs";
 import { supervisedCycleFailures } from "../../apps/worker/dist/outbox-workload.js";
-import process from "node:process";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 import { createOptionalBatchCancellationWorkloads } from "./pilot-batch-cancellation-workload.mjs";
 import console from "node:console";
 import { createPaymentAcceptanceWaitWorkload } from "../../apps/worker/dist/payment-acceptance-wait-workload.js";
@@ -116,8 +116,9 @@ export async function createInternalWorker(resources, observers = {}, options = 
         : []),
     ],
     eventing: {
+      // DEC-PILOT-RUNTIME-ENVIRONMENT: either pilot process (InternalTest or a Pilot Store).
       authorizeScope: async (value) =>
-        process.env.NODE_ENV === "development" &&
+        isPilotRuntime() &&
         resources.now() < resources.publicProfile.binding.validUntil &&
         isPilotDispatchScope(value, resources.scope),
       now: resources.now,

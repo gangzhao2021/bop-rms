@@ -23,6 +23,7 @@ import { createPilotAlertBoardReader } from "./pilot-ops-files.mjs";
 import { createInternalBatchCancellation } from "./pilot-batch-cancellation.mjs";
 import { createInternalOpenPaymentResolution } from "./pilot-open-payment-resolution.mjs";
 import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
+import { createPilotStaffSessionFactory } from "./pilot-staff-session.mjs";
 const factories = {
   createInternalRefundReconciliation,
   createInternalRefundSend,
@@ -246,22 +247,17 @@ export function composeMerchantDependencies(
     loadDailySettlementCoverage: installation.loadDailySettlementCoverage,
     // WP-2423 DEC-COGNITO-STORE-STAFF: staff-sign-in.json selects Cognito sign-in (own accounts,
     // in-app invitations, sign-in step-up, PIN keys from secret files); without it the TEST-ONLY
-    // sign-in of the InternalTest pilot is used, unchanged.
-    createInternalMerchantSession: async (r) => {
-      const signIn = await f.loadPilotStaffSignIn(directory);
-      return signIn.mode === "cognito"
-        ? f.createInternalMerchantCognitoSession(r, {
-            signIn,
-            createInternalMerchantCredentials: credentials.createInternalMerchantCredentials,
-            // The staff origin is the HTTPS server's public origin (DEC-PILOT-MAINTENANCE-PAGE).
-            staffOrigin: publicOrigin,
-          })
-        : f.createInternalMerchantSession(r, {
-            loadEmployee: () => installation.loadCustomerData("internal-test-merchant.json"),
-            expectedDatabaseName: installation.database,
-            createInternalMerchantCredentials: credentials.createInternalMerchantCredentials,
-          });
-    },
+    // sign-in of the InternalTest pilot is used, unchanged. The customer composition's dining
+    // staff commands use the same session (pilot-staff-session.mjs).
+    createInternalMerchantSession: createPilotStaffSessionFactory(directory, installation, {
+      credentials,
+      publicOrigin,
+      implementations: {
+        loadPilotStaffSignIn: f.loadPilotStaffSignIn,
+        createInternalMerchantSession: f.createInternalMerchantSession,
+        createInternalMerchantCognitoSession: f.createInternalMerchantCognitoSession,
+      },
+    }),
   };
 }
 export function composeConfiguredMerchant(

@@ -38,6 +38,28 @@ test("creates valid loopback TLS and retains exact bytes on retry", async () => 
   expect(cert.equals(await readFile(join(directory, "customer-tls-cert.pem")))).toBe(true);
   expect((await readdir(directory)).filter((name) => name.startsWith(".tls-"))).toEqual([]);
 });
+test("DEC-PILOT-RUNTIME-ENVIRONMENT: a Pilot Store issues its local entry pair; environments never mix", async () => {
+  const options = { directory, expectedDatabaseName: "isolated_test" };
+  // An InternalTest profile in a Pilot process, or production without the Pilot declaration: refused.
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("BOP_PILOT_ENVIRONMENT", undefined);
+  await expect(provisionPilotTls(options)).rejects.toMatchObject({ reason: "not-pilot-process" });
+  vi.stubEnv("BOP_PILOT_ENVIRONMENT", "Pilot");
+  await expect(provisionPilotTls(options)).rejects.toMatchObject({
+    reason: "profile-environment-mismatch",
+  });
+  await writeFile(
+    join(directory, "internal-test-profile.json"),
+    JSON.stringify({ environment: "Pilot", database: "isolated_test" }),
+    { mode: 0o600 },
+  );
+  expect((await provisionPilotTls(options)).status).toBe("Created");
+  const certificate = new X509Certificate(await readFile(join(directory, "customer-tls-cert.pem")));
+  expect(certificate.subject).toBe("CN=BOP-RMS Store local entry");
+  expect(certificate.checkIP("127.0.0.1")).toBe("127.0.0.1");
+  expect(certificate.ca).toBe(false);
+  expect((await renewPilotTls(options)).status).toBe("Retained");
+});
 test("incomplete pair is preserved and refused", async () => {
   const file = join(directory, "customer-tls-key.pem");
   await writeFile(file, "existing-invalid-key", { mode: 0o600 });

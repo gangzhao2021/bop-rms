@@ -17,6 +17,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { createPilotStaticAssets, missingPilotAsset } from "./pilot-static-assets.mjs";
 import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
+import { isInternalTest, isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 const require = createRequire(new URL("../../apps/api/package.json", import.meta.url));
 const express = require("express");
 export async function startInternalCustomerServer({
@@ -37,12 +38,19 @@ export async function startInternalCustomerServer({
   certificateFile,
   productImageDirectory,
   publicOrigin = INTERNAL_CUSTOMER_ORIGIN,
+  // The local entry and API ports (tests pass their own; the pilot always uses 4443 and 4300).
+  listenPort = 4443,
+  apiPort = 4300,
 }) {
   const origin = publicOrigin,
     host = new URL(publicOrigin).host;
-  if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_TEST_ONLY");
+  // DEC-PILOT-RUNTIME-ENVIRONMENT: the customer and staff HTTPS server of either pilot process
+  // (InternalTest, or a Pilot Store with NODE_ENV=production); the installation profile must
+  // declare the same environment. The DEMO launchers below stay InternalTest only.
+  if (!isPilotRuntime()) throw new Error("PILOT_RUNTIME_ONLY");
   const profile = await loadProfile();
-  if (profile.environment !== "InternalTest") throw new Error("INTERNAL_TEST_ONLY");
+  if (!matchesPilotEnvironment(profile.environment)) throw new Error("PILOT_RUNTIME_ONLY");
+  const internalTest = isInternalTest();
   const stat = await lstat(keyFile);
   if (
     !stat.isFile() ||
@@ -60,7 +68,10 @@ export async function startInternalCustomerServer({
     next();
   });
   const pickupQr = await loadInternalPickupQr(profile);
-  app.get("/bff/internal-test/pickup-entry", (req, res) => {
+  // DEC-PILOT-RUNTIME-ENVIRONMENT: the Store's own address opens pickup ordering, so the pickup
+  // poster's QR code is just the customer origin and never needs reprinting when keys rotate.
+  // The old InternalTest path stays for an app version cached before this change.
+  const pickupEntry = (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     if (
       req.headers["sec-fetch-site"] !== "same-origin" ||
@@ -69,7 +80,9 @@ export async function startInternalCustomerServer({
     )
       return res.status(400).json({ code: "INTERNAL_ENTRY_UNAVAILABLE" });
     res.json({ schemaVersion: 1, qrToken: pickupQr.token() });
-  });
+  };
+  app.get("/bff/customer/pickup-entry", pickupEntry);
+  if (internalTest) app.get("/bff/internal-test/pickup-entry", pickupEntry);
   let resources, simulator;
   try {
     resources = await createInternalTestResources();
@@ -77,18 +90,20 @@ export async function startInternalCustomerServer({
     const entry = await createInternalCustomerEntry(resources),
       items = await createInternalTestItems(resources);
     // WP-2423 Q11: each DEMO launcher table opens its current issued code; none issued → 503.
-    registerInternalDiningEntry(app, {
-      profile,
-      tables: diningEntries.map(({ selector, label, tableReference }) => ({
-        selector,
-        label,
-        loadQr: async () => {
-          const token = await entry.dining.currentToken(tableReference);
-          if (typeof token !== "string") throw new Error("INTERNAL_DINING_QR_UNAVAILABLE");
-          return { token: () => token };
-        },
-      })),
-    });
+    // InternalTest only: a Pilot Store's guests scan the printed table codes (DIN-TABLE-LIST).
+    if (internalTest)
+      registerInternalDiningEntry(app, {
+        profile,
+        tables: diningEntries.map(({ selector, label, tableReference }) => ({
+          selector,
+          label,
+          loadQr: async () => {
+            const token = await entry.dining.currentToken(tableReference);
+            if (typeof token !== "string") throw new Error("INTERNAL_DINING_QR_UNAVAILABLE");
+            return { token: () => token };
+          },
+        })),
+      });
     const checkout = createInternalCheckout(resources, entry, items.catalogCartItems);
     const orders = await createInternalOrder(resources, checkout, items.catalogCartItems);
     const diningCheckout = createInternalDiningCheckout(resources, entry, checkout);
@@ -143,6 +158,8 @@ export async function startInternalCustomerServer({
               wallets:
                 simulator.walletDomain !== null &&
                 new URL(origin).hostname === simulator.walletDomain,
+              // Wire name kept for installed apps: the Store's address opens pickup ordering
+              // (`/bff/customer/pickup-entry`), in InternalTest and in a Pilot Store alike.
               internalTestEntry: true,
             }
           : { schemaVersion: 1, mode: "simulation", internalTestEntry: true },
@@ -221,7 +238,7 @@ export async function startInternalCustomerServer({
       const upstream = request(
         {
           hostname: "127.0.0.1",
-          port: 4300,
+          port: apiPort,
           path: req.url,
           method: req.method,
           headers: { ...req.headers, host, connection: "close" },
@@ -263,8 +280,10 @@ export async function startInternalCustomerServer({
       { key: await readFile(keyFile), cert: await readFile(certificateFile) },
       app,
     );
-    server.listen(4443, "127.0.0.1", () =>
-      process.stdout.write("Internal customer HTTPS listening on 127.0.0.1:4443\n"),
+    server.listen(listenPort, "127.0.0.1", () =>
+      process.stdout.write(
+        "Pilot customer HTTPS listening on 127.0.0.1:" + server.address().port + "\n",
+      ),
     );
     for (const signal of ["SIGINT", "SIGTERM"])
       process.once(signal, () =>

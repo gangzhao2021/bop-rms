@@ -10,6 +10,7 @@ import { createInternalQrLoaders } from "./pilot-qr.mjs";
 import { startInternalCustomerServer } from "./pilot-customer-server.mjs";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { loadPilotHosting } from "./pilot-hosting.mjs";
+import { isPilotRuntime } from "./pilot-environment.mjs";
 export function parsePilotHttpsArguments(args) {
   if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== "string")
     throw Error("PILOT_HTTPS_ARGUMENT_INVALID");
@@ -89,7 +90,8 @@ export async function startConfiguredPilotHttps(
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    if (process.env.NODE_ENV !== "development") throw Error("PILOT_HTTPS_ENVIRONMENT_INVALID");
+    // DEC-PILOT-RUNTIME-ENVIRONMENT: InternalTest or a Pilot Store process; nothing else.
+    if (!isPilotRuntime()) throw Error("PILOT_HTTPS_ENVIRONMENT_INVALID");
     const dir = path.join(
       fileURLToPath(new URL("../../", import.meta.url)),
       parsePilotHttpsArguments(process.argv.slice(2)),
