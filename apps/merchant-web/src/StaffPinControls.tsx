@@ -17,8 +17,13 @@ import {
  * own six-digit PIN for the store's shared tablets after a full sign-in. A PIN sign-in is
  * reminded that refunds, price and staff changes need the authenticator code or a full sign-in.
  */
-export const PIN_ELEVATION_EXPLANATION =
-  "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, refunds, price changes and staff changes can go ahead on this PIN sign-in until the time shown.";
+export const PIN_ELEVATION_EXPLANATION = Object.freeze({
+  /** TEST-ONLY sign-in (internal test): the authenticator code is entered on this page. */
+  code: "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, refunds, price changes and staff changes can go ahead on this PIN sign-in until the time shown.",
+  /** DEC-COGNITO-STORE-STAFF: the staff member signs in again in a small window. */
+  signIn:
+    "Confirm it is you by signing in again with your password and authenticator app. After you verify, refunds, price changes and staff changes can go ahead on this PIN sign-in until the time shown.",
+});
 export const PIN_FULL_SIGN_IN_TEXT =
   "You signed in with a PIN. Confirm it's you with your authenticator app, or sign in with your account, to change your PIN.";
 

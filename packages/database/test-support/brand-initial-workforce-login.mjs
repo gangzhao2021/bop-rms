@@ -180,8 +180,8 @@ export async function exerciseInitialBrandWorkforceLogin(
         auth_time: second,
         iat: second,
         exp: second + 3600,
-        acr: "urn:cognito:loa:4",
-        amr: ["pwd", "otp", "mfa"],
+        // WP-2423 DEC-COGNITO-STORE-STAFF: real user-pool tokens carry no acr/amr; the pool's
+        // MFA check (synthetic answer: required, authenticator app only) stands in for them.
       };
     return globalThis.Response.json({
       id_token: jwt({ ...common, token_use: "id", aud: clientId, nonce: code.nonce }, "id"),

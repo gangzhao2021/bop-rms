@@ -42,9 +42,28 @@ import {
 } from "../../bop/audit/src/index.ts";
 
 const identityRequire = createRequire(new URL("../../bop/identity/package.json", import.meta.url));
-const { CognitoIdentityProviderClient, AdminGetUserCommand } = identityRequire(
-  "@aws-sdk/client-cognito-identity-provider",
-);
+const {
+  CognitoIdentityProviderClient,
+  AdminGetUserCommand,
+  GetUserPoolMfaConfigCommand,
+  DescribeUserPoolCommand,
+} = identityRequire("@aws-sdk/client-cognito-identity-provider");
+/**
+ * WP-2423 DEC-COGNITO-STORE-STAFF: the Cognito compositions check the pool's MFA settings (real
+ * user-pool tokens carry no acr/amr). Synthetic answer: MFA required, authenticator app only.
+ */
+const syntheticPoolMfaAnswer = (command) =>
+  command instanceof GetUserPoolMfaConfigCommand
+    ? { MfaConfiguration: "ON", SoftwareTokenMfaConfiguration: { Enabled: true } }
+    : command instanceof DescribeUserPoolCommand
+      ? {
+          UserPool: {
+            Id: command.input.UserPoolId,
+            MfaConfiguration: "ON",
+            Policies: { SignInPolicy: { AllowedFirstAuthFactors: ["PASSWORD"] } },
+          },
+        }
+      : null;
 const id = (n) => `0190ed60-0040-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const actions = [
   "organization.manage",
@@ -305,6 +324,8 @@ async function createNativeOperator(f, context, external) {
   const send = vi
     .spyOn(CognitoIdentityProviderClient.prototype, "send")
     .mockImplementation(async (command) => {
+      const poolAnswer = syntheticPoolMfaAnswer(command);
+      if (poolAnswer !== null) return poolAnswer;
       assert(command instanceof AdminGetUserCommand);
       sdkCalls++;
       assert.equal(command.input.UserPoolId, pool);

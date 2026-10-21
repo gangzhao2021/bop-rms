@@ -29,7 +29,12 @@ import type { MerchantBffService } from "./merchant-bff-contract.js";
  */
 export const stepUpCookieName = "__Host-bop-step-up";
 export const stepUpCompletePath = "/app/identity/step-up-complete";
-export type ProviderStepUpResult = "verified" | "cancelled" | "failed";
+/**
+ * `unavailable`: the sign-in could not be started because the identity provider's pool check
+ * (MFA required, authenticator app only) did not pass or could not be read; nothing is recorded.
+ */
+export type ProviderStepUpResult = "verified" | "cancelled" | "failed" | "unavailable";
+const stepUpWindowMs = 600_000;
 interface StepUpProvider {
   readonly redirectUri: string;
   createAuthorizationUrl(request: OidcAuthorizationRequest): Promise<string>;
@@ -97,6 +102,17 @@ export function createMerchantProviderStepUp(options: {
     const transactionReference = parseAuthorizationTransactionReference(
       identity.credentials.generateUuidV7(),
     );
+    // The provider may refuse to start (its pool check says sign-in is not safe now): nothing is
+    // written and the window says so.
+    const authorizationUrl = await options.provider.createAuthorizationUrl({
+      issuer: options.issuer,
+      clientId: options.clientId,
+      redirectUri: options.provider.redirectUri,
+      state,
+      nonce,
+      codeChallenge: identity.pkce.challenge(codeVerifier),
+      codeChallengeMethod: "S256",
+    });
     const encryptedSecrets = await identity.envelopes.encrypt(
       JSON.stringify({
         profile: "MerchantProviderStepUpV1",
@@ -117,20 +133,13 @@ export function createMerchantProviderStepUp(options: {
         encryptedSecrets,
         redirectUri: options.provider.redirectUri,
         postLoginPath: stepUpCompletePath,
-        expiresAt: parseCanonicalInstant(new Date(Date.parse(startedAt) + 600_000).toISOString()),
+        expiresAt: parseCanonicalInstant(
+          new Date(Date.parse(startedAt) + stepUpWindowMs).toISOString(),
+        ),
         consumedAt: null,
         version: parseSessionVersion(1),
       }),
     );
-    const authorizationUrl = await options.provider.createAuthorizationUrl({
-      issuer: options.issuer,
-      clientId: options.clientId,
-      redirectUri: options.provider.redirectUri,
-      state,
-      nonce,
-      codeChallenge: identity.pkce.challenge(codeVerifier),
-      codeChallengeMethod: "S256",
-    });
     return Object.freeze({ authorizationUrl, cookie });
   }
 
@@ -189,6 +198,10 @@ export function createMerchantProviderStepUp(options: {
         code: String(input.code),
         nonce: parseRawBrowserCredential(secrets.nonce),
         codeVerifier: parseRawBrowserCredential(secrets.codeVerifier),
+        // `start` made the transaction expire ten minutes after it began.
+        authorizationStartedAt: new Date(
+          Date.parse(transaction.expiresAt) - stepUpWindowMs,
+        ).toISOString(),
       });
       const actorReference = await options.boundActor(verified);
       const current = await options.authentication.bootstrap(input.sessionCookie);

@@ -9,7 +9,10 @@ import {
 } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
-import { AdminGetUserCommand } from "@aws-sdk/client-cognito-identity-provider";
+import {
+  AdminGetUserCommand,
+  GetUserPoolMfaConfigCommand,
+} from "@aws-sdk/client-cognito-identity-provider";
 import {
   BrowserSessionError,
   parseAuthorizationTransactionReference,
@@ -26,16 +29,31 @@ import {
 import { createCognitoWorkforceInvitation } from "../infrastructure/cognito-workforce-invitation.js";
 import { createCognitoWorkforceOnboardingAuthentication } from "../infrastructure/cognito-workforce-onboarding-authentication.js";
 
-const sdk = vi.hoisted(() => ({ send: vi.fn() }));
+const sdk = vi.hoisted(() => ({ send: vi.fn(), pool: vi.fn() }));
 vi.mock("@aws-sdk/client-cognito-identity-provider", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aws-sdk/client-cognito-identity-provider")>();
   return {
     ...actual,
     CognitoIdentityProviderClient: class {
-      send = sdk.send;
+      // WP-2423 DEC-COGNITO-STORE-STAFF: the pool MFA check answers separately (`sdk.pool`).
+      send = (command: unknown, ...rest: unknown[]) =>
+        command instanceof actual.GetUserPoolMfaConfigCommand ||
+        command instanceof actual.DescribeUserPoolCommand
+          ? sdk.pool(command)
+          : sdk.send(command, ...rest);
     },
   };
 });
+const poolAnswer = async (command: unknown) =>
+  command instanceof GetUserPoolMfaConfigCommand
+    ? { MfaConfiguration: "ON", SoftwareTokenMfaConfiguration: { Enabled: true } }
+    : {
+        UserPool: {
+          Id: "ca-central-1_Synthetic",
+          MfaConfiguration: "ON",
+          Policies: { SignInPolicy: { AllowedFirstAuthFactors: ["PASSWORD"] } },
+        },
+      };
 // Real installed OIDC/JWT verifiers consume locally RSA-signed tokens and JWKS.
 // Only HTTP and actual AWS SDK send boundaries are synthetic, never verdict ports.
 const idKey = generateKeyPairSync("rsa", { modulusLength: 2048 }),
@@ -293,6 +311,8 @@ function fixture() {
 beforeEach(() => {
   sdk.send.mockReset();
   sdk.send.mockResolvedValue(status());
+  sdk.pool.mockReset();
+  sdk.pool.mockImplementation(poolAnswer);
 });
 describe("actual invitation-specific Cognito authentication", () => {
   it("constructs without observing time, allocating evidence or calling Provider transport", () => {
@@ -347,6 +367,31 @@ describe("actual invitation-specific Cognito authentication", () => {
       expect(sdk.send).not.toHaveBeenCalled();
     },
   );
+  it("accepts real Cognito tokens without acr/amr only while the pool requires the authenticator app", async () => {
+    const strip = (f: ReturnType<typeof fixture>) => {
+      for (const claims of [f.changes.id, f.changes.access]) {
+        claims.acr = undefined;
+        claims.amr = undefined;
+      }
+    };
+    const f = fixture();
+    strip(f);
+    const proof = await f.exchange();
+    expect(proof.actor.verificationLevel).toBe("RecentMfa");
+    expect(sdk.pool).toHaveBeenCalledTimes(2);
+    // MFA optional in the pool: refused before any Provider account read or allocation.
+    const g = fixture();
+    strip(g);
+    sdk.send.mockClear();
+    sdk.pool.mockImplementation(async (command: unknown) =>
+      command instanceof GetUserPoolMfaConfigCommand
+        ? { MfaConfiguration: "OPTIONAL", SoftwareTokenMfaConfiguration: { Enabled: true } }
+        : await poolAnswer(command),
+    );
+    await expect(g.exchange()).rejects.toBeInstanceOf(BrowserSessionError);
+    expect(sdk.send).not.toHaveBeenCalled();
+    expect(g.nextEvidenceReference).not.toHaveBeenCalled();
+  });
   it.each(["disabled", "unknown", "mismatch"])("refuses actual current-status %s", async (mode) => {
     const f = fixture();
     if (mode === "disabled") sdk.send.mockResolvedValue(status(false));

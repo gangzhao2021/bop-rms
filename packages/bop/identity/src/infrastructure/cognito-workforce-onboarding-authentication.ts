@@ -35,6 +35,7 @@ import {
   type CognitoProviderConfiguration,
 } from "./cognito-provider-protocol.js";
 import { createCognitoSubjectStatus } from "./cognito-subject-status.js";
+import { createCognitoPoolMfaPolicy } from "./cognito-pool-mfa-policy.js";
 import { createCognitoWorkforceInvitation } from "./cognito-workforce-invitation.js";
 
 export interface CognitoWorkforceOnboardingAuthenticationOptions {
@@ -171,6 +172,12 @@ export function createCognitoWorkforceOnboardingAuthentication(
       },
       clock,
       accountKind: "Workforce",
+      // WP-2423 DEC-COGNITO-STORE-STAFF: real Cognito tokens carry no acr/amr; the pool itself
+      // must require the authenticator app (checked at most five minutes before the exchange).
+      poolPolicy: createCognitoPoolMfaPolicy({
+        userPoolId: new URL(scope.issuer).pathname.slice(1),
+        clock,
+      }),
       ...(http === undefined ? {} : { http }),
     });
     const pool = new URL(scope.issuer).pathname.slice(1);

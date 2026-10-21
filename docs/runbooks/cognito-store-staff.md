@@ -15,6 +15,11 @@ Create one workforce user pool in **ca-central-1** (the code only accepts
 - Password policy: minimum 12 characters; temporary password validity **7 days** (matches the
   app's invitation expiry).
 - MFA: **required**, **authenticator app (TOTP) only**; no SMS, no email OTP.
+- Sign-in options (choice-based sign-in / first factors): **password only** — no passkey, no email or
+  SMS one-time password as a first factor.
+- Device tracking: **don't remember devices** (a remembered device must never skip MFA).
+- The app checks these settings itself (section 9): Cognito's user-pool tokens carry no `acr`/`amr`,
+  so the pool's MFA setting is what proves the authenticator was used. Any other setting stops sign-in.
 - Account recovery: **admin only** (no self-service email recovery), per IDR-0025.
 - Custom attribute: `custom:bop_invitation_intent` (String, max 80, **immutable**). The app writes
   the invitation's intent digest here and checks it on the first sign-in.
@@ -40,8 +45,9 @@ Create one workforce user pool in **ca-central-1** (the code only accepts
 - Managed login domain: an AWS domain `https://<prefix>.auth.ca-central-1.amazoncognito.com`
   (or a custom domain with its certificate).
 - IAM for the pilot host (instance role or the AWS credential chain of the API process):
-  `cognito-idp:AdminCreateUser`, `cognito-idp:AdminGetUser`, `cognito-idp:AdminDeleteUser` on this
-  pool's ARN only.
+  `cognito-idp:AdminCreateUser`, `cognito-idp:AdminGetUser`, `cognito-idp:AdminDeleteUser`,
+  `cognito-idp:GetUserPoolMfaConfig`, `cognito-idp:DescribeUserPool` on this pool's ARN only. The
+  same two read actions are needed on the Brand administration and Platform pools for their sign-ins.
 
 ## 3. Installation files (private runtime directory, owner-only `0600`, directory `0700`)
 
@@ -130,9 +136,31 @@ prepare-assignment --change <ownerRoleChange> …` → approver `sign-assignment
 
 1. Invite a test staff member; confirm the email template and sender; first sign-in with password
    change and TOTP set-up reaches the app; Staff shows them as joined.
-2. Confirm the ID and access tokens carry `acr` and `amr` as the protocol expects; if not, stop and
-   record it (the strong-authentication check needs adjusting, see the design note).
+2. Confirm sign-in works with the pool check (section 9): no `STAFF_SIGN_IN_POOL_CHECK_REFUSED` line in
+   the API log after startup. Real tokens are expected to carry no `acr`/`amr`; that is accepted.
 3. Sign out and sign in again on the same browser: the managed login asks for password and code again.
 4. "Verify it's you" on a refund approval opens the sign-in window and the approval goes ahead.
 5. Kitchen display start, PIN switch on a registered tablet, 12-hour limit warnings unchanged.
 6. Resend, cancel (the Cognito user is deleted), re-invite the same email.
+
+## 9. Pool check (MFA required, authenticator app only)
+
+Real Cognito user-pool tokens carry `auth_time` but no `acr`/`amr`, so before every staff sign-in and
+"Verify it's you" the app reads the pool settings (`GetUserPoolMfaConfig` and `DescribeUserPool`, the
+IAM actions above). A result older than five minutes is read again; the API also checks at startup and
+every four minutes. Sign-in goes ahead only when MFA is `ON`, the authenticator app (TOTP) is enabled,
+SMS and email MFA are off, the first factor is password only and remembered devices cannot skip MFA.
+
+When the check does not pass or cannot be read:
+
+- Staff see "Signing in isn't available right now …" on the sign-in page, and the "Verify it's you"
+  window says signing in again isn't available. Signed-in staff keep working; PIN switching on a
+  registered tablet keeps working. Nothing is recorded.
+- The API logs one line per change (no secret, no person):
+  `{"event":"STAFF_SIGN_IN_POOL_CHECK_REFUSED","state":"Refused"|"Unknown","reason":…}`.
+  `MfaNotRequired` (set MFA to required), `AuthenticatorAppNotEnabled` (enable authenticator apps),
+  `TextMessageMfaEnabled` / `EmailMfaEnabled` (turn that MFA method off), `PasswordlessSignInAllowed`
+  (sign-in options: password only), `RememberedDevicesSkipMfa` (device tracking: don't remember),
+  `Unavailable` (the pool could not be read: IAM actions, pool ID, network or a Cognito outage).
+- Fix the setting in the Cognito console; sign-in works again within four minutes (or at the next
+  sign-in attempt after the previous result is five minutes old). No restart is needed.

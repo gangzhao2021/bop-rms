@@ -35,6 +35,22 @@ const failureMessage = (error: StepUpError): string => {
   return messages[error.code];
 };
 
+export interface StepUpExplanation {
+  readonly code: string;
+  readonly signIn: string;
+}
+export const STEP_UP_CODE_EXPLANATION =
+  "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, approvals and refunds can go ahead for 15 minutes.";
+/** The dialog text for how this sign-in confirms it is the person (never a code in sign-in mode). */
+export function stepUpExplanationText(
+  method: StepUpMethod,
+  explanation: StepUpExplanation | undefined,
+): string {
+  return method === "SignIn"
+    ? (explanation?.signIn ?? STEP_UP_SIGN_IN_EXPLANATION)
+    : (explanation?.code ?? STEP_UP_CODE_EXPLANATION);
+}
+
 const currentPath = () =>
   typeof window === "undefined" ? "/app" : window.location.pathname + window.location.search;
 
@@ -69,8 +85,11 @@ export function StepUpVerification({
   readonly fetcher?: typeof fetch | undefined;
   /** Read the server's current verification on first display (off when the page shares it). */
   readonly loadServerStatus?: boolean;
-  /** What a verification allows, when it is not the default refunds and approvals wording. */
-  readonly explanation?: string | undefined;
+  /**
+   * What a verification allows, when it is not the default refunds and approvals wording: one
+   * text for each way of confirming (the code on this page, or signing in again).
+   */
+  readonly explanation?: StepUpExplanation | undefined;
   /**
    * Show "Confirm it is you with the code from your authenticator app." before verifying. Off
    * where the text around the button already says so, so the hint is never shown twice.
@@ -128,7 +147,7 @@ export function StepUpVerification({
     if (!waiting) return;
     let active = true;
     const recheck = async (result: StepUpResult | null) => {
-      if (result === "cancelled" || result === "failed") {
+      if (result === "cancelled" || result === "failed" || result === "unavailable") {
         setWaiting(false);
         setMessage(stepUpResultText[result]);
         return;
@@ -256,7 +275,7 @@ export function StepUpVerification({
         <h2 id={titleId}>Confirm it is you</h2>
         {signIn ? (
           <>
-            <p>{explanation ?? STEP_UP_SIGN_IN_EXPLANATION}</p>
+            <p>{stepUpExplanationText("SignIn", explanation)}</p>
             {waiting ? (
               <p role="status">
                 Finish signing in in the new window. This page continues when you are done.
@@ -274,10 +293,7 @@ export function StepUpVerification({
           </>
         ) : (
           <>
-            <p>
-              {explanation ??
-                "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, approvals and refunds can go ahead for 15 minutes."}
-            </p>
+            <p>{stepUpExplanationText("Code", explanation)}</p>
             <form
               onSubmit={(event) => {
                 event.preventDefault();

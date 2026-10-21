@@ -16,6 +16,7 @@ import type {
   OidcCodeExchangeRequest,
 } from "../application/ports/oidc-provider-port.js";
 import type { AuthorizationTransactionReference } from "../contracts/browser-session.js";
+import type { CognitoPoolMfaPolicy } from "./cognito-pool-mfa-policy.js";
 export interface CognitoProviderConfiguration {
   readonly issuer: string;
   readonly clientId: string;
@@ -34,8 +35,18 @@ export interface CognitoProviderProtocolOptions {
    * signed Cognito username, which names the invited person on a first sign-in.
    */
   readonly profile?: "StoreOperations";
+  /**
+   * WP-2423 DEC-COGNITO-STORE-STAFF: real Cognito user-pool tokens carry no `acr`/`amr`. With this
+   * pool check every authorization and code exchange first needs a recent verified pool setting
+   * (MFA required, authenticator app only, password first factor); tokens may then omit
+   * `acr`/`amr`, and any that are present must still say loa:4 / password plus one-time code.
+   * Without it both claims are required as before.
+   */
+  readonly poolPolicy?: Pick<CognitoPoolMfaPolicy, "assertRequiredTotp">;
   readonly http?: typeof globalThis.fetch;
 }
+/** Seconds a signed authentication may be old when its tokens are checked (prompt=login). */
+export const cognitoAuthenticationFreshSeconds = 300;
 type StrongAuthorizationRequest = OidcAuthorizationRequest & {
   readonly prompt: "login";
   readonly requireTotp: true;
@@ -49,6 +60,21 @@ type StrongExchangeRequest = OidcCodeExchangeRequest & {
 const denied = (): never => {
   throw new BrowserSessionError("BROWSER_SESSION_DENIED");
 };
+const unavailableOrDenied = (error: unknown): never => {
+  if (error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_UNAVAILABLE")
+    throw new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE");
+  return denied();
+};
+const strongAmr = ["pwd", "otp", "mfa"];
+/** `amr`, when a token carries it, names the password and a one-time code (never anything else). */
+const amrStrong = (amr: unknown): boolean =>
+  Array.isArray(amr) &&
+  amr.length >= 2 &&
+  amr.length <= 3 &&
+  new Set(amr).size === amr.length &&
+  amr.every((value) => strongAmr.includes(value as string)) &&
+  amr.includes("pwd") &&
+  (amr.includes("otp") || amr.includes("mfa"));
 const instant = (value: unknown) => parseCanonicalInstant(value);
 const wholeSecond = (value: unknown): number => {
   if (
@@ -88,8 +114,17 @@ export function createCognitoProviderProtocol(options: CognitoProviderProtocolOp
       "clock",
       "accountKind",
       ...(Object.hasOwn(options, "profile") ? ["profile"] : []),
+      ...(Object.hasOwn(options, "poolPolicy") ? ["poolPolicy"] : []),
       ...(Object.hasOwn(options, "http") ? ["http"] : []),
     ]);
+    const poolPolicy = Object.hasOwn(o, "poolPolicy")
+      ? (o.poolPolicy as Pick<CognitoPoolMfaPolicy, "assertRequiredTotp"> | undefined)
+      : null;
+    if (poolPolicy !== null && typeof poolPolicy?.assertRequiredTotp !== "function")
+      return denied();
+    const assertPool = async () => {
+      if (poolPolicy !== null) await poolPolicy.assertRequiredTotp();
+    };
     if (o.accountKind !== "Platform" && o.accountKind !== "Workforce") return denied();
     const workforce = o.accountKind === "Workforce";
     const store = Object.hasOwn(o, "profile");
@@ -287,26 +322,26 @@ export function createCognitoProviderProtocol(options: CognitoProviderProtocolOp
         issued = wholeSecond(payload.iat),
         expires = wholeSecond(payload.exp),
         at = Date.parse(observedAt) / 1000;
-      const amr = payload.amr;
+      const hasAcr = Object.hasOwn(payload, "acr"),
+        hasAmr = Object.hasOwn(payload, "amr");
       if (
         payload.iss !== issuer ||
         typeof payload.sub !== "string" ||
         payload.sub.length > 128 ||
         !/^[\x21-\x7e]+$/u.test(payload.sub) ||
         payload.sub.includes("@") ||
-        payload.acr !== "urn:cognito:loa:4" ||
+        // Present claims must say strong; absent ones are accepted only behind the pool check.
+        (hasAcr && payload.acr !== "urn:cognito:loa:4") ||
+        (hasAmr && !amrStrong(payload.amr)) ||
+        (poolPolicy === null && (!hasAcr || !hasAmr)) ||
         Object.hasOwn(payload, "identities") ||
-        !Array.isArray(amr) ||
-        amr.length !== 3 ||
-        new Set(amr).size !== 3 ||
-        !amr.every((v) => ["pwd", "otp", "mfa"].includes(v)) ||
         auth > at ||
         issued < auth ||
         issued > at ||
         expires <= at ||
         expires <= issued ||
-        at - auth >= 600 ||
-        at - issued >= 600
+        at - auth >= cognitoAuthenticationFreshSeconds ||
+        at - issued >= cognitoAuthenticationFreshSeconds
       )
         return denied();
       return {
@@ -334,6 +369,7 @@ export function createCognitoProviderProtocol(options: CognitoProviderProtocolOp
           ]);
           const bound = fixed(r);
           if (r.codeChallengeMethod !== "S256") return denied();
+          await assertPool();
           return oidc.buildAuthorizationUrl(sdk, {
             redirect_uri: redirectUri,
             response_type: "code",
@@ -347,8 +383,8 @@ export function createCognitoProviderProtocol(options: CognitoProviderProtocolOp
             max_age: "0",
             acr_values: "urn:cognito:loa:4",
           }).href;
-        } catch {
-          return denied();
+        } catch (error) {
+          return unavailableOrDenied(error);
         }
       },
       async exchangeVerifiedCode(value: StrongExchangeRequest) {
@@ -364,8 +400,9 @@ export function createCognitoProviderProtocol(options: CognitoProviderProtocolOp
             "requireTotp",
             "transactionReference",
           ]);
-          const bound = fixed(r),
-            observedAt = observe(),
+          const bound = fixed(r);
+          await assertPool();
+          const observedAt = observe(),
             callbackUrl = new URL(redirectUri);
           let latest = observedAt;
           const check = () => {
@@ -381,7 +418,7 @@ export function createCognitoProviderProtocol(options: CognitoProviderProtocolOp
             pkceCodeVerifier: parseRawBrowserCredential(r.codeVerifier),
             expectedNonce: bound.nonce,
             idTokenExpected: true,
-            maxAge: 600,
+            maxAge: cognitoAuthenticationFreshSeconds,
           });
           check();
           const idToken = credential(tokens.id_token, 8192),

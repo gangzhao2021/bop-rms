@@ -30,7 +30,9 @@ import { openSyntheticStoreRoles } from "../test-support/store-role-provisioning
 // test double (a cookie names a person with the listed permissions at the Store). Invitations,
 // Memberships, role requests, Cognito accounts, sessions, Store selections, step-ups and audits are
 // the real owners over real rows, run as a restricted NOBYPASSRLS role holding exactly the rendered
-// pilot API grants, against the TEST-ONLY local Cognito stand-in over HTTP (no AWS call).
+// pilot API grants, against the TEST-ONLY local Cognito stand-in over HTTP (no AWS call). Its tokens
+// have the real user-pool shape (no acr/amr) unless a step says otherwise, and its pool MFA admin
+// calls answer "required, authenticator app only" unless a step changes them.
 const signedIn = vi.hoisted(() => ({ scopeFor: null }));
 vi.mock("../../../apps/api/src/merchant-store-scope.ts", () => ({
   createMerchantStoreScope: () => async (tx, cookie, action, expected) =>
@@ -219,21 +221,29 @@ it("WP-2423 Cognito store staff: invite, first sign-in, sessions, step-up, resen
         nextReference: next,
         inspector: invitation,
       });
-      const provider = createCognitoStoreWorkforceProvider({
-        configuration: {
-          issuer: fake.issuer,
-          clientId: fake.clientId,
-          clientSecret: fake.clientSecret,
-          managedLoginOrigin: fake.managedLoginOrigin,
-          redirectUri: origin + "/merchant/callback",
-          logoutReturnUri: origin + "/app",
-        },
-        stepUpRedirectUri: origin + "/merchant/identity/step-up/callback",
-        clock: { now: clock },
-        nextReference: next,
-        resolveSubject: people.resolveSubject,
-        http,
-      });
+      const providerEndpoint = {
+        url: fake.origin + "/",
+        credentials: { accessKeyId: "TESTONLY", secretAccessKey: "TESTONLY" },
+      };
+      // A fresh provider has an unchecked pool (its MFA check is cached for five minutes).
+      const createProvider = () =>
+        createCognitoStoreWorkforceProvider({
+          configuration: {
+            issuer: fake.issuer,
+            clientId: fake.clientId,
+            clientSecret: fake.clientSecret,
+            managedLoginOrigin: fake.managedLoginOrigin,
+            redirectUri: origin + "/merchant/callback",
+            logoutReturnUri: origin + "/app",
+          },
+          stepUpRedirectUri: origin + "/merchant/identity/step-up/callback",
+          clock: { now: clock },
+          nextReference: next,
+          resolveSubject: people.resolveSubject,
+          providerEndpoint,
+          http,
+        });
+      const provider = createProvider();
       const scope = { tenantReference: tenant, brandReference: brand, storeReference: store };
       const validateAssociation = async (tx, session, selected, at = clock()) =>
         selected.storeReference === store &&
@@ -531,6 +541,31 @@ it("WP-2423 Cognito store staff: invite, first sign-in, sessions, step-up, resen
       const kitchen = await signIn({ ...samPassword }, "/operations/kitchen/start");
       assert.equal(kitchen.session.policy.code, "NamedKdsOperator");
       assert.equal(kitchen.postLoginPath, "/operations/kitchen/start");
+      // Real Cognito tokens (above) carry no acr/amr; tokens that do carry them are accepted too,
+      // and must then say password plus one-time code.
+      await tick();
+      fake.setTokenShape("acr-amr");
+      const withClaims = await signIn({ ...samPassword });
+      assert.equal(withClaims.session.actor.actorReference, sam);
+      const sessionCount = async () =>
+        (
+          await rows(
+            "SELECT count(*)::int n FROM bop_identity.authentication_session WHERE actor_id=$1",
+            [sam],
+          )
+        )[0].n;
+      const sessionsBefore = await sessionCount();
+      fake.setNextClaims({ common: { amr: ["pwd"] } });
+      await assert.rejects(signIn({ ...samPassword }));
+      fake.setTokenShape("cognito");
+      // prompt=login: an authentication dated before this sign-in started (a reused Cognito
+      // sign-in) is refused, as is one more than five minutes old.
+      const nowSecond = Math.floor(Date.now() / 1000);
+      fake.setNextClaims({ common: { auth_time: nowSecond - 60 } });
+      await assert.rejects(signIn({ ...samPassword }));
+      fake.setNextClaims({ common: { auth_time: nowSecond - 400, iat: nowSecond - 400 } });
+      await assert.rejects(signIn({ ...samPassword }));
+      assert.equal(await sessionCount(), sessionsBefore);
 
       // ── 4. Refusals: no invitation, someone else's invitation, expired, a failing Provider.
       fake.users.set("stranger", {
@@ -845,6 +880,63 @@ it("WP-2423 Cognito store staff: invite, first sign-in, sessions, step-up, resen
       await assert.rejects(
         stepUp.start({ sessionCookie: samSession, purpose: "Everything", returnTo: "/app" }),
       );
+      // The pool must require the authenticator app (real Cognito tokens carry no acr/amr). Any
+      // other setting, an error or no answer: sign-in and step-up are refused before anything is
+      // written (no authorization, session or step-up row) and before the person is sent to Cognito.
+      const counts = async () =>
+        (
+          await rows(
+            "SELECT (SELECT count(*) FROM bop_identity.oidc_authorization_transaction)::int a,(SELECT count(*) FROM bop_identity.authentication_session)::int s,(SELECT count(*) FROM bop_identity.workforce_mfa_step_up)::int u",
+          )
+        )[0];
+      const poolCases = [
+        ["optional", null],
+        ["off", null],
+        ["sms", null],
+        ["email", null],
+        ["passwordless", null],
+        ["remembered-devices", null],
+        ["on-totp", "status-500"],
+        ["on-totp", "hang"],
+      ];
+      for (const [mode, fault] of poolCases) {
+        fake.setPoolMfa(mode);
+        // Once for the sign-in and once for the step-up (a failed check is not kept).
+        if (fault !== null) [1, 2].forEach(() => fake.fail("admin:GetUserPoolMfaConfig", fault));
+        const refused = createProvider();
+        const refusedService = new BrowserSessionService({
+          ...identity,
+          provider: refused,
+          store: sessionStore,
+          now: clock,
+        });
+        const refusedStepUp = createMerchantProviderStepUp({
+          persistence: { transactions: api, now: clock, identity },
+          authentication: { bootstrap: (cookie) => service.bootstrap(cookie) },
+          provider: refused.stepUp,
+          issuer: fake.issuer,
+          clientId: fake.clientId,
+          environment: "acceptance",
+          boundActor: people.boundActor,
+          newReference: next,
+        });
+        const before = await counts();
+        await assert.rejects(refusedService.start("/app"), {
+          code: "BROWSER_SESSION_UNAVAILABLE",
+        });
+        await assert.rejects(
+          refusedStepUp.start({
+            sessionCookie: samSession,
+            purpose: "RefundApproval",
+            returnTo: "/app",
+          }),
+          { code: "BROWSER_SESSION_UNAVAILABLE" },
+        );
+        assert.deepEqual(await counts(), before, mode + "/" + fault);
+        assert.notEqual(refused.pool.status().state, "Verified");
+      }
+      fake.setPoolMfa("on-totp");
+
       // Signing out ends the session and revokes its Cognito refresh token.
       const revokedBefore = fake.revoked.length;
       await service.logout(samSession);
@@ -1052,6 +1144,88 @@ it("WP-2423 Cognito store staff: invite, first sign-in, sessions, step-up, resen
         });
         assert.equal(refused.status, 303);
         assert.equal(refused.headers.location, "/operations/sign-in?signIn=failed");
+        // The pool stops requiring the authenticator app: once the five-minute check is due, the
+        // sign-in page and the step-up window say signing in is unavailable (checked on a fresh
+        // router whose provider has not checked the pool yet).
+        fake.setPoolMfa("optional");
+        const unchecked = createProvider();
+        const uncheckedApp = express();
+        uncheckedApp.use(
+          "/merchant",
+          createMerchantBffRouter({
+            service: {
+              ...minimal,
+              start: (path) =>
+                new BrowserSessionService({
+                  ...identity,
+                  provider: unchecked,
+                  store: sessionStore,
+                  now: clock,
+                }).start(path),
+            },
+            exactOrigin: origin,
+            acceptedHost: "staff.example.test",
+            signInEntry: { path: "/operations/sign-in", testOnly: false },
+            providerStepUp: createMerchantProviderStepUp({
+              persistence: { transactions: api, now: clock, identity },
+              authentication: { bootstrap: (cookie) => service.bootstrap(cookie) },
+              provider: unchecked.stepUp,
+              issuer: fake.issuer,
+              clientId: fake.clientId,
+              environment: "acceptance",
+              boundActor: people.boundActor,
+              newReference: next,
+            }),
+          }),
+        );
+        const uncheckedServer = await new Promise((resolve) => {
+          const listener = uncheckedApp.listen(0, "127.0.0.1", () => resolve(listener));
+        });
+        try {
+          const port = uncheckedServer.address().port;
+          const sendTo = (path, cookie, headers = {}) =>
+            new Promise((resolve, reject) => {
+              const call = httpRequest(
+                {
+                  host: "127.0.0.1",
+                  port,
+                  path,
+                  headers: {
+                    Host: "staff.example.test",
+                    "Sec-Fetch-Site": "same-origin",
+                    ...(cookie ? { Cookie: cookie } : {}),
+                    ...headers,
+                  },
+                },
+                (response) => {
+                  response.resume();
+                  response.on("end", () =>
+                    resolve({ status: response.statusCode, headers: response.headers }),
+                  );
+                },
+              );
+              call.on("error", reject);
+              call.end();
+            });
+          const unavailableLogin = await sendTo("/merchant/login?returnTo=/app", null, {
+            "Sec-Fetch-Dest": "document",
+          });
+          assert.equal(unavailableLogin.status, 303);
+          assert.equal(unavailableLogin.headers.location, "/operations/sign-in?signIn=unavailable");
+          assert.equal(unavailableLogin.headers["set-cookie"], undefined);
+          const unavailableStepUp = await sendTo(
+            "/merchant/identity/step-up/start?purpose=RefundRequest&returnTo=%2Fapp%2Fpayments",
+            session,
+          );
+          assert.equal(
+            unavailableStepUp.headers.location,
+            "/app/identity/step-up-complete?result=unavailable&returnTo=%2Fapp%2Fpayments",
+          );
+          assert.equal(unavailableStepUp.headers["set-cookie"], undefined);
+        } finally {
+          await new Promise((resolve) => uncheckedServer.close(resolve));
+          fake.setPoolMfa("on-totp");
+        }
         const csrf = (await service.bootstrap(session.split("=")[1])).csrf;
         const out = await send("/merchant/logout", {
           cookie: session,

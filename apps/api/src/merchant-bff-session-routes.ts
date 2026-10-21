@@ -120,7 +120,23 @@ export function installMerchantSessionRoutes(
         response.set("Set-Cookie", serializeCookie(result.cookie));
         response.redirect(303, result.authorizationUrl);
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => {
+        // WP-2423 DEC-COGNITO-STORE-STAFF: the identity provider's pool check (MFA required,
+        // authenticator app only) did not pass or could not be read. Staff see why on the sign-in
+        // page; nothing was started or recorded.
+        if (
+          error instanceof BrowserSessionError &&
+          error.code === "BROWSER_SESSION_UNAVAILABLE" &&
+          options.signInEntry?.path === staffSignInPagePath &&
+          exactHeader(request, "sec-fetch-dest") === "document"
+        ) {
+          response
+            .set("Cache-Control", NO_STORE)
+            .redirect(303, staffSignInPagePath + "?signIn=unavailable");
+          return;
+        }
+        denied(response);
+      });
   });
 
   router.get("/callback", oidcCallbackNavigation(options), (request, response) => {
@@ -315,7 +331,17 @@ export function installMerchantSessionRoutes(
         );
         response.redirect(303, result.authorizationUrl);
       })
-      .catch(() => response.redirect(303, stepUpComplete("failed", returnTo)));
+      .catch((error: unknown) =>
+        response.redirect(
+          303,
+          stepUpComplete(
+            error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_UNAVAILABLE"
+              ? "unavailable"
+              : "failed",
+            returnTo,
+          ),
+        ),
+      );
   });
   router.get("/identity/step-up/callback", oidcCallbackNavigation(options), (request, response) => {
     response.set("Cache-Control", NO_STORE);

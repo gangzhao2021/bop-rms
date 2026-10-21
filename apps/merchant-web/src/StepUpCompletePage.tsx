@@ -15,6 +15,8 @@ export const stepUpCompleteText: Record<StepUpResult, string> = {
   verified: "You're verified. You can go back to what you were doing.",
   cancelled: "Sign-in was cancelled.",
   failed: "We couldn't confirm it's you.",
+  unavailable:
+    "Signing in again isn't available right now, so nothing was changed. Try again in a few minutes; if it keeps happening, tell your manager.",
 };
 
 export interface StepUpCompleteWindow {
@@ -26,7 +28,8 @@ export interface StepUpCompleteWindow {
 /**
  * The page's effect, apart from React: tell the page that opened the sign-in window how it went,
  * close this window, and — when it was not a popup (it is still open shortly after) — go back to
- * the page the staff member left. A failed check stays here so its message can be read.
+ * the page the staff member left. A failed or unavailable check stays here so its message can be
+ * read.
  */
 export function finishStepUp(
   result: StepUpResult | null,
@@ -42,7 +45,7 @@ export function finishStepUp(
   } catch {
     // Not a window this page may close; it goes back below.
   }
-  if (result === "failed") return;
+  if (result === "failed" || result === "unavailable") return;
   schedule(() => {
     if (!target.closed) target.location.replace(returnTo);
   }, STEP_UP_CLOSE_WAIT_MS);
@@ -68,7 +71,9 @@ export function StepUpCompleteView({
         {result === null ? (
           <p>This sign-in check has ended.</p>
         ) : (
-          <p role={result === "failed" ? "alert" : "status"}>{stepUpCompleteText[result]}</p>
+          <p role={result === "failed" || result === "unavailable" ? "alert" : "status"}>
+            {stepUpCompleteText[result]}
+          </p>
         )}
         <p>
           <Link className="staff-sign-in__link" to={returnTo}>

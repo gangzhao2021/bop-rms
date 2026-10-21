@@ -1,3 +1,4 @@
+import console from "node:console";
 import process from "node:process";
 import { Buffer } from "node:buffer";
 import { createHash, randomBytes } from "node:crypto";
@@ -67,20 +68,20 @@ export async function createInternalMerchantCognitoSession(
     clientId: signIn.cognito.clientId,
   });
   const origin = signIn.exactOrigin;
+  // TEST-ONLY loopback stand-in with static synthetic credentials (admin API and pool check).
+  const providerEndpoint =
+    signIn.testProvider === null
+      ? null
+      : {
+          url: signIn.testProvider.origin + "/",
+          credentials: { accessKeyId: "TESTONLY", secretAccessKey: "TESTONLY" },
+        };
   const invitation = createCognitoWorkforceInvitation({
     configuration: { ...pool },
     clock: { now: clock },
     hasher: crypto.hasher,
     markEmailVerified: true,
-    ...(signIn.testProvider === null
-      ? {}
-      : {
-          // TEST-ONLY loopback stand-in with static synthetic credentials.
-          providerEndpoint: {
-            url: signIn.testProvider.origin + "/",
-            credentials: { accessKeyId: "TESTONLY", secretAccessKey: "TESTONLY" },
-          },
-        }),
+    ...(providerEndpoint === null ? {} : { providerEndpoint }),
   });
   const people = createStoreStaffSignIn({
     transactions,
@@ -103,8 +104,27 @@ export async function createInternalMerchantCognitoSession(
     clock: { now: clock },
     nextReference: () => credentials.reference(),
     resolveSubject: people.resolveSubject,
+    ...(providerEndpoint === null ? {} : { providerEndpoint }),
     ...(http === undefined ? {} : { http }),
   });
+  // Real Cognito tokens carry no acr/amr: sign-in and step-up need the pool's MFA settings
+  // (required, authenticator app only) checked within five minutes. Checked now and every four
+  // minutes; a refusal is logged once per change with its setting name only.
+  let reported = null;
+  const reportPool = (status) => {
+    const key = status.state + ":" + status.reason;
+    if (status.state !== "Verified" && key !== reported)
+      console.error(
+        JSON.stringify({
+          event: "STAFF_SIGN_IN_POOL_CHECK_REFUSED",
+          state: status.state,
+          reason: status.reason,
+        }),
+      );
+    reported = key;
+    return status;
+  };
+  const stopPoolCheck = realProvider.pool.monitor(240_000, reportPool);
   // TEST-ONLY: with a loopback stand-in the browser is sent to its HTTPS sign-in page.
   const browserUrl = (url) => testProviderAuthorizationUrl(signIn, url);
   const provider = Object.freeze({
@@ -175,6 +195,11 @@ export async function createInternalMerchantCognitoSession(
   const browser = new BrowserSessionService({ ...identity, store, now: clock });
   return {
     mode: "cognito",
+    /** The pool MFA check's latest result (state and setting name only) and its stop. */
+    poolCheck: Object.freeze({
+      status: () => realProvider.pool.status(),
+      stop: stopPoolCheck,
+    }),
     identity,
     currentActor,
     validateAssociation,

@@ -38,25 +38,37 @@ sign-assignment → apply-assignment`，批准人 ≠ 申请人）。`link-exist
 6. **能力缺口**：`StaffLogin` 只在 `staff-sign-in.json` 选择 Cognito 且全部密钥文件存在、格式正确、未指向本地替身时关闭（`pilot-supervisor`
    启动检查）。`Secrets`（会话信封与选择器密钥仍来自内部测试密钥文件）与 `Tls`（服务仍只在 `https://127.0.0.1:4443`）照旧。
 7. **本地替身**：`tooling/environment/cognito-test-provider.mjs`（TEST-ONLY，生产进程拒绝启动）实现 JWKS、托管登录页、令牌、吊销、退出与
-   AdminCreateUser/AdminGetUser/AdminDeleteUser，并可注入故障（500、挂起、丢失应答、令牌声明变化）。`staff-sign-in.json` 的 `testProvider`
-   只在 InternalTest 接受。
+   AdminCreateUser/AdminGetUser/AdminDeleteUser/GetUserPoolMfaConfig/DescribeUserPool，并可注入故障（500、挂起、丢失应答、令牌声明变化）；
+   令牌默认为真实用户池形态（无 `acr`/`amr`，`tokenShape:"acr-amr"` 可带上），池 MFA 设置可设为 `on-totp`/`optional`/`off`/`sms`/`email`/
+   `passwordless`/`remembered-devices`。`staff-sign-in.json` 的 `testProvider` 只在 InternalTest 接受。
+8. **强认证判定（2026-10-20，真实 Cognito 令牌无 `acr`/`amr`）**：Cognito 用户池的 ID/访问令牌只带 `auth_time`，不带 `acr`/`amr`（`amr` 只见于
+   Identity Pool 凭据）。门店员工登录与加验、品牌管理登录（含邀请首次登录）与平台登录因此以池本身为证：发起授权与换码前须有不超过 5 分钟的
+   池检查通过——`GetUserPoolMfaConfig` 与 `DescribeUserPool`（与 AdminGetUser 同一管理凭据）读到 `MfaConfiguration=ON`、验证器（TOTP）已启用、
+   未启用短信与邮件 MFA、首因素仅密码、记住的设备不能跳过 MFA。门店进程启动时检查并每 4 分钟刷新，品牌/平台在登录时按需检查；结果过期、
+   未知、读取失败或任一不符即拒绝（`BROWSER_SESSION_UNAVAILABLE`）：登录页说明"现在无法登录、已登录的人照常工作"，加验窗口显示无法验证，
+   不写授权事务、会话或加验记录，日志只记 `STAFF_SIGN_IN_POOL_CHECK_REFUSED` 与设置名。缺 `acr`/`amr` 的令牌只在池检查通过时接受；带
+   `amr` 时仍须含 `pwd` 与 `otp`/`mfa`，带 `acr` 时须为 `urn:cognito:loa:4`。`auth_time` 距回调不超过 5 分钟，且不早于本次授权发起（门店登录与
+   加验允许 10 秒时钟差；品牌/平台由强会话服务按发起时间判定），保证 `prompt=login`/`max_age=0` 确实重新输入。
 
 ## 运行连续性
 
-- Cognito 或网络不可用：已登录的人照常工作（会话在本系统，不依赖 Cognito）；新登录与加验失败。共享平板上已设 PIN 的员工仍可用 PIN 切换
+- Cognito 或网络不可用，或池检查不通过/读不到（决定 8）：已登录的人照常工作（会话在本系统，不依赖 Cognito）；新登录与加验失败（登录页说明
+  现在无法登录）。共享平板上已设 PIN 的员工仍可用 PIN 切换
   （PIN 校验只需本系统）；需要加验的操作（退款审批等）等待恢复或由已加验的人处理。断网按 Q9 手册走纸单。
 - 忘记密码或丢失验证器：池为 `admin_only` 恢复，员工找店主/店长，店主联系 BOP 支持在 Cognito 中重置（运行手册）；期间可用 PIN 做非敏感操作。
 - 邀请邮件未到：员工页显示"未确认"并可重发；7 天后过期须重发。
 
 ## 待真实账户验证（不能在仓库内证明）
 
-- Cognito 令牌是否带 `acr`/`amr`：现有协议（品牌管理已用）要求 ID/访问令牌 `acr=urn:cognito:loa:4`、`amr` 含 pwd/otp/mfa；若真实池不签发
-  这些声明，需按实测调整协议的强认证判定（例如依赖池 MFA=ON 与 `auth_time` 新鲜度），属 IDR-0025 的实施细节，届时记录。
+- 强认证已不依赖 `acr`/`amr`（决定 8）。待实测：按运行手册配置的真实池上池检查通过（两项管理读取返回 ON/TOTP、无短信/邮件、首因素仅密码），
+  以及真实令牌的 `auth_time` 在 `prompt=login` 后确为本次登录时间。
 - `prompt=login`/`max_age=0` 在托管登录上确实强制重新输入；首次登录的改密与验证器绑定流程；邀请邮件模板与发件身份。
 
 ## 检查
 
 单元（Identity 协议门店档案、门店提供方、邀请适配器重发/删除/回环端点、API 邀请命令解析、工具链配置读取与能力缺口、组合）；隔离
 PostgreSQL 受限 NOBYPASSRLS 角色 + 渲染的试点授权 `cognito-store-staff`（邀请/必填姓名/重复邮箱/无权限、首次登录绑定与激活、再次登录、
-厨房屏、伪造用户名/挂起/令牌失败/过期拒绝、重发与补邮箱、撤销与重邀、加验记录/重放/他人/取消、运营首位店主与已有成员、HTTP 路由）；
+厨房屏、伪造用户名/挂起/令牌失败/过期拒绝、重发与补邮箱、撤销与重邀、加验记录/重放/他人/取消、运营首位店主与已有成员、HTTP 路由；
+两种令牌形态、弱 `amr`、早于发起或超过 5 分钟的 `auth_time`、各池设置与池读取失败均拒绝且不写记录、登录页与加验窗口的"unavailable"）；
+品牌管理隔离验收以真实形态令牌（无 `acr`/`amr`）经池检查登录；
 商户生产浏览器 `staff-cognito-sign-in`。结果记录在 WP-2423。

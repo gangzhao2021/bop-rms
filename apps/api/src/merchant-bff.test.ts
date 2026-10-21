@@ -6953,6 +6953,74 @@ describe("WP-2423 Q18 staff session continuity routes", () => {
     expect(await response.json()).toMatchObject({ idleExpiresAt: session.idleExpiresAt });
   });
 
+  it("tells staff when signing in is unavailable (the identity provider's pool check) and records nothing", async () => {
+    const service = fakeService();
+    vi.mocked(service.start).mockRejectedValue(
+      new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE"),
+    );
+    const root = await serveSessionContinuity(service, {
+      path: "/operations/sign-in",
+      testOnly: false,
+    });
+    const page = await request(root, "/merchant/login?returnTo=/app", {
+      headers: { ...safeHeaders, "Sec-Fetch-Dest": "document" },
+    });
+    expect(page.status).toBe(303);
+    expect(page.headers.get("location")).toBe("/operations/sign-in?signIn=unavailable");
+    expect(page.headers.get("cache-control")).toBe("no-store");
+    expect(page.headers.get("set-cookie")).toBeNull();
+    // Not a page navigation, or another refusal: the ordinary denial.
+    expect((await request(root, "/merchant/login", { headers: safeHeaders })).status).toBe(403);
+    vi.mocked(service.start).mockRejectedValue(new BrowserSessionError("BROWSER_SESSION_DENIED"));
+    expect(
+      (
+        await request(root, "/merchant/login", {
+          headers: { ...safeHeaders, "Sec-Fetch-Dest": "document" },
+        })
+      ).status,
+    ).toBe(403);
+  });
+
+  it("ends a step-up window as unavailable when the identity provider refuses to start", async () => {
+    const start = vi.fn(async () => {
+      throw new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE");
+    });
+    const app = express();
+    app.use(
+      "/merchant",
+      createMerchantBffRouter({
+        service: fakeService(),
+        exactOrigin: "https://merchant.invalid",
+        acceptedHost: "merchant.invalid",
+        providerStepUp: { start, callback: vi.fn(), status: vi.fn() } as never,
+      }),
+    );
+    const server = app.listen(0, "127.0.0.1");
+    servers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("listener unavailable");
+    const root = `http://127.0.0.1:${address.port}`;
+    const path =
+      "/merchant/identity/step-up/start?purpose=RefundApproval&returnTo=%2Fapp%2Fapprovals";
+    const response = await request(root, path, {
+      headers: { ...safeHeaders, Cookie: `__Host-bop-merchant=${sessionCookie}` },
+    });
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "/app/identity/step-up-complete?result=unavailable&returnTo=%2Fapp%2Fapprovals",
+    );
+    expect(response.headers.get("set-cookie")).toBeNull();
+    start.mockRejectedValueOnce(new BrowserSessionError("BROWSER_SESSION_DENIED"));
+    expect(
+      (
+        await request(root, path, {
+          headers: { ...safeHeaders, Cookie: `__Host-bop-merchant=${sessionCookie}` },
+        })
+      ).headers.get("location"),
+    ).toBe("/app/identity/step-up-complete?result=failed&returnTo=%2Fapp%2Fapprovals");
+  });
+
   it("names the production sign-in by default and the labelled pilot sign-in when configured", async () => {
     const production = await serveSessionContinuity(fakeService());
     const entry = await request(production, "/merchant/sign-in-entry", { headers: safeHeaders });

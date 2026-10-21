@@ -71,6 +71,9 @@ function assertBrowserSessionUsable(session: AuthenticationSession, observedAt: 
   }
 }
 
+/** An authorization (sign-in) transaction is usable for ten minutes after it starts. */
+export const authorizationLifetimeMs = 600_000;
+
 const encodeSecrets = (value: Readonly<Record<string, string>>): string => JSON.stringify(value);
 
 function decodeSecrets<const T extends readonly string[]>(
@@ -160,6 +163,19 @@ export class BrowserSessionService {
     const transactionReference = parseAuthorizationTransactionReference(
       this.#credentials.generateUuidV7(),
     );
+    // WP-2423 DEC-COGNITO-STORE-STAFF: the provider may refuse to start a sign-in (its pool check);
+    // nothing is written then.
+    const authorizationUrl = parseExactHttpsUri(
+      await this.#provider.createAuthorizationUrl({
+        issuer: this.#configuration.issuer,
+        clientId: this.#configuration.clientId,
+        redirectUri: this.#configuration.redirectUri,
+        state,
+        nonce,
+        codeChallenge: this.#pkce.challenge(codeVerifier),
+        codeChallengeMethod: "S256",
+      }),
+    );
     const encryptionContext = `${this.#configuration.environment}:oidc:${transactionReference}`;
     const encryptedSecrets = await this.#envelopes.encrypt(
       encodeSecrets({ nonce, codeVerifier }),
@@ -173,20 +189,11 @@ export class BrowserSessionService {
         encryptedSecrets,
         redirectUri: this.#configuration.redirectUri,
         postLoginPath,
-        expiresAt: new Date(Date.parse(observedAt) + 600_000).toISOString() as never,
+        expiresAt: new Date(
+          Date.parse(observedAt) + authorizationLifetimeMs,
+        ).toISOString() as never,
         consumedAt: null,
         version: 1 as never,
-      }),
-    );
-    const authorizationUrl = parseExactHttpsUri(
-      await this.#provider.createAuthorizationUrl({
-        issuer: this.#configuration.issuer,
-        clientId: this.#configuration.clientId,
-        redirectUri: this.#configuration.redirectUri,
-        state,
-        nonce,
-        codeChallenge: this.#pkce.challenge(codeVerifier),
-        codeChallengeMethod: "S256",
       }),
     );
     return Object.freeze({
@@ -248,6 +255,10 @@ export class BrowserSessionService {
         code,
         nonce: secrets.nonce,
         codeVerifier: secrets.codeVerifier,
+        // The transaction expires ten minutes after `start` created it.
+        authorizationStartedAt: new Date(
+          Date.parse(transaction.expiresAt) - authorizationLifetimeMs,
+        ).toISOString(),
       });
       if (
         typeof exchange.tokenBundle !== "string" ||
