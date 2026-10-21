@@ -706,6 +706,188 @@
           "token"
         ],
         "additionalProperties": false
+      },
+      "CustomerStoreProfile": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "store": {
+            "type": "object",
+            "properties": {
+              "storeDisplayName": {
+                "type": "string",
+                "minLength": 1
+              },
+              "brandDisplayName": {
+                "type": "string",
+                "minLength": 1
+              },
+              "timeZone": {
+                "type": "string",
+                "minLength": 1
+              },
+              "address": {
+                "type": "object",
+                "properties": {
+                  "addressLines": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1,
+                    "maxItems": 3
+                  },
+                  "locality": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "regionCode": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "postalCode": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "countryCode": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{2}$/u"
+                  }
+                },
+                "required": [
+                  "addressLines",
+                  "locality",
+                  "regionCode",
+                  "postalCode",
+                  "countryCode"
+                ],
+                "additionalProperties": false
+              },
+              "phone": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^\\+[1-9][0-9]{6,14}$/u"
+              },
+              "hours": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "Open",
+                      "Closed",
+                      "Paused"
+                    ]
+                  },
+                  "todayHours": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "startLocalTime": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?$/u"
+                        },
+                        "endLocalTime": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?$/u"
+                        },
+                        "endsNextDay": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "startLocalTime",
+                        "endLocalTime",
+                        "endsNextDay"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "closesAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?$/u"
+                  },
+                  "opensAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?$/u"
+                  }
+                },
+                "required": [
+                  "status",
+                  "todayHours",
+                  "closesAt",
+                  "opensAt"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "storeDisplayName",
+              "brandDisplayName",
+              "timeZone",
+              "address",
+              "phone",
+              "hours"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "store"
+        ],
+        "additionalProperties": false
+      },
+      "CustomerStoreProfileError": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "store_request_invalid",
+                  "session_unavailable",
+                  "store_unavailable"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "error"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {}
@@ -3620,6 +3802,112 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CustomerOrderLinkError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/customer/store": {
+      "get": {
+        "operationId": "getCustomerStoreProfile",
+        "description": "WP-2423: the Guest Session's own Store as the start and menu pages show it — the published public profile (name, address, business phone; DEC-STORE-CUSTOMER-NAME) and, from the published operating reader the entry gate uses, whether it is open now with today's hours. Authenticated by the guest cookie only (read-only, same-origin); no query; no guest, staff or order data. All fields are Public classification, so the response may be kept by this browser for 30 seconds. No pickup ready time is given: none is computed by any owner.",
+        "responses": {
+          "200": {
+            "description": "The Store's public identity and today's hours (hours null when unreadable)",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "private, max-age=30"
+                  ]
+                }
+              },
+              "Referrer-Policy": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-referrer"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerStoreProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cross-site request or query parameters",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerStoreProfileError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No current Guest Session",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerStoreProfileError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe internal failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The Store's published profile is unavailable; retry",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerStoreProfileError"
                 }
               }
             }

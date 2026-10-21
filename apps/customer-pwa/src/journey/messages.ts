@@ -137,6 +137,8 @@ export const cartText = Object.freeze({
     heading: "Order summary",
     checkoutUnavailable: "This cart can’t be checked out right now.",
     totalAtCheckout: "Your total, including tax, is calculated at checkout.",
+    subtotalBeforeTax: "Subtotal before tax",
+    taxAtCheckout: "Tax is added at checkout.",
     pricesExpired: "These prices have expired. Checkout will price your order again.",
   }),
   /** Heading and sentence for each recoverable cart failure. */
@@ -251,6 +253,9 @@ export const checkoutText = Object.freeze({
   continueToPayment: "Continue to payment",
   continueToPaymentWithTotal: (total: string) => `Continue to payment · ${total}`,
   continueNote: "You’ll enter your card on the next step. Nothing is charged until you confirm.",
+  /** Internal testing with the simulated payment: no card is asked for and nothing is charged. */
+  continueNoteSimulated:
+    "Next you’ll confirm a test payment. This is internal testing: no card is needed and no real money is charged.",
   // Details form (checkout/CheckoutDetailsForm.tsx)
   detailsLabel: "Checkout details",
   detailsLoading: "Loading checkout details…",

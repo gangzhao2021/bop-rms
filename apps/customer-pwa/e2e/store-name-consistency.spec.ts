@@ -1,5 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { routeStorefrontReads } from "./storefront-reads";
+
+// WP-2423: every page with a Store context reads the Store's identity (and the menu for
+// cart lines not yet priced); spec routes registered later still answer first.
+test.beforeEach(({ context }) => routeStorefrontReads(context));
 
 // WP-2423 DEC-STORE-CUSTOMER-NAME synthetic HTTP evidence for the production App: after the Owner
 // renames the Store, the restored session, the order page (header and "Contact the store"), the

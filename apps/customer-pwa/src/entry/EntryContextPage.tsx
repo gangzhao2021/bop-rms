@@ -3,6 +3,11 @@ import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { CustomerCurrentOrder } from "../session/session-bootstrap.js";
+import {
+  createStoreProfileClient,
+  type StoreProfileLoader,
+} from "../store/store-profile-client.js";
+import { StoreIdentityCard } from "../store/StoreIdentity.js";
 import type {
   CustomerEntryClient,
   CustomerEntryEstablishedContext,
@@ -36,7 +41,11 @@ export interface EntryContextPageProps {
   readonly currentOrder?: CustomerCurrentOrder | undefined;
   /** The Store of that order, restored with the Session. */
   readonly store?: CustomerStoreContext | undefined;
+  /** The Store's hours and address once the visit starts; null shows none (previews). */
+  readonly storeProfile?: StoreProfileLoader | null | undefined;
 }
+
+const browserStoreProfile: StoreProfileLoader = createStoreProfileClient();
 
 /** "21:30:00" → "9:30 PM" (published local time; no time zone conversion). */
 export function entryClock(value: string): string {
@@ -50,6 +59,7 @@ export function EntryContextPage({
   diningAdmission,
   currentOrder,
   store,
+  storeProfile,
 }: EntryContextPageProps) {
   const [holding, setHolding] = useState(currentOrder !== undefined);
   const initial = (): CustomerEntryScreenState =>
@@ -119,6 +129,7 @@ export function EntryContextPage({
       onContinue={() => navigate("/menu")}
       onRetry={retry}
       state={state}
+      storeProfile={storeProfile === undefined ? browserStoreProfile : storeProfile}
     />
   );
 }
@@ -181,6 +192,8 @@ export interface EntryContextViewProps {
   readonly onContinue?: (() => void) | undefined;
   readonly onRetry?: (() => void) | undefined;
   readonly state: CustomerEntryScreenState;
+  /** Shown under a started visit: the Store's hours, address and phone. */
+  readonly storeProfile?: StoreProfileLoader | null | undefined;
 }
 
 export function EntryContextView({
@@ -189,6 +202,7 @@ export function EntryContextView({
   onContinue,
   onRetry,
   state,
+  storeProfile = null,
 }: EntryContextViewProps) {
   const established = state.kind === "Established" ? state.context : null;
   return (
@@ -215,6 +229,8 @@ export function EntryContextView({
           state={state}
         />
       </section>
+      {/* Below the started visit, so its arrival moves nothing the guest is reading. */}
+      {established ? <StoreIdentityCard load={storeProfile} /> : null}
       {/* Not under the short loading notice, where the arriving answer would push it down. */}
       {state.kind === "Loading" ? null : (
         <aside className="entry-help" aria-labelledby="entry-help-heading">

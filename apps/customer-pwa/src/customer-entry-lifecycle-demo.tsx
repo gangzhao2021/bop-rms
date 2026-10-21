@@ -139,7 +139,11 @@ export function EntryLifecycleDemo() {
           path="/"
           element={
             mounted ? (
-              <EntryContextPage client={harness.clients[selected]} onEstablished={established} />
+              <EntryContextPage
+                client={harness.clients[selected]}
+                onEstablished={established}
+                storeProfile={null}
+              />
             ) : (
               <p>Entry unmounted</p>
             )

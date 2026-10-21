@@ -1,5 +1,10 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { routeStorefrontReads } from "./storefront-reads";
+
+// WP-2423: every page with a Store context reads the Store's identity (and the menu for
+// cart lines not yet priced); spec routes registered later still answer first.
+test.beforeEach(({ context }) => routeStorefrontReads(context));
 
 // Synthetic menu and synthetic generated image bytes (a beige circle on brown); no Store authority.
 const storeReference = "018f7600-0000-7000-8000-000000000001";

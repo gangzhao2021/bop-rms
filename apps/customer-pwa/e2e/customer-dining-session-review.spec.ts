@@ -1,5 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { routeStorefrontReads } from "./storefront-reads";
+
+// WP-2423: every page with a Store context reads the Store's identity (and the menu for
+// cart lines not yet priced); spec routes registered later still answer first.
+test.beforeEach(({ context }) => routeStorefrontReads(context));
 
 // WP-2423 Q8: synthetic HTTP views exercise the production CUST-DINE-IN-SESSION page; these
 // fixtures grant no real membership and contain no real Store, guest or payment data.

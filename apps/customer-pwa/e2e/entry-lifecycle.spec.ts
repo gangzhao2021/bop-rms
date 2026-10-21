@@ -1,5 +1,10 @@
 import { readdir, readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
+import { routeStorefrontReads } from "./storefront-reads";
+
+// WP-2423: every page with a Store context reads the Store's identity (and the menu for
+// cart lines not yet priced); spec routes registered later still answer first.
+test.beforeEach(({ context }) => routeStorefrontReads(context));
 test.use({ trace: "off", screenshot: "off", video: "off" });
 const click = (page: Page, name: string) => page.getByRole("button", { name, exact: true }).click();
 const publications = (page: Page) => page.getByLabel("Established publications");

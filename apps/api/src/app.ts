@@ -15,6 +15,10 @@ import {
   customerSessionBootstrapRoute,
 } from "./customer-session-bootstrap.js";
 import {
+  createCustomerStoreProfileHandler,
+  customerStoreProfileRoute,
+} from "./customer-store-profile.js";
+import {
   customerPickupCodeRoute,
   type CustomerPickupCodeHandler,
   unavailableCustomerPickupCodeHandler,
@@ -171,6 +175,8 @@ export interface AppOptions {
   /** WP-2423 DEC-DINING-GUEST-INVITATION: the table's Host invites the next guest. */
   customerDiningInvitation?: CustomerDiningInvitationHandler;
   customerSessionBootstrap?: ReturnType<typeof createCustomerSessionBootstrapHandler>;
+  /** WP-2423: the guest's Store — published address, phone, open now and today's hours. */
+  customerStoreProfile?: ReturnType<typeof createCustomerStoreProfileHandler>;
   customerPickupCode?: CustomerPickupCodeHandler;
   customerReceipt?: CustomerReceiptHandler;
   /** WP-2423 Q16: the customer removes their own pickup contact from the order page. */
@@ -260,6 +266,7 @@ export function createApp({
   customerDiningSession,
   customerDiningInvitation,
   customerSessionBootstrap,
+  customerStoreProfile,
   customerPickupCode,
   customerReceipt,
   customerContactRemoval,
@@ -414,6 +421,7 @@ export function createApp({
     customerSessionBootstrapRoute,
     customerSessionBootstrap ?? createCustomerSessionBootstrapHandler(),
   );
+  app.get(customerStoreProfileRoute, customerStoreProfile ?? createCustomerStoreProfileHandler());
   app.get(
     customerPickupCodeRoute,
     customerPickupCode?.handler() ?? unavailableCustomerPickupCodeHandler,

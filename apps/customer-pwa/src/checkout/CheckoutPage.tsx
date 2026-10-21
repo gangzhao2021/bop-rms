@@ -21,6 +21,9 @@ import { checkoutInProgressMessage, orderProcessingMessage } from "../cart/types
 import { describeConfiguration } from "../cart/CartPage.js";
 import { checkoutItemRefusalMessage } from "./item-refusal-message.js";
 import { checkoutSessionAlert } from "./session-message.js";
+import { paymentConfiguration } from "../payment/payment-configuration.js";
+import { quoteConsistentLinePrices, usePublishedMenu } from "../menu/menu-line-prices.js";
+import type { CustomerMenuClient, MenuJourneyContext } from "../menu/types.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import {
   currencySymbol,
@@ -53,10 +56,15 @@ export function CheckoutPage({
   controller: provided,
   now = Date.now,
   store,
+  menuContext,
+  menuClient,
 }: {
   readonly controller?: CheckoutController;
   readonly now?: () => number;
   readonly store?: CustomerStoreContext | undefined;
+  /** The published menu prices each line as the guest saw it, when it agrees with the quote. */
+  readonly menuContext?: MenuJourneyContext | undefined;
+  readonly menuClient?: CustomerMenuClient | undefined;
 }) {
   const [controller] = useState(
     () =>
@@ -136,6 +144,17 @@ export function CheckoutPage({
   }, [controller]);
   const cart = "cart" in state ? state.cart : null;
   const quote = state.status === "ready" ? state.quote : null;
+  const menu = usePublishedMenu(
+    menuContext,
+    menuClient,
+    cart?.cart.items.some((item) => item.lineEstimate.status !== "Available") ?? false,
+  );
+  // Each line at a price that adds up to the quote's subtotal; a line that can't be priced that
+  // way shows no amount while the quote's total is beside it, never a contradicting label.
+  const linePrices =
+    cart === null
+      ? null
+      : quoteConsistentLinePrices(cart.cart.items, menu, quote?.subtotal ?? null);
   // U1: the Store prices the order as soon as the cart is known (and again after a reconnect);
   // no "get a quote" tap. A failed attempt leaves a non-ready state, so this cannot loop.
   useEffect(() => {
@@ -296,9 +315,14 @@ export function CheckoutPage({
                       ) : null}
                     </span>
                     <span className="checkout-items__amount">
-                      {item.lineEstimate.status === "Available"
-                        ? formatCartMoney(item.lineEstimate.total)
-                        : lineEstimateLabel(item.lineEstimate.reasonCode)}
+                      {(() => {
+                        const price = linePrices?.get(item.cartItemReference) ?? null;
+                        if (price !== null) return formatMoney(price.amountMinor, price.currency);
+                        if (quote !== null) return null;
+                        return item.lineEstimate.status === "Available"
+                          ? formatCartMoney(item.lineEstimate.total)
+                          : lineEstimateLabel(item.lineEstimate.reasonCode);
+                      })()}
                     </span>
                   </li>
                 ))}
@@ -599,7 +623,11 @@ export function CheckoutPage({
                 : checkoutText.continueToPayment}
             </button>
           )}
-          <p className="checkout-continue__note">{checkoutText.continueNote}</p>
+          <p className="checkout-continue__note">
+            {paymentConfiguration()?.mode === "simulation"
+              ? checkoutText.continueNoteSimulated
+              : checkoutText.continueNote}
+          </p>
         </section>
       </div>
     </CustomerPage>

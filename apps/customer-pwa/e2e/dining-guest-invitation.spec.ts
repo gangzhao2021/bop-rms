@@ -1,4 +1,9 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { routeStorefrontReads } from "./storefront-reads";
+
+// WP-2423: every page with a Store context reads the Store's identity (and the menu for
+// cart lines not yet priced); spec routes registered later still answer first.
+test.beforeEach(({ context }) => routeStorefrontReads(context));
 
 const id = (n: number) => `018f2423-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const noStore = { "cache-control": "no-store" };

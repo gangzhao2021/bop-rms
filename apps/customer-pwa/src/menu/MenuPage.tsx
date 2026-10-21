@@ -37,6 +37,12 @@ import {
   type MenuFamily,
   type MenuVariant,
 } from "./menu-families.js";
+import {
+  createStoreProfileClient,
+  type StoreProfileLoader,
+} from "../store/store-profile-client.js";
+import { StoreStatusStrip } from "../store/StoreIdentity.js";
+import { cartLinePrices, cartLinesSubtotal } from "./menu-line-prices.js";
 import type {
   CustomerMenuClient,
   MenuJourneyContext,
@@ -56,12 +62,12 @@ type ScreenState =
 /** The guest's current cart in one line: how many items and, when every line is priced, the subtotal. */
 export interface MenuCartSummary {
   readonly count: number;
-  /** "$14.75" before tax; null while any line is still to be priced by the final quote. */
+  /** "$14.75" before tax; null when any line can't be priced before checkout. */
   readonly subtotal: string | null;
 }
 
-/** The current cart's summary; null when it can't be read. */
-export type CartSummaryLoader = () => Promise<MenuCartSummary | null>;
+/** The guest's current cart; null when there is none or it can't be read. */
+export type CartSummaryLoader = () => Promise<CartView | null>;
 
 interface MenuPageProps {
   readonly context?: MenuJourneyContext | undefined;
@@ -69,10 +75,21 @@ interface MenuPageProps {
   readonly readOnlyNotice?: React.ReactNode | undefined;
   /** Injected for previews; the browser loader reads the Store cart otherwise. */
   readonly cartSummary?: CartSummaryLoader | undefined;
+  /** The Store's hours and address; null shows none (previews), absent reads the Store. */
+  readonly storeProfile?: StoreProfileLoader | null | undefined;
 }
 
-/** Count and pre-tax subtotal of a cart, from its current quote or its priced lines. */
-export function summarizeCart(view: CartView | null): MenuCartSummary {
+const browserStoreProfile: StoreProfileLoader = createStoreProfileClient();
+
+/**
+ * Count and pre-tax subtotal of a cart: the current quote's subtotal when there is one, otherwise
+ * each line at the Store's price or, before the Store prices it, at the published price the guest
+ * saw on the item page. Null subtotal when any line can't be priced that way.
+ */
+export function summarizeCart(
+  view: CartView | null,
+  menu: MenuView | null = null,
+): MenuCartSummary {
   if (view === null || view.cart.lifecycle.status !== "Active") return { count: 0, subtotal: null };
   const { cart } = view;
   const count = cart.items.reduce((total, item) => total + item.quantity, 0);
@@ -82,24 +99,17 @@ export function summarizeCart(view: CartView | null): MenuCartSummary {
       count,
       subtotal: formatMoney(cart.quote.subtotal.amountMinor, cart.quote.subtotal.currency),
     };
-  let total = 0n;
-  let currency: string | null = null;
-  for (const item of cart.items) {
-    const estimate = item.lineEstimate;
-    if (
-      estimate.status !== "Available" ||
-      (currency !== null && estimate.total.currency !== currency) ||
-      !/^(?:0|[1-9][0-9]{0,20})$/u.test(estimate.total.amountMinor)
-    )
-      return { count, subtotal: null };
-    currency = estimate.total.currency;
-    total += BigInt(estimate.total.amountMinor);
-  }
-  return { count, subtotal: currency === null ? null : formatMoney(total, currency) };
+  const subtotal = cartLinesSubtotal(cartLinePrices(cart.items, menu));
+  return {
+    count,
+    subtotal: subtotal === null ? null : formatMoney(subtotal.amountMinor, subtotal.currency),
+  };
 }
 
-const browserCartSummary: CartSummaryLoader = async () =>
-  summarizeCart(await createBrowserCustomerCartClient().loadCurrent());
+const browserCartSummary: CartSummaryLoader = async () => {
+  const view = await createBrowserCustomerCartClient().loadCurrent();
+  return view;
+};
 
 function useClient(
   context: MenuJourneyContext | undefined,
@@ -170,7 +180,13 @@ function optionPriceText(price: MenuOptionRule["options"][number]["price"]): str
   return amount === null ? "Priced at checkout" : `+ ${amount}`;
 }
 
-export function MenuBrowsePage({ context, client, readOnlyNotice, cartSummary }: MenuPageProps) {
+export function MenuBrowsePage({
+  context,
+  client,
+  readOnlyNotice,
+  cartSummary,
+  storeProfile,
+}: MenuPageProps) {
   const resolvedClient = useClient(context, client);
   const input = useMemo(() => ({}), []);
   const loaded = useMenuLoad(resolvedClient, input);
@@ -182,12 +198,19 @@ export function MenuBrowsePage({ context, client, readOnlyNotice, cartSummary }:
       onRetry={loaded.retry}
       readOnlyNotice={readOnlyNotice}
       cartSummary={cartSummary}
+      storeProfile={storeProfile}
       state={loaded.state}
     />
   );
 }
 
-export function MenuSearchPage({ context, client, readOnlyNotice, cartSummary }: MenuPageProps) {
+export function MenuSearchPage({
+  context,
+  client,
+  readOnlyNotice,
+  cartSummary,
+  storeProfile,
+}: MenuPageProps) {
   const resolvedClient = useClient(context, client);
   const [draft, setDraft] = useState("");
   const [sectionDraft, setSectionDraft] = useState("");
@@ -219,6 +242,7 @@ export function MenuSearchPage({ context, client, readOnlyNotice, cartSummary }:
       onRetry={loaded.retry}
       readOnlyNotice={readOnlyNotice}
       cartSummary={cartSummary}
+      storeProfile={storeProfile}
       search={
         <section className="menu-search-view">
           <form className="menu-search" role="search" onSubmit={submit}>
@@ -321,6 +345,7 @@ export interface MenuScreenProps {
   readonly onRetry?: (() => void) | undefined;
   readonly readOnlyNotice?: React.ReactNode | undefined;
   readonly cartSummary?: CartSummaryLoader | undefined;
+  readonly storeProfile?: StoreProfileLoader | null | undefined;
   readonly search?: React.ReactNode | undefined;
   readonly searchTerm?: string | null | undefined;
   readonly state: ScreenState;
@@ -335,6 +360,7 @@ export function MenuScreen({
   onRetry,
   readOnlyNotice,
   cartSummary,
+  storeProfile,
   search,
   searchTerm,
   state,
@@ -360,6 +386,11 @@ export function MenuScreen({
     >
       <div className={`menu-layout${withCart ? " menu-layout--with-cart" : ""}`}>
         <div className="menu-layout__main">
+          {mode === "browse" && context !== undefined ? (
+            <StoreStatusStrip
+              load={storeProfile === undefined ? browserStoreProfile : storeProfile}
+            />
+          ) : null}
           {mode === "detail" ? (
             <h2 className="sr-only">{title}</h2>
           ) : (
@@ -422,7 +453,12 @@ export function MenuScreen({
             <AllergenHelp />
           ) : null}
         </div>
-        {withCart ? <MenuCart load={cartSummary ?? browserCartSummary} /> : null}
+        {withCart ? (
+          <MenuCart
+            load={cartSummary ?? browserCartSummary}
+            menu={state.kind === "Found" && mode === "browse" ? state.menu : null}
+          />
+        ) : null}
       </div>
     </CustomerPage>
   );
@@ -433,22 +469,30 @@ export function MenuScreen({
  * the menu; phones get a bar along the bottom once something is in the cart. Nothing is shown until
  * the Store's cart has been read, and nothing at all if it can't be.
  */
-function MenuCart({ load }: { readonly load: CartSummaryLoader }) {
-  const [summary, setSummary] = useState<MenuCartSummary | null>(null);
+function MenuCart({
+  load,
+  menu,
+}: {
+  readonly load: CartSummaryLoader;
+  /** The published menu shown, so lines the Store hasn't priced yet use the prices shown here. */
+  readonly menu: MenuView | null;
+}) {
+  const [cart, setCart] = useState<{ readonly view: CartView | null } | null>(null);
   useEffect(() => {
     let active = true;
     load()
-      .then((value) => {
-        if (active) setSummary(value);
+      .then((view) => {
+        if (active) setCart({ view });
       })
       .catch(() => {
-        if (active) setSummary(null);
+        if (active) setCart(null);
       });
     return () => {
       active = false;
     };
   }, [load]);
-  if (summary === null) return null;
+  if (cart === null) return null;
+  const summary = summarizeCart(cart.view, menu);
   const items = `${summary.count} item${summary.count === 1 ? "" : "s"}`;
   return (
     <>
@@ -465,12 +509,16 @@ function MenuCart({ load }: { readonly load: CartSummaryLoader }) {
               </div>
               {summary.subtotal === null ? null : (
                 <div>
-                  <dt>Subtotal</dt>
+                  <dt>Subtotal before tax</dt>
                   <dd>{summary.subtotal}</dd>
                 </div>
               )}
             </dl>
-            <p className="menu-cart-panel__note">Tax is added at checkout.</p>
+            <p className="menu-cart-panel__note">
+              {summary.subtotal === null
+                ? "Some items are priced at checkout, with tax."
+                : "Tax is added at checkout."}
+            </p>
             <Link className="menu-cart-panel__link" to="/cart">
               View cart
             </Link>
@@ -484,9 +532,16 @@ function MenuCart({ load }: { readonly load: CartSummaryLoader }) {
               {summary.count}
             </span>
             <span className="menu-cart-bar__label">View cart</span>
-            <span className="menu-cart-bar__total" aria-hidden={summary.subtotal === null}>
-              {summary.subtotal ?? items}
-            </span>
+            {summary.subtotal === null ? (
+              <span className="menu-cart-bar__total" aria-hidden="true">
+                {items}
+              </span>
+            ) : (
+              <span className="menu-cart-bar__total">
+                {summary.subtotal}
+                <span className="menu-cart-bar__tax"> + tax</span>
+              </span>
+            )}
           </Link>
         </div>
       )}
