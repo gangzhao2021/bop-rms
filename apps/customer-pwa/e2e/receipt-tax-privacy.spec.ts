@@ -1,6 +1,11 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { routeStorefrontReads } from "./storefront-reads";
+
+// WP-2423: every page with a Store context reads the Store's identity (and the menu for
+// cart lines not yet priced); spec routes registered later still answer first.
+test.beforeEach(({ context }) => routeStorefrontReads(context));
 
 // WP-2423 Q15/Q16 synthetic HTTP evidence for the production App: the tax receipt (address,
 // registration, one line per tax and rate), the Store's privacy notice link where contact details

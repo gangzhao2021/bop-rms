@@ -56,6 +56,21 @@ export function formatClockTime(instant: string, locale = "en-CA"): string {
   );
 }
 
+/**
+ * "1:00 p.m." for a Store's own published local time ("13:00:00"), in the same style as
+ * {@link formatClockTime}. No time zone conversion: it is the time on the Store's clock. End a
+ * sentence with {@link endSentence}.
+ */
+export function formatStoreLocalTime(value: string, locale = "en-CA"): string {
+  const match = /^([01][0-9]|2[0-3]):([0-5][0-9])/u.exec(value);
+  if (!match) return "";
+  return new Intl.DateTimeFormat(locale, {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(2000, 0, 1, Number(match[1]), Number(match[2]))));
+}
+
 /** "2026-09-02, 12:51 p.m." for records such as receipts. End a sentence with {@link endSentence}. */
 export function formatDateTime(instant: string, locale = "en-CA"): string {
   const ms = Date.parse(instant);

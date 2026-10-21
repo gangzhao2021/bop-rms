@@ -64,6 +64,7 @@ export const publicRestOperations = Object.freeze([
   ["post", "/api/v1/provider/ses-feedback", "receiveNotificationFeedback", false],
   ["get", "/api/v1/customer/order-messages", "getCustomerOrderMessageOptions", false],
   ["post", "/api/v1/customer/order-recovery", "consumeCustomerOrderLink", false],
+  ["get", "/api/v1/customer/store", "getCustomerStoreProfile", false],
 ] as const);
 
 const Reference = z.string().uuid().openapi({ example: "018f0f58-767a-7f3b-a1d0-000000000001" });
@@ -798,6 +799,107 @@ export function buildRestRegistry(): OpenAPIRegistry {
                   .strict(),
               },
             },
+          },
+          500: {
+            description: "Safe internal failure",
+            content: { "application/json": { schema: ErrorBody } },
+          },
+        },
+      });
+      continue;
+    }
+    if (operationId === "getCustomerStoreProfile") {
+      const localTime = z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?$/u);
+      const error = z
+        .object({
+          schemaVersion: z.literal(1),
+          error: z
+            .object({
+              code: z.enum(["store_request_invalid", "session_unavailable", "store_unavailable"]),
+            })
+            .strict(),
+        })
+        .strict()
+        .openapi("CustomerStoreProfileError");
+      const noStore = {
+        "Cache-Control": { schema: { type: "string" as const, enum: ["no-store"] } },
+      };
+      registry.registerPath({
+        method,
+        path,
+        operationId,
+        description:
+          "WP-2423: the Guest Session's own Store as the start and menu pages show it — the published public profile (name, address, business phone; DEC-STORE-CUSTOMER-NAME) and, from the published operating reader the entry gate uses, whether it is open now with today's hours. Authenticated by the guest cookie only (read-only, same-origin); no query; no guest, staff or order data. All fields are Public classification, so the response may be kept by this browser for 30 seconds. No pickup ready time is given: none is computed by any owner.",
+        responses: {
+          200: {
+            description:
+              "The Store's public identity and today's hours (hours null when unreadable)",
+            headers: {
+              "Cache-Control": { schema: { type: "string", enum: ["private, max-age=30"] } },
+              "Referrer-Policy": { schema: { type: "string", enum: ["no-referrer"] } },
+            },
+            content: {
+              "application/json": {
+                schema: z
+                  .object({
+                    schemaVersion: z.literal(1),
+                    store: z
+                      .object({
+                        storeDisplayName: z.string().min(1),
+                        brandDisplayName: z.string().min(1),
+                        timeZone: z.string().min(1),
+                        address: z
+                          .object({
+                            addressLines: z.array(z.string().min(1)).min(1).max(3),
+                            locality: z.string().min(1),
+                            regionCode: z.string().min(1),
+                            postalCode: z.string().min(1),
+                            countryCode: z.string().regex(/^[A-Z]{2}$/u),
+                          })
+                          .strict(),
+                        phone: z
+                          .string()
+                          .regex(/^\+[1-9][0-9]{6,14}$/u)
+                          .nullable(),
+                        hours: z
+                          .object({
+                            status: z.enum(["Open", "Closed", "Paused"]),
+                            todayHours: z.array(
+                              z
+                                .object({
+                                  startLocalTime: localTime,
+                                  endLocalTime: localTime,
+                                  endsNextDay: z.boolean(),
+                                })
+                                .strict(),
+                            ),
+                            closesAt: localTime.nullable(),
+                            opensAt: localTime.nullable(),
+                          })
+                          .strict()
+                          .nullable(),
+                      })
+                      .strict(),
+                  })
+                  .strict()
+                  .openapi("CustomerStoreProfile"),
+              },
+            },
+          },
+          400: {
+            description: "Cross-site request or query parameters",
+            headers: noStore,
+            content: { "application/json": { schema: error } },
+          },
+          401: {
+            description: "No current Guest Session",
+            headers: noStore,
+            content: { "application/json": { schema: error } },
+          },
+          503: {
+            description: "The Store's published profile is unavailable; retry",
+            headers: noStore,
+            content: { "application/json": { schema: error } },
           },
           500: {
             description: "Safe internal failure",

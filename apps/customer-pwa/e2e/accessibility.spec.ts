@@ -1,5 +1,10 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { routeStorefrontReads } from "./storefront-reads";
+
+// WP-2423: every page with a Store context reads the Store's identity (and the menu for
+// cart lines not yet priced); spec routes registered later still answer first.
+test.beforeEach(({ context }) => routeStorefrontReads(context));
 
 /**
  * WP-2423 C5: automated accessibility checks (axe-core, WCAG 2.0/2.1 A and AA) on the customer

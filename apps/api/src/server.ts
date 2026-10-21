@@ -9,6 +9,10 @@ import {
   createCustomerSessionBootstrapHandler,
   createCustomerSessionBootstrapRead,
 } from "./customer-session-bootstrap.js";
+import {
+  createCustomerStoreProfileHandler,
+  createCustomerStoreProfileRead,
+} from "./customer-store-profile.js";
 import { createCustomerPickupCodeRead } from "./customer-pickup-code-read.js";
 import { CustomerPickupCodeHandler } from "./customer-pickup-code.js";
 import type { CustomerPaymentIntentHandler } from "./customer-payment-intent.js";
@@ -153,6 +157,10 @@ export interface ApiServerRuntimeOptions {
   customerSessionBootstrap?: Parameters<typeof createCustomerSessionBootstrapRead>[0] & {
     allowedOrigin: string;
   };
+  /** WP-2423: the guest's Store identity (published profile and today's hours). */
+  customerStoreProfile?: Parameters<typeof createCustomerStoreProfileRead>[0] & {
+    allowedOrigin: string;
+  };
   customerPickupCode?: Parameters<typeof createCustomerPickupCodeRead>[0] & {
     allowedOrigin: string;
   };
@@ -234,6 +242,7 @@ export function createApiServerRuntime({
   customerPaymentResult,
   customerOrderStatus,
   customerSessionBootstrap,
+  customerStoreProfile,
   customerPickupCode,
   customerReceipt,
   customerContactRemoval,
@@ -411,6 +420,14 @@ export function createApiServerRuntime({
           customerSessionBootstrap: createCustomerSessionBootstrapHandler({
             allowedOrigin: customerSessionBootstrap.allowedOrigin,
             port: createCustomerSessionBootstrapRead(customerSessionBootstrap),
+          }),
+        }),
+    ...(customerStoreProfile === undefined
+      ? {}
+      : {
+          customerStoreProfile: createCustomerStoreProfileHandler({
+            allowedOrigin: customerStoreProfile.allowedOrigin,
+            port: createCustomerStoreProfileRead(customerStoreProfile),
           }),
         }),
     ...(customerPickupCode === undefined

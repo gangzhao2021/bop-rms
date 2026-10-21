@@ -45,6 +45,8 @@ export interface CustomerEntryOperatingReader {
           endLocalTime: string;
           endsNextDay: boolean;
         }[];
+        /** The Store's local time ("HH:MM:SS") at `evaluatedAt`, when the reader provides it. */
+        localTime?: string;
       })
     | null
   >;

@@ -56,6 +56,8 @@ function dependencies() {
     requestAdmission: port("admission"),
     database: { probe: port("probe") },
     stores: port("stores"),
+    // WP-2423: the published operating reader the entry gate uses (start/menu store identity).
+    operatingReader: () => port("operating"),
     now: () => "2026-10-17T12:00:00.000Z",
     close: vi.fn(async () => undefined),
   };

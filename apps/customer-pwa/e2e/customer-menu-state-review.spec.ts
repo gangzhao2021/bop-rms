@@ -1,4 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
+import { routeStorefrontReads } from "./storefront-reads";
+
+// WP-2423: every page with a Store context reads the Store's identity (and the menu for
+// cart lines not yet priced); spec routes registered later still answer first.
+test.beforeEach(({ context }) => routeStorefrontReads(context));
 
 const storeReference = "018f7500-0000-7000-8000-000000000001";
 const instant = "2026-09-24T12:00:00.000Z";

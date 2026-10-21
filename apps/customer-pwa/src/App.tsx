@@ -14,7 +14,6 @@ import {
   MenuBrowsePage,
   MenuSearchPage,
   SellableDetailPage,
-  summarizeCart,
   type CartSummaryLoader,
 } from "./menu/MenuPage.js";
 import type { MenuJourneyContext } from "./menu/types.js";
@@ -147,7 +146,7 @@ export function App({
       demo
         ? async () => {
             const state = demo.cartController.getState();
-            return summarizeCart("cart" in state ? state.cart : null);
+            return "cart" in state ? state.cart : null;
           }
         : undefined,
     [demo],
@@ -178,6 +177,7 @@ export function App({
               onEstablished={establishMenuContext}
               currentOrder={currentOrder}
               store={store}
+              storeProfile={demo ? null : undefined}
             />
           }
         />
@@ -189,6 +189,7 @@ export function App({
               client={demo?.menuClient}
               readOnlyNotice={demo?.menuReadOnlyNotice}
               cartSummary={demoCartSummary}
+              storeProfile={demo ? null : undefined}
             />
           }
         />
@@ -200,6 +201,7 @@ export function App({
               client={demo?.menuClient}
               readOnlyNotice={demo?.menuReadOnlyNotice}
               cartSummary={demoCartSummary}
+              storeProfile={demo ? null : undefined}
             />
           }
         />
@@ -217,7 +219,12 @@ export function App({
         <Route
           path="/cart"
           element={
-            <CartPage store={store} {...(demo ? { controller: demo.cartController } : {})} />
+            <CartPage
+              store={store}
+              menuContext={menuContext}
+              menuClient={demo?.menuClient}
+              {...(demo ? { controller: demo.cartController } : {})}
+            />
           }
         />
         <Route
@@ -225,6 +232,8 @@ export function App({
           element={
             <CheckoutPage
               store={store}
+              menuContext={menuContext}
+              menuClient={demo?.menuClient}
               {...(checkoutNow === undefined ? {} : { now: checkoutNow })}
               {...(demo ? { controller: demo.checkoutController, now: demo.now } : {})}
             />

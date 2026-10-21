@@ -62,6 +62,7 @@ export function createPersistentEntryOperatingReader(options: {
           state: status.state,
           availableServiceModes: status.availableServiceModes,
           todayHours: status.todayHours,
+          localTime: String(status.localTime),
         });
       } catch {
         return null;

@@ -4,6 +4,11 @@ import {
   v15PickupOrderReference,
   v15PickupStatusBody,
 } from "../src/order-status/v15-pickup-status.fixture";
+import { routeStorefrontReads } from "./storefront-reads";
+
+// WP-2423: every page with a Store context reads the Store's identity (and the menu for
+// cart lines not yet priced); spec routes registered later still answer first.
+test.beforeEach(({ context }) => routeStorefrontReads(context));
 
 // Synthetic HTTP evidence for the production App. No live Store or Payment result.
 const id = (n: number) => "018f8800-0000-7000-8000-" + n.toString(16).padStart(12, "0");

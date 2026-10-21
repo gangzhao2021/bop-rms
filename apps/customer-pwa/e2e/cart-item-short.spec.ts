@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { routeStorefrontReads } from "./storefront-reads";
+
+// WP-2423: every page with a Store context reads the Store's identity (and the menu for
+// cart lines not yet priced); spec routes registered later still answer first.
+test.beforeEach(({ context }) => routeStorefrontReads(context));
 // Synthetic HTTP interception on the production PWA, not live Store, stock or payment evidence.
 // WP-2423 (v15 run of 8f655fc4): Flat White on two lines and a Mocha sharing the milk. Checkout
 // says how many Flat White can be made and to remove one (the "−" stops at 1); the cart's Remove

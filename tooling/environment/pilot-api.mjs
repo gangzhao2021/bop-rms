@@ -140,6 +140,9 @@ export async function createRuntime(
           environment: pilotProviderEnvironment(),
         },
       },
+      // WP-2423: the start and menu pages show the Store's address and today's hours from the
+      // same published operating reader the entry gate uses.
+      storeOperatingReader: resources.operatingReader,
       checkoutSessions: diningCheckout.checkoutSessions,
       ...quote,
       ...createInternalCheckoutDetails(resources, entry, diningCheckout.preparation),

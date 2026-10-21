@@ -311,6 +311,16 @@ export async function exercisePersistentProfileEntry({
           },
         }
       : {}),
+    ...(pickupOnly
+      ? {
+          storeOperatingReader: (tx) =>
+            createPersistentEntryOperatingReader({
+              transaction: tx,
+              publicStore: { binding: publicOptions.binding, authorize: publicOptions.authorize },
+              operating,
+            }),
+        }
+      : {}),
     menuStores: { resolvePublic: async () => null },
     sessionTransactions: { run },
     menuTransactions: { run },
@@ -383,6 +393,40 @@ export async function exercisePersistentProfileEntry({
     assert.equal(Object.hasOwn(body, "brandReference"), false);
     assert.equal(successful.headers.getSetCookie().length, 1);
     assert.equal(typeof body.csrfToken, "string");
+    if (pickupOnly) {
+      // WP-2423: the started visit reads its Store's identity — the published profile and today's
+      // hours from the same operating reader the entry gate used — under the restricted role.
+      const cookie = successful.headers.getSetCookie()[0].split(";")[0];
+      const identity = await globalThis.fetch(
+        "http://127.0.0.1:" + address.port + "/api/v1/customer/store",
+        {
+          headers: { cookie, "sec-fetch-site": "same-origin", origin: "https://customer.invalid" },
+        },
+      );
+      assert.equal(identity.status, 200);
+      assert.equal(identity.headers.get("cache-control"), "private, max-age=30");
+      const identityBody = await identity.json();
+      assert.deepEqual(Object.keys(identityBody.store).sort(), [
+        "address",
+        "brandDisplayName",
+        "hours",
+        "phone",
+        "storeDisplayName",
+        "timeZone",
+      ]);
+      assert.equal(identityBody.store.storeDisplayName, body.storeDisplayName);
+      assert.equal(identityBody.store.brandDisplayName, body.brandDisplayName);
+      assert.ok(identityBody.store.address.addressLines.length >= 1);
+      assert.ok(identityBody.store.hours, "today's hours are read from the published schedule");
+      assert.equal(identityBody.store.hours.status, "Open");
+      assert.ok(identityBody.store.hours.todayHours.length >= 1);
+      const anonymous = await globalThis.fetch(
+        "http://127.0.0.1:" + address.port + "/api/v1/customer/store",
+        { headers: { "sec-fetch-site": "same-origin" } },
+      );
+      assert.equal(anonymous.status, 401);
+      await anonymous.text();
+    }
     let saved = await count();
     assert.equal(saved.sessions, before.sessions + 1);
     assert.equal(saved.history, before.history + 1);

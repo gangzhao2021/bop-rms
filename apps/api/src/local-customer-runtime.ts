@@ -89,6 +89,7 @@ import {
 import {
   createCustomerEntryComposition,
   type CustomerEntryCompositionOptions,
+  type CustomerEntryOperatingReader,
 } from "./customer-entry-composition.js";
 import { CustomerEntryHandler } from "./customer-entry.js";
 import { CustomerMenuHandler } from "./customer-menu.js";
@@ -220,6 +221,13 @@ export interface LocalCustomerRuntimeOptions {
   readonly now: () => string;
   readonly uuidV7Factory: () => string;
   readonly runtime?: Pick<ApiServerRuntimeOptions, "port" | "logger" | "healthReadiness">;
+  /**
+   * WP-2423: the published operating reader (the entry gate's) for the guest's Store identity on
+   * the start and menu pages. Absent: the store route answers 503 and pages show no hours.
+   */
+  readonly storeOperatingReader?: (
+    transaction: Parameters<Parameters<CartQueryTransactionRunner["run"]>[0]>[0],
+  ) => CustomerEntryOperatingReader;
   /** DEC-PILOT-NOTIFICATIONS: order messages (absent: nothing offered, link and feedback 503/404). */
   readonly orderMessaging?: Omit<
     NonNullable<ApiServerRuntimeOptions["customerOrderMessaging"]>,
@@ -601,6 +609,20 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
     ...(options.orderStatus === undefined
       ? {}
       : {
+          ...("persistent" in entry && options.storeOperatingReader !== undefined
+            ? {
+                customerStoreProfile: {
+                  transactions: options.orderStatus.transactions,
+                  binding: options.orderStatus.binding,
+                  publicProfile: entry.persistent.profile,
+                  operatingReader: options.storeOperatingReader,
+                  scope,
+                  credentials: entry.session.credentials,
+                  now,
+                  allowedOrigin: options.allowedOrigin,
+                },
+              }
+            : {}),
           customerSessionBootstrap: {
             ...options.orderStatus,
             ...("persistent" in entry ? { publicProfile: entry.persistent.profile } : {}),

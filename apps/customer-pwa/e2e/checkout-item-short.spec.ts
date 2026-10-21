@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { routeStorefrontReads } from "./storefront-reads";
+
+// WP-2423: every page with a Store context reads the Store's identity (and the menu for
+// cart lines not yet priced); spec routes registered later still answer first.
+test.beforeEach(({ context }) => routeStorefrontReads(context));
 // Synthetic HTTP interception on the production PWA, not live Store, stock or payment evidence.
 // WP-2423 (2026-10-17): when the store's stock can't make the cart as it stands (here two drinks
 // that use the same milk), checkout says which item, how many are left and that nothing was

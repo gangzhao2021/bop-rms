@@ -15,7 +15,14 @@ import {
 import { formatCartMoney } from "./format-money.js";
 import { cartItemShortMessage } from "../checkout/item-refusal-message.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import { formatMinutesUntil } from "../journey/format.js";
+import { formatMinutesUntil, formatMoney } from "../journey/format.js";
+import {
+  quoteConsistentLinePrices,
+  cartLinesSubtotal,
+  usePublishedMenu,
+  type CartLinePrice,
+} from "../menu/menu-line-prices.js";
+import type { CustomerMenuClient, MenuJourneyContext, MenuView } from "../menu/types.js";
 import {
   cartIssueMessage,
   cartItemWarningMessage,
@@ -59,8 +66,11 @@ function CartItem({
   pending,
   readOnly,
   controller,
+  price,
 }: {
   readonly item: CartItemView;
+  /** The line's price before tax when it can be stated (the Store's, or the published one). */
+  readonly price: CartLinePrice | null;
   readonly pending: boolean;
   readonly readOnly: boolean;
   readonly controller: CartStateController;
@@ -93,9 +103,11 @@ function CartItem({
           )}
         </div>
         <p className="cart-item__estimate">
-          {item.lineEstimate.status === "Unavailable"
-            ? lineEstimateLabel(item.lineEstimate.reasonCode)
-            : formatCartMoney(item.lineEstimate.total)}
+          {price !== null
+            ? formatMoney(price.amountMinor, price.currency)
+            : item.lineEstimate.status === "Unavailable"
+              ? lineEstimateLabel(item.lineEstimate.reasonCode)
+              : formatCartMoney(item.lineEstimate.total)}
         </p>
       </div>
       {foreign ? (
@@ -147,7 +159,16 @@ function CartItem({
   );
 }
 
-function CartSummary({ cart, now }: { readonly cart: CartView; readonly now: () => number }) {
+function CartSummary({
+  cart,
+  now,
+  subtotal,
+}: {
+  readonly cart: CartView;
+  readonly now: () => number;
+  /** Every line's price before tax added up, when each one can be stated; null otherwise. */
+  readonly subtotal: CartLinePrice | null;
+}) {
   if (cart.cart.lifecycle.status !== "Active")
     return (
       <section className="cart-summary" aria-labelledby="cart-summary-heading">
@@ -160,7 +181,17 @@ function CartSummary({ cart, now }: { readonly cart: CartView; readonly now: () 
     return (
       <section className="cart-summary" aria-labelledby="cart-summary-heading">
         <h2 id="cart-summary-heading">{cartText.summary.heading}</h2>
-        <p>{cartText.summary.totalAtCheckout}</p>
+        {subtotal === null ? null : (
+          <dl>
+            <div className="cart-summary__total">
+              <dt>{cartText.summary.subtotalBeforeTax}</dt>
+              <dd>{formatMoney(subtotal.amountMinor, subtotal.currency)}</dd>
+            </div>
+          </dl>
+        )}
+        <p>
+          {subtotal === null ? cartText.summary.totalAtCheckout : cartText.summary.taxAtCheckout}
+        </p>
       </section>
     );
   const remaining = formatMinutesUntil(quote.expiresAt, now());
@@ -289,10 +320,12 @@ function CartContent({
   state,
   controller,
   now,
+  menu,
 }: {
   readonly state: CartState;
   readonly controller: CartStateController;
   readonly now: () => number;
+  readonly menu: MenuView | null;
 }) {
   if (state.status === "loading")
     return (
@@ -340,6 +373,11 @@ function CartContent({
   const pending = state.status === "command-pending";
   const terminal = cart.cart.lifecycle.status !== "Active";
   const count = cart.cart.items.reduce((total, item) => total + item.quantity, 0);
+  const currentQuote =
+    cart.cart.quote !== null && cart.cart.quote.cartVersion === cart.cart.version
+      ? cart.cart.quote.subtotal
+      : null;
+  const prices = quoteConsistentLinePrices(cart.cart.items, menu, currentQuote);
   return (
     <>
       {terminal ? (
@@ -409,6 +447,7 @@ function CartContent({
             <CartItem
               key={item.cartItemReference}
               item={item}
+              price={prices.get(item.cartItemReference) ?? null}
               pending={pending}
               readOnly={
                 readOnly ||
@@ -420,7 +459,7 @@ function CartContent({
             />
           ))}
         </section>
-        <CartSummary cart={cart} now={now} />
+        <CartSummary cart={cart} now={now} subtotal={cartLinesSubtotal(prices)} />
       </div>
       <section className="cart-next-actions" aria-label={cartText.actionsLabel}>
         <Link to="/menu">{terminal ? commonText.browseMenu : cartText.continueShopping}</Link>
@@ -438,10 +477,15 @@ export function CartPage({
   controller: provided,
   store,
   now = Date.now,
+  menuContext,
+  menuClient,
 }: {
   readonly controller?: CartStateController;
   readonly store?: CustomerStoreContext | undefined;
   readonly now?: () => number;
+  /** The published menu prices lines the Store hasn't priced yet (as shown on the item page). */
+  readonly menuContext?: MenuJourneyContext | undefined;
+  readonly menuClient?: CustomerMenuClient | undefined;
 }) {
   const [controller] = useState(
     () => provided ?? createCartStateController({ client: createBrowserCustomerCartClient() }),
@@ -463,6 +507,11 @@ export function CartPage({
     };
   }, [controller]);
   const cart = "cart" in state && state.cart !== null ? state.cart.cart : null;
+  const menu = usePublishedMenu(
+    menuContext,
+    menuClient,
+    cart?.items.some((item) => item.lineEstimate.status !== "Available") ?? false,
+  );
   const resolvedStore: CustomerStoreContext | undefined =
     store ??
     (cart
@@ -476,7 +525,7 @@ export function CartPage({
     <CustomerPage step="cart" store={resolvedStore} className="cart-page">
       <PageHeading title={cartText.pageHeading} />
       <div id="cart-content">
-        <CartContent state={state} controller={controller} now={now} />
+        <CartContent state={state} controller={controller} now={now} menu={menu} />
       </div>
       <div className="sr-only" role="status" aria-live="polite">
         {cartText.stateAnnouncement[state.status]}

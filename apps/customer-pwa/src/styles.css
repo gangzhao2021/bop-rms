@@ -9,12 +9,17 @@
 
 /* ---------- Frame ---------- */
 .customer-page {
-  /* One column per page; the header, the journey bar and the page content share its edges. */
+  /*
+   * The header and the journey bar keep one frame on every page, so the Store's name never moves
+   * between pages. Wide pages (menu, cart, checkout, receipt) fill that frame; single-column pages
+   * (start, payment, order status) read in a narrower centred column inside it.
+   */
+  --customer-frame: 76rem;
   --customer-column: 44rem;
   --customer-gutter: clamp(1rem, 4vw, 2rem);
   --customer-edge: max(
     var(--customer-gutter),
-    calc((100% - var(--customer-column)) / 2 + var(--customer-gutter))
+    calc((100% - var(--customer-frame)) / 2 + var(--customer-gutter))
   );
   --customer-nav-height: 45px;
   background: var(--bop-color-surface-canvas);
@@ -82,13 +87,11 @@
   width: min(var(--customer-column), 100%);
   padding: 1.5rem var(--customer-gutter) 6rem;
 }
-.customer-page--menu {
-  --customer-column: 76rem;
-}
+.customer-page--menu,
 .customer-page--receipt,
 .customer-page--cart,
 .customer-page--checkout {
-  --customer-column: 64rem;
+  --customer-column: var(--customer-frame);
 }
 .customer-heading {
   margin-bottom: 1rem;
@@ -138,6 +141,7 @@
 .customer-page .checkout-tip,
 .customer-page .entry-card,
 .customer-page .entry-help,
+.customer-page .store-identity,
 .customer-page .menu-state,
 .customer-page .menu-help,
 .customer-page .sellable-detail,
@@ -490,29 +494,32 @@
   scroll-margin-top: calc(var(--customer-nav-height) + 4rem);
 }
 /* Equal cards in a strict grid: each row's cards share one height. */
+/*
+ * A printed-menu grid: items sit between hairlines, not in boxes, so a section that ends half way
+ * along a row simply ends (no empty box beside the last item). Each row's items share one height.
+ */
 .menu-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--bop-space-3);
+  column-gap: var(--bop-space-8);
+  border-bottom: 1px solid var(--bop-color-border-default);
 }
 .menu-card {
   display: flex;
   min-width: 0;
+  border-top: 1px solid var(--bop-color-border-default);
 }
 .menu-card__link {
   display: flex;
   flex: 1 1 auto;
   gap: var(--bop-space-4);
-  padding: var(--bop-space-4);
-  border: 1px solid var(--bop-color-border-default);
-  border-radius: var(--bop-radius-card);
+  padding: var(--bop-space-4) 0;
   color: inherit;
-  background: var(--bop-color-surface-default);
   text-decoration: none;
-  transition: border-color var(--bop-motion-fast);
 }
-.menu-card__link:hover {
-  border-color: var(--bop-color-border-strong);
+.menu-card__link:hover h4 {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .menu-card__body {
   display: flex;
@@ -664,7 +671,7 @@
 .menu-skeleton {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--bop-space-3);
+  column-gap: var(--bop-space-8);
   margin-top: var(--bop-space-8);
 }
 .menu-skeleton__card {
@@ -672,9 +679,8 @@
   align-content: start;
   gap: var(--bop-space-2);
   min-height: 8.5rem;
-  padding: var(--bop-space-4);
-  border: 1px solid var(--bop-color-border-default);
-  border-radius: var(--bop-radius-card);
+  padding: var(--bop-space-4) 0;
+  border-top: 1px solid var(--bop-color-border-default);
 }
 .menu-skeleton--detail {
   margin-top: var(--bop-space-8);
@@ -730,6 +736,10 @@
 /* An item without a photo reads as one centred sheet; with a photo it uses the full width. */
 /* The item page keeps one width from loading to loaded (nothing moves when it arrives); an item
    without a photo reads as one centred sheet inside it. */
+/* No cart bar on the item page, so no room is kept for one under the content. */
+.customer-page.customer-menu-screen--detail .bop-shell__main {
+  padding-bottom: var(--bop-space-6);
+}
 .customer-menu-screen--detail .menu-layout {
   max-width: 64rem;
   margin-inline: auto;
@@ -2283,4 +2293,80 @@
   flex-wrap: wrap;
   gap: var(--bop-space-2);
   margin-top: var(--bop-space-2);
+}
+
+/* ---------- WP-2423 store identity (start and menu pages) ---------- */
+/* One line on the menu, its height kept from the first render so nothing moves when it arrives. */
+.store-strip {
+  min-height: 1.75rem;
+  font-size: 0.9375rem;
+}
+.store-strip__details summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--bop-space-2);
+  min-height: 1.75rem;
+  list-style: none;
+  cursor: pointer;
+}
+.store-strip__details summary::-webkit-details-marker {
+  display: none;
+}
+.store-strip__label {
+  font-weight: 650;
+}
+.store-strip__label--open {
+  color: var(--bop-color-success);
+}
+.store-strip__label--closed,
+.store-strip__label--paused {
+  color: var(--bop-color-danger);
+}
+.store-strip__more {
+  color: var(--bop-color-text-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.store-strip__panel {
+  display: grid;
+  gap: var(--bop-space-2);
+  margin-top: var(--bop-space-2);
+  padding: var(--bop-space-3) var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-card);
+}
+.customer-page .store-identity h2 {
+  margin: 0 0 var(--bop-space-1);
+  font-size: 1.0625rem;
+}
+.customer-page .store-identity > * + * {
+  margin-top: var(--bop-space-2);
+}
+.customer-page .store-identity__status,
+.customer-page .store-identity__hours,
+.customer-page .store-identity__links {
+  margin: 0;
+}
+.store-identity__hours span {
+  margin-inline-end: var(--bop-space-1);
+  color: var(--bop-color-text-muted);
+}
+.store-identity__address {
+  display: grid;
+  font-style: normal;
+}
+.store-identity__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--bop-space-5);
+}
+.store-identity__links a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
