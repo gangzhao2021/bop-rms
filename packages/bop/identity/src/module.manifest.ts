@@ -42,6 +42,8 @@ const moduleManifestInput = {
       "staff_pin_session",
       "store_staff_invitation",
       "store_staff_account",
+      "order_recovery_authorization",
+      "order_recovery_consumption",
     ],
   },
   ownedJobs: [],

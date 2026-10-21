@@ -56,7 +56,7 @@ export function createStripeOnlineTransport(options: StripeOnlineTransportOption
   }
   const send = options.fetch ?? globalThis.fetch;
   async function exchange(
-    input: CreateIntentRequest | RetrieveIntentRequest | CancelIntentRequest | RefundPaymentRequest,
+    input: { readonly context: StripeOnlineReadScope },
     encoded: StripeOnlineIntentRequest,
   ): Promise<{ status: number; payload: unknown }> {
     if (
@@ -123,5 +123,39 @@ export function createStripeOnlineTransport(options: StripeOnlineTransportOption
     async listRefunds(input: RefundPaymentRequest, startingAfter: string | null = null) {
       return exchange(input, encodeStripeOrdinaryRefundLookup(input, startingAfter));
     },
+    /** DEC-STRIPE-PILOT-WIRING: read-only Provider-first discovery (capture journal, balance
+     * transactions, readiness). Only the fixed GET resources below; never a mutation. */
+    async read(scope: StripeOnlineReadScope, path: string) {
+      if (!readablePath.test(path) || path.length > 1024)
+        throw new StripeOnlineTransportError("CONFIGURATION_INVALID");
+      return exchange(
+        { context: scope },
+        Object.freeze({ method: "GET", path, body: null, idempotencyKey: null }),
+      );
+    },
+    /** Operator tool only: register the customer domain for wallet buttons (Apple/Google Pay). */
+    async registerPaymentMethodDomain(scope: StripeOnlineReadScope, domainName: string) {
+      if (
+        domainName.length > 253 ||
+        !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/u.test(domainName)
+      )
+        throw new StripeOnlineTransportError("CONFIGURATION_INVALID");
+      return exchange(
+        { context: scope },
+        Object.freeze({
+          method: "POST",
+          path: "/v1/payment_method_domains",
+          body: new URLSearchParams({ domain_name: domainName, enabled: "true" }).toString(),
+          idempotencyKey: "payment-method-domain:" + domainName,
+        }),
+      );
+    },
   });
 }
+export interface StripeOnlineReadScope {
+  readonly brandReference: string;
+  readonly storeReference: string;
+  readonly environment: "Test" | "Live";
+}
+const readablePath =
+  /^\/v1\/(?:payment_intents(?:\/pi_[A-Za-z0-9]+)?|balance_transactions|account|webhook_endpoints|payment_method_domains)(?:\?[A-Za-z0-9_%.=&[\]-]*)?$/u;

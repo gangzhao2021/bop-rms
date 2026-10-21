@@ -13,6 +13,7 @@ const guardedComponents = [
   "../checkout/CheckoutDetailsForm.tsx",
   "../order-status/OrderStatusPage.tsx",
   "../order-status/ContactDetailsSection.tsx",
+  "../resume/ResumeScreen.tsx",
 ] as const;
 
 /** Attributes whose values are markup, routing or machine values, never read by a guest. */
@@ -64,8 +65,15 @@ function attributeName(node: ts.Node): string | null {
  * catalog. JSX text is never exempt; keep each list to codes the file really compares.
  */
 const machineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
-  // Contact-method values of the checkout details contract.
-  "../checkout/CheckoutDetailsForm.tsx": new Set(["Phone", "Email"]),
+  // One-time order link page states (compared, never shown).
+  "../resume/ResumeScreen.tsx": new Set(["Opening", "Expired", "Open", "TryAgain", "TooManyTries"]),
+  // Contact-method and receipt-choice values of the checkout details contract.
+  "../checkout/CheckoutDetailsForm.tsx": new Set([
+    "Phone",
+    "Email",
+    "InSession",
+    "TransactionalEmail",
+  ]),
   // Refund statuses, serving and kitchen progress codes, and the progress stage (all compared).
   "../order-status/OrderStatusPage.tsx": new Set([
     "Refunded",

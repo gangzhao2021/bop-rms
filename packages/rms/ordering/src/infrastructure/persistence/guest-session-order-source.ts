@@ -135,3 +135,31 @@ export async function findGuestSessionOrder(
     createdAt: String(parseOrderingInstant(row.created_at)),
   });
 }
+
+/**
+ * DEC-PILOT-NOTIFICATIONS R1: the Guest Session that placed this Order (its first submission), so
+ * Identity can bind a one-time recovery link to that exact Session. Never exposed to a browser.
+ */
+export async function loadOrderGuestSession(
+  transaction: { query(text: string, values: readonly unknown[]): Promise<unknown> },
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+): Promise<string | null> {
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    order = parseOrderingReference(orderReference);
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const result = (await transaction.query(
+    "SELECT guest_session_id::text AS guest_session_id FROM rms_ordering.order_submission_record " +
+      "WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND submission_kind='Initial' LIMIT 2",
+    [brand, store, order],
+  )) as { readonly rows?: unknown } | null;
+  const rows = result?.rows;
+  if (!Array.isArray(rows) || rows.length > 1) return fail();
+  const row = rows[0] as Record<string, unknown> | undefined;
+  if (row === undefined) return null;
+  return String(parseOrderingReference(row.guest_session_id));
+}

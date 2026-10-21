@@ -64,6 +64,26 @@ it("uses expanded charge to verify captured and refunded amounts", () => {
   expect(result.status).toBe("Captured");
   expect(result.refundedAmount.amountMinor).toBe(200n);
 });
+it("treats a declined intent (failed latest charge) as a Failed attempt without a transaction", () => {
+  const declined = {
+    ...charge,
+    id: "ch_SYNTHETICDECLINED1",
+    amount_captured: 0,
+    amount_refunded: 0,
+    paid: false,
+    captured: false,
+    status: "failed",
+  };
+  const result = normalize(request, { ...pending, latest_charge: declined }, at);
+  expect(result.status).toBe("Failed");
+  expect(result.providerTransactionReference).toBeNull();
+  expect(result.capturedAmount.amountMinor).toBe(0n);
+  // A later authentication step on the same intent is not a decline.
+  expect(
+    normalize(request, { ...pending, status: "requires_action", latest_charge: declined }, at)
+      .status,
+  ).toBe("RequiresCustomerAction");
+});
 it.each([
   { livemode: true },
   { currency: "usd" },

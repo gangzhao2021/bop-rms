@@ -132,7 +132,7 @@ describe("WP-2423 Q10 customer order notifications", () => {
         orderLink: "https://order.example.test/resume#t=abc",
       }).text,
     ).toBe(
-      "DEMO Store: your order 12 is ready. Show this order number at the pickup counter. See your order: https://order.example.test/resume#t=abc",
+      "DEMO Store: your order 12 is ready. Show this order number at the pickup counter. Open your order (the link works once, for 30 minutes): https://order.example.test/resume#t=abc",
     );
     expect(() =>
       renderCustomerOrderMessage({

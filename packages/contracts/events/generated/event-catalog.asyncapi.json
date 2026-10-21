@@ -3174,7 +3174,11 @@
         },
         "title": "KitchenOrderReady v1",
         "x-bop-compatibility": "additive",
-        "x-bop-consumers": ["fulfillment.kitchen-order-ready:v1", "ordering.kitchen-progress:v1"],
+        "x-bop-consumers": [
+          "fulfillment.kitchen-order-ready:v1",
+          "notification.customer-order-ready:v1",
+          "ordering.kitchen-progress:v1"
+        ],
         "x-bop-data-classification": "indirect_identifier",
         "x-bop-event-type": "KitchenOrderReady",
         "x-bop-owner-module": "@rms/kitchen",
@@ -5585,7 +5589,12 @@
         },
         "title": "PaymentSucceeded v1",
         "x-bop-compatibility": "additive",
-        "x-bop-consumers": ["ordering.payment-outcome:v1", "payment.status-projection:v1"],
+        "x-bop-consumers": [
+          "notification.customer-order-placed:v1",
+          "notification.customer-receipt-email:v1",
+          "ordering.payment-outcome:v1",
+          "payment.status-projection:v1"
+        ],
         "x-bop-data-classification": "payment",
         "x-bop-event-type": "PaymentSucceeded",
         "x-bop-owner-module": "@rms/payment",

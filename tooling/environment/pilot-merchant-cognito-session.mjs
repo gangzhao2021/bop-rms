@@ -42,11 +42,11 @@ export const pilotStaffOrigin = "https://127.0.0.1:4443";
 
 export async function createInternalMerchantCognitoSession(
   resources,
-  { signIn, createInternalMerchantCredentials },
+  { signIn, createInternalMerchantCredentials, staffOrigin = pilotStaffOrigin },
 ) {
   if (signIn?.mode !== "cognito") return denied();
-  // The pilot HTTPS server answers only on its local origin until the hosting gap is closed.
-  if (signIn.exactOrigin !== pilotStaffOrigin) return denied();
+  // The Cognito callbacks are registered on the origin this HTTPS server answers on.
+  if (signIn.exactOrigin !== staffOrigin) return denied();
   if (signIn.testProvider !== null && process.env.NODE_ENV !== "development") return denied();
   const { now, transactions, credentials } = resources,
     clock = now.bind(resources),
@@ -215,18 +215,25 @@ export async function createInternalMerchantCognitoSession(
         boundActor: people.boundActor,
         newReference: () => credentials.reference(),
       }),
-    /** The PIN pepper, tablet and lock-screen keys from their own secret files. */
-    async staffPinCredentials() {
-      const { pepper, device, choice } = signIn.staffPinKeys;
-      return Object.freeze({
-        kdf: createArgon2idStaffPinKdf({
-          peppers: new Map([[1, Buffer.from(pepper)]]),
-          currentPepperVersion: 1,
+    /**
+     * InternalTest: the PIN pepper, tablet and lock-screen keys from their own secret files. A
+     * Pilot store leaves this out and uses the managed secrets (DEC-PILOT-SECRETS).
+     */
+    ...(signIn.staffPinKeys === null
+      ? {}
+      : {
+          async staffPinCredentials() {
+            const { pepper, device, choice } = signIn.staffPinKeys;
+            return Object.freeze({
+              kdf: createArgon2idStaffPinKdf({
+                peppers: new Map([[1, Buffer.from(pepper)]]),
+                currentPepperVersion: 1,
+              }),
+              deviceHasher: createStoreDeviceSecretHasher(Buffer.from(device)),
+              choiceTokens: createStaffPinChoiceTokens(Buffer.from(choice)),
+            });
+          },
         }),
-        deviceHasher: createStoreDeviceSecretHasher(Buffer.from(device)),
-        choiceTokens: createStaffPinChoiceTokens(Buffer.from(choice)),
-      });
-    },
     /** A verified staff PIN on a registered tablet issues this person's ordinary session. */
     async issueForPin(actorReference, finalize) {
       if (typeof finalize !== "function" || !referencePattern.test(actorReference)) return denied();

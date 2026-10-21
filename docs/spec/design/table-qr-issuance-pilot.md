@@ -94,5 +94,7 @@
 
 ## 剩余工作
 
-- 外部关口：托管 QR 密钥（"Secrets"）、正式顾客域名与证书（"Tls"）——之后按上文切换并全部重印。
+- 外部关口：托管 QR 密钥（"Secrets"）、正式顾客域名与证书（"Tls"）——之后按上文切换并全部重印。仓库侧切换机制已建成
+  （2026-10-20，[托管接口](pilot-hosting-integrations.md)：`qr-signing-key`/`qr-signing-kid` 为 Current，`qr-previous-*` 为 Overlap 或
+  `compromisedAt`；`hosting.json` 的 `customerOrigin` 进入打印地址）。
 - v15：Owner 批准后应用迁移/授权/目录 v9，签发并打印 DEMO 桌码，按 Q11 记录实测。

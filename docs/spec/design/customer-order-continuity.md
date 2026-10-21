@@ -82,6 +82,9 @@ bop_notification.customer_order_notification_outcome`。
   报订单号"。按 §87.4.2 每单/联系方式/IP 每小时 5 次。验收：单次、过期、兄弟作废、跨店拒绝、令牌不进日志/Referrer/存储。
 - **R2 保留任务调度（已完成，2026-10-14）**：试点业务 worker 常开 `business-contact-retention` 循环（`tooling/environment/pilot-contact-retention.mjs`），以 api 角色资源每 60 秒检查一次，到期即按门店范围每批最多 100 条清除；满批继续下一批，不满批则当天结束、24 小时后再跑；失败的批次整体回滚，下次重试。健康文件 `business-contact-retention.health.json`纳入启动检查。核对方法：`rms_ordering.checkout_contact_redaction` 当日新增行数与该循环健康文件的 `completedCycles`。
 - **R3 服务商适配器**：短信/邮件账户、发件身份、退信/投诉处理（IDR-0027 修订 1）属外部关口。
+- **R1、R3 仓库内实现（2026-10-20，Owner 解除通知模块冻结后）**：见 [DEC-PILOT-NOTIFICATIONS](pilot-notifications.md)——SES 邮件与 SNS 短信适配器（默认关闭）、
+  SNS 签名验证的退信/投诉端点与退信名单、三个试点消费者（已收到订单、可取餐、邮件收据）、Identity 持有的一次性找回链接与 `/resume` 页面；
+  迁移 `2000_092`、`2000_093`。剩余只有账户、发件身份、号码注册与真实投递验证（外部关口）。
 
 ## Owner 决定（2026-10-14，"按建议，批准"）
 

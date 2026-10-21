@@ -15,7 +15,13 @@ const moduleManifestInput = {
   publishedEvents: [],
   ownedDatabase: {
     schema: "bop_notification",
-    tables: ["customer_order_notification_attempt", "customer_order_notification_outcome"],
+    tables: [
+      "customer_order_notification_attempt",
+      "customer_order_notification_outcome",
+      "delivery_provider_event",
+      "contact_suppression",
+      "delivery_issue_case",
+    ],
   },
   ownedJobs: [],
   featureFlags: [],

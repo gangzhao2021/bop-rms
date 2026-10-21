@@ -2,7 +2,7 @@ import { createInternalProviderCaptureReview } from "./pilot-provider-capture-re
 import { join } from "node:path";
 import process from "node:process";
 import { loadPilotInstallation } from "./pilot-installation.mjs";
-import { createInternalSimulatedProvider } from "./pilot-payment-provider.mjs";
+import { createPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
 import { createInternalReconciliationRuntime } from "./pilot-reconciliation-runtime.mjs";
 import { createOperationalReconciliationScheduler } from "./pilot-reconciliation-scheduler.mjs";
 import {
@@ -16,9 +16,10 @@ export async function createConfiguredReconciliationExecution(
 ) {
   const installation = await loadPilotInstallation(directory),
     config = await installation.loadCustomerRuntime();
-  const simulator = await createInternalSimulatedProvider(
+  const simulator = await createPilotPaymentProvider(
     {},
     {
+      directory,
       path: join(directory, "simulated-provider.sqlite"),
       loadProfile: installation.loadProfile,
       expectedDatabaseName: installation.database,

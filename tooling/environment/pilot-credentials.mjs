@@ -1,14 +1,8 @@
 import process from "node:process";
 import { Buffer } from "node:buffer";
 import { readFile, open, lstat, realpath } from "node:fs/promises";
-import {
-  randomBytes,
-  createHmac,
-  timingSafeEqual,
-  createCipheriv,
-  createDecipheriv,
-  hkdfSync,
-} from "node:crypto";
+import { randomBytes, hkdfSync } from "node:crypto";
+import { dirname } from "node:path";
 import {
   createArgon2idStaffPinKdf,
   createGuestSessionCredentialProvider,
@@ -17,7 +11,25 @@ import {
   createStaffPinChoiceTokens,
 } from "../../packages/bop/identity/src/index.ts";
 import { createPickupCredentialProvider } from "../../packages/rms/fulfillment/src/index.ts";
+import { isPilotStore } from "./pilot-environment.mjs";
+import {
+  createMerchantEnvelopeCrypto,
+  createSelectorHasher,
+  loadPilotManagedSecrets,
+} from "./pilot-secrets.mjs";
+const highest = (versions) => Math.max(...versions.keys());
+const wipe = (...items) => {
+  for (const item of items)
+    if (item instanceof Map) for (const key of item.values()) key.fill(0);
+    else item.fill(0);
+};
+/**
+ * InternalTest: the generated local key file `internal-test-keys.json`. Pilot (DEC-PILOT-SECRETS):
+ * the hosting's managed secret files named by `<runtime>/hosting.json`, read through the same
+ * functions, so every consumer is unchanged. The runtime directory is the key file's directory.
+ */
 export function createInternalCredentialLoaders({ file, loadProfile, expectedDatabaseName }) {
+  const managed = () => loadPilotManagedSecrets(dirname(file));
   const names = [
     "guestSession",
     "guestBinding",
@@ -82,6 +94,31 @@ export function createInternalCredentialLoaders({ file, loadProfile, expectedDat
   }
   /** Runtime only reads; missing or invalid key files never cause implicit replacement. */
   async function createInternalTestCredentials() {
+    if (isPilotStore()) {
+      const secrets = await managed(),
+        session = secrets.key("guest-session-key"),
+        binding = secrets.key("guest-binding-key"),
+        derivation = secrets.versions("pickup-derivation-key"),
+        selector = secrets.versions("pickup-selector-key");
+      try {
+        const sessions = createGuestSessionCredentialProvider(session);
+        return Object.freeze({
+          sessions,
+          binding: createGuestBindingCredentialProvider(binding),
+          // Every version verifies codes already handed out; the newest issues new ones.
+          pickup: createPickupCredentialProvider(
+            [...derivation.keys()].map((version) => ({
+              version,
+              derivationKey: derivation.get(version),
+              selectorKey: selector.get(version),
+            })),
+          ),
+          reference: () => String(sessions.generateSessionReference()),
+        });
+      } finally {
+        wipe(session, binding, derivation, selector);
+      }
+    }
     const saved = await load(),
       keys = Object.fromEntries(names.map((name) => [name, Buffer.from(saved.keys[name], "hex")]));
     try {
@@ -103,6 +140,7 @@ export function createInternalCredentialLoaders({ file, loadProfile, expectedDat
 
   /** Purpose-separated stable cursor key; startup never creates or rotates keys. */
   async function createInternalCatalogCursorKey() {
+    if (isPilotStore()) return (await managed()).key("catalog-cursor-key");
     const saved = await load();
     return Buffer.from(
       hkdfSync(
@@ -117,52 +155,28 @@ export function createInternalCredentialLoaders({ file, loadProfile, expectedDat
 
   /** Stable InternalTest workforce crypto. Never substitutes for external authentication. */
   async function createInternalMerchantCredentials() {
-    const saved = await load(),
-      key = Buffer.from(saved.keys.merchantEncryption, "hex"),
-      pepper = Buffer.from(saved.keys.merchantSelector, "hex");
-    const keyReference = "internal-test-merchant-v1";
+    if (isPilotStore()) {
+      const secrets = await managed(),
+        keys = secrets.versions("merchant-encryption-key");
+      // The schema's envelope labels are SYNTHETIC_AES_256_GCM and KMS_AES_256_GCM; a locally held
+      // managed AES key keeps the first label with a Pilot key reference (DEC-PILOT-SECRETS 3).
+      return {
+        hasher: createSelectorHasher(secrets.key("merchant-selector-key")),
+        envelopes: createMerchantEnvelopeCrypto({
+          keys,
+          current: { version: highest(keys), prefix: "pilot-merchant-v" },
+          algorithm: "SYNTHETIC_AES_256_GCM",
+        }),
+      };
+    }
+    const saved = await load();
     return {
-      hasher: {
-        hash: (value) => createHmac("sha256", pepper).update(value).digest("hex"),
-        equals: (a, b) =>
-          typeof a === "string" &&
-          typeof b === "string" &&
-          /^[a-f0-9]{64}$/.test(a) &&
-          /^[a-f0-9]{64}$/.test(b) &&
-          timingSafeEqual(Buffer.from(a, "hex"), Buffer.from(b, "hex")),
-      },
-      envelopes: {
-        async encrypt(plaintext, encryptionContext) {
-          const nonce = randomBytes(12),
-            cipher = createCipheriv("aes-256-gcm", key, nonce);
-          cipher.setAAD(Buffer.from(encryptionContext));
-          const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-          return {
-            algorithm: "SYNTHETIC_AES_256_GCM",
-            keyReference,
-            encryptionContext,
-            ciphertext: Buffer.concat([nonce, cipher.getAuthTag(), ciphertext]).toString(
-              "base64url",
-            ),
-          };
-        },
-        async decrypt(envelope, expected) {
-          if (
-            envelope.algorithm !== "SYNTHETIC_AES_256_GCM" ||
-            envelope.keyReference !== keyReference ||
-            envelope.encryptionContext !== expected
-          )
-            throw new Error("INTERNAL_SESSION_DENIED");
-          const raw = Buffer.from(envelope.ciphertext, "base64url");
-          if (raw.length < 29 || raw.length > 32768) throw new Error("INTERNAL_SESSION_DENIED");
-          const decipher = createDecipheriv("aes-256-gcm", key, raw.subarray(0, 12));
-          decipher.setAAD(Buffer.from(expected));
-          decipher.setAuthTag(raw.subarray(12, 28));
-          return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString(
-            "utf8",
-          );
-        },
-      },
+      hasher: createSelectorHasher(Buffer.from(saved.keys.merchantSelector, "hex")),
+      envelopes: createMerchantEnvelopeCrypto({
+        keys: new Map([[1, Buffer.from(saved.keys.merchantEncryption, "hex")]]),
+        current: { version: 1, prefix: "internal-test-merchant-v" },
+        algorithm: "SYNTHETIC_AES_256_GCM",
+      }),
     };
   }
   /**
@@ -172,6 +186,21 @@ export function createInternalCredentialLoaders({ file, loadProfile, expectedDat
    * a live store keeps both in the managed secret store (capability gap "Secrets").
    */
   async function createInternalStaffPinCredentials() {
+    if (isPilotStore()) {
+      const secrets = await managed(),
+        peppers = secrets.versions("staff-pin-pepper"),
+        device = secrets.key("store-device-key"),
+        choice = secrets.key("staff-pin-choice-key");
+      try {
+        return Object.freeze({
+          kdf: createArgon2idStaffPinKdf({ peppers, currentPepperVersion: highest(peppers) }),
+          deviceHasher: createStoreDeviceSecretHasher(device),
+          choiceTokens: createStaffPinChoiceTokens(choice),
+        });
+      } finally {
+        wipe(peppers, device, choice);
+      }
+    }
     const saved = await load(),
       root = Buffer.from(saved.keys.merchantSelector, "hex");
     const derive = (purpose) =>
@@ -206,7 +235,37 @@ export function createInternalCredentialLoaders({ file, loadProfile, expectedDat
       root.fill(0);
     }
   }
+  /**
+   * DEC-PILOT-NOTIFICATIONS R1: the order recovery token pepper (version 1) and the recovery abuse
+   * key, each derived for its own purpose from the Guest Session key (no new key file entry).
+   * TEST-ONLY: a live store keeps them in the managed secret store (capability gap "Secrets").
+   */
+  async function createInternalOrderRecoveryKeys() {
+    const saved = await load(),
+      root = Buffer.from(saved.keys.guestSession, "hex");
+    const derive = (purpose) =>
+      Buffer.from(
+        hkdfSync(
+          "sha256",
+          root,
+          Buffer.from(expectedDatabaseName, "utf8"),
+          Buffer.from(purpose, "utf8"),
+          32,
+        ),
+      );
+    try {
+      return Object.freeze({
+        peppers: Object.freeze([
+          { version: 1, key: derive("bop-rms/internal-test/order-recovery-pepper/v1") },
+        ]),
+        abuse: derive("bop-rms/internal-test/order-recovery-abuse/v1"),
+      });
+    } finally {
+      root.fill(0);
+    }
+  }
   return {
+    createInternalOrderRecoveryKeys,
     provisionInternalTestCredentials,
     createInternalTestCredentials,
     createInternalMerchantCredentials,

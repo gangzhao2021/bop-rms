@@ -99,6 +99,20 @@ it.each(["", "re_bad/escape", "pi_syntheticRefund", "re_bad?next=1"])(
     expect(() => lookup(request(), cursor)).toThrow();
   },
 );
+it("accepts the compensation and unmatched-capture refund keys of the same operation only", () => {
+  const value = request();
+  for (const prefix of ["compensation-refund:", "unmatched-capture-refund:"]) {
+    const key = (prefix + value.context.operationReference) as never;
+    expect(encode({ ...value, idempotencyKey: key }).idempotencyKey).toBe(key);
+    expect(() => encode({ ...value, idempotencyKey: (prefix + id(99)) as never })).toThrow();
+  }
+  expect(() =>
+    encode({
+      ...value,
+      idempotencyKey: ("other-refund:" + value.context.operationReference) as never,
+    }),
+  ).toThrow();
+});
 it("rejects another operation key or invalid Provider reference", () => {
   const value = request();
   expect(() =>

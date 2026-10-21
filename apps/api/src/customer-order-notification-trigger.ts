@@ -17,6 +17,7 @@ export interface CustomerOrderNotifyPort {
     readonly contactDetailsReference: string;
     readonly contactDetailsVersion: number;
     readonly orderLink: string | null;
+    readonly mintOrderLink?: (attemptReference: string) => Promise<string | null>;
   }): Promise<{ readonly status: string }>;
   availability(): { readonly sms: boolean; readonly email: boolean };
 }
@@ -36,8 +37,14 @@ export function createCustomerOrderNotificationTrigger(options: {
   readonly transactions: { run<T>(work: (transaction: Transaction) => Promise<T>): Promise<T> };
   readonly storeDisplayName: (transaction: Transaction) => Promise<string | null>;
   readonly notification: CustomerOrderNotifyPort;
-  /** IDR-0031 order resume link minted just before the attempt; absent until that capability ships. */
-  readonly orderLink?: (orderReference: string) => Promise<string | null>;
+  /**
+   * DEC-PILOT-NOTIFICATIONS R1: mints the IDR-0031 one-time order link for one attempt, called by
+   * Notification only after the attempt is durably recorded and just before the send.
+   */
+  readonly orderLink?: (input: {
+    readonly orderReference: string;
+    readonly attemptReference: string;
+  }) => Promise<string | null>;
 }) {
   async function handle(
     purpose: "OrderPlaced" | "PickupReady",
@@ -69,7 +76,16 @@ export function createCustomerOrderNotificationTrigger(options: {
       contact: { channel: facts.contact.channel, value: facts.contact.value },
       contactDetailsReference: facts.contact.detailsReference,
       contactDetailsVersion: facts.contact.detailsVersion,
-      orderLink: options.orderLink ? await options.orderLink(orderReference) : null,
+      orderLink: null,
+      ...(options.orderLink === undefined
+        ? {}
+        : {
+            mintOrderLink: (attemptReference: string) =>
+              (options.orderLink as NonNullable<typeof options.orderLink>)({
+                orderReference,
+                attemptReference,
+              }),
+          }),
     });
   }
   return Object.freeze({

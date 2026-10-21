@@ -24,6 +24,29 @@ export const DEFAULT_PROBE_TARGETS = Object.freeze({
   customer: { url: "https://127.0.0.1:14443/", host: "127.0.0.1:4443" },
   merchant: { url: "https://127.0.0.1:14443/app", host: "127.0.0.1:4443" },
 });
+/**
+ * DEC-PILOT-MAINTENANCE-PAGE: with a hosted customer origin the probes still go through the
+ * published port, but ask for the Store's host name. When the front serves the hosting's public
+ * certificate (`tls.mode: front`) it is checked against the public trust store for that name
+ * (`systemTrust`); otherwise the local entry's certificate stays the only trusted root.
+ */
+export function probeTargetsFor(hosting) {
+  if (!hosting?.configured) return { targets: DEFAULT_PROBE_TARGETS, systemTrust: false };
+  const front = hosting.tls.mode === "front";
+  const entry = (url) => ({
+    url,
+    host: hosting.host,
+    ...(front ? { servername: hosting.hostname } : {}),
+  });
+  return {
+    targets: {
+      api: DEFAULT_PROBE_TARGETS.api,
+      customer: entry("https://127.0.0.1:14443/"),
+      merchant: entry("https://127.0.0.1:14443/app"),
+    },
+    systemTrust: front,
+  };
+}
 export function probeEntry(target, { ca = null, timeoutMs = 5000 } = {}) {
   return new Promise((resolve) => {
     const url = new URL(target.url);
@@ -38,7 +61,13 @@ export function probeEntry(target, { ca = null, timeoutMs = 5000 } = {}) {
           "user-agent": "bop-rms-pilot-monitor",
         },
         timeout: timeoutMs,
-        ...(url.protocol === "https:" ? { ca, rejectUnauthorized: true } : {}),
+        ...(url.protocol === "https:"
+          ? {
+              ...(ca === null ? {} : { ca }),
+              ...(target.servername ? { servername: target.servername } : {}),
+              rejectUnauthorized: true,
+            }
+          : {}),
       },
       (response) => {
         const peer = response.socket.getPeerCertificate?.();
@@ -117,10 +146,14 @@ export async function observeBackup(runtimeDirectory, configured, read = readPri
   }
 }
 
-export async function observeCertificate(runtimeDirectory, liveValidTo) {
+export async function observeCertificate(
+  runtimeDirectory,
+  liveValidTo,
+  file = path.join(runtimeDirectory, "customer-tls-cert.pem"),
+) {
   if (liveValidTo) return { validTo: liveValidTo };
   try {
-    const pem = await fs.readFile(path.join(runtimeDirectory, "customer-tls-cert.pem"));
+    const pem = await fs.readFile(file);
     return { validTo: new Date(new X509Certificate(pem).validTo).toISOString() };
   } catch {
     return "unreadable";

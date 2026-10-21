@@ -44,6 +44,15 @@ export function isInternalTest(options) {
   }
 }
 
+/** The real Store environment: managed secrets, hosted certificate, no simulation. */
+export function isPilotStore(options) {
+  try {
+    return currentPilotEnvironment(options) === "Pilot";
+  } catch {
+    return false;
+  }
+}
+
 /** A configuration file must declare the environment this process runs in. */
 export function matchesPilotEnvironment(declared, options) {
   try {
@@ -69,25 +78,35 @@ export const pilotCapabilityGaps = Object.freeze([
   Object.freeze({
     code: "PaymentProvider",
     standIn: "internal payment simulator",
-    needs: "Stripe adapter wiring (repository) and the Owner's Stripe account keys (external)",
+    // DEC-STRIPE-PILOT-WIRING: Stripe test-mode wiring is done (payment.json + secret files);
+    // satisfied only by a configured Stripe Provider whose secrets are present and whose mode
+    // matches the environment (Live for a Pilot Store — not yet accepted by the configuration).
+    needs:
+      "Stripe live-mode Provider environment through the composition (repository) and the Owner's live keys, webhook secret and verified domain (external)",
+    configurable: true,
   }),
   Object.freeze({
     code: "StaffLogin",
     standIn: "DEMO staff roster login",
-    // WP-2423 DEC-COGNITO-STORE-STAFF: the Cognito sign-in is built; it closes this gap once the
-    // installation's staff-sign-in.json selects it and its secret files are in place.
+    // DEC-COGNITO-STORE-STAFF: met when staff-sign-in.json selects Cognito and its client secret is
+    // present (readPilotStaffSignInReadiness); the pool, client and domain are external.
     needs:
-      "Cognito workforce pool configured in staff-sign-in.json (external: AWS account, user pool, app client, domain, secrets)",
+      "Cognito workforce pool configured in staff-sign-in.json (external: AWS account, user pool, app client, domain, client secret)",
+    configurable: true,
   }),
+  // DEC-PILOT-SECRETS: met when hosting.json names a secrets folder holding every managed value.
   Object.freeze({
     code: "Secrets",
     standIn: "locally generated internal-test keys",
-    needs: "managed secret source for session, QR and cursor keys (with P4 hosting)",
+    needs: "managed secret files from the hosting (hosting.json secretsDirectory; values external)",
+    configurable: true,
   }),
+  // DEC-PILOT-MAINTENANCE-PAGE: met with a public customer origin and a certificate phones trust.
   Object.freeze({
     code: "Tls",
     standIn: "local self-signed certificate",
-    needs: "public certificate and reverse proxy (P4 hosting and domain)",
+    needs: "public customer domain and its certificate (hosting.json customerOrigin and tls)",
+    configurable: true,
   }),
   Object.freeze({
     code: "PricingCurrencyMetadata",
@@ -97,23 +116,59 @@ export const pilotCapabilityGaps = Object.freeze([
 ]);
 
 /**
- * The gaps that remain for this installation. WP-2423 DEC-COGNITO-STORE-STAFF: `StaffLogin`
- * closes only when the staff sign-in is configured for Cognito with every secret file present
- * and well formed (`readPilotStaffSignInReadiness`); a missing or broken configuration keeps it.
+ * The gaps that remain once this installation's checked configuration is taken into account. `met`
+ * lists configurable gaps the configuration was checked to satisfy (never the others), e.g.
+ * "Secrets"/"Tls" from `checkConfiguredPilotCapabilities` or "PaymentProvider" from
+ * `pilotPaymentProviderReady`.
  */
-export function currentPilotCapabilityGaps({ staffSignIn = "NotConfigured" } = {}) {
-  return Object.freeze(
-    pilotCapabilityGaps.filter(
-      (gap) => !(gap.code === "StaffLogin" && staffSignIn === "CognitoConfigured"),
-    ),
-  );
+export function remainingPilotCapabilityGaps(met = []) {
+  const satisfied = new Set(met);
+  return pilotCapabilityGaps.filter((gap) => !(gap.configurable && satisfied.has(gap.code)));
 }
 
 /** Refuses a Pilot start while a capability gap remains; InternalTest is unaffected. */
-export function assertPilotReady(options, capabilities = {}) {
+export function assertPilotReady(options = {}) {
   const environment = currentPilotEnvironment(options);
-  const gaps = currentPilotCapabilityGaps(capabilities);
-  if (environment === "Pilot" && gaps.length > 0)
-    throw new Error("PILOT_CAPABILITY_MISSING:" + gaps.map((gap) => gap.code).join(","));
+  const remaining = remainingPilotCapabilityGaps(options.met ?? []);
+  if (environment === "Pilot" && remaining.length > 0)
+    throw new Error("PILOT_CAPABILITY_MISSING:" + remaining.map((gap) => gap.code).join(","));
   return environment;
+}
+
+/**
+ * Which configurable gaps this installation's hosting configuration satisfies, with a plain reason
+ * for each one that is not (file names and fixed reasons only, never values).
+ */
+export async function checkConfiguredPilotCapabilities(
+  runtimeDirectory,
+  {
+    loadHosting = async (directory) =>
+      (await import("./pilot-hosting.mjs")).loadPilotHosting(directory),
+    checkSecrets = async (directory) =>
+      (await import("./pilot-secrets.mjs")).checkManagedSecrets(directory),
+    checkTls = async (hosting) => (await import("./pilot-hosting.mjs")).checkPilotTls(hosting),
+  } = {},
+) {
+  const met = [],
+    problems = [];
+  let hosting;
+  try {
+    hosting = await loadHosting(runtimeDirectory);
+  } catch (error) {
+    return { met, problems: [`hosting.json is unusable (${error?.reason ?? "unreadable"})`] };
+  }
+  if (hosting.secretsDirectory === null)
+    problems.push("Secrets: no secretsDirectory in hosting.json");
+  else {
+    const result = await checkSecrets(hosting.secretsDirectory);
+    if (result.missing.length === 0 && result.invalid.length === 0) met.push("Secrets");
+    else {
+      const { describeSecretProblems } = await import("./pilot-secrets.mjs");
+      problems.push("Secrets: " + describeSecretProblems(result));
+    }
+  }
+  const tls = await checkTls(hosting);
+  if (tls === null) met.push("Tls");
+  else problems.push("Tls: " + tls);
+  return { met, problems };
 }

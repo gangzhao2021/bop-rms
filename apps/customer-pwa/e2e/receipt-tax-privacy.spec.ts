@@ -451,6 +451,43 @@ for (const viewport of [
       await expect(page.getByRole("link", { name: /Privacy notice/u })).toHaveCount(0);
     });
 
+    test("DEC-PILOT-NOTIFICATIONS: without a connected channel nothing extra is offered or collected", async ({
+      page,
+    }) => {
+      await checkout(page, false);
+      await expect(page.getByText(/only to contact you about this order/u)).toBeVisible();
+      await expect(page.getByText(/We’ll also (text|email) you/u)).toHaveCount(0);
+      await expect(page.getByRole("checkbox", { name: "Email my receipt" })).toHaveCount(0);
+      await expect(
+        page.getByText("Your receipt appears on your order page, where you can print or save it."),
+      ).toBeVisible();
+    });
+
+    test("DEC-PILOT-NOTIFICATIONS: with text and email connected, checkout says how the contact is used and offers Email my receipt", async ({
+      page,
+    }) => {
+      await page.route("**/api/v1/customer/order-messages", (route) =>
+        route.fulfill({
+          status: 200,
+          headers: { "content-type": "application/json", "cache-control": "no-store" },
+          body: JSON.stringify({ schemaVersion: 1, orderMessages: { sms: true, email: true } }),
+        }),
+      );
+      await checkout(page, false);
+      await expect(
+        page.getByText("We’ll also text you when the store has your order and when it’s ready.", {
+          exact: false,
+        }),
+      ).toBeVisible();
+      const emailReceipt = page.getByRole("checkbox", { name: "Email my receipt" });
+      await expect(emailReceipt).not.toBeChecked();
+      await emailReceipt.check();
+      await expect(page.getByRole("textbox", { name: "Receipt email" })).toBeVisible();
+      await expect(page.getByText(/We send your receipt to this address once/u)).toBeVisible();
+      await expectNoInternalText(page);
+      await noOverflowOrBlockingAxe(page);
+    });
+
     test("the customer removes their contact details from the order page", async ({ page }) => {
       await bootstrap(page);
       let removed = false;

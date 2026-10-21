@@ -100,6 +100,8 @@ function dependencies() {
         channelCheckoutDetails: { pickup: port("d"), dining: port("d") },
       }),
       createInternalMenuStoreFacts: async () => port("facts"),
+      // DEC-STRIPE-PILOT-WIRING: Stripe mode wires the webhook receiver (null with the simulator).
+      createPaymentWebhookReceiver: async () => port("webhook"),
       providerAccountReference: "account",
     },
   };

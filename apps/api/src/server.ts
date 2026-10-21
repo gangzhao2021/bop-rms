@@ -1,4 +1,11 @@
 import {
+  createCustomerOrderMessagingOptionsHandler,
+  createCustomerOrderRecoveryHandler,
+  createNotificationFeedbackHandlers,
+  type CustomerOrderRecoveryPort,
+  type NotificationFeedbackPort,
+} from "./customer-order-messaging-http.js";
+import {
   createCustomerSessionBootstrapHandler,
   createCustomerSessionBootstrapRead,
 } from "./customer-session-bootstrap.js";
@@ -79,6 +86,10 @@ import { HealthReadinessController } from "./health-readiness.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff.js";
 import type { MerchantCatalogRouterOptions } from "./merchant-catalog.js";
 import type { RealtimeTransport } from "./realtime.js";
+import {
+  PaymentProviderWebhookHandler,
+  type PaymentProviderWebhookPort,
+} from "./payment-provider-webhook.js";
 
 const apiLogEvents = [
   "http_request_completed",
@@ -133,6 +144,8 @@ export interface ApiServerRuntimeOptions {
   customerPaymentHandoff?: CustomerPaymentHandoffRuntimeOptions;
   customerPaymentResult?: CustomerPaymentResultRuntimeOptions;
   customerReceipt?: Parameters<typeof createCustomerReceiptRead>[0] & { allowedOrigin: string };
+  /** WP-2423 DEC-STRIPE-PILOT-WIRING: the Stripe webhook receiver (Payment-owned port). */
+  paymentProviderWebhook?: PaymentProviderWebhookPort;
   /** WP-2423 Q16: "Remove my contact details" on the customer's own order page. */
   customerContactRemoval?: Parameters<typeof createCustomerContactRemoval>[0] & {
     allowedOrigin: string;
@@ -145,6 +158,13 @@ export interface ApiServerRuntimeOptions {
   };
   customerOrderStatus?: Parameters<typeof createCustomerOrderStatusRead>[0] & {
     allowedOrigin: string;
+  };
+  /** DEC-PILOT-NOTIFICATIONS: order-message options, one-time order link and SES feedback. */
+  customerOrderMessaging?: {
+    readonly allowedOrigin: string;
+    readonly availability: () => { readonly sms: boolean; readonly email: boolean };
+    readonly recovery?: CustomerOrderRecoveryPort;
+    readonly feedback?: NotificationFeedbackPort;
   };
   healthReadiness?: HealthReadinessController;
   host?: string;
@@ -217,6 +237,8 @@ export function createApiServerRuntime({
   customerPickupCode,
   customerReceipt,
   customerContactRemoval,
+  customerOrderMessaging,
+  paymentProviderWebhook,
   healthReadiness = new HealthReadinessController(),
   host = "127.0.0.1",
   logger = createApiRuntimeLogger(),
@@ -348,6 +370,31 @@ export function createApiServerRuntime({
           customerReceipt: new CustomerReceiptHandler({
             allowedOrigin: customerReceipt.allowedOrigin,
             port: createCustomerReceiptRead(customerReceipt),
+          }),
+        }),
+    ...(customerOrderMessaging === undefined
+      ? {}
+      : {
+          customerOrderMessagingOptions: createCustomerOrderMessagingOptionsHandler({
+            availability: customerOrderMessaging.availability,
+          }),
+          customerOrderRecovery: createCustomerOrderRecoveryHandler({
+            allowedOrigin: customerOrderMessaging.allowedOrigin,
+            ...(customerOrderMessaging.recovery === undefined
+              ? {}
+              : { port: customerOrderMessaging.recovery }),
+          }),
+          notificationFeedback: createNotificationFeedbackHandlers(
+            customerOrderMessaging.feedback === undefined
+              ? {}
+              : { port: customerOrderMessaging.feedback },
+          ),
+        }),
+    ...(paymentProviderWebhook === undefined
+      ? {}
+      : {
+          paymentProviderWebhook: new PaymentProviderWebhookHandler({
+            port: paymentProviderWebhook,
           }),
         }),
     ...(customerContactRemoval === undefined

@@ -2,12 +2,18 @@ import { customerSessionBootstrapRoute } from "./customer-session-bootstrap.js";
 import { customerPickupCodeRoute } from "./customer-pickup-code.js";
 import { customerReceiptRoute } from "./customer-receipt.js";
 import { customerContactRemovalRoute } from "./customer-contact-removal.js";
+import {
+  customerOrderMessagingOptionsRoute,
+  customerOrderRecoveryRoute,
+  notificationFeedbackRoute,
+} from "./customer-order-messaging-http.js";
 import { customerOrderStatusRoute } from "./customer-order-status.js";
 import { customerDiningSessionRoute } from "./customer-dining-session.js";
 import { customerDiningInvitationRoute } from "./customer-dining-invitation.js";
 import { customerPaymentResultRoute } from "./customer-payment-result.js";
 import { customerPaymentHandoffRoute } from "./customer-payment-handoff.js";
 import { customerPaymentIntentRoute } from "./customer-payment-intent.js";
+import { paymentProviderWebhookRoute } from "./payment-provider-webhook.js";
 import {
   customerCheckoutSessionRoute,
   customerCheckoutSessionReadRoute,
@@ -34,9 +40,13 @@ export const apiRouteTemplates = Object.freeze([
   customerPickupCodeRoute,
   customerReceiptRoute,
   customerContactRemovalRoute,
+  customerOrderMessagingOptionsRoute,
+  customerOrderRecoveryRoute,
+  notificationFeedbackRoute,
   customerPaymentIntentRoute,
   customerPaymentHandoffRoute,
   customerPaymentResultRoute,
+  paymentProviderWebhookRoute,
   "/__acceptance/request-command-event",
   "/bff/customer/entry",
   ...Object.values(customerCartBindingRoutes),

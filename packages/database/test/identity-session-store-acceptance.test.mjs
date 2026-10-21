@@ -38,6 +38,8 @@ async function prove(context) {
       { table_name: "guest_session" },
       { table_name: "guest_session_operation" },
       { table_name: "oidc_authorization_transaction" },
+      { table_name: "order_recovery_authorization" },
+      { table_name: "order_recovery_consumption" },
       { table_name: "platform_actor_directory_head" },
       { table_name: "platform_actor_directory_revision" },
       { table_name: "session_revocation_request" },
@@ -358,6 +360,8 @@ async function prove(context) {
         "guest_entry_admission",
         "guest_session",
         "guest_session_operation",
+        "order_recovery_authorization",
+        "order_recovery_consumption",
         "platform_actor_directory_head",
         "platform_actor_directory_revision",
         "staff_pin_attempt",
@@ -380,10 +384,12 @@ async function prove(context) {
     assert.deepEqual(
       functions.rows.map(({ proname }) => proname),
       [
+        "check_order_recovery_consumption",
         "check_staff_pin_attempt",
         "check_staff_pin_session",
         "check_store_staff_account",
         "enforce_api_client_revision",
+        "guard_guest_session_rekey",
         "guard_staff_pin_credential_update",
         "guard_store_sign_in_device_update",
         "guard_store_staff_invitation_update",
@@ -397,6 +403,7 @@ async function prove(context) {
         "reject_api_client_history_update",
         "reject_browser_brand_selection_mutation",
         "reject_guest_session_operation_mutation",
+        "reject_order_recovery_mutation",
         "reject_staff_pin_history_mutation",
         "reject_store_staff_history_mutation",
         "reject_workforce_mfa_step_up_mutation",
@@ -426,7 +433,9 @@ async function prove(context) {
          'bop_identity.authentication_session'::regclass,
          'bop_identity.oidc_authorization_transaction'::regclass,
          'bop_identity.guest_session'::regclass
-       ) AND NOT tgisinternal`,
+       ) AND NOT tgisinternal
+         -- DEC-PILOT-NOTIFICATIONS R1: the only trigger guards selector re-keys (2000_093).
+         AND tgname <> 'guest_session_rekey_guard'`,
     );
     assert.deepEqual(triggers.rows, [{ triggers: 0 }]);
 

@@ -1,3 +1,4 @@
+import { isPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
 import process from "node:process";
 import { createHash } from "node:crypto";
 import {
@@ -48,7 +49,7 @@ export function createInternalReconciliationRuntime(
   };
   const active = () =>
     process.env.NODE_ENV === "development" &&
-    simulator.simulation === true &&
+    isPilotPaymentProvider(simulator) &&
     r.now() < r.publicProfile.binding.validUntil &&
     r.scope.brandReference === r.publicProfile.binding.brandReference &&
     r.scope.storeReference === r.publicProfile.binding.storeReference;

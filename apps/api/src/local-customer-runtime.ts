@@ -118,6 +118,8 @@ export interface LocalCustomerRuntimeOptions {
     dining: CompleteCheckoutDetailsPort;
   }>;
   readonly paymentIntent?: CustomerPaymentIntentPort;
+  /** WP-2423 DEC-STRIPE-PILOT-WIRING: Stripe webhook receiver (Stripe mode only). */
+  readonly paymentProviderWebhook?: ApiServerRuntimeOptions["paymentProviderWebhook"];
   readonly paymentResult?: Omit<LocalPaymentResult, "access" | "allowedOrigin"> & {
     readonly access: Omit<LocalPaymentResult["access"], "scope" | "credentials" | "now">;
   };
@@ -218,6 +220,11 @@ export interface LocalCustomerRuntimeOptions {
   readonly now: () => string;
   readonly uuidV7Factory: () => string;
   readonly runtime?: Pick<ApiServerRuntimeOptions, "port" | "logger" | "healthReadiness">;
+  /** DEC-PILOT-NOTIFICATIONS: order messages (absent: nothing offered, link and feedback 503/404). */
+  readonly orderMessaging?: Omit<
+    NonNullable<ApiServerRuntimeOptions["customerOrderMessaging"]>,
+    "allowedOrigin"
+  >;
 }
 
 // The caller owns the injected database resources; close them after runtime.shutdown().
@@ -504,6 +511,9 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
     throw new Error("CUSTOMER_PICKUP_STATUS_REQUIRED");
   return createApiServerRuntime({
     ...(options.merchantRuntime === undefined ? {} : { merchantRuntime: options.merchantRuntime }),
+    ...(options.paymentProviderWebhook === undefined
+      ? {}
+      : { paymentProviderWebhook: options.paymentProviderWebhook }),
     ...(orderSubmission === undefined
       ? {}
       : {
@@ -578,6 +588,14 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
               credentials: entry.session.credentials,
               now,
             },
+          },
+        }),
+    ...(options.orderMessaging === undefined
+      ? {}
+      : {
+          customerOrderMessaging: {
+            ...options.orderMessaging,
+            allowedOrigin: options.allowedOrigin,
           },
         }),
     ...(options.orderStatus === undefined

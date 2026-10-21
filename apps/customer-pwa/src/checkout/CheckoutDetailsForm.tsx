@@ -13,6 +13,11 @@ import { captureCustomerCsrfContext } from "../session/customer-transaction-cont
 import { createCheckoutDetailsReadClient } from "./details-read-client.js";
 import { createCheckoutPolicyClient, type CheckoutPolicyView } from "./policy-client.js";
 import {
+  createOrderMessageOptionsClient,
+  noOrderMessages,
+  type OrderMessageOptions,
+} from "./order-messages-client.js";
+import {
   createCheckoutDetailsClient,
   createCheckoutDetailsController,
   type CheckoutDetailsDraft,
@@ -95,6 +100,8 @@ export function CheckoutDetailsForm({
   const [selection] = useState(() => Object.freeze({ ...provided }));
   const [reader] = useState(createCheckoutDetailsReadClient);
   const [policies] = useState(() => createCheckoutPolicyClient(now));
+  const [messageOptions] = useState(createOrderMessageOptionsClient);
+  const [messages, setMessages] = useState<OrderMessageOptions>(noOrderMessages);
   const [saver] = useState(() => createCheckoutDetailsController(createCheckoutDetailsClient()));
   const save = useSyncExternalStore(saver.subscribe, saver.getState, saver.getState);
   const [draft, setDraft] = useState<CheckoutDetailsDraft | null>(null);
@@ -123,6 +130,8 @@ export function CheckoutDetailsForm({
         reader.read(selection),
         policies.read(selection),
       ]);
+      // Only once this checkout's details are readable: which order messages can be sent now.
+      const channels = await messageOptions.read();
       if (run !== generation.current || !current()) return;
       const prior = saved.details;
       setDraft({
@@ -138,12 +147,17 @@ export function CheckoutDetailsForm({
           unsaved.current,
           prior?.pickupContact,
         ),
-        // WP-2423 Q10: emailing a receipt needs the store's email account (an external gate); until
-        // it is connected the receipt is shown on the order page, and no email is collected.
-        receipt: { choice: "InSession", email: null },
+        // WP-2423 Q10 / DEC-PILOT-NOTIFICATIONS: "Email my receipt" is offered (and an address
+        // collected) only while the store's email account can send; otherwise the receipt is on
+        // the order page.
+        receipt:
+          channels.email && prior?.receipt.choice === "TransactionalEmail"
+            ? prior.receipt
+            : { choice: "InSession", email: null },
         policies: [],
       });
       setPolicy(requirements);
+      setMessages(channels);
       setDirty(true);
     } catch {
       if (run === generation.current) setFailed(true);
@@ -299,6 +313,15 @@ export function CheckoutDetailsForm({
           {selection.orderType === "Pickup" ? (
             <p className="checkout-details-form__hint">
               {checkoutText.pickupContactPurpose}
+              {draft.pickupContact !== null &&
+              (draft.pickupContact.channel === "Phone" ? messages.sms : messages.email) ? (
+                <>
+                  {" "}
+                  {draft.pickupContact.channel === "Phone"
+                    ? checkoutText.orderTextsPhone
+                    : checkoutText.orderTextsEmail}
+                </>
+              ) : null}
               {policy.privacyNoticeUrl ? (
                 <>
                   {" "}
@@ -372,7 +395,48 @@ export function CheckoutDetailsForm({
           ) : (
             <p>{checkoutText.dineInNoContact}</p>
           )}
-          <p className="checkout-details-form__hint">{checkoutText.receiptOnOrderPage}</p>
+          {messages.email ? (
+            <>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={draft.receipt.choice === "TransactionalEmail"}
+                  onChange={(event) =>
+                    edit({
+                      receipt: event.target.checked
+                        ? { choice: "TransactionalEmail", email: "" }
+                        : { choice: "InSession", email: null },
+                    })
+                  }
+                />
+                {checkoutText.emailReceipt}
+              </label>
+              {draft.receipt.choice === "TransactionalEmail" ? (
+                <>
+                  <p className="checkout-details-form__hint">{checkoutText.receiptEmailPurpose}</p>
+                  <label>
+                    {checkoutText.receiptEmail}
+                    <input
+                      required
+                      type="email"
+                      autoComplete="email"
+                      maxLength={254}
+                      value={draft.receipt.email}
+                      onChange={(event) =>
+                        edit({
+                          receipt: { choice: "TransactionalEmail", email: event.target.value },
+                        })
+                      }
+                    />
+                  </label>
+                </>
+              ) : (
+                <p className="checkout-details-form__hint">{checkoutText.receiptOnOrderPage}</p>
+              )}
+            </>
+          ) : (
+            <p className="checkout-details-form__hint">{checkoutText.receiptOnOrderPage}</p>
+          )}
           {policy.documents.map((document) => (
             <details key={document.documentReference}>
               <summary>{document.title}</summary>

@@ -337,9 +337,14 @@ describe("Event Catalog source", () => {
       dataClassification: "personal",
       replaySemantics: "idempotent",
     });
-    for (const [eventType, consumer] of [
-      ["KitchenItemReady", "fulfillment.kitchen-item-ready:v1"],
-      ["KitchenOrderReady", "fulfillment.kitchen-order-ready:v1"],
+    for (const [eventType, consumer, extra] of [
+      ["KitchenItemReady", "fulfillment.kitchen-item-ready:v1", []],
+      // DEC-PILOT-NOTIFICATIONS: "your order is ready" to the pickup contact.
+      [
+        "KitchenOrderReady",
+        "fulfillment.kitchen-order-ready:v1",
+        ["notification.customer-order-ready:v1"],
+      ],
     ] as const) {
       expect(byType.get(eventType)).toMatchObject({
         eventType,
@@ -347,7 +352,7 @@ describe("Event Catalog source", () => {
         ownerModule: "@rms/kitchen",
         producerModule: "@rms/kitchen",
         stability: "stable",
-        consumers: [consumer, "ordering.kitchen-progress:v1"],
+        consumers: [consumer, ...extra, "ordering.kitchen-progress:v1"],
         tenantScope: "store",
         dataClassification: "indirect_identifier",
         compatibility: "additive",
@@ -1367,7 +1372,7 @@ describe("Event consumer compatibility", () => {
   if (firstConsumer === undefined) throw new Error("EVENT_CONSUMER_FIXTURE_MISSING");
 
   it("covers every accepted producer-to-consumer relation exactly", () => {
-    expect(eventConsumerContracts).toHaveLength(159);
+    expect(eventConsumerContracts).toHaveLength(162);
     expect(() =>
       assertEventConsumerCompatibility(eventCatalog, eventConsumerContracts),
     ).not.toThrow();

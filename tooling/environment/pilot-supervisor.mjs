@@ -6,7 +6,14 @@ import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { createPilotRecoverySweep } from "./pilot-recovery-sweep.mjs";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
-import { assertPilotReady, isPilotRuntime } from "./pilot-environment.mjs";
+import {
+  assertPilotReady,
+  checkConfiguredPilotCapabilities,
+  currentPilotEnvironment,
+  isPilotRuntime,
+  isPilotStore,
+} from "./pilot-environment.mjs";
+import { pilotPaymentProviderReady } from "./pilot-payment-config.mjs";
 import { readPilotStaffSignInReadiness } from "./pilot-staff-sign-in.mjs";
 import { SUPERVISOR_HEALTH_FILE, writePrivateJson } from "./pilot-ops-files.mjs";
 export async function acquirePilotSupervisorLease(runtimeDirectory) {
@@ -176,14 +183,30 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (process.argv.length !== 3 || !isPilotRuntime())
       throw Error("PILOT_SUPERVISOR_ARGUMENT_INVALID");
     try {
-      // WP-2423 DEC-COGNITO-STORE-STAFF: StaffLogin closes only with Cognito configured and its
-      // secret files present (nothing secret is read into this process's output).
-      const root = await fs.realpath(process.cwd());
-      assertPilotReady(undefined, {
-        staffSignIn: await readPilotStaffSignInReadiness(
-          path.join(root, parsePilotRuntimeDirectory(process.argv[2])),
-        ),
-      });
+      // DEC-PILOT-SECRETS: a Pilot start checks the hosting's secrets and certificate first and
+      // names what is missing (file names and fixed reasons only, never values).
+      let met = [];
+      if (isPilotStore()) {
+        const checked = await checkConfiguredPilotCapabilities(
+          path.join(await fs.realpath(process.cwd()), parsePilotRuntimeDirectory(process.argv[2])),
+        );
+        met = checked.met;
+        for (const problem of checked.problems) console.error("PILOT_NOT_READY " + problem);
+      }
+      // DEC-STRIPE-PILOT-WIRING: a configured Provider whose secrets are present and whose mode
+      // matches the environment meets the PaymentProvider gap.
+      if (
+        await pilotPaymentProviderReady(process.argv[2], { environment: currentPilotEnvironment() })
+      )
+        met = [...met, "PaymentProvider"];
+      // DEC-COGNITO-STORE-STAFF: staff sign in with Cognito and its client secret is present.
+      if (
+        (await readPilotStaffSignInReadiness(
+          path.join(await fs.realpath(process.cwd()), parsePilotRuntimeDirectory(process.argv[2])),
+        )) === "CognitoConfigured"
+      )
+        met = [...met, "StaffLogin"];
+      assertPilotReady({ met });
     } catch (error) {
       // WP-2423 P1b: name what a Pilot Store still lacks (capability codes only, no data).
       console.error(

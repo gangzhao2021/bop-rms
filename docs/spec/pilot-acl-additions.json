@@ -4101,6 +4101,245 @@
       "justification": "the api only locks Store rows FOR SHARE; the existing column grants (lifecycle, version) cover that lock"
     },
     {
+      "type": "schema",
+      "schema": "bop_notification",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: the pilot business worker and API (api role) record customer order messages and provider feedback"
+    },
+    {
+      "type": "table",
+      "schema": "bop_notification",
+      "object": "customer_order_notification_attempt",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: append one attempt per Order and purpose before the provider call (2000_041)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_notification",
+      "object": "customer_order_notification_attempt",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: append one attempt per Order and purpose before the provider call (2000_041)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_notification",
+      "object": "customer_order_notification_outcome",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: append the provider outcome; SES feedback resolves its message id (2000_041)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_notification",
+      "object": "customer_order_notification_outcome",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: append the provider outcome; SES feedback resolves its message id (2000_041)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_notification",
+      "object": "delivery_provider_event",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: store each signed SES feedback event once before answering SNS (2000_092)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_notification",
+      "object": "delivery_provider_event",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: store each signed SES feedback event once before answering SNS (2000_092)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_notification",
+      "object": "contact_suppression",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: hard bounce/complaint suppression list (keyed digest only), checked before each send (2000_092)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_notification",
+      "object": "contact_suppression",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: hard bounce/complaint suppression list (keyed digest only), checked before each send (2000_092)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_notification",
+      "object": "delivery_issue_case",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: open a delivery issue for a hard bounce or complaint (2000_092)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_notification",
+      "object": "delivery_issue_case",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: open a delivery issue for a hard bounce or complaint (2000_092)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "order_recovery_authorization",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: R1 mint: keyed-hash-only one-time order link authorization, sibling limit read (2000_093)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "order_recovery_authorization",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: R1 mint: keyed-hash-only one-time order link authorization, sibling limit read (2000_093)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "order_recovery_consumption",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: R1 consume: Consumed/Revoked facts; the re-key guard reads them (2000_093)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "order_recovery_consumption",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: R1 consume: Consumed/Revoked facts; the re-key guard reads them (2000_093)"
+    },
+    {
+      "type": "column",
+      "schema": "bop_identity",
+      "object": "guest_session",
+      "column": "session_selector_hash",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: R1 consume re-keys the Order's own Guest Session; the 2000_093 guard trigger accepts a selector change only with a Consumed recovery fact naming that operation"
+    },
+    {
+      "type": "column",
+      "schema": "bop_identity",
+      "object": "guest_session",
+      "column": "csrf_selector_hash",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: R1 consume re-keys the Order's own Guest Session; the 2000_093 guard trigger accepts a selector change only with a Consumed recovery fact naming that operation"
+    },
+    {
+      "type": "column",
+      "schema": "bop_identity",
+      "object": "guest_session",
+      "column": "operation_id",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: R1 consume re-keys the Order's own Guest Session; the 2000_093 guard trigger accepts a selector change only with a Consumed recovery fact naming that operation"
+    },
+    {
+      "type": "column",
+      "schema": "bop_identity",
+      "object": "guest_session",
+      "column": "operation_intent_hash",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: R1 consume re-keys the Order's own Guest Session; the 2000_093 guard trigger accepts a selector change only with a Consumed recovery fact naming that operation"
+    },
+    {
+      "type": "column",
+      "schema": "bop_identity",
+      "object": "guest_session",
+      "column": "last_seen_at",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: R1 consume re-keys the Order's own Guest Session; the 2000_093 guard trigger accepts a selector change only with a Consumed recovery fact naming that operation"
+    },
+    {
+      "type": "column",
+      "schema": "bop_identity",
+      "object": "guest_session",
+      "column": "idle_expires_at",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); Owner 2026-10-20 lifted the @bop/notification freeze for pilot needs only (\"Lift for pilot needs only (recommended)\"); DEC-PILOT-NOTIFICATIONS: R1 consume re-keys the Order's own Guest Session; the 2000_093 guard trigger accepts a selector change only with a Consumed recovery fact naming that operation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_webhook_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-20 DEC-STRIPE-PILOT-WIRING: Stripe webhook receiver (Payment Webhook Inbox)",
+      "justification": "accept one immutable receipt per verified Stripe event (SELECT already granted)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_webhook_raw_evidence",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-20 DEC-STRIPE-PILOT-WIRING: Stripe webhook receiver (Payment Webhook Inbox)",
+      "justification": "Restricted raw event bytes for 30 days, written with the receipt"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_webhook_raw_evidence",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-20 DEC-STRIPE-PILOT-WIRING: Stripe webhook receiver (Payment Webhook Inbox)",
+      "justification": "the mapper reads the accepted raw event once to record the payment outcome"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_webhook_processing_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-20 DEC-STRIPE-PILOT-WIRING: Stripe webhook receiver (Payment Webhook Inbox)",
+      "justification": "one append-only completion marker per processed receipt"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "provider_webhook_processing_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-20 DEC-STRIPE-PILOT-WIRING: Stripe webhook receiver (Payment Webhook Inbox)",
+      "justification": "a redelivered event finds its completion and is not processed twice"
+    },
+    {
       "type": "table",
       "schema": "bop_identity",
       "object": "oidc_authorization_transaction",

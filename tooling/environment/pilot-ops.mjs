@@ -8,6 +8,8 @@
 //   pilot-ops.mjs maintenance end <runtime>     planned update window (deploys; see the runbook)
 //   pilot-ops.mjs generate-offsite-key <runtime>
 //   pilot-ops.mjs decrypt-backup <runtime> <encrypted file> <output file>
+//   pilot-ops.mjs list-offsite <runtime>        copies in the configured off-site target
+//   pilot-ops.mjs restore-offsite <runtime> <copy>.enc <output file>   fetch from target + decrypt
 //
 // Runs in its own container next to the supervisor so that a stopped supervisor, API or HTTPS
 // entry is still noticed. Output never contains secrets, addresses, contact data or tokens.
@@ -50,7 +52,9 @@ import {
   observeDisks,
   observeProbes,
   observeSupervisor,
+  probeTargetsFor,
 } from "./pilot-ops-observe.mjs";
+import { loadPilotHosting } from "./pilot-hosting.mjs";
 import {
   PLANNED_MAINTENANCE_MAX_MINUTES,
   activePlannedMaintenance,
@@ -59,6 +63,7 @@ import {
   startPlannedMaintenance,
 } from "./pilot-ops-maintenance.mjs";
 import {
+  createOffsiteTarget,
   decideBackupRun,
   decryptFile,
   emptyBackupStatus,
@@ -183,20 +188,30 @@ export async function runMonitorCycle({ now, state, config, io }) {
 
 function createIo(runtimeDirectory, opsDirectory, config, log) {
   const absolute = path.resolve(runtimeDirectory);
+  // DEC-PILOT-MAINTENANCE-PAGE: the hosted customer origin, when configured (else the local entry).
+  const hosting = () => loadPilotHosting(absolute).catch(() => null);
   return {
     observeProbes: async (previous, now) => {
+      const { targets, systemTrust } = probeTargetsFor(await hosting());
       let ca = null;
       try {
-        ca = await fs.readFile(path.join(absolute, "customer-tls-cert.pem"));
+        if (!systemTrust) ca = await fs.readFile(path.join(absolute, "customer-tls-cert.pem"));
       } catch {
         /* Without the certificate the HTTPS probes fail and are reported. */
       }
-      return observeProbes(previous, now, { ca });
+      return observeProbes(previous, now, { ca, targets });
     },
     observeSupervisor: (now) => observeSupervisor(absolute, now),
     observeMaintenance: () => readPlannedMaintenance(absolute),
     observeBackup: (configured) => observeBackup(absolute, configured),
-    observeCertificate: (live) => observeCertificate(absolute, live),
+    observeCertificate: async (live) => {
+      const hosted = await hosting();
+      return observeCertificate(
+        absolute,
+        live,
+        hosted?.tls.mode === "front" ? hosted.tls.certificateFile : undefined,
+      );
+    },
     observeDisks: async (current) =>
       observeDisks({
         runtime: absolute,
@@ -485,6 +500,39 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         name,
       );
       console.log(`PILOT_OFFSITE_DECRYPTED ${name}`);
+    } else if (command === "list-offsite" && rest.length === 0) {
+      // DEC-PILOT-OFFSITE-S3: the copies in the configured target (directory or bucket), names only.
+      const config = await loadPilotOpsConfig(runtimeDirectory);
+      if (!config.backup?.offsite) throw Error("PILOT_OFFSITE_NOT_CONFIGURED");
+      const target = await createOffsiteTarget(config.backup.offsite, {
+        staging: config.backup.directory,
+        runtimeDirectory,
+      });
+      for (const name of await target.list()) console.log(name);
+    } else if (command === "restore-offsite" && rest.length === 2) {
+      // Fetches one copy from the target and decrypts it; nothing is written unless it verifies.
+      const config = await loadPilotOpsConfig(runtimeDirectory);
+      if (!config.backup?.offsite) throw Error("PILOT_OFFSITE_NOT_CONFIGURED");
+      const [copy, output] = rest;
+      const name = copy.replace(/\.enc$/u, "");
+      if (name === copy || path.basename(copy) !== copy) throw Error("PILOT_OFFSITE_FILE_INVALID");
+      const target = await createOffsiteTarget(config.backup.offsite, {
+        staging: config.backup.directory,
+        runtimeDirectory,
+      });
+      const fetched = `${output}.fetched-${process.pid}.enc`;
+      try {
+        await target.fetch(copy, fetched);
+        await decryptFile(
+          fetched,
+          output,
+          await readOffsiteKey(runtimeDirectory, config.backup.offsite.keyFile),
+          name,
+        );
+      } finally {
+        await fs.rm(fetched, { force: true });
+      }
+      console.log(`PILOT_OFFSITE_RESTORED ${name}`);
     } else throw Error("PILOT_OPS_ARGUMENT_INVALID");
   } catch (error) {
     console.error(

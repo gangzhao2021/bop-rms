@@ -18,6 +18,8 @@
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-sesv2": "3.1094.0",
+    "@aws-sdk/client-sns": "3.1094.0",
     "@bop/eventing": "workspace:*",
     "@bop/publishing": "workspace:*",
     "@bop/tenant": "workspace:*",

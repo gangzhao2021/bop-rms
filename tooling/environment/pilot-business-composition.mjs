@@ -21,7 +21,8 @@ import { createInternalOrderConfirmation } from "./pilot-order-confirmation.mjs"
 import { createInternalPickupProof } from "./pilot-pickup-proof.mjs";
 import { createInternalReceipt } from "./pilot-receipt.mjs";
 import { refreshInternalReceiptObservations } from "./pilot-receipt-observations.mjs";
-import { createInternalSimulatedProvider } from "./pilot-payment-provider.mjs";
+// DEC-STRIPE-PILOT-WIRING: the configured Provider (Stripe test mode or the TEST-ONLY simulator).
+import { createPilotPaymentProvider as createInternalSimulatedProvider } from "./pilot-stripe-provider.mjs";
 import { createInternalKitchenQueue } from "./pilot-kitchen-queue.mjs";
 import { createInternalDiningCheckoutExpiryWorkload } from "./pilot-dining-checkout-expiry.mjs";
 import { createInternalCartExpiryWorkload } from "./pilot-cart-expiry.mjs";
@@ -31,8 +32,12 @@ import { createInternalContactRetentionWorkload } from "./pilot-contact-retentio
 import { createInternalPickupCapacityScheduleWorkload } from "./pilot-pickup-capacity-schedule.mjs";
 import { createInternalWorkerServices } from "./pilot-worker-services.mjs";
 import { createInternalWorker } from "./pilot-worker.mjs";
+import { createInternalCustomerOrderMessageConsumers } from "./pilot-order-messaging.mjs";
+import { createCustomerOrderNotificationTrigger } from "../../apps/api/dist/customer-order-notification-trigger.js";
 
 const factories = {
+  createInternalCustomerOrderMessageConsumers,
+  createCustomerOrderNotificationTrigger,
   createInternalRefundConsumers,
   createInternalBatchCancellationDispatcher,
   createInternalCompensationService,
@@ -76,6 +81,7 @@ export function composeConfiguredBusinessWorker({
   const account = { providerAccountReference: config.providerAccountReference };
   const provider = (options = {}) =>
     f.createInternalSimulatedProvider(options, {
+      directory,
       path: join(directory, "simulated-provider.sqlite"),
       loadProfile: installation.loadProfile,
       expectedDatabaseName: installation.database,
@@ -139,6 +145,14 @@ export function composeConfiguredBusinessWorker({
       }),
     createInternalOrderCompletionConsumer: (r) =>
       f.createInternalOrderCompletionConsumer(r, { createCompletion: completion }),
+    // DEC-PILOT-NOTIFICATIONS: registered only when `notification.json` enables a channel.
+    createInternalCustomerOrderMessageConsumers: (r) =>
+      r.orderMessaging === undefined
+        ? []
+        : f.createInternalCustomerOrderMessageConsumers(r, {
+            orderMessaging: r.orderMessaging,
+            createTrigger: f.createCustomerOrderNotificationTrigger,
+          }),
   };
   return (resources, observers, options) => {
     if (

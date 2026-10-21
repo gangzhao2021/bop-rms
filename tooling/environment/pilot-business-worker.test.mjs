@@ -50,8 +50,12 @@ it("preserves the complete enabled consumer registration set and scoped workflow
       "createInternalPickupReadiness",
       "createInternalPickupProofConsumer",
       "createInternalOrderCompletionConsumer",
+      // DEC-PILOT-NOTIFICATIONS: customer order messages (no consumers until a channel can send).
+      "createInternalCustomerOrderMessageConsumers",
     ].sort(),
   );
+  const messageConsumers = services.mock.calls[0][2].createInternalCustomerOrderMessageConsumers;
+  expect(messageConsumers({})).toEqual([]);
   const dependencies = paidFactory.mock.calls[0][2];
   expect(dependencies.providerAccountReference).toBe(config.providerAccountReference);
   expect(dependencies.actorReference).toBe(config.actors.paidOutcome);

@@ -9,7 +9,7 @@ import {
  * WP-2423 Q10: messages to a customer about their own order, sent only to the contact the customer
  * gave for that order and for that stated purpose. Transactional; never marketing.
  */
-export const customerOrderMessagePurposes = ["OrderPlaced", "PickupReady"] as const;
+export const customerOrderMessagePurposes = ["OrderPlaced", "PickupReady", "ReceiptEmail"] as const;
 export type CustomerOrderMessagePurpose = (typeof customerOrderMessagePurposes)[number];
 export type CustomerOrderMessageChannel = "Sms" | "Email";
 
@@ -19,6 +19,8 @@ export interface CustomerOrderMessage {
   readonly destination: string;
   readonly subject: string | null;
   readonly text: string;
+  /** Escaped HTML alternative for email (receipt template), or null to derive it from the text. */
+  readonly html?: string | null;
   /** Provider idempotency key (the notification reference; carries no customer data). */
   readonly idempotencyKey: NotificationReference;
 }

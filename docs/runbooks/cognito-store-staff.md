@@ -72,6 +72,11 @@ Create one workforce user pool in **ca-central-1** (the code only accepts
 }
 ```
 
+For a **Pilot** (production) process the file names no secret files: omit `staffPin` and
+`clientSecretFile`; put the client secret in the hosting's managed secrets folder as
+`cognito-client-secret` (DEC-PILOT-SECRETS, next to the other managed values; the PIN pepper,
+store-device and lock-screen keys are already managed values there).
+
 `environment` must match the process (`InternalTest` for the v15 pilot, `Pilot` for a production
 process). Never add `testProvider` outside local testing. Without this file the pilot keeps its
 TEST-ONLY sign-in. With it, the `StaffLogin` capability gap closes (`pilot-supervisor` check).

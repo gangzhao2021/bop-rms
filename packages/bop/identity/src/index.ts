@@ -397,3 +397,6 @@ export * from "./application/ports/workforce-onboarding-browser-port.js";
 export * from "./infrastructure/cognito-workforce-onboarding-authentication.js";
 export * from "./infrastructure/persistence/workforce-onboarding-invitation-source.js";
 export * from "./infrastructure/persistence/workforce-onboarding-operation-store.js";
+// DEC-PILOT-NOTIFICATIONS R1 (IDR-0031): one-time order recovery link.
+export * from "./application/order-recovery-service.js";
+export * from "./infrastructure/persistence/order-recovery-store.js";

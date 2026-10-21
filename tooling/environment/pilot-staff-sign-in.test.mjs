@@ -173,3 +173,35 @@ it("admits the TEST-ONLY loopback stand-in only in InternalTest, and it never cl
     "PILOT_STAFF_SIGN_IN_UNAVAILABLE",
   );
 });
+
+it("in a Pilot store reads the client secret from the managed secrets and leaves PIN keys to them", async () => {
+  const pilotCognito = { ...cognito };
+  delete pilotCognito.clientSecretFile;
+  const pilotConfig = { ...config({ environment: "Pilot", cognito: pilotCognito }) };
+  delete pilotConfig.staffPin;
+  await file("staff-sign-in.json", JSON.stringify(pilotConfig));
+  const asked = [];
+  const readManaged = async (name) => {
+    asked.push(name);
+    return "managed-client-secret\n";
+  };
+  const signIn = await loadPilotStaffSignIn(directory, { env: pilot, readManaged });
+  expect(asked).toEqual(["cognito-client-secret"]);
+  expect(signIn.cognito.clientSecret).toBe("managed-client-secret");
+  expect(signIn.staffPinKeys).toBeNull();
+  expect(await readPilotStaffSignInReadiness(directory, { env: pilot, readManaged })).toBe(
+    "CognitoConfigured",
+  );
+  expect(
+    await readPilotStaffSignInReadiness(directory, {
+      env: pilot,
+      readManaged: async () => undefined,
+    }),
+  ).toBe("NotConfigured");
+  // A Pilot configuration may not name private secret files.
+  await file(
+    "staff-sign-in.json",
+    JSON.stringify({ ...pilotConfig, cognito: { ...pilotCognito, clientSecretFile: "x" } }),
+  );
+  await expect(loadPilotStaffSignIn(directory, { env: pilot, readManaged })).rejects.toThrow();
+});

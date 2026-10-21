@@ -57,11 +57,29 @@ async function key(read, name) {
   return Buffer.from(text, "hex");
 }
 
+/** The managed secret file holding the app client secret in a Pilot store (DEC-PILOT-SECRETS). */
+export const cognitoClientSecretName = "cognito-client-secret";
+async function readManagedClientSecret(directory, readManaged) {
+  const read =
+    readManaged ??
+    (async (name) => {
+      const { loadPilotHosting } = await import("./pilot-hosting.mjs");
+      const { createManagedSecretSource } = await import("./pilot-secrets.mjs");
+      const hosting = await loadPilotHosting(directory);
+      if (hosting.secretsDirectory === null) throw unavailable();
+      const result = await createManagedSecretSource(hosting.secretsDirectory).read([name]);
+      return result.values.get(name);
+    });
+  const value = await read(cognitoClientSecretName);
+  if (typeof value !== "string") throw unavailable();
+  return value.trim();
+}
+
 /**
  * The installation's staff sign-in. `{ mode: "internal-test" }` when not configured; otherwise
  * the Cognito configuration with its secrets read now (callers must not log the result).
  */
-export async function loadPilotStaffSignIn(directory, { env } = {}) {
+export async function loadPilotStaffSignIn(directory, { env, readManaged } = {}) {
   const reader = await createPrivateInstallationReader(directory);
   let text;
   try {
@@ -90,7 +108,9 @@ export async function loadPilotStaffSignIn(directory, { env } = {}) {
       "mode",
       "exactOrigin",
       "cognito",
-      "staffPin",
+      // A Pilot store reads the PIN keys and the client secret from the hosting's managed
+      // secrets (DEC-PILOT-SECRETS); only InternalTest names private files here.
+      ...(raw?.environment === "Pilot" ? [] : ["staffPin"]),
       ...(Object.hasOwn(raw, "testProvider") ? ["testProvider"] : []),
     ]);
     if (
@@ -105,7 +125,7 @@ export async function loadPilotStaffSignIn(directory, { env } = {}) {
       "issuer",
       "clientId",
       "managedLoginOrigin",
-      "clientSecretFile",
+      ...(config.environment === "Pilot" ? [] : ["clientSecretFile"]),
     ]);
     const issuer = parseExactHttpsUri(cognito.issuer);
     if (
@@ -120,22 +140,38 @@ export async function loadPilotStaffSignIn(directory, { env } = {}) {
     )
       throw unavailable();
     const managedLogin = exactOrigin(cognito.managedLoginOrigin);
-    const pin = readClosedRecord(config.staffPin, ["pepperFile", "deviceKeyFile", "choiceKeyFile"]);
-    const files = [cognito.clientSecretFile, pin.pepperFile, pin.deviceKeyFile, pin.choiceKeyFile];
-    if (
-      files.some((name) => typeof name !== "string") ||
-      new Set(files).size !== files.length ||
-      files.includes(staffSignInFileName)
-    )
-      throw unavailable();
-    files.forEach(parsePrivateInstallationFilename);
-    const clientSecret = (await reader.read(cognito.clientSecretFile)).trim();
+    let clientSecret,
+      staffPinKeys = null;
+    if (config.environment === "Pilot") {
+      clientSecret = await readManagedClientSecret(directory, readManaged);
+    } else {
+      const pin = readClosedRecord(config.staffPin, [
+        "pepperFile",
+        "deviceKeyFile",
+        "choiceKeyFile",
+      ]);
+      const files = [
+        cognito.clientSecretFile,
+        pin.pepperFile,
+        pin.deviceKeyFile,
+        pin.choiceKeyFile,
+      ];
+      if (
+        files.some((name) => typeof name !== "string") ||
+        new Set(files).size !== files.length ||
+        files.includes(staffSignInFileName)
+      )
+        throw unavailable();
+      files.forEach(parsePrivateInstallationFilename);
+      clientSecret = (await reader.read(cognito.clientSecretFile)).trim();
+      const pepper = await key(reader.read, pin.pepperFile),
+        device = await key(reader.read, pin.deviceKeyFile),
+        choice = await key(reader.read, pin.choiceKeyFile);
+      if (pepper.equals(device) || pepper.equals(choice) || device.equals(choice))
+        throw unavailable();
+      staffPinKeys = Object.freeze({ pepper, device, choice });
+    }
     if (!/^[\x21-\x7e]{1,256}$/u.test(clientSecret)) throw unavailable();
-    const pepper = await key(reader.read, pin.pepperFile),
-      device = await key(reader.read, pin.deviceKeyFile),
-      choice = await key(reader.read, pin.choiceKeyFile);
-    if (pepper.equals(device) || pepper.equals(choice) || device.equals(choice))
-      throw unavailable();
     let testProvider = null;
     if (Object.hasOwn(config, "testProvider")) {
       // TEST-ONLY: a loopback Cognito stand-in, never in a Pilot (production) process.
@@ -178,7 +214,8 @@ export async function loadPilotStaffSignIn(directory, { env } = {}) {
         clientSecret,
         managedLoginOrigin: managedLogin.origin,
       }),
-      staffPinKeys: Object.freeze({ pepper, device, choice }),
+      // null in a Pilot store: the PIN keys come from the managed secrets with every other key.
+      staffPinKeys,
       testProvider,
     });
   } catch {
@@ -194,7 +231,7 @@ export async function readPilotStaffSignInReadiness(directory, options = {}) {
   try {
     const signIn = await loadPilotStaffSignIn(directory, options);
     if (signIn.mode !== "cognito") return "NotConfigured";
-    for (const value of Object.values(signIn.staffPinKeys)) value.fill(0);
+    for (const value of Object.values(signIn.staffPinKeys ?? {})) value.fill(0);
     return signIn.testProvider === null ? "CognitoConfigured" : "NotConfigured";
   } catch {
     return "NotConfigured";

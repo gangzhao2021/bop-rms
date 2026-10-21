@@ -1,3 +1,4 @@
+import { isPilotPaymentProvider, isStripeProvider } from "./pilot-stripe-provider.mjs";
 import process from "node:process";
 import { createHash } from "node:crypto";
 import { createInternalClosedSettlementWindow } from "./pilot-settlement-window.mjs";
@@ -32,7 +33,7 @@ export function createInternalDailySettlementSource({
   const guard = async () => {
     if (
       process.env.NODE_ENV !== "development" ||
-      simulator.simulation !== true ||
+      !isPilotPaymentProvider(simulator) ||
       (await active()) !== true
     )
       return fail();
@@ -198,7 +199,9 @@ export function createInternalDailySettlementSource({
     });
     const evidenceObservedAt = parsePaymentInstant(r.now());
     if (
-      provider.source !== "InternalTestSimulator" ||
+      // DEC-STRIPE-PILOT-WIRING: Stripe's balance-transaction statement, or the simulator journal.
+      provider.source !==
+        (isStripeProvider(simulator) ? "StripeBalanceTransactions" : "InternalTestSimulator") ||
       provider.brandReference !== r.scope.brandReference ||
       provider.storeReference !== r.scope.storeReference ||
       provider.startsAt !== window.startsAt ||

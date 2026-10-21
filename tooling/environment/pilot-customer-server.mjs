@@ -6,12 +6,17 @@ import { CustomerPaymentResultHandler } from "../../apps/api/dist/customer-payme
 import { createMerchantBffRouter } from "../../apps/api/dist/merchant-bff.js";
 import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
 import { CustomerPaymentIntentHandler } from "../../apps/api/dist/customer-payment-intent.js";
+import { CustomerPaymentHandoffHandler } from "../../apps/api/dist/customer-payment-handoff.js";
+import { createCustomerSessionPaymentHandoff } from "../../apps/api/dist/customer-session-payment-handoff.js";
+import { createPostgresPaymentIntentCreationStore } from "../../packages/rms/payment/src/index.ts";
+import { isStripeProvider } from "./pilot-stripe-provider.mjs";
 import { createServer } from "node:https";
 import { request } from "node:http";
 import { readFile, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { createPilotStaticAssets, missingPilotAsset } from "./pilot-static-assets.mjs";
+import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
 const require = createRequire(new URL("../../apps/api/package.json", import.meta.url));
 const express = require("express");
 export async function startInternalCustomerServer({
@@ -31,7 +36,10 @@ export async function startInternalCustomerServer({
   keyFile,
   certificateFile,
   productImageDirectory,
+  publicOrigin = INTERNAL_CUSTOMER_ORIGIN,
 }) {
+  const origin = publicOrigin,
+    host = new URL(publicOrigin).host;
   if (process.env.NODE_ENV !== "development") throw new Error("INTERNAL_TEST_ONLY");
   const profile = await loadProfile();
   if (profile.environment !== "InternalTest") throw new Error("INTERNAL_TEST_ONLY");
@@ -46,7 +54,7 @@ export async function startInternalCustomerServer({
   const app = express();
   app.disable("x-powered-by");
   app.use((req, res, next) => {
-    if (req.headers.host !== "127.0.0.1:4443") return res.sendStatus(421);
+    if (req.headers.host !== host) return res.sendStatus(421);
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("X-Content-Type-Options", "nosniff");
     next();
@@ -56,7 +64,7 @@ export async function startInternalCustomerServer({
     res.setHeader("Cache-Control", "no-store");
     if (
       req.headers["sec-fetch-site"] !== "same-origin" ||
-      (req.headers.origin !== undefined && req.headers.origin !== "https://127.0.0.1:4443") ||
+      (req.headers.origin !== undefined && req.headers.origin !== origin) ||
       Object.keys(req.query).length !== 0
     )
       return res.status(400).json({ code: "INTERNAL_ENTRY_UNAVAILABLE" });
@@ -110,16 +118,69 @@ export async function startInternalCustomerServer({
       "/api/v1/checkout-sessions/:checkout_session_id/payment-reconciliation",
       express.json({ limit: "2kb", strict: true }),
       new CustomerPaymentResultHandler({
-        allowedOrigin: "https://127.0.0.1:4443",
+        allowedOrigin: origin,
         port: { read: (input) => terminal.reconcile(input) },
       }).handler("reconcile"),
     );
-    for (const [path, confirmation] of [
-      ["simulation-confirm", "SIMULATE_CAPTURE"],
-      ["simulation-fail", "SIMULATE_FAILURE"],
-    ]) {
+    // DEC-STRIPE-PILOT-WIRING: the payment form the customer app shows comes from this
+    // installation's runtime configuration (payment.json), not from the build.
+    app.get("/bff/customer/payment-configuration", (req, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      if (
+        req.headers["sec-fetch-site"] !== "same-origin" ||
+        (req.headers.origin !== undefined && req.headers.origin !== "https://127.0.0.1:4443") ||
+        Object.keys(req.query).length !== 0
+      )
+        return res.status(400).json({ code: "PAYMENT_CONFIGURATION_UNAVAILABLE" });
+      res.json(
+        isStripeProvider(simulator)
+          ? {
+              schemaVersion: 1,
+              mode: "stripe",
+              publishableKey: simulator.publishableKey,
+              returnUrl: simulator.returnUrl,
+              internalTestEntry: true,
+            }
+          : { schemaVersion: 1, mode: "simulation", internalTestEntry: true },
+      );
+    });
+    if (isStripeProvider(simulator)) {
+      // The guest's ephemeral Stripe client credential, re-authorized against the current
+      // Guest, Order, payment window and owner fences before and after the Stripe read.
+      const history = createPostgresPaymentIntentCreationStore(
+        resources.transactions,
+        resources.scope,
+        { now: resources.now, generateObservationReference: resources.credentials.reference },
+      );
+      app.post(
+        "/api/v1/checkout-sessions/:checkout_session_id/payment-handoff",
+        express.json({ limit: "2kb", strict: true }),
+        new CustomerPaymentHandoffHandler({
+          allowedOrigin: "https://127.0.0.1:4443",
+          port: {
+            async retrieve(input) {
+              const prepared = await intents.resolveRequest(input);
+              return createCustomerSessionPaymentHandoff({
+                access: checkout.accessOptions,
+                history,
+                transactions: resources.transactions,
+                currentAdmission: () => prepared.admission,
+                allowConfirmation: async () => true,
+                provider: simulator.handoff,
+              }).retrieve(input);
+            },
+          },
+        }).handler(),
+      );
+    }
+    for (const [path, confirmation] of simulator.simulation === true
+      ? [
+          ["simulation-confirm", "SIMULATE_CAPTURE"],
+          ["simulation-fail", "SIMULATE_FAILURE"],
+        ]
+      : []) {
       const handler = new CustomerPaymentIntentHandler({
-        allowedOrigin: "https://127.0.0.1:4443",
+        allowedOrigin: origin,
         port: {
           async create(input) {
             await terminal.confirm(input, confirmation);
@@ -159,7 +220,7 @@ export async function startInternalCustomerServer({
           port: 4300,
           path: req.url,
           method: req.method,
-          headers: { ...req.headers, host: "127.0.0.1:4443", connection: "close" },
+          headers: { ...req.headers, host, connection: "close" },
         },
         (response) => {
           res.writeHead(response.statusCode ?? 502, response.headers);

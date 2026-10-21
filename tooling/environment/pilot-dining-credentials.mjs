@@ -3,9 +3,13 @@ import { Buffer } from "node:buffer";
 import { createGuestDiningBindingCredentialProvider } from "../../packages/bop/identity/src/index.ts";
 import { readFile, open, lstat, realpath } from "node:fs/promises";
 import { randomBytes, randomInt, createHmac, timingSafeEqual, createHash } from "node:crypto";
-import { isPilotRuntime } from "./pilot-environment.mjs";
+import { dirname } from "node:path";
+import { isPilotRuntime, isPilotStore } from "./pilot-environment.mjs";
+import { loadPilotManagedSecrets } from "./pilot-secrets.mjs";
 export function createInternalDiningCredentialLoaders({ path }) {
   async function load() {
+    // DEC-PILOT-SECRETS: a Pilot Store reads the hosting's managed `dining-key` file instead.
+    if (isPilotStore()) return (await loadPilotManagedSecrets(dirname(path))).key("dining-key");
     const stat = await lstat(path);
     if (
       !isPilotRuntime() ||
@@ -21,7 +25,7 @@ export function createInternalDiningCredentialLoaders({ path }) {
     return Buffer.from(raw, "hex");
   }
   async function provisionInternalDiningCredentials() {
-    if (!isPilotRuntime()) throw new Error("INTERNAL_DINING_ONLY");
+    if (!isPilotRuntime() || isPilotStore()) throw new Error("INTERNAL_DINING_ONLY");
     let file;
     try {
       file = await open(path, "wx", 0o600);
