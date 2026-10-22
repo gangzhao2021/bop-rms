@@ -2194,7 +2194,10 @@ it("reads actual current full Option Draft with held fields, provenance and no b
       assert.deepEqual(await take(), before);
       reset("advance-before-initial");
       const bounded = await reader.readCurrent(input);
-      assert.equal(bounded.observedAt, plus(1));
+      // 8eab1c5e: the draft is observed once its source lock and rows are held, so a clock that
+      // advanced while the read waited for them is the observation time; validity stays bounded
+      // by the first reading (+30 s).
+      assert.equal(bounded.observedAt, plus(2));
       assert.equal(bounded.validUntil, plus(31));
       assert.deepEqual(await take(), before);
       for (const failure of [

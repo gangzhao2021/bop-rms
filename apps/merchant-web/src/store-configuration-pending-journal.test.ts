@@ -290,10 +290,14 @@ it("atomically reserves only one exact original across tabs with strict durabili
     second = await original(id(92));
   expect(await a.load()).toBeNull();
   const results = await Promise.allSettled([a.reserve(first), b.reserve(second)]);
-  expect(results.map((v) => v.status)).toEqual(["fulfilled", "rejected"]);
-  expect(await b.load()).toEqual(first);
-  await b.reserve(first);
-  expect(await a.load()).toEqual(first);
+  // Exactly one tab wins; which one depends on scheduling (regression 2026-10-22: B won under load).
+  expect(results.map((v) => v.status).sort()).toEqual(["fulfilled", "rejected"]);
+  const won = results[0]?.status === "fulfilled" ? first : second;
+  expect(await a.load()).toEqual(won);
+  expect(await b.load()).toEqual(won);
+  // The loser can join the winner's exact original, never replace it.
+  await (won === first ? b : a).reserve(won);
+  expect(await a.load()).toEqual(won);
   expect(db.durability).toContainEqual({ durability: "strict" });
 });
 it("reload preserves exact canonical command pins and hash without configuration or credentials", async () => {
