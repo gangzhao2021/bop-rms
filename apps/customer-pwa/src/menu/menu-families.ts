@@ -1,4 +1,4 @@
-import { t } from "../i18n/i18n.js";
+import { listSeparator, t } from "../i18n/i18n.js";
 import { formatDecimalMoney } from "../journey/format.js";
 import type { MenuAllergenItem, MenuOptionRule, MenuSellable, MenuView } from "./types.js";
 
@@ -153,10 +153,10 @@ export function compactAllergenLine(allergens: readonly MenuAllergenItem[]): str
   const parts = [
     contains.length === 0
       ? null
-      : t("Contains {value1}", { value1: contains.map((item) => item.name).join(", ") }),
+      : t("Contains {value1}", { value1: contains.map((item) => item.name).join(listSeparator()) }),
     may.length === 0
       ? null
-      : t("May contain {value1}", { value1: may.map((item) => item.name).join(", ") }),
+      : t("May contain {value1}", { value1: may.map((item) => item.name).join(listSeparator()) }),
   ].filter((part): part is string => part !== null);
   return parts.length === 0 ? null : parts.join(" · ");
 }

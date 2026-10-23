@@ -1,4 +1,4 @@
-import { t } from "../i18n/i18n.js";
+import { clauseSeparator, listSeparator, sentenceEnd, t } from "../i18n/i18n.js";
 import {
   activeMenuOptionRules,
   defaultMenuOptionSelections,
@@ -178,7 +178,7 @@ function choiceText(rule: MenuOptionRule): string {
 /** "+ $0.75", "Included", or a note that the quote will price it. */
 function optionPriceText(price: MenuOptionRule["options"][number]["price"]): string {
   if (price === null) return t("Priced at checkout");
-  if (/^0+(\.0+)?$/u.test(price.amount)) return "Included";
+  if (/^0+(\.0+)?$/u.test(price.amount)) return t("Included");
   const amount = formatDecimalMoney(price.amount, price.currency);
   return amount === null ? t("Priced at checkout") : `+ ${amount}`;
 }
@@ -894,7 +894,7 @@ function srcSet(photo: MenuPhoto, contentType: string, widths: readonly number[]
   return photo.renditions
     .filter((item) => item.contentType === contentType && widths.includes(item.width))
     .map((item) => `${item.url} ${item.width}w`)
-    .join(", ");
+    .join(listSeparator());
 }
 
 /**
@@ -1489,13 +1489,17 @@ function ChoiceAllergens({
         : [
             contains.length === 0
               ? null
-              : t("contains {value1}", { value1: contains.map((item) => item.name).join(", ") }),
+              : t("contains {value1}", {
+                  value1: contains.map((item) => item.name).join(listSeparator()),
+                }),
             may.length === 0
               ? null
-              : t("may contain {value1}", { value1: may.map((item) => item.name).join(", ") }),
+              : t("may contain {value1}", {
+                  value1: may.map((item) => item.name).join(listSeparator()),
+                }),
           ]
             .filter(Boolean)
-            .join("; ") + "."}
+            .join(clauseSeparator()) + sentenceEnd()}
     </p>
   );
 }
@@ -1517,13 +1521,13 @@ function AllergenSummary({ sellable }: { readonly sellable: MenuSellable }) {
           {contains.length === 0 ? null : (
             <div>
               <dt>{t("Contains")}</dt>
-              <dd>{contains.map((item) => item.name).join(", ")}</dd>
+              <dd>{contains.map((item) => item.name).join(listSeparator())}</dd>
             </div>
           )}
           {may.length === 0 ? null : (
             <div>
               <dt>{t("Cross-contact possible")}</dt>
-              <dd>{may.map((item) => item.name).join(", ")}</dd>
+              <dd>{may.map((item) => item.name).join(listSeparator())}</dd>
             </div>
           )}
         </dl>

@@ -1,3 +1,4 @@
+import { listSeparator } from "../i18n/i18n.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link, useParams } from "react-router";
 import {
@@ -991,7 +992,7 @@ function StatusContent({
                             {itemDetails
                               .get(item.orderItemReference)
                               ?.options?.map(describeChosenOption)
-                              .join(", ")}
+                              .join(listSeparator())}
                           </span>
                         ) : null}
                         {itemDetails.get(item.orderItemReference)?.customerNote ? (

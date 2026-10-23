@@ -1,3 +1,4 @@
+import { listSeparator } from "../i18n/i18n.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router";
 import { createBrowserCustomerCartClient } from "./cart-client.js";
@@ -58,7 +59,7 @@ export function describeConfiguration(item: CartItemView): string | null {
     .map((option) =>
       option.quantity === 1 ? option.displayName : `${option.displayName} × ${option.quantity}`,
     )
-    .join(", ");
+    .join(listSeparator());
 }
 
 function CartItem({

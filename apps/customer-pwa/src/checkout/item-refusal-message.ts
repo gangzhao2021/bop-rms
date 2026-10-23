@@ -1,4 +1,4 @@
-import { t } from "../i18n/i18n.js";
+import { listSeparator, t } from "../i18n/i18n.js";
 import type { CartItemView } from "../cart/types.js";
 import type { CheckoutRefusedLine } from "./session-client.js";
 
@@ -7,7 +7,9 @@ function itemName(item: CartItemView): string {
   const options = item.configuration.map((option) =>
     option.quantity === 1 ? option.displayName : `${option.displayName} × ${option.quantity}`,
   );
-  return options.length === 0 ? item.displayName : `${item.displayName} (${options.join(", ")})`;
+  return options.length === 0
+    ? item.displayName
+    : `${item.displayName} (${options.join(listSeparator())})`;
 }
 
 /** The cart's lines of the same item with the same options (the line itself included). */

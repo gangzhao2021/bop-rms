@@ -1,4 +1,4 @@
-import { t } from "../i18n/i18n.js";
+import { listSeparator, t } from "../i18n/i18n.js";
 import { useEffect, useState } from "react";
 import { formatLocalityLine, formatStoreLocalTime } from "../journey/format.js";
 import { formatStorePhone } from "../journey/StoreContact.js";
@@ -64,7 +64,7 @@ export function todayHoursText(hours: NonNullable<StoreProfile["hours"]>): strin
           interval.endsNextDay ? t(" (next day)") : ""
         }`,
     )
-    .join(", ");
+    .join(listSeparator());
 }
 
 function StoreDetails({ profile }: { readonly profile: StoreProfile }) {

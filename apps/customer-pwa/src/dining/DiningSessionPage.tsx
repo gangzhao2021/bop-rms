@@ -1,4 +1,4 @@
-import { t } from "../i18n/i18n.js";
+import { dateLocale, t } from "../i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
@@ -21,7 +21,7 @@ import type { DiningInvitationClient } from "./dining-invitation-client.js";
  * WP-2423 D5: when a round was sent. Today's rounds show the time; a round from another day (a
  * table kept open past midnight, or reopened on a later day) shows its date too.
  */
-export function roundTime(instant: string, now = Date.now(), locale = "en-CA"): string {
+export function roundTime(instant: string, now = Date.now(), locale = dateLocale()): string {
   const ms = Date.parse(instant);
   if (!Number.isFinite(ms)) return "";
   const day = (value: number) => new Date(value).toDateString();

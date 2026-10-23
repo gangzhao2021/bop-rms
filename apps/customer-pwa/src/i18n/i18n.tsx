@@ -37,6 +37,22 @@ export function currentLanguage(): CustomerLanguage {
   return current;
 }
 
+/** How a list of names is joined: "Milk, Soy" / "牛奶、大豆". */
+export function listSeparator(): string {
+  return current === "zh-Hans" ? "、" : ", ";
+}
+/** Between two clauses and at the end of a sentence built from parts. */
+export function clauseSeparator(): string {
+  return current === "zh-Hans" ? "；" : "; ";
+}
+export function sentenceEnd(): string {
+  return current === "zh-Hans" ? "。" : ".";
+}
+/** The locale times and dates are written in for the chosen language. */
+export function dateLocale(): string {
+  return current === "zh-Hans" ? "zh-CN" : "en-CA";
+}
+
 /** The locale to ask the Store's menu in: Chinese when chosen, else the entry's own locale. */
 export function menuLocale(language: CustomerLanguage, entryLocale: string): string {
   return language === "zh-Hans" ? CHINESE_LOCALE : entryLocale;

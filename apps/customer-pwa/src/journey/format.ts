@@ -1,4 +1,4 @@
-import { t } from "../i18n/i18n.js";
+import { dateLocale, t } from "../i18n/i18n.js";
 /** Customer-facing presentation of exact server amounts and instants. No binary floating point. */
 
 const wholeUnits = new Intl.NumberFormat("en-CA", { maximumFractionDigits: 0 });
@@ -49,7 +49,7 @@ export function formatLocalityLine(address: {
  * locales end the time with an abbreviation period, so a sentence that ends with a formatted time
  * must use {@link endSentence} instead of appending "." itself ("9:46 p.m.." otherwise).
  */
-export function formatClockTime(instant: string, locale = "en-CA"): string {
+export function formatClockTime(instant: string, locale = dateLocale()): string {
   const ms = Date.parse(instant);
   if (!Number.isFinite(ms)) return "";
   return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(
@@ -62,7 +62,7 @@ export function formatClockTime(instant: string, locale = "en-CA"): string {
  * {@link formatClockTime}. No time zone conversion: it is the time on the Store's clock. End a
  * sentence with {@link endSentence}.
  */
-export function formatStoreLocalTime(value: string, locale = "en-CA"): string {
+export function formatStoreLocalTime(value: string, locale = dateLocale()): string {
   const match = /^([01][0-9]|2[0-3]):([0-5][0-9])/u.exec(value);
   if (!match) return "";
   return new Intl.DateTimeFormat(locale, {
@@ -73,7 +73,7 @@ export function formatStoreLocalTime(value: string, locale = "en-CA"): string {
 }
 
 /** "2026-09-02, 12:51 p.m." for records such as receipts. End a sentence with {@link endSentence}. */
-export function formatDateTime(instant: string, locale = "en-CA"): string {
+export function formatDateTime(instant: string, locale = dateLocale()): string {
   const ms = Date.parse(instant);
   if (!Number.isFinite(ms)) return "";
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(

@@ -1,4 +1,4 @@
-import { t } from "../i18n/i18n.js";
+import { listSeparator, t } from "../i18n/i18n.js";
 import { DiningAdmissionPanel, type DiningAdmissionUi } from "../dining/DiningAdmissionPanel.js";
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -361,7 +361,7 @@ function EntryState({
                     entryClock(interval.end) +
                     (interval.endsNextDay ? t(" (next day)") : ""),
                 )
-                .join(", ")}
+                .join(listSeparator())}
         </p>
         <RetryAction onRetry={onRetry} />
       </div>

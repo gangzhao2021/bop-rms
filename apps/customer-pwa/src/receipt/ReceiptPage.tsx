@@ -30,14 +30,18 @@ function money(value: ReceiptMoneyView): string {
 
 /** Customer words for the payment state, never the internal code. */
 const paymentStatusText: Record<ReceiptRecordView["snapshot"]["paymentStatus"], string> = {
-  Paid: "Paid",
+  get Paid() {
+    return t("Paid");
+  },
   get RefundPending() {
     return t("Refund in progress");
   },
   get PartiallyRefunded() {
     return t("Partly refunded");
   },
-  Refunded: "Refunded",
+  get Refunded() {
+    return t("Refunded");
+  },
 };
 /**
  * The receipt prints the tax name the Store's tax configuration gives each tax ("HST", "GST",
@@ -63,14 +67,18 @@ export const receiptReasonText: Readonly<Record<string, string>> = {
 
 /** WP-2423 (v15 3cd0f8dd M4): what kind of refund each stated refund is, in the guest's words. */
 export const receiptRefundKindText: Record<ReceiptRefundView["kind"], string> = {
-  Refund: "Refund",
+  get Refund() {
+    return t("Refund");
+  },
   get ItemCancellation() {
     return t("Cancelled items");
   },
   get RoundRefund() {
     return t("Refunded in full");
   },
-  Other: "Refund",
+  get Other() {
+    return t("Refund");
+  },
 };
 
 /**
@@ -165,12 +173,18 @@ export function receiptVersionReason(record: ReceiptRecordView): string | null {
 }
 
 const kindText: Record<ReceiptRecordView["kind"], string> = {
-  Original: "Receipt",
+  get Original() {
+    return t("Receipt");
+  },
   get Correction() {
     return t("Corrected receipt");
   },
-  Void: "Voided",
-  Refund: "Refund",
+  get Void() {
+    return t("Voided");
+  },
+  get Refund() {
+    return t("Refund");
+  },
   get Reissue() {
     return t("Reissued receipt");
   },

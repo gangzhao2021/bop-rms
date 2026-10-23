@@ -1062,4 +1062,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Please wait {seconds} seconds before trying again.": "请等 {seconds} 秒后再试。",
   "Checking your session. Please wait.": "正在检查你的会话，请稍候。",
   "Please wait before trying again.": "请稍后再试。",
+  Included: "免费",
+  Refund: "退款",
+  Voided: "已作废",
 });
