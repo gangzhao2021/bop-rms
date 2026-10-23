@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatClockTime } from "../journey/format.js";
 import {
@@ -179,7 +180,7 @@ export function DiningInvitationView({
   readonly onMake: () => void;
 }) {
   if (state.status === "hidden") return null;
-  const heading = <h2 id="dining-invitation-heading">Invite someone at your table</h2>;
+  const heading = <h2 id="dining-invitation-heading">{t("Invite someone at your table")}</h2>;
   const makeButton = (label: string, secondary = false) => (
     <button
       className={
@@ -204,86 +205,97 @@ export function DiningInvitationView({
       {state.status === "ready" || state.status === "issuing" ? (
         <>
           <p>
-            Someone joining you? Make a code on this phone. They scan the QR code on the table, then
-            enter the code to order with you.
+            {t(
+              "Someone joining you? Make a code on this phone. They scan the QR code on the table, then enter the code to order with you.",
+            )}
           </p>
-          {makeButton(state.status === "issuing" ? "Making a code…" : "Make a code")}
+          {makeButton(state.status === "issuing" ? t("Making a code…") : t("Make a code"))}
         </>
       ) : null}
       {state.status === "issued" ? (
         <>
           <p className="dining-invitation__code" role="status" aria-live="polite">
-            <span className="dining-invitation__label">Code</span>{" "}
+            <span className="dining-invitation__label">{t("Code")}</span>{" "}
             <span className="dining-invitation__digits" aria-hidden="true">
               {grouped(state.code)}
             </span>
             <span className="sr-only">{state.code.split("").join(" ")}</span>
           </p>
           <p>
-            Show this code to the person joining you. It works once and for 15 minutes (until{" "}
+            {t("Show this code to the person joining you. It works once and for 15 minutes (until")}{" "}
             {formatClockTime(state.expiresAt)}).
           </p>
           <p className="dining-invitation__note">
-            For someone else after them, make a new code. A new code replaces this one.
+            {t("For someone else after them, make a new code. A new code replaces this one.")}
           </p>
-          {makeButton("Make a new code", true)}
+          {makeButton(t("Make a new code"), true)}
         </>
       ) : null}
       {state.status === "expired" ? (
         <>
-          <p role="status">This code has expired. Make a new one if someone still needs to join.</p>
-          {makeButton("Make a new code")}
+          <p role="status">
+            {t("This code has expired. Make a new one if someone still needs to join.")}
+          </p>
+          {makeButton(t("Make a new code"))}
         </>
       ) : null}
       {state.status === "used" ? (
         <>
-          <p role="status">Someone joined with this code. For someone else, make another code.</p>
-          {makeButton("Make another code")}
+          <p role="status">
+            {t("Someone joined with this code. For someone else, make another code.")}
+          </p>
+          {makeButton(t("Make another code"))}
         </>
       ) : null}
       {state.status === "replaced" ? (
         <>
-          <p role="status">This code was replaced. Make a new one.</p>
-          {makeButton("Make a new code")}
+          <p role="status">{t("This code was replaced. Make a new one.")}</p>
+          {makeButton(t("Make a new code"))}
         </>
       ) : null}
       {state.status === "ended" ? (
         <p role="status">
-          This code no longer works. A staff member can give a code to someone joining.
+          {t("This code no longer works. A staff member can give a code to someone joining.")}
         </p>
       ) : null}
       {state.status === "lost" ? (
         <>
-          <p role="status">We couldn’t show that code. Make a new one.</p>
-          {makeButton("Make a new code")}
+          <p role="status">{t("We couldn’t show that code. Make a new one.")}</p>
+          {makeButton(t("Make a new code"))}
         </>
       ) : null}
       {state.status === "not-host" ? (
         <p role="status">
-          Only the person who joined this table first can make codes. A staff member can give you
-          one.
+          {t(
+            "Only the person who joined this table first can make codes. A staff member can give you one.",
+          )}
         </p>
       ) : null}
       {state.status === "table-changed" ? (
         <p role="status">
-          Your table was changed. Ask a staff member for a code for your new table.
+          {t("Your table was changed. Ask a staff member for a code for your new table.")}
         </p>
       ) : null}
       {state.status === "too-many" ? (
         <p role="status">
           {state.retryAt
-            ? `You’ve made a lot of codes in the last few minutes. You can make another at ${formatClockTime(state.retryAt)}, or ask a staff member for one.`
-            : "You’ve made a lot of codes in the last few minutes. Try again in a few minutes, or ask a staff member for one."}
+            ? t(
+                "You’ve made a lot of codes in the last few minutes. You can make another at {value1}, or ask a staff member for one.",
+                { value1: formatClockTime(state.retryAt) },
+              )
+            : t(
+                "You’ve made a lot of codes in the last few minutes. Try again in a few minutes, or ask a staff member for one.",
+              )}
         </p>
       ) : null}
       {state.status === "failed" ? (
         <>
           <p role="alert">
             {state.offline
-              ? "You’re offline, so no code was made. Reconnect, then try again."
-              : "We couldn’t make a code. Try again, or ask a staff member for one."}
+              ? t("You’re offline, so no code was made. Reconnect, then try again.")
+              : t("We couldn’t make a code. Try again, or ask a staff member for one.")}
           </p>
-          {makeButton("Try again")}
+          {makeButton(t("Try again"))}
         </>
       ) : null}
     </section>

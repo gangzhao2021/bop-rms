@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { Link } from "react-router";
 import { CustomerPage, PageHeading } from "./journey/CustomerPage.js";
 
@@ -5,14 +6,16 @@ import { CustomerPage, PageHeading } from "./journey/CustomerPage.js";
 export function CustomerShell() {
   return (
     <CustomerPage step="other" className="not-found-page">
-      <PageHeading title="Page not found">
-        <p>This link doesn’t lead anywhere. Scan the location QR code again or open the menu.</p>
+      <PageHeading title={t("Page not found")}>
+        <p>
+          {t("This link doesn’t lead anywhere. Scan the location QR code again or open the menu.")}
+        </p>
       </PageHeading>
       <div className="shell-actions">
         <Link className="shell-action" to="/menu">
-          Open the menu
+          {t("Open the menu")}
         </Link>
-        <Link to="/">Scan again</Link>
+        <Link to="/">{t("Scan again")}</Link>
       </div>
     </CustomerPage>
   );

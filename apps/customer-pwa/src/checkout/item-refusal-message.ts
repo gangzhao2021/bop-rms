@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import type { CartItemView } from "../cart/types.js";
 import type { CheckoutRefusedLine } from "./session-client.js";
 
@@ -30,10 +31,13 @@ function linesOf(item: CartItemView, items: readonly CartItemView[]): CartItemVi
  */
 function lowerTo(name: string, lines: readonly CartItemView[], left: number): string {
   const ordered = lines.reduce((sum, line) => sum + line.quantity, 0);
-  if (left === 0) return lines.length === 1 ? `Remove ${name}` : `Remove every ${name}`;
-  if (lines.length === 1) return `Change ${name} to ${left}`;
+  if (left === 0)
+    return lines.length === 1 ? t("Remove {name}", { name }) : t("Remove every {name}", { name });
+  if (lines.length === 1) return t("Change {name} to {left}", { name, left });
   const extra = ordered - left;
-  return extra === 1 ? `Remove one ${name}` : `Remove ${extra} of your ${ordered} ${name}`;
+  return extra === 1
+    ? t("Remove one {name}", { name })
+    : t("Remove {extra} of your {ordered} {name}", { extra, ordered, name });
 }
 
 /**
@@ -46,26 +50,45 @@ export function checkoutItemRefusalMessage(
   line: CheckoutRefusedLine | null,
   items: readonly CartItemView[],
 ): string {
-  const notCharged = "You haven’t been charged.";
+  const notCharged = t("You haven’t been charged.");
   const item =
     line === null
       ? undefined
       : items.find((entry) => entry.cartItemReference === line.cartItemReference);
   if (item === undefined)
-    return `Some items in your cart can’t be made right now. ${notCharged} Edit your cart, then try again.`;
+    return t(
+      "Some items in your cart can’t be made right now. {notCharged} Edit your cart, then try again.",
+      { notCharged },
+    );
   const name = itemName(item);
   const lines = linesOf(item, items);
   if (status === "item_unavailable" || line === null || line.available === null)
-    return `${name} isn’t available right now. ${notCharged} ${lowerTo(name, lines, 0)} from your cart, then try again.`;
+    return t(
+      "{name} isn’t available right now. {notCharged} {value1} from your cart, then try again.",
+      { name, notCharged, value1: lowerTo(name, lines, 0) },
+    );
   const left = line.available;
   const ordered = lines.reduce((sum, entry) => sum + entry.quantity, 0);
   if (line.sharedStock)
     return left === 0
-      ? `We don’t have enough left to make ${name} along with the rest of your order — some items use the same ingredients. ${notCharged} ${lowerTo(name, lines, 0)} or change other items, then try again.`
-      : `We can make only ${left} ${name} along with the rest of your order — some items use the same ingredients. ${notCharged} ${lowerTo(name, lines, left)} or change other items, then try again.`;
+      ? t(
+          "We don’t have enough left to make {name} along with the rest of your order — some items use the same ingredients. {notCharged} {value1} or change other items, then try again.",
+          { name, notCharged, value1: lowerTo(name, lines, 0) },
+        )
+      : t(
+          "We can make only {left} {name} along with the rest of your order — some items use the same ingredients. {notCharged} {value1} or change other items, then try again.",
+          { left, name, notCharged, value1: lowerTo(name, lines, left) },
+        );
   return left === 0
-    ? `${name} just sold out. ${notCharged} ${lowerTo(name, lines, 0)} from your cart, then try again.`
-    : `Only ${left} ${name} can be made right now — you have ${ordered} in your cart. ${notCharged} ${lowerTo(name, lines, left)}, then try again.`;
+    ? t("{name} just sold out. {notCharged} {value1} from your cart, then try again.", {
+        name,
+        notCharged,
+        value1: lowerTo(name, lines, 0),
+      })
+    : t(
+        "Only {left} {name} can be made right now — you have {ordered} in your cart. {notCharged} {value1}, then try again.",
+        { left, name, ordered, notCharged, value1: lowerTo(name, lines, left) },
+      );
 }
 
 /**
@@ -81,8 +104,18 @@ export function cartItemShortMessage(
   const item = items.find((entry) => entry.cartItemReference === cartItemReference);
   if (item === undefined) return null;
   const name = itemName(item);
-  if (available === 0) return `${name} just sold out. ${lowerTo(name, [item], 0)} before checkout.`;
+  if (available === 0)
+    return t("{name} just sold out. {value1} before checkout.", {
+      name,
+      value1: lowerTo(name, [item], 0),
+    });
   return available >= item.quantity
-    ? `Only ${available} ${name} can be made right now, so we couldn’t add more. Your cart is unchanged.`
-    : `Only ${available} ${name} can be made right now — this line has ${item.quantity}. ${lowerTo(name, [item], available)} before checkout.`;
+    ? t(
+        "Only {available} {name} can be made right now, so we couldn’t add more. Your cart is unchanged.",
+        { available, name },
+      )
+    : t(
+        "Only {available} {name} can be made right now — this line has {quantity}. {value1} before checkout.",
+        { available, name, quantity: item.quantity, value1: lowerTo(name, [item], available) },
+      );
 }

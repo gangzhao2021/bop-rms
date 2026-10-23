@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 /** Customer-facing presentation of exact server amounts and instants. No binary floating point. */
 
 const wholeUnits = new Intl.NumberFormat("en-CA", { maximumFractionDigits: 0 });
@@ -6,7 +7,7 @@ const minorPattern = /^-?(?:0|[1-9][0-9]{0,20})$/u;
 /** "$11.30" for CAD minor units; other currencies keep their ISO code; malformed input is never guessed. */
 export function formatMoney(amountMinor: string | bigint, currency: string): string {
   const text = typeof amountMinor === "bigint" ? amountMinor.toString() : amountMinor;
-  if (!/^[A-Z]{3}$/u.test(currency) || !minorPattern.test(text)) return "Amount unavailable";
+  if (!/^[A-Z]{3}$/u.test(currency) || !minorPattern.test(text)) return t("Amount unavailable");
   const minor = BigInt(text);
   const magnitude = minor < 0n ? -minor : minor;
   const fraction = (magnitude % 100n).toString().padStart(2, "0");
@@ -95,9 +96,9 @@ export function formatMinutesUntil(instant: string, nowMs: number): string | nul
   if (!Number.isFinite(remaining) || remaining <= 0) return null;
   const minutes = Math.ceil(remaining / 60_000);
   if (minutes <= 1) return "less than a minute";
-  if (minutes < 60) return `about ${minutes} minutes`;
+  if (minutes < 60) return t("about {minutes} minutes", { minutes });
   const hours = Math.floor(minutes / 60);
-  return hours === 1 ? "about 1 hour" : `about ${hours} hours`;
+  return hours === 1 ? "about 1 hour" : t("about {hours} hours", { hours });
 }
 
 /** A whole-number percentage of an amount in minor units, rounded half up, as minor-unit text. */

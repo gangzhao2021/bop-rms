@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import { useEffect, useRef, useState, type FormEvent, type RefObject } from "react";
 import {
   DiningAdmissionJourneyError,
@@ -19,10 +20,19 @@ export type DiningAdmissionUiState =
 /** The server definitively refused the code: nothing to recover, a new code is needed. */
 export type DiningAdmissionRefusedState = "CodeUsed" | "CodeNotAccepted" | "TooManyAttempts";
 const refusalText: Readonly<Record<DiningAdmissionRefusedState, string>> = {
-  CodeUsed: "This code was already used. Ask staff, or the person who invited you, for a new one.",
-  CodeNotAccepted:
-    "That code didn’t work. Check it and try again, or ask staff or the person who invited you for a new one.",
-  TooManyAttempts: "Too many tries. Wait a few minutes before trying again, or ask staff for help.",
+  get CodeUsed() {
+    return t(
+      "This code was already used. Ask staff, or the person who invited you, for a new one.",
+    );
+  },
+  get CodeNotAccepted() {
+    return t(
+      "That code didn’t work. Check it and try again, or ask staff or the person who invited you for a new one.",
+    );
+  },
+  get TooManyAttempts() {
+    return t("Too many tries. Wait a few minutes before trying again, or ask staff for help.");
+  },
 };
 /** Maps a failed attempt: a definitive refusal returns to entry, anything else stays recoverable. */
 export function admissionStateForFailure(error: unknown): "Unknown" | DiningAdmissionRefusedState {
@@ -185,20 +195,21 @@ export function DiningAdmissionView({
       aria-busy={state === "Joining"}
     >
       <h2 id="dining-admission-heading" ref={statusRef} tabIndex={-1}>
-        {state === "Bound" ? "You’ve joined this table" : "Join this table"}
+        {state === "Bound" ? t("You’ve joined this table") : t("Join this table")}
       </h2>
       {!online && (
         <p role="status">
-          You’re offline. Joining and recovery are paused. Reconnect, then try again.
+          {t("You’re offline. Joining and recovery are paused. Reconnect, then try again.")}
         </p>
       )}
       {entry && (
         <form onSubmit={onSubmit} noValidate>
           <p id="dining-admission-help">
-            Ask staff, or the person who joined your table first, for the table’s code. Scanning the
-            table QR code alone does not join the table.
+            {t(
+              "Ask staff, or the person who joined your table first, for the table’s code. Scanning the table QR code alone does not join the table.",
+            )}
           </p>
-          <label htmlFor="dining-join-credential">Join code or invitation</label>
+          <label htmlFor="dining-join-credential">{t("Join code or invitation")}</label>
           <input
             ref={inputRef}
             id="dining-join-credential"
@@ -217,7 +228,7 @@ export function DiningAdmissionView({
           />
           {state === "Invalid" && (
             <p id="dining-admission-error" role="alert">
-              Enter the six-digit code you were given.
+              {t("Enter the six-digit code you were given.")}
             </p>
           )}
           {refused(state) && (
@@ -226,35 +237,39 @@ export function DiningAdmissionView({
             </p>
           )}
           <button className="entry-action" type="submit" disabled={!online}>
-            Join table
+            {t("Join table")}
           </button>
         </form>
       )}
       {state === "Joining" && (
         <p role="status" aria-live="polite">
-          Checking your table connection…
+          {t("Checking your table connection…")}
         </p>
       )}
       {state === "Unknown" && (
         <div role="alert">
           <p>
-            We couldn’t confirm the result. Recover this attempt before starting another. If it
-            still cannot be confirmed, ask staff for help.
+            {t(
+              "We couldn’t confirm the result. Recover this attempt before starting another. If it still cannot be confirmed, ask staff for help.",
+            )}
           </p>
           <button className="entry-action" type="button" disabled={!online} onClick={onResume}>
-            Recover this attempt
+            {t("Recover this attempt")}
           </button>
         </div>
       )}
       {state === "Bound" && (
         <p role="status">
-          Your table connection is confirmed. You can continue to the menu. No order has been
-          placed.
+          {t(
+            "Your table connection is confirmed. You can continue to the menu. No order has been placed.",
+          )}
         </p>
       )}
       {state === "Unavailable" && (
         <p role="status">
-          Table joining is unavailable here. Ask staff for help. You can still browse the menu.
+          {t(
+            "Table joining is unavailable here. Ask staff for help. You can still browse the menu.",
+          )}
         </p>
       )}
     </section>

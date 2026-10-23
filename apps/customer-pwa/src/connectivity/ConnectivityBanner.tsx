@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   createConnectivityController,
@@ -35,22 +36,25 @@ export function ConnectivityBanner({
     >
       {state.status === "offline" ? (
         <>
-          <strong>You’re offline.</strong>{" "}
+          <strong>{t("You’re offline.")}</strong>{" "}
           <span>
-            Ordering and payment are paused until you reconnect. Nothing is sent in the background.
+            {t(
+              "Ordering and payment are paused until you reconnect. Nothing is sent in the background.",
+            )}
           </span>
         </>
       ) : (
         <>
           <div>
-            <strong>Connection restored.</strong>{" "}
+            <strong>{t("Connection restored.")}</strong>{" "}
             <span>
-              Check this page, then try again if you need to. Nothing was sent while you were
-              offline.
+              {t(
+                "Check this page, then try again if you need to. Nothing was sent while you were offline.",
+              )}
             </span>
           </div>
           <button type="button" onClick={() => controller.dismissRestored()}>
-            Dismiss
+            {t("Dismiss")}
           </button>
         </>
       )}

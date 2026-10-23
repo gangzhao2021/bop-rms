@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import { loadStripe } from "@stripe/stripe-js/pure";
 import type { Stripe, StripeElements } from "@stripe/stripe-js";
@@ -140,20 +141,22 @@ export function StripeCardForm({
     }
   };
   return (
-    <section aria-label="Secure card payment">
+    <section aria-label={t("Secure card payment")}>
       <div ref={host} />
-      {!ready && !error ? <p role="status">Loading secure card form…</p> : null}
+      {!ready && !error ? <p role="status">{t("Loading secure card form…")}</p> : null}
       {error ? (
-        <p role="alert">We couldn’t prepare your card payment. Check the form and try again.</p>
+        <p role="alert">
+          {t("We couldn’t prepare your card payment. Check the form and try again.")}
+        </p>
       ) : null}
-      {!online ? <p role="alert">Reconnect to continue payment.</p> : null}
+      {!online ? <p role="alert">{t("Reconnect to continue payment.")}</p> : null}
       <button
         className="payment-page__pay"
         type="button"
         disabled={!ready || busy || !online}
         onClick={() => void confirm()}
       >
-        {busy ? "Submitting payment…" : "Pay securely"}
+        {busy ? t("Submitting payment…") : t("Pay securely")}
       </button>
     </section>
   );

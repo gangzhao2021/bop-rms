@@ -17,6 +17,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 import { AppErrorBoundary } from "@bop-rms/ui";
 import { App } from "./App.js";
+import { LanguageRoot, t } from "./i18n/i18n.js";
 import { createCustomerEntryClient } from "./entry/entry-client.js";
 import "./styles.css";
 import { ResumeScreen } from "./resume/ResumeScreen.js";
@@ -26,7 +27,7 @@ const root = document.getElementById("root");
 if (!root) throw new Error("Application root is missing");
 const recoveryStatus = document.createElement("p");
 recoveryStatus.setAttribute("role", "status");
-recoveryStatus.textContent = "Checking your session. Please wait.";
+recoveryStatus.textContent = t("Checking your session. Please wait.");
 recoveryStatus.hidden = true;
 root.before(recoveryStatus);
 protectCustomerHistoryRestore({
@@ -51,11 +52,15 @@ async function start() {
     createRoot(root).render(
       <StrictMode>
         <AppErrorBoundary>
-          <ResumeScreen
-            token={token}
-            fetcher={window.fetch.bind(window)}
-            open={(path) => window.location.replace(path)}
-          />
+          <LanguageRoot>
+            {() => (
+              <ResumeScreen
+                token={token}
+                fetcher={window.fetch.bind(window)}
+                open={(path) => window.location.replace(path)}
+              />
+            )}
+          </LanguageRoot>
         </AppErrorBoundary>
       </StrictMode>,
     );
@@ -124,12 +129,16 @@ async function start() {
     <StrictMode>
       <AppErrorBoundary>
         <BrowserRouter>
-          <App
-            entryClient={entryClient}
-            diningAdmission={diningAdmission}
-            initialMenuContext={initialMenuContext}
-            currentOrder={currentOrder}
-          />
+          <LanguageRoot>
+            {() => (
+              <App
+                entryClient={entryClient}
+                diningAdmission={diningAdmission}
+                initialMenuContext={initialMenuContext}
+                currentOrder={currentOrder}
+              />
+            )}
+          </LanguageRoot>
         </BrowserRouter>
       </AppErrorBoundary>
     </StrictMode>,

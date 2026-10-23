@@ -1,3 +1,4 @@
+import { LanguageSwitch, t, useLanguage } from "../i18n/i18n.js";
 import { AppFrame } from "@bop-rms/ui";
 import { useEffect, type ReactNode } from "react";
 import { Link } from "react-router";
@@ -12,7 +13,7 @@ export interface CustomerStoreContext {
 }
 
 export const serviceModeLabel = (mode: "DineIn" | "Pickup" | undefined): string =>
-  mode === "DineIn" ? "Dine in" : mode === "Pickup" ? "Pickup" : "";
+  mode === "DineIn" ? t("Dine in") : mode === "Pickup" ? t("Pickup") : "";
 
 /** One frame for every customer page: the Store as the title, one journey navigation, one main landmark. */
 export function CustomerPage({
@@ -20,7 +21,7 @@ export function CustomerPage({
   store,
   orderReference,
   className,
-  fallbackTitle = "Order",
+  fallbackTitle,
   children,
 }: {
   readonly step: CustomerJourneyStep;
@@ -32,42 +33,49 @@ export function CustomerPage({
   readonly fallbackTitle?: string | undefined;
   readonly children: ReactNode;
 }) {
+  const { language } = useLanguage();
   const mode = serviceModeLabel(store?.serviceMode);
   // The browser tab and the installed app carry the Store's name, not the product's.
   useEffect(() => {
-    document.title = store ? `${store.storeName} · Order` : "BOP Order";
-  }, [store]);
+    document.title = store
+      ? t("{storeName} · Order", { storeName: store.storeName })
+      : t("BOP Order");
+  }, [store, language]);
   const description = store
     ? [store.brandName, mode].filter((part) => part !== undefined && part !== "").join(" · ")
-    : "Scan the location QR code to begin";
+    : t("Scan the location QR code to begin");
   const links: readonly { step: CustomerJourneyStep; label: string; href: string }[] = [
-    { step: "menu", label: "Menu", href: "/menu" },
-    { step: "cart", label: "Cart", href: "/cart" },
+    { step: "menu", label: t("Menu"), href: "/menu" },
+    { step: "cart", label: t("Cart"), href: "/cart" },
     ...(orderReference === undefined
       ? []
-      : [{ step: "order" as const, label: "Order", href: `/orders/${orderReference}` }]),
+      : [{ step: "order" as const, label: t("Order"), href: `/orders/${orderReference}` }]),
     // WP-2423 Q8: a dine-in guest can always see what the whole table has ordered.
     ...(store?.serviceMode === "DineIn" || step === "table"
-      ? [{ step: "table" as const, label: "Your table", href: "/dine-in/session" }]
+      ? [{ step: "table" as const, label: t("Your table"), href: "/dine-in/session" }]
       : []),
   ];
   return (
     <AppFrame
       className={`customer-page customer-page--${step}${className ? ` ${className}` : ""}`}
-      title={store?.storeName ?? fallbackTitle}
+      title={store?.storeName ?? fallbackTitle ?? t("Order")}
       description={description}
-      navigationLabel="Customer journey"
-      navigation={links.map((link) =>
-        link.step === step ? (
-          <span key={link.step} aria-current="page">
-            {link.label}
-          </span>
-        ) : (
-          <Link key={link.step} to={link.href}>
-            {link.label}
-          </Link>
+      navigationLabel={t("Customer journey")}
+      navigation={[
+        ...links.map((link) =>
+          link.step === step ? (
+            <span key={link.step} aria-current="page">
+              {link.label}
+            </span>
+          ) : (
+            <Link key={link.step} to={link.href}>
+              {link.label}
+            </Link>
+          ),
         ),
-      )}
+        // Owner 2026-10-23: English / Simplified Chinese on every customer page.
+        <LanguageSwitch key="language" />,
+      ]}
     >
       {children}
     </AppFrame>

@@ -1,3 +1,4 @@
+import { LanguageRoot } from "./i18n/i18n.js";
 import { v7 as uuidv7 } from "uuid";
 import { createDiningAdmissionJourney } from "./dining/dining-admission-journey.js";
 import { createBrowserDiningJoinClient } from "./dining/dining-join-client.js";
@@ -107,11 +108,15 @@ createRoot(root).render(
           Stop local lab
         </button>
       </aside>
-      <App
-        entryClient={entryClient}
-        diningAdmission={diningAdmission}
-        {...(quoteEnabled ? { checkoutNow: Date.now } : {})}
-      />
+      <LanguageRoot>
+        {() => (
+          <App
+            entryClient={entryClient}
+            diningAdmission={diningAdmission}
+            {...(quoteEnabled ? { checkoutNow: Date.now } : {})}
+          />
+        )}
+      </LanguageRoot>
     </BrowserRouter>
   </StrictMode>,
 );

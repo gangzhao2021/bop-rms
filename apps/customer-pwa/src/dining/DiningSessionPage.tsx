@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
@@ -38,30 +39,62 @@ export function roundTime(instant: string, now = Date.now(), locale = "en-CA"): 
 export const diningSessionPollIntervalMs = 15_000;
 
 const statusText: Readonly<Record<DiningRoundStatus, string>> = {
-  AwaitingPayment: "Waiting for payment",
-  PaymentFailed: "On hold until paid",
-  NotPaidCancelled: "Cancelled — not paid",
-  StoreCancelled: "Cancelled by the store",
-  Received: "Received by the store",
-  Queued: "Sent to the kitchen",
-  Preparing: "Being prepared",
-  Ready: "Ready — on its way to your table",
-  Serving: "Being served",
+  get AwaitingPayment() {
+    return t("Waiting for payment");
+  },
+  get PaymentFailed() {
+    return t("On hold until paid");
+  },
+  get NotPaidCancelled() {
+    return t("Cancelled — not paid");
+  },
+  get StoreCancelled() {
+    return t("Cancelled by the store");
+  },
+  get Received() {
+    return t("Received by the store");
+  },
+  get Queued() {
+    return t("Sent to the kitchen");
+  },
+  get Preparing() {
+    return t("Being prepared");
+  },
+  get Ready() {
+    return t("Ready — on its way to your table");
+  },
+  get Serving() {
+    return t("Being served");
+  },
   Served: "Served",
 };
 const paymentText: Readonly<Record<DiningRoundPayment, string>> = {
   Paid: "Paid",
-  Awaiting: "Not paid yet",
-  Failed: "Payment failed",
-  NotCharged: "Not charged",
+  get Awaiting() {
+    return t("Not paid yet");
+  },
+  get Failed() {
+    return t("Payment failed");
+  },
+  get NotCharged() {
+    return t("Not charged");
+  },
   Refunded: "Refunded",
-  RefundPending: "Refund on its way",
+  get RefundPending() {
+    return t("Refund on its way");
+  },
 };
 /** WP-2423 Q7 slice 2: who ordered a round, in the guest's words (never a staff name). */
 const orderedByText: Readonly<Record<DiningRound["orderedBy"], string>> = {
-  You: "Ordered by you",
-  AnotherGuest: "Ordered by another guest",
-  Staff: "Entered by staff",
+  get You() {
+    return t("Ordered by you");
+  },
+  get AnotherGuest() {
+    return t("Ordered by another guest");
+  },
+  get Staff() {
+    return t("Entered by staff");
+  },
 };
 const settled: ReadonlySet<DiningRoundStatus> = new Set([
   "NotPaidCancelled",
@@ -81,13 +114,15 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
     return (
       <p className="order-status__warning" role="status">
         {round.cancelsAt
-          ? `This round will be cancelled at ${endSentence(formatClockTime(round.cancelsAt))} `
+          ? t("This round will be cancelled at {value1} ", {
+              value1: endSentence(formatClockTime(round.cancelsAt)),
+            })
           : ""}
-        Ask a staff member if you need help.
+        {t("Ask a staff member if you need help.")}
       </p>
     );
   if (round.status === "NotPaidCancelled")
-    return <p>This round never went to the kitchen. No one was charged for it.</p>;
+    return <p>{t("This round never went to the kitchen. No one was charged for it.")}</p>;
   if (round.status === "StoreCancelled")
     return (
       <p>
@@ -95,8 +130,8 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
           ? staffCancellationReasonText[round.storeCancellationReason] + " "
           : ""}
         {round.payment === "Refunded"
-          ? "The payment was refunded."
-          : "The payment is being refunded to the card that paid."}
+          ? t("The payment was refunded.")
+          : t("The payment is being refunded to the card that paid.")}
       </p>
     );
   if (round.status === "AwaitingPayment")
@@ -106,7 +141,7 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
         {/* WP-2423 abandoned payment: the guest who sent it finishes the same payment here. */}
         {round.orderedBy === "You" ? (
           <Link className="dining-session__pay" to="/checkout/payment">
-            Pay for round {round.roundNumber}
+            {t("Pay for round")} {round.roundNumber}
           </Link>
         ) : null}
       </>
@@ -118,13 +153,17 @@ function AwaitingPaymentNote({ round }: { readonly round: DiningRound }) {
   return (
     <p className={round.cancelsAt ? "order-status__warning" : undefined}>
       {round.orderedBy === "You"
-        ? "Finish paying for this round so the kitchen can start it."
+        ? t("Finish paying for this round so the kitchen can start it.")
         : round.orderedBy === "Staff"
-          ? "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it."
-          : "The kitchen starts this round once it is paid."}
+          ? t(
+              "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it.",
+            )
+          : t("The kitchen starts this round once it is paid.")}
       {/* WP-2423 item 5: a round nobody started paying for is cancelled when its time ends. */}
       {round.cancelsAt
-        ? ` If it isn't paid by ${formatClockTime(round.cancelsAt)}, it is cancelled and nobody is charged.`
+        ? t(" If it isn't paid by {value1}, it is cancelled and nobody is charged.", {
+            value1: formatClockTime(round.cancelsAt),
+          })
         : ""}
     </p>
   );
@@ -135,19 +174,19 @@ function RoundCard({ round }: { readonly round: DiningRound }) {
   return (
     <article className="order-status__card order-status__batch" aria-labelledby={headingId}>
       <h3 id={headingId}>
-        Round {round.roundNumber} · {orderedByText[round.orderedBy]}
+        {t("Round")} {round.roundNumber} · {orderedByText[round.orderedBy]}
       </h3>
       <dl className="dining-session__round-facts">
         <div>
-          <dt>Ordered at</dt>
+          <dt>{t("Ordered at")}</dt>
           <dd>{roundTime(round.submittedAt)}</dd>
         </div>
         <div>
-          <dt>Status</dt>
+          <dt>{t("Status")}</dt>
           <dd>{statusText[round.status]}</dd>
         </div>
         <div>
-          <dt>Payment</dt>
+          <dt>{t("Payment")}</dt>
           <dd>{paymentText[round.payment]}</dd>
         </div>
       </dl>
@@ -162,14 +201,14 @@ function RoundCard({ round }: { readonly round: DiningRound }) {
               {money(item.priceBeforeTax ?? item.lineTotal)}
             </span>
             {item.cancelled ? (
-              <span className="order-status__item-cancelled">Cancelled</span>
+              <span className="order-status__item-cancelled">{t("Cancelled")}</span>
             ) : item.beingRemade ? (
               <span className="order-status__item-remake">
-                Being remade · we&apos;ll bring it to your table shortly
+                {t("Being remade · we'll bring it to your table shortly")}
               </span>
             ) : round.payment === "Paid" ? (
               <span>
-                Served {item.servedQuantity} of {item.quantity}
+                {t("Served")} {item.servedQuantity} {t("of")} {item.quantity}
               </span>
             ) : null}
           </li>
@@ -179,23 +218,25 @@ function RoundCard({ round }: { readonly round: DiningRound }) {
       {round.subtotal !== undefined && round.tax !== undefined ? (
         <dl className="order-status__money">
           <div>
-            <dt>Subtotal</dt>
+            <dt>{t("Subtotal")}</dt>
             <dd>{money(round.subtotal)}</dd>
           </div>
           {adjustments(round.itemsTotal, round.subtotal, round.tax) ? (
             <div>
-              <dt>Discounts and fees</dt>
+              <dt>{t("Discounts and fees")}</dt>
               <dd>{adjustments(round.itemsTotal, round.subtotal, round.tax)}</dd>
             </div>
           ) : null}
           <div>
-            <dt>Tax</dt>
+            <dt>{t("Tax")}</dt>
             <dd>{money(round.tax)}</dd>
           </div>
         </dl>
       ) : null}
       <p className="order-status__total">
-        <span>{round.subtotal === undefined ? "Round total including tax" : "Round total"}</span>
+        <span>
+          {round.subtotal === undefined ? t("Round total including tax") : t("Round total")}
+        </span>
         <span>{money(round.itemsTotal)}</span>
       </p>
     </article>
@@ -211,59 +252,60 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
       className="order-status__card order-status__summary dining-session__summary"
       aria-labelledby="dining-summary-heading"
     >
-      <h2 id="dining-summary-heading">Table total</h2>
+      <h2 id="dining-summary-heading">{t("Table total")}</h2>
       {summary.ordered !== undefined ? (
         <dl className="order-status__money">
           <div>
-            <dt>Subtotal</dt>
+            <dt>{t("Subtotal")}</dt>
             <dd>{money(summary.ordered.subtotal)}</dd>
           </div>
           {adjustments(summary.ordered.total, summary.ordered.subtotal, summary.ordered.tax) ? (
             <div>
-              <dt>Discounts and fees</dt>
+              <dt>{t("Discounts and fees")}</dt>
               <dd>
                 {adjustments(summary.ordered.total, summary.ordered.subtotal, summary.ordered.tax)}
               </dd>
             </div>
           ) : null}
           <div>
-            <dt>Tax</dt>
+            <dt>{t("Tax")}</dt>
             <dd>{money(summary.ordered.tax)}</dd>
           </div>
           <div>
-            <dt>Total ordered</dt>
+            <dt>{t("Total ordered")}</dt>
             <dd>{money(summary.ordered.total)}</dd>
           </div>
         </dl>
       ) : null}
       <dl>
         <div>
-          <dt>Paid so far</dt>
+          <dt>{t("Paid so far")}</dt>
           <dd>{money(summary.paid)}</dd>
         </div>
         <div>
-          <dt>Waiting for payment</dt>
-          <dd>{nonZero(summary.due) ? money(summary.due) : "Nothing"}</dd>
+          <dt>{t("Waiting for payment")}</dt>
+          <dd>{nonZero(summary.due) ? money(summary.due) : t("Nothing")}</dd>
         </div>
         {nonZero(summary.refunded) ? (
           <div>
-            <dt>Refunded</dt>
+            <dt>{t("Refunded")}</dt>
             <dd>{money(summary.refunded)}</dd>
           </div>
         ) : null}
         {nonZero(summary.refundPending) ? (
           <div>
-            <dt>Refund on its way</dt>
+            <dt>{t("Refund on its way")}</dt>
             <dd>{money(summary.refundPending)}</dd>
           </div>
         ) : null}
       </dl>
       <p>
         {summary.ordered !== undefined
-          ? "Item prices are before tax. Rounds that were never paid are not included. "
+          ? t("Item prices are before tax. Rounds that were never paid are not included. ")
           : ""}
-        Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any
-        tip. Each guest pays for the rounds they order.
+        {t(
+          "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
+        )}
       </p>
     </section>
   );
@@ -384,26 +426,34 @@ export function DiningSessionScreen({
   return (
     <CustomerPage step="table" store={store} className="order-status dining-session">
       <PageHeading
-        eyebrow={view?.orderNumber ? `Order ${view.orderNumber}` : undefined}
-        title={view?.tableLabel ? `Your table · ${view.tableLabel}` : "Your table"}
+        eyebrow={
+          view?.orderNumber
+            ? t("Order {orderNumber}", { orderNumber: view.orderNumber })
+            : undefined
+        }
+        title={
+          view?.tableLabel
+            ? t("Your table · {tableLabel}", { tableLabel: view.tableLabel })
+            : t("Your table")
+        }
       >
-        <p>Everything ordered at this table, by you and the other guests.</p>
+        <p>{t("Everything ordered at this table, by you and the other guests.")}</p>
       </PageHeading>
       {state.status === "loading" ? (
         <section role="status">
-          <h2>Loading your table</h2>
+          <h2>{t("Loading your table")}</h2>
         </section>
       ) : null}
       {state.status === "not-joined" ? (
         <section className="order-status__card" role="alert">
-          <h2>Join your table first</h2>
+          <h2>{t("Join your table first")}</h2>
           <p>
-            Ask a staff member, or the person who joined your table first, for your table&apos;s
-            code and enter it after scanning the table&apos;s QR code. Then you can see what your
-            table has ordered.
+            {t(
+              "Ask a staff member, or the person who joined your table first, for your table's code and enter it after scanning the table's QR code. Then you can see what your table has ordered.",
+            )}
           </p>
           <Link className="order-status__back" to="/">
-            Go to the start
+            {t("Go to the start")}
           </Link>
         </section>
       ) : null}
@@ -412,53 +462,55 @@ export function DiningSessionScreen({
           <span className="order-status__unavailable-icon" aria-hidden="true">
             !
           </span>
-          <h2>{state.offline ? "You\u2019re offline" : "We couldn\u2019t load your table"}</h2>
+          <h2>{state.offline ? t("You’re offline") : t("We couldn’t load your table")}</h2>
           <p>
             {view
-              ? "Showing what was loaded before. It may be out of date."
-              : "Check your connection and try again. A staff member can also tell you what your table has ordered."}
+              ? t("Showing what was loaded before. It may be out of date.")
+              : t(
+                  "Check your connection and try again. A staff member can also tell you what your table has ordered.",
+                )}
           </p>
           <button className="order-status__retry" type="button" onClick={onRefresh}>
-            Try again
+            {t("Try again")}
           </button>
         </section>
       ) : null}
       {invitation}
       {view && view.rounds.length === 0 ? (
         <section className="order-status__card">
-          <h2>No one at this table has ordered yet</h2>
-          <p>Rounds appear here as soon as someone at your table places an order.</p>
+          <h2>{t("No one at this table has ordered yet")}</h2>
+          <p>{t("Rounds appear here as soon as someone at your table places an order.")}</p>
         </section>
       ) : null}
       {view ? <TableSummary view={view} /> : null}
       {view && view.rounds.length > 0 ? (
         <section className="order-status__batches" aria-labelledby="dining-rounds-heading">
-          <h2 id="dining-rounds-heading">Rounds</h2>
+          <h2 id="dining-rounds-heading">{t("Rounds")}</h2>
           {view.rounds.map((round) => (
             <RoundCard key={round.roundNumber} round={round} />
           ))}
         </section>
       ) : null}
       {state.status === "ready" ? (
-        <section className="order-status__actions" aria-label="Updates">
+        <section className="order-status__actions" aria-label={t("Updates")}>
           <p>
             {active
-              ? "This page checks for updates every few seconds."
-              : "Everything at this table is served or closed."}
+              ? t("This page checks for updates every few seconds.")
+              : t("Everything at this table is served or closed.")}
           </p>
           <button type="button" disabled={state.refreshing} onClick={onRefresh}>
-            {state.refreshing ? "Refreshing…" : "Refresh now"}
+            {state.refreshing ? "Refreshing…" : t("Refresh now")}
           </button>
         </section>
       ) : null}
       {view ? (
         <aside className="menu-help" aria-labelledby="dining-help-heading">
-          <h2 id="dining-help-heading">Allergies or a problem with your food?</h2>
-          <p>Tell a staff member before you eat. They can check any dish for you.</p>
+          <h2 id="dining-help-heading">{t("Allergies or a problem with your food?")}</h2>
+          <p>{t("Tell a staff member before you eat. They can check any dish for you.")}</p>
         </aside>
       ) : null}
       <Link className="order-status__back" to="/menu">
-        Order more from the menu
+        {t("Order more from the menu")}
       </Link>
     </CustomerPage>
   );

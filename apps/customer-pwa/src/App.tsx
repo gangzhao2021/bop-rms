@@ -5,6 +5,7 @@ import type { DiningAdmissionUi } from "./dining/DiningAdmissionPanel.js";
 import { Route, Routes, useParams } from "react-router";
 import type { CustomerCurrentOrder } from "./session/session-bootstrap.js";
 import { useCallback, useMemo, useState } from "react";
+import { menuLocale, useLanguage } from "./i18n/i18n.js";
 import { CartPage } from "./cart/CartPage.js";
 import { CheckoutPage } from "./checkout/CheckoutPage.js";
 import { CustomerShell } from "./CustomerShell.js";
@@ -133,6 +134,16 @@ export function App({
   const [menuContext, setMenuContext] = useState<MenuJourneyContext | undefined>(
     initialMenuContext ?? demo?.menuContext,
   );
+  // Owner 2026-10-23: the menu is asked in the guest's chosen language (Simplified Chinese or the
+  // entry's own locale); items without a Chinese name fall back to the menu language.
+  const { language } = useLanguage();
+  const localizedMenuContext = useMemo(
+    () =>
+      menuContext === undefined
+        ? undefined
+        : Object.freeze({ ...menuContext, locale: menuLocale(language, menuContext.locale) }),
+    [menuContext, language],
+  );
   const store: CustomerStoreContext | undefined = menuContext
     ? {
         storeName: menuContext.storeDisplayName,
@@ -185,7 +196,7 @@ export function App({
           path="/menu"
           element={
             <MenuBrowsePage
-              context={menuContext}
+              context={localizedMenuContext}
               client={demo?.menuClient}
               readOnlyNotice={demo?.menuReadOnlyNotice}
               cartSummary={demoCartSummary}
@@ -197,7 +208,7 @@ export function App({
           path="/menu/search"
           element={
             <MenuSearchPage
-              context={menuContext}
+              context={localizedMenuContext}
               client={demo?.menuClient}
               readOnlyNotice={demo?.menuReadOnlyNotice}
               cartSummary={demoCartSummary}
@@ -209,7 +220,7 @@ export function App({
           path="/menu/items/:sellableId"
           element={
             <SellableDetailPage
-              context={menuContext}
+              context={localizedMenuContext}
               client={demo?.menuClient}
               readOnlyNotice={demo?.menuReadOnlyNotice}
             />
@@ -221,7 +232,7 @@ export function App({
           element={
             <CartPage
               store={store}
-              menuContext={menuContext}
+              menuContext={localizedMenuContext}
               menuClient={demo?.menuClient}
               {...(demo ? { controller: demo.cartController } : {})}
             />
@@ -232,7 +243,7 @@ export function App({
           element={
             <CheckoutPage
               store={store}
-              menuContext={menuContext}
+              menuContext={localizedMenuContext}
               menuClient={demo?.menuClient}
               {...(checkoutNow === undefined ? {} : { now: checkoutNow })}
               {...(demo ? { controller: demo.checkoutController, now: demo.now } : {})}

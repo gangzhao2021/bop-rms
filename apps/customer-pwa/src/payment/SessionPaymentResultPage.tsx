@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router";
 import { formatCartMoney } from "../cart/format-money.js";
@@ -107,28 +108,28 @@ export function SessionPaymentResultPage({
     Date.parse(result.payBy) > Date.now();
   const heading =
     state.status === "loading"
-      ? "Verifying payment"
+      ? t("Verifying payment")
       : state.status === "missing" || state.status === "denied"
-        ? "Payment result not found"
+        ? t("Payment result not found")
         : state.status === "offline"
-          ? "Connection required"
+          ? t("Connection required")
           : unknown
-            ? "Payment result unknown"
+            ? t("Payment result unknown")
             : unprepared
-              ? "Payment not prepared"
+              ? t("Payment not prepared")
               : result?.status === "Pending"
-                ? "Payment not confirmed yet"
+                ? t("Payment not confirmed yet")
                 : result?.status === "Succeeded"
-                  ? "Payment confirmed"
+                  ? t("Payment confirmed")
                   : notCompleted
-                    ? "Payment not finished"
+                    ? t("Payment not finished")
                     : result?.status === "Failed"
-                      ? "Payment declined"
-                      : "Payment result not found";
+                      ? t("Payment declined")
+                      : t("Payment result not found");
   const badge = unknown
-    ? "Status not confirmed"
+    ? t("Status not confirmed")
     : notCompleted
-      ? "Not charged"
+      ? t("Not charged")
       : result?.status === "Failed"
         ? "Declined"
         : result?.status === "Succeeded"
@@ -139,7 +140,7 @@ export function SessionPaymentResultPage({
               ? "Checking"
               : state.status === "offline"
                 ? "Offline"
-                : "Not found";
+                : t("Not found");
   const badgeTone = unknown
     ? "warning"
     : result?.status === "Failed"
@@ -164,23 +165,23 @@ export function SessionPaymentResultPage({
       }
       className="payment-page payment-result-page"
     >
-      <PageHeading title="Check your payment">
+      <PageHeading title={t("Check your payment")}>
         <p className="payment-result-page__intro" aria-live="polite">
           {unknown
-            ? "The payment result is still being confirmed."
+            ? t("The payment result is still being confirmed.")
             : notCompleted
-              ? "This payment wasn’t finished in time, so it was cancelled. Nothing was charged."
+              ? t("This payment wasn’t finished in time, so it was cancelled. Nothing was charged.")
               : result?.status === "Failed"
-                ? "Your card was declined. Nothing was charged."
+                ? t("Your card was declined. Nothing was charged.")
                 : result?.status === "Succeeded"
                   ? paidIntroText(kitchen)
-                  : "Payment details come from your current checkout."}
+                  : t("Payment details come from your current checkout.")}
         </p>
       </PageHeading>
-      <ol className="checkout-progress" aria-label="Checkout progress">
-        <li>1 Review</li>
-        <li>2 Pay</li>
-        <li aria-current="step">3 Done</li>
+      <ol className="checkout-progress" aria-label={t("Checkout progress")}>
+        <li>{t("1 Review")}</li>
+        <li>{t("2 Pay")}</li>
+        <li aria-current="step">{t("3 Done")}</li>
       </ol>
       <section className="payment-result-page__card" aria-labelledby="payment-result-heading">
         <span className="payment-result-page__badge" data-tone={badgeTone}>
@@ -188,44 +189,48 @@ export function SessionPaymentResultPage({
         </span>
         <h2 id="payment-result-heading">{heading}</h2>
         <div role={alert ? "alert" : "status"} className="payment-result-page__message">
-          {state.status === "loading" ? <p>Verifying payment…</p> : null}
+          {state.status === "loading" ? <p>{t("Verifying payment…")}</p> : null}
           {state.status === "missing" ? (
             <p>
-              This payment cannot be identified in this window. Contact the store to check your
-              payment before paying again.
+              {t(
+                "This payment cannot be identified in this window. Contact the store to check your payment before paying again.",
+              )}
             </p>
           ) : null}
           {state.status === "denied" ? (
             <p>
-              This payment can’t be shown on this phone right now. Contact the store to check its
-              status.
+              {t(
+                "This payment can’t be shown on this phone right now. Contact the store to check its status.",
+              )}
             </p>
           ) : null}
           {state.status === "offline" ? (
-            <p>Reconnect to check your payment. Nothing will restart automatically.</p>
+            <p>{t("Reconnect to check your payment. Nothing will restart automatically.")}</p>
           ) : null}
           {unknown ? (
             <>
-              <p>Neither success nor failure is confirmed.</p>
-              <p>Check the same payment; do not submit another.</p>
+              <p>{t("Neither success nor failure is confirmed.")}</p>
+              <p>{t("Check the same payment; do not submit another.")}</p>
             </>
           ) : null}
-          {unprepared ? <p>Payment has not been prepared for this checkout.</p> : null}
+          {unprepared ? <p>{t("Payment has not been prepared for this checkout.")}</p> : null}
           {result?.status === "Pending" && !unprepared ? (
             <p>
               {resumable
-                ? "If you already entered your card, the result shows here shortly. If you left before paying, finish paying below — you won’t be charged twice."
-                : "Your payment is still being confirmed. Don’t start another payment."}
+                ? t(
+                    "If you already entered your card, the result shows here shortly. If you left before paying, finish paying below — you won’t be charged twice.",
+                  )
+                : t("Your payment is still being confirmed. Don’t start another payment.")}
             </p>
           ) : null}
           {notCompleted ? (
-            <p>It wasn’t sent to the kitchen. Ask staff if you still want it.</p>
+            <p>{t("It wasn’t sent to the kitchen. Ask staff if you still want it.")}</p>
           ) : null}
           {result?.status === "Succeeded" ? (
             <>
               {result.total ? (
                 <p>
-                  Paid: <strong>{formatCartMoney(result.total)}</strong>
+                  {t("Paid:")} <strong>{formatCartMoney(result.total)}</strong>
                 </p>
               ) : null}
               {result.orderReference ? (
@@ -233,13 +238,15 @@ export function SessionPaymentResultPage({
                   className="payment-result-page__order"
                   to={"/orders/" + result.orderReference}
                 >
-                  View order status
+                  {t("View order status")}
                 </Link>
               ) : null}
             </>
           ) : null}
           {result?.status === "Failed" && !notCompleted ? (
-            <p>Your card was declined. Try another card or ask staff to pay at the counter.</p>
+            <p>
+              {t("Your card was declined. Try another card or ask staff to pay at the counter.")}
+            </p>
           ) : null}
         </div>
         {resumable && result ? (
@@ -265,21 +272,21 @@ export function SessionPaymentResultPage({
           <>
             <p className="payment-result-page__polling" role="status">
               {polls < paymentResultPollLimit
-                ? "Checking again automatically…"
-                : "Automatic checks stopped. Check again or contact the store."}
+                ? t("Checking again automatically…")
+                : t("Automatic checks stopped. Check again or contact the store.")}
             </p>
             <button
               type="button"
               className="payment-result-page__refresh"
               onClick={() => void controller.refresh()}
             >
-              Check payment status
+              {t("Check payment status")}
             </button>
           </>
         ) : null}
       </section>
       <Link className="payment-result-page__back" to="/checkout">
-        Back to checkout
+        {t("Back to checkout")}
       </Link>
     </CustomerPage>
   );

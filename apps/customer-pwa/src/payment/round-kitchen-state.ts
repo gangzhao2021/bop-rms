@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import {
   OrderStatusClientError,
   parseOrderStatusView,
@@ -121,10 +122,10 @@ export function createRoundKitchenWatch(input: {
 /** The payment result's opening line for a confirmed payment, in the guest's words. */
 export function paidIntroText(state: RoundKitchenState | null): string {
   return state === "SentToKitchen"
-    ? "Thank you. Your order has been sent to the kitchen."
+    ? t("Thank you. Your order has been sent to the kitchen.")
     : state === "AwaitingStaff"
-      ? "Paid. The staff will send it to the kitchen shortly."
+      ? t("Paid. The staff will send it to the kitchen shortly.")
       : state === "Checking"
-        ? "Paid. Checking on your order…"
-        : "Thank you. Your payment went through.";
+        ? t("Paid. Checking on your order…")
+        : t("Thank you. Your payment went through.");
 }

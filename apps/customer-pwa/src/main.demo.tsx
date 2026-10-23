@@ -1,3 +1,4 @@
+import { LanguageRoot } from "./i18n/i18n.js";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
@@ -21,11 +22,15 @@ const EntryLifecycle =
 createRoot(root).render(
   <StrictMode>
     <BrowserRouter>
-      {EntryLifecycle ? (
-        <EntryLifecycle />
-      ) : (
-        <App {...(demo === null ? {} : { demo })} {...dining} />
-      )}
+      <LanguageRoot>
+        {() =>
+          EntryLifecycle ? (
+            <EntryLifecycle />
+          ) : (
+            <App {...(demo === null ? {} : { demo })} {...dining} />
+          )
+        }
+      </LanguageRoot>
     </BrowserRouter>
   </StrictMode>,
 );

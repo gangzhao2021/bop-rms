@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import {
   activeMenuOptionRules,
   defaultMenuOptionSelections,
@@ -170,16 +171,16 @@ const singleChoice = (rule: MenuOptionRule) =>
 /** "Required", "Optional · up to 3", "Choose 1 to 2". */
 function choiceText(rule: MenuOptionRule): string {
   const { minimumSelections: min, maximumSelections: max } = rule;
-  if (min === max) return max === 1 ? "Required" : `Required · choose ${max}`;
-  if (min === 0) return max === 1 ? "Optional" : `Optional · up to ${max}`;
-  return `Choose ${min} to ${max}`;
+  if (min === max) return max === 1 ? t("Required") : t("Required · choose {max}", { max });
+  if (min === 0) return max === 1 ? t("Optional") : t("Optional · up to {max}", { max });
+  return t("Choose {min} to {max}", { min, max });
 }
 /** "+ $0.75", "Included", or a note that the quote will price it. */
 function optionPriceText(price: MenuOptionRule["options"][number]["price"]): string {
-  if (price === null) return "Priced at checkout";
+  if (price === null) return t("Priced at checkout");
   if (/^0+(\.0+)?$/u.test(price.amount)) return "Included";
   const amount = formatDecimalMoney(price.amount, price.currency);
-  return amount === null ? "Priced at checkout" : `+ ${amount}`;
+  return amount === null ? t("Priced at checkout") : `+ ${amount}`;
 }
 
 export function MenuBrowsePage({
@@ -249,13 +250,13 @@ export function MenuSearchPage({
         <section className="menu-search-view">
           <form className="menu-search" role="search" onSubmit={submit}>
             <label className="sr-only" htmlFor="menu-search-input">
-              Search the menu
+              {t("Search the menu")}
             </label>
             <div className="menu-search-primary">
               <input
                 id="menu-search-input"
                 maxLength={100}
-                placeholder="Search menu items"
+                placeholder={t("Search menu items")}
                 value={draft}
                 onChange={(event) => setDraft(event.currentTarget.value)}
               />
@@ -263,7 +264,7 @@ export function MenuSearchPage({
                 type="submit"
                 disabled={normalizeMenuSearch(draft) === null && sectionDraft === ""}
               >
-                Search
+                {t("Search")}
               </button>
               <button
                 type="button"
@@ -274,18 +275,18 @@ export function MenuSearchPage({
                   setSection(null);
                 }}
               >
-                Clear
+                {t("Clear")}
               </button>
             </div>
             <div className="menu-search-section">
-              <label htmlFor="menu-search-section">Menu section</label>
+              <label htmlFor="menu-search-section">{t("Menu section")}</label>
               <select
                 id="menu-search-section"
                 value={sectionDraft}
                 disabled={sections.state.kind !== "Found"}
                 onChange={(event) => setSectionDraft(event.currentTarget.value)}
               >
-                <option value="">All sections</option>
+                <option value="">{t("All sections")}</option>
                 {sections.state.kind === "Found"
                   ? sections.state.menu.sections.map((item) => (
                       <option key={item.sectionReference} value={item.sectionReference}>
@@ -296,8 +297,9 @@ export function MenuSearchPage({
               </select>
             </div>
             <p className="menu-search-boundary">
-              Dietary tags are not provided by this menu. Availability is shown on each result; ask
-              staff for dietary help.
+              {t(
+                "Dietary tags are not provided by this menu. Availability is shown on each result; ask staff for dietary help.",
+              )}
             </p>
           </form>
         </section>
@@ -369,7 +371,7 @@ export function MenuScreen({
 }: MenuScreenProps) {
   // The page title never changes when the menu arrives, so a long item name cannot wrap late and
   // push the page down; the item's own heading carries its name.
-  const title = mode === "search" ? "Search menu" : "Menu";
+  const title = mode === "search" ? t("Search menu") : t("Menu");
   const browseFound = mode === "browse" && state.kind === "Found";
   const withCart = context !== undefined && mode !== "detail";
   return (
@@ -404,18 +406,18 @@ export function MenuScreen({
               ) : (
                 <h2>{title}</h2>
               )}
-              <nav className="menu-navigation" aria-label="Menu">
+              <nav className="menu-navigation" aria-label={t("Menu")}>
                 {mode === "search" ? (
                   <div className="menu-navigation__links menu-navigation__links--search">
-                    <Link to="/menu">← Back to menu</Link>
+                    <Link to="/menu">{t("← Back to menu")}</Link>
                   </div>
                 ) : (
                   <Link
-                    aria-label="Search menu"
+                    aria-label={t("Search menu")}
                     className="menu-navigation__search"
                     to="/menu/search"
                   >
-                    Search
+                    {t("Search")}
                   </Link>
                 )}
               </nav>
@@ -429,9 +431,13 @@ export function MenuScreen({
           ) : null}
           {state.kind === "MissingContext" ? null : search}
           {state.kind === "Found" && mode === "search" ? (
-            <section className="menu-search-summary" aria-label="Search results">
-              <h2>Search results</h2>
-              {searchTerm ? <p>Matched term · {searchTerm}</p> : null}
+            <section className="menu-search-summary" aria-label={t("Search results")}>
+              <h2>{t("Search results")}</h2>
+              {searchTerm ? (
+                <p>
+                  {t("Matched term ·")} {searchTerm}
+                </p>
+              ) : null}
             </section>
           ) : null}
           <div className="menu-content" aria-live="polite" aria-busy={state.kind === "Loading"}>
@@ -495,34 +501,36 @@ function MenuCart({
   }, [load]);
   if (cart === null) return null;
   const summary = summarizeCart(cart.view, menu);
-  const items = `${summary.count} item${summary.count === 1 ? "" : "s"}`;
+  const items = summary.count === 1 ? t("1 item") : t("{count} items", { count: summary.count });
   return (
     <>
       <aside className="menu-cart-panel" aria-labelledby="menu-cart-heading">
-        <h2 id="menu-cart-heading">Your order</h2>
+        <h2 id="menu-cart-heading">{t("Your order")}</h2>
         {summary.count === 0 ? (
-          <p className="menu-cart-panel__empty">Your cart is empty. Choose an item to start.</p>
+          <p className="menu-cart-panel__empty">
+            {t("Your cart is empty. Choose an item to start.")}
+          </p>
         ) : (
           <>
             <dl className="menu-cart-panel__facts">
               <div>
-                <dt>Items</dt>
+                <dt>{t("Items")}</dt>
                 <dd>{summary.count}</dd>
               </div>
               {summary.subtotal === null ? null : (
                 <div>
-                  <dt>Subtotal before tax</dt>
+                  <dt>{t("Subtotal before tax")}</dt>
                   <dd>{summary.subtotal}</dd>
                 </div>
               )}
             </dl>
             <p className="menu-cart-panel__note">
               {summary.subtotal === null
-                ? "Some items are priced at checkout, with tax."
-                : "Tax is added at checkout."}
+                ? t("Some items are priced at checkout, with tax.")
+                : t("Tax is added at checkout.")}
             </p>
             <Link className="menu-cart-panel__link" to="/cart">
-              View cart
+              {t("View cart")}
             </Link>
           </>
         )}
@@ -530,17 +538,20 @@ function MenuCart({
       {summary.count === 0 ? null : (
         <div className="menu-cart-bar">
           <Link className="menu-cart-bar__link" to="/cart">
-            <span className="menu-cart-bar__count" aria-label={`${summary.count} items in cart`}>
+            <span
+              className="menu-cart-bar__count"
+              aria-label={t("{count} items in cart", { count: summary.count })}
+            >
               {summary.count}
             </span>
-            <span className="menu-cart-bar__label">View cart</span>
+            <span className="menu-cart-bar__label">{t("View cart")}</span>
             {summary.subtotal === null ? (
               <span className="menu-cart-bar__total" aria-hidden="true">
                 {items}
               </span>
             ) : (
               <span className="menu-cart-bar__total">
-                <span className="menu-cart-bar__caption">Subtotal before tax</span>{" "}
+                <span className="menu-cart-bar__caption">{t("Subtotal before tax")}</span>{" "}
                 {summary.subtotal}
               </span>
             )}
@@ -568,7 +579,7 @@ function Heading({
 function Retry({ onRetry }: { readonly onRetry?: (() => void) | undefined }) {
   return onRetry ? (
     <button className="menu-action" type="button" onClick={onRetry}>
-      Try again
+      {t("Try again")}
     </button>
   ) : null;
 }
@@ -588,28 +599,29 @@ function MenuState({
   if (state.kind === "MissingContext")
     return (
       <section className="menu-state" role="alert">
-        <Heading headingRef={headingRef}>Scan the location QR code</Heading>
+        <Heading headingRef={headingRef}>{t("Scan the location QR code")}</Heading>
         <p>
-          We don’t know which location you’re ordering from. Scan the QR code again to open the
-          menu.
+          {t(
+            "We don’t know which location you’re ordering from. Scan the QR code again to open the menu.",
+          )}
         </p>
         <Link className="menu-action" to="/">
-          Return to entry
+          {t("Return to entry")}
         </Link>
       </section>
     );
   if (state.kind === "IdleSearch")
     return (
       <section className="menu-state menu-state--idle-search" role="status">
-        <Heading headingRef={headingRef}>Search this menu</Heading>
-        <p>Type an item name to find it on today’s menu.</p>
+        <Heading headingRef={headingRef}>{t("Search this menu")}</Heading>
+        <p>{t("Type an item name to find it on today’s menu.")}</p>
       </section>
     );
   if (state.kind === "Loading")
     return (
       <section className="menu-state menu-state--loading" role="status">
-        <Heading headingRef={headingRef}>Loading the current menu</Heading>
-        <p>Checking the latest published items…</p>
+        <Heading headingRef={headingRef}>{t("Loading the current menu")}</Heading>
+        <p>{t("Checking the latest published items…")}</p>
         <MenuSkeleton detail={mode === "detail"} />
       </section>
     );
@@ -619,37 +631,38 @@ function MenuState({
         className="menu-state menu-state--warning menu-state--permission-denied"
         role="alert"
       >
-        <Heading headingRef={headingRef}>This menu can’t be opened</Heading>
+        <Heading headingRef={headingRef}>{t("This menu can’t be opened")}</Heading>
         <p>
-          Your current session can’t access this menu. Scan the location QR code again or ask staff
-          for help.
+          {t(
+            "Your current session can’t access this menu. Scan the location QR code again or ask staff for help.",
+          )}
         </p>
         <Link className="menu-action" to="/">
-          Return to entry
+          {t("Return to entry")}
         </Link>
       </section>
     );
   if (state.kind === "Offline")
     return (
       <section className="menu-state menu-state--warning" role="alert">
-        <Heading headingRef={headingRef}>You’re offline</Heading>
-        <p>No cached menu is available. No item or order was submitted.</p>
+        <Heading headingRef={headingRef}>{t("You’re offline")}</Heading>
+        <p>{t("No cached menu is available. No item or order was submitted.")}</p>
         <Retry onRetry={onRetry} />
       </section>
     );
   if (state.kind === "Stale")
     return (
       <section className="menu-state menu-state--warning" role="alert">
-        <Heading headingRef={headingRef}>Menu is being refreshed</Heading>
-        <p>We won’t show an out-of-date menu. Try again shortly.</p>
+        <Heading headingRef={headingRef}>{t("Menu is being refreshed")}</Heading>
+        <p>{t("We won’t show an out-of-date menu. Try again shortly.")}</p>
         <Retry onRetry={onRetry} />
       </section>
     );
   if (state.kind === "Unavailable")
     return (
       <section className="menu-state menu-state--error" role="alert">
-        <Heading headingRef={headingRef}>Menu is unavailable</Heading>
-        <p>No item or order was submitted. Try again or ask staff for help.</p>
+        <Heading headingRef={headingRef}>{t("Menu is unavailable")}</Heading>
+        <p>{t("No item or order was submitted. Try again or ask staff for help.")}</p>
         <Retry onRetry={onRetry} />
       </section>
     );
@@ -657,15 +670,15 @@ function MenuState({
     return (
       <section className="menu-state" role="status">
         <Heading headingRef={headingRef}>
-          {mode === "detail" ? "Item not found" : "No menu found"}
+          {mode === "detail" ? t("Item not found") : t("No menu found")}
         </Heading>
         <p>
           {mode === "detail"
-            ? "This item is not in the current published menu."
-            : "There are no matching published items right now."}
+            ? t("This item is not in the current published menu.")
+            : t("There are no matching published items right now.")}
         </p>
         <Link className="menu-action" to="/menu">
-          Browse menu
+          {t("Browse menu")}
         </Link>
       </section>
     );
@@ -740,7 +753,7 @@ function SectionTabs({ sections }: { readonly sections: MenuView["sections"] }) 
   }, [sections]);
   if (sections.length < 2) return null;
   return (
-    <nav className="menu-sections" aria-label="Menu sections">
+    <nav className="menu-sections" aria-label={t("Menu sections")}>
       {sections.map((section) => (
         <a
           key={section.sectionReference}
@@ -767,8 +780,8 @@ function MenuContents({
   if (count === 0)
     return (
       <section className="menu-state menu-state--empty">
-        <h2>No items available</h2>
-        <p>The current published menu has no matching items.</p>
+        <h2>{t("No items available")}</h2>
+        <p>{t("The current published menu has no matching items.")}</p>
       </section>
     );
   return (
@@ -779,7 +792,9 @@ function MenuContents({
           className="menu-section"
           key={section.sectionReference}
           data-section={section.sectionReference}
-          aria-label={mode === "search" ? `Results in ${section.name}` : undefined}
+          aria-label={
+            mode === "search" ? t("Results in {name}", { name: section.name }) : undefined
+          }
           aria-labelledby={mode === "browse" ? sectionAnchor(section.sectionReference) : undefined}
         >
           {mode === "browse" ? (
@@ -819,7 +834,7 @@ function MenuItemCard({
       className={`menu-card${soldOut ? " menu-card--sold-out" : ""}${photo === null ? "" : " menu-card--with-photo"}`}
     >
       <Link
-        aria-label={`View ${family.name}`}
+        aria-label={t("View {name}", { name: family.name })}
         className="menu-card__link"
         to={`/menu/items/${opens.sellableReference}`}
       >
@@ -829,10 +844,10 @@ function MenuItemCard({
             {role !== "Standard" ? (
               <span className="menu-badge">
                 {role === "Sponsored"
-                  ? "Sponsored"
+                  ? t("Sponsored")
                   : role === "Promotional"
-                    ? "Promotion"
-                    : "Featured"}
+                    ? t("Promotion")
+                    : t("Featured")}
               </span>
             ) : null}
           </span>
@@ -846,7 +861,7 @@ function MenuItemCard({
           ) : null}
           {sectionName ? (
             <span className="menu-result-section">
-              <span>Section</span>
+              <span>{t("Section")}</span>
               {sectionName}
             </span>
           ) : null}
@@ -855,9 +870,9 @@ function MenuItemCard({
             <span
               className={`menu-card__price${price === null ? " menu-card__price--pending" : ""}`}
             >
-              {price ?? "Priced at checkout"}
+              {price ?? t("Priced at checkout")}
             </span>
-            {soldOut ? <span className="menu-sold-out">Sold out</span> : null}
+            {soldOut ? <span className="menu-sold-out">{t("Sold out")}</span> : null}
           </span>
         </span>
         {photo === null ? null : (
@@ -946,9 +961,11 @@ function MenuPhotoPicture({
 
 /** WP-2423 8.6: the size's own base price; options and tax are added in the final quote. */
 function priceLine(sellable: MenuSellable): string {
-  if (sellable.price === null) return "Priced at checkout";
+  if (sellable.price === null) return t("Priced at checkout");
   // Decimal text from the server; never converted to a binary number.
-  return formatDecimalMoney(sellable.price.amount, sellable.price.currency) ?? "Priced at checkout";
+  return (
+    formatDecimalMoney(sellable.price.amount, sellable.price.currency) ?? t("Priced at checkout")
+  );
 }
 
 function SellableDetail({
@@ -970,7 +987,7 @@ function SellableDetail({
   return (
     <article className={`sellable-detail${photo === null ? "" : " sellable-detail--with-photo"}`}>
       <Link className="sellable-detail__back" to="/menu">
-        ← Back to menu
+        {t("← Back to menu")}
       </Link>
       {photo === null ? null : (
         <MenuPhotoPicture
@@ -990,14 +1007,14 @@ function SellableDetail({
               <span className="sellable-detail__size">{currentLabel(family, sellable)} · </span>
             ) : null}
             {priceLine(sellable)}
-            {sellable.price === null ? null : <span> plus tax</span>}
+            {sellable.price === null ? null : <span> {t("plus tax")}</span>}
           </p>
         </div>
         {description === null ? null : (
           <p className="sellable-detail__description">{description}</p>
         )}
         {sellable.availability === "SoldOut" ? (
-          <p className="menu-sold-out">{sized ? "This size is sold out" : "Sold out"}</p>
+          <p className="menu-sold-out">{sized ? t("This size is sold out") : t("Sold out")}</p>
         ) : null}
         <AllergenSummary sellable={sellable} />
         {readOnlyNotice ? (
@@ -1005,7 +1022,7 @@ function SellableDetail({
             {readOnlyNotice}
           </div>
         ) : sellable.availability === "SoldOut" && !sized ? (
-          <p role="status">Sold out at this store right now. Please choose another item.</p>
+          <p role="status">{t("Sold out at this store right now. Please choose another item.")}</p>
         ) : (
           <SellableConfigurator
             channel={channel}
@@ -1035,7 +1052,7 @@ function configurationIssues(
 ): readonly string[] {
   const issues: string[] = [];
   if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100)
-    issues.push("Quantity must be between 1 and 100.");
+    issues.push(t("Quantity must be between 1 and 100."));
   const activeRules = activeMenuOptionRules(sellable.optionRules, selected);
   const activeReferences = new Set(
     activeRules.flatMap((rule) => rule.options.map((option) => option.optionReference)),
@@ -1047,11 +1064,17 @@ function configurationIssues(
     );
     if (count < rule.minimumSelections)
       issues.push(
-        `${rule.name ?? `Choice group ${index + 1}`} requires at least ${rule.minimumSelections}.`,
+        t("{value1} requires at least {minimumSelections}.", {
+          value1: rule.name ?? `Choice group ${index + 1}`,
+          minimumSelections: rule.minimumSelections,
+        }),
       );
     if (count > rule.maximumSelections)
       issues.push(
-        `${rule.name ?? `Choice group ${index + 1}`} allows at most ${rule.maximumSelections}.`,
+        t("{value1} allows at most {maximumSelections}.", {
+          value1: rule.name ?? `Choice group ${index + 1}`,
+          maximumSelections: rule.maximumSelections,
+        }),
       );
     rule.options.forEach((option) => {
       const optionQuantity = selected.get(option.optionReference) ?? 0;
@@ -1059,22 +1082,27 @@ function configurationIssues(
         selected.has(option.optionReference) &&
         (!Number.isSafeInteger(optionQuantity) || optionQuantity < 1)
       )
-        issues.push("Selected option quantities must be positive whole numbers.");
+        issues.push(t("Selected option quantities must be positive whole numbers."));
       if (optionQuantity > Math.min(option.maximumQuantity, 100))
-        issues.push(`${option.name} allows at most ${Math.min(option.maximumQuantity, 100)}.`);
+        issues.push(
+          t("{name} allows at most {value1}.", {
+            name: option.name,
+            value1: Math.min(option.maximumQuantity, 100),
+          }),
+        );
       if (
         optionQuantity > 0 &&
         option.conflictOptionReferences.some(
           (reference) => activeReferences.has(reference) && (selected.get(reference) ?? 0) > 0,
         )
       )
-        issues.push(`${option.name} conflicts with another selected choice.`);
+        issues.push(t("{name} conflicts with another selected choice.", { name: option.name }));
     });
   });
   if (note !== note.normalize("NFC") || note.length > 500)
-    issues.push("Preparation note must be 500 characters or fewer.");
+    issues.push(t("Preparation note must be 500 characters or fewer."));
   if (/\b(?:allerg(?:y|ic|ies)|anaphyla\w*|medical|medication|celiac|intoleran\w*)\b/iu.test(note))
-    issues.push("Do not put allergy or medical information in the preparation note; ask staff.");
+    issues.push(t("Do not put allergy or medical information in the preparation note; ask staff."));
   return Object.freeze(issues);
 }
 
@@ -1090,45 +1118,52 @@ function ConfigureStatus({
     return (
       <p className="configure-status" role="status">
         {state.stage === "locate"
-          ? "Checking your current cart…"
+          ? t("Checking your current cart…")
           : state.stage === "create"
-            ? "Starting your cart…"
-            : "Adding the item…"}
+            ? t("Starting your cart…")
+            : t("Adding the item…")}
       </p>
     );
   if (state.status === "added")
     return (
       <div className="configure-status configure-status--success" role="status">
-        <p>Added to your cart.</p>
+        <p>{t("Added to your cart.")}</p>
         {state.earlierCartCleared === true ? (
           <p>
-            Your table&apos;s earlier cart timed out, so items that hadn&apos;t been ordered were
-            cleared. Orders already placed are not affected.
+            {t(
+              "Your table's earlier cart timed out, so items that hadn't been ordered were cleared. Orders already placed are not affected.",
+            )}
           </p>
         ) : null}
         <Link className="menu-action" to="/cart">
-          View cart
+          {t("View cart")}
         </Link>
-        <Link to="/menu">Keep browsing</Link>
+        <Link to="/menu">{t("Keep browsing")}</Link>
       </div>
     );
   const copy = {
-    offline: "You’re offline. Nothing was queued or replayed.",
-    "session-expired": "Your Store session expired. Scan the location QR code again.",
-    conflict: "Your cart changed. Review the current cart before trying again.",
-    validation: "This item can’t be ordered as selected. Review your choices.",
-    "rate-limited": `Please wait${"retryAfterSeconds" in state && state.retryAfterSeconds !== null ? ` ${state.retryAfterSeconds} seconds` : ""} before trying again.`,
-    expired:
+    offline: t("You’re offline. Nothing was queued or replayed."),
+    "session-expired": t("Your Store session expired. Scan the location QR code again."),
+    conflict: t("Your cart changed. Review the current cart before trying again."),
+    validation: t("This item can’t be ordered as selected. Review your choices."),
+    "rate-limited":
+      "retryAfterSeconds" in state && state.retryAfterSeconds !== null
+        ? t("Please wait {seconds} seconds before trying again.", {
+            seconds: state.retryAfterSeconds,
+          })
+        : t("Please wait before trying again."),
+    expired: t(
       "Your table’s cart timed out and a new one couldn’t be started just now. Wait a moment, then add the item again.",
-    abandoned: "This cart is closed and cannot accept another item.",
+    ),
+    abandoned: t("This cart is closed and cannot accept another item."),
     "order-processing": orderProcessingMessage(
       "retryAfterSeconds" in state ? state.retryAfterSeconds : null,
     ),
     "checkout-in-progress": checkoutInProgressMessage(
       "retryAfterSeconds" in state ? state.retryAfterSeconds : null,
     ),
-    unavailable: "We couldn’t add this right now. Please try again.",
-    "outcome-unknown": "The connection dropped before we could confirm. Retry to check.",
+    unavailable: t("We couldn’t add this right now. Please try again."),
+    "outcome-unknown": t("The connection dropped before we could confirm. Retry to check."),
   } as const;
   return (
     <div className="configure-status configure-status--error" role="alert">
@@ -1145,11 +1180,11 @@ function ConfigureStatus({
           disabled={state.status === "offline"}
           onClick={() => void controller.retry()}
         >
-          Retry the same operation
+          {t("Retry the same operation")}
         </button>
       ) : null}
-      {state.status === "conflict" ? <Link to="/cart">Review cart</Link> : null}
-      {state.status === "session-expired" ? <Link to="/">Return to entry</Link> : null}
+      {state.status === "conflict" ? <Link to="/cart">{t("Review cart")}</Link> : null}
+      {state.status === "session-expired" ? <Link to="/">{t("Return to entry")}</Link> : null}
     </div>
   );
 }
@@ -1252,14 +1287,14 @@ export function SellableConfigurator({
     <form className="sellable-configurator" aria-labelledby="configure-heading" onSubmit={submit}>
       <h3 id="configure-heading" className="sr-only">
         {sellable.optionRules.length === 0 && sizes === null
-          ? "Add to your order"
-          : "Make it yours"}
+          ? t("Add to your order")
+          : t("Make it yours")}
       </h3>
       {sizes === null ? null : (
         <fieldset className="configure-group">
           <legend>
-            <span className="configure-group__name">Size</span>
-            <span className="configure-group__rule">Required</span>
+            <span className="configure-group__name">{t("Size")}</span>
+            <span className="configure-group__rule">{t("Required")}</span>
           </legend>
           {sizes.map((variant) => {
             const variantSoldOut = variant.sellable.availability === "SoldOut";
@@ -1278,7 +1313,7 @@ export function SellableConfigurator({
                 />
                 <span className="configure-option__name">{variant.label}</span>
                 <span className="configure-option__price">
-                  {variantSoldOut ? "Sold out" : priceLine(variant.sellable)}
+                  {variantSoldOut ? t("Sold out") : priceLine(variant.sellable)}
                 </span>
               </label>
             );
@@ -1292,7 +1327,7 @@ export function SellableConfigurator({
         >
           <legend>
             <span className="configure-group__name">
-              {rule.name ?? `Choice group ${groupIndex + 1}`}
+              {rule.name ?? t("Choice group {value1}", { value1: groupIndex + 1 })}
             </span>
             <span className="configure-group__rule">{choiceText(rule)}</span>
           </legend>
@@ -1321,7 +1356,7 @@ export function SellableConfigurator({
               <span className="configure-option__price">{optionPriceText(option.price)}</span>
               {current.has(option.optionReference) && option.maximumQuantity > 1 ? (
                 <label className="configure-option__quantity">
-                  How many {option.name}
+                  {t("How many")} {option.name}
                   <input
                     type="number"
                     min={1}
@@ -1342,7 +1377,7 @@ export function SellableConfigurator({
         </fieldset>
       ))}
       <div className="configure-note">
-        <label htmlFor="configure-note">Preparation note (optional)</label>
+        <label htmlFor="configure-note">{t("Preparation note (optional)")}</label>
         <textarea
           id="configure-note"
           maxLength={500}
@@ -1353,8 +1388,9 @@ export function SellableConfigurator({
           onChange={(event) => setNote(event.currentTarget.value)}
         />
         <p id="configure-note-help">
-          Plain preparation requests only. Do not enter allergy, medical or other sensitive details;
-          ask staff for assistance.
+          {t(
+            "Plain preparation requests only. Do not enter allergy, medical or other sensitive details; ask staff for assistance.",
+          )}
         </p>
       </div>
       {issues.length > 0 ? (
@@ -1366,7 +1402,7 @@ export function SellableConfigurator({
       ) : null}
       {soldOut ? (
         <p className="configure-sold-out" role="status">
-          This size is sold out right now. Please choose another size.
+          {t("This size is sold out right now. Please choose another size.")}
         </p>
       ) : null}
       <ConfigureStatus state={state} controller={controller} />
@@ -1374,14 +1410,14 @@ export function SellableConfigurator({
         <div className="configure-stepper">
           <button
             type="button"
-            aria-label="Decrease quantity"
+            aria-label={t("Decrease quantity")}
             disabled={locked || !(quantity > 1)}
             onClick={() => setQuantity((value) => Math.max(1, Math.min(100, (value || 1) - 1)))}
           >
             −
           </button>
           <label htmlFor="configure-quantity" className="sr-only">
-            Quantity
+            {t("Quantity")}
           </label>
           <input
             id="configure-quantity"
@@ -1395,7 +1431,7 @@ export function SellableConfigurator({
           />
           <button
             type="button"
-            aria-label="Increase quantity"
+            aria-label={t("Increase quantity")}
             disabled={locked || !(quantity < 100)}
             onClick={() => setQuantity((value) => Math.max(1, Math.min(100, (value || 0) + 1)))}
           >
@@ -1407,14 +1443,14 @@ export function SellableConfigurator({
           type="submit"
           disabled={issues.length > 0 || locked || soldOut}
         >
-          Add to cart
+          {t("Add to cart")}
         </button>
         <p className="configure-actions__total" aria-live="polite">
           {total === null ? (
-            "Price confirmed at checkout"
+            t("Price confirmed at checkout")
           ) : (
             <>
-              <strong>{total}</strong> plus tax
+              <strong>{total}</strong> {t("plus tax")}
             </>
           )}
         </p>
@@ -1447,14 +1483,16 @@ function ChoiceAllergens({
   const may = allergens.filter((item) => item.classification !== "Contains");
   return (
     <p className="configure-allergens" aria-live="polite">
-      <span>With your choices: </span>
+      <span>{t("With your choices:")} </span>
       {allergens.length === 0
-        ? "none of the listed allergens are declared. Ask staff if you have an allergy."
+        ? t("none of the listed allergens are declared. Ask staff if you have an allergy.")
         : [
             contains.length === 0
               ? null
-              : `contains ${contains.map((item) => item.name).join(", ")}`,
-            may.length === 0 ? null : `may contain ${may.map((item) => item.name).join(", ")}`,
+              : t("contains {value1}", { value1: contains.map((item) => item.name).join(", ") }),
+            may.length === 0
+              ? null
+              : t("may contain {value1}", { value1: may.map((item) => item.name).join(", ") }),
           ]
             .filter(Boolean)
             .join("; ") + "."}
@@ -1469,22 +1507,22 @@ function AllergenSummary({ sellable }: { readonly sellable: MenuSellable }) {
     <div className="menu-allergens">
       <p className="menu-allergen-heading">
         {sellable.allergensByChoice === undefined
-          ? "Allergen information"
-          : "Allergen information (all choices)"}
+          ? t("Allergen information")
+          : t("Allergen information (all choices)")}
       </p>
       {sellable.allergens.length === 0 ? (
-        <p>No allergen-free claim is made. Ask staff before ordering.</p>
+        <p>{t("No allergen-free claim is made. Ask staff before ordering.")}</p>
       ) : (
         <dl>
           {contains.length === 0 ? null : (
             <div>
-              <dt>Contains</dt>
+              <dt>{t("Contains")}</dt>
               <dd>{contains.map((item) => item.name).join(", ")}</dd>
             </div>
           )}
           {may.length === 0 ? null : (
             <div>
-              <dt>Cross-contact possible</dt>
+              <dt>{t("Cross-contact possible")}</dt>
               <dd>{may.map((item) => item.name).join(", ")}</dd>
             </div>
           )}
@@ -1497,10 +1535,11 @@ function AllergenSummary({ sellable }: { readonly sellable: MenuSellable }) {
 function AllergenHelp() {
   return (
     <aside className="menu-help" aria-labelledby="menu-help-heading">
-      <h2 id="menu-help-heading">Allergies or accessibility?</h2>
+      <h2 id="menu-help-heading">{t("Allergies or accessibility?")}</h2>
       <p>
-        Ask staff before ordering. The menu never promises that an item is allergen-free, and staff
-        can take your order another way.
+        {t(
+          "Ask staff before ordering. The menu never promises that an item is allergen-free, and staff can take your order another way.",
+        )}
       </p>
     </aside>
   );

@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 export interface CartMoney {
   readonly amountMinor: string;
   readonly currency: string;
@@ -117,12 +118,18 @@ export class CartClientError extends Error {
  * promised only when the wait is time-bounded (the server sent how long it lasts at most).
  */
 export function orderProcessingMessage(retryAfterSeconds: number | null): string {
-  const base = "Your table’s last order is still being processed.";
+  const base = t("Your table’s last order is still being processed.");
   if (retryAfterSeconds === null)
-    return `${base} Please try again shortly. If this keeps happening, ask a staff member.`;
-  if (retryAfterSeconds <= 60) return `${base} Try again in a moment.`;
+    return t("{base} Please try again shortly. If this keeps happening, ask a staff member.", {
+      base,
+    });
+  if (retryAfterSeconds <= 60) return t("{base} Try again in a moment.", { base });
   const minutes = Math.ceil(retryAfterSeconds / 60);
-  return `${base} Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+  return t("{base} Try again in about {minutes} minute{value1}.", {
+    base,
+    minutes,
+    value1: minutes === 1 ? "" : "s",
+  });
 }
 
 /**
@@ -130,9 +137,13 @@ export function orderProcessingMessage(retryAfterSeconds: number | null): string
  * the same table is checking out this cart. Nothing was changed; they can try again after the wait.
  */
 export function checkoutInProgressMessage(retryAfterSeconds: number | null): string {
-  const base = "Another guest at your table is paying for this order.";
-  if (retryAfterSeconds === null) return `${base} Try again shortly.`;
-  if (retryAfterSeconds <= 60) return `${base} Try again in a moment.`;
+  const base = t("Another guest at your table is paying for this order.");
+  if (retryAfterSeconds === null) return t("{base} Try again shortly.", { base });
+  if (retryAfterSeconds <= 60) return t("{base} Try again in a moment.", { base });
   const minutes = Math.ceil(retryAfterSeconds / 60);
-  return `${base} Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+  return t("{base} Try again in about {minutes} minute{value1}.", {
+    base,
+    minutes,
+    value1: minutes === 1 ? "" : "s",
+  });
 }

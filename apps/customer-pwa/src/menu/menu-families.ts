@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import { formatDecimalMoney } from "../journey/format.js";
 import type { MenuAllergenItem, MenuOptionRule, MenuSellable, MenuView } from "./types.js";
 
@@ -150,8 +151,12 @@ export function compactAllergenLine(allergens: readonly MenuAllergenItem[]): str
   const contains = allergens.filter((item) => item.classification === "Contains");
   const may = allergens.filter((item) => item.classification !== "Contains");
   const parts = [
-    contains.length === 0 ? null : `Contains ${contains.map((item) => item.name).join(", ")}`,
-    may.length === 0 ? null : `May contain ${may.map((item) => item.name).join(", ")}`,
+    contains.length === 0
+      ? null
+      : t("Contains {value1}", { value1: contains.map((item) => item.name).join(", ") }),
+    may.length === 0
+      ? null
+      : t("May contain {value1}", { value1: may.map((item) => item.name).join(", ") }),
   ].filter((part): part is string => part !== null);
   return parts.length === 0 ? null : parts.join(" · ");
 }
@@ -215,7 +220,7 @@ export function familyPriceText(family: MenuFamily): string | null {
   const varies = values.some((value) => value !== lowest) || priced.length < family.variants.length;
   const text = formatDecimalMoney(microsToDecimal(lowest), currency);
   if (text === null) return null;
-  return varies ? `From ${text}` : text;
+  return varies ? t("From {text}", { text }) : text;
 }
 
 /**

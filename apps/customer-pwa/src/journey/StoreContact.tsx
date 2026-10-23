@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import { formatLocalityLine } from "./format.js";
 
 /**
@@ -65,12 +66,12 @@ export function StoreContactCard({
 }) {
   return (
     <section className="store-contact" aria-labelledby="store-contact-heading">
-      <h2 id="store-contact-heading">Contact the store</h2>
-      <p>Questions about this order? The store can help.</p>
+      <h2 id="store-contact-heading">{t("Contact the store")}</h2>
+      <p>{t("Questions about this order? The store can help.")}</p>
       {contact.phone ? (
         <p>
           <a className="store-contact__phone" href={`tel:${contact.phone}`}>
-            Call {formatStorePhone(contact.phone)}
+            {t("Call")} {formatStorePhone(contact.phone)}
           </a>
         </p>
       ) : null}

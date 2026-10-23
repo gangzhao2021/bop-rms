@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import { useRef, useState } from "react";
 import { formatCartMoney } from "../cart/format-money.js";
 import {
@@ -29,11 +30,20 @@ type RetryState =
 
 /** Plain words for why another card cannot be tried; never codes. */
 export const retryStoppedText = {
-  retry_limit: "This order has reached the limit of card tries. Ask staff to pay at the counter.",
-  window_ended:
-    "The time to pay for this order has ended, so you haven’t been charged. Ask staff for help.",
-  retry_pending: "Your last card is still being checked. Check the payment status again.",
-  unknown: "We couldn’t open another card payment. Check your connection and try again.",
+  get retry_limit() {
+    return t("This order has reached the limit of card tries. Ask staff to pay at the counter.");
+  },
+  get window_ended() {
+    return t(
+      "The time to pay for this order has ended, so you haven’t been charged. Ask staff for help.",
+    );
+  },
+  get retry_pending() {
+    return t("Your last card is still being checked. Check the payment status again.");
+  },
+  get unknown() {
+    return t("We couldn’t open another card payment. Check your connection and try again.");
+  },
 } as const;
 
 /**
@@ -112,10 +122,10 @@ export function RetryCardPanel({
   if (configuration === null) return null;
   return (
     <section className="payment-retry" aria-labelledby="payment-retry-heading">
-      <h3 id="payment-retry-heading">Pay with another card</h3>
+      <h3 id="payment-retry-heading">{t("Pay with another card")}</h3>
       {total ? (
         <p>
-          Amount to pay: <strong>{formatCartMoney(total)}</strong>
+          {t("Amount to pay:")} <strong>{formatCartMoney(total)}</strong>
         </p>
       ) : null}
       {state.step === "offer" ? (
@@ -125,21 +135,21 @@ export function RetryCardPanel({
           disabled={!online}
           onClick={() => void open()}
         >
-          Try another card
+          {t("Try another card")}
         </button>
       ) : null}
-      {state.step === "opening" ? <p role="status">Opening a new card payment…</p> : null}
-      {state.step === "submitting" ? <p role="status">Checking your card…</p> : null}
+      {state.step === "opening" ? <p role="status">{t("Opening a new card payment…")}</p> : null}
+      {state.step === "submitting" ? <p role="status">{t("Checking your card…")}</p> : null}
       {state.step === "simulated" ? (
         <div className="payment-retry__simulated">
-          <p>Internal testing only. No real money is charged.</p>
+          <p>{t("Internal testing only. No real money is charged.")}</p>
           <button
             type="button"
             className="payment-result-page__retry"
             disabled={!online}
             onClick={() => void simulate("approve")}
           >
-            Confirm simulated payment
+            {t("Confirm simulated payment")}
           </button>
           <button
             type="button"
@@ -147,7 +157,7 @@ export function RetryCardPanel({
             disabled={!online}
             onClick={() => void simulate("decline")}
           >
-            Simulate a declined card (test only)
+            {t("Simulate a declined card (test only)")}
           </button>
         </div>
       ) : null}
@@ -175,7 +185,7 @@ export function RetryCardPanel({
                 onSettled();
               }}
             >
-              Check payment status
+              {t("Check payment status")}
             </button>
           ) : null}
           {state.reason === "unknown" ? (
@@ -185,12 +195,12 @@ export function RetryCardPanel({
               disabled={!online}
               onClick={() => setState({ step: "offer" })}
             >
-              Try again
+              {t("Try again")}
             </button>
           ) : null}
         </div>
       ) : null}
-      {!online ? <p role="alert">Reconnect to pay with another card.</p> : null}
+      {!online ? <p role="alert">{t("Reconnect to pay with another card.")}</p> : null}
     </section>
   );
 }

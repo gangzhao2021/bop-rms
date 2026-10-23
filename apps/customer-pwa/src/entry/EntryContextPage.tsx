@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import { DiningAdmissionPanel, type DiningAdmissionUi } from "../dining/DiningAdmissionPanel.js";
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -146,33 +147,43 @@ export function CurrentOrderView({
       store={store}
       orderReference={order.orderReference}
       className="entry-page"
-      fallbackTitle="Your order"
+      fallbackTitle={t("Your order")}
     >
       <section className="entry-card" aria-labelledby="entry-heading">
         <div>
-          <StateHeading headingRef={heading}>Your order {order.orderNumber}</StateHeading>
+          <StateHeading headingRef={heading}>
+            {t("Your order")} {order.orderNumber}
+          </StateHeading>
           <p>
             {order.orderType === "DineIn"
-              ? "You ordered at a table from this phone. You can check your order and everything your table ordered."
-              : "You placed a pickup order from this phone. Check its status and your pickup code."}
+              ? t(
+                  "You ordered at a table from this phone. You can check your order and everything your table ordered.",
+                )
+              : t(
+                  "You placed a pickup order from this phone. Check its status and your pickup code.",
+                )}
           </p>
           <div className="shell-actions">
             <Link className="entry-action" to={`/orders/${order.orderReference}`}>
-              View order {order.orderNumber}
+              {t("View order")} {order.orderNumber}
             </Link>
-            {order.orderType === "DineIn" ? <Link to="/dine-in/session">Your table</Link> : null}
+            {order.orderType === "DineIn" ? (
+              <Link to="/dine-in/session">{t("Your table")}</Link>
+            ) : null}
           </div>
           {onStartNew ? (
             <>
               <p>
-                Starting a new order here closes this order on this phone. The store still has it.
+                {t(
+                  "Starting a new order here closes this order on this phone. The store still has it.",
+                )}
               </p>
               <button className="entry-secondary-action" type="button" onClick={onStartNew}>
-                Start a new order
+                {t("Start a new order")}
               </button>
             </>
           ) : (
-            <p>To start a new order, scan the QR code at your table or at the counter.</p>
+            <p>{t("To start a new order, scan the QR code at your table or at the counter.")}</p>
           )}
         </div>
       </section>
@@ -212,7 +223,7 @@ export function EntryContextView({
           : undefined
       }
       className="entry-page"
-      fallbackTitle="Start your order"
+      fallbackTitle={t("Start your order")}
     >
       <section className="entry-card" aria-live="polite" aria-busy={state.kind === "Loading"}>
         <EntryState
@@ -228,10 +239,11 @@ export function EntryContextView({
       {/* Not under the short loading notice, where the arriving answer would push it down. */}
       {state.kind === "Loading" ? null : (
         <aside className="entry-help" aria-labelledby="entry-help-heading">
-          <h2 id="entry-help-heading">Need help?</h2>
+          <h2 id="entry-help-heading">{t("Need help?")}</h2>
           <p>
-            Ask a staff member for an accessible ordering option. Tell staff about allergies before
-            ordering; the QR code does not record allergy or health information.
+            {t(
+              "Ask a staff member for an accessible ordering option. Tell staff about allergies before ordering; the QR code does not record allergy or health information.",
+            )}
           </p>
         </aside>
       )}
@@ -259,7 +271,7 @@ function RetryAction({
 }: Readonly<{ onRetry?: (() => void) | undefined; disabled?: boolean }>) {
   return onRetry ? (
     <button className="entry-action" type="button" onClick={onRetry} disabled={disabled}>
-      Try again
+      {t("Try again")}
     </button>
   ) : null;
 }
@@ -285,10 +297,12 @@ function RateLimitedState({
   }, [seconds]);
   return (
     <div className="entry-state entry-state--warning" role="status">
-      <StateHeading headingRef={headingRef}>Please wait before trying again</StateHeading>
-      <p>No order was submitted. You can ask a staff member for help.</p>
+      <StateHeading headingRef={headingRef}>{t("Please wait before trying again")}</StateHeading>
+      <p>{t("No order was submitted. You can ask a staff member for help.")}</p>
       <p aria-live="off">
-        {remaining > 0 ? "Try again in " + remaining + " seconds." : "You can try again now."}
+        {remaining > 0
+          ? t("Try again in ") + remaining + t(" seconds.")
+          : t("You can try again now.")}
       </p>
       <RetryAction onRetry={onRetry} disabled={remaining > 0} />
     </div>
@@ -305,17 +319,19 @@ function EntryState({
   if (state.kind === "Loading")
     return (
       <div role="status">
-        <StateHeading headingRef={headingRef}>Checking this location</StateHeading>
-        <p>Confirming the latest public ordering options…</p>
+        <StateHeading headingRef={headingRef}>{t("Checking this location")}</StateHeading>
+        <p>{t("Confirming the latest public ordering options…")}</p>
       </div>
     );
 
   if (state.kind === "Missing")
     return (
       <div role="status">
-        <StateHeading headingRef={headingRef}>Scan the location QR code</StateHeading>
+        <StateHeading headingRef={headingRef}>{t("Scan the location QR code")}</StateHeading>
         <p>
-          This page needs the QR code at the table or pickup location. No store search is shown.
+          {t(
+            "This page needs the QR code at the table or pickup location. No store search is shown.",
+          )}
         </p>
       </div>
     );
@@ -324,24 +340,26 @@ function EntryState({
     return (
       <div className="entry-state entry-state--warning" role="alert">
         <StateHeading headingRef={headingRef}>
-          {state.storeDisplayName} isn’t taking orders right now
+          {state.storeDisplayName} {t("isn’t taking orders right now")}
         </StateHeading>
         <p>
           {state.paused
-            ? "Online ordering is paused for a short while. Try again in a few minutes, or order with a staff member."
-            : "The store is closed now."}
+            ? t(
+                "Online ordering is paused for a short while. Try again in a few minutes, or order with a staff member.",
+              )
+            : t("The store is closed now.")}
         </p>
         <p>
           {state.todayHours.length === 0
-            ? "Closed today."
-            : "Today’s hours: " +
+            ? t("Closed today.")
+            : t("Today’s hours: ") +
               state.todayHours
                 .map(
                   (interval) =>
                     entryClock(interval.start) +
                     "–" +
                     entryClock(interval.end) +
-                    (interval.endsNextDay ? " (next day)" : ""),
+                    (interval.endsNextDay ? t(" (next day)") : ""),
                 )
                 .join(", ")}
         </p>
@@ -352,8 +370,8 @@ function EntryState({
   if (state.kind === "RequestInvalid" || state.kind === "EntryUnavailable")
     return (
       <div className="entry-state entry-state--warning" role="alert">
-        <StateHeading headingRef={headingRef}>This entry link can’t be used</StateHeading>
-        <p>Scan the location QR code again or ask a staff member for help.</p>
+        <StateHeading headingRef={headingRef}>{t("This entry link can’t be used")}</StateHeading>
+        <p>{t("Scan the location QR code again or ask a staff member for help.")}</p>
       </div>
     );
 
@@ -361,12 +379,14 @@ function EntryState({
     return (
       <div className="entry-state entry-state--warning" role="alert">
         <StateHeading headingRef={headingRef}>
-          {state.replaced ? "This table code was replaced" : "This table code is no longer in use"}
+          {state.replaced
+            ? t("This table code was replaced")
+            : t("This table code is no longer in use")}
         </StateHeading>
         <p>
           {state.replaced
-            ? "This table code was replaced. Please ask a staff member."
-            : "This table code is no longer in use. Please ask a staff member."}
+            ? t("This table code was replaced. Please ask a staff member.")
+            : t("This table code is no longer in use. Please ask a staff member.")}
         </p>
       </div>
     );
@@ -384,8 +404,8 @@ function EntryState({
   if (state.kind === "Offline")
     return (
       <div className="entry-state entry-state--warning" role="alert">
-        <StateHeading headingRef={headingRef}>You’re offline</StateHeading>
-        <p>No request or order was submitted. Reconnect, then try again.</p>
+        <StateHeading headingRef={headingRef}>{t("You’re offline")}</StateHeading>
+        <p>{t("No request or order was submitted. Reconnect, then try again.")}</p>
         <RetryAction onRetry={onRetry} />
       </div>
     );
@@ -393,8 +413,8 @@ function EntryState({
   if (state.kind === "ServiceUnavailable" || state.kind === "CommandFailed")
     return (
       <div className="entry-state entry-state--error" role="alert">
-        <StateHeading headingRef={headingRef}>Ordering is unavailable</StateHeading>
-        <p>No order was submitted. Try again or ask a staff member for help.</p>
+        <StateHeading headingRef={headingRef}>{t("Ordering is unavailable")}</StateHeading>
+        <p>{t("No order was submitted. Try again or ask a staff member for help.")}</p>
         <RetryAction onRetry={onRetry} />
       </div>
     );
@@ -403,11 +423,15 @@ function EntryState({
   const locationOpen = context.operatingState === "Open";
   return (
     <div>
-      <StateHeading headingRef={headingRef}>Ready to order</StateHeading>
+      <StateHeading headingRef={headingRef}>{t("Ready to order")}</StateHeading>
       <p className="entry-context">
         {context.channel === "DineIn"
-          ? `Your table at ${context.storeDisplayName} is confirmed for dine-in.`
-          : `Pickup from ${context.storeDisplayName} is selected.`}
+          ? t("Your table at {storeDisplayName} is confirmed for dine-in.", {
+              storeDisplayName: context.storeDisplayName,
+            })
+          : t("Pickup from {storeDisplayName} is selected.", {
+              storeDisplayName: context.storeDisplayName,
+            })}
       </p>
       {/* Open now, today's hours and the address are stated once, in the store card below. */}
       {context.channel === "DineIn" &&
@@ -419,14 +443,18 @@ function EntryState({
       {locationOpen ? (
         onContinue ? (
           <button className="entry-action" type="button" onClick={onContinue}>
-            Continue to menu
+            {t("Continue to menu")}
           </button>
         ) : (
-          <p role="status">Menu navigation is unavailable. Scan the location QR code again.</p>
+          <p role="status">
+            {t("Menu navigation is unavailable. Scan the location QR code again.")}
+          </p>
         )
       ) : (
         <p className="entry-closed" role="status">
-          This location is not accepting orders. Ask staff about current hours or alternatives.
+          {t(
+            "This location is not accepting orders. Ask staff about current hours or alternatives.",
+          )}
         </p>
       )}
     </div>

@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import { useRef, useState } from "react";
 import { formatCartMoney } from "../cart/format-money.js";
 import { formatClockTime } from "../journey/format.js";
@@ -19,9 +20,14 @@ type ResumeState =
 
 /** Plain words for why the payment can't be finished here; never codes. */
 export const resumeStoppedText = {
-  window_ended:
-    "The time to pay for this has ended, so you haven’t been charged. Ask staff if you still want it.",
-  unknown: "We couldn’t open your payment. Check your connection and try again.",
+  get window_ended() {
+    return t(
+      "The time to pay for this has ended, so you haven’t been charged. Ask staff if you still want it.",
+    );
+  },
+  get unknown() {
+    return t("We couldn’t open your payment. Check your connection and try again.");
+  },
 } as const;
 
 /**
@@ -101,15 +107,17 @@ export function ResumePaymentPanel({
   if (configuration === null) return null;
   return (
     <section className="payment-retry" aria-labelledby="payment-resume-heading">
-      <h3 id="payment-resume-heading">Finish paying</h3>
+      <h3 id="payment-resume-heading">{t("Finish paying")}</h3>
       <p>
         {total ? (
           <>
-            Amount to pay: <strong>{formatCartMoney(total)}</strong>.{" "}
+            {t("Amount to pay:")} <strong>{formatCartMoney(total)}</strong>.{" "}
           </>
         ) : null}
         {payBy
-          ? `Pay by ${formatClockTime(payBy)}, or it is cancelled and nobody is charged.`
+          ? t("Pay by {value1}, or it is cancelled and nobody is charged.", {
+              value1: formatClockTime(payBy),
+            })
           : null}
       </p>
       {state.step === "offer" ? (
@@ -119,21 +127,21 @@ export function ResumePaymentPanel({
           disabled={!online}
           onClick={() => void open()}
         >
-          Finish paying
+          {t("Finish paying")}
         </button>
       ) : null}
-      {state.step === "opening" ? <p role="status">Opening your payment…</p> : null}
-      {state.step === "submitting" ? <p role="status">Checking your card…</p> : null}
+      {state.step === "opening" ? <p role="status">{t("Opening your payment…")}</p> : null}
+      {state.step === "submitting" ? <p role="status">{t("Checking your card…")}</p> : null}
       {state.step === "simulated" ? (
         <div className="payment-retry__simulated">
-          <p>Internal testing only. No real money is charged.</p>
+          <p>{t("Internal testing only. No real money is charged.")}</p>
           <button
             type="button"
             className="payment-result-page__retry"
             disabled={!online}
             onClick={() => void simulate("approve")}
           >
-            Confirm simulated payment
+            {t("Confirm simulated payment")}
           </button>
           <button
             type="button"
@@ -141,7 +149,7 @@ export function ResumePaymentPanel({
             disabled={!online}
             onClick={() => void simulate("decline")}
           >
-            Simulate a declined card (test only)
+            {t("Simulate a declined card (test only)")}
           </button>
         </div>
       ) : null}
@@ -167,12 +175,12 @@ export function ResumePaymentPanel({
               disabled={!online}
               onClick={() => setState({ step: "offer" })}
             >
-              Try again
+              {t("Try again")}
             </button>
           ) : null}
         </div>
       ) : null}
-      {!online ? <p role="alert">Reconnect to finish paying.</p> : null}
+      {!online ? <p role="alert">{t("Reconnect to finish paying.")}</p> : null}
     </section>
   );
 }

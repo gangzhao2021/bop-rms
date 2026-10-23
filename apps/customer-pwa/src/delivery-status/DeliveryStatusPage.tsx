@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
@@ -18,35 +19,38 @@ export function DeliveryTrackingContent({ view }: { readonly view: CustomerDeliv
     <>
       {readOnly ? (
         <section role="status">
-          <h2>Status may be delayed</h2>
-          <p>Refresh before changing delivery instructions.</p>
+          <h2>{t("Status may be delayed")}</h2>
+          <p>{t("Refresh before changing delivery instructions.")}</p>
         </section>
       ) : null}
       <section aria-labelledby="delivery-progress">
         <h2 id="delivery-progress">{view.status}</h2>
         <p>
           {view.eta
-            ? `Estimated arrival ${view.eta.earliestUtc} – ${view.eta.latestUtc}`
-            : "Estimated arrival is not available yet."}
+            ? t("Estimated arrival {earliestUtc} – {latestUtc}", {
+                earliestUtc: view.eta.earliestUtc,
+                latestUtc: view.eta.latestUtc,
+              })
+            : t("Estimated arrival is not available yet.")}
         </p>
         <dl>
           <div>
-            <dt>Store handoff</dt>
+            <dt>{t("Store handoff")}</dt>
             <dd>{view.handoffSummary}</dd>
           </div>
           <div>
-            <dt>Delivery confirmation</dt>
+            <dt>{t("Delivery confirmation")}</dt>
             <dd>{view.proofSummary}</dd>
           </div>
         </dl>
-        <p>Courier contact and precise location are never shown here.</p>
+        <p>{t("Courier contact and precise location are never shown here.")}</p>
       </section>
       <section>
-        <h2>Delivery options</h2>
+        <h2>{t("Delivery options")}</h2>
         <button type="button" disabled={readOnly || !view.instructionUpdateAllowed}>
-          Update approved instruction before cutoff
+          {t("Update approved instruction before cutoff")}
         </button>
-        <Link to={view.supportPath}>Contact support</Link>
+        <Link to={view.supportPath}>{t("Contact support")}</Link>
       </section>
     </>
   );
@@ -89,10 +93,10 @@ export function DeliveryStatusPage({
       orderReference={orderReference}
       className="order-status delivery-status"
     >
-      <PageHeading eyebrow="Delivery" title="Track your delivery" />
+      <PageHeading eyebrow={t("Delivery")} title={t("Track your delivery")} />
       {state.kind === "Loading" ? (
         <section className="order-status__card" role="status">
-          <h2>Loading delivery status</h2>
+          <h2>{t("Loading delivery status")}</h2>
         </section>
       ) : null}
       {state.kind !== "Loading" && state.kind !== "Ready" ? (
@@ -102,21 +106,21 @@ export function DeliveryStatusPage({
           </span>
           <h2 id="delivery-unavailable-heading">
             {state.kind === "PermissionDenied"
-              ? "Delivery access denied"
+              ? t("Delivery access denied")
               : state.kind === "FeatureDisabled"
-                ? "Delivery tracking is disabled"
+                ? t("Delivery tracking is disabled")
                 : state.kind === "InvalidReference"
-                  ? "Delivery link is invalid"
+                  ? t("Delivery link is invalid")
                   : state.kind === "NotFound"
-                    ? "Delivery not found"
-                    : "Delivery status unavailable"}
+                    ? t("Delivery not found")
+                    : t("Delivery status unavailable")}
           </h2>
-          <p>No courier, location or proof details are available.</p>
+          <p>{t("No courier, location or proof details are available.")}</p>
         </section>
       ) : null}
       {state.kind === "Ready" ? <DeliveryTrackingContent view={state.view} /> : null}
       <Link className="order-status__back" to={`/orders/${orderReference}`}>
-        Back to order status
+        {t("Back to order status")}
       </Link>
     </CustomerPage>
   );

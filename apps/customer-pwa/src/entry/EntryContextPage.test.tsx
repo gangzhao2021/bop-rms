@@ -183,6 +183,7 @@ describe("WP-2423 Q10 continue the order in progress", () => {
     const html = view({ order: { ...order, orderType: "DineIn" } });
     expect(html).toContain('href="/dine-in/session"');
     expect(html).toContain("scan the QR code at your table or at the counter");
-    expect(html).not.toContain("<button");
+    // No "start a new order" action in the page (the header only carries the language switch).
+    expect(html.split("<main")[1]).not.toContain("<button");
   });
 });
