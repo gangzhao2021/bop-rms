@@ -389,17 +389,22 @@ function ProductEditor({
   const changed =
     product === null ||
     name.trim() !== product.name ||
+    nameZh.trim() !== (product.nameZh ?? "") ||
     taxClass !== (product.taxClassificationReference ?? "") ||
     sizes.length !== product.sizes.length ||
     sizes.some(
       (size, index) =>
         size.skuReference !== product.sizes[index]?.skuReference ||
-        size.name.trim() !== product.sizes[index]?.name,
+        size.name.trim() !== product.sizes[index]?.name ||
+        size.nameZh.trim() !== (product.sizes[index]?.nameZh ?? ""),
     ) ||
     optionSetsChanged ||
     (product.presentation !== undefined && presentationChanged(presentation, product.presentation));
   const problems = product?.presentation ? presentationProblems(presentation) : {};
-  const presentationBlocked = problems.description !== undefined || problems.altText !== undefined;
+  const presentationBlocked =
+    problems.description !== undefined ||
+    problems.descriptionZh !== undefined ||
+    problems.altText !== undefined;
 
   return (
     <AppFrame
