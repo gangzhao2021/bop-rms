@@ -19,9 +19,81 @@ export type MenuErrorCode =
   | "Offline"
   | "Unavailable";
 export class MenuPageError extends Error {
-  constructor(readonly code: MenuErrorCode) {
+  constructor(
+    readonly code: MenuErrorCode,
+    /** WP-2423 (v15 2026-10-22): what a blocked review found missing, when the server knows. */
+    readonly problem: MenuReviewProblem | null = null,
+  ) {
     super("Menus are unavailable");
     this.name = "MenuPageError";
+  }
+}
+export interface MenuReviewProblem {
+  readonly missing:
+    "Recipe" | "SubRecipe" | "OptionRecipe" | "AllergenDeclaration" | "AllergenList";
+  readonly productName: string | null;
+  readonly sizeName: string | null;
+  readonly optionName: string | null;
+  readonly quantity: number | null;
+  readonly ingredientName: string | null;
+}
+const missingKinds = new Set<MenuReviewProblem["missing"]>([
+  "Recipe",
+  "SubRecipe",
+  "OptionRecipe",
+  "AllergenDeclaration",
+  "AllergenList",
+]);
+const optionalText = (value: unknown) =>
+  typeof value === "string" && value.trim() && value.length <= 200 ? value.trim() : null;
+export function parseMenuReviewProblem(value: unknown): MenuReviewProblem | null {
+  if (value === null || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  if (!missingKinds.has(raw.missing as MenuReviewProblem["missing"])) return null;
+  const quantity = raw.quantity;
+  return {
+    missing: raw.missing as MenuReviewProblem["missing"],
+    productName: optionalText(raw.productName),
+    sizeName: optionalText(raw.sizeName),
+    optionName: optionalText(raw.optionName),
+    quantity:
+      typeof quantity === "number" && Number.isSafeInteger(quantity) && quantity >= 1
+        ? quantity
+        : null,
+    ingredientName: optionalText(raw.ingredientName),
+  };
+}
+/** The blocked review in staff words: which item, size, option or ingredient, and where to fix it. */
+export function menuReviewProblemText(problem: MenuReviewProblem): string {
+  const item =
+    problem.productName === null
+      ? "An item on this menu"
+      : problem.sizeName === null || problem.sizeName === problem.productName
+        ? problem.productName
+        : `${problem.productName} — ${problem.sizeName}`;
+  const option =
+    problem.optionName === null
+      ? null
+      : problem.quantity !== null && problem.quantity > 1
+        ? `${problem.optionName} × ${problem.quantity}`
+        : problem.optionName;
+  switch (problem.missing) {
+    case "Recipe":
+      return `${item} has no published recipe for this menu's Stores. Publish one under Recipes and assign it to this size, then submit again.`;
+    case "SubRecipe":
+      return `A recipe used in ${item} is not published. Publish it under Recipes, then submit again.`;
+    case "OptionRecipe":
+      return `${item}: the option ${option ?? "chosen"} has no published recipe change. Set, review and publish it under Option recipes, then submit again.`;
+    case "AllergenDeclaration": {
+      const ingredient =
+        problem.ingredientName === null
+          ? "An ingredient"
+          : `The ingredient ${problem.ingredientName}`;
+      const where = option === null ? item : `${item} with ${option}`;
+      return `${ingredient} in ${where} has no current allergen declaration. Record or renew it under Allergens, then submit again.`;
+    }
+    case "AllergenList":
+      return "The Brand allergen list this menu uses is not approved. Approve it under Allergens, then submit again.";
   }
 }
 export interface MenuPublicationStatus {
@@ -460,6 +532,9 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
       const code = String(payload?.error) as MenuErrorCode;
       throw new MenuPageError(
         codes.has(code) ? code : response.status === 403 ? "PermissionDenied" : "Unavailable",
+        code === "ReviewBlocked"
+          ? parseMenuReviewProblem((payload as { problem?: unknown } | null)?.problem)
+          : null,
       );
     }
     return response.json() as Promise<unknown>;

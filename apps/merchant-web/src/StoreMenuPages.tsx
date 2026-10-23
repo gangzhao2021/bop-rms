@@ -15,6 +15,7 @@ import {
   photoChangeText,
   itemsNotOfferedHere,
   mayDiscardDraft,
+  menuReviewProblemText,
   menuRevisionAction,
   menuStage,
   orderTypeText,
@@ -372,7 +373,11 @@ function MenuBuilder({
     } catch (error) {
       const code = error instanceof MenuPageError ? error.code : "Unavailable";
       if (code !== "Offline" && code !== "Unavailable") setPending(null);
-      setMessage({ tone: "error", text: copy[code] });
+      const problem = error instanceof MenuPageError ? error.problem : null;
+      setMessage({
+        tone: "error",
+        text: problem === null ? copy[code] : menuReviewProblemText(problem),
+      });
     } finally {
       setBusy(false);
     }

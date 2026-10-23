@@ -1,5 +1,6 @@
 import { parseCatalogReference } from "@rms/catalog";
 import { beforeEach, expect, it, vi } from "vitest";
+import { RecipeReviewGapError } from "@rms/recipe";
 import {
   createMenuRecipeAllergenSource,
   createCompleteMenuRecipeAllergenSource,
@@ -10,20 +11,38 @@ const fixtures = vi.hoisted(() => ({
   allergens: null as unknown,
   requests: [] as unknown[],
   failAt: 0,
+  failure: new Error("synthetic missing source") as unknown,
+  allergenReads: 0,
 }));
 vi.mock("@rms/recipe", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@rms/recipe")>()),
-  createPostgresRecipeReviewSource: () => ({
-    resolve: async (_tx: unknown, query: unknown) => {
+  createPostgresRecipeReviewSource: () => {
+    const resolve = async (_tx: unknown, query: unknown) => {
       fixtures.requests.push(query);
-      if (fixtures.failAt === fixtures.requests.length) throw new Error("synthetic missing source");
+      if (fixtures.failAt === fixtures.requests.length) throw fixtures.failure;
       return fixtures.recipe;
-    },
-  }),
+    };
+    return {
+      resolve,
+      resolveConfigurations: async (
+        tx: unknown,
+        query: object,
+        configurations: readonly unknown[],
+      ) => {
+        const results = [];
+        for (const selections of configurations)
+          results.push(await resolve(tx, { ...query, selections }));
+        return results;
+      },
+    };
+  },
 }));
 vi.mock("@rms/catalog", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@rms/catalog")>()),
-  createPostgresAllergenReviewFactsStore: () => async () => fixtures.allergens,
+  createPostgresAllergenReviewFactsStore: () => async () => {
+    fixtures.allergenReads += 1;
+    return fixtures.allergens;
+  },
 }));
 const id = (n: number) => "01902405-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const requirement = () => ({
@@ -64,6 +83,8 @@ const load = () =>
 beforeEach(() => {
   fixtures.requests = [];
   fixtures.failAt = 0;
+  fixtures.failure = new Error("synthetic missing source");
+  fixtures.allergenReads = 0;
   fixtures.recipe = {
     configuredIngredients: [requirement()],
     graph: [],
@@ -144,6 +165,13 @@ it("resolves every legal quantity and deduplicates shared source evidence", asyn
     result.configurations.map((item) => item.selections.map((selection) => selection.quantity)),
   ).toEqual([[], [1], [2]]);
   expect(fixtures.requests).toHaveLength(3);
+  // One allergen read covers every configuration (v15 2026-10-22: one per configuration was slow).
+  expect(fixtures.allergenReads).toBe(1);
+  expect(result.configurations.map((item) => item.evidenceReferences)).toEqual([
+    [id(4)],
+    [id(4)],
+    [id(4)],
+  ]);
   expect(result.allergens.evidence).toHaveLength(1);
   expect(result.sourceDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
 });
@@ -162,4 +190,33 @@ it("does not start owner queries for an incomplete enumeration", async () => {
     }),
   ).rejects.toMatchObject({ code: "MENU_RECIPE_ALLERGEN_UNAVAILABLE" });
   expect(fixtures.requests).toHaveLength(0);
+});
+it("names the SKU, Store, option and quantity whose option recipe change is missing", async () => {
+  fixtures.failAt = 1;
+  fixtures.failure = new RecipeReviewGapError({
+    missing: "OptionRecipe",
+    selection: { bindingReference: id(20), optionReference: id(22), quantity: 2 },
+  });
+  await expect(complete().resolve(tx, completeInput())).rejects.toMatchObject({
+    code: "MENU_RECIPE_ALLERGEN_UNAVAILABLE",
+    gap: {
+      skuReference: id(12),
+      storeReference: id(11),
+      missing: "OptionRecipe",
+      optionReference: id(22),
+      quantity: 2,
+      ingredientReference: null,
+    },
+  });
+});
+it("names the ingredient without an allergen declaration", async () => {
+  fixtures.recipe = {
+    configuredIngredients: [{ ...requirement(), allergens: [] }],
+    graph: [],
+    modifierRules: [],
+    observedAt: input.recipe.observedAt,
+  };
+  await expect(complete().resolve(tx, completeInput())).rejects.toMatchObject({
+    gap: { missing: "AllergenDeclaration", ingredientReference: id(2), optionReference: null },
+  });
 });

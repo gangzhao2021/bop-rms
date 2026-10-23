@@ -21,6 +21,7 @@ import {
   createMenuReviewPreparationSource,
   type MenuReviewPreparationInput,
 } from "./menu-review-preparation-source.js";
+import { MenuRecipeAllergenError, MenuReviewGapError } from "./menu-recipe-allergen-source.js";
 
 export type MenuReviewCreationReferencePurpose =
   "Lifecycle" | "Validation" | "ReviewOperation" | "ContentAudit" | "DraftAudit" | "ReviewAudit";
@@ -301,6 +302,8 @@ export function createMenuReviewCreationSource(options: {
         return Object.freeze({ status: "Created" as const, record: prepared.record });
       } catch (error) {
         if (error instanceof CatalogError) throw error;
+        if (error instanceof MenuRecipeAllergenError && error.gap !== null)
+          throw new MenuReviewGapError(error.gap);
         return fail();
       }
     },

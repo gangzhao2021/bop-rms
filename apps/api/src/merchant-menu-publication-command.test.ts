@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({
   createdInput: null as unknown,
   executed: null as unknown,
   changed: false,
+  gap: null as unknown,
   permission: true,
   dependencyReads: 0,
   evidenceReads: 0,
@@ -25,6 +26,10 @@ vi.mock("./menu-review-preparation-source.js", async (importOriginal) => {
       resolve: async () => {
         state.dependencyReads++;
         if (state.changed) throw new original.MenuReviewDependencyChangedError();
+        if (state.gap !== null) {
+          const { MenuRecipeAllergenError } = await import("./menu-recipe-allergen-source.js");
+          throw new MenuRecipeAllergenError(state.gap as never);
+        }
         return state.binding;
       },
     }),
@@ -74,6 +79,7 @@ beforeEach(() => {
   state.createdInput = null;
   state.executed = null;
   state.changed = false;
+  state.gap = null;
   state.permission = true;
   state.dependencyReads = 0;
   state.evidenceReads = 0;
@@ -201,3 +207,21 @@ it("requires explicit review configuration and rejects client authority or versi
   }
   expect(state.createdInput).toBeNull();
 });
+it.each(["Approve", "Publish"])(
+  "keeps what the review found missing before %s, for staff to be told",
+  async (action) => {
+    state.gap = {
+      skuReference: id(20),
+      storeReference: id(21),
+      missing: "AllergenDeclaration",
+      optionReference: id(22),
+      quantity: 1,
+      ingredientReference: id(23),
+    };
+    await expect(handler()(request(action))).rejects.toMatchObject({
+      name: "MenuReviewGapError",
+      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+      gap: state.gap,
+    });
+  },
+);

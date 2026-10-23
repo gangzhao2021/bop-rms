@@ -42,6 +42,8 @@ export {
 
 export {
   createPostgresRecipeReviewSource,
+  RecipeReviewGapError,
+  type RecipeReviewGap,
   type RecipeReviewInput,
 } from "./infrastructure/persistence/recipe-demand-store.js";
 

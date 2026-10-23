@@ -382,7 +382,13 @@ export function installMerchantCommerceRoutes(
       denied(response);
       return;
     }
-    response.status(menuStatus[error.code]).json({ error: error.code });
+    response
+      .status(menuStatus[error.code])
+      .json(
+        error.problem === null
+          ? { error: error.code }
+          : { error: error.code, problem: error.problem },
+      );
   };
   router.post("/commerce/menus/query", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");

@@ -44,6 +44,8 @@ import { createPostgresConfiguredRecipeDemandSource } from "../../rms/recipe/src
 import { createPostgresRecipeModifierSource } from "../../rms/recipe/src/index.ts";
 import { createPostgresBaseRecipeDemandSource } from "../../rms/recipe/src/index.ts";
 import { createHash } from "node:crypto";
+import { canonicalizeRfc8785 } from "../../bop/audit/src/index.ts";
+import { enumerateCatalogReviewSelections } from "../../rms/catalog/src/index.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -986,6 +988,264 @@ async function prove(context) {
         }),
       ),
       { code: "MENU_RECIPE_ALLERGEN_UNAVAILABLE" },
+    );
+    // WP-2423 (v15 2026-10-22) ⑩: the missing rule is named, so staff can be told what to fix.
+    await assert.rejects(
+      runner.run((tx) =>
+        completeSource.resolve(tx, {
+          ...completeInput,
+          rules: [
+            {
+              ...completeInput.rules[0],
+              maximumQuantity: 2,
+              options: [{ ...completeInput.rules[0].options[0], maximumQuantity: 2 }],
+            },
+          ],
+        }),
+      ),
+      {
+        gap: {
+          skuReference: id(206),
+          storeReference: id(500),
+          missing: "OptionRecipe",
+          optionReference: id(403),
+          quantity: 2,
+          ingredientReference: null,
+        },
+      },
+    );
+    // WP-2423 (v15 2026-10-22) ⑨: the batch review (recipe, option rules, SubRecipes and allergen
+    // records read once) yields byte-identical configurations, evidence and digest to resolving
+    // every configuration separately, which review approval and publication recompute and compare.
+    // Real rows: a second quantity of the first option and a second option binding whose two
+    // quantities add a declared-none and an allergen-bearing ingredient.
+    const batch = (n) => id(0x51000 + n);
+    await admin.query("RESET ROLE");
+    await admin.query("SELECT set_config('bop.brand_id',$1,false)", [id(2)]);
+    for (const [evidence, item, version, registryBound] of [
+      [batch(1), batch(2), batch(3), true],
+      [batch(4), batch(5), batch(6), false],
+    ])
+      await admin.query(
+        "INSERT INTO rms_catalog.allergen_source_evidence (evidence_id,brand_id,subject_id,subject_kind,source_version_id,supplier_id,document_digest,reviewed_at,valid_until,evidence_status,registry_version_id,declaration_json,declared_by_actor_id) VALUES($1,$2,$3,'Ingredient',$4,NULL,$5,$6,$7,'Approved',$8,$9,$10)",
+        [
+          evidence,
+          id(2),
+          item,
+          version,
+          digest("c"),
+          at,
+          "2026-08-14T18:00:00.000Z",
+          registryBound ? id(9900) : null,
+          registryBound ? JSON.stringify({ sourceKind: "SupplierSpecification" }) : null,
+          registryBound ? id(3) : null,
+        ],
+      );
+    await admin.query(
+      "INSERT INTO rms_catalog.allergen_source_assertion VALUES($1,$2,$3,$4,'Contains')",
+      [batch(4), id(2), id(9900), id(10)],
+    );
+    const inventoryIngredient = (requirement, item, version, extra) => ({
+      ...published.ingredients[0],
+      requirementReference: requirement,
+      sourceReference: item,
+      sourceVersionReference: version,
+      allergens: [],
+      ...extra,
+    });
+    const batchRules = [
+      // First option, second quantity: the base ingredient again (shared evidence) plus the SubRecipe.
+      [
+        batch(10),
+        402,
+        403,
+        2,
+        [
+          {
+            action: "Add",
+            ingredient: inventoryIngredient(batch(11), id(7), id(8), {
+              allergens: published.ingredients[0].allergens,
+            }),
+          },
+          activeModifier.changes[0],
+        ],
+      ],
+      // Second option binding: one declared-none ingredient, then an allergen-bearing one.
+      [
+        batch(20),
+        batch(30),
+        batch(31),
+        1,
+        [
+          {
+            action: "Add",
+            ingredient: inventoryIngredient(batch(21), batch(2), batch(3), {
+              allergenDeclarationReference: batch(1),
+            }),
+          },
+        ],
+      ],
+      [
+        batch(22),
+        batch(30),
+        batch(31),
+        2,
+        [
+          {
+            action: "Add",
+            ingredient: inventoryIngredient(batch(23), batch(5), batch(6), {
+              allergens: [
+                { allergenReference: id(10), evidenceReference: batch(4), verified: true },
+              ],
+            }),
+          },
+        ],
+      ],
+    ];
+    for (const [index, [rule, binding, option, quantity, changes]] of batchRules.entries()) {
+      const bindingReference = typeof binding === "number" ? id(binding) : binding;
+      const optionReference = typeof option === "number" ? id(option) : option;
+      const content = {
+        ...modifier,
+        ruleReference: rule,
+        ruleVersionReference: batch(0x40 + index),
+        selection: { bindingReference, optionReference, quantity },
+        changes,
+      };
+      await admin.query(
+        "INSERT INTO rms_recipe.recipe_modifier_version (rule_version_id,rule_id,brand_id,version,recipe_id,recipe_version_id,binding_id,option_id,selected_quantity,lifecycle,rule_digest,rule_json,effective_from,operation_id,actor_id,audit_id,occurred_at,review_evidence_json) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,'Published',$9,$10,$11,$12,$13,$14,$11,$15)",
+        [
+          content.ruleVersionReference,
+          rule,
+          id(2),
+          id(60),
+          id(90),
+          bindingReference,
+          optionReference,
+          quantity,
+          content.ruleDigest,
+          content,
+          at,
+          batch(0x50 + index),
+          id(3),
+          batch(0x60 + index),
+          {
+            ...modifierProof,
+            ruleReference: rule,
+            ruleVersionReference: content.ruleVersionReference,
+          },
+        ],
+      );
+    }
+    await admin.query("SET ROLE " + role);
+    const batchInput = {
+      ...completeInput,
+      budget: { maximumConfigurations: 100, maximumSearchSteps: 10000 },
+      rules: [
+        {
+          ...completeInput.rules[0],
+          maximumQuantity: 2,
+          options: [{ ...completeInput.rules[0].options[0], maximumQuantity: 2 }],
+        },
+        {
+          bindingReference: batch(30),
+          optionSetVersionReference: batch(32),
+          activationOptionReferences: [],
+          minimumQuantity: 0,
+          maximumQuantity: 2,
+          options: [
+            { optionReference: batch(31), maximumQuantity: 2, conflictOptionReferences: [] },
+          ],
+        },
+      ],
+    };
+    // The per-configuration path as it was before the batch review (d7369ab6): the unchanged
+    // single-configuration source once per enumerated configuration, composed the same way.
+    const perConfiguration = async (tx, input) => {
+      const selections = enumerateCatalogReviewSelections(
+        input.rules,
+        input.budget,
+        "distinct-options",
+      );
+      const configurations = [];
+      let registry = null;
+      const evidence = new Map();
+      for (const selection of selections) {
+        const resolved = await linkedSource.resolve(tx, {
+          recipe: { ...input.recipe, selections: selection },
+          registryVersionReference: input.registryVersionReference,
+          defaultLocale: input.defaultLocale,
+        });
+        registry = {
+          registryVersionReference: resolved.allergens.registryVersionReference,
+          registry: resolved.allergens.registry,
+        };
+        for (const item of resolved.allergens.evidence) evidence.set(item.evidenceReference, item);
+        configurations.push(Object.freeze({ selections: selection, ...resolved }));
+      }
+      const allergens = Object.freeze({
+        ...registry,
+        evidence: Object.freeze(
+          [...evidence.values()].sort((a, b) =>
+            a.evidenceReference.localeCompare(b.evidenceReference),
+          ),
+        ),
+      });
+      return {
+        configurations,
+        allergens,
+        sourceDigest:
+          "sha256:" +
+          createHash("sha256")
+            .update(
+              canonicalizeRfc8785({
+                brandReference: input.recipe.brandReference,
+                storeReference: input.recipe.storeReference,
+                skuReference: input.recipe.skuReference,
+                defaultLocale: input.defaultLocale,
+                rules: input.rules,
+                allergens,
+                configurations: configurations.map((item) => ({
+                  selections: item.selections,
+                  sourceDigest: item.sourceDigest,
+                })),
+              }),
+            )
+            .digest("hex"),
+      };
+    };
+    const counted = (tx, counter) => ({
+      query: (sql, values) => {
+        counter.queries += 1;
+        return tx.query(sql, values);
+      },
+    });
+    const batchQueries = { queries: 0 },
+      separateQueries = { queries: 0 };
+    const batched = await runner.run((tx) =>
+      completeSource.resolve(counted(tx, batchQueries), batchInput),
+    );
+    const separate = await runner.run((tx) =>
+      perConfiguration(counted(tx, separateQueries), batchInput),
+    );
+    assert.equal(batched.configurations.length, 6);
+    assert.equal(
+      canonicalizeRfc8785(batched.configurations),
+      canonicalizeRfc8785(separate.configurations),
+    );
+    assert.equal(canonicalizeRfc8785(batched.allergens), canonicalizeRfc8785(separate.allergens));
+    assert.equal(batched.sourceDigest, separate.sourceDigest);
+    assert.deepEqual(
+      batched.allergens.evidence.map((item) => item.evidenceReference),
+      [id(11), batch(1), batch(4)].sort(),
+    );
+    assert.deepEqual(
+      batched.configurations.map((item) => item.evidenceReferences.length),
+      separate.configurations.map((item) => item.evidenceReferences.length),
+    );
+    assert.ok(
+      batchQueries.queries * 4 < separateQueries.queries,
+      `batch ${batchQueries.queries} queries, separate ${separateQueries.queries}`,
     );
     await admin.query("RESET ROLE");
     const menuScope = await seedPriceMenuOwnerFacts(

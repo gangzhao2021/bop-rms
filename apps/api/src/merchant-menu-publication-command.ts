@@ -4,6 +4,7 @@ import {
   MenuReviewDependencyChangedError,
 } from "./menu-review-preparation-source.js";
 import { readClosedRecord } from "@bop/identity";
+import { MenuRecipeAllergenError, MenuReviewGapError } from "./menu-recipe-allergen-source.js";
 import { createMenuReviewCreationSource } from "./menu-review-creation-source.js";
 import { sha256Hex } from "@bop/audit";
 import {
@@ -329,6 +330,8 @@ export function createMerchantMenuPublicationCommand(options: {
               if (!(await permission())) return fail("CATALOG_PERMISSION_DENIED");
               if (error instanceof MenuReviewDependencyChangedError)
                 return fail("CATALOG_VERSION_CONFLICT");
+              if (error instanceof MenuRecipeAllergenError && error.gap !== null)
+                throw new MenuReviewGapError(error.gap);
               return fail("CATALOG_DEPENDENCY_UNAVAILABLE");
             });
           if (

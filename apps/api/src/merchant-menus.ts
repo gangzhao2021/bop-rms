@@ -14,6 +14,7 @@ import {
   currentAllergenRegistry,
   availabilityPermission,
   listBrandMenus,
+  listBrandOptionSets,
   listBrandSkuChoices,
   listStoreAvailabilityRules,
   parseCatalogHash,
@@ -28,6 +29,8 @@ import {
   currentStorePriceBook,
   type CurrencyMetadataSnapshot,
 } from "@rms/pricing";
+import { listInventoryRecipeIngredientFacts } from "@rms/inventory";
+import { MenuReviewGapError, type MenuReviewGap } from "./menu-recipe-allergen-source.js";
 import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -74,10 +77,21 @@ export class MerchantMenuError extends Error {
       | "SoleOperatorNotInEffect"
       /** WP-2423 Q19: approving alone needs a second-factor check in the last 15 minutes. */
       | "NeedsReverification",
+    /** WP-2423 (v15 2026-10-22): for ReviewBlocked, what the review found missing, named. */
+    readonly problem: MenuReviewProblem | null = null,
   ) {
     super(code);
     this.name = "MerchantMenuError";
   }
+}
+/** A menu review gap in staff terms: names only, never references or internal codes. */
+export interface MenuReviewProblem {
+  readonly missing: MenuReviewGap["missing"];
+  readonly productName: string | null;
+  readonly sizeName: string | null;
+  readonly optionName: string | null;
+  readonly quantity: number | null;
+  readonly ingredientName: string | null;
 }
 const fail = (code: MerchantMenuError["code"]): never => {
   throw new MerchantMenuError(code);
@@ -509,6 +523,43 @@ export function createMerchantMenus(options: {
       };
     });
   };
+  /** Names a review gap for staff in a fresh read (the failed review's transaction is gone). */
+  const describeGap = (
+    sessionCookie: unknown,
+    sessionReference: string,
+    gap: MenuReviewGap,
+  ): Promise<MenuReviewProblem> =>
+    options.persistence.transactions.run((tx) =>
+      withRememberedBrandAuthorization(tx, async () => {
+        const s = await scopeFor(tx, sessionCookie, sessionReference);
+        const sku = (await listBrandSkuChoices(ptx(tx) as never, s.owner)).find(
+          (item) => item.skuReference === gap.skuReference,
+        );
+        const option =
+          gap.optionReference === null
+            ? undefined
+            : (await listBrandOptionSets(ptx(tx), s.owner))
+                .flatMap((set) => set.draft.options)
+                .find((item) => String(item.optionReference) === gap.optionReference);
+        const ingredient =
+          gap.ingredientReference === null
+            ? undefined
+            : (await listInventoryRecipeIngredientFacts(ptx(tx) as never, s.owner)).find(
+                (item) => item.itemReference === gap.ingredientReference,
+              );
+        await brandScope(tx, s.owner.brandReference);
+        return {
+          missing: gap.missing,
+          productName: sku ? name(sku.productLocalizedNames, sku.skuCode) : null,
+          sizeName: sku ? name(sku.localizedNames, sku.skuCode) : null,
+          optionName: option ? name(option.localizedNames, "") || null : null,
+          quantity: gap.quantity,
+          ingredientName: ingredient
+            ? name(ingredient.localizedNames, ingredient.internalCode)
+            : null,
+        };
+      }),
+    );
   const unpricedOptions = async (tx: unknown, s: Scope, aggregate: MenuAggregate) => {
     const missing = await unpricedMenuOptions(ptx(tx) as never, {
       owner: s.owner,
@@ -1017,6 +1068,13 @@ export function createMerchantMenus(options: {
       );
     } catch (error) {
       if (error instanceof MerchantMenuError) throw error;
+      if (error instanceof MenuReviewGapError)
+        throw new MerchantMenuError(
+          "ReviewBlocked",
+          await describeGap(input.sessionCookie, current.sessionReference, error.gap).catch(
+            () => null,
+          ),
+        );
       if (error instanceof MerchantSoleOperatorGateError)
         return fail(
           error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification",

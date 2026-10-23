@@ -6,6 +6,7 @@ import {
   itemsNotOfferedHere,
   mayDiscardDraft,
   MenuPageError,
+  menuReviewProblemText,
   orderTypeText,
   menuRevisionAction,
   menuStage,
@@ -132,6 +133,59 @@ describe("WP-2423 menu page helpers", () => {
       throw new TypeError("network");
     });
     await expect(offline.load(null)).rejects.toBeInstanceOf(MenuPageError);
+  });
+  it("says which item, size, option or ingredient blocked the review, in staff words", async () => {
+    const blocked = createMenuClient("csrf", async () =>
+      Response.json(
+        {
+          error: "ReviewBlocked",
+          problem: {
+            missing: "AllergenDeclaration",
+            productName: "Latte",
+            sizeName: "Regular",
+            optionName: "Hazelnut syrup",
+            quantity: 2,
+            ingredientName: "Hazelnut syrup",
+          },
+        },
+        { status: 409 },
+      ),
+    );
+    const error = await blocked.command?.({} as never).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "ReviewBlocked" });
+    const problem = (error as MenuPageError).problem;
+    if (problem === null) throw new Error("expected the review problem");
+    expect(menuReviewProblemText(problem)).toBe(
+      "The ingredient Hazelnut syrup in Latte — Regular with Hazelnut syrup × 2 has no current allergen declaration. Record or renew it under Allergens, then submit again.",
+    );
+    const base = {
+      productName: "Latte",
+      sizeName: "Latte",
+      optionName: null,
+      quantity: null,
+      ingredientName: null,
+    };
+    expect(menuReviewProblemText({ ...base, missing: "Recipe" })).toBe(
+      "Latte has no published recipe for this menu's Stores. Publish one under Recipes and assign it to this size, then submit again.",
+    );
+    expect(
+      menuReviewProblemText({
+        ...base,
+        missing: "OptionRecipe",
+        optionName: "Oat milk",
+        quantity: 1,
+      }),
+    ).toBe(
+      "Latte: the option Oat milk has no published recipe change. Set, review and publish it under Option recipes, then submit again.",
+    );
+    // Unknown or malformed details fall back to the general message; codes never reach staff.
+    const unknown = createMenuClient("csrf", async () =>
+      Response.json({ error: "ReviewBlocked", problem: { missing: "SOMETHING" } }, { status: 409 }),
+    );
+    expect(
+      ((await unknown.command?.({} as never).catch((caught: unknown) => caught)) as MenuPageError)
+        .problem,
+    ).toBeNull();
   });
   it("reads what customers will see, rendering only public photo paths, and summarizes changes", () => {
     const photo = (url: string) => ({ url, width: 320, height: 240, altText: "Latte in a glass" });

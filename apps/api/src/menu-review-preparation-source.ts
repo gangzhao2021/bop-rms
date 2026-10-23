@@ -320,7 +320,9 @@ export function createMenuReviewPreparationSource(options: {
         }).validation;
         if (!(await authorize("Catalog"))) return fail();
         return Object.freeze({ record, validation, resolvedConfigurations });
-      } catch {
+      } catch (error) {
+        // WP-2423 (v15 2026-10-22): keep what is missing so staff are told which item to fix.
+        if (error instanceof MenuRecipeAllergenError && error.gap !== null) throw error;
         return fail();
       }
     },
@@ -399,6 +401,7 @@ export function createMenuReviewDependencyBindingSource(
         return record;
       } catch (error) {
         if (error instanceof MenuReviewDependencyChangedError) throw error;
+        if (error instanceof MenuRecipeAllergenError && error.gap !== null) throw error;
         return fail();
       }
     },
