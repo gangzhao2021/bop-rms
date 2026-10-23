@@ -23,6 +23,7 @@ import {
   createPostgresMenuPublicationRepository,
   createPostgresMenuPublicationEvidenceSource,
   listBrandMenus,
+  listPublishedSellableAllergenDisclosures,
 } from "../../rms/catalog/src/index.ts";
 import { createPostgresCurrentMenuReleaseStore } from "../../rms/catalog/src/infrastructure/persistence/current-menu-release-store.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -404,6 +405,8 @@ it.each([
                 productVersionReference: product.productVersionReference,
                 evidenceReferences: [id(961)],
                 optionEvidenceReferences: {},
+                // WP-2423 ⑪: the per-choice evidence (here the one set: no option chosen).
+                choiceEvidence: { options: [], outcomes: [[id(961)]], sets: [[0]] },
               },
             ],
           };
@@ -652,6 +655,18 @@ it.each([
             allergenValidation.disclosures[id(20)],
             contentRecord.content.sections[0].sellables[0].allergenDisclosure,
           );
+          // WP-2423 ⑪: per-choice allergens are derived from the same evidence as the union.
+          const expectedByChoice = {
+            options: [],
+            outcomes: [
+              allergenValidation.disclosures[id(20)].items.map((item) => ({
+                code: item.code,
+                classification: item.classification,
+              })),
+            ],
+            sets: [[0]],
+          };
+          assert.deepEqual(allergenValidation.disclosures[id(20)].byChoice, expectedByChoice);
           const validation = () => allergenValidation.validation;
           const approval = () => ({
             evidenceReference: id(952),
@@ -1060,6 +1075,24 @@ it.each([
             at: query.observedAt,
             generation: id(980),
           });
+          // WP-2423 ⑪: the kitchen's disclosure read returns the projection's per-choice allergens.
+          const projected = await runner.run((tx) =>
+            listPublishedSellableAllergenDisclosures(
+              tx,
+              { brandReference: id(1), storeReference: scope.storeReference },
+              [
+                {
+                  menuVersionReference: id(801),
+                  sellableReference: id(20),
+                  productVersionReference: product.productVersionReference,
+                },
+              ],
+            ),
+          );
+          assert.deepEqual(
+            [...projected.values()].map((item) => item.byChoice),
+            [expectedByChoice],
+          );
           // The projection written by the restricted consumer keeps the reviewed description and photo.
           assert.deepEqual(
             (
@@ -1126,6 +1159,11 @@ it.each([
           assert.equal(retained.localizedNames["en-CA"], "Synthetic");
           assert.equal(retained.sections[0].sellables[0].localizedNames["fr-CA"], "Produit");
           assert.equal(retained.sections[0].sellables[0].allergenDisclosure.items[0].code, "MILK");
+          // WP-2423 ⑪: stored and read back under the restricted role, byChoice is unchanged.
+          assert.deepEqual(
+            retained.sections[0].sellables[0].allergenDisclosure.byChoice,
+            expectedByChoice,
+          );
           assert.equal(retained.effectiveFrom, period.effectiveFrom.instant);
           assert.equal(retained.effectiveUntil, period.effectiveUntil.instant);
           assert.equal(
