@@ -51,6 +51,7 @@ it("expands option recipe changes into reviewed, published modifier rules", asyn
       beans = id(32),
       undeclared = id(33),
       sugar = id(34),
+      packet = id(35),
       tree = id(40);
     const scope = { brandReference: brand, storeReference: store };
     let second = 0;
@@ -159,6 +160,8 @@ it("expands option recipe changes into reviewed, published modifier rules", asyn
         item(beans, "Mass", "G", []),
         item(undeclared, "Volume", "ML", null),
         item(sugar, "Mass", "G", []),
+        // Inventory counts single items in EA (e.g. a sweetener packet).
+        item(packet, "Count", "EA", []),
       ]);
       const content = (change) =>
         parseOptionRecipeChangeContent({
@@ -310,10 +313,28 @@ it("expands option recipe changes into reviewed, published modifier rules", asyn
         skuReferences: [sku],
         quantities: [1, 2, 3],
       };
+      // v15 2026-10-22: an ingredient counted in EA (Inventory's unit for single items) is added
+      // per one chosen; it was refused as a unit mismatch because only EACH was known here.
+      await save(
+        shotTarget,
+        content({ kind: "Add", toItemReference: packet, quantity: "1", unitCostCents: "5" }),
+        null,
+      );
+      assert.deepEqual(
+        (await listed(shotTarget)).expansion.map((entry) => [
+          entry.quantity,
+          entry.lines[0].toQuantityMicrounits,
+        ]),
+        [
+          [1, "1000000"],
+          [2, "2000000"],
+          [3, "3000000"],
+        ],
+      );
       await save(
         shotTarget,
         content({ kind: "Add", toItemReference: beans, quantity: "18", unitCostCents: "2.45" }),
-        null,
+        1,
       );
       const shots = await listed(shotTarget);
       assert.deepEqual(
@@ -340,11 +361,11 @@ it("expands option recipe changes into reviewed, published modifier rules", asyn
         )
       ).rows.map((r) => [r.action_code, r.n]);
       assert.deepEqual(audits, [
-        ["RECIPE_MODIFIER_DRAFT", 5],
+        ["RECIPE_MODIFIER_DRAFT", 8],
         ["RECIPE_MODIFIER_PUBLISHED", 1],
         ["RECIPE_OPTION_CHANGE_PUBLISHED", 1],
         ["RECIPE_OPTION_CHANGE_REVIEWED", 2],
-        ["RECIPE_OPTION_CHANGE_SAVED", 3],
+        ["RECIPE_OPTION_CHANGE_SAVED", 4],
         ["RECIPE_PREPARATION_PUBLISHED", 1],
       ]);
     } finally {

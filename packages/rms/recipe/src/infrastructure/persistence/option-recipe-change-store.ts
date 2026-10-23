@@ -88,6 +88,9 @@ const unitFactors: Readonly<Record<string, readonly [string, bigint]>> = {
   ML: ["Volume", 1n],
   L: ["Volume", 1000n],
   EACH: ["Count", 1n],
+  // Inventory's base unit for single items (a packet, a lid). PACK stays out: how many each a
+  // pack holds is not known here, so it cannot replace or be replaced by a counted amount.
+  EA: ["Count", 1n],
 };
 
 export type OptionRecipeChangeKind = "NoChange" | "Replace" | "Add" | "Remove";
