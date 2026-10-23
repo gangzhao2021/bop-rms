@@ -1,3 +1,4 @@
+import { currentLanguage } from "../i18n/i18n.js";
 import type {
   CustomerMenuClient,
   MenuAllergenItem,
@@ -289,12 +290,35 @@ function allergenDisclosure(value: unknown) {
         (entry.classification !== "Contains" && entry.classification !== "CrossContactPossible")
       )
         throw new TypeError("allergen item invalid");
-      const name = text(entry.name);
+      const name = allergenName(entry.code, text(entry.name));
       names.set(entry.code, name);
       return Object.freeze({ name, classification: entry.classification });
     }),
   );
   return { items, byChoice: hasChoices ? allergensByChoice(raw.byChoice, names) : undefined };
+}
+
+/**
+ * Owner 2026-10-23: the Canadian priority allergens in Simplified Chinese, by registry code. Used
+ * while Chinese is chosen unless the Store's registry already names the allergen in Chinese.
+ */
+const chineseAllergenNames: Readonly<Record<string, string>> = Object.freeze({
+  CRUSTACEAN_MOLLUSC: "甲壳类和软体类海鲜",
+  EGG: "蛋",
+  FISH: "鱼",
+  GLUTEN: "麸质来源（大麦、燕麦、黑麦）",
+  MILK: "牛奶",
+  MUSTARD: "芥末",
+  PEANUT: "花生",
+  SESAME: "芝麻",
+  SOY: "大豆",
+  SULPHITES: "亚硫酸盐",
+  TREE_NUT: "坚果",
+  WHEAT_TRITICALE: "小麦和黑小麦",
+});
+function allergenName(code: string, name: string): string {
+  if (currentLanguage() !== "zh-Hans" || /\p{Script=Han}/u.test(name)) return name;
+  return chineseAllergenNames[code] ?? name;
 }
 
 /** WP-2423 ⑪: per-choice allergens, named as in the item's disclosure. */

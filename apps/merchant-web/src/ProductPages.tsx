@@ -176,6 +176,8 @@ interface EditableSize {
   readonly lifecycle: string;
   skuCode: string;
   name: string;
+  /** Owner 2026-10-23: the Simplified Chinese name customers see ("" when none). */
+  nameZh: string;
 }
 let sizeKey = 0;
 /** Option sets in order, each with its enabled options in any order. */
@@ -218,12 +220,20 @@ function ProductEditor({
     parse,
   );
   const [name, setName] = useState("");
+  const [nameZh, setNameZh] = useState("");
   const [code, setCode] = useState("");
   const [codeTouched, setCodeTouched] = useState(false);
   const [productType, setProductType] = useState("NonAlcoholicBeverage");
   const [taxClass, setTaxClass] = useState("");
   const [sizes, setSizes] = useState<EditableSize[]>([
-    { key: nextKey(), skuReference: null, lifecycle: "Draft", skuCode: "", name: "Regular" },
+    {
+      key: nextKey(),
+      skuReference: null,
+      lifecycle: "Draft",
+      skuCode: "",
+      name: "Regular",
+      nameZh: "",
+    },
   ]);
   const [optionSets, setOptionSets] = useState<ProductOptionSetInput[]>([]);
   const [presentation, setPresentation] = useState<PresentationDraft>(emptyPresentation);
@@ -251,6 +261,7 @@ function ProductEditor({
       if (loadedVersion === current.aggregateVersion) return;
       setLoadedVersion(current.aggregateVersion);
       setName(current.name);
+      setNameZh(current.nameZh ?? "");
       setCode(current.internalCode);
       setProductType(current.productType);
       setTaxClass(current.taxClassificationReference ?? "");
@@ -261,6 +272,7 @@ function ProductEditor({
           lifecycle: size.lifecycle,
           skuCode: size.skuCode,
           name: size.name,
+          nameZh: size.nameZh ?? "",
         })),
       );
       setOptionSets([...(current.optionSets ?? [])]);
@@ -323,6 +335,7 @@ function ProductEditor({
     skuReference: size.skuReference,
     skuCode: size.skuCode.trim().toUpperCase(),
     name: size.name.trim(),
+    nameZh: size.nameZh.trim(),
   }));
   const save = () =>
     void send(
@@ -335,6 +348,7 @@ function ProductEditor({
               internalCode: (code || suggestProductCode(name)).trim().toUpperCase(),
               productType,
               name: name.trim(),
+              nameZh: nameZh.trim(),
               taxClassificationReference: taxClass,
               sizes: sizeInputs,
             }
@@ -344,6 +358,7 @@ function ProductEditor({
               productReference: product.productReference,
               expectedAggregateVersion: product.aggregateVersion,
               name: name.trim(),
+              nameZh: nameZh.trim(),
               taxClassificationReference: taxClass,
               sizes: sizeInputs,
               ...(optionChoices === null ? {} : { optionSets }),
@@ -445,6 +460,19 @@ function ProductEditor({
             />
           </label>
           <label>
+            Chinese name (中文名称, optional)
+            <input
+              lang="zh-Hans"
+              value={nameZh}
+              maxLength={120}
+              aria-describedby="product-chinese-help"
+              onChange={(event) => setNameZh(event.target.value)}
+            />
+          </label>
+          <p id="product-chinese-help">
+            Customers who choose 中文 see this name; without it they see the name above.
+          </p>
+          <label>
             Code
             <input
               value={codeTouched || product ? code : code || suggestProductCode(name)}
@@ -503,6 +531,7 @@ function ProductEditor({
             <thead>
               <tr>
                 <th>Size name</th>
+                <th>Chinese name</th>
                 <th>Size code</th>
                 <th>Status</th>
                 <th aria-label="Remove" />
@@ -520,6 +549,21 @@ function ProductEditor({
                         setSizes((current) =>
                           current.map((item) =>
                             item.key === size.key ? { ...item, name: event.target.value } : item,
+                          ),
+                        )
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      lang="zh-Hans"
+                      aria-label={`Size ${index + 1} Chinese name`}
+                      value={size.nameZh}
+                      maxLength={80}
+                      onChange={(event) =>
+                        setSizes((current) =>
+                          current.map((item) =>
+                            item.key === size.key ? { ...item, nameZh: event.target.value } : item,
                           ),
                         )
                       }
@@ -571,6 +615,7 @@ function ProductEditor({
                     lifecycle: "Draft",
                     skuCode: "",
                     name: "",
+                    nameZh: "",
                   },
                 ])
               }
@@ -792,7 +837,12 @@ function ProductOptionSetsFieldset({
   );
 }
 
-const emptyPresentation: PresentationDraft = { description: "", photo: null, altText: "" };
+const emptyPresentation: PresentationDraft = {
+  description: "",
+  descriptionZh: "",
+  photo: null,
+  altText: "",
+};
 const presentationNote =
   "Customers see the description and photo after the menu is next published.";
 const photoErrorText: Record<ProductPhotoErrorCode, string> = {
@@ -846,10 +896,7 @@ export function ProductCustomerMenuFieldset({
   readonly value: PresentationDraft;
   readonly onChange: (next: PresentationDraft) => void;
   readonly onUploadingChange: (uploading: boolean) => void;
-  readonly problems: {
-    readonly description?: PresentationProblem;
-    readonly altText?: PresentationProblem;
-  };
+  readonly problems: ReturnType<typeof presentationProblems>;
   readonly altTextRef?: Ref<HTMLInputElement>;
   readonly initialUpload?: PhotoUploadState;
 }) {
@@ -930,6 +977,27 @@ export function ProductCustomerMenuFieldset({
         {problems.description ? (
           <p id={ids.descriptionError} className="product-customer-menu__error" role="alert">
             {presentationProblemText(problems.description, "description")}
+          </p>
+        ) : null}
+      </div>
+      <div className="product-customer-menu__field">
+        <label htmlFor={`${id}-description-zh`}>Chinese description (中文描述, optional)</label>
+        <textarea
+          id={`${id}-description-zh`}
+          lang="zh-Hans"
+          value={value.descriptionZh}
+          maxLength={presentationLimits.description}
+          rows={3}
+          aria-invalid={problems.descriptionZh ? true : undefined}
+          aria-describedby={`${id}-description-zh-help`}
+          onChange={(event) => onChange({ ...value, descriptionZh: event.target.value })}
+        />
+        <p id={`${id}-description-zh-help`} className="product-customer-menu__help">
+          Customers who choose 中文 see this; without it they see the description above.
+        </p>
+        {problems.descriptionZh ? (
+          <p className="product-customer-menu__error" role="alert">
+            {presentationProblemText(problems.descriptionZh, "description")}
           </p>
         ) : null}
       </div>

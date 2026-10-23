@@ -27,6 +27,7 @@ import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { chineseOf, optionalChinese, withChinese } from "./merchant-chinese-text.js";
 
 /**
  * WP-2423 / DEC-CAT-PRODUCT-ADMIN: CAT-PRODUCT-LIST / CAT-PRODUCT-DETAIL for the selected Store's Brand.
@@ -106,6 +107,8 @@ export interface ProductSizeInput {
   readonly skuReference: string | null;
   readonly skuCode: string;
   readonly name: string;
+  /** Owner 2026-10-23: the size's Simplified Chinese name ("" clears it; absent keeps it). */
+  readonly nameZh?: string;
 }
 /** An option set on a product: the options of the set this product offers. */
 export interface ProductOptionSetInput {
@@ -115,6 +118,8 @@ export interface ProductOptionSetInput {
 /** The customer-facing description ("" = none) and photo of a product, in the page locale. */
 export interface ProductPresentationInput {
   readonly description: string;
+  /** Owner 2026-10-23: the Simplified Chinese description ("" clears it; absent keeps it). */
+  readonly descriptionZh?: string;
   readonly photo: { readonly imageReference: string; readonly altText: string } | null;
 }
 export type ProductCommandBody =
@@ -124,6 +129,7 @@ export type ProductCommandBody =
       readonly internalCode: string;
       readonly productType: (typeof productTypes)[number];
       readonly name: string;
+      readonly nameZh?: string;
       readonly taxClassificationReference: string;
       readonly sizes: readonly ProductSizeInput[];
     }
@@ -133,6 +139,7 @@ export type ProductCommandBody =
       readonly productReference: string;
       readonly expectedAggregateVersion: number;
       readonly name: string;
+      readonly nameZh?: string;
       readonly taxClassificationReference: string;
       readonly sizes: readonly ProductSizeInput[];
       /** Absent: the product's option sets stay as they are. */
@@ -154,12 +161,21 @@ function sizes(value: unknown, creating: boolean): readonly ProductSizeInput[] {
       r === null ||
       typeof r !== "object" ||
       Array.isArray(r) ||
-      Object.keys(r).sort().join(",") !== "name,skuCode,skuReference"
+      Object.keys(r)
+        .filter((key) => key !== "nameZh")
+        .sort()
+        .join(",") !== "name,skuCode,skuReference"
     )
       return fail("Invalid");
     const skuReference = nullableRef(r.skuReference);
     if (creating && skuReference !== null) return fail("Invalid");
-    return { skuReference, skuCode: codeOf(r.skuCode), name: text(r.name, 80) };
+    const nameZh = optionalChinese(r.nameZh, 80, () => fail("Invalid"));
+    return {
+      skuReference,
+      skuCode: codeOf(r.skuCode),
+      name: text(r.name, 80),
+      ...(nameZh === undefined ? {} : { nameZh }),
+    };
   });
   if (
     new Set(parsed.map((size) => size.skuCode)).size !== parsed.length ||
@@ -198,11 +214,18 @@ function presentationInput(value: unknown): ProductPresentationInput {
     r === null ||
     typeof r !== "object" ||
     Array.isArray(r) ||
-    Object.keys(r).sort().join(",") !== "description,photo"
+    Object.keys(r)
+      .filter((key) => key !== "descriptionZh")
+      .sort()
+      .join(",") !== "description,photo"
   )
     return fail("Invalid");
   const description = optionalText(r.description, productDescriptionMaximum);
-  if (r.photo === null) return { description, photo: null };
+  const descriptionZh = optionalChinese(r.descriptionZh, productDescriptionMaximum, () =>
+    fail("Invalid"),
+  );
+  const zh = descriptionZh === undefined ? {} : { descriptionZh };
+  if (r.photo === null) return { description, ...zh, photo: null };
   const photo = r.photo as Record<string, unknown> | null;
   if (
     photo === null ||
@@ -213,6 +236,7 @@ function presentationInput(value: unknown): ProductPresentationInput {
     return fail("Invalid");
   return {
     description,
+    ...zh,
     photo: {
       imageReference: ref(photo.imageReference),
       altText: text(photo.altText, productPhotoAltTextMaximum),
@@ -222,7 +246,12 @@ function presentationInput(value: unknown): ProductPresentationInput {
 export function parseProductCommandBody(value: unknown): ProductCommandBody {
   const r = value as Record<string, unknown> | null;
   if (r === null || typeof r !== "object" || Array.isArray(r)) return fail("Invalid");
-  const keys = Object.keys(r).sort().join(",");
+  const keys = Object.keys(r)
+    .filter((key) => key !== "nameZh")
+    .sort()
+    .join(",");
+  const nameZh = optionalChinese(r.nameZh, 120, () => fail("Invalid"));
+  const zhName = nameZh === undefined ? {} : { nameZh };
   if (
     r.action === "Create" &&
     keys ===
@@ -235,6 +264,7 @@ export function parseProductCommandBody(value: unknown): ProductCommandBody {
       internalCode: codeOf(r.internalCode),
       productType: r.productType as (typeof productTypes)[number],
       name: text(r.name, 120),
+      ...zhName,
       taxClassificationReference: ref(r.taxClassificationReference),
       sizes: sizes(r.sizes, true),
     };
@@ -252,7 +282,13 @@ export function parseProductCommandBody(value: unknown): ProductCommandBody {
   if (
     r.action === "SaveDraft" &&
     saveKeys.every((key) => own.includes(key)) &&
-    own.every((key) => saveKeys.includes(key) || key === "optionSets" || key === "presentation")
+    own.every(
+      (key) =>
+        saveKeys.includes(key) ||
+        key === "optionSets" ||
+        key === "presentation" ||
+        key === "nameZh",
+    )
   )
     return {
       action: "SaveDraft",
@@ -260,6 +296,7 @@ export function parseProductCommandBody(value: unknown): ProductCommandBody {
       productReference: ref(r.productReference),
       expectedAggregateVersion: version(r.expectedAggregateVersion),
       name: text(r.name, 120),
+      ...zhName,
       taxClassificationReference: ref(r.taxClassificationReference),
       sizes: sizes(r.sizes, false),
       ...(own.includes("optionSets") ? { optionSets: optionSetInputs(r.optionSets) } : {}),
@@ -320,9 +357,11 @@ export function presentationView(
   const presentation = product.draft.customerPresentation;
   const pick = (values: Readonly<Record<string, string>>) =>
     values[locale] ?? values[product.draft.defaultLocale] ?? Object.values(values)[0] ?? "";
-  if (presentation === undefined) return { description: "", photo: null };
+  if (presentation === undefined) return { description: "", descriptionZh: "", photo: null };
+  const descriptionZh = chineseOf(presentation.localizedDescriptions);
   const photo = presentation.photo;
-  if (photo === null) return { description: pick(presentation.localizedDescriptions), photo: null };
+  if (photo === null)
+    return { description: pick(presentation.localizedDescriptions), descriptionZh, photo: null };
   const image = images.get(String(photo.imageReference));
   const preview = image?.renditions.find(
     (rendition) => rendition.width === 640 && rendition.contentType === "image/jpeg",
@@ -330,6 +369,7 @@ export function presentationView(
   if (image === undefined || preview === undefined) return fail("PhotoStorageUnavailable");
   return {
     description: pick(presentation.localizedDescriptions),
+    descriptionZh,
     photo: {
       imageReference: String(photo.imageReference),
       altText: pick(photo.localizedAltText),
@@ -353,11 +393,13 @@ export function productView(
     lifecycle: product.lifecycle,
     aggregateVersion: product.aggregateVersion,
     name: name(product.draft.localizedNames),
+    nameZh: chineseOf(product.draft.localizedNames),
     taxClassificationReference: product.draft.taxClassificationReference,
     sizes: product.draft.skus.map((sku) => ({
       skuReference: sku.skuReference,
       skuCode: sku.skuCode,
       name: name(sku.localizedNames),
+      nameZh: chineseOf(sku.localizedNames),
       lifecycle: sku.lifecycle,
       unitOfSale: sku.unitOfSale,
     })),
@@ -709,12 +751,15 @@ export function createMerchantProducts(options: {
             input: ProductPresentationInput,
           ) => {
             const current = product.draft.customerPresentation;
-            const descriptions: Record<string, string> = Object.fromEntries(
+            let descriptions: Record<string, string> = Object.fromEntries(
               Object.entries(current?.localizedDescriptions ?? {}).filter(
                 ([locale]) => locale !== options.locale,
               ),
             );
             if (input.description !== "") descriptions[options.locale] = input.description;
+            // Owner 2026-10-23: the Chinese description (kept above unless the editor sent one).
+            if (input.descriptionZh !== undefined)
+              descriptions = withChinese(descriptions, input.descriptionZh);
             let photo: NonNullable<ProductAggregate["draft"]["customerPresentation"]>["photo"] =
               null;
             if (input.photo !== null) {
@@ -760,11 +805,11 @@ export function createMerchantProducts(options: {
                 internalCode: body.internalCode,
                 productType: body.productType,
                 defaultLocale: options.locale,
-                localizedNames: names(body.name),
+                localizedNames: withChinese(names(body.name), body.nameZh),
                 taxClassificationReference: body.taxClassificationReference,
                 skus: body.sizes.map((size, index) => ({
                   skuCode: size.skuCode,
-                  localizedNames: names(size.name),
+                  localizedNames: withChinese(names(size.name), size.nameZh),
                   variantSelections:
                     body.sizes.length === 1
                       ? []
@@ -856,7 +901,10 @@ export function createMerchantProducts(options: {
                   if (existing.skuCode !== size.skuCode) fail("Invalid");
                   return {
                     ...existing,
-                    localizedNames: { ...existing.localizedNames, ...names(size.name) },
+                    localizedNames: withChinese(
+                      { ...existing.localizedNames, ...names(size.name) },
+                      size.nameZh,
+                    ),
                     variantSelections: selection,
                   };
                 }
@@ -866,7 +914,10 @@ export function createMerchantProducts(options: {
                   brandReference: product.brandReference,
                   skuCode: size.skuCode,
                   lifecycle: "Draft" as const,
-                  localizedNames: { [product.draft.defaultLocale]: size.name, ...names(size.name) },
+                  localizedNames: withChinese(
+                    { [product.draft.defaultLocale]: size.name, ...names(size.name) },
+                    size.nameZh,
+                  ),
                   variantSelections: selection,
                   unitOfSale: "EACH",
                   unitQuantity: "1",
@@ -889,7 +940,10 @@ export function createMerchantProducts(options: {
                 requestedAt: at,
                 draft: {
                   ...product.draft,
-                  localizedNames: { ...product.draft.localizedNames, ...names(body.name) },
+                  localizedNames: withChinese(
+                    { ...product.draft.localizedNames, ...names(body.name) },
+                    body.nameZh,
+                  ),
                   taxClassificationReference: body.taxClassificationReference,
                   skus,
                   optionBindings,

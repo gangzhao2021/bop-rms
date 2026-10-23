@@ -301,6 +301,8 @@ interface EditableSection {
   readonly sectionReference: string | null;
   readonly code: string | null;
   name: string;
+  /** Owner 2026-10-23: the Simplified Chinese name customers see ("" when none). */
+  nameZh: string;
   items: { skuReference: string; featured: boolean }[];
 }
 let sectionKey = 0;
@@ -336,6 +338,7 @@ function MenuBuilder({
         sectionReference: section.sectionReference,
         code: section.code,
         name: section.name,
+        nameZh: section.nameZh ?? "",
         items: section.items.map((item) => ({
           skuReference: item.skuReference,
           featured: item.featured,
@@ -525,6 +528,7 @@ function MenuBuilder({
                 sectionReference: section.sectionReference,
                 code: section.code ?? sectionCode(section.name),
                 name: section.name.trim(),
+                nameZh: section.nameZh.trim(),
                 items: section.items,
               })),
             },
@@ -554,6 +558,18 @@ function MenuBuilder({
                   maxLength={80}
                   onChange={(event) =>
                     updateSection(section.key, (s) => ({ ...s, name: event.target.value }))
+                  }
+                />
+              </label>
+              <label>
+                Chinese name (中文名称, optional)
+                <input
+                  lang="zh-Hans"
+                  value={section.nameZh}
+                  maxLength={80}
+                  placeholder="咖啡"
+                  onChange={(event) =>
+                    updateSection(section.key, (s) => ({ ...s, nameZh: event.target.value }))
                   }
                 />
               </label>
@@ -700,6 +716,7 @@ function MenuBuilder({
                     sectionReference: null,
                     code: null,
                     name: "",
+                    nameZh: "",
                     items: [],
                   },
                 ])

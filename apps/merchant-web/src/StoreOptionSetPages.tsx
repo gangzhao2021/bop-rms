@@ -149,6 +149,8 @@ interface EditableOption {
   readonly key: string;
   readonly optionReference: string | null;
   name: string;
+  /** Owner 2026-10-23: the Simplified Chinese name customers see ("" when none). */
+  nameZh: string;
   offered: boolean;
   defaultChoice: boolean;
 }
@@ -158,6 +160,7 @@ const blank = (): EditableOption => ({
   key: nextKey(),
   optionReference: null,
   name: "",
+  nameZh: "",
   offered: true,
   defaultChoice: false,
 });
@@ -176,6 +179,7 @@ function OptionSetEditor({
     reference ?? "new",
   );
   const [name, setName] = useState("");
+  const [nameZh, setNameZh] = useState("");
   const [kind, setKind] = useState<OptionChoiceKind>("One");
   const [minimum, setMinimum] = useState(1);
   const [maximum, setMaximum] = useState<number | null>(1);
@@ -199,6 +203,7 @@ function OptionSetEditor({
     if (set === null || loadedVersion === set.aggregateVersion) return;
     setLoadedVersion(set.aggregateVersion);
     setName(set.name);
+    setNameZh(set.nameZh ?? "");
     setKind(set.kind);
     setMinimum(set.minimum);
     setMaximum(set.maximum);
@@ -208,6 +213,7 @@ function OptionSetEditor({
         key: nextKey(),
         optionReference: option.optionReference,
         name: option.name,
+        nameZh: option.nameZh ?? "",
         offered: option.offered,
         defaultChoice: option.defaultChoice,
       })),
@@ -237,6 +243,7 @@ function OptionSetEditor({
 
   const body = () => ({
     name: name.trim(),
+    nameZh: nameZh.trim(),
     kind,
     minimum: effectiveMinimum,
     maximum: effectiveMaximum,
@@ -244,6 +251,7 @@ function OptionSetEditor({
     options: rows.map((row) => ({
       optionReference: row.optionReference,
       name: row.name.trim(),
+      nameZh: row.nameZh.trim(),
       offered: row.offered,
       defaultChoice: row.defaultChoice,
     })),
@@ -366,6 +374,16 @@ function OptionSetEditor({
             />
           </label>
           <label>
+            Chinese name (中文名称, optional)
+            <input
+              lang="zh-Hans"
+              value={nameZh}
+              maxLength={80}
+              placeholder="奶类"
+              onChange={(event) => setNameZh(event.target.value)}
+            />
+          </label>
+          <label>
             Customers
             <select
               value={kind}
@@ -452,6 +470,7 @@ function OptionSetEditor({
             <thead>
               <tr>
                 <th>Option</th>
+                <th>Chinese name</th>
                 <th>Offered</th>
                 <th>Default</th>
                 <th aria-label="Order" />
@@ -467,6 +486,16 @@ function OptionSetEditor({
                       maxLength={80}
                       placeholder={index === 0 ? "Whole milk" : index === 1 ? "Oat milk" : ""}
                       onChange={(event) => update(row.key, { name: event.target.value })}
+                    />
+                  </td>
+                  <td data-label="Chinese name">
+                    <input
+                      lang="zh-Hans"
+                      aria-label={`Option ${index + 1} Chinese name`}
+                      value={row.nameZh}
+                      maxLength={80}
+                      placeholder={index === 0 ? "全脂牛奶" : index === 1 ? "燕麦奶" : ""}
+                      onChange={(event) => update(row.key, { nameZh: event.target.value })}
                     />
                   </td>
                   <td data-label="Offered">

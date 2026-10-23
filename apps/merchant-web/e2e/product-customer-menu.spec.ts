@@ -240,6 +240,8 @@ test("@production staff add a description and a described photo to a product and
   await expect.poll(() => commands.length).toBe(2);
   expect(commands[1]?.presentation).toEqual({
     description: "Double ristretto with steamed whole milk.",
+    // Owner 2026-10-23: the editor always sends its Chinese description ("" = none).
+    descriptionZh: "",
     photo: null,
   });
 });

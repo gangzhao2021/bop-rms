@@ -16,6 +16,7 @@ import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { chineseOf, optionalChinese, withChinese } from "./merchant-chinese-text.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 
 /**
@@ -69,6 +70,8 @@ export const codeForName = (name: string, prefix: string) => {
 export type OptionChoiceKind = "One" | "Any" | "Quantity";
 export interface OptionSetBody {
   readonly name: string;
+  /** Owner 2026-10-23: the set's Simplified Chinese name ("" clears it; absent keeps it). */
+  readonly nameZh?: string;
   readonly kind: OptionChoiceKind;
   /** Customers must choose at least this many (0 = optional). */
   readonly minimum: number;
@@ -79,6 +82,7 @@ export interface OptionSetBody {
   readonly options: readonly {
     readonly optionReference: string | null;
     readonly name: string;
+    readonly nameZh?: string;
     readonly offered: boolean;
     readonly defaultChoice: boolean;
   }[];
@@ -109,14 +113,19 @@ function parseBody(r: Record<string, unknown>): OptionSetBody {
     if (
       o === null ||
       typeof o !== "object" ||
-      Object.keys(o).sort().join(",") !== "defaultChoice,name,offered,optionReference" ||
+      Object.keys(o)
+        .filter((key) => key !== "nameZh")
+        .sort()
+        .join(",") !== "defaultChoice,name,offered,optionReference" ||
       typeof o.offered !== "boolean" ||
       typeof o.defaultChoice !== "boolean"
     )
       return fail("Invalid");
+    const nameZh = optionalChinese(o.nameZh, 80, () => fail("Invalid"));
     return {
       optionReference: o.optionReference === null ? null : ref(o.optionReference),
       name: text(o.name, 80),
+      ...(nameZh === undefined ? {} : { nameZh }),
       offered: o.offered,
       defaultChoice: o.defaultChoice,
     };
@@ -130,12 +139,24 @@ function parseBody(r: Record<string, unknown>): OptionSetBody {
   if (maximum !== null && maximum < minimum) return fail("Invalid");
   if (minimum > options.filter((o) => o.offered).length * perOptionMaximum) return fail("Invalid");
   if (kind === "One" && options.filter((o) => o.defaultChoice).length > 1) return fail("Invalid");
-  return { name: text(r.name, 80), kind, minimum, maximum, perOptionMaximum, options };
+  const nameZh = optionalChinese(r.nameZh, 80, () => fail("Invalid"));
+  return {
+    name: text(r.name, 80),
+    ...(nameZh === undefined ? {} : { nameZh }),
+    kind,
+    minimum,
+    maximum,
+    perOptionMaximum,
+    options,
+  };
 }
 export function parseOptionSetCommandBody(value: unknown): OptionSetCommandBody {
   const r = value as Record<string, unknown> | null;
   if (r === null || typeof r !== "object" || Array.isArray(r)) return fail("Invalid");
-  const keys = Object.keys(r).sort().join(",");
+  const keys = Object.keys(r)
+    .filter((key) => key !== "nameZh")
+    .sort()
+    .join(",");
   if (r.action === "Create" && keys === keysOf("action", "operationReference", ...bodyKeys))
     return { action: "Create", operationReference: ref(r.operationReference), ...parseBody(r) };
   if (
@@ -247,6 +268,7 @@ export function createMerchantOptionSets(options: {
     /** Products whose draft offers this set (customers see it once such a menu is published). */
     productNames: used.get(String(set.optionSetReference)) ?? [],
     name: name(set.draft.localizedNames, set.internalCode),
+    nameZh: chineseOf(set.draft.localizedNames),
     kind: kindOf(set.draft.displayStyle),
     minimum: set.draft.minimumSelection,
     maximum: set.draft.maximumSelection,
@@ -258,6 +280,7 @@ export function createMerchantOptionSets(options: {
         optionReference: option.optionReference,
         code: option.stableCode,
         name: name(option.localizedNames, option.stableCode),
+        nameZh: chineseOf(option.localizedNames),
         offered: option.lifecycle === "Active",
         defaultChoice: option.defaultEligible,
       })),
@@ -331,7 +354,7 @@ export function createMerchantOptionSets(options: {
               const result = await service.create({
                 internalCode: code,
                 defaultLocale: options.locale,
-                localizedNames: { [options.locale]: body.name },
+                localizedNames: withChinese({ [options.locale]: body.name }, body.nameZh),
                 localizedDescriptions: {},
                 ...limits(body),
                 // New options: the service assigns their identity.
@@ -378,7 +401,10 @@ export function createMerchantOptionSets(options: {
               expectedAggregateVersion: body.expectedAggregateVersion,
               draft: {
                 ...existing.draft,
-                localizedNames: { ...existing.draft.localizedNames, [options.locale]: body.name },
+                localizedNames: withChinese(
+                  { ...existing.draft.localizedNames, [options.locale]: body.name },
+                  body.nameZh,
+                ),
                 ...limits(body),
                 options: merged.map((option) =>
                   "optionReference" in option && option.optionReference !== null
@@ -438,7 +464,10 @@ export function createMerchantOptionSets(options: {
         return {
           ...existing,
           lifecycle,
-          localizedNames: { ...existing.localizedNames, [options.locale]: option.name },
+          localizedNames: withChinese(
+            { ...existing.localizedNames, [options.locale]: option.name },
+            option.nameZh,
+          ),
           sortOrder,
           defaultEligible: option.defaultChoice,
         };
@@ -450,7 +479,7 @@ export function createMerchantOptionSets(options: {
         optionReference: null,
         stableCode,
         lifecycle,
-        localizedNames: { [options.locale]: option.name },
+        localizedNames: withChinese({ [options.locale]: option.name }, option.nameZh),
         localizedDescriptions: {},
         sortOrder,
         defaultEligible: option.defaultChoice,

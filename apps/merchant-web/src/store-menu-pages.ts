@@ -189,6 +189,8 @@ export interface MenuBuilderView extends MenuViewBase {
       readonly sectionReference: string;
       readonly code: string;
       readonly name: string;
+      /** Owner 2026-10-23: the Simplified Chinese name customers see ("" or absent when none). */
+      readonly nameZh?: string;
       readonly items: readonly {
         readonly placementReference: string;
         readonly skuReference: string;
@@ -212,6 +214,7 @@ export interface MenuSectionInput {
   readonly sectionReference: string | null;
   readonly code: string;
   readonly name: string;
+  readonly nameZh: string;
   readonly items: readonly { readonly skuReference: string; readonly featured: boolean }[];
 }
 export type MenuCommand =

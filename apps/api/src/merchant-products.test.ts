@@ -171,12 +171,13 @@ describe("WP-2423 menu descriptions and photos", () => {
   it("shows the page-locale description and the photo's 640 px JPEG preview", () => {
     expect(presentationView(product(undefined), "en-CA", new Map())).toEqual({
       description: "",
+      descriptionZh: "",
       photo: null,
     });
     expect(
       presentationView(
         product({
-          localizedDescriptions: { "en-CA": "Steamed milk", fr: "Lait" },
+          localizedDescriptions: { "en-CA": "Steamed milk", fr: "Lait", "zh-Hans-CA": "蒸奶" },
           photo: { imageReference: id(7), localizedAltText: { "en-CA": "Latte in a cup" } },
         }),
         "en-CA",
@@ -184,6 +185,8 @@ describe("WP-2423 menu descriptions and photos", () => {
       ),
     ).toEqual({
       description: "Steamed milk",
+      // Owner 2026-10-23: the Chinese description staff entered, for the editor.
+      descriptionZh: "蒸奶",
       photo: {
         imageReference: id(7),
         altText: "Latte in a cup",
@@ -204,5 +207,60 @@ describe("WP-2423 menu descriptions and photos", () => {
         new Map(),
       ),
     ).toThrow(expect.objectContaining({ code: "PhotoStorageUnavailable" }));
+  });
+});
+
+describe("Owner 2026-10-23 Chinese names", () => {
+  it("accepts an optional Chinese name, size name and description, and keeps or clears them", async () => {
+    const { parseProductCommandBody } = await import("./merchant-products.js");
+    const { withChinese, chineseOf } = await import("./merchant-chinese-text.js");
+    const body = parseProductCommandBody({
+      action: "SaveDraft",
+      operationReference: id(1),
+      productReference: id(2),
+      expectedAggregateVersion: 3,
+      name: "Latte",
+      nameZh: " 拿铁 ",
+      taxClassificationReference: id(4),
+      sizes: [{ skuReference: id(5), skuCode: "LATTE-S", name: "Small", nameZh: "小杯" }],
+      presentation: { description: "Milk", descriptionZh: "牛奶", photo: null },
+    });
+    expect(body).toMatchObject({
+      nameZh: "拿铁",
+      sizes: [{ nameZh: "小杯" }],
+      presentation: { descriptionZh: "牛奶" },
+    });
+    // Older editors send no Chinese fields: nothing changes.
+    expect(
+      parseProductCommandBody({
+        action: "SaveDraft",
+        operationReference: id(1),
+        productReference: id(2),
+        expectedAggregateVersion: 3,
+        name: "Latte",
+        taxClassificationReference: id(4),
+        sizes: [{ skuReference: id(5), skuCode: "LATTE-S", name: "Small" }],
+      }),
+    ).not.toHaveProperty("nameZh");
+    expect(() =>
+      parseProductCommandBody({
+        action: "Create",
+        operationReference: id(1),
+        internalCode: "LATTE",
+        productType: "PreparedFood",
+        name: "Latte",
+        nameZh: 7,
+        taxClassificationReference: id(4),
+        sizes: [{ skuReference: null, skuCode: "LATTE", name: "Regular" }],
+      }),
+    ).toThrow();
+    const names = { "en-CA": "Latte" };
+    expect(withChinese(names, "拿铁")).toEqual({ "en-CA": "Latte", "zh-Hans-CA": "拿铁" });
+    expect(withChinese({ ...names, "zh-Hans-CA": "拿铁" }, "")).toEqual(names);
+    expect(withChinese({ ...names, "zh-Hans-CA": "拿铁" }, undefined)).toEqual({
+      ...names,
+      "zh-Hans-CA": "拿铁",
+    });
+    expect(chineseOf(names)).toBe("");
   });
 });

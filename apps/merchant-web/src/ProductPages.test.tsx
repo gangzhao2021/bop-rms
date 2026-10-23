@@ -148,10 +148,15 @@ describe("WP-2423 product description and photo", () => {
       description: "Double ristretto, steamed milk.",
       photo: { ...photo, altText: "Cup" },
     };
-    expect(parseProductDetailView(detail(saved)).product.presentation).toEqual(saved);
+    // An older server sends no Chinese description: it reads as none.
+    expect(parseProductDetailView(detail(saved)).product.presentation).toEqual({
+      ...saved,
+      descriptionZh: "",
+    });
     expect(
-      parseProductDetailView(detail({ description: "", photo: null })).product.presentation,
-    ).toEqual({ description: "", photo: null });
+      parseProductDetailView(detail({ description: "", descriptionZh: "拿铁", photo: null }))
+        .product.presentation,
+    ).toEqual({ description: "", descriptionZh: "拿铁", photo: null });
     expect(parseProductDetailView(detail(undefined)).product.presentation).toBeUndefined();
     for (const bad of [
       { description: "x", photo: { ...photo, altText: "Cup", previewUrl: "https://x.test/a.jpg" } },
@@ -170,6 +175,7 @@ describe("WP-2423 product description and photo", () => {
   it("counts description, photo and alt text as unsaved changes", () => {
     const saved: ProductPresentation = {
       description: "Velvety milk.",
+      descriptionZh: "",
       photo: { ...photo, altText: "Flat white in a cup" },
     };
     const draft = presentationDraftFrom(saved);
@@ -177,40 +183,73 @@ describe("WP-2423 product description and photo", () => {
     expect(presentationChanged({ ...draft, description: "  Velvety   milk. " }, saved)).toBe(false);
     expect(presentationChanged({ ...draft, description: "Smooth." }, saved)).toBe(true);
     expect(presentationChanged({ ...draft, altText: "A cup" }, saved)).toBe(true);
+    // Owner 2026-10-23: the Chinese description is an unsaved change too.
+    expect(presentationChanged({ ...draft, descriptionZh: "丝滑牛奶。" }, saved)).toBe(true);
     expect(presentationChanged({ ...draft, photo: null, altText: "" }, saved)).toBe(true);
     expect(
       presentationChanged({ ...draft, photo: { ...photo, imageReference: ref(6) } }, saved),
     ).toBe(true);
     expect(
       presentationChanged(
-        { description: "", photo, altText: "Cup" },
-        { description: "", photo: null },
+        { description: "", descriptionZh: "", photo, altText: "Cup" },
+        { description: "", descriptionZh: "", photo: null },
       ),
     ).toBe(true);
   });
 
   it("requires a photo description and plain text before saving", () => {
-    expect(presentationProblems({ description: "", photo: null, altText: "" })).toEqual({});
-    expect(presentationProblems({ description: "Nice", photo, altText: "  " })).toEqual({
+    expect(
+      presentationProblems({ description: "", descriptionZh: "", photo: null, altText: "" }),
+    ).toEqual({});
+    expect(
+      presentationProblems({
+        description: "",
+        descriptionZh: "<b>拿铁</b>",
+        photo: null,
+        altText: "",
+      }),
+    ).toEqual({ descriptionZh: "NotPlain" });
+    expect(
+      presentationProblems({ description: "Nice", descriptionZh: "", photo, altText: "  " }),
+    ).toEqual({
       altText: "AltTextMissing",
     });
     expect(
-      presentationProblems({ description: "See https://example.test", photo, altText: "<b>" }),
+      presentationProblems({
+        description: "See https://example.test",
+        descriptionZh: "",
+        photo,
+        altText: "<b>",
+      }),
     ).toEqual({ description: "NotPlain", altText: "NotPlain" });
     expect(
-      presentationProblems({ description: "x".repeat(241), photo: null, altText: "" }),
+      presentationProblems({
+        description: "x".repeat(241),
+        descriptionZh: "",
+        photo: null,
+        altText: "",
+      }),
     ).toEqual({ description: "TooLong" });
   });
 
   it("sends the current description and photo with its description in the save", () => {
     expect(
-      presentationInput({ description: " Rich\n espresso ", photo, altText: " Cup  of coffee " }),
+      presentationInput({
+        description: " Rich\n espresso ",
+        descriptionZh: " 浓郁 意式 ",
+        photo,
+        altText: " Cup  of coffee ",
+      }),
     ).toEqual({
       description: "Rich espresso",
+      descriptionZh: "浓郁 意式",
       photo: { imageReference: ref(5), altText: "Cup of coffee" },
     });
-    expect(presentationInput({ description: "", photo: null, altText: "stale" })).toEqual({
+    expect(
+      presentationInput({ description: "", descriptionZh: "", photo: null, altText: "stale" }),
+    ).toEqual({
       description: "",
+      descriptionZh: "",
       photo: null,
     });
   });
@@ -296,7 +335,7 @@ describe("WP-2423 product description and photo", () => {
         disabled={false}
         client={{ load: () => Promise.resolve(null) }}
         productReference={ref(1)}
-        value={{ description: "Silky", photo, altText: "" }}
+        value={{ description: "Silky", descriptionZh: "丝滑", photo, altText: "" }}
         onChange={() => undefined}
         onUploadingChange={() => undefined}
         problems={{ altText: "AltTextMissing" }}
@@ -326,7 +365,11 @@ describe("WP-2423 product description and photo", () => {
   it("shows read-only staff the description and photo without controls", () => {
     const html = renderToStaticMarkup(
       <ProductCustomerMenuReadOnly
-        presentation={{ description: "Silky", photo: { ...photo, altText: "Flat white" } }}
+        presentation={{
+          description: "Silky",
+          descriptionZh: "",
+          photo: { ...photo, altText: "Flat white" },
+        }}
       />,
     );
     expect(html).toContain("Silky");

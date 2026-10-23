@@ -59,11 +59,14 @@ export interface ProductDetail {
   readonly lifecycle: string;
   readonly aggregateVersion: number;
   readonly name: string;
+  /** Owner 2026-10-23: the Simplified Chinese name customers see ("" when none). */
+  readonly nameZh?: string;
   readonly taxClassificationReference: string | null;
   readonly sizes: readonly {
     readonly skuReference: string;
     readonly skuCode: string;
     readonly name: string;
+    readonly nameZh?: string;
     readonly lifecycle: string;
     readonly unitOfSale: string;
   }[];
@@ -84,10 +87,13 @@ export interface ProductPhoto {
 export interface ProductPresentation {
   /** "" when the product has no description. */
   readonly description: string;
+  /** Owner 2026-10-23: the Simplified Chinese description ("" when none). */
+  readonly descriptionZh: string;
   readonly photo: (ProductPhoto & { readonly altText: string }) | null;
 }
 export interface ProductPresentationInput {
   readonly description: string;
+  readonly descriptionZh: string;
   readonly photo: { readonly imageReference: string; readonly altText: string } | null;
 }
 export interface ProductListView extends ProductViewBase {
@@ -126,6 +132,7 @@ export interface ProductSizeInput {
   readonly skuReference: string | null;
   readonly skuCode: string;
   readonly name: string;
+  readonly nameZh: string;
 }
 export type ProductCommand =
   | {
@@ -134,6 +141,7 @@ export type ProductCommand =
       readonly internalCode: string;
       readonly productType: string;
       readonly name: string;
+      readonly nameZh: string;
       readonly taxClassificationReference: string;
       readonly sizes: readonly ProductSizeInput[];
     }
@@ -143,6 +151,7 @@ export type ProductCommand =
       readonly productReference: string;
       readonly expectedAggregateVersion: number;
       readonly name: string;
+      readonly nameZh: string;
       readonly taxClassificationReference: string;
       readonly sizes: readonly ProductSizeInput[];
       readonly optionSets?: readonly ProductOptionSetInput[];
@@ -216,15 +225,20 @@ function parsePresentation(value: unknown): ProductPresentation | null {
   if (
     presentation === null ||
     typeof presentation.description !== "string" ||
-    presentation.description.length > presentationLimits.description
+    presentation.description.length > presentationLimits.description ||
+    (presentation.descriptionZh !== undefined &&
+      (typeof presentation.descriptionZh !== "string" ||
+        presentation.descriptionZh.length > presentationLimits.description))
   )
     return null;
-  if (presentation.photo === null) return { description: presentation.description, photo: null };
+  const descriptionZh = (presentation.descriptionZh as string | undefined) ?? "";
+  if (presentation.photo === null)
+    return { description: presentation.description, descriptionZh, photo: null };
   const photo = parsePhoto(presentation.photo);
   const altText = object(presentation.photo)?.altText;
   if (photo === null || typeof altText !== "string" || altText.length > presentationLimits.altText)
     return null;
-  return { description: presentation.description, photo: { ...photo, altText } };
+  return { description: presentation.description, descriptionZh, photo: { ...photo, altText } };
 }
 export function parseProductDetailView(value: unknown): ProductDetailView {
   const r = object(value);
@@ -249,11 +263,14 @@ export function parseProductDetailView(value: unknown): ProductDetailView {
 export const presentationLimits = { description: 240, altText: 160 } as const;
 export interface PresentationDraft {
   readonly description: string;
+  readonly descriptionZh: string;
   readonly photo: ProductPhoto | null;
   readonly altText: string;
 }
 export const presentationDraftFrom = (presentation: ProductPresentation): PresentationDraft => ({
   description: presentation.description,
+  // A server response used as-is (after a save) may predate the Chinese description.
+  descriptionZh: (presentation.descriptionZh as string | undefined) ?? "",
   photo: presentation.photo
     ? {
         imageReference: presentation.photo.imageReference,
@@ -268,6 +285,7 @@ export const presentationDraftFrom = (presentation: ProductPresentation): Presen
 export const plainText = (value: string) => value.replace(/\s+/gu, " ").trim();
 export const presentationInput = (draft: PresentationDraft): ProductPresentationInput => ({
   description: plainText(draft.description),
+  descriptionZh: plainText(draft.descriptionZh),
   photo: draft.photo
     ? { imageReference: draft.photo.imageReference, altText: plainText(draft.altText) }
     : null,
@@ -276,6 +294,7 @@ export function presentationChanged(draft: PresentationDraft, saved: ProductPres
   const input = presentationInput(draft);
   return (
     input.description !== saved.description ||
+    input.descriptionZh !== saved.descriptionZh ||
     (input.photo?.imageReference ?? null) !== (saved.photo?.imageReference ?? null) ||
     (input.photo !== null && input.photo.altText !== saved.photo?.altText)
   );
@@ -286,12 +305,14 @@ export type PresentationProblem = "NotPlain" | "TooLong" | "AltTextMissing";
 /** Why the draft cannot be saved, by field; empty when it can. */
 export function presentationProblems(draft: PresentationDraft): {
   readonly description?: PresentationProblem;
+  readonly descriptionZh?: PresentationProblem;
   readonly altText?: PresentationProblem;
 } {
   const input = presentationInput(draft);
   const check = (value: string, max: number) =>
     value.length > max ? "TooLong" : notPlain.test(value) ? "NotPlain" : undefined;
   const description = check(input.description, presentationLimits.description);
+  const descriptionZh = check(input.descriptionZh, presentationLimits.description);
   const altText =
     input.photo === null
       ? undefined
@@ -300,6 +321,7 @@ export function presentationProblems(draft: PresentationDraft): {
         : check(input.photo.altText, presentationLimits.altText);
   return {
     ...(description ? { description } : {}),
+    ...(descriptionZh ? { descriptionZh } : {}),
     ...(altText ? { altText } : {}),
   };
 }

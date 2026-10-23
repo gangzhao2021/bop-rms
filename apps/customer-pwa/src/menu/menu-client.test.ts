@@ -322,6 +322,24 @@ describe("Customer Menu client", () => {
       ).resolves.toEqual({ kind: "Unavailable" });
   });
 
+  it("Owner 2026-10-23: names priority allergens in Chinese while Chinese is chosen", async () => {
+    const { LanguageRoot } = await import("../i18n/i18n.js");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { createElement } = await import("react");
+    const load = async () => {
+      const result = await createCustomerMenuClient(context, {
+        fetch: async () => response(200, found()),
+        online: () => true,
+      }).load();
+      if (result.kind !== "Found") throw new Error("expected a menu");
+      return result.menu.sections[0]?.sellables[0]?.allergens;
+    };
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+    expect(await load()).toEqual([{ name: "牛奶", classification: "Contains" }]);
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+    expect(await load()).toEqual([{ name: "Milk", classification: "Contains" }]);
+  });
+
   it("bounds search text before network use", async () => {
     expect(normalizeMenuSearch("  café   latte ")).toBe("café latte");
     expect(normalizeMenuSearch("<script>")).toBeNull();

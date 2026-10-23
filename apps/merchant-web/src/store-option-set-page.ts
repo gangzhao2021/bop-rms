@@ -12,6 +12,8 @@ export interface OptionRow {
   readonly optionReference: string;
   readonly code: string;
   readonly name: string;
+  /** Owner 2026-10-23: the Simplified Chinese name customers see ("" or absent when none). */
+  readonly nameZh?: string;
   readonly offered: boolean;
   readonly defaultChoice: boolean;
 }
@@ -23,6 +25,7 @@ export interface OptionSetRow {
   /** Products whose draft offers this set; customers see it once such a menu is published. */
   readonly productNames: readonly string[];
   readonly name: string;
+  readonly nameZh?: string;
   readonly kind: OptionChoiceKind;
   readonly minimum: number;
   readonly maximum: number | null;
@@ -44,6 +47,7 @@ export interface OptionSetEditView extends Base {
 }
 export interface OptionSetBody {
   readonly name: string;
+  readonly nameZh: string;
   readonly kind: OptionChoiceKind;
   readonly minimum: number;
   readonly maximum: number | null;
@@ -51,6 +55,7 @@ export interface OptionSetBody {
   readonly options: readonly {
     readonly optionReference: string | null;
     readonly name: string;
+    readonly nameZh: string;
     readonly offered: boolean;
     readonly defaultChoice: boolean;
   }[];

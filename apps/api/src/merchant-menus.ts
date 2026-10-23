@@ -44,6 +44,7 @@ import { itemAvailability } from "./merchant-availability.js";
 import { localBoundary } from "./merchant-prices.js";
 import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { chineseOf, optionalChinese, withChinese } from "./merchant-chinese-text.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 
 /**
@@ -115,6 +116,8 @@ export interface MenuSectionInput {
   readonly sectionReference: string | null;
   readonly code: string;
   readonly name: string;
+  /** Owner 2026-10-23: the section's Simplified Chinese name ("" clears it; absent keeps it). */
+  readonly nameZh?: string;
   readonly items: readonly { readonly skuReference: string; readonly featured: boolean }[];
 }
 export type MenuCommandBody =
@@ -175,7 +178,10 @@ export function parseMenuCommandBody(value: unknown): MenuCommandBody {
       if (
         s === null ||
         typeof s !== "object" ||
-        Object.keys(s).sort().join(",") !== "code,items,name,sectionReference" ||
+        Object.keys(s)
+          .filter((key) => key !== "nameZh")
+          .sort()
+          .join(",") !== "code,items,name,sectionReference" ||
         !Array.isArray(s.items) ||
         s.items.length > 200
       )
@@ -195,10 +201,12 @@ export function parseMenuCommandBody(value: unknown): MenuCommandBody {
       });
       if (new Set(items.map((item) => item.skuReference)).size !== items.length)
         return fail("Invalid");
+      const nameZh = optionalChinese(s.nameZh, 80, () => fail("Invalid"));
       return {
         sectionReference: s.sectionReference === null ? null : ref(s.sectionReference),
         code: sectionCode,
         name: text(s.name, 80),
+        ...(nameZh === undefined ? {} : { nameZh }),
         items,
       };
     });
@@ -585,6 +593,7 @@ export function createMerchantMenus(options: {
         sectionReference: section.sectionReference,
         code: section.internalCode,
         name: name(section.localizedNames, section.internalCode),
+        nameZh: chineseOf(section.localizedNames),
         items: [...section.placements]
           .sort((a, b) => a.sortOrder - b.sortOrder)
           .map((placement) => ({
@@ -1014,7 +1023,10 @@ export function createMerchantMenus(options: {
                 menuReference: currentMenu.menuReference,
                 brandReference: currentMenu.brandReference,
                 internalCode: input.code,
-                localizedNames: { ...(existing?.localizedNames ?? {}), [locale]: input.name },
+                localizedNames: withChinese(
+                  { ...(existing?.localizedNames ?? {}), [locale]: input.name },
+                  input.nameZh,
+                ),
                 sortOrder,
                 categoryReferences: existing?.categoryReferences ?? [],
                 placements: input.items.map((item, itemOrder) => {
