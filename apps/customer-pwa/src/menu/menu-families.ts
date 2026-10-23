@@ -156,6 +156,28 @@ export function compactAllergenLine(allergens: readonly MenuAllergenItem[]): str
   return parts.length === 0 ? null : parts.join(" · ");
 }
 
+/**
+ * WP-2423 ⑪: what the item contains with exactly these chosen options (quantities do not
+ * matter), as reviewed for the published menu; null when the menu has no per-choice disclosure or
+ * this set was not reviewed.
+ */
+export function allergensForChoice(
+  sellable: MenuSellable,
+  optionReferences: readonly string[],
+): readonly MenuAllergenItem[] | null {
+  const choices = sellable.allergensByChoice;
+  if (choices === undefined) return null;
+  const indexes: number[] = [];
+  for (const reference of new Set(optionReferences)) {
+    const index = choices.options.indexOf(reference);
+    if (index < 0) return null;
+    indexes.push(index);
+  }
+  const key = indexes.sort((a, b) => a - b).join(",");
+  const entry = choices.sets.find((set) => set.slice(1).join(",") === key);
+  return entry === undefined ? null : (choices.outcomes[entry[0] as number] ?? null);
+}
+
 /* ---------- Exact decimal arithmetic for menu prices (never binary floating point) ---------- */
 
 const decimalPattern = /^(0|[1-9][0-9]{0,20})(?:\.([0-9]{1,6}))?$/u;

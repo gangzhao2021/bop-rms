@@ -80,11 +80,12 @@ function allergens(value: unknown) {
     closedRecord(value, ["status"]);
     return { status: "Unavailable" };
   }
-  const declared = closedRecord(value, ["status", "items"]);
+  const declared = closedRecord(value, ["status", "items", "forChoices"]);
   if (
     declared.status !== "Declared" ||
     !Array.isArray(declared.items) ||
-    declared.items.length > 30
+    declared.items.length > 30 ||
+    typeof declared.forChoices !== "boolean"
   )
     return fail();
   const contains: string[] = [],
@@ -96,7 +97,8 @@ function allergens(value: unknown) {
     else if (allergen.classification === "CrossContactPossible") mayContain.push(allergen.name);
     else return fail();
   }
-  return { status: "Declared", contains, mayContain };
+  // WP-2423 ⑪: forChoices — these are for exactly the options chosen on this item.
+  return { status: "Declared", contains, mayContain, forChoices: declared.forChoices };
 }
 function item(value: unknown) {
   const raw = record(value),

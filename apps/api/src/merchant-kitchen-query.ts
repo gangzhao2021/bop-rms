@@ -11,7 +11,11 @@ import {
   listKitchenWorkItemPreparationFacts,
   type KitchenQueueItemView,
 } from "@rms/kitchen";
-import { listPublishedSellableAllergenDisclosures, sellableDisclosureKey } from "@rms/catalog";
+import {
+  allergenDisclosureForChoice,
+  listPublishedSellableAllergenDisclosures,
+  sellableDisclosureKey,
+} from "@rms/catalog";
 import {
   createPostgresCounterOrderEntryStore,
   createPostgresStaffDiningRoundEntryStore,
@@ -98,6 +102,11 @@ export type KitchenItemAllergens =
         readonly name: string;
         readonly classification: "Contains" | "CrossContactPossible";
       }[];
+      /**
+       * WP-2423 ⑪: true when `items` are for exactly the options chosen on this item (reviewed
+       * for the published menu); false when they cover every choice, so choices may add more.
+       */
+      readonly forChoices: boolean;
     }
   | { readonly status: "Unavailable" };
 /** WP-2423 Q2: how the kitchen names the Order (no Customer identity). */
@@ -151,6 +160,11 @@ export async function kitchenPreparation(
     readonly workItemReference: string;
     readonly orderReference: string;
     readonly orderBatchReference?: string;
+    /**
+     * WP-2423 ⑪: the options chosen on the item. Absent means unknown (never "none"): the
+     * disclosure then covers every choice, so no allergen is left out.
+     */
+    readonly selectedOptions?: readonly { readonly optionReference: string }[];
   }[],
   /**
    * WP-2423 D4: each round's own business date (a table's later round is work of the day it was
@@ -164,7 +178,14 @@ export async function kitchenPreparation(
   const allergens = await kitchenAllergens(
     transaction,
     scope,
-    items.map((item) => item.workItemReference),
+    new Map(
+      items.map((item) => [
+        item.workItemReference,
+        item.selectedOptions === undefined
+          ? null
+          : item.selectedOptions.map((option) => String(option.optionReference)),
+      ]),
+    ),
   );
   // WP-2423 Q2: Ordering names the Order; Dining gives a dine-in session's current table.
   const orders = await listStoreKitchenOrderLabels(transaction, scope, [
@@ -295,9 +316,12 @@ export async function kitchenAwaitingAcceptance(
 async function kitchenAllergens(
   transaction: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
-  workItemReferences: readonly string[],
+  /** Work item → the options chosen on it, or null when unknown. */
+  chosenOptions: ReadonlyMap<string, readonly string[] | null>,
 ): Promise<ReadonlyMap<string, { allergens: KitchenItemAllergens; customerNote: string | null }>> {
-  const keys = await listKitchenWorkItemPreparationFacts(transaction, scope, workItemReferences);
+  const keys = await listKitchenWorkItemPreparationFacts(transaction, scope, [
+    ...chosenOptions.keys(),
+  ]);
   const disclosures = await listPublishedSellableAllergenDisclosures(
     transaction,
     scope,
@@ -321,14 +345,17 @@ async function kitchenAllergens(
           workItem,
           { allergens: unavailableAllergens, customerNote: key.customerNote },
         ] as const;
+      const chosen = chosenOptions.get(workItem) ?? null;
+      const forChoice = chosen === null ? null : allergenDisclosureForChoice(disclosure, chosen);
       return [
         workItem,
         {
           customerNote: key.customerNote,
           allergens: Object.freeze({
             status: "Declared" as const,
+            forChoices: forChoice !== null,
             items: Object.freeze(
-              disclosure.items.map((item) => {
+              (forChoice ?? disclosure.items).map((item) => {
                 const names = item.localizedNames;
                 return Object.freeze({
                   code: item.code,

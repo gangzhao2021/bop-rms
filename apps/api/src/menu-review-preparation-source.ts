@@ -205,6 +205,8 @@ export function createMenuReviewPreparationSource(options: {
           });
           const allReferences = new Set<string>();
           const optionReferences = new Map<string, Set<string>>();
+          // WP-2423 ⑪: evidence per distinct set of chosen options (every Store and channel).
+          const choiceEvidence = new Map<string, { options: string[]; evidence: Set<string> }>();
           for (const store of [...menu.draft.storeReferences].sort())
             for (const channel of optionSource.channels) {
               const resolved = await recipes.resolve(tx, {
@@ -242,6 +244,16 @@ export function createMenuReviewPreparationSource(options: {
               for (const configuration of resolved.configurations) {
                 for (const reference of configuration.evidenceReferences)
                   allReferences.add(reference);
+                const chosen = [
+                  ...new Set(configuration.selections.map((item) => item.optionReference)),
+                ].sort();
+                const entry = choiceEvidence.get(chosen.join(",")) ?? {
+                  options: chosen,
+                  evidence: new Set<string>(),
+                };
+                for (const reference of configuration.evidenceReferences)
+                  entry.evidence.add(reference);
+                choiceEvidence.set(chosen.join(","), entry);
                 for (const selection of configuration.selections) {
                   const union =
                     optionReferences.get(selection.optionReference) ?? new Set<string>();
@@ -270,6 +282,9 @@ export function createMenuReviewPreparationSource(options: {
                   ]),
               ),
             ),
+            ...(optionReferences.size === 0
+              ? {}
+              : { choiceEvidence: compactMenuChoiceEvidence(choiceEvidence) }),
           });
           sellables.push({ ...product, optionRules, ...presentationOf(product) });
         }
@@ -405,5 +420,46 @@ export function createMenuReviewDependencyBindingSource(
         return fail();
       }
     },
+  });
+}
+
+/**
+ * WP-2423 ⑪: per-choice evidence as `{ options, outcomes, sets }` — options and evidence outcomes
+ * stored once and referred to by index, so a drink with hundreds of choice sets stays small.
+ */
+export function compactMenuChoiceEvidence(
+  choices: ReadonlyMap<
+    string,
+    { readonly options: readonly string[]; readonly evidence: ReadonlySet<string> }
+  >,
+) {
+  const options = [...new Set([...choices.values()].flatMap((choice) => choice.options))].sort();
+  const optionIndex = new Map(options.map((reference, index) => [reference, index]));
+  const outcomes: string[][] = [];
+  const outcomeIndex = new Map<string, number>();
+  const sets = [...choices.keys()].sort().map((key) => {
+    const choice = choices.get(key);
+    if (!choice) throw new Error("choice evidence");
+    const evidence = [...choice.evidence].sort();
+    const outcomeKey = evidence.join(",");
+    let outcome = outcomeIndex.get(outcomeKey);
+    if (outcome === undefined) {
+      outcome = outcomes.length;
+      outcomeIndex.set(outcomeKey, outcome);
+      outcomes.push(evidence);
+    }
+    return Object.freeze([
+      outcome,
+      ...choice.options
+        .map((reference) => optionIndex.get(reference) as number)
+        .sort((a, b) => a - b),
+    ]);
+  });
+  return Object.freeze({
+    options: Object.freeze(options.map(parseCatalogReference)),
+    outcomes: Object.freeze(
+      outcomes.map((items) => Object.freeze(items.map(parseCatalogReference))),
+    ),
+    sets: Object.freeze(sets),
   });
 }

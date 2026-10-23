@@ -1167,6 +1167,14 @@
   width: 100%;
   min-height: 48px;
 }
+/* WP-2423 ⑪: what the drink contains with the choices made so far. */
+.configure-allergens {
+  margin: var(--bop-space-2) 0 0;
+  font-size: 0.875rem;
+}
+.configure-allergens span {
+  font-weight: 650;
+}
 .configure-actions__total {
   grid-area: total;
   margin: 0;

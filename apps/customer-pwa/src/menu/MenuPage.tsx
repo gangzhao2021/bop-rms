@@ -24,6 +24,7 @@ import {
 } from "./configure-state.js";
 import { createCustomerMenuClient, normalizeMenuSearch } from "./menu-client.js";
 import {
+  allergensForChoice,
   compactAllergenLine,
   configuredItemTotal,
   familyAllergens,
@@ -45,6 +46,7 @@ import { StoreStatusStrip } from "../store/StoreIdentity.js";
 import { cartLinePrices, cartLinesSubtotal } from "./menu-line-prices.js";
 import type {
   CustomerMenuClient,
+  MenuAllergenItem,
   MenuJourneyContext,
   MenuLoadResult,
   MenuOptionRule,
@@ -1417,7 +1419,46 @@ export function SellableConfigurator({
           )}
         </p>
       </div>
+      {issues.length === 0 && sellable.optionRules.length > 0 ? (
+        <ChoiceAllergens
+          allergens={allergensForChoice(
+            sellable,
+            selectedMenuOptions(sellable.optionRules, current)
+              .filter((option) => option.quantity > 0)
+              .map((option) => option.optionReference),
+          )}
+        />
+      ) : null}
     </form>
+  );
+}
+
+/**
+ * WP-2423 ⑪: what this drink contains with the choices made so far, as reviewed for the menu.
+ * Never an allergen-free claim; nothing is shown when the menu has no per-choice disclosure.
+ */
+function ChoiceAllergens({
+  allergens,
+}: {
+  readonly allergens: readonly MenuAllergenItem[] | null;
+}) {
+  if (allergens === null) return null;
+  const contains = allergens.filter((item) => item.classification === "Contains");
+  const may = allergens.filter((item) => item.classification !== "Contains");
+  return (
+    <p className="configure-allergens" aria-live="polite">
+      <span>With your choices: </span>
+      {allergens.length === 0
+        ? "none of the listed allergens are declared. Ask staff if you have an allergy."
+        : [
+            contains.length === 0
+              ? null
+              : `contains ${contains.map((item) => item.name).join(", ")}`,
+            may.length === 0 ? null : `may contain ${may.map((item) => item.name).join(", ")}`,
+          ]
+            .filter(Boolean)
+            .join("; ") + "."}
+    </p>
   );
 }
 
@@ -1426,7 +1467,11 @@ function AllergenSummary({ sellable }: { readonly sellable: MenuSellable }) {
   const may = sellable.allergens.filter((item) => item.classification !== "Contains");
   return (
     <div className="menu-allergens">
-      <p className="menu-allergen-heading">Allergen information</p>
+      <p className="menu-allergen-heading">
+        {sellable.allergensByChoice === undefined
+          ? "Allergen information"
+          : "Allergen information (all choices)"}
+      </p>
       {sellable.allergens.length === 0 ? (
         <p>No allergen-free claim is made. Ask staff before ordering.</p>
       ) : (

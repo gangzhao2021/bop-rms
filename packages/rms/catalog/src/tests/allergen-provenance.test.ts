@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   CatalogError,
+  allergenDisclosureForChoice,
   parseCatalogReference,
+  parseSellableAllergenDisclosure,
   createMenuAllergenValidationService,
   transitionMenuPublication,
   type MenuAllergenProvenanceSnapshot,
@@ -237,4 +239,68 @@ it("unions shared source evidence across base and options but rejects repeats wi
       ],
     } as MenuAllergenProvenanceSnapshot).validate(command),
   ).rejects.toBeInstanceOf(CatalogError);
+});
+
+describe("WP-2423 ⑪ allergens for the chosen options", () => {
+  const withChoices = (choiceEvidence: unknown) => {
+    const value = snapshot();
+    return {
+      ...value,
+      paths: [{ ...value.paths[0], choiceEvidence }],
+    } as unknown as MenuAllergenProvenanceSnapshot;
+  };
+  // Without the option the item has only the base recipe's evidence; with it, both.
+  const choices = {
+    options: [id(15)],
+    outcomes: [[id(6)], [id(6), id(9)], [id(9), id(6)]],
+    sets: [[0], [1, 0]],
+  };
+
+  it("discloses exactly what each reviewed set of chosen options contains", async () => {
+    const disclosure = (await service(withChoices(choices)).validate(command)).disclosures[id(13)];
+    if (!disclosure) throw new Error("fixture");
+    // The union for the menu card is unchanged.
+    expect(disclosure.items.map((item) => [item.code, item.classification])).toEqual([
+      ["MILK", "Contains"],
+      ["PEANUT", "CrossContactPossible"],
+    ]);
+    // Equal outcomes are stored once.
+    expect(disclosure.byChoice?.outcomes).toHaveLength(2);
+    expect(
+      allergenDisclosureForChoice(disclosure, [])?.map((item) => [item.code, item.classification]),
+    ).toEqual([["MILK", "CrossContactPossible"]]);
+    expect(
+      allergenDisclosureForChoice(disclosure, [id(15), id(15)])?.map((item) => [
+        item.code,
+        item.classification,
+        item.localizedNames["fr-CA"],
+      ]),
+    ).toEqual([
+      ["MILK", "Contains", "Lait"],
+      ["PEANUT", "CrossContactPossible", "Arachide"],
+    ]);
+    // An option or set the review did not cover never narrows the disclosure.
+    expect(allergenDisclosureForChoice(disclosure, [id(99)])).toBeNull();
+    const older = Object.fromEntries(
+      Object.entries(disclosure).filter(([key]) => key !== "byChoice"),
+    ) as unknown as typeof disclosure;
+    expect(allergenDisclosureForChoice(older, [])).toBeNull();
+    // The published projection keeps it.
+    const stored = parseSellableAllergenDisclosure(JSON.parse(JSON.stringify(disclosure)), "en-CA");
+    expect(stored.byChoice).toEqual(disclosure.byChoice);
+  });
+
+  it("refuses per-choice evidence that does not match the reviewed path", async () => {
+    for (const invalid of [
+      { ...choices, options: [id(99)] },
+      { ...choices, outcomes: [[id(98)]] },
+      { ...choices, sets: [[0], [1, 0], [0]] },
+      { ...choices, sets: [[5]] },
+      { ...choices, sets: [[0, 1]] },
+      { ...choices, sets: [] },
+    ])
+      await expect(service(withChoices(invalid)).validate(command)).rejects.toBeInstanceOf(
+        CatalogError,
+      );
+  });
 });

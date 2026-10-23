@@ -83,6 +83,18 @@ export interface CustomerMenuSellableDto {
     }[];
     readonly allergenFreeClaim: false;
     readonly assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED";
+    /**
+     * WP-2423 ⑪: allergens for each reviewed set of chosen options (`sets` entries are
+     * `[outcome, ...optionIndexes]`, names as in `items`); absent for older menus.
+     */
+    readonly byChoice?: {
+      readonly options: readonly CatalogReference[];
+      readonly outcomes: readonly (readonly {
+        readonly code: CatalogCode;
+        readonly classification: "Contains" | "CrossContactPossible";
+      }[])[];
+      readonly sets: readonly (readonly number[])[];
+    };
   };
   /** The Store's current base price before options and tax; the final Quote stays authoritative. */
   readonly displayPrice:

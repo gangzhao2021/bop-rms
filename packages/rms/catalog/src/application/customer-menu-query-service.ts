@@ -247,6 +247,9 @@ function publicSellable(
       ),
       allergenFreeClaim: false,
       assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
+      ...(item.allergenDisclosure.byChoice === undefined
+        ? {}
+        : { byChoice: item.allergenDisclosure.byChoice }),
     }),
     displayPrice: Object.freeze(
       fact === null

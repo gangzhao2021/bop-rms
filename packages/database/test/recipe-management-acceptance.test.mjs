@@ -24,7 +24,10 @@ import {
   createMenuReviewPreparationSource,
   createMenuReviewDependencyBindingSource,
 } from "../../../apps/api/src/menu-review-preparation-source.ts";
-import { createPostgresMenuReviewContentStore } from "../../rms/catalog/src/index.ts";
+import {
+  allergenDisclosureForChoice,
+  createPostgresMenuReviewContentStore,
+} from "../../rms/catalog/src/index.ts";
 import { seedPriceMenuOwnerFacts } from "../test-support/price-menu-owner-facts.mjs";
 import {
   createMenuRecipeAllergenSource,
@@ -1314,6 +1317,11 @@ async function prove(context) {
       return result;
     });
     assert.equal(prepared.resolvedConfigurations, 2);
+    // WP-2423 ⑪: a product without options needs no per-choice disclosure (its one
+    // configuration is the union already shown); products with options carry `byChoice`.
+    const reviewedDisclosure = prepared.record.content.sections[0].sellables[0].allergenDisclosure;
+    assert.equal(reviewedDisclosure.byChoice, undefined);
+    assert.equal(allergenDisclosureForChoice(reviewedDisclosure, []), null);
     assert.match(prepared.record.dependencyDigest, /^sha256:[a-f0-9]{64}$/);
     assert.equal(prepared.validation.snapshotDigest, prepared.record.snapshotDigest);
     assert.equal(

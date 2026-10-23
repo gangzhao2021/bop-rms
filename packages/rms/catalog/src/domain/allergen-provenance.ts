@@ -37,11 +37,24 @@ export interface AllergenSourceEvidence {
   readonly status: "Approved" | "Invalidated" | "Conflicting";
   readonly assertions: readonly AllergenAssertion[];
 }
+/**
+ * WP-2423 ⑪: the evidence of every distinct set of chosen options a review resolved, compact.
+ * `sets` entries are `[outcome, ...optionIndexes]` (option indexes ascending, into `options`);
+ * `outcomes` are evidence reference lists. Quantity never changes the ingredients used, so one
+ * entry per set of chosen options covers every quantity.
+ */
+export interface MenuAllergenChoiceEvidence {
+  readonly options: readonly CatalogReference[];
+  readonly outcomes: readonly (readonly CatalogReference[])[];
+  readonly sets: readonly (readonly number[])[];
+}
 export interface MenuAllergenPath {
   readonly sellableReference: CatalogReference;
   readonly productVersionReference: CatalogReference;
   readonly evidenceReferences: readonly CatalogReference[];
   readonly optionEvidenceReferences: Readonly<Record<string, readonly CatalogReference[]>>;
+  /** Absent on reviews made before per-choice disclosure. */
+  readonly choiceEvidence?: MenuAllergenChoiceEvidence;
 }
 export interface MenuAllergenProvenanceSnapshot {
   readonly brandReference: CatalogReference;
@@ -59,11 +72,28 @@ export interface AllergenDisclosureItem {
   readonly localizedNames: Readonly<Record<string, string>>;
   readonly classification: Exclude<AllergenClassification, "Unverified">;
 }
+/** One allergen of a choice outcome; its names are those of the same code in `items`. */
+export interface AllergenChoiceItem {
+  readonly code: CatalogCode;
+  readonly classification: Exclude<AllergenClassification, "Unverified">;
+}
+/**
+ * WP-2423 ⑪: what the item contains for each reviewed set of chosen options. `sets` entries are
+ * `[outcome, ...optionIndexes]`; equal outcomes are stored once.
+ */
+export interface AllergenChoiceDisclosure {
+  readonly options: readonly CatalogReference[];
+  readonly outcomes: readonly (readonly AllergenChoiceItem[])[];
+  readonly sets: readonly (readonly number[])[];
+}
 export interface SellableAllergenDisclosure {
   readonly registryVersionReference: CatalogReference;
+  /** Everything the item may contain across all its choices. */
   readonly items: readonly AllergenDisclosureItem[];
   readonly allergenFreeClaim: false;
   readonly assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED";
+  /** Absent on menus reviewed before per-choice disclosure, or for items without options. */
+  readonly byChoice?: AllergenChoiceDisclosure;
 }
 export interface MenuAllergenValidationResult {
   readonly validation: PublishingValidationEvidence;
@@ -156,6 +186,138 @@ function strongest(
   return current === "Contains" || next === "Contains" ? "Contains" : "CrossContactPossible";
 }
 
+const MAXIMUM_CHOICE_SETS = 10000;
+
+/** Shared shape checks of `[outcome, ...optionIndexes]` set entries. */
+function parseChoiceSets(value: unknown, outcomes: number, options: number) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAXIMUM_CHOICE_SETS) blocked();
+  const keys = new Set<string>();
+  return Object.freeze(
+    value.map((entry: unknown) => {
+      if (!Array.isArray(entry) || entry.length < 1) blocked();
+      const numbers = entry as unknown[];
+      if (!numbers.every((item) => Number.isSafeInteger(item) && (item as number) >= 0)) blocked();
+      const [outcome, ...chosen] = numbers as number[];
+      if (outcome === undefined || outcome >= outcomes) blocked();
+      for (const [index, option] of chosen.entries()) {
+        const previous = chosen[index - 1];
+        if (option >= options || (previous !== undefined && option <= previous)) blocked();
+      }
+      const key = chosen.join(",");
+      if (keys.has(key)) blocked();
+      keys.add(key);
+      return Object.freeze([outcome, ...chosen]);
+    }),
+  );
+}
+
+function parseChoiceEvidence(
+  value: MenuAllergenChoiceEvidence,
+  evidence: ReadonlySet<CatalogReference>,
+  coveredOptions: ReadonlySet<string>,
+): MenuAllergenChoiceEvidence {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    !Array.isArray(value.options) ||
+    !Array.isArray(value.outcomes) ||
+    value.outcomes.length < 1
+  )
+    blocked();
+  const options = Object.freeze(value.options.map((item) => parseCatalogReference(item)));
+  if (
+    !unique(options) ||
+    options.some((item, index) => index > 0 && item <= (options[index - 1] as string)) ||
+    options.some((item) => !coveredOptions.has(item))
+  )
+    blocked();
+  const outcomes = Object.freeze(
+    value.outcomes.map((outcome) => {
+      if (!Array.isArray(outcome) || outcome.length < 1) blocked();
+      const references = Object.freeze(outcome.map((item) => parseCatalogReference(item)));
+      if (!unique(references) || references.some((item) => !evidence.has(item))) blocked();
+      return references;
+    }),
+  );
+  return Object.freeze({
+    options,
+    outcomes,
+    sets: parseChoiceSets(value.sets, outcomes.length, options.length),
+  });
+}
+
+function parseChoiceDisclosure(
+  value: AllergenChoiceDisclosure,
+  codes: ReadonlySet<string>,
+): AllergenChoiceDisclosure {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    !Array.isArray(value.options) ||
+    !Array.isArray(value.outcomes) ||
+    value.outcomes.length < 1
+  )
+    blocked();
+  const options = Object.freeze(value.options.map((item) => parseCatalogReference(item)));
+  if (!unique(options)) blocked();
+  const outcomes = Object.freeze(
+    value.outcomes.map((outcome) => {
+      if (!Array.isArray(outcome)) blocked();
+      const items = Object.freeze(
+        outcome.map((item) => {
+          if (
+            item === null ||
+            typeof item !== "object" ||
+            (item.classification !== "Contains" && item.classification !== "CrossContactPossible")
+          )
+            blocked();
+          const code = parseCatalogCode(item.code);
+          if (!codes.has(code)) blocked();
+          return Object.freeze({ code, classification: item.classification });
+        }),
+      );
+      if (!unique(items.map((item) => item.code))) blocked();
+      return items;
+    }),
+  );
+  return Object.freeze({
+    options,
+    outcomes,
+    sets: parseChoiceSets(value.sets, outcomes.length, options.length),
+  });
+}
+
+/**
+ * WP-2423 ⑪: what the item contains with exactly these chosen options (quantities do not
+ * matter), as reviewed for the published menu; null when the menu has no per-choice disclosure
+ * or this set was not reviewed — the caller then shows `items` and says choices may add more.
+ */
+export function allergenDisclosureForChoice(
+  disclosure: SellableAllergenDisclosure,
+  optionReferences: readonly string[],
+): readonly AllergenDisclosureItem[] | null {
+  const byChoice = disclosure.byChoice;
+  if (byChoice === undefined) return null;
+  const indexes: number[] = [];
+  for (const reference of new Set(optionReferences)) {
+    const index = byChoice.options.indexOf(reference as CatalogReference);
+    if (index < 0) return null;
+    indexes.push(index);
+  }
+  const key = indexes.sort((a, b) => a - b).join(",");
+  const entry = byChoice.sets.find((set) => set.slice(1).join(",") === key);
+  const outcome = entry === undefined ? undefined : byChoice.outcomes[entry[0] as number];
+  if (outcome === undefined) return null;
+  const named = new Map(disclosure.items.map((item) => [item.code, item]));
+  return Object.freeze(
+    outcome.map((item) => {
+      const base = named.get(item.code);
+      if (base === undefined) return blocked();
+      return Object.freeze({ ...base, classification: item.classification });
+    }),
+  );
+}
+
 export function parseSellableAllergenDisclosure(
   value: SellableAllergenDisclosure,
   defaultLocale: string,
@@ -190,6 +352,11 @@ export function parseSellableAllergenDisclosure(
     items,
     allergenFreeClaim: false,
     assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
+    ...(value.byChoice === undefined
+      ? {}
+      : {
+          byChoice: parseChoiceDisclosure(value.byChoice, new Set(items.map((item) => item.code))),
+        }),
   });
 }
 
@@ -272,11 +439,62 @@ export function validateMenuAllergenProvenance(input: {
         return Object.freeze({ ...entry, classification });
       })
       .sort((left, right) => left.code.localeCompare(right.code));
+    let byChoice: AllergenChoiceDisclosure | undefined;
+    if (path.choiceEvidence !== undefined) {
+      const choice = parseChoiceEvidence(
+        path.choiceEvidence,
+        allReferences as ReadonlySet<CatalogReference>,
+        new Set(Object.keys(path.optionEvidenceReferences)),
+      );
+      // Each evidence outcome as allergens; equal allergen outcomes are stored once.
+      const outcomes: (readonly AllergenChoiceItem[])[] = [];
+      const outcomeIndex = new Map<string, number>();
+      const remap = choice.outcomes.map((references) => {
+        const found = new Map<CatalogReference, Exclude<AllergenClassification, "Unverified">>();
+        for (const reference of references) {
+          const source = evidenceByReference.get(reference);
+          if (source === undefined) return blocked();
+          for (const assertion of source.assertions)
+            found.set(
+              assertion.allergenReference,
+              strongest(
+                found.get(assertion.allergenReference),
+                assertion.classification as Exclude<AllergenClassification, "Unverified">,
+              ),
+            );
+        }
+        const outcome = Object.freeze(
+          [...found.entries()]
+            .map(([allergenReference, classification]) => {
+              const entry = registryByReference.get(allergenReference);
+              if (entry === undefined) return blocked();
+              return Object.freeze({ code: entry.code, classification });
+            })
+            .sort((left, right) => left.code.localeCompare(right.code)),
+        );
+        const key = JSON.stringify(outcome);
+        const existing = outcomeIndex.get(key);
+        if (existing !== undefined) return existing;
+        outcomeIndex.set(key, outcomes.length);
+        outcomes.push(outcome);
+        return outcomes.length - 1;
+      });
+      byChoice = Object.freeze({
+        options: choice.options,
+        outcomes: Object.freeze(outcomes),
+        sets: Object.freeze(
+          choice.sets.map(([outcome, ...chosen]) =>
+            Object.freeze([remap[outcome as number] as number, ...chosen]),
+          ),
+        ),
+      });
+    }
     disclosures[sellableReference] = Object.freeze({
       registryVersionReference,
       items: Object.freeze(items),
       allergenFreeClaim: false,
       assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
+      ...(byChoice === undefined ? {} : { byChoice }),
     });
   }
   if (snapshot.paths.length < 1) blocked();

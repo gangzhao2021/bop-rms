@@ -15,6 +15,11 @@ export type KitchenItemAllergens =
       readonly status: "Declared";
       readonly contains: readonly string[];
       readonly mayContain: readonly string[];
+      /**
+       * WP-2423 ⑪: true when these are for exactly the options chosen on the item; otherwise they
+       * cover every choice of the item and chosen options may add more.
+       */
+      readonly forChoices: boolean;
     }
   | { readonly status: "Unavailable" };
 
@@ -239,7 +244,8 @@ export function parseKitchenItemAllergens(value: unknown): KitchenItemAllergens 
     closed(value, ["status"]);
     return Object.freeze({ status: "Unavailable" });
   }
-  const input = closed(value, ["status", "contains", "mayContain"]);
+  const input = closed(value, ["status", "contains", "mayContain", "forChoices"]);
+  if (typeof input.forChoices !== "boolean") throw new Error("KITCHEN_BOARD_INVALID");
   const names = (list: unknown) => {
     if (!Array.isArray(list) || list.length > 30) throw new Error("KITCHEN_BOARD_INVALID");
     return Object.freeze(
@@ -255,6 +261,7 @@ export function parseKitchenItemAllergens(value: unknown): KitchenItemAllergens 
     status: "Declared",
     contains: names(input.contains),
     mayContain: names(input.mayContain),
+    forChoices: input.forChoices,
   });
 }
 

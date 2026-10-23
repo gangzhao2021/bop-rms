@@ -261,12 +261,15 @@ function optionRule(value: unknown): MenuOptionRule {
   });
 }
 
-function allergenDisclosure(value: unknown): readonly MenuAllergenItem[] {
+function allergenDisclosure(value: unknown) {
+  const hasChoices =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "byChoice");
   const raw = exact(value, [
     "registryVersionReference",
     "items",
     "allergenFreeClaim",
     "assistanceCode",
+    ...(hasChoices ? ["byChoice"] : []),
   ]);
   reference(raw.registryVersionReference);
   if (
@@ -275,7 +278,8 @@ function allergenDisclosure(value: unknown): readonly MenuAllergenItem[] {
     !Array.isArray(raw.items)
   )
     throw new TypeError("controlled allergen disclosure required");
-  return Object.freeze(
+  const names = new Map<string, string>();
+  const items: readonly MenuAllergenItem[] = Object.freeze(
     raw.items.map((item) => {
       const entry = exact(item, ["allergenReference", "code", "name", "classification"]);
       reference(entry.allergenReference);
@@ -285,12 +289,51 @@ function allergenDisclosure(value: unknown): readonly MenuAllergenItem[] {
         (entry.classification !== "Contains" && entry.classification !== "CrossContactPossible")
       )
         throw new TypeError("allergen item invalid");
-      return Object.freeze({
-        name: text(entry.name),
-        classification: entry.classification,
-      });
+      const name = text(entry.name);
+      names.set(entry.code, name);
+      return Object.freeze({ name, classification: entry.classification });
     }),
   );
+  return { items, byChoice: hasChoices ? allergensByChoice(raw.byChoice, names) : undefined };
+}
+
+/** WP-2423 ⑪: per-choice allergens, named as in the item's disclosure. */
+function allergensByChoice(value: unknown, names: ReadonlyMap<string, string>) {
+  const raw = exact(value, ["options", "outcomes", "sets"]);
+  const options = referenceList(raw.options);
+  if (!Array.isArray(raw.outcomes) || raw.outcomes.length < 1 || !Array.isArray(raw.sets))
+    throw new TypeError("allergen choices invalid");
+  const outcomes = Object.freeze(
+    raw.outcomes.map((outcome) => {
+      if (!Array.isArray(outcome)) throw new TypeError("allergen choices invalid");
+      return Object.freeze(
+        outcome.map((item) => {
+          const entry = exact(item, ["code", "classification"]);
+          const name = typeof entry.code === "string" ? names.get(entry.code) : undefined;
+          if (
+            name === undefined ||
+            (entry.classification !== "Contains" && entry.classification !== "CrossContactPossible")
+          )
+            throw new TypeError("allergen choices invalid");
+          return Object.freeze({ name, classification: entry.classification });
+        }),
+      );
+    }),
+  );
+  const sets = Object.freeze(
+    raw.sets.map((set) => {
+      if (
+        !Array.isArray(set) ||
+        set.length < 1 ||
+        !set.every((n) => Number.isSafeInteger(n) && n >= 0) ||
+        (set[0] as number) >= outcomes.length ||
+        set.slice(1).some((n) => (n as number) >= options.length)
+      )
+        throw new TypeError("allergen choices invalid");
+      return Object.freeze(set as number[]);
+    }),
+  );
+  return Object.freeze({ options, outcomes, sets });
 }
 
 function sellable(value: unknown): MenuSellable {
@@ -382,7 +425,13 @@ function sellable(value: unknown): MenuSellable {
     pinned: raw.pinned,
     availability: raw.availability as MenuSellable["availability"],
     price: priced ? { amount: price.amount as string, currency: price.currency as string } : null,
-    allergens: allergenDisclosure(raw.allergenDisclosure),
+    ...(() => {
+      const disclosure = allergenDisclosure(raw.allergenDisclosure);
+      return {
+        allergens: disclosure.items,
+        ...(disclosure.byChoice === undefined ? {} : { allergensByChoice: disclosure.byChoice }),
+      };
+    })(),
     optionRules,
   });
 }

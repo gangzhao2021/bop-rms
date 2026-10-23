@@ -97,6 +97,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
         { code: "MILK", name: "Milk", classification: "Contains" },
         { code: "SESAME", name: "Sesame", classification: "CrossContactPossible" },
       ],
+      forChoices: false,
     },
     selectedOptions: [
       {

@@ -738,13 +738,24 @@ it("WP-2423 Q3: shows the menu's declared allergens on the card, strongest first
     items: [
       {
         ...kitchenItemFixture(),
-        allergens: { status: "Declared", contains: ["Milk"], mayContain: ["Sesame"] },
+        allergens: {
+          status: "Declared",
+          contains: ["Milk"],
+          mayContain: ["Sesame"],
+          forChoices: false,
+        },
       },
       {
         ...kitchenItemFixture(),
         workItemReference: "01909985-0000-7000-8000-000000000071",
         selectedOptions: [],
-        allergens: { status: "Declared", contains: [], mayContain: [] },
+        allergens: { status: "Declared", contains: [], mayContain: [], forChoices: false },
+      },
+      // WP-2423 ⑪: allergens for exactly the options chosen; nothing more to warn about.
+      {
+        ...kitchenItemFixture(),
+        workItemReference: "01909985-0000-7000-8000-000000000072",
+        allergens: { status: "Declared", contains: ["Oats"], mayContain: [], forChoices: true },
       },
     ],
   });
@@ -755,7 +766,8 @@ it("WP-2423 Q3: shows the menu's declared allergens on the card, strongest first
   );
   expect(html).toContain("<strong>Contains: Milk</strong>");
   expect(html).toContain("<span>May contain: Sesame</span>");
-  expect(html).toContain("Modifiers may add allergens");
+  expect(html.match(/Modifiers may add allergens/gu)).toHaveLength(1);
+  expect(html).toContain("<strong>Contains: Oats</strong>");
   expect(html).toContain('aria-label="Contains Milk. May contain Sesame"');
   expect(html).toContain("No menu allergens declared");
   expect(html).not.toMatch(/allergen.free/iu);

@@ -528,7 +528,7 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
           ) : null}
         </>
       )}
-      {item.selectedOptions.length > 0 ? (
+      {item.selectedOptions.length > 0 && !allergens.forChoices ? (
         <span className="kitchen-work-item__allergens-modifiers">Modifiers may add allergens</span>
       ) : null}
     </p>

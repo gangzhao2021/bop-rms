@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { allergensForChoice } from "./menu-families.js";
 import { createCustomerMenuClient, normalizeMenuSearch } from "./menu-client.js";
 import type { MenuJourneyContext } from "./types.js";
 
@@ -280,6 +281,45 @@ describe("Customer Menu client", () => {
       online: () => true,
     });
     await expect(client.load()).resolves.toEqual({ kind: "Unavailable" });
+  });
+
+  it("WP-2423 ⑪: reads allergens per set of chosen options, named as in the disclosure", async () => {
+    const withChoices = (byChoice: unknown) => {
+      const body = found();
+      const sellable = body.menu.sections[0]?.sellables[0];
+      if (!sellable) throw new Error("fixture");
+      Object.assign(sellable.allergenDisclosure, { byChoice });
+      return body;
+    };
+    // Without the oat option the drink contains milk; with it, none of the listed allergens.
+    const byChoice = {
+      options: [references.option],
+      outcomes: [[{ code: "MILK", classification: "Contains" }], []],
+      sets: [[0], [1, 0]],
+    };
+    const result = await createCustomerMenuClient(context, {
+      fetch: async () => response(200, withChoices(byChoice)),
+      online: () => true,
+    }).load();
+    if (result.kind !== "Found") throw new Error("expected a menu");
+    const sellable = result.menu.sections[0]?.sellables[0];
+    if (!sellable) throw new Error("expected the item");
+    expect(allergensForChoice(sellable, [])).toEqual([
+      { name: "Milk", classification: "Contains" },
+    ]);
+    expect(allergensForChoice(sellable, [references.option])).toEqual([]);
+    expect(allergensForChoice(sellable, [references.menu])).toBeNull();
+    for (const invalid of [
+      { ...byChoice, outcomes: [[{ code: "PEANUT", classification: "Contains" }]] },
+      { ...byChoice, sets: [[2]] },
+      { ...byChoice, extra: true },
+    ])
+      await expect(
+        createCustomerMenuClient(context, {
+          fetch: async () => response(200, withChoices(invalid)),
+          online: () => true,
+        }).load(),
+      ).resolves.toEqual({ kind: "Unavailable" });
   });
 
   it("bounds search text before network use", async () => {

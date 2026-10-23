@@ -292,6 +292,7 @@ it("WP-2423 Q3: serves the published menu disclosure per work item and restores 
   expect(result.items[0]?.customerNote).toBe("Synthetic note: no onions");
   expect(result.items[0]?.allergens).toEqual({
     status: "Declared",
+    forChoices: false,
     items: [{ code: "MILK", name: "Milk", classification: "Contains" }],
   });
   const calls = f.tx.query.mock.calls as unknown as [string, unknown[]][];
@@ -303,6 +304,55 @@ it("WP-2423 Q3: serves the published menu disclosure per work item and restores 
     "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
     [id(3), id(4)],
   ]);
+  // WP-2423 ⑪: with per-choice disclosure the cook sees what this item contains as ordered (here
+  // with no option chosen: none of the listed allergens), not every choice's union.
+  Object.assign(disclosure, {
+    byChoice: {
+      options: [id(50)],
+      outcomes: [[], [{ code: "MILK", classification: "Contains" }]],
+      sets: [[0], [1, 0]],
+    },
+  });
+  // Options unknown on the item are never read as "none chosen": the union stays.
+  const unknown = (await f.operation(f.input)) as typeof result;
+  expect(unknown.items[0]?.allergens).toMatchObject({
+    forChoices: false,
+    items: [{ code: "MILK" }],
+  });
+  doubles.list.mockResolvedValue({
+    items: [
+      {
+        workItemReference: id(5),
+        ticketReference: id(7),
+        orderReference: id(6),
+        ticketAggregateVersion: 9007199254740993n,
+        workItemVersion: 2n,
+        selectedOptions: [],
+      },
+    ],
+  });
+  const exact = (await f.operation(f.input)) as typeof result;
+  expect(exact.items[0]?.allergens).toEqual({ status: "Declared", forChoices: true, items: [] });
+  doubles.list.mockResolvedValue({
+    items: [
+      {
+        workItemReference: id(5),
+        ticketReference: id(7),
+        orderReference: id(6),
+        ticketAggregateVersion: 9007199254740993n,
+        workItemVersion: 2n,
+        selectedOptions: [
+          { optionReference: id(50), quantity: 2, localizedNames: { "en-CA": "Whole milk" } },
+        ],
+      },
+    ],
+  });
+  const withOption = (await f.operation(f.input)) as typeof result;
+  expect(withOption.items[0]?.allergens).toEqual({
+    status: "Declared",
+    forChoices: true,
+    items: [{ code: "MILK", name: "Milk", classification: "Contains" }],
+  });
 });
 it("preserves projection-owned selected modifiers through List and Get", async () => {
   const f = setup();

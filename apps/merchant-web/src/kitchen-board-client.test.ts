@@ -270,19 +270,32 @@ it("WP-2423 Q3: groups the menu's declared allergens and fails closed on malform
         { code: "MILK", name: "Milk", classification: "Contains" },
         { code: "SESAME", name: "Sesame", classification: "CrossContactPossible" },
       ],
+      forChoices: true,
     },
   };
   f.fetcher.mockResolvedValueOnce(response({ ...metadata, items: [declared], nextCursor: null }));
   const view = parseKitchenBoardView(await f.client.loadQueue());
+  // WP-2423 ⑪: forChoices — the disclosure is for exactly the options chosen on this item.
   expect(view.items[0]?.allergens).toEqual({
     status: "Declared",
     contains: ["Milk"],
     mayContain: ["Sesame"],
+    forChoices: true,
   });
   for (const allergens of [
     undefined,
-    { status: "Declared", items: [{ code: "MILK", name: "Milk", classification: "Unverified" }] },
-    { status: "Declared", items: [{ code: "MILK", name: "", classification: "Contains" }] },
+    { status: "Declared", items: [] },
+    { status: "Declared", items: [], forChoices: "yes" },
+    {
+      status: "Declared",
+      items: [{ code: "MILK", name: "Milk", classification: "Unverified" }],
+      forChoices: false,
+    },
+    {
+      status: "Declared",
+      items: [{ code: "MILK", name: "", classification: "Contains" }],
+      forChoices: false,
+    },
     { status: "Unavailable", items: [] },
     { status: "AllergenFree" },
   ]) {

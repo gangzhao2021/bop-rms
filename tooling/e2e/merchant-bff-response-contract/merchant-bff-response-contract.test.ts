@@ -542,6 +542,8 @@ const kitchenItem = (n: number, status: "Queued" | "Completed"): KitchenList["it
       ? {
           status: "Declared",
           items: [{ code: "PEANUT", name: "Peanuts", classification: "Contains" }],
+          // WP-2423 ⑪: whether these are for exactly the options chosen on the item.
+          forChoices: true,
         }
       : { status: "Unavailable" },
   orderLabel: {

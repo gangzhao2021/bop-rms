@@ -179,6 +179,9 @@ export function publicFound(value: CustomerMenuFound): CustomerMenuFound {
             })),
             allergenFreeClaim: false,
             assistanceCode: sellable.allergenDisclosure.assistanceCode,
+            ...(sellable.allergenDisclosure.byChoice === undefined
+              ? {}
+              : { byChoice: sellable.allergenDisclosure.byChoice }),
           },
           displayPrice:
             sellable.displayPrice.status === "Available"

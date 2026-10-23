@@ -64,7 +64,17 @@ export interface MenuSellable {
   readonly availability: "Available" | "SoldOut";
   /** The Store's base price before options and tax, when it has one. */
   readonly price: { readonly amount: string; readonly currency: string } | null;
+  /** Everything the item may contain across all its choices. */
   readonly allergens: readonly MenuAllergenItem[];
+  /**
+   * WP-2423 ⑪: what the item contains for each reviewed set of chosen options (`sets` entries are
+   * `[outcome, ...optionIndexes]`); absent for older menus.
+   */
+  readonly allergensByChoice?: {
+    readonly options: readonly string[];
+    readonly outcomes: readonly (readonly MenuAllergenItem[])[];
+    readonly sets: readonly (readonly number[])[];
+  };
   readonly optionRules: readonly MenuOptionRule[];
 }
 
