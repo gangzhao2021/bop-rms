@@ -172,7 +172,16 @@ export function createCompleteMenuRecipeAllergenSource(
       },
     ) {
       try {
-        const selections = enumerateCatalogReviewSelections(input.rules, input.budget);
+        // Allergens follow which ingredients a configuration uses, and each option's recipe rule
+        // depends only on its own quantity, so covering every distinct set of chosen options and
+        // every option at every quantity proves the same as every quantity combination (v15
+        // 2026-10-22: a Latte with milk, shots, syrups and sweeteners has 13,440 quantity
+        // combinations per size, which exceeded the whole menu's review budget).
+        const selections = enumerateCatalogReviewSelections(
+          input.rules,
+          input.budget,
+          "distinct-options",
+        );
         const configurations = [];
         type Source = Awaited<ReturnType<typeof source.resolve>>;
         let registry: Pick<Source["allergens"], "registryVersionReference" | "registry"> | null =

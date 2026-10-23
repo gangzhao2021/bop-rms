@@ -368,6 +368,13 @@ export interface CatalogReviewOptionSelection {
 
 /** Complete review coverage only. Budget exhaustion never returns a partial list.
  * No current publication/availability or customer authorization is inferred.
+ *
+ * `coverage: "distinct-options"` returns at least one configuration per distinct set of chosen
+ * options, plus whatever is needed so every option appears at every quantity it can be chosen at.
+ * It is for reviews whose ingredients depend on which options are chosen and on each option's own
+ * quantity, never on combinations of quantities — such as recipe allergens and per-quantity recipe
+ * rules: two pumps of a syrup add the same ingredients as one, but still need their own rule. The
+ * budget counts the configurations returned. Default: every valid quantity combination.
  */
 export function enumerateCatalogReviewSelections(
   rulesInput: unknown,
@@ -375,7 +382,9 @@ export function enumerateCatalogReviewSelections(
     maximumConfigurations: number;
     maximumSearchSteps: number;
   },
+  coverage: "every-quantity" | "distinct-options" = "every-quantity",
 ): readonly (readonly CatalogReviewOptionSelection[])[] {
+  if (coverage !== "every-quantity" && coverage !== "distinct-options") return invalid();
   if (
     !Number.isSafeInteger(budget.maximumConfigurations) ||
     budget.maximumConfigurations < 1 ||
@@ -415,6 +424,9 @@ export function enumerateCatalogReviewSelections(
     ),
   );
   const configurations: (readonly CatalogReviewOptionSelection[])[] = [];
+  // distinct-options: option sets and option×quantity pairs already covered.
+  const coveredSets = new Set<string>();
+  const coveredQuantities = new Set<string>();
   let steps = 0;
   const tick = () => {
     if (++steps > budget.maximumSearchSteps)
@@ -439,15 +451,22 @@ export function enumerateCatalogReviewSelections(
     const candidate = ordered[task.groupIndex];
     if (task.kind === "group") {
       if (!candidate) {
+        const configuration = Object.freeze(
+          [...selected.values()].sort((a, b) => a.optionReference.localeCompare(b.optionReference)),
+        );
+        if (coverage === "distinct-options") {
+          const set = configuration.map((item) => item.optionReference).join(",");
+          const quantities = configuration.map(
+            (item) => item.optionReference + "×" + item.quantity,
+          );
+          if (coveredSets.has(set) && quantities.every((pair) => coveredQuantities.has(pair)))
+            continue;
+          coveredSets.add(set);
+          for (const pair of quantities) coveredQuantities.add(pair);
+        }
         if (configurations.length >= budget.maximumConfigurations)
           throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
-        configurations.push(
-          Object.freeze(
-            [...selected.values()].sort((a, b) =>
-              a.optionReference.localeCompare(b.optionReference),
-            ),
-          ),
-        );
+        configurations.push(configuration);
         continue;
       }
       const active =

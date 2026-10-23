@@ -400,6 +400,73 @@ describe("complete review configuration coverage", () => {
       expect.objectContaining({ code: "CATALOG_LIFECYCLE_CONFLICT" }),
     );
   });
+  it("covers every distinct option set and every option at every quantity, without every combination", () => {
+    const option = (n: number, maximumQuantity: number) => ({
+      optionReference: id(n),
+      maximumQuantity,
+      conflictOptionReferences: [],
+    });
+    const rules = [
+      {
+        bindingReference: id(500),
+        optionSetVersionReference: id(501),
+        activationOptionReferences: [],
+        minimumQuantity: 1,
+        maximumQuantity: 1,
+        options: [option(502, 1), option(503, 1)],
+      },
+      {
+        bindingReference: id(510),
+        optionSetVersionReference: id(511),
+        activationOptionReferences: [],
+        minimumQuantity: 0,
+        maximumQuantity: 4,
+        options: [option(512, 3), option(513, 3)],
+      },
+    ];
+    const set = (items: readonly { optionReference: string }[]) =>
+      items.map((item) => item.optionReference).join(",");
+    const pairs = (
+      configurations: readonly (readonly { optionReference: string; quantity: number }[])[],
+    ) =>
+      [
+        ...new Set(
+          configurations.flatMap((items) =>
+            items.map((item) => item.optionReference + "×" + item.quantity),
+          ),
+        ),
+      ].sort();
+    const every = enumerateCatalogReviewSelections(rules, budget);
+    const distinct = enumerateCatalogReviewSelections(rules, budget, "distinct-options");
+    // 2 milks × (each syrup 0–3, at most 4 in total = 13) quantity combinations…
+    expect(every).toHaveLength(26);
+    // …are covered by fewer: every option set, and every option at every quantity it allows.
+    expect([...new Set(distinct.map(set))].sort()).toEqual([...new Set(every.map(set))].sort());
+    expect(pairs(distinct)).toEqual(pairs(every));
+    expect(distinct.length).toBeLessThan(every.length);
+    expect(
+      distinct.every((items) =>
+        every.some((candidate) => JSON.stringify(candidate) === JSON.stringify(items)),
+      ),
+    ).toBe(true);
+    // The budget counts the configurations returned.
+    expect(
+      enumerateCatalogReviewSelections(
+        rules,
+        { ...budget, maximumConfigurations: distinct.length },
+        "distinct-options",
+      ),
+    ).toHaveLength(distinct.length);
+    expect(() =>
+      enumerateCatalogReviewSelections(rules, {
+        ...budget,
+        maximumConfigurations: distinct.length,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "CATALOG_DEPENDENCY_UNAVAILABLE" }));
+    expect(() =>
+      enumerateCatalogReviewSelections(rules, budget, "partial" as "distinct-options"),
+    ).toThrowError();
+  });
   it("returns the one empty configuration for no rules", () => {
     expect(enumerateCatalogReviewSelections([], budget)).toEqual([[]]);
   });
