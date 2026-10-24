@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { timeZoneLabel } from "./time-zone-names.js";
@@ -73,8 +74,9 @@ export function storeConfigurationViewerMayApprove(
   return undefined;
 }
 /** Shown to a sender who cannot approve (or whose approval access is not known). */
-export const STORE_HOURS_SENT_TO_OWNER =
-  "Sent for approval. An Owner will review and approve it; you\u2019ll see it here once it is published.";
+export const STORE_HOURS_SENT_TO_OWNER = t(
+  "Sent for approval. An Owner will review and approve it; you’ll see it here once it is published.",
+);
 /** WP-2423 (v15 `8bd902e3` D4): what happens next once a change is sent for approval — the
  * Owner with sole operator in effect approves it alone; another sender with approval access is told
  * someone else approves it (and, when sole operator is off, where to turn it on); a sender without
@@ -83,11 +85,17 @@ export const STORE_HOURS_SENT_TO_OWNER =
 export function storeHoursSubmittedMessage(view: StoreConfigurationView): string {
   const gate = view.soleOperator;
   if (gate?.status === "Effective")
-    return "Sent for approval. You are the sole operator: you can approve it yourself below, then publish it.";
+    return t(
+      "Sent for approval. You are the sole operator: you can approve it yourself below, then publish it.",
+    );
   if (storeConfigurationViewerMayApprove(view) !== true) return STORE_HOURS_SENT_TO_OWNER;
   if (gate?.status === "NotSet")
-    return "Sent for approval. Another person with approval access must approve it. If you run the Store alone, turn on sole operator in Approvals to approve it yourself.";
-  return "Sent for approval. Another person with approval access must approve it before it is published.";
+    return t(
+      "Sent for approval. Another person with approval access must approve it. If you run the Store alone, turn on sole operator in Approvals to approve it yourself.",
+    );
+  return t(
+    "Sent for approval. Another person with approval access must approve it before it is published.",
+  );
 }
 /** WP-2423 (v15): what someone else's open change allows you to do, from its current state (never
  * draft-only wording once it has been sent or approved). */
@@ -97,18 +105,20 @@ export function storeConfigurationOthersChangeText(
 ): string {
   const lifecycle = view.latest?.lifecycle,
     mayApprove = storeConfigurationViewerMayApprove(view) === true,
-    who = author ?? "the person who made it";
+    who = author ?? t("the person who made it");
   if (lifecycle === "PendingApproval")
     return mayApprove
-      ? "It has been sent for approval. You can approve or decline it."
-      : "It has been sent for approval and is waiting for an Owner to approve it.";
+      ? t("It has been sent for approval. You can approve or decline it.")
+      : t("It has been sent for approval and is waiting for an Owner to approve it.");
   if (lifecycle === "Approved")
-    return "It has been approved and can now be published. Customers see the new hours once it is published.";
+    return t(
+      "It has been approved and can now be published. Customers see the new hours once it is published.",
+    );
   return (
-    `Only ${who} can check it or send it for approval. ` +
+    t("Only {who} can check it or send it for approval. ", { who: who }) +
     (mayApprove
-      ? "You can approve it once it is sent, or decline it here."
-      : "Ask an Owner to approve or decline it.")
+      ? t("You can approve it once it is sent, or decline it here.")
+      : t("Ask an Owner to approve or decline it."))
   );
 }
 /** WP-2423 (v15 D2/D3): whose change is open (not published, not withdrawn), if any. */
@@ -172,10 +182,10 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
       if (active.signal.aborted) return;
       setView(next);
       setDraft(storeConfigurationEditBase(next));
-      setMessage("Configuration loaded.");
+      setMessage(t("Configuration loaded."));
     } catch {
       if (!active.signal.aborted)
-        setMessage("Configuration unavailable. Check your access and retry.");
+        setMessage(t("Configuration unavailable. Check your access and retry."));
     } finally {
       if (!active.signal.aborted) {
         running.current = false;
@@ -200,7 +210,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
             : "Draft") ||
         JSON.stringify(draft) !== JSON.stringify(view.latest))
     ) {
-      setMessage("Reload the saved configuration before reviewing this action.");
+      setMessage(t("Reload the saved configuration before reviewing this action."));
       return;
     }
     // WP-2423 Q4: hours of a configuration from Store setup are saved as an hours-only Store setup
@@ -279,20 +289,22 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
       setDraft(storeConfigurationEditBase(next));
       setMessage(
         completedCommand === "Publish"
-          ? "Configuration published."
+          ? t("Configuration published.")
           : completedCommand === "Approve"
             ? doneMode === "SoleOperator"
-              ? "Configuration approved by you alone as sole operator. Publish it to change the hours customers see."
-              : "Configuration approved. Published hours remain unchanged until publication."
+              ? t(
+                  "Configuration approved by you alone as sole operator. Publish it to change the hours customers see.",
+                )
+              : t("Configuration approved. Published hours remain unchanged until publication.")
             : completedCommand === "Validate"
-              ? "Saved draft validated."
+              ? t("Saved draft validated.")
               : completedCommand === "Submit"
                 ? storeHoursSubmittedMessage(next)
-                : "Draft saved. It takes effect only after approval and publication.",
+                : t("Draft saved. It takes effect only after approval and publication."),
       );
     } catch (error) {
       if (active.signal.aborted) return;
-      const text = error instanceof Error ? error.message : "Configuration request unavailable.";
+      const text = error instanceof Error ? error.message : t("Configuration request unavailable.");
       if (text.startsWith("Source changed")) {
         pending.current = null;
         setUncertain(false);
@@ -344,14 +356,16 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
       setDraft(storeConfigurationEditBase(next));
       setMessage(
         (kind === "Withdrawn"
-          ? "Your change was withdrawn. The next change starts from the published hours."
-          : "The change was declined. The next change starts from the published hours.") +
+          ? t("Your change was withdrawn. The next change starts from the published hours.")
+          : t("The change was declined. The next change starts from the published hours.")) +
           // WP-2423 (2026-10-16 v15): Store setup no longer holds the withdrawn hours either.
-          (setupHoursRestored ? " Store setup is back to the published opening hours too." : ""),
+          (setupHoursRestored ? t(" Store setup is back to the published opening hours too.") : ""),
       );
     } catch (error) {
       if (!active.signal.aborted)
-        setMessage(error instanceof Error ? error.message : "Configuration request unavailable.");
+        setMessage(
+          error instanceof Error ? error.message : t("Configuration request unavailable."),
+        );
     } finally {
       if (!active.signal.aborted) {
         running.current = false;
@@ -362,19 +376,20 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
   const disabled = busy || !online || uncertain;
   return (
     <section aria-labelledby="configuration-editor-title" aria-busy={busy}>
-      <h2 id="configuration-editor-title">Operating hours draft</h2>
+      <h2 id="configuration-editor-title">{t("Operating hours draft")}</h2>
       <p>
-        Save changes for review. Published hours remain active until a new configuration is
-        published.
+        {t(
+          "Save changes for review. Published hours remain active until a new configuration is published.",
+        )}
       </p>
-      {!online && <p role="status">Offline read-only.</p>}
+      {!online && <p role="status">{t("Offline read-only.")}</p>}
       <p role="status">{message}</p>
       <button type="button" disabled={disabled} onClick={() => void load()}>
-        {view ? "Reload configuration" : "Edit operating hours"}
+        {view ? t("Reload configuration") : t("Edit operating hours")}
       </button>
       {uncertain && (
         <button type="button" disabled={busy || !online} onClick={() => void save()}>
-          Retry configuration request
+          {t("Retry configuration request")}
         </button>
       )}
       {view && draft && (
@@ -455,49 +470,66 @@ export function StoreHoursDraftForm({
     >
       <p>
         {view.latest && view.latest.lifecycle !== "Published"
-          ? "Latest change: " +
+          ? t("Latest change: ") +
             (withdrawn
               ? withdrawn.kind === "Withdrawn"
-                ? "Withdrawn by the person who made it"
+                ? t("Withdrawn by the person who made it")
                 : "Declined"
               : storeConfigurationStateLabel(view.latest.lifecycle))
           : view.current
-            ? "No pending change. Customers see the published hours."
-            : "No published hours yet."}
+            ? t("No pending change. Customers see the published hours.")
+            : t("No published hours yet.")}
       </p>
       {withdrawn && (
         <p>
-          It was {withdrawn.kind === "Withdrawn" ? "withdrawn" : "declined"}
-          {withdrawn.byYou ? " by you" : ""} <StaffTime instant={withdrawn.withdrawnAt} />
-          {withdrawn.reason ? ` (${storeConfigurationDeclineReasonText[withdrawn.reason]})` : ""}.
-          The next change starts from the published hours.
+          {t("It was {value}{value2}", {
+            value: withdrawn.kind === "Withdrawn" ? t("withdrawn") : t("declined"),
+            value2: withdrawn.byYou ? t(" by you") : "",
+          })}{" "}
+          <StaffTime instant={withdrawn.withdrawnAt} />
+          {t("{value}. The next change starts from the published hours.", {
+            value: withdrawn.reason
+              ? ` (${storeConfigurationDeclineReasonText[withdrawn.reason]})`
+              : "",
+          })}
         </p>
       )}
       {open === "SomeoneElse" && view.latest && (
-        <section aria-label="Change waiting from someone else">
+        <section aria-label={t("Change waiting from someone else")}>
           <p>
-            {Author === null ? "Someone else" : Author}&rsquo;s change (version{" "}
-            {view.latest.configurationVersion},{" "}
-            {storeConfigurationStateLabel(view.latest.lifecycle).toLowerCase()}) is still open. It
-            is shown below. A new change cannot be saved until it is{" "}
-            {view.latest.lifecycle === "Approved" ? "published" : "approved and published"}, or
-            declined. {storeConfigurationOthersChangeText(view, author)}
+            {t(
+              "{value}’s change (version {configurationVersion}, {value2}) is still open. It is shown below. A new change cannot be saved until it is {value3}, or declined. {view}",
+              {
+                value: Author === null ? t("Someone else") : Author,
+                configurationVersion: view.latest.configurationVersion,
+                value2: storeConfigurationStateLabel(view.latest.lifecycle).toLowerCase(),
+                value3:
+                  view.latest.lifecycle === "Approved"
+                    ? t("published")
+                    : t("approved and published"),
+                view: storeConfigurationOthersChangeText(view, author),
+              },
+            )}
           </p>
           {onWithdraw && view.viewerMayDecline === true && !declining && (
             <button type="button" disabled={disabled} onClick={() => setDeclining(true)}>
-              Decline this change
+              {t("Decline this change")}
             </button>
           )}
           {onWithdraw && view.viewerMayDecline === true && declining && (
-            <div role="group" aria-label="Decline this change">
+            <div role="group" aria-label={t("Decline this change")}>
               <p>
-                Decline version {view.latest.configurationVersion}? It stays in the history and
-                cannot be approved or published.{" "}
-                {Author === null ? "The person who made it" : Author} sees that it was declined
-                {declineReason === "" ? "" : " and why"}, and can make a new change.
+                {t(
+                  "Decline version {configurationVersion}? It stays in the history and cannot be approved or published. {value} sees that it was declined{value2}, and can make a new change.",
+                  {
+                    configurationVersion: view.latest.configurationVersion,
+                    value: Author === null ? t("The person who made it") : Author,
+                    value2: declineReason === "" ? "" : t(" and why"),
+                  },
+                )}
               </p>
               <label>
-                Reason (optional)
+                {t("Reason (optional)")}
                 <select
                   value={declineReason}
                   disabled={disabled}
@@ -505,7 +537,7 @@ export function StoreHoursDraftForm({
                     setDeclineReason(event.currentTarget.value as StoreConfigurationDeclineReason)
                   }
                 >
-                  <option value="">No reason given</option>
+                  <option value="">{t("No reason given")}</option>
                   {(
                     Object.keys(
                       storeConfigurationDeclineReasonText,
@@ -525,32 +557,40 @@ export function StoreHoursDraftForm({
                   onWithdraw(declineReason === "" ? undefined : declineReason);
                 }}
               >
-                Decline version {view.latest.configurationVersion}
+                {t("Decline version {configurationVersion}", {
+                  configurationVersion: view.latest.configurationVersion,
+                })}
               </button>{" "}
               <button type="button" disabled={disabled} onClick={() => setDeclining(false)}>
-                Keep it
+                {t("Keep it")}
               </button>
             </div>
           )}
         </section>
       )}
       {open === "Yours" && view.latest && (
-        <section aria-label="Your change waiting">
+        <section aria-label={t("Your change waiting")}>
           <p>
-            You are editing your own change (version {view.latest.configurationVersion},{" "}
-            {storeConfigurationStateLabel(view.latest.lifecycle).toLowerCase()}). Saving again
-            replaces it; it then needs to be sent and approved again.
+            {t(
+              "You are editing your own change (version {configurationVersion}, {value}). Saving again replaces it; it then needs to be sent and approved again.",
+              {
+                configurationVersion: view.latest.configurationVersion,
+                value: storeConfigurationStateLabel(view.latest.lifecycle).toLowerCase(),
+              },
+            )}
           </p>
           {onWithdraw && (
             <button type="button" disabled={disabled} onClick={() => onWithdraw()}>
-              Withdraw my change
+              {t("Withdraw my change")}
             </button>
           )}
         </section>
       )}
       <p>
-        Times are in {timeZoneLabel(draft.timeZone)}. The business day starts at{" "}
-        {draft.businessDayStartLocalTime.slice(0, 5)}.
+        {t("Times are in {timeZone}. The business day starts at {value}.", {
+          timeZone: timeZoneLabel(draft.timeZone),
+          value: draft.businessDayStartLocalTime.slice(0, 5),
+        })}
       </p>
       {draft.setupBasis !== undefined && <StoreConfigurationFeeBasisView configuration={draft} />}
       {view.current?.setupBasis !== undefined &&
@@ -562,7 +602,7 @@ export function StoreHoursDraftForm({
           {draft.weeklySchedule.map((day, n) => (
             <fieldset key={day.isoWeekday}>
               <legend>{days[n]}</legend>
-              {day.intervals.length === 0 && <p>Closed</p>}
+              {day.intervals.length === 0 && <p>{t("Closed")}</p>}
               {day.intervals.map((interval, i) => (
                 <IntervalEditor
                   key={i}
@@ -597,22 +637,23 @@ export function StoreHoursDraftForm({
                   })
                 }
               >
-                Add interval
+                {t("Add interval")}
               </button>
             </fieldset>
           ))}
 
           <fieldset>
-            <legend>Dated exceptions</legend>
+            <legend>{t("Dated exceptions")}</legend>
             <p>
-              Dates use {timeZoneLabel(draft.timeZone)}. An exception with no intervals is closed
-              for that date.
+              {t("Dates use {timeZone}. An exception with no intervals is closed for that date.", {
+                timeZone: timeZoneLabel(draft.timeZone),
+              })}
             </p>
             {draft.exceptions.map((exception, n) => (
               <fieldset key={n}>
-                <legend>Exception {n + 1}</legend>
+                <legend>{t("Exception {value}", { value: n + 1 })}</legend>
                 <label>
-                  Exception date
+                  {t("Exception date")}
                   <input
                     type="date"
                     required
@@ -628,7 +669,7 @@ export function StoreHoursDraftForm({
                   />
                 </label>
                 <label>
-                  Exception kind
+                  {t("Exception kind")}
                   <select
                     value={exception.kind}
                     onChange={(event) =>
@@ -640,12 +681,12 @@ export function StoreHoursDraftForm({
                       })
                     }
                   >
-                    <option value="Holiday">Holiday</option>
-                    <option value="TemporaryClosure">Temporary closure</option>
-                    <option value="Override">Special hours</option>
+                    <option value="Holiday">{t("Holiday")}</option>
+                    <option value="TemporaryClosure">{t("Temporary closure")}</option>
+                    <option value="Override">{t("Special hours")}</option>
                   </select>
                 </label>
-                {exception.intervals.length === 0 && <p>Closed</p>}
+                {exception.intervals.length === 0 && <p>{t("Closed")}</p>}
                 {exception.intervals.map((interval, i) => (
                   <IntervalEditor
                     key={i}
@@ -694,7 +735,7 @@ export function StoreHoursDraftForm({
                     })
                   }
                 >
-                  Add exception interval
+                  {t("Add exception interval")}
                 </button>
                 <button
                   type="button"
@@ -705,7 +746,7 @@ export function StoreHoursDraftForm({
                     })
                   }
                 >
-                  Remove exception {n + 1}
+                  {t("Remove exception {value}", { value: n + 1 })}
                 </button>
               </fieldset>
             ))}
@@ -722,12 +763,12 @@ export function StoreHoursDraftForm({
                 })
               }
             >
-              Add dated exception
+              {t("Add dated exception")}
             </button>
           </fieldset>
         </StoreConfigurationEditingBoundary>
         <button type="submit" disabled={open === "SomeoneElse"}>
-          Save hours draft
+          {t("Save hours draft")}
         </button>
         <button
           type="button"
@@ -736,7 +777,7 @@ export function StoreHoursDraftForm({
           }
           onClick={() => onCommand("Validate")}
         >
-          Validate saved draft
+          {t("Validate saved draft")}
         </button>
         <button
           type="button"
@@ -745,11 +786,11 @@ export function StoreHoursDraftForm({
           }
           onClick={() => onCommand("Submit")}
         >
-          Submit saved draft
+          {t("Submit saved draft")}
         </button>
         {!stepsClosed && view.latest?.lifecycle === "Approved" && (
           <button type="button" disabled={!saved} onClick={() => onCommand("Publish")}>
-            Publish approved configuration
+            {t("Publish approved configuration")}
           </button>
         )}
         {!stepsClosed &&
@@ -758,10 +799,12 @@ export function StoreHoursDraftForm({
           storeConfigurationViewerMayApprove(view) !== false && (
             <>
               <p>
-                Approval requires an authorized reviewer other than the person who made the change.
+                {t(
+                  "Approval requires an authorized reviewer other than the person who made the change.",
+                )}
               </p>
               <button type="button" disabled={!saved} onClick={() => onCommand("Approve")}>
-                Approve reviewed configuration
+                {t("Approve reviewed configuration")}
               </button>
             </>
           )}
@@ -802,39 +845,43 @@ export function StoreHoursOwnApproval({
     storeConfigurationViewerMayApprove(view) !== true
   )
     return yours || view.soleOperator !== null ? (
-      <section aria-label="Approve your own change">
-        <h3>Approval</h3>
+      <section aria-label={t("Approve your own change")}>
+        <h3>{t("Approval")}</h3>
         <p>
-          An Owner will review and approve this change; you&rsquo;ll see it here once it is
-          published.
+          {t(
+            "An Owner will review and approve this change; you’ll see it here once it is published.",
+          )}
         </p>
       </section>
     ) : null;
   if (view.soleOperator === null)
     return yours ? (
-      <section aria-label="Approve your own change">
-        <h3>Approval</h3>
+      <section aria-label={t("Approve your own change")}>
+        <h3>{t("Approval")}</h3>
         <p>
-          You made this change, so another person with Owner access must approve it. You cannot
-          approve a change you made.
+          {t(
+            "You made this change, so another person with Owner access must approve it. You cannot approve a change you made.",
+          )}
         </p>
       </section>
     ) : null;
   return (
-    <section aria-label="Approve your own change">
-      <h3>Approval</h3>
+    <section aria-label={t("Approve your own change")}>
+      <h3>{t("Approval")}</h3>
       <SoleOperatorSelfApproval
         gate={view.soleOperator}
         csrf={csrf}
         summary={
           <p>
-            Version {latest.configurationVersion}: opening hours and dated closures as shown above.
-            Once approved, publish it to change the hours customers see.
+            {t(
+              "Version {configurationVersion}: opening hours and dated closures as shown above. Once approved, publish it to change the hours customers see.",
+              { configurationVersion: latest.configurationVersion },
+            )}
           </p>
         }
-        what="these opening hours"
-        permissionName="Owner access to this Store"
-        actionLabel="Approve hours on my own"
+        what={t("these opening hours")}
+        permissionName={t("Owner access to this Store")}
+        actionLabel={t("Approve hours on my own")}
         busy={busy}
         onApprove={onApprove}
       />
@@ -860,9 +907,9 @@ export function IntervalEditor({
   const seconds = (value: string) => Math.min(86400, Math.max(0, Math.round(Number(value)) * 60));
   return (
     <fieldset>
-      <legend>Interval {i + 1}</legend>
+      <legend>{t("Interval {value}", { value: i + 1 })}</legend>
       <label>
-        Start {i + 1}
+        {t("Start {value}", { value: i + 1 })}
         <input
           type="time"
           required
@@ -877,7 +924,7 @@ export function IntervalEditor({
         />
       </label>
       <label>
-        End {i + 1}
+        {t("End {value}", { value: i + 1 })}
         <input
           type="time"
           required
@@ -897,10 +944,10 @@ export function IntervalEditor({
           checked={interval.endsNextDay}
           onChange={(event) => onChange({ endsNextDay: event.target.checked })}
         />
-        Ends next day
+        {t("Ends next day")}
       </label>
       <label>
-        Last orders (minutes before closing)
+        {t("Last orders (minutes before closing)")}
         <input
           type="number"
           min="0"
@@ -912,7 +959,7 @@ export function IntervalEditor({
         />
       </label>
       <label>
-        Preparation time (minutes)
+        {t("Preparation time (minutes)")}
         <input
           type="number"
           min="0"
@@ -924,7 +971,7 @@ export function IntervalEditor({
         />
       </label>
       <fieldset>
-        <legend>Service modes</legend>
+        <legend>{t("Service modes")}</legend>
         {modes.map((mode) => (
           <label key={mode}>
             <input
@@ -944,7 +991,7 @@ export function IntervalEditor({
         ))}
       </fieldset>
       <button type="button" onClick={onRemove}>
-        Remove interval {i + 1}
+        {t("Remove interval {value}", { value: i + 1 })}
       </button>
     </fieldset>
   );
@@ -964,63 +1011,72 @@ export function StoreConfigurationFeeBasisView({
     <section
       aria-label={
         configuration.lifecycle === "Published"
-          ? "Published fee configuration"
-          : "Recorded fee configuration"
+          ? t("Published fee configuration")
+          : t("Recorded fee configuration")
       }
     >
       <h3>
         {configuration.lifecycle === "Published"
-          ? "Fees in the published settings"
-          : "Fees in the recorded settings"}
+          ? t("Fees in the published settings")
+          : t("Fees in the recorded settings")}
       </h3>
       <p>
         {withdrawal === undefined
           ? storeConfigurationStateLabel(configuration.lifecycle)
           : withdrawal === "Withdrawn"
-            ? "Withdrawn, will not be published"
-            : "Declined, will not be published"}
+            ? t("Withdrawn, will not be published")
+            : t("Declined, will not be published")}
         .{" "}
-        {configuration.lifecycle !== "Published" && "These settings do not change the live Store."}
+        {configuration.lifecycle !== "Published" &&
+          t("These settings do not change the live Store.")}
       </p>
       {!basis ? (
         <p>
-          This configuration was made before fees were part of Store setup, so it has no fee
-          settings.
+          {t(
+            "This configuration was made before fees were part of Store setup, so it has no fee settings.",
+          )}
         </p>
       ) : (
         <>
           <p>
-            These settings come from saved Store setup draft {basis.sourceRevision}. Change them in
-            Store setup.
+            {t(
+              "These settings come from saved Store setup draft {sourceRevision}. Change them in Store setup.",
+              { sourceRevision: basis.sourceRevision },
+            )}
           </p>
           <Link to={`/app/organization/stores/${configuration.storeReference}/setup`}>
-            Edit in Store Setup
+            {t("Edit in Store Setup")}
           </Link>
           <ul>
             {basis.feeContexts.map((entry) => (
               <li key={entry.chargeType}>
                 {entry.chargeType === "ServiceCharge"
-                  ? "Service charge"
+                  ? t("Service charge")
                   : entry.chargeType === "DeliveryFee"
-                    ? "Delivery fee"
-                    : "Tip"}
+                    ? t("Delivery fee")
+                    : t("Tip")}
                 :{" "}
-                {entry.state === "Enabled" ? "On" : entry.state === "Disabled" ? "Off" : "Not set"}
+                {entry.state === "Enabled"
+                  ? t("On")
+                  : entry.state === "Disabled"
+                    ? t("Off")
+                    : t("Not set")}
                 {entry.state === "Enabled" && (
                   <>
                     {" "}
                     · {entry.orderTypes.map(serviceModeLabel).join(", ")} ·{" "}
                     {entry.taxClassificationReference === null
-                      ? "no tax classification (tips are not taxed)"
-                      : "tax classification chosen"}
+                      ? t("no tax classification (tips are not taxed)")
+                      : t("tax classification chosen")}
                   </>
                 )}
               </li>
             ))}
           </ul>
           <p>
-            Fee amounts are not set here, and the tax classification has not been checked by a tax
-            professional.
+            {t(
+              "Fee amounts are not set here, and the tax classification has not been checked by a tax professional.",
+            )}
           </p>
         </>
       )}
@@ -1042,10 +1098,12 @@ export function StoreConfigurationEditingBoundary({
 }) {
   return (
     <fieldset>
-      <legend>Hours and service timing</legend>
+      <legend>{t("Hours and service timing")}</legend>
       {configuration.setupBasis !== undefined && (
         <p>
-          These hours are also the hours in Store setup. Saving them changes nothing else there.
+          {t(
+            "These hours are also the hours in Store setup. Saving them changes nothing else there.",
+          )}
         </p>
       )}
       {children}

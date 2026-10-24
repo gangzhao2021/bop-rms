@@ -1,3 +1,4 @@
+import { LanguageSwitch, t } from "./i18n/i18n.js";
 import { Link, useLocation } from "react-router";
 
 /**
@@ -12,15 +13,17 @@ import { Link, useLocation } from "react-router";
 export const STAFF_SIGN_IN_PATH = "/operations/sign-in";
 export const SIGN_IN_HREF = "/merchant/login?returnTo=/app";
 export const KITCHEN_SIGN_IN_HREF = "/merchant/login?returnTo=/operations/kitchen/start";
-export const SIGN_IN_FAILED_TEXT =
-  "We couldn't sign you in. If you were invited, sign in with the email address the invitation was sent to; an invitation expires 7 days after it was sent. If it keeps happening, ask your manager.";
+export const SIGN_IN_FAILED_TEXT = t(
+  "We couldn't sign you in. If you were invited, sign in with the email address the invitation was sent to; an invitation expires 7 days after it was sent. If it keeps happening, ask your manager.",
+);
 
 /**
  * The sign-in service's own check (it must require the authenticator app) did not pass or could not
  * be read, so no one can sign in with their account for now. Signed-in staff keep working.
  */
-export const SIGN_IN_UNAVAILABLE_TEXT =
-  "Signing in isn't available right now. Staff who are already signed in can keep working, and a shared store tablet still switches staff with a PIN. Try again in a few minutes; if it keeps happening, tell your manager so they can contact BOP support.";
+export const SIGN_IN_UNAVAILABLE_TEXT = t(
+  "Signing in isn't available right now. Staff who are already signed in can keep working, and a shared store tablet still switches staff with a PIN. Try again in a few minutes; if it keeps happening, tell your manager so they can contact BOP support.",
+);
 
 export function StaffSignInView({
   failed = false,
@@ -35,7 +38,8 @@ export function StaffSignInView({
         <p className="staff-switch__brand">
           <strong aria-label="BOP">BOP</strong>
         </p>
-        <h1>Staff sign-in</h1>
+        <h1>{t("Staff sign-in")}</h1>
+        <LanguageSwitch className="staff-switch__language" />
       </header>
       {failed || unavailable ? (
         <p role="alert" className="staff-switch__message">
@@ -43,39 +47,43 @@ export function StaffSignInView({
         </p>
       ) : null}
       <section className="staff-switch__panel" aria-labelledby="staff-sign-in-own">
-        <h2 id="staff-sign-in-own">Sign in with your account</h2>
-        <p>Use your work email, your password and the code from your authenticator app.</p>
+        <h2 id="staff-sign-in-own">{t("Sign in with your account")}</h2>
+        <p>{t("Use your work email, your password and the code from your authenticator app.")}</p>
         <a
           className="staff-switch__action staff-sign-in__primary"
           href="/merchant/login?returnTo=/app"
         >
-          Sign in
+          {t("Sign in")}
         </a>
       </section>
       <section className="staff-switch__panel" aria-labelledby="staff-sign-in-kitchen">
-        <h2 id="staff-sign-in-kitchen">Kitchen screen</h2>
+        <h2 id="staff-sign-in-kitchen">{t("Kitchen screen")}</h2>
         <p>
-          On the kitchen screen, start the kitchen display. A kitchen display sign-in only opens the
-          kitchen, not orders, refunds or settings.
+          {t(
+            "On the kitchen screen, start the kitchen display. A kitchen display sign-in only opens the kitchen, not orders, refunds or settings.",
+          )}
         </p>
         <a
           className="staff-sign-in__link"
           href="/merchant/login?returnTo=/operations/kitchen/start"
         >
-          Start kitchen display
+          {t("Start kitchen display")}
         </a>
       </section>
       <section className="staff-switch__panel" aria-labelledby="staff-sign-in-tablet">
-        <h2 id="staff-sign-in-tablet">Shared store tablet</h2>
-        <p>On a shared store tablet a manager has set up, switch to yourself with your PIN.</p>
+        <h2 id="staff-sign-in-tablet">{t("Shared store tablet")}</h2>
+        <p>
+          {t("On a shared store tablet a manager has set up, switch to yourself with your PIN.")}
+        </p>
         <Link className="staff-sign-in__link" to="/operations/switch-staff">
-          Switch staff with a PIN
+          {t("Switch staff with a PIN")}
         </Link>
       </section>
       <footer className="staff-switch__footer">
         <p>
-          Forgot your password or lost your phone? Ask the store owner or manager; they can contact
-          BOP support to reset your sign-in.
+          {t(
+            "Forgot your password or lost your phone? Ask the store owner or manager; they can contact BOP support to reset your sign-in.",
+          )}
         </p>
       </footer>
     </main>

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /** WP-2423 / DEC-INV-OPENING: INV-OPENING-COUNT view contract, money helpers and client. */
 export type OpeningCountErrorCode =
   | "PermissionDenied"
@@ -14,7 +15,7 @@ export class OpeningCountPageError extends Error {
     readonly code: OpeningCountErrorCode,
     readonly lineReference: string | null = null,
   ) {
-    super("Opening count is unavailable");
+    super(t("Opening count is unavailable"));
     this.name = "OpeningCountPageError";
   }
 }

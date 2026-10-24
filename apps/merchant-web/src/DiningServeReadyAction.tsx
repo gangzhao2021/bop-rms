@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createDiningServeReadyClient,
@@ -76,12 +77,14 @@ export function serveLines(lines: readonly Item[], byRound: boolean): readonly S
 }
 
 const refusal = {
-  Denied:
+  Denied: t(
     "Nothing was marked served. Your access may have changed; check serving progress and try again.",
-  NotAvailable:
+  ),
+  NotAvailable: t(
     "Nothing was marked served. This table has changed; check serving progress and try again.",
+  ),
 } as const;
-const items = (count: number) => (count === 1 ? "1 item" : `${count} items`);
+const items = (count: number) => (count === 1 ? t("1 item") : t("{count} items", { count: count }));
 
 /** The result in staff words: what was served and what still needs a look. */
 export function serveReadySummary(result: DiningServeReadyResult): string {
@@ -90,20 +93,33 @@ export function serveReadySummary(result: DiningServeReadyResult): string {
   if (result.served > 0)
     parts.push(
       notServed === 0 && result.alreadyServed === 0
-        ? `All ${items(result.served)} marked served.`
-        : `${result.served} served.`,
+        ? t("All {served} marked served.", { served: items(result.served) })
+        : t("{served} served.", { served: result.served }),
     );
   if (result.alreadyServed > 0)
     parts.push(
-      `${result.alreadyServed} ${result.alreadyServed === 1 ? "was" : "were"} already marked served by someone else.`,
+      t("{alreadyServed} {value} already marked served by someone else.", {
+        alreadyServed: result.alreadyServed,
+        value: result.alreadyServed === 1 ? "was" : "were",
+      }),
     );
   if (result.changed > 0)
     parts.push(
-      `${result.changed} could not be served because ${result.changed === 1 ? "it" : "they"} changed (cancelled, partly served or the table moved). Check ${result.changed === 1 ? "it" : "them"} and try again.`,
+      t(
+        "{changed} could not be served because {value} changed (cancelled, partly served or the table moved). Check {value2} and try again.",
+        {
+          changed: result.changed,
+          value: result.changed === 1 ? "it" : "they",
+          value2: result.changed === 1 ? "it" : "them",
+        },
+      ),
     );
   if (result.failed > 0)
     parts.push(
-      `${result.failed} could not be served right now. ${result.failed === 1 ? "It is" : "They are"} still ready; try again.`,
+      t("{failed} could not be served right now. {value} still ready; try again.", {
+        failed: result.failed,
+        value: result.failed === 1 ? "It is" : "They are",
+      }),
     );
   return parts.join(" ");
 }
@@ -147,13 +163,22 @@ export function DiningServeReadyAction({
   const lines = ready.slice(0, DINING_SERVE_READY_MAX_LINES);
   const where =
     scope.kind === "Round"
-      ? `round ${scope.sequence} at table ${view.tableLabel}`
-      : `table ${view.tableLabel}`;
+      ? t("round {sequence} at table {tableLabel}", {
+          sequence: scope.sequence,
+          tableLabel: view.tableLabel,
+        })
+      : t("table {tableLabel}", { tableLabel: view.tableLabel });
   const label =
     ready.length > lines.length
-      ? `Serve the first ${lines.length} of ${ready.length} ready items`
-      : `Serve all ${ready.length} ready items`;
-  const buttonLabel = scope.kind === "Round" ? `${label} in round ${scope.sequence}` : label;
+      ? t("Serve the first {length} of {length2} ready items", {
+          length: lines.length,
+          length2: ready.length,
+        })
+      : t("Serve all {length} ready items", { length: ready.length });
+  const buttonLabel =
+    scope.kind === "Round"
+      ? t("{label} in round {sequence}", { label: label, sequence: scope.sequence })
+      : label;
   const titleId = "serve-ready-" + (scope.kind === "Round" ? "round-" + scope.sequence : "table");
   const submit = async () => {
     if (pending.current || (!operation.current && locked)) return;
@@ -205,7 +230,7 @@ export function DiningServeReadyAction({
         disabled={locked && !retrying}
         onClick={() => dialog.current?.showModal()}
       >
-        {retrying ? "Check serving result" : buttonLabel}
+        {retrying ? t("Check serving result") : buttonLabel}
       </button>
       <dialog
         ref={dialog}
@@ -219,24 +244,28 @@ export function DiningServeReadyAction({
         }}
       >
         <h2 id={titleId}>
-          Mark {items(lines.length)} served for {where}?
+          {t("Mark {length} served for {where}?", { length: items(lines.length), where: where })}
         </h2>
-        <p>Each item is marked served in full. Only confirm once they are all on the table.</p>
+        <p>
+          {t("Each item is marked served in full. Only confirm once they are all on the table.")}
+        </p>
         <ul className="dining-serve-ready-lines">
           {serveLines(lines, scope.kind === "Table").map((line) => (
             <li key={line.key}>
               {line.quantity} × {line.name}
-              {scope.kind === "Table" ? ` · round ${line.round}` : ""}
+              {scope.kind === "Table" ? t(" · round {round}", { round: line.round }) : ""}
               {line.options ? <span className="order-line-options">{line.options}</span> : null}
               {line.note !== null ? (
-                <span className="order-line-note">Note: {line.note}</span>
+                <span className="order-line-note">{t("Note: {note}", { note: line.note })}</span>
               ) : null}
             </li>
           ))}
         </ul>
         {ready.length > lines.length ? (
           <p>
-            The other {ready.length - lines.length} ready items stay as they are; serve them next.
+            {t("The other {value} ready items stay as they are; serve them next.", {
+              value: ready.length - lines.length,
+            })}
           </p>
         ) : null}
         <div className="card-actions">
@@ -247,10 +276,10 @@ export function DiningServeReadyAction({
               onClick={() => void submit()}
             >
               {retrying
-                ? "Retry the same request"
+                ? t("Retry the same request")
                 : state === "Submitting"
-                  ? "Marking served…"
-                  : `Mark ${items(lines.length)} served`}
+                  ? t("Marking served…")
+                  : t("Mark {length} served", { length: items(lines.length) })}
             </button>
           )}
           <button
@@ -258,14 +287,18 @@ export function DiningServeReadyAction({
             disabled={state === "Submitting"}
             onClick={() => dialog.current?.close()}
           >
-            {state === "Denied" || state === "NotAvailable" ? "Close" : "Not yet"}
+            {state === "Denied" || state === "NotAvailable" ? t("Close") : t("Not yet")}
           </button>
         </div>
         <p role="status">
           {state === "Submitting"
-            ? `Marking ${items(lines.length)} served. This can take a little while for a full table.`
+            ? t("Marking {length} served. This can take a little while for a full table.", {
+                length: items(lines.length),
+              })
             : state === "Unknown"
-              ? "We could not confirm the result. Retry the same request: anything already marked served will not be marked twice."
+              ? t(
+                  "We could not confirm the result. Retry the same request: anything already marked served will not be marked twice.",
+                )
               : state === "Denied" || state === "NotAvailable"
                 ? refusal[state]
                 : null}
@@ -296,7 +329,7 @@ export function DiningServeReadyActions({
   const rounds = [...new Set(all.map((item) => item.batchSequence))].sort((a, b) => a - b);
   const common = { view, csrf, locked, onBusy, onDone, fetcher };
   return (
-    <div aria-label="Serve ready items" role="group">
+    <div aria-label={t("Serve ready items")} role="group">
       {rounds.length > 1 ? (
         <DiningServeReadyAction {...common} ready={all} scope={{ kind: "Table" }} />
       ) : null}

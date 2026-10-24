@@ -310,7 +310,8 @@ it("WP-2423: names each item to hand over from Ordering's item snapshots, only f
     expect.anything(),
     { brandReference: id(3), storeReference: id(4) },
     id(51),
-    "en-CA",
+    // Owner 2026-10-24: the staff member's chosen language first, then the Store's.
+    ["en-CA"],
   );
 });
 

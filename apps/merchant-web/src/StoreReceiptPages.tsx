@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StaffTime } from "./StoreTime.js";
@@ -17,18 +18,22 @@ import {
 } from "./store-receipt-pages.js";
 
 const copy: Record<StoreReceiptErrorCode | "Loading", string> = {
-  Loading: "Loading receiving…",
-  PermissionDenied: "You do not have permission for this receiving action.",
-  NotFound: "This receipt does not exist for the selected Store.",
-  Conflict: "The receipt changed or was already recorded. Refresh and check before trying again.",
-  AlreadyVoided: "This receipt has already been voided.",
-  StockUsed:
+  Loading: t("Loading receiving…"),
+  PermissionDenied: t("You do not have permission for this receiving action."),
+  NotFound: t("This receipt does not exist for the selected Store."),
+  Conflict: t(
+    "The receipt changed or was already recorded. Refresh and check before trying again.",
+  ),
+  AlreadyVoided: t("This receipt has already been voided."),
+  StockUsed: t(
     "Stock from the highlighted line has already been used or reserved; void is not possible. Record an adjustment or waste instead.",
-  LineInvalid:
+  ),
+  LineInvalid: t(
     "The highlighted line is not valid: check item, location, quantities, lot/expiry, reason and cost.",
-  Invalid: "The receipt is not valid. A supplier name and at least one line are required.",
-  Offline: "Offline. The receipt was not confirmed; retry sends the same request again.",
-  Unavailable: "Receiving is unavailable.",
+  ),
+  Invalid: t("The receipt is not valid. A supplier name and at least one line are required."),
+  Offline: t("Offline. The receipt was not confirmed; retry sends the same request again."),
+  Unavailable: t("Receiving is unavailable."),
 };
 const reasonLabel = (reason: string) =>
   reason.charAt(0) + reason.slice(1).toLowerCase().replaceAll("_", " ");
@@ -63,7 +68,7 @@ function useReceipts(
 function Failure({ code }: { code: StoreReceiptErrorCode | "Loading" }) {
   return (
     <StatePanel
-      heading={code === "PermissionDenied" ? noAccessHeading : "Receiving"}
+      heading={code === "PermissionDenied" ? noAccessHeading : t("Receiving")}
       tone={code === "Loading" ? "neutral" : "error"}
       status
     >
@@ -83,33 +88,34 @@ export function StoreReceiptListPage({
   if (state.kind !== "Found") return <Failure code={state.kind} />;
   const view = state.view;
   return (
-    <AppFrame title="Receiving" description="">
+    <AppFrame title={t("Receiving")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Receiving</p>
-          <h2>Receiving</h2>
+          <p className="bop-eyebrow">{t("Receiving")}</p>
+          <h2>{t("Receiving")}</h2>
           <p>
-            Goods received at this Store. Source as of <SourceTime instant={view.sourceAsOf} />
+            {t("Goods received at this Store. Source as of")}{" "}
+            <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
         {view.permissions.mayReceive ? (
-          <Link to="/operations/receiving/new">Receive goods</Link>
+          <Link to="/operations/receiving/new">{t("Receive goods")}</Link>
         ) : null}
       </header>
       {view.receipts.length === 0 ? (
-        <StatePanel heading="No receipts yet" status>
-          <p>Record deliveries and store purchases here as they arrive.</p>
+        <StatePanel heading={t("No receipts yet")} status>
+          <p>{t("Record deliveries and store purchases here as they arrive.")}</p>
         </StatePanel>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Received</th>
-              <th>Supplier</th>
-              <th>Document</th>
-              <th>Lines</th>
-              <th>Accepted value</th>
-              <th>Status</th>
+              <th>{t("Received")}</th>
+              <th>{t("Supplier")}</th>
+              <th>{t("Document")}</th>
+              <th>{t("Lines")}</th>
+              <th>{t("Accepted value")}</th>
+              <th>{t("Status")}</th>
             </tr>
           </thead>
           <tbody>
@@ -124,7 +130,7 @@ export function StoreReceiptListPage({
                 <td>{receipt.supplierDocument ?? ""}</td>
                 <td>{receipt.lines.length}</td>
                 <td>${centsToDollars(totalCents(receipt.lines))}</td>
-                <td>{receipt.voided ? "Voided" : "Posted"}</td>
+                <td>{receipt.voided ? t("Voided") : t("Posted")}</td>
               </tr>
             ))}
           </tbody>
@@ -237,14 +243,15 @@ export function StoreReceiptFormPage({
     }
   };
   return (
-    <AppFrame title="Receive goods" description="">
+    <AppFrame title={t("Receive goods")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Receive goods · Store direct</p>
-          <h2>Receive goods</h2>
+          <p className="bop-eyebrow">{t("Receive goods · Store direct")}</p>
+          <h2>{t("Receive goods")}</h2>
           <p>
-            Record what arrived. Only accepted quantities enter stock; rejected and damaged
-            quantities are kept with a reason. A posted receipt cannot be edited, only voided.
+            {t(
+              "Record what arrived. Only accepted quantities enter stock; rejected and damaged quantities are kept with a reason. A posted receipt cannot be edited, only voided.",
+            )}
           </p>
         </div>
       </header>
@@ -256,7 +263,7 @@ export function StoreReceiptFormPage({
         }}
       >
         <label>
-          Supplier
+          {t("Supplier")}
           <input
             required
             maxLength={120}
@@ -265,7 +272,7 @@ export function StoreReceiptFormPage({
           />
         </label>
         <label>
-          Invoice or delivery note number (optional)
+          {t("Invoice or delivery note number (optional)")}
           <input
             maxLength={64}
             value={document}
@@ -273,7 +280,7 @@ export function StoreReceiptFormPage({
           />
         </label>
         {view.items.length === 0 || view.locations.length === 0 ? (
-          <p>Activate stock-tracked inventory items and set up stock locations first.</p>
+          <p>{t("Activate stock-tracked inventory items and set up stock locations first.")}</p>
         ) : null}
         {lines.map((line, index) => {
           const item = items.get(line.itemReference);
@@ -286,9 +293,9 @@ export function StoreReceiptFormPage({
               aria-invalid={flagged}
               style={flagged ? { outline: "2px solid #b42318" } : undefined}
             >
-              <legend>Line {index + 1}</legend>
+              <legend>{t("Line {value}", { value: index + 1 })}</legend>
               <label>
-                Item
+                {t("Item")}
                 <select
                   value={line.itemReference}
                   onChange={(e) => update(index, { itemReference: e.currentTarget.value })}
@@ -301,7 +308,7 @@ export function StoreReceiptFormPage({
                 </select>
               </label>
               <label>
-                Put away at
+                {t("Put away at")}
                 <select
                   value={line.locationReference}
                   onChange={(e) => update(index, { locationReference: e.currentTarget.value })}
@@ -316,7 +323,9 @@ export function StoreReceiptFormPage({
               {mode !== "NoLot" ? (
                 <>
                   <label>
-                    Lot code{mode === "LotOptional" ? " (optional)" : ""}
+                    {t("Lot code{value}", {
+                      value: mode === "LotOptional" ? t(" (optional)") : "",
+                    })}
                     <input
                       maxLength={64}
                       required={mode !== "LotOptional" && !isZero(line.accepted)}
@@ -325,7 +334,9 @@ export function StoreReceiptFormPage({
                     />
                   </label>
                   <label>
-                    Expiry date{mode === "LotExpiryRequired" ? "" : " (optional)"}
+                    {t("Expiry date{value}", {
+                      value: mode === "LotExpiryRequired" ? "" : t(" (optional)"),
+                    })}
                     <input
                       type="date"
                       required={mode === "LotExpiryRequired" && !isZero(line.accepted)}
@@ -336,7 +347,8 @@ export function StoreReceiptFormPage({
                 </>
               ) : null}
               <label>
-                Accepted ({item?.unitCode})
+                {t("Accepted (")}
+                {item?.unitCode})
                 <input
                   inputMode="decimal"
                   value={line.accepted}
@@ -344,7 +356,7 @@ export function StoreReceiptFormPage({
                 />
               </label>
               <label>
-                Rejected
+                {t("Rejected")}
                 <input
                   inputMode="decimal"
                   value={line.rejected}
@@ -352,7 +364,7 @@ export function StoreReceiptFormPage({
                 />
               </label>
               <label>
-                Damaged
+                {t("Damaged")}
                 <input
                   inputMode="decimal"
                   value={line.damaged}
@@ -361,13 +373,13 @@ export function StoreReceiptFormPage({
               </label>
               {discrepancy ? (
                 <label>
-                  Reason
+                  {t("Reason")}
                   <select
                     required
                     value={line.reason}
                     onChange={(e) => update(index, { reason: e.currentTarget.value })}
                   >
-                    <option value="">Choose a reason</option>
+                    <option value="">{t("Choose a reason")}</option>
                     {view.discrepancyReasons.map((reason) => (
                       <option key={reason} value={reason}>
                         {reasonLabel(reason)}
@@ -377,7 +389,7 @@ export function StoreReceiptFormPage({
                 </label>
               ) : null}
               <label>
-                Unit cost per {item?.unitCode} ($)
+                {t("Unit cost per")} {item?.unitCode} ($)
                 <input
                   required
                   inputMode="decimal"
@@ -386,7 +398,7 @@ export function StoreReceiptFormPage({
                 />
               </label>
               <label>
-                Delivery temperature °C (optional)
+                {t("Delivery temperature °C (optional)")}
                 <input
                   inputMode="decimal"
                   value={line.temperature}
@@ -398,7 +410,7 @@ export function StoreReceiptFormPage({
                   type="button"
                   onClick={() => setLines((current) => current.filter((_, i) => i !== index))}
                 >
-                  Remove line
+                  {t("Remove line")}
                 </button>
               ) : null}
             </fieldset>
@@ -409,16 +421,16 @@ export function StoreReceiptFormPage({
           disabled={busy || view.items.length === 0}
           onClick={() => setLines((current) => [...current, blank(view)])}
         >
-          Add line
+          {t("Add line")}
         </button>{" "}
-        <button disabled={busy || lines.length === 0}>Post receipt</button>{" "}
-        <Link to="/operations/receiving">Cancel</Link>
+        <button disabled={busy || lines.length === 0}>{t("Post receipt")}</button>{" "}
+        <Link to="/operations/receiving">{t("Cancel")}</Link>
         {error ? (
-          <StatePanel heading="Not recorded" tone="error" status>
+          <StatePanel heading={t("Not recorded")} tone="error" status>
             <p>{copy[error.code]}</p>
             {error.code === "Offline" ? (
               <button type="button" disabled={busy} onClick={() => void submit()}>
-                Retry
+                {t("Retry")}
               </button>
             ) : null}
           </StatePanel>
@@ -474,32 +486,36 @@ export function StoreReceiptDetailPage({
     }
   };
   return (
-    <AppFrame title="Receipt" description="">
+    <AppFrame title={t("Receipt")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Receipt</p>
+          <p className="bop-eyebrow">{t("Receipt")}</p>
           <h2>
             {receipt.supplierName} {receipt.supplierDocument ? `· ${receipt.supplierDocument}` : ""}
           </h2>
           <p>
-            Received <StaffTime instant={receipt.receivedAt} /> ·{" "}
-            {receipt.voided ? `Voided (${reasonLabel(receipt.voided.reasonCode)})` : "Posted"} ·
-            accepted value ${centsToDollars(totalCents(receipt.lines))}
+            {t("Received")} <StaffTime instant={receipt.receivedAt} />{" "}
+            {t("· {value} · accepted value ${value2}", {
+              value: receipt.voided
+                ? t("Voided ({reasonCode})", { reasonCode: reasonLabel(receipt.voided.reasonCode) })
+                : t("Posted"),
+              value2: centsToDollars(totalCents(receipt.lines)),
+            })}
           </p>
         </div>
-        <Link to="/operations/receiving">Back to receiving</Link>
+        <Link to="/operations/receiving">{t("Back to receiving")}</Link>
       </header>
       <table>
         <thead>
           <tr>
-            <th>Item</th>
-            <th>Location</th>
-            <th>Lot / expiry</th>
-            <th>Accepted</th>
-            <th>Rejected</th>
-            <th>Damaged</th>
-            <th>Reason</th>
-            <th>Unit cost</th>
+            <th>{t("Item")}</th>
+            <th>{t("Location")}</th>
+            <th>{t("Lot / expiry")}</th>
+            <th>{t("Accepted")}</th>
+            <th>{t("Rejected")}</th>
+            <th>{t("Damaged")}</th>
+            <th>{t("Reason")}</th>
+            <th>{t("Unit cost")}</th>
             <th>°C</th>
           </tr>
         </thead>
@@ -528,15 +544,16 @@ export function StoreReceiptDetailPage({
       </table>
       {!receipt.voided && view.permissions.mayVoid ? (
         <section className="detail-section">
-          <h3>Void this receipt</h3>
+          <h3>{t("Void this receipt")}</h3>
           <p>
-            Voiding removes the received quantities from stock. It is refused once that stock was
-            used or reserved.
+            {t(
+              "Voiding removes the received quantities from stock. It is refused once that stock was used or reserved.",
+            )}
           </p>
           <label>
-            Reason
+            {t("Reason")}
             <select value={reason} onChange={(e) => setReason(e.currentTarget.value)}>
-              <option value="">Choose a reason</option>
+              <option value="">{t("Choose a reason")}</option>
               {view.voidReasons.map((value) => (
                 <option key={value} value={value}>
                   {reasonLabel(value)}
@@ -545,12 +562,12 @@ export function StoreReceiptDetailPage({
             </select>
           </label>
           <button disabled={busy || reason === ""} onClick={() => void voidReceipt()}>
-            Void receipt
+            {t("Void receipt")}
           </button>
         </section>
       ) : null}
       {error ? (
-        <StatePanel heading="Not voided" tone="error" status>
+        <StatePanel heading={t("Not voided")} tone="error" status>
           <p>{copy[error.code]}</p>
         </StatePanel>
       ) : null}

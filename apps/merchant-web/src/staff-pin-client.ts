@@ -1,3 +1,4 @@
+import { displayLocale, t } from "./i18n/i18n.js";
 /**
  * WP-2423 (Owner-approved design "A"): device-bound six-digit staff PIN quick switch.
  *
@@ -79,7 +80,7 @@ export class StaffPinError extends Error {
       readonly reason?: PinInvalidReason;
     } = {},
   ) {
-    super("Staff PIN request was not completed");
+    super(t("Staff PIN request was not completed"));
     this.name = "StaffPinError";
   }
 }
@@ -121,7 +122,7 @@ const path = (value: unknown): string =>
 function timeZone(value: unknown): string {
   if (typeof value !== "string" || value.length > 64) return invalid();
   try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    new Intl.DateTimeFormat(displayLocale(), { timeZone: value });
   } catch {
     return invalid();
   }
@@ -482,7 +483,7 @@ export function createStaffPinClient(
  * store's, when the store's is not known).
  */
 export function storeClockTime(instantValue: string, zone: string | undefined): string {
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(displayLocale(), {
     ...(zone === undefined ? {} : { timeZone: zone }),
     hour: "numeric",
     minute: "2-digit",
@@ -490,7 +491,7 @@ export function storeClockTime(instantValue: string, zone: string | undefined): 
 }
 /** "Oct 14, 2026" in the store's time zone. */
 export function storeDate(instantValue: string, zone: string | undefined): string {
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(displayLocale(), {
     ...(zone === undefined ? {} : { timeZone: zone }),
     year: "numeric",
     month: "short",

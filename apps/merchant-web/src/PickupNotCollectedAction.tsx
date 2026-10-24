@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useRef, useState } from "react";
 import type { PickupQueueItem } from "./pickup.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -90,35 +91,45 @@ export function PickupNotCollectedAction({
   };
   const message: Record<Exclude<Outcome, "Idle">, string> = {
     Pending: "Closing…",
-    Closed: "Closed as not collected.",
-    Denied: "Only a manager can close an uncollected order.",
-    NotEligible: "This order can no longer be closed. Refresh the queue.",
-    Unknown: "Result unknown. Retry the same close to recover its result.",
+    Closed: t("Closed as not collected."),
+    Denied: t("Only a manager can close an uncollected order."),
+    NotEligible: t("This order can no longer be closed. Refresh the queue."),
+    Unknown: t("Result unknown. Retry the same close to recover its result."),
   };
   return (
     <>
       <button disabled={outcome === "Closed" || paused} onClick={() => dialog.current?.showModal()}>
-        Mark not collected
+        {t("Mark not collected")}
       </button>
       {outcome === "Closed" ? <p role="status">{message.Closed}</p> : null}
       <dialog ref={dialog} aria-labelledby={"not-collected-" + item.fulfillmentReference}>
-        <h2 id={"not-collected-" + item.fulfillmentReference}>Close as not collected</h2>
+        <h2 id={"not-collected-" + item.fulfillmentReference}>{t("Close as not collected")}</h2>
         <p>
-          Order {item.publicOrderNumber ?? "reference unavailable"} has waited more than{" "}
-          {pickupHoldMinutes} minutes and nobody collected it. Closing it removes it from the pickup
-          queue and the order cannot be handed over afterwards.
+          {t(
+            "Order {value} has waited more than {pickupHoldMinutes} minutes and nobody collected it. Closing it removes it from the pickup queue and the order cannot be handed over afterwards.",
+            {
+              value: item.publicOrderNumber ?? t("reference unavailable"),
+              pickupHoldMinutes: pickupHoldMinutes,
+            },
+          )}
         </p>
         <p>
-          The customer is not refunded automatically. If the Store decides to refund, a manager does
-          it from the order&apos;s payments.
+          {t(
+            "The customer is not refunded automatically. If the Store decides to refund, a manager does it from the order's payments.",
+          )}
         </p>
         {item.remakeQuantity ? (
           // DEC-PICKUP-NOT-COLLECTED-REMAKE: the closure also cancels the remake (server-side).
           <p className="pickup-queue__remake" role="note">
-            The kitchen is still remaking{" "}
-            {item.remakeQuantity === 1 ? "1 item" : `${item.remakeQuantity} items`} for this order.
-            Closing it also cancels the remake and takes it off the Kitchen screen. Tell the kitchen
-            to stop making it.
+            {t(
+              "The kitchen is still remaking {value} for this order. Closing it also cancels the remake and takes it off the Kitchen screen. Tell the kitchen to stop making it.",
+              {
+                value:
+                  item.remakeQuantity === 1
+                    ? t("1 item")
+                    : t("{remakeQuantity} items", { remakeQuantity: item.remakeQuantity }),
+              },
+            )}
           </p>
         ) : null}
         {outcome === "Idle" || outcome === "Unknown" ? (
@@ -129,17 +140,17 @@ export function PickupNotCollectedAction({
                 checked={confirmed}
                 onChange={(event) => setConfirmed(event.currentTarget.checked)}
               />
-              I checked the pickup shelf and nobody collected this order
+              {t("I checked the pickup shelf and nobody collected this order")}
             </label>
             <button disabled={!confirmed || paused} onClick={() => void submit()}>
-              {outcome === "Unknown" ? "Retry same close" : "Close as not collected"}
+              {outcome === "Unknown" ? t("Retry same close") : t("Close as not collected")}
             </button>
           </>
         ) : null}
-        {paused ? <p role="status">Paused until the connection returns.</p> : null}
+        {paused ? <p role="status">{t("Paused until the connection returns.")}</p> : null}
         <p role="status">{outcome === "Idle" ? null : message[outcome]}</p>
         <button disabled={outcome === "Pending"} onClick={() => dialog.current?.close()}>
-          Close
+          {t("Close")}
         </button>
       </dialog>
     </>

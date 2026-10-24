@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /** WP-2423 8.5: CAT-AVAILABILITY view contract and same-origin client for the selected Store. */
 import { storeDayTime } from "./StoreTime.js";
 import type { KitchenBoardView } from "./kitchen-board.js";
@@ -5,7 +6,7 @@ export type AvailabilityErrorCode =
   "PermissionDenied" | "NotFound" | "Conflict" | "Invalid" | "Offline" | "Unavailable";
 export class AvailabilityPageError extends Error {
   constructor(readonly code: AvailabilityErrorCode) {
-    super("Item availability is unavailable");
+    super(t("Item availability is unavailable"));
     this.name = "AvailabilityPageError";
   }
 }
@@ -96,7 +97,7 @@ export function stockAmount(value: string, unitCode: string, displayPrecision: n
     (negative ? "-" : "") + whole + (fraction ? "." + fraction : "") + (unit ? " " + unit : "")
   );
 }
-const orders = (n: number) => (n === 1 ? "1 open order" : `${n} open orders`);
+const orders = (n: number) => (n === 1 ? t("1 open order") : t("{n} open orders", { n: n }));
 /**
  * WP-2423 (2026-10-16): why guests see an offered item as sold out, in staff words: "All 2.8 L of
  * Whole milk is set aside for 11 open orders." The page links to Orders (or Inventory).
@@ -106,15 +107,32 @@ export function stockSoldOutText(stock: StockSoldOut): string {
     const amount = (value: string) => stockAmount(value, entry.unitCode, entry.displayPrecision);
     const onHand = micro(entry.onHand),
       reserved = micro(entry.reserved);
-    if (onHand <= 0n) return `no ${entry.name} is in stock`;
+    if (onHand <= 0n) return t("no {name} is in stock", { name: entry.name });
     if (reserved > 0n && reserved >= onHand)
-      return `all ${amount(entry.onHand)} of ${entry.name} is set aside for ${orders(entry.openOrderCount)}`;
+      return t("all {onHand} of {name} is set aside for {openOrderCount}", {
+        onHand: amount(entry.onHand),
+        name: entry.name,
+        openOrderCount: orders(entry.openOrderCount),
+      });
     if (reserved > 0n)
-      return `${amount(entry.onHand)} of ${entry.name} is in stock, but ${amount(entry.reserved)} is set aside for ${orders(entry.openOrderCount)} and one needs ${amount(entry.required)}`;
-    return `only ${amount(entry.available)} of ${entry.name} can be used and one needs ${amount(entry.required)}`;
+      return t(
+        "{onHand} of {name} is in stock, but {reserved} is set aside for {openOrderCount} and one needs {required}",
+        {
+          onHand: amount(entry.onHand),
+          name: entry.name,
+          reserved: amount(entry.reserved),
+          openOrderCount: orders(entry.openOrderCount),
+          required: amount(entry.required),
+        },
+      );
+    return t("only {available} of {name} can be used and one needs {required}", {
+      available: amount(entry.available),
+      name: entry.name,
+      required: amount(entry.required),
+    });
   });
   if (reasons.length === 0)
-    return "The ingredients in stock are on hold or past their use-by date.";
+    return t("The ingredients in stock are on hold or past their use-by date.");
   const text = reasons.join("; ");
   return text.charAt(0).toUpperCase() + text.slice(1) + ".";
 }
@@ -180,7 +198,7 @@ export function soldOutText(
   timeZone: string,
   now: Date = new Date(),
 ): string {
-  if (until === null) return "Sold out until brought back";
+  if (until === null) return t("Sold out until brought back");
   const end = new Date(until);
   const local = (at: Date) =>
     new Intl.DateTimeFormat("en-CA", {
@@ -195,8 +213,8 @@ export function soldOutText(
   // Ends exactly at the start of the next calendar day: the rest of today.
   const lastMinute = local(new Date(end.getTime() - 60_000));
   if (local(end).endsWith("00:00") && lastMinute.slice(0, 10) === local(now).slice(0, 10))
-    return "Sold out for the rest of today";
-  return `Sold out until ${storeDayTime(until, timeZone, now)}`;
+    return t("Sold out for the rest of today");
+  return t("Sold out until {until}", { until: storeDayTime(until, timeZone, now) });
 }
 /** What a viewer may do with one item (WP-2423 Q17: floor staff mark sold out for today only). */
 export type AvailabilityAction =

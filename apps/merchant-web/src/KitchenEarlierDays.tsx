@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
@@ -26,13 +27,13 @@ export function fromEarlierKitchenDay(
 
 /** "8 min", "2 h 5 min", "1 day", "5 days" for how long work has been waiting. */
 export function kitchenWaitText(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) return t("{minutes} min", { minutes: minutes });
   if (minutes < 24 * 60) {
     const rest = minutes % 60;
-    return `${Math.floor(minutes / 60)} h${rest ? ` ${rest} min` : ""}`;
+    return `${Math.floor(minutes / 60)} h${rest ? t(" {rest} min", { rest: rest }) : ""}`;
   }
   const days = Math.floor(minutes / (24 * 60));
-  return days === 1 ? "1 day" : `${days} days`;
+  return days === 1 ? t("1 day") : t("{days} days", { days: days });
 }
 
 /** "From Fri, Oct 9" for an earlier business day's ticket. */
@@ -152,40 +153,46 @@ export function KitchenStaleCloseStatus({
   if (state.kind === "Idle") return null;
   const heading =
     state.kind === "Submitting"
-      ? "Closing ticket"
+      ? t("Closing ticket")
       : state.kind === "Unknown"
-        ? "Close result unknown"
+        ? t("Close result unknown")
         : state.kind === "Confirmed"
-          ? "Ticket closed"
-          : "Ticket not closed";
+          ? t("Ticket closed")
+          : t("Ticket not closed");
   const text =
     state.kind === "Submitting"
-      ? "Please wait."
+      ? t("Please wait.")
       : state.kind === "Unknown"
-        ? "The answer was lost. Retry the same close; it will not be recorded twice."
+        ? t("The answer was lost. Retry the same close; it will not be recorded twice.")
         : state.kind === "Confirmed"
           ? state.body.reasonCode === "ALREADY_SERVED"
-            ? "It has left the kitchen board. Its ingredients are recorded as used. The order and its payment are unchanged."
-            : "It has left the kitchen board. Nothing is recorded as used. The order and its payment are unchanged — cancel or refund it in Orders if the guest should get money back."
+            ? t(
+                "It has left the kitchen board. Its ingredients are recorded as used. The order and its payment are unchanged.",
+              )
+            : t(
+                "It has left the kitchen board. Nothing is recorded as used. The order and its payment are unchanged — cancel or refund it in Orders if the guest should get money back.",
+              )
           : state.code === "PermissionDenied"
-            ? "Only a manager can close an earlier day's ticket."
+            ? t("Only a manager can close an earlier day's ticket.")
             : state.code === "NotEarlierDay"
-              ? "This ticket belongs to today's business day. Finish it on the board instead."
+              ? t("This ticket belongs to today's business day. Finish it on the board instead.")
               : state.code === "NothingOpen"
-                ? "Nothing on this ticket is still open. The board has been refreshed."
-                : "The ticket changed on another screen. The board has been refreshed — check it again.";
+                ? t("Nothing on this ticket is still open. The board has been refreshed.")
+                : t(
+                    "The ticket changed on another screen. The board has been refreshed — check it again.",
+                  );
   return (
     <div className="kitchen-rework-status kitchen-stale-close-status" data-kind={state.kind}>
       <StatePanel heading={heading} tone={state.kind === "Rejected" ? "error" : "neutral"} status>
         <p>{text}</p>
         {state.kind === "Unknown" ? (
           <button type="button" onClick={close.retry}>
-            Retry same close
+            {t("Retry same close")}
           </button>
         ) : null}
         {state.kind === "Confirmed" || state.kind === "Rejected" ? (
           <button type="button" onClick={close.dismiss}>
-            Dismiss
+            {t("Dismiss")}
           </button>
         ) : null}
       </StatePanel>
@@ -233,14 +240,15 @@ export function KitchenCloseTicketDialog({
           }}
         >
           <h2 id={titleId}>
-            Close {ticket.orderLabel} from {day}?
+            {t("Close {orderLabel} from {day}?", { orderLabel: ticket.orderLabel, day: day })}
           </h2>
           <p>
-            Use this for a ticket that was dealt with in real life but never cleared from this
-            screen. The kitchen&apos;s record stays in the history.
+            {t(
+              "Use this for a ticket that was dealt with in real life but never cleared from this screen. The kitchen's record stays in the history.",
+            )}
           </p>
           <fieldset>
-            <legend>What happened to it?</legend>
+            <legend>{t("What happened to it?")}</legend>
             {(["ALREADY_SERVED", "CANCELLED_ELSEWHERE", "NOT_MADE_ABANDONED"] as const).map(
               (value) => (
                 <label key={value} className="kitchen-remake-dialog__reason">
@@ -259,21 +267,25 @@ export function KitchenCloseTicketDialog({
           {reason ? (
             <p className="kitchen-remake-dialog__effect">
               {reason === "ALREADY_SERVED"
-                ? "The food was made, so its ingredients are recorded as used."
-                : "Nothing is recorded as used. Stock held for this order stays held until the order is cancelled in Orders."}
+                ? t("The food was made, so its ingredients are recorded as used.")
+                : t(
+                    "Nothing is recorded as used. Stock held for this order stays held until the order is cancelled in Orders.",
+                  )}
             </p>
           ) : null}
           <p className="kitchen-close-dialog__money" role="note">
-            Closing the ticket does not refund or cancel the order. If the guest paid and did not
-            get their food, cancel or refund {ticket.orderLabel.split(" · ")[0]} from {day} in{" "}
-            <Link to="/operations/orders">Orders</Link>.
+            {t(
+              "Closing the ticket does not refund or cancel the order. If the guest paid and did not get their food, cancel or refund",
+            )}{" "}
+            {ticket.orderLabel.split(" · ")[0]} {t("from")} {day} {t("in")}{" "}
+            <Link to="/operations/orders">{t("Orders")}</Link>.
           </p>
           <div className="kitchen-remake-dialog__actions">
             <button type="button" onClick={() => dialog.current?.close()}>
-              Keep open
+              {t("Keep open")}
             </button>
             <button type="submit" disabled={reason === null}>
-              Close ticket
+              {t("Close ticket")}
             </button>
           </div>
         </form>
@@ -318,15 +330,18 @@ export function KitchenEarlierDayConfirm({
     >
       {request ? (
         <div>
-          <h2 id={titleId}>This ticket is from {day} — continue?</h2>
+          <h2 id={titleId}>{t("This ticket is from {day} — continue?", { day: day })}</h2>
           <p>
-            Order numbers restart every business day. {request.orderLabel.split(" · ")[0]} from{" "}
-            {day} is not today&apos;s order with the same number. Check it is the right ticket
-            before you {request.actionLabel.toLocaleLowerCase()}.
+            {t("Order numbers restart every business day.")} {request.orderLabel.split(" · ")[0]}{" "}
+            {t("from")} {day}{" "}
+            {t(
+              "is not today's order with the same number. Check it is the right ticket before you",
+            )}{" "}
+            {request.actionLabel.toLocaleLowerCase()}.
           </p>
           <div className="kitchen-remake-dialog__actions">
             <button type="button" autoFocus onClick={() => dialog.current?.close()}>
-              Go back
+              {t("Go back")}
             </button>
             <button
               type="button"
@@ -337,7 +352,7 @@ export function KitchenEarlierDayConfirm({
                 onCancel();
               }}
             >
-              Continue — {request.actionLabel}
+              {t("Continue — {actionLabel}", { actionLabel: request.actionLabel })}
             </button>
           </div>
         </div>

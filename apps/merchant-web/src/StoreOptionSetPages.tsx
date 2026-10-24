@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -25,14 +26,15 @@ import {
  * Options are never deleted (orders refer to them); an option can stop being offered instead.
  */
 const copy: Record<OptionSetErrorCode | "Loading", string> = {
-  Loading: "Loading options…",
-  PermissionDenied: "You do not have permission to change the Brand's options.",
-  NotFound: "This option set does not exist for the Brand.",
-  Conflict: "The option set changed since you opened it. Refresh and check again.",
-  Invalid:
+  Loading: t("Loading options…"),
+  PermissionDenied: t("You do not have permission to change the Brand's options."),
+  NotFound: t("This option set does not exist for the Brand."),
+  Conflict: t("The option set changed since you opened it. Refresh and check again."),
+  Invalid: t(
     "The option set is not valid. It needs a name, at least one option, different option names, and limits that customers can meet with the options offered.",
-  Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
-  Unavailable: "Options are unavailable.",
+  ),
+  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Unavailable: t("Options are unavailable."),
 };
 type State<V> =
   { readonly kind: "Loading" | OptionSetErrorCode } | { readonly kind: "Found"; readonly view: V };
@@ -60,7 +62,7 @@ function useView<V>(load: () => Promise<unknown>, parse: (value: unknown) => V, 
 function Failure({ code }: { readonly code: OptionSetErrorCode | "Loading" }) {
   return (
     <StatePanel
-      heading={code === "PermissionDenied" ? noAccessHeading : "Options"}
+      heading={code === "PermissionDenied" ? noAccessHeading : t("Options")}
       tone={code === "Loading" ? "neutral" : "error"}
       status
     >
@@ -70,7 +72,7 @@ function Failure({ code }: { readonly code: OptionSetErrorCode | "Loading" }) {
 }
 const offeredNames = (set: OptionSetRow) => {
   const names = set.options.filter((option) => option.offered).map((option) => option.name);
-  return names.length === 0 ? "None offered" : names.join(", ");
+  return names.length === 0 ? t("None offered") : names.join(", ");
 };
 
 export function StoreOptionSetListPage({
@@ -83,33 +85,34 @@ export function StoreOptionSetListPage({
   const view: OptionSetListView = state.view;
   const current = view.optionSets.filter((set) => !set.archived);
   return (
-    <AppFrame title="Options" description="">
+    <AppFrame title={t("Options")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Options · Brand</p>
-          <h2>Options</h2>
+          <p className="bop-eyebrow">{t("Options · Brand")}</p>
+          <h2>{t("Options")}</h2>
           <p>
-            Choices customers make on an item, such as milk or an extra shot. Add a set to a product
-            on the product page; customers see it once a menu with that product is published. Source
-            as of <SourceTime instant={view.sourceAsOf} />
+            {t(
+              "Choices customers make on an item, such as milk or an extra shot. Add a set to a product on the product page; customers see it once a menu with that product is published. Source as of",
+            )}{" "}
+            <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
         {view.permissions.mayEdit ? (
-          <Link to="/app/commerce/option-sets/new">New option set</Link>
+          <Link to="/app/commerce/option-sets/new">{t("New option set")}</Link>
         ) : null}
       </header>
       {current.length === 0 ? (
-        <StatePanel heading="No option sets yet" status>
-          <p>Create a set for each choice customers make, for example Milk or Extra shot.</p>
+        <StatePanel heading={t("No option sets yet")} status>
+          <p>{t("Create a set for each choice customers make, for example Milk or Extra shot.")}</p>
         </StatePanel>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Option set</th>
-              <th>Customer chooses</th>
-              <th>Options offered</th>
-              <th>Used on</th>
+              <th>{t("Option set")}</th>
+              <th>{t("Customer chooses")}</th>
+              <th>{t("Options offered")}</th>
+              <th>{t("Used on")}</th>
             </tr>
           </thead>
           <tbody>
@@ -118,10 +121,12 @@ export function StoreOptionSetListPage({
                 <td>
                   <Link to={`/app/commerce/option-sets/${set.optionSetReference}`}>{set.name}</Link>
                 </td>
-                <td data-label="Customer chooses">{choiceRule(set)}</td>
-                <td data-label="Options offered">{offeredNames(set)}</td>
-                <td data-label="Used on">
-                  {set.productNames.length === 0 ? "No product yet" : set.productNames.join(", ")}
+                <td data-label={t("Customer chooses")}>{choiceRule(set)}</td>
+                <td data-label={t("Options offered")}>{offeredNames(set)}</td>
+                <td data-label={t("Used on")}>
+                  {set.productNames.length === 0
+                    ? t("No product yet")
+                    : set.productNames.join(", ")}
                 </td>
               </tr>
             ))}
@@ -229,17 +234,17 @@ function OptionSetEditor({
   const effectivePerOption = kind === "Quantity" ? perOption : 1;
   const offered = rows.filter((row) => row.offered).length;
   const problems: string[] = [];
-  if (name.trim() === "") problems.push("Give the set a name.");
+  if (name.trim() === "") problems.push(t("Give the set a name."));
   if (rows.length === 0 || rows.some((row) => row.name.trim() === ""))
-    problems.push("Every option needs a name.");
+    problems.push(t("Every option needs a name."));
   if (new Set(rows.map((row) => row.name.trim().toLowerCase())).size !== rows.length)
-    problems.push("Option names must differ.");
+    problems.push(t("Option names must differ."));
   if (effectiveMaximum !== null && effectiveMaximum < effectiveMinimum)
-    problems.push("The most a customer can choose must not be less than the least.");
+    problems.push(t("The most a customer can choose must not be less than the least."));
   if (effectiveMinimum > offered * effectivePerOption)
-    problems.push("Customers could not meet the minimum with the options offered.");
+    problems.push(t("Customers could not meet the minimum with the options offered."));
   if (kind === "One" && rows.filter((row) => row.defaultChoice).length > 1)
-    problems.push("Only one option can be the default when customers choose one.");
+    problems.push(t("Only one option can be the default when customers choose one."));
 
   const body = () => ({
     name: name.trim(),
@@ -327,28 +332,31 @@ function OptionSetEditor({
       if (row) next.splice(index + by, 0, row);
       return next;
     });
-  const title = set ? set.name : "New option set";
+  const title = set ? set.name : t("New option set");
   return (
-    <AppFrame title={title} description={set ? "Edit option set" : "New option set"}>
+    <AppFrame title={title} description={set ? t("Edit option set") : t("New option set")}>
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">{set ? "Edit option set" : "New option set"} · Brand</p>
+          <p className="bop-eyebrow">
+            {t("{value} · Brand", { value: set ? t("Edit option set") : t("New option set") })}
+          </p>
           <h2>{title}</h2>
           <p>
             {set
               ? optionSetStateText(set)
-              : "Name the choice, say how customers choose, and list the options."}
+              : t("Name the choice, say how customers choose, and list the options.")}
           </p>
           <p>
-            Changes reach customers when a menu with a product that uses this set is next published.
-            Each option needs a price (it can be 0) before customers can choose it.
+            {t(
+              "Changes reach customers when a menu with a product that uses this set is next published. Each option needs a price (it can be 0) before customers can choose it.",
+            )}
           </p>
         </div>
-        <Link to="/app/commerce/option-sets">Back to options</Link>
+        <Link to="/app/commerce/option-sets">{t("Back to options")}</Link>
       </header>
       {message ? (
         <StatePanel
-          heading={message.tone === "error" ? "Not saved" : "Done"}
+          heading={message.tone === "error" ? t("Not saved") : t("Done")}
           tone={message.tone}
           status
         >
@@ -362,19 +370,19 @@ function OptionSetEditor({
         }}
       >
         <fieldset disabled={!mayEdit || busy}>
-          <legend>Choice</legend>
+          <legend>{t("Choice")}</legend>
           <label>
-            Name
+            {t("Name")}
             <input
               value={name}
               maxLength={80}
               required
-              placeholder="Milk"
+              placeholder={t("Milk")}
               onChange={(event) => setName(event.target.value)}
             />
           </label>
           <label>
-            Chinese name (中文名称, optional)
+            {t("Chinese name (中文名称, optional)")}
             <input
               lang="zh-Hans"
               value={nameZh}
@@ -384,7 +392,7 @@ function OptionSetEditor({
             />
           </label>
           <label>
-            Customers
+            {t("Customers")}
             <select
               value={kind}
               onChange={(event) => {
@@ -398,9 +406,9 @@ function OptionSetEditor({
                 else if (perOption === 1) setPerOption(3);
               }}
             >
-              <option value="One">Choose one option</option>
-              <option value="Any">Choose several options</option>
-              <option value="Quantity">Choose a quantity of each option</option>
+              <option value="One">{t("Choose one option")}</option>
+              <option value="Any">{t("Choose several options")}</option>
+              <option value="Quantity">{t("Choose a quantity of each option")}</option>
             </select>
           </label>
           {kind === "One" ? (
@@ -410,12 +418,12 @@ function OptionSetEditor({
                 checked={minimum >= 1}
                 onChange={(event) => setMinimum(event.target.checked ? 1 : 0)}
               />
-              A choice is required
+              {t("A choice is required")}
             </label>
           ) : (
             <>
               <label>
-                Least in total
+                {t("Least in total")}
                 <input
                   type="number"
                   min={0}
@@ -425,7 +433,7 @@ function OptionSetEditor({
                 />
               </label>
               <label>
-                Most in total (empty for no limit)
+                {t("Most in total (empty for no limit)")}
                 <input
                   type="number"
                   min={1}
@@ -442,7 +450,7 @@ function OptionSetEditor({
               </label>
               {kind === "Quantity" ? (
                 <label>
-                  Most of one option
+                  {t("Most of one option")}
                   <input
                     type="number"
                     min={1}
@@ -455,25 +463,26 @@ function OptionSetEditor({
             </>
           )}
           <p>
-            Customers see:{" "}
-            {choiceRule({
-              kind,
-              minimum: effectiveMinimum,
-              maximum: effectiveMaximum,
-              perOptionMaximum: effectivePerOption,
+            {t("Customers see: {value}", {
+              value: choiceRule({
+                kind,
+                minimum: effectiveMinimum,
+                maximum: effectiveMaximum,
+                perOptionMaximum: effectivePerOption,
+              }),
             })}
           </p>
         </fieldset>
         <fieldset disabled={!mayEdit || busy}>
-          <legend>Options</legend>
+          <legend>{t("Options")}</legend>
           <table>
             <thead>
               <tr>
-                <th>Option</th>
-                <th>Chinese name</th>
-                <th>Offered</th>
-                <th>Default</th>
-                <th aria-label="Order" />
+                <th>{t("Option")}</th>
+                <th>{t("Chinese name")}</th>
+                <th>{t("Offered")}</th>
+                <th>{t("Default")}</th>
+                <th aria-label={t("Order")} />
               </tr>
             </thead>
             <tbody>
@@ -484,11 +493,11 @@ function OptionSetEditor({
                       aria-label={`Option ${index + 1} name`}
                       value={row.name}
                       maxLength={80}
-                      placeholder={index === 0 ? "Whole milk" : index === 1 ? "Oat milk" : ""}
+                      placeholder={index === 0 ? t("Whole milk") : index === 1 ? t("Oat milk") : ""}
                       onChange={(event) => update(row.key, { name: event.target.value })}
                     />
                   </td>
-                  <td data-label="Chinese name">
+                  <td data-label={t("Chinese name")}>
                     <input
                       lang="zh-Hans"
                       aria-label={`Option ${index + 1} Chinese name`}
@@ -498,7 +507,7 @@ function OptionSetEditor({
                       onChange={(event) => update(row.key, { nameZh: event.target.value })}
                     />
                   </td>
-                  <td data-label="Offered">
+                  <td data-label={t("Offered")}>
                     <input
                       type="checkbox"
                       aria-label={`Offer ${row.name || `option ${index + 1}`}`}
@@ -506,7 +515,7 @@ function OptionSetEditor({
                       onChange={(event) => update(row.key, { offered: event.target.checked })}
                     />
                   </td>
-                  <td data-label="Default">
+                  <td data-label={t("Default")}>
                     <input
                       type="checkbox"
                       aria-label={`${row.name || `Option ${index + 1}`} is chosen by default`}
@@ -517,12 +526,12 @@ function OptionSetEditor({
                   <td>
                     {index > 0 ? (
                       <button type="button" onClick={() => move(index, -1)}>
-                        Up
+                        {t("Up")}
                       </button>
                     ) : null}
                     {index < rows.length - 1 ? (
                       <button type="button" onClick={() => move(index, 1)}>
-                        Down
+                        {t("Down")}
                       </button>
                     ) : null}
                     {row.optionReference === null && rows.length > 1 ? (
@@ -532,7 +541,7 @@ function OptionSetEditor({
                           setRows((current) => current.filter((item) => item.key !== row.key))
                         }
                       >
-                        Remove
+                        {t("Remove")}
                       </button>
                     ) : null}
                   </td>
@@ -541,17 +550,18 @@ function OptionSetEditor({
             </tbody>
           </table>
           <p>
-            An option that has been saved cannot be removed, because orders refer to it; clear
-            “Offered” to stop customers choosing it.
+            {t(
+              "An option that has been saved cannot be removed, because orders refer to it; clear “Offered” to stop customers choosing it.",
+            )}
           </p>
           {rows.length < 50 ? (
             <button type="button" onClick={() => setRows((current) => [...current, blank()])}>
-              Add option
+              {t("Add option")}
             </button>
           ) : null}
         </fieldset>
         {problems.length > 0 && mayEdit ? (
-          <ul aria-label="Before saving">
+          <ul aria-label={t("Before saving")}>
             {problems.map((problem) => (
               <li key={problem}>{problem}</li>
             ))}
@@ -560,22 +570,23 @@ function OptionSetEditor({
         {mayEdit ? (
           <button type="submit" disabled={problems.length > 0 || busy}>
             {pending && pending.action !== "Archive"
-              ? "Retry"
+              ? t("Retry")
               : set
-                ? "Save changes"
-                : "Create option set"}
+                ? t("Save changes")
+                : t("Create option set")}
           </button>
         ) : null}
       </form>
       {set && mayEdit ? (
         <section className="detail-section" aria-labelledby="archive-set">
-          <h3 id="archive-set">Archive</h3>
+          <h3 id="archive-set">{t("Archive")}</h3>
           <p>
-            Archived sets cannot be added to products. Products already using it keep it until you
-            remove it from them.
+            {t(
+              "Archived sets cannot be added to products. Products already using it keep it until you remove it from them.",
+            )}
           </p>
           <button type="button" disabled={busy} onClick={archive}>
-            {pending && pending.action === "Archive" ? "Retry archive" : "Archive option set"}
+            {pending && pending.action === "Archive" ? t("Retry archive") : t("Archive option set")}
           </button>
         </section>
       ) : null}

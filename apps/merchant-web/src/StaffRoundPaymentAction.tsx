@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import { validSlipReference } from "./CardMachineRefundAction.js";
 import { orderMoney } from "./order-money.js";
@@ -99,8 +100,8 @@ export function StaffRoundPaymentAction({
           }}
         >
           {amount === null
-            ? (label ?? "Record card-machine payment")
-            : `${label ?? "Record card-machine payment"} · ${cad(amount)}`}
+            ? (label ?? t("Record card-machine payment"))
+            : `${label ?? t("Record card-machine payment")} · ${cad(amount)}`}
         </button>
       </div>
     );
@@ -110,16 +111,20 @@ export function StaffRoundPaymentAction({
         <p>
           {reading === "NotDue"
             ? subject === "order"
-              ? "This order is no longer waiting for a card-machine payment (paid or released). The list will update."
-              : "This round is no longer waiting for a card-machine payment. The order list will update."
+              ? t(
+                  "This order is no longer waiting for a card-machine payment (paid or released). The list will update.",
+                )
+              : t(
+                  "This round is no longer waiting for a card-machine payment. The order list will update.",
+                )
             : reading === "Failed" || loadAmountDue === undefined
-              ? "Couldn't read the amount to charge. Check the connection and try again."
-              : "Reading the amount to charge…"}
+              ? t("Couldn't read the amount to charge. Check the connection and try again.")
+              : t("Reading the amount to charge…")}
         </p>
         <div className="card-actions">
           {reading === "Failed" ? (
             <button type="button" onClick={readAmount}>
-              Try again
+              {t("Try again")}
             </button>
           ) : null}
           <button
@@ -131,7 +136,7 @@ export function StaffRoundPaymentAction({
               if (reading === "NotDue") onRecorded();
             }}
           >
-            {reading === "NotDue" ? "Close" : "Cancel"}
+            {reading === "NotDue" ? t("Close") : t("Cancel")}
           </button>
         </div>
       </div>
@@ -153,8 +158,8 @@ export function StaffRoundPaymentAction({
       });
       setMessage(
         result.acceptance === "Accepted"
-          ? "Paid and sent to the kitchen."
-          : "Paid, but not sent to the kitchen yet. Accept it on this order now.",
+          ? t("Paid and sent to the kitchen.")
+          : t("Paid, but not sent to the kitchen yet. Accept it on this order now."),
       );
       onRecorded(result);
     } catch (error) {
@@ -173,15 +178,17 @@ export function StaffRoundPaymentAction({
   return (
     <form
       className="staff-round-payment"
-      aria-label="Record card-machine payment"
+      aria-label={t("Record card-machine payment")}
       onSubmit={(event) => {
         event.preventDefault();
         void record();
       }}
     >
       <p>
-        Charge {cad(amount)} on the card machine first, then record it here. The kitchen starts this{" "}
-        {subject} once it is recorded.
+        {t(
+          "Charge {amount} on the card machine first, then record it here. The kitchen starts this {subject} once it is recorded.",
+          { amount: cad(amount), subject: subject },
+        )}
       </p>
       {payBy !== null
         ? (() => {
@@ -203,7 +210,7 @@ export function StaffRoundPaymentAction({
           })()
         : null}
       <label>
-        Slip reference (optional)
+        {t("Slip reference (optional)")}
         <input
           value={slip}
           maxLength={40}
@@ -214,7 +221,7 @@ export function StaffRoundPaymentAction({
       </label>
       {recordedAfterOutage ? (
         <label>
-          Paid at (store time)
+          {t("Paid at (store time)")}
           <input
             type="datetime-local"
             value={paidAt}
@@ -232,10 +239,10 @@ export function StaffRoundPaymentAction({
             (recordedAfterOutage && paperInstant === null)
           }
         >
-          {busy ? "Recording…" : `Paid on card machine · ${cad(amount)}`}
+          {busy ? t("Recording…") : t("Paid on card machine · {amount}", { amount: cad(amount) })}
         </button>
         <button type="button" disabled={busy} onClick={() => setOpen(false)}>
-          Cancel
+          {t("Cancel")}
         </button>
       </div>
     </form>

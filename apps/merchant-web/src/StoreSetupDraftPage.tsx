@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { StoreConfigurationOrdinaryPanel } from "./StoreConfigurationOrdinaryPanel.js";
 import type { StoreConfigurationSnapshot } from "./store-configuration-client.js";
 import { createStoreConfigurationOrdinaryClient } from "./store-configuration-ordinary-client.js";
@@ -55,10 +56,10 @@ import { languageName } from "./staff-text.js";
 import { timeZoneChoices, timeZoneLabel } from "./time-zone-names.js";
 const steps = [
   "Identity",
-  "Address and timezone",
-  "Service modes",
+  t("Address and timezone"),
+  t("Service modes"),
   "Hours",
-  "Tax and payment",
+  t("Tax and payment"),
   "Capacity",
   "Contacts",
   "Review",
@@ -106,7 +107,13 @@ export interface StoreSetupEditorInputs {
 /** Shown only when a saved wait is not a whole number of minutes and staff have not edited it. */
 function SavedWaitNote({ seconds }: { readonly seconds?: number | null | undefined }) {
   if (typeof seconds !== "number" || seconds % 60 === 0) return null;
-  return <p>Saved as {savedWaitText(seconds)}. It stays as saved unless you change it here.</p>;
+  return (
+    <p>
+      {t("Saved as {seconds}. It stays as saved unless you change it here.", {
+        seconds: savedWaitText(seconds),
+      })}
+    </p>
+  );
 }
 function editInputs(content: StoreSetupContent): StoreSetupEditorInputs {
   return {
@@ -233,36 +240,52 @@ export async function recoverStoreSetupDraft(input: {
   return { receipt, workspace };
 }
 const messages: Record<StoreSetupClientError["code"], string> = {
-  Invalid:
+  Invalid: t(
     "Check the edited settings. Each service interval needs valid times and at least one service mode. Wait times are whole minutes, up to 24 hours (1,440 minutes). A service charge or delivery fee that is On needs a tax classification that is still in use, and every fee that is On needs at least one order type.",
-  Denied: "Your current permission or selected Store does not allow this action.",
-  Conflict:
+  ),
+  Denied: t("Your current permission or selected Store does not allow this action."),
+  Conflict: t(
     "The saved settings or their baseline changed. Refresh, then discard your local edits to use the latest saved version.",
-  Unavailable: "The current Store settings could not be loaded. Connect and refresh to try again.",
-  OutcomeUnknown:
+  ),
+  Unavailable: t(
+    "The current Store settings could not be loaded. Connect and refresh to try again.",
+  ),
+  OutcomeUnknown: t(
     "The save result could not be confirmed. Recover the original save before making another change.",
-  ScopeChanged:
+  ),
+  ScopeChanged: t(
     "The selected Store or signed-in session changed. Open setup for the current Store.",
-  Stale: "The current settings check expired. Refresh to read the current Store again.",
-  NotRegistered: "No tax classifications are set up for this Brand yet.",
+  ),
+  Stale: t("The current settings check expired. Refresh to read the current Store again."),
+  NotRegistered: t("No tax classifications are set up for this Brand yet."),
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
-  SoleOperatorNotInEffect:
+  SoleOperatorNotInEffect: t(
     "Sole operator is not in effect for you now, so another person with Owner access must approve this.",
-  SoleOperatorNeedsVerification:
+  ),
+  SoleOperatorNeedsVerification: t(
     "Your verification is more than 15 minutes old. Verify again, then approve.",
-  SoleOperatorOff:
+  ),
+  SoleOperatorOff: t(
     "Sole operator is off, so another person with Owner access must approve this. If you run this business on your own, turn on Sole operator on the Approvals page, then approve again.",
-  NotYourChange:
+  ),
+  NotYourChange: t(
     "Only the person who made this configuration can check it or send it for approval. Ask them to, or approve or decline it.",
-  SetupIncomplete:
+  ),
+  SetupIncomplete: t(
     "The saved setup still has settings that are not set (see the list in this step). Finish them, save the setup, then create the configuration.",
-  SetupOutdated:
+  ),
+  SetupOutdated: t(
     "The Store's configuration changed after this setup was saved. Save the setup again, then create the configuration.",
-  OpenChangeByAnother:
+  ),
+  OpenChangeByAnother: t(
     "Someone else's configuration change is still waiting. It must be approved and published, or declined, before a new configuration can be created.",
-  Withdrawn: "This configuration was withdrawn or declined. Create a new one from the saved setup.",
-  SoleOperatorApprovalInvalid:
+  ),
+  Withdrawn: t(
+    "This configuration was withdrawn or declined. Create a new one from the saved setup.",
+  ),
+  SoleOperatorApprovalInvalid: t(
     "This configuration was approved by you alone while Sole operator was off, so it cannot be published. Withdraw it, then send a new change for approval.",
+  ),
 };
 const root = (view: StoreSetupWorkspace) => ({
   reference: view.setup.snapshot?.setupDraftReference ?? null,
@@ -272,12 +295,12 @@ const sameRoot = (a: StoreSetupWorkspace, b: StoreSetupWorkspace) =>
   JSON.stringify(root(a)) === JSON.stringify(root(b));
 const feeLabel = (chargeType: string) =>
   chargeType === "ServiceCharge"
-    ? "Service charge"
+    ? t("Service charge")
     : chargeType === "DeliveryFee"
-      ? "Delivery fee"
+      ? t("Delivery fee")
       : "Tip";
 function SavedReference({ value }: { value: StoreSetupContent["addressReference"] }) {
-  return <p>{value.state === "Configured" ? "Already configured." : "Not configured."}</p>;
+  return <p>{value.state === "Configured" ? t("Already configured.") : t("Not configured.")}</p>;
 }
 /**
  * v15 finding: a Store Manager reads this page (organization.store.read) but only the Owner changes
@@ -306,20 +329,21 @@ export function StoreSetupHeader({
   return (
     <header className="screen-heading">
       <div>
-        <h2>Store setup</h2>
+        <h2>{t("Store setup")}</h2>
         {displayName !== null && <p>{displayName}</p>}
         {ownerOnly ? (
           <p role="note">
-            Only the Owner can change Store setup. You can see the details customers and receipts
-            use below.
+            {t(
+              "Only the Owner can change Store setup. You can see the details customers and receipts use below.",
+            )}
           </p>
         ) : (
-          <p>Saving a draft does not change the live Store.</p>
+          <p>{t("Saving a draft does not change the live Store.")}</p>
         )}
       </div>
       {ownerOnly ? null : (
         <button type="button" disabled={refreshDisabled} onClick={onRefresh}>
-          Refresh saved setup
+          {t("Refresh saved setup")}
         </button>
       )}
     </header>
@@ -423,7 +447,9 @@ export function StoreSetupDraftPage({
           setReady(true);
           if (cursor)
             setNotice(
-              "An earlier save needs recovery. Your new changes stay locked until its result is known.",
+              t(
+                "An earlier save needs recovery. Your new changes stay locked until its result is known.",
+              ),
             );
         })
         .catch((value: unknown) => {
@@ -545,8 +571,8 @@ export function StoreSetupDraftPage({
       apply(after);
       setNotice(
         receipt.outcome === "Committed"
-          ? "Setup draft saved. These settings have not been validated or published."
-          : "The original save was not committed. You can continue editing.",
+          ? t("Setup draft saved. These settings have not been validated or published.")
+          : t("The original save was not committed. You can continue editing."),
       );
     } catch (value) {
       if (current(token, request.signal))
@@ -576,8 +602,8 @@ export function StoreSetupDraftPage({
       apply(fresh);
       setNotice(
         receipt.outcome === "Committed"
-          ? "The original save was committed. Current saved settings are shown."
-          : "The original save was not committed. You can continue with a new save.",
+          ? t("The original save was committed. Current saved settings are shown.")
+          : t("The original save was not committed. You can continue with a new save."),
       );
     } catch (value) {
       if (current(token, request.signal))
@@ -637,9 +663,9 @@ export function StoreSetupDraftPage({
   return (
     <AppFrame
       className="store-setup-draft-page"
-      title="Store setup"
+      title={t("Store setup")}
       description={
-        ownerOnly ? "The Store's details" : "Save unfinished settings and continue later"
+        ownerOnly ? t("The Store's details") : t("Save unfinished settings and continue later")
       }
     >
       <StoreSetupHeader
@@ -649,14 +675,14 @@ export function StoreSetupDraftPage({
         onRefresh={() => void refresh()}
       />
       {id !== storeReference && (
-        <StatePanel heading="Select this Store" tone="error" status>
-          <p>Choose this Store in the workspace before opening its setup.</p>
+        <StatePanel heading={t("Select this Store")} tone="error" status>
+          <p>{t("Choose this Store in the workspace before opening its setup.")}</p>
         </StatePanel>
       )}
       {id === storeReference ? children : null}
       {!online && (
         <p role="status">
-          Offline. Your local edits are retained. Reconnect and refresh before saving.
+          {t("Offline. Your local edits are retained. Reconnect and refresh before saving.")}
         </p>
       )}
       {error && !ownerOnly && (
@@ -665,18 +691,18 @@ export function StoreSetupDraftPage({
         </p>
       )}
       {notice && <p role="status">{notice}</p>}
-      {busy && <p role="status">Checking current Store settings…</p>}
+      {busy && <p role="status">{t("Checking current Store settings…")}</p>}
       {pending && (
-        <section className="store-setup-recovery" aria-label="Original save recovery">
-          <p>An earlier save has not been cleared. A new save is blocked.</p>
+        <section className="store-setup-recovery" aria-label={t("Original save recovery")}>
+          <p>{t("An earlier save has not been cleared. A new save is blocked.")}</p>
           <button type="button" disabled={busy || !online} onClick={() => void recover()}>
-            Recover original save
+            {t("Recover original save")}
           </button>
         </section>
       )}
       {workspace && (
         <>
-          <nav className="store-setup-steps" aria-label="Setup steps">
+          <nav className="store-setup-steps" aria-label={t("Setup steps")}>
             <ol>
               {steps.map((name, i) => (
                 <li key={name}>
@@ -700,47 +726,47 @@ export function StoreSetupDraftPage({
             </h3>
             {step === 0 && (
               <dl>
-                <dt>Store</dt>
+                <dt>{t("Store")}</dt>
                 <dd>{workspace.store.displayName}</dd>
-                <dt>Language</dt>
+                <dt>{t("Language")}</dt>
                 <dd>{languageName(workspace.store.locale)}</dd>
-                <dt>Currency</dt>
+                <dt>{t("Currency")}</dt>
                 <dd>
                   {workspace.store.currencyCode === "CAD"
-                    ? "Canadian dollars ($)"
+                    ? t("Canadian dollars ($)")
                     : workspace.store.currencyCode}
                 </dd>
-                <dt>Current timezone</dt>
+                <dt>{t("Current timezone")}</dt>
                 <dd>{timeZoneLabel(workspace.store.timeZone)}</dd>
-                <dt>Saved draft</dt>
+                <dt>{t("Saved draft")}</dt>
                 <dd>
                   {workspace.setup.snapshot
-                    ? `Revision ${workspace.setup.snapshot.revision}`
-                    : "No draft saved yet"}
+                    ? t("Revision {revision}", { revision: workspace.setup.snapshot.revision })
+                    : t("No draft saved yet")}
                 </dd>
               </dl>
             )}
             {step === 1 && (
               <>
-                <h4>Address</h4>
+                <h4>{t("Address")}</h4>
                 <SavedReference value={content.addressReference} />
-                <p>Save an address below, then choose it for this draft.</p>
+                <p>{t("Save an address below, then choose it for this draft.")}</p>
                 <label>
-                  Draft timezone
+                  {t("Draft timezone")}
                   <select
                     disabled={disabled}
                     value={inputs.timeZone}
                     onChange={(e) => changeInputs({ timeZone: e.currentTarget.value })}
                   >
-                    <option value="">Not configured</option>
-                    <optgroup label="Canada">
+                    <option value="">{t("Not configured")}</option>
+                    <optgroup label={t("Canada")}>
                       {zones.canada.map((zone) => (
                         <option key={zone.value} value={zone.value}>
                           {zone.label}
                         </option>
                       ))}
                     </optgroup>
-                    <optgroup label="Other time zones">
+                    <optgroup label={t("Other time zones")}>
                       {zones.other.map((zone) => (
                         <option key={zone.value} value={zone.value}>
                           {zone.label}
@@ -750,7 +776,7 @@ export function StoreSetupDraftPage({
                   </select>
                 </label>
                 <label>
-                  Business day starts at (local time)
+                  {t("Business day starts at (local time)")}
                   <input
                     type="time"
                     step="1"
@@ -759,13 +785,15 @@ export function StoreSetupDraftPage({
                     onChange={(e) => changeInputs({ businessStart: e.currentTarget.value })}
                   />
                 </label>
-                <p>Choose draft values explicitly. Current Store values are shown in Identity.</p>
+                <p>
+                  {t("Choose draft values explicitly. Current Store values are shown in Identity.")}
+                </p>
               </>
             )}
             {step === 2 && (
               <>
                 <label>
-                  Use service settings from
+                  {t("Use service settings from")}
                   <select
                     disabled={disabled}
                     value={content.source.state === "Configured" ? content.source.value : ""}
@@ -778,18 +806,18 @@ export function StoreSetupDraftPage({
                       })
                     }
                   >
-                    <option value="">Not chosen yet</option>
-                    <option value="StoreOverride">This Store</option>
+                    <option value="">{t("Not chosen yet")}</option>
+                    <option value="StoreOverride">{t("This Store")}</option>
                     {content.source.state === "Configured" &&
                       content.source.value === "BrandInherited" && (
                         <option value="BrandInherited" disabled>
-                          The Brand (saved earlier)
+                          {t("The Brand (saved earlier)")}
                         </option>
                       )}
                   </select>
                 </label>
                 <fieldset disabled={disabled}>
-                  <legend>Service modes</legend>
+                  <legend>{t("Service modes")}</legend>
                   {modes.map((mode) => (
                     <label key={mode}>
                       <input
@@ -803,32 +831,33 @@ export function StoreSetupDraftPage({
                           })
                         }
                       />
-                      {mode === "DineIn" ? "Dine in" : mode}
+                      {mode === "DineIn" ? t("Dine in") : mode}
                     </label>
                   ))}
                 </fieldset>
                 <p>
                   {inputs.serviceModes.length === 0
-                    ? "Service modes are not configured."
-                    : "Selected modes are draft settings until validated and published."}
+                    ? t("Service modes are not configured.")
+                    : t("Selected modes are draft settings until validated and published.")}
                 </p>
               </>
             )}
             {step === 3 && (
               <>
                 <p>
-                  Weekly times are in the store&rsquo;s timezone chosen in step 2. Wait times are in
-                  whole minutes, up to 24 hours (1,440 minutes).
+                  {t(
+                    "Weekly times are in the store’s timezone chosen in step 2. Wait times are in whole minutes, up to 24 hours (1,440 minutes).",
+                  )}
                 </p>
                 {inputs.hours === null ? (
                   <>
-                    <p>Weekly hours are not configured.</p>
+                    <p>{t("Weekly hours are not configured.")}</p>
                     <button
                       type="button"
                       disabled={disabled}
                       onClick={() => changeInputs({ hours: Array.from({ length: 7 }, () => []) })}
                     >
-                      Configure weekly hours
+                      {t("Configure weekly hours")}
                     </button>
                   </>
                 ) : (
@@ -836,12 +865,12 @@ export function StoreSetupDraftPage({
                     {inputs.hours.map((intervals, day) => (
                       <fieldset key={day} disabled={disabled}>
                         <legend>{days[day]}</legend>
-                        {intervals.length === 0 && <p>No service intervals on this day.</p>}
+                        {intervals.length === 0 && <p>{t("No service intervals on this day.")}</p>}
                         {intervals.map((value, index) => (
                           <div className="store-setup-interval" key={index}>
-                            <h4>Interval {index + 1}</h4>
+                            <h4>{t("Interval {value}", { value: index + 1 })}</h4>
                             <label>
-                              {days[day]} interval {index + 1} start
+                              {days[day]} {t("interval")} {index + 1} {t("start")}
                               <input
                                 type="time"
                                 step="1"
@@ -856,7 +885,7 @@ export function StoreSetupDraftPage({
                               />
                             </label>
                             <label>
-                              {days[day]} interval {index + 1} end
+                              {days[day]} {t("interval")} {index + 1} {t("end")}
                               <input
                                 type="time"
                                 step="1"
@@ -880,11 +909,11 @@ export function StoreSetupDraftPage({
                                   })
                                 }
                               />
-                              Ends on the following day
+                              {t("Ends on the following day")}
                             </label>
                             <fieldset>
                               <legend>
-                                {days[day]} interval {index + 1} service modes
+                                {days[day]} {t("interval")} {index + 1} {t("service modes")}
                               </legend>
                               {modes.map((mode) => (
                                 <label key={mode}>
@@ -899,12 +928,12 @@ export function StoreSetupDraftPage({
                                       })
                                     }
                                   />
-                                  {mode === "DineIn" ? "Dine in" : mode}
+                                  {mode === "DineIn" ? t("Dine in") : mode}
                                 </label>
                               ))}
                             </fieldset>
                             <label>
-                              Last orders (minutes before closing)
+                              {t("Last orders (minutes before closing)")}
                               <input
                                 inputMode="numeric"
                                 aria-invalid={error === "Invalid"}
@@ -924,7 +953,7 @@ export function StoreSetupDraftPage({
                             </label>
                             <SavedWaitNote seconds={value.savedCutoffSeconds} />
                             <label>
-                              Preparation time (minutes)
+                              {t("Preparation time (minutes)")}
                               <input
                                 inputMode="numeric"
                                 aria-invalid={error === "Invalid"}
@@ -954,7 +983,7 @@ export function StoreSetupDraftPage({
                                 })
                               }
                             >
-                              Remove {days[day]} interval {index + 1}
+                              {t("Remove")} {days[day]} {t("interval")} {index + 1}
                             </button>
                           </div>
                         ))}
@@ -982,7 +1011,7 @@ export function StoreSetupDraftPage({
                             })
                           }
                         >
-                          Add {days[day]} interval
+                          {t("Add")} {days[day]} {t("interval")}
                         </button>
                       </fieldset>
                     ))}
@@ -991,39 +1020,44 @@ export function StoreSetupDraftPage({
                       disabled={disabled}
                       onClick={() => changeInputs({ hours: null })}
                     >
-                      Leave weekly hours unconfigured
+                      {t("Leave weekly hours unconfigured")}
                     </button>
                   </>
                 )}
                 <p id="setup-wait-help">
-                  Enter each wait as whole minutes, from 0 to 1,440 (24 hours). Opening periods on
-                  the same day must not overlap.
+                  {t(
+                    "Enter each wait as whole minutes, from 0 to 1,440 (24 hours). Opening periods on the same day must not overlap.",
+                  )}
                 </p>
                 {content.exceptions.state === "Configured" ? (
                   <>
-                    <h4>Saved special-date hours</h4>
+                    <h4>{t("Saved special-date hours")}</h4>
                     {content.exceptions.value.length === 0 ? (
-                      <p>No special dates selected.</p>
+                      <p>{t("No special dates selected.")}</p>
                     ) : (
                       <ul>
                         {content.exceptions.value.map((value) => (
                           <li key={value.localDate}>
                             {value.localDate} ·{" "}
-                            {value.kind === "Holiday" ? "Holiday" : "Special hours"} ·{" "}
+                            {value.kind === "Holiday" ? t("Holiday") : t("Special hours")} ·{" "}
                             {value.intervals.length === 0
-                              ? "closed"
-                              : `${value.intervals.length} opening period${value.intervals.length === 1 ? "" : "s"}`}
+                              ? t("closed")
+                              : t("{length} opening period{value}", {
+                                  length: value.intervals.length,
+                                  value: value.intervals.length === 1 ? "" : "s",
+                                })}
                           </li>
                         ))}
                       </ul>
                     )}
                     <p>
-                      Saved special dates are kept. Holidays and special hours are changed in Hours
-                      &amp; ordering.
+                      {t(
+                        "Saved special dates are kept. Holidays and special hours are changed in Hours & ordering.",
+                      )}
                     </p>
                   </>
                 ) : (
-                  <p>No holidays or special hours are set. Add them in Hours &amp; ordering.</p>
+                  <p>{t("No holidays or special hours are set. Add them in Hours & ordering.")}</p>
                 )}
               </>
             )}
@@ -1038,19 +1072,19 @@ export function StoreSetupDraftPage({
                   onChange={(feeContexts) => changeContent({ feeContexts })}
                   {...(taxClassificationsHref === undefined ? {} : { taxClassificationsHref })}
                 />
-                <h4>Tax settings</h4>
+                <h4>{t("Tax settings")}</h4>
                 <SavedReference value={content.taxConfigurationReference} />
-                <h4>Payment settings</h4>
+                <h4>{t("Payment settings")}</h4>
                 <SavedReference value={content.paymentConfigurationReference} />
-                <h4>Receipt settings</h4>
+                <h4>{t("Receipt settings")}</h4>
                 <SavedReference value={content.receiptReference} />
-                <p>Tax rates and tax names are set in Tax review.</p>
+                <p>{t("Tax rates and tax names are set in Tax review.")}</p>
               </>
             )}
             {step === 5 && (
               <>
                 <label>
-                  Order limits
+                  {t("Order limits")}
                   <select
                     disabled={
                       disabled ||
@@ -1073,25 +1107,26 @@ export function StoreSetupDraftPage({
                       })
                     }
                   >
-                    <option value="unconfigured">Not decided yet</option>
-                    <option value="none">No order limits</option>
+                    <option value="unconfigured">{t("Not decided yet")}</option>
+                    <option value="none">{t("No order limits")}</option>
                     {content.capacityConfigurationReference.state === "Configured" &&
                       content.capacityConfigurationReference.value !== null && (
-                        <option value="saved">Limits saved earlier</option>
+                        <option value="saved">{t("Limits saved earlier")}</option>
                       )}
                   </select>
                 </label>
                 <p>
-                  Choose &ldquo;No order limits&rdquo; when the Store accepts every order it
-                  receives; staff pause ordering from Hours &amp; ordering when the kitchen is busy.
+                  {t(
+                    "Choose “No order limits” when the Store accepts every order it receives; staff pause ordering from Hours & ordering when the kitchen is busy.",
+                  )}
                 </p>
               </>
             )}
             {step === 6 && (
               <>
-                <h4>Contact configuration</h4>
+                <h4>{t("Contact configuration")}</h4>
                 <SavedReference value={content.contactReference} />
-                <p>Save contact details below, then choose them for this draft.</p>
+                <p>{t("Save contact details below, then choose them for this draft.")}</p>
               </>
             )}
             <ReceiptTemplateStoreSelection
@@ -1235,7 +1270,7 @@ export function StoreSetupDraftPage({
                 heading.current?.focus();
               }}
             >
-              Previous step
+              {t("Previous step")}
             </button>
             <button
               type="button"
@@ -1245,7 +1280,7 @@ export function StoreSetupDraftPage({
                 heading.current?.focus();
               }}
             >
-              Next step
+              {t("Next step")}
             </button>
             <button
               className="store-setup-save"
@@ -1253,10 +1288,10 @@ export function StoreSetupDraftPage({
               disabled={disabled}
               onClick={() => void save()}
             >
-              Save setup draft
+              {t("Save setup draft")}
             </button>
             <button type="button" disabled={disabled || !dirty} onClick={() => void refresh(true)}>
-              Discard local edits
+              {t("Discard local edits")}
             </button>
           </footer>
         </>
@@ -1273,63 +1308,70 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
       content.timeZone.state === "Configured" ? timeZoneLabel(content.timeZone.value) : notSet(2),
     ],
     [
-      "Business day start",
+      t("Business day start"),
       content.businessDayStartLocalTime.state === "Configured"
         ? content.businessDayStartLocalTime.value
         : notSet(2),
     ],
     [
-      "Service modes",
+      t("Service modes"),
       content.enabledServiceModes.state === "Configured"
         ? content.enabledServiceModes.value
-            .map((mode) => (mode === "DineIn" ? "Dine in" : mode))
+            .map((mode) => (mode === "DineIn" ? t("Dine in") : mode))
             .join(", ")
         : notSet(3),
     ],
     [
-      "Weekly hours",
+      t("Weekly hours"),
       content.weeklySchedule.state === "Configured"
-        ? ((open) => `Open ${open} ${open === 1 ? "day" : "days"} a week`)(
+        ? ((open) =>
+            t("Open {open} {value} a week", { open: open, value: open === 1 ? "day" : "days" }))(
             content.weeklySchedule.value.filter((day) => day.intervals.length > 0).length,
           )
         : notSet(4),
     ],
-    ["Address", content.addressReference.state === "Configured" ? "Already configured" : notSet(2)],
+    [
+      "Address",
+      content.addressReference.state === "Configured" ? t("Already configured") : notSet(2),
+    ],
     [
       "Fees",
       content.feeContexts?.state === "Configured"
         ? content.feeContexts.value
             .map(
               (v) =>
-                `${feeLabel(v.chargeType)}: ${v.state === "Enabled" ? "On" : v.state === "Disabled" ? "Off" : "Not set"}`,
+                `${feeLabel(v.chargeType)}: ${v.state === "Enabled" ? "On" : v.state === "Disabled" ? "Off" : t("Not set")}`,
             )
             .join(", ")
         : notSet(5),
     ],
     [
-      "Tax settings",
+      t("Tax settings"),
       content.taxConfigurationReference.state === "Configured"
-        ? "Set (see Tax review)"
-        : "Not set yet (use the live Store's settings below)",
+        ? t("Set (see Tax review)")
+        : t("Not set yet (use the live Store's settings below)"),
     ],
     [
       "Payment",
       content.paymentConfigurationReference.state === "Configured"
-        ? "Already configured"
+        ? t("Already configured")
         : notSet(5),
     ],
-    ["Receipt", content.receiptReference.state === "Configured" ? "Already configured" : notSet(5)],
+    [
+      "Receipt",
+      content.receiptReference.state === "Configured" ? t("Already configured") : notSet(5),
+    ],
     [
       "Capacity",
       content.capacityConfigurationReference.state === "Unconfigured"
         ? notSet(6)
         : content.capacityConfigurationReference.value === null
-          ? "No order limits"
-          : "Already configured",
+          ? t("No order limits")
+          : t("Already configured"),
     ],
     [
       "Contacts",
-      content.contactReference.state === "Configured" ? "Already configured" : notSet(7),
+      content.contactReference.state === "Configured" ? t("Already configured") : notSet(7),
     ],
   ];
 }
@@ -1341,18 +1383,21 @@ export function StoreSetupDraftReview({ content }: { readonly content: StoreSetu
     <>
       <p>
         {missing === null
-          ? "Some edited times or wait values need correction before saving."
+          ? t("Some edited times or wait values need correction before saving.")
           : missing.length === 0
-            ? "Every setting is set."
-            : `${missing.length} ${missing.length === 1 ? "setting is" : "settings are"} not set yet. An unfinished draft can be saved.`}
+            ? t("Every setting is set.")
+            : t("{length} {value} not set yet. An unfinished draft can be saved.", {
+                length: missing.length,
+                value: missing.length === 1 ? "setting is" : "settings are",
+              })}
       </p>
       {missing !== null && missing.length > 0 && (
-        <section aria-label="Settings not set yet">
-          <h4>Not set yet</h4>
+        <section aria-label={t("Settings not set yet")}>
+          <h4>{t("Not set yet")}</h4>
           <ul>
             {missing.map((item) => (
               <li key={item.label}>
-                {item.label}: set it in {item.where}
+                {t("{label}: set it in {where}", { label: item.label, where: item.where })}
               </li>
             ))}
           </ul>
@@ -1367,7 +1412,9 @@ export function StoreSetupDraftReview({ content }: { readonly content: StoreSetu
           ))}
         </ul>
       )}
-      <p>These settings still need validation. This draft is not approved, published, or live.</p>
+      <p>
+        {t("These settings still need validation. This draft is not approved, published, or live.")}
+      </p>
     </>
   );
 }
@@ -1546,8 +1593,10 @@ export function StoreSetupReferenceEditor({
           setReady(true);
           setNotice(
             receipt.outcome === "Committed"
-              ? "Earlier save confirmed. Choose this saved configuration to use it in the setup draft."
-              : "Earlier save did not commit. You can save again.",
+              ? t(
+                  "Earlier save confirmed. Choose this saved configuration to use it in the setup draft.",
+                )
+              : t("Earlier save did not commit. You can save again."),
           );
         }
         return;
@@ -1593,7 +1642,9 @@ export function StoreSetupReferenceEditor({
         dirty.current = false;
         apply(v);
         setNotice(
-          "Configuration saved. Choose it below, then save the setup draft to keep that selection.",
+          t(
+            "Configuration saved. Choose it below, then save the setup draft to keep that selection.",
+          ),
         );
       }
     } catch (value) {
@@ -1623,61 +1674,73 @@ export function StoreSetupReferenceEditor({
   );
   return (
     <section hidden={hidden} aria-label={`${kind} configuration`}>
-      <h4>{kind === "Address" ? "Store address" : "Store contact"}</h4>
+      <h4>{kind === "Address" ? t("Store address") : t("Store contact")}</h4>
       {error && (
         <p role="alert">
           {error === "Invalid"
-            ? "Check the entered details. Phone numbers need a country code; websites must use HTTPS."
+            ? t(
+                "Check the entered details. Phone numbers need a country code; websites must use HTTPS.",
+              )
             : error === "Conflict"
-              ? "This configuration changed. Refresh and review before saving."
+              ? t("This configuration changed. Refresh and review before saving.")
               : error === "Denied"
-                ? "You cannot access this configuration in the current Store."
+                ? t("You cannot access this configuration in the current Store.")
                 : error === "OutcomeUnknown"
-                  ? "The save could not be confirmed. Recover the original save before making another change."
-                  : "These details could not be loaded. Refresh when connected; an earlier save remains protected."}
+                  ? t(
+                      "The save could not be confirmed. Recover the original save before making another change.",
+                    )
+                  : t(
+                      "These details could not be loaded. Refresh when connected; an earlier save remains protected.",
+                    )}
         </p>
       )}
       {notice && <p role="status">{notice}</p>}
       {pending && (
         <>
           <p role="status">
-            An earlier {kind.toLowerCase()} save must be recovered before another save.
+            {t("An earlier {value} save must be recovered before another save.", {
+              value: kind.toLowerCase(),
+            })}
           </p>
           <button type="button" disabled={disabled || busy} onClick={() => void action("Resolve")}>
-            Recover original {kind.toLowerCase()} save
+            {t("Recover original {value} save", { value: kind.toLowerCase() })}
           </button>
         </>
       )}
       {kind === "Address" ? (
         <>
-          {field("countryCode", "Country code")}
-          {field("regionCode", "Province or region code")}
+          {field("countryCode", t("Country code"))}
+          {field("regionCode", t("Province or region code"))}
           {field("locality", "City")}
-          {field("postalCode", "Postal code")}
-          {field("line1", "Address line 1")}
-          {field("line2", "Address line 2 (optional)")}
-          {field("line3", "Address line 3 (optional)")}
+          {field("postalCode", t("Postal code"))}
+          {field("line1", t("Address line 1"))}
+          {field("line2", t("Address line 2 (optional)"))}
+          {field("line3", t("Address line 3 (optional)"))}
         </>
       ) : (
         <>
-          {field("contactName", "Contact name")}
-          {field("businessPhone", "Business phone with country code", "tel")}
-          {field("website", "Website (optional)", "url")}
+          {field("contactName", t("Contact name"))}
+          {field("businessPhone", t("Business phone with country code"), "tel")}
+          {field("website", t("Website (optional)"), "url")}
         </>
       )}
       <button type="button" disabled={disabled || busy} onClick={() => void action("Refresh")}>
-        Refresh saved {kind.toLowerCase()}
+        {t("Refresh saved {value}", { value: kind.toLowerCase() })}
       </button>
       <button
         type="button"
         disabled={disabled || busy || !ready || !!pending}
         onClick={() => void action("Save")}
       >
-        Save {kind.toLowerCase()} configuration
+        {t("Save {value} configuration", { value: kind.toLowerCase() })}
       </button>
       {selected && (
         <>
-          <p>Saved revision {selected.revision}. Business validation has not been completed.</p>
+          <p>
+            {t("Saved revision {revision}. Business validation has not been completed.", {
+              revision: selected.revision,
+            })}
+          </p>
           <button
             type="button"
             disabled={disabled || busy || !!pending}
@@ -1687,10 +1750,10 @@ export function StoreSetupReferenceEditor({
                 return;
               }
               onSelect(selected.reference);
-              setNotice("Selection changed locally. Save the setup draft to keep it.");
+              setNotice(t("Selection changed locally. Save the setup draft to keep it."));
             }}
           >
-            Use saved {kind.toLowerCase()}
+            {t("Use saved {value}", { value: kind.toLowerCase() })}
           </button>
         </>
       )}
@@ -1909,8 +1972,8 @@ export function StorePaymentConfigurationEditor({
           setReady(true);
           setNotice(
             result.receipt.outcome === "Committed"
-              ? "Earlier payment save confirmed. Choose the saved configuration to use it."
-              : "Earlier payment save did not commit. You can save again.",
+              ? t("Earlier payment save confirmed. Choose the saved configuration to use it.")
+              : t("Earlier payment save did not commit. You can save again."),
           );
         }
         return;
@@ -1935,7 +1998,9 @@ export function StorePaymentConfigurationEditor({
         dirty.current = false;
         apply(result.current);
         setNotice(
-          "Payment configuration saved. Choose it below, then save the setup draft to keep that selection.",
+          t(
+            "Payment configuration saved. Choose it below, then save the setup draft to keep that selection.",
+          ),
         );
       }
     } catch (value) {
@@ -1948,52 +2013,58 @@ export function StorePaymentConfigurationEditor({
     }
   };
   const labels: readonly [keyof StorePaymentConfigurationContent, string][] = [
-    ["customerOnlineCardEnabled", "Customer online card"],
-    ["staffTerminalCardPresentEnabled", "Staff terminal card present"],
-    ["staffTerminalInteracEnabled", "Staff terminal Interac"],
+    ["customerOnlineCardEnabled", t("Customer online card")],
+    ["staffTerminalCardPresentEnabled", t("Staff terminal card present")],
+    ["staffTerminalInteracEnabled", t("Staff terminal Interac")],
   ];
   return (
-    <section hidden={hidden} aria-label="Payment configuration">
-      <h4>Store payment rules</h4>
+    <section hidden={hidden} aria-label={t("Payment configuration")}>
+      <h4>{t("Store payment rules")}</h4>
       <p>
-        Saving these rules does not turn on card payments by itself: the payment provider account
-        must be set up, and the rules approved and published.
+        {t(
+          "Saving these rules does not turn on card payments by itself: the payment provider account must be set up, and the rules approved and published.",
+        )}
       </p>
       {error === "FullSignInRequired" ? (
         <>
           <FullSignInPrompt csrf={csrf} />
           {pending ? (
             <p role="status">
-              After you verify, choose Recover original payment save. If it shows the save did not
-              go through, save again — your choices are kept.
+              {t(
+                "After you verify, choose Recover original payment save. If it shows the save did not go through, save again — your choices are kept.",
+              )}
             </p>
           ) : null}
         </>
       ) : error ? (
         <p role="alert">
           {error === "Denied"
-            ? "You cannot access payment configuration in the current Store."
+            ? t("You cannot access payment configuration in the current Store.")
             : error === "Conflict"
-              ? "Payment configuration changed. Refresh and review before saving."
+              ? t("Payment configuration changed. Refresh and review before saving.")
               : error === "OutcomeUnknown"
-                ? "The payment save could not be confirmed. Recover the original save before making another change."
+                ? t(
+                    "The payment save could not be confirmed. Recover the original save before making another change.",
+                  )
                 : error === "Invalid"
-                  ? "Check the three payment channel settings."
-                  : "Payment settings could not be loaded. Refresh when connected; an earlier save remains protected."}
+                  ? t("Check the three payment channel settings.")
+                  : t(
+                      "Payment settings could not be loaded. Refresh when connected; an earlier save remains protected.",
+                    )}
         </p>
       ) : null}
       {notice && <p role="status">{notice}</p>}
-      {busy && <p role="status">Loading payment configuration…</p>}
+      {busy && <p role="status">{t("Loading payment configuration…")}</p>}
       {pending && (
         <>
-          <p role="status">An earlier payment save must be recovered before another save.</p>
+          <p role="status">{t("An earlier payment save must be recovered before another save.")}</p>
           <button type="button" disabled={disabled || busy} onClick={() => void action("Resolve")}>
-            Recover original payment save
+            {t("Recover original payment save")}
           </button>
         </>
       )}
       <fieldset disabled={disabled || busy || !ready || !!pending}>
-        <legend>Allowed payment channels</legend>
+        <legend>{t("Allowed payment channels")}</legend>
         {labels.map(([key, label]) => (
           <label key={key}>
             <input
@@ -2011,20 +2082,22 @@ export function StorePaymentConfigurationEditor({
         ))}
       </fieldset>
       <button type="button" disabled={disabled || busy} onClick={() => void action("Refresh")}>
-        Refresh saved payment configuration
+        {t("Refresh saved payment configuration")}
       </button>
       <button
         type="button"
         disabled={disabled || busy || !ready || !!pending}
         onClick={() => void action("Save")}
       >
-        Save payment configuration
+        {t("Save payment configuration")}
       </button>
       {view?.snapshot && (
         <>
           <p>
-            Saved payment rules, version {view.snapshot.revision}. Card payments still need the
-            payment provider account to be set up.
+            {t(
+              "Saved payment rules, version {revision}. Card payments still need the payment provider account to be set up.",
+              { revision: view.snapshot.revision },
+            )}
           </p>
           <button
             type="button"
@@ -2037,10 +2110,10 @@ export function StorePaymentConfigurationEditor({
               const selected = view.snapshot;
               if (!selected) return;
               onSelect(selected.configurationReference);
-              setNotice("Selection changed locally. Save the setup draft to keep it.");
+              setNotice(t("Selection changed locally. Save the setup draft to keep it."));
             }}
           >
-            Use saved payment configuration
+            {t("Use saved payment configuration")}
           </button>
         </>
       )}
@@ -2206,45 +2279,45 @@ export function StoreSetupFeeContextEditor({
   // refuses a classification no longer in use, so picking never waits for a manual refresh.
   const loading = choices === null && error === false;
   return (
-    <section className="store-setup-fee-contexts" aria-label="Fees">
-      <h4>Fees</h4>
+    <section className="store-setup-fee-contexts" aria-label={t("Fees")}>
+      <h4>{t("Fees")}</h4>
       <p>
-        Choose whether this store uses a service charge, a delivery fee and tips, and which orders
-        each one applies to. Saving the setup draft keeps these choices. It does not set fee amounts
-        or tax rates, and customers are not charged anything new until the store settings are
-        approved and published.
+        {t(
+          "Choose whether this store uses a service charge, a delivery fee and tips, and which orders each one applies to. Saving the setup draft keeps these choices. It does not set fee amounts or tax rates, and customers are not charged anything new until the store settings are approved and published.",
+        )}
       </p>
-      {loading && <p role="status">Loading tax classification choices…</p>}
+      {loading && <p role="status">{t("Loading tax classification choices…")}</p>}
       {error === "NotRegistered" && (
         <p role="status">
-          No tax classifications are set up for this Brand yet, so a service charge or delivery fee
-          cannot be turned on here. Leave them as Not set or Off; tips can still be turned on, and
-          you can save the rest of this setup.
+          {t(
+            "No tax classifications are set up for this Brand yet, so a service charge or delivery fee cannot be turned on here. Leave them as Not set or Off; tips can still be turned on, and you can save the rest of this setup.",
+          )}
         </p>
       )}
       {taxClassificationsHref !== undefined &&
         (error === "NotRegistered" ||
           (choices !== null && !choices.choices.some((v) => v.lifecycle === "Active"))) && (
           <p>
-            <Link to={taxClassificationsHref}>Set up the Brand&rsquo;s tax classifications</Link>,
-            then come back and choose Refresh fee classification choices.
+            <Link to={taxClassificationsHref}>{t("Set up the Brand’s tax classifications")}</Link>
+            {t(", then come back and choose Refresh fee classification choices.")}
           </p>
         )}
       {error === "Denied" && (
         <p role="status">
-          Choosing a tax classification needs permission to read Products and tax settings. Leave
-          the service charge and delivery fee as Not set or Off; tips can still be turned on, and
-          you can save the rest of this setup.
+          {t(
+            "Choosing a tax classification needs permission to read Products and tax settings. Leave the service charge and delivery fee as Not set or Off; tips can still be turned on, and you can save the rest of this setup.",
+          )}
         </p>
       )}
       {error === "Unavailable" && (
         <p role="status">
-          Tax classifications could not be loaded. Choose Refresh fee classification choices to try
-          again; tips, and fees that are Not set or Off, can still be saved.
+          {t(
+            "Tax classifications could not be loaded. Choose Refresh fee classification choices to try again; tips, and fees that are Not set or Off, can still be saved.",
+          )}
         </p>
       )}
       <button type="button" disabled={disabled || loading} onClick={() => setReload((v) => v + 1)}>
-        Refresh fee classification choices
+        {t("Refresh fee classification choices")}
       </button>
       {entries.map((entry, index) => (
         <fieldset disabled={disabled} key={entry.chargeType}>
@@ -2273,13 +2346,13 @@ export function StoreSetupFeeContextEditor({
                   );
               }}
             >
-              <option value="Unconfigured">Not set</option>
-              <option value="Disabled">Off</option>
-              <option value="Enabled">On</option>
+              <option value="Unconfigured">{t("Not set")}</option>
+              <option value="Disabled">{t("Off")}</option>
+              <option value="Enabled">{t("On")}</option>
             </select>
           </label>
           <label>
-            {feeLabel(entry.chargeType)} tax classification
+            {t("{chargeType} tax classification", { chargeType: feeLabel(entry.chargeType) })}
             <select
               aria-label={`${feeLabel(entry.chargeType)} tax classification`}
               disabled={
@@ -2311,8 +2384,8 @@ export function StoreSetupFeeContextEditor({
             >
               <option value="">
                 {entry.chargeType === "Tip"
-                  ? "No tax classification (tips are not taxed)"
-                  : "Choose a tax classification to turn this on"}
+                  ? t("No tax classification (tips are not taxed)")
+                  : t("Choose a tax classification to turn this on")}
               </option>
               {entry.state === "Enabled" &&
                 entry.taxClassificationReference !== null &&
@@ -2321,7 +2394,7 @@ export function StoreSetupFeeContextEditor({
                   (v) => v.classificationReference === entry.taxClassificationReference,
                 ) && (
                   <option value={entry.taxClassificationReference}>
-                    Saved classification retained
+                    {t("Saved classification retained")}
                   </option>
                 )}
               {choices?.choices.map((choice) => (
@@ -2332,15 +2405,17 @@ export function StoreSetupFeeContextEditor({
                 >
                   {choice.localizedNames[choices.defaultLocale] ??
                     Object.values(choice.localizedNames)[0] ??
-                    "Unnamed tax classification"}
-                  {choice.lifecycle === "Active" ? "" : " (no longer in use)"}
+                    t("Unnamed tax classification")}
+                  {choice.lifecycle === "Active" ? "" : t(" (no longer in use)")}
                 </option>
               ))}
             </select>
           </label>
           {entry.state === "Enabled" && (
             <fieldset>
-              <legend>{feeLabel(entry.chargeType)} order types</legend>
+              <legend>
+                {t("{chargeType} order types", { chargeType: feeLabel(entry.chargeType) })}
+              </legend>
               {modes.map((mode) => (
                 <label key={mode}>
                   <input
@@ -2355,7 +2430,7 @@ export function StoreSetupFeeContextEditor({
                       })
                     }
                   />
-                  {mode === "DineIn" ? "Dine in" : mode}
+                  {mode === "DineIn" ? t("Dine in") : mode}
                 </label>
               ))}
             </fieldset>
@@ -2363,11 +2438,9 @@ export function StoreSetupFeeContextEditor({
         </fieldset>
       ))}
       <p>
-        A service charge or delivery fee that is On needs a tax classification, and every fee that
-        is On needs at least one order type before saving. Tips customers choose to give go to staff
-        and are generally not subject to GST/HST, so a tip needs no tax classification (a service
-        charge every customer must pay is taxed). The classification is the Brand&rsquo;s own
-        choice; it has not been checked by a tax professional.
+        {t(
+          "A service charge or delivery fee that is On needs a tax classification, and every fee that is On needs at least one order type before saving. Tips customers choose to give go to staff and are generally not subject to GST/HST, so a tip needs no tax classification (a service charge every customer must pay is taxed). The classification is the Brand’s own choice; it has not been checked by a tax professional.",
+        )}
       </p>
     </section>
   );
@@ -2421,13 +2494,21 @@ type ScheduleInterval = WeeklySchedule[number]["intervals"][number];
 const clock = (value: string) => value.slice(0, 5);
 function intervalText(interval: ScheduleInterval, detailed: boolean): string {
   const times = `${clock(interval.startLocalTime)}\u2013${clock(interval.endLocalTime)}${
-    interval.endsNextDay ? " (next day)" : ""
+    interval.endsNextDay ? t(" (next day)") : ""
   }`;
   if (!detailed) return times;
   const services = interval.serviceModes
-    .map((mode) => (mode === "DineIn" ? "Dine in" : mode))
+    .map((mode) => (mode === "DineIn" ? t("Dine in") : mode))
     .join(", ");
-  return `${times} (${services}; last orders ${waitMinutesText(interval.orderCutoffSeconds)} min before closing; preparation ${waitMinutesText(interval.leadTimeSeconds)} min)`;
+  return t(
+    "{times} ({services}; last orders {orderCutoffSeconds} min before closing; preparation {leadTimeSeconds} min)",
+    {
+      times: times,
+      services: services,
+      orderCutoffSeconds: waitMinutesText(interval.orderCutoffSeconds),
+      leadTimeSeconds: waitMinutesText(interval.leadTimeSeconds),
+    },
+  );
 }
 function dayText(intervals: readonly ScheduleInterval[] | undefined, detailed: boolean): string {
   return intervals === undefined || intervals.length === 0
@@ -2452,7 +2533,13 @@ export function openingHoursChanges(
       after = to.get(i + 1);
     if (JSON.stringify(before ?? []) === JSON.stringify(after ?? [])) return [];
     const detailed = dayText(before, false) === dayText(after, false);
-    return [`${name}: ${dayText(before, detailed)} becomes ${dayText(after, detailed)}`];
+    return [
+      t("{name}: {before} becomes {after}", {
+        name: name,
+        before: dayText(before, detailed),
+        after: dayText(after, detailed),
+      }),
+    ];
   });
 }
 /** The live (published) Store configuration as the publication panel read it. */
@@ -2511,67 +2598,78 @@ export function StoreSetupLiveSettings({
       ? openingHoursChanges(current.weeklySchedule, content.weeklySchedule.value)
       : [];
   return (
-    <section aria-label="Settings from the live Store">
-      <h4>Settings from the live Store</h4>
+    <section aria-label={t("Settings from the live Store")}>
+      <h4>{t("Settings from the live Store")}</h4>
       <p>
-        These are not changed in Store setup. They come from the Store as it runs today; save the
-        setup draft after using them.
+        {t(
+          "These are not changed in Store setup. They come from the Store as it runs today; save the setup draft after using them.",
+        )}
       </p>
       <ul>
         <li>
-          Tax settings (see Tax review):{" "}
-          {tax ? "same as the live Store" : "not the live Store's settings yet"}
+          {t("Tax settings (see Tax review): {value}", {
+            value: tax ? t("same as the live Store") : t("not the live Store's settings yet"),
+          })}
         </li>
-        <li>Brand settings: {brand ? "same as the live Store" : "not set yet"}</li>
         <li>
-          Holidays and special hours (changed in Hours &amp; ordering):{" "}
-          {closures
-            ? content.exceptions.state === "Configured" && content.exceptions.value.length === 0
-              ? "none"
-              : "kept as saved"
-            : "not set yet"}
+          {t("Brand settings: {value}", {
+            value: brand ? t("same as the live Store") : t("not set yet"),
+          })}
         </li>
-        <li>Takes effect: {start ? "as soon as it is published" : "not set yet"}</li>
+        <li>
+          {t("Holidays and special hours (changed in Hours & ordering): {value}", {
+            value: closures
+              ? content.exceptions.state === "Configured" && content.exceptions.value.length === 0
+                ? t("none")
+                : t("kept as saved")
+              : t("not set yet"),
+          })}
+        </li>
+        <li>
+          {t("Takes effect: {value}", {
+            value: start ? t("as soon as it is published") : t("not set yet"),
+          })}
+        </li>
         {missingOperating.length > 0 && (
           <li>
-            Time zone, business day start, service modes, opening hours, order limits and the
-            receipt template not set in this setup: the live Store&rsquo;s are used when you choose
-            &ldquo;Use the live Store&rsquo;s settings&rdquo;.
+            {t(
+              "Time zone, business day start, service modes, opening hours, order limits and the receipt template not set in this setup: the live Store’s are used when you choose “Use the live Store’s settings”.",
+            )}
           </li>
         )}
         {(content.addressReference.state !== "Configured" ||
           content.contactReference.state !== "Configured" ||
           content.paymentConfigurationReference.state !== "Configured") && (
           <li>
-            Address, contact details and payment settings: the ones the Store runs with today were
-            set when it was installed and cannot be carried over. Enter them in step 2 (address),
-            step 7 (contact) and step 5 (payment), save each, choose &ldquo;Use saved&rdquo;, then
-            save the setup draft. They can be the same as the name and contact shown to customers
-            above.
+            {t(
+              "Address, contact details and payment settings: the ones the Store runs with today were set when it was installed and cannot be carried over. Enter them in step 2 (address), step 7 (contact) and step 5 (payment), save each, choose “Use saved”, then save the setup draft. They can be the same as the name and contact shown to customers above.",
+            )}
           </li>
         )}
         <li>
-          Opening hours:{" "}
-          {hours
-            ? "same as the live Store"
-            : content.weeklySchedule.state !== "Configured"
-              ? "not set yet"
-              : hourChanges.length === 0
-                ? "different from the live Store"
-                : "different from the live Store (see below)"}
+          {t("Opening hours: {value}", {
+            value: hours
+              ? t("same as the live Store")
+              : content.weeklySchedule.state !== "Configured"
+                ? t("not set yet")
+                : hourChanges.length === 0
+                  ? t("different from the live Store")
+                  : t("different from the live Store (see below)"),
+          })}
         </li>
       </ul>
       {!hours && hourChanges.length > 0 && (
-        <div role="note" aria-label="Opening hours change">
-          <p>Publishing this setup changes the Store&rsquo;s opening hours:</p>
+        <div role="note" aria-label={t("Opening hours change")}>
+          <p>{t("Publishing this setup changes the Store’s opening hours:")}</p>
           <ul>
             {hourChanges.map((line) => (
               <li key={line}>{line}</li>
             ))}
           </ul>
           <p>
-            To keep the hours the Store opens with today, choose &ldquo;Use the live Store&rsquo;s
-            opening hours&rdquo; and save the setup draft before sending or publishing it.
+            {t(
+              "To keep the hours the Store opens with today, choose “Use the live Store’s opening hours” and save the setup draft before sending or publishing it.",
+            )}
           </p>
         </div>
       )}
@@ -2583,7 +2681,7 @@ export function StoreSetupLiveSettings({
             onUse({ weeklySchedule: { state: "Configured", value: current.weeklySchedule } })
           }
         >
-          Use the live Store&rsquo;s opening hours
+          {t("Use the live Store’s opening hours")}
         </button>
       )}
       <button
@@ -2591,12 +2689,13 @@ export function StoreSetupLiveSettings({
         disabled={disabled || complete}
         onClick={() => onUse(liveStoreSettingsChange(content, known))}
       >
-        Use the live Store&rsquo;s settings
+        {t("Use the live Store’s settings")}
       </button>
       {!hours && content.weeklySchedule.state === "Configured" && (
         <p>
-          &ldquo;Use the live Store&rsquo;s settings&rdquo; also replaces the opening hours in this
-          setup with the live Store&rsquo;s.
+          {t(
+            "“Use the live Store’s settings” also replaces the opening hours in this setup with the live Store’s.",
+          )}
         </p>
       )}
     </section>

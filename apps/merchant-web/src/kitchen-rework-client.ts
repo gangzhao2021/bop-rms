@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /**
  * WP-2423 Q26 (Handoff Section 26.6): the Kitchen board's remakes. A finished dish that was made
  * wrong, dropped, sent back or failed a quality check is made again as a new rework; a dish marked
@@ -21,25 +22,25 @@ export const kitchenReworkCancelReasons = ["GUEST_DECLINED", "OPENED_BY_MISTAKE"
 export type KitchenReworkCancelReason = (typeof kitchenReworkCancelReasons)[number];
 export const kitchenReworkCancelReasonLabels: Readonly<Record<KitchenReworkCancelReason, string>> =
   Object.freeze({
-    GUEST_DECLINED: "Guest doesn't want it any more",
-    OPENED_BY_MISTAKE: "Opened by mistake",
+    GUEST_DECLINED: t("Guest doesn't want it any more"),
+    OPENED_BY_MISTAKE: t("Opened by mistake"),
   });
 
 /** Staff words for each reason (never the internal code). */
 export const kitchenReworkReasonLabels: Readonly<Record<KitchenReworkReason, string>> =
   Object.freeze({
-    WRONG_ITEM: "Made wrong",
+    WRONG_ITEM: t("Made wrong"),
     DROPPED: "Dropped",
-    CUSTOMER_RETURNED: "Guest sent it back",
-    QUALITY_ISSUE: "Quality problem",
-    NOT_READY: "Not ready yet — marked done by mistake",
-    OTHER: "Other reason",
+    CUSTOMER_RETURNED: t("Guest sent it back"),
+    QUALITY_ISSUE: t("Quality problem"),
+    NOT_READY: t("Not ready yet — marked done by mistake"),
+    OTHER: t("Other reason"),
   });
 /** Badge on the remade ticket. */
 export function kitchenReworkBadge(reason: KitchenReworkReason): string {
   return reason === "NOT_READY"
-    ? "Back in progress · Marked done too early"
-    : "Remake · " + kitchenReworkReasonLabels[reason];
+    ? t("Back in progress · Marked done too early")
+    : t("Remake · ") + kitchenReworkReasonLabels[reason];
 }
 export const kitchenReworkNotReadyWindowMs = 120_000;
 
@@ -88,7 +89,7 @@ export class KitchenReworkClientError extends Error {
       | "NotOffered"
       | "OutcomeUnknown",
   ) {
-    super("Kitchen remake could not be confirmed");
+    super(t("Kitchen remake could not be confirmed"));
     this.name = "KitchenReworkClientError";
   }
 }

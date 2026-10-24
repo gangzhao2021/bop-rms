@@ -1,3 +1,4 @@
+import { displayLocale, t } from "./i18n/i18n.js";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
 /**
@@ -211,7 +212,7 @@ const dateValue = (businessDate: string) => Date.parse(`${businessDate}T00:00:00
 
 /** "Wed, Oct 14" for a business date (a date label, independent of any time zone). */
 export function businessDateText(businessDate: string): string {
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(displayLocale(), {
     timeZone: "UTC",
     weekday: "short",
     month: "short",
@@ -224,7 +225,11 @@ export function businessDateLabel(businessDate: string, today: string | null | u
   const text = businessDateText(businessDate);
   if (today === null || today === undefined) return text;
   const difference = Math.round((dateValue(today) - dateValue(businessDate)) / dayMs);
-  return difference === 0 ? `Today · ${text}` : difference === 1 ? `Yesterday · ${text}` : text;
+  return difference === 0
+    ? t("Today · {text}", { text: text })
+    : difference === 1
+      ? t("Yesterday · {text}", { text: text })
+      : text;
 }
 
 /**
@@ -237,5 +242,8 @@ export function openedEarlierText(
   listedOn: string,
   today: string | null | undefined,
 ): string {
-  return `Opened ${businessDateText(openedOn)} · ordered again ${businessDateLabel(listedOn, today)}`;
+  return t("Opened {openedOn} · ordered again {listedOn}", {
+    openedOn: businessDateText(openedOn),
+    listedOn: businessDateLabel(listedOn, today),
+  });
 }

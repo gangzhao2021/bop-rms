@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /** WP-2423 C2: the order exception projection shape and parser, shared by Home and the exception page. */
 export interface OrderExceptionItem {
   readonly exceptionReference: string;
@@ -79,12 +80,15 @@ export function exceptionOpenForText(item: OrderExceptionItem, projectedAt: stri
   if (item.status === "Resolved") return null;
   const minutes = Math.floor((Date.parse(projectedAt) - Date.parse(item.createdAt)) / 60_000);
   if (!Number.isFinite(minutes) || minutes < 0) return null;
-  if (minutes < 1) return "Open less than a minute";
-  if (minutes < 60) return `Open ${minutes} min`;
+  if (minutes < 1) return t("Open less than a minute");
+  if (minutes < 60) return t("Open {minutes} min", { minutes: minutes });
   if (minutes < 24 * 60)
-    return `Open ${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")} min`;
+    return t("Open {value} h {value2} min", {
+      value: Math.floor(minutes / 60),
+      value2: String(minutes % 60).padStart(2, "0"),
+    });
   const days = Math.floor(minutes / (24 * 60));
-  return `Open ${days} ${days === 1 ? "day" : "days"}`;
+  return t("Open {days} {value}", { days: days, value: days === 1 ? "day" : "days" });
 }
 const REF = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;

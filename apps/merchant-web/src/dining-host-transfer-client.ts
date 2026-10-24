@@ -1,6 +1,7 @@
+import { t } from "./i18n/i18n.js";
 export class DiningHostClientError extends Error {
   constructor(readonly code: "Denied" | "Unavailable" | "Unknown") {
-    super("Dining host operation unavailable");
+    super(t("Dining host operation unavailable"));
   }
 }
 const fail = (): never => {

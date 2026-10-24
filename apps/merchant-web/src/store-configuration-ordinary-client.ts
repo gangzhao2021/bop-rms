@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import {
   validateStoreConfigurationOriginalCursor,
   validateStoreConfigurationOrdinaryReceipt,
@@ -312,7 +313,7 @@ export function parseStoreConfigurationOrdinaryHistory(
  * current read); Store setup hides the publication panel instead of reporting an outage. */
 export class StoreConfigurationPublicationNotOfferedError extends Error {
   constructor() {
-    super("Store configuration publication is not offered");
+    super(t("Store configuration publication is not offered"));
     this.name = "StoreConfigurationPublicationNotOfferedError";
   }
 }

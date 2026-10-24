@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -16,10 +17,10 @@ import {
 
 const others = (view: SoleOperatorView) => {
   const names = view.refundApproval.otherApprovers.map(
-    (person) => person.displayName ?? "Another staff member",
+    (person) => person.displayName ?? t("Another staff member"),
   );
   return names.length <= 1
-    ? (names[0] ?? "Another staff member")
+    ? (names[0] ?? t("Another staff member"))
     : names.slice(0, -1).join(", ") + " and " + names.at(-1);
 };
 
@@ -27,9 +28,12 @@ const others = (view: SoleOperatorView) => {
 function soleOperatorChangeText(entry: SoleOperatorView["history"][number]) {
   return (
     <>
-      Turned {entry.state === "On" ? "on" : "off"} by{" "}
-      {entry.changedByYou ? "you" : (entry.changedByName ?? "the brand owner")} ·{" "}
-      {soleOperatorReasonLabel[entry.reasonCode]} · <SourceTime instant={entry.recordedAt} />
+      {t("Turned {value} by {value2} · {value3} ·", {
+        value: entry.state === "On" ? t("on") : t("off"),
+        value2: entry.changedByYou ? t("you") : (entry.changedByName ?? t("the brand owner")),
+        value3: soleOperatorReasonLabel[entry.reasonCode],
+      })}{" "}
+      <SourceTime instant={entry.recordedAt} />
     </>
   );
 }
@@ -37,15 +41,18 @@ function soleOperatorChangeText(entry: SoleOperatorView["history"][number]) {
 /** Why sole operator is (or isn't) letting the Owner approve their own refunds right now. */
 function effectText(view: SoleOperatorView): string {
   if (view.state === "Off")
-    return "Off. Refunds that need approval are approved by a second owner or finance member.";
+    return t("Off. Refunds that need approval are approved by a second owner or finance member.");
   if (!view.refundApproval.youHoldApproval)
-    return "On, but you don't hold refund approval at this store, so it has no effect for you.";
+    return t("On, but you don't hold refund approval at this store, so it has no effect for you.");
   if (view.refundApproval.status === "Effective")
-    return "On and in effect: you are the only person who can approve refunds at this store, so you may approve your own after confirming it is you.";
+    return t(
+      "On and in effect: you are the only person who can approve refunds at this store, so you may approve your own after confirming it is you.",
+    );
   const named = others(view);
-  return `On, but not in effect: ${named} also ${
-    view.refundApproval.otherApprovers.length === 1 ? "holds" : "hold"
-  } refund approval at this store, so a second person is required.`;
+  return t(
+    "On, but not in effect: {named} also {value} refund approval at this store, so a second person is required.",
+    { named: named, value: view.refundApproval.otherApprovers.length === 1 ? "holds" : "hold" },
+  );
 }
 
 /**
@@ -110,9 +117,9 @@ export function SoleOperatorSection({
   if (status === "Unavailable" || view === null)
     return (
       <section aria-labelledby="sole-operator-heading" className="sole-operator">
-        <h2 id="sole-operator-heading">Sole operator</h2>
-        <StatePanel heading="Setting could not be loaded" tone="error" status>
-          <p>Check your connection, then refresh.</p>
+        <h2 id="sole-operator-heading">{t("Sole operator")}</h2>
+        <StatePanel heading={t("Setting could not be loaded")} tone="error" status>
+          <p>{t("Check your connection, then refresh.")}</p>
         </StatePanel>
       </section>
     );
@@ -139,7 +146,8 @@ export function SoleOperatorSection({
       setReason("");
       setMessage({
         tone: "status",
-        text: result.state === "On" ? "Sole operator turned on." : "Sole operator turned off.",
+        text:
+          result.state === "On" ? t("Sole operator turned on.") : t("Sole operator turned off."),
       });
       reload();
       onChanged?.();
@@ -155,14 +163,18 @@ export function SoleOperatorSection({
         tone: "alert",
         text:
           code === "NeedsReverification"
-            ? "Confirm it is you with your authenticator code, then try again."
+            ? t("Confirm it is you with your authenticator code, then try again.")
             : code === "Changed" || code === "NoChange"
-              ? "The setting changed since it was shown. It has been refreshed — check it and try again."
+              ? t(
+                  "The setting changed since it was shown. It has been refreshed — check it and try again.",
+                )
               : code === "Denied"
-                ? "Only the brand owner can change this setting. Sign in again if your session ended."
+                ? t(
+                    "Only the brand owner can change this setting. Sign in again if your session ended.",
+                  )
                 : code === "OutcomeUnknown"
-                  ? "Result unknown. Try again — the change is recorded once."
-                  : "The change could not be sent. Check your connection and try again.",
+                  ? t("Result unknown. Try again — the change is recorded once.")
+                  : t("The change could not be sent. Check your connection and try again."),
       });
       if (code === "Changed" || code === "NoChange") reload();
     } finally {
@@ -171,45 +183,42 @@ export function SoleOperatorSection({
   };
   return (
     <section aria-labelledby="sole-operator-heading" className="sole-operator">
-      <h2 id="sole-operator-heading">Sole operator</h2>
+      <h2 id="sole-operator-heading">{t("Sole operator")}</h2>
       <p>
-        For a business run by one owner with no one else who can approve. When it is on and you are
-        the only person who can approve, you may approve your own changes: refunds that need
-        approval (over $100, from an earlier business day or more than 24 hours after payment), new
-        prices (price books and option prices), menus, recipes (including option recipes) and the
-        allergen list, and the Store&rsquo;s configuration (Store setup, opening hours and the
-        receipt template) before you publish it. You still confirm with your authenticator code,
-        every approval is recorded as approved by you alone, and the day-end settlement shows your
-        own refund approvals for your review.
+        {t(
+          "For a business run by one owner with no one else who can approve. When it is on and you are the only person who can approve, you may approve your own changes: refunds that need approval (over $100, from an earlier business day or more than 24 hours after payment), new prices (price books and option prices), menus, recipes (including option recipes) and the allergen list, and the Store’s configuration (Store setup, opening hours and the receipt template) before you publish it. You still confirm with your authenticator code, every approval is recorded as approved by you alone, and the day-end settlement shows your own refund approvals for your review.",
+        )}
       </p>
       <dl>
         <div>
-          <dt>Sole operator</dt>
+          <dt>{t("Sole operator")}</dt>
           <dd>
             <strong>{view.state}</strong>
-            {view.version > 0 ? ` · setting change ${view.version}` : ""}
+            {view.version > 0 ? t(" · setting change {version}", { version: view.version }) : ""}
           </dd>
         </div>
         <div>
-          <dt>Refund approval</dt>
+          <dt>{t("Refund approval")}</dt>
           <dd>{effectText(view)}</dd>
         </div>
       </dl>
       {/* WP-2423 (2026-10-16 v15): who turned it on or off, when and why — newest first. */}
       {view.history.length > 0 ? (
         <section aria-labelledby="sole-operator-history-heading" className="sole-operator-history">
-          <h3 id="sole-operator-history-heading">Recent changes</h3>
+          <h3 id="sole-operator-history-heading">{t("Recent changes")}</h3>
           <ol>
             {view.history.slice(0, shownChanges).map((entry) => (
               <li key={entry.version}>
-                Change {entry.version}: {soleOperatorChangeText(entry)}
+                {t("Change")} {entry.version}: {soleOperatorChangeText(entry)}
               </li>
             ))}
           </ol>
           {earlierChanges > 0 ? (
             <p>
-              {earlierChanges} earlier {earlierChanges === 1 ? "change is" : "changes are"} kept in
-              the record.
+              {t("{earlierChanges} earlier {value} kept in the record.", {
+                earlierChanges: earlierChanges,
+                value: earlierChanges === 1 ? t("change is") : t("changes are"),
+              })}
             </p>
           ) : null}
         </section>
@@ -217,7 +226,7 @@ export function SoleOperatorSection({
       {/* Not a form: the verification dialog holds its own form and must not nest in one. */}
       <div className="card-actions">
         <label htmlFor="sole-operator-reason">
-          Reason for turning it {target === "On" ? "on" : "off"}
+          {t("Reason for turning it {value}", { value: target === "On" ? t("on") : t("off") })}
         </label>
         <select
           id="sole-operator-reason"
@@ -226,7 +235,7 @@ export function SoleOperatorSection({
           disabled={busy}
           onChange={(event) => setReason(event.currentTarget.value as SoleOperatorReason | "")}
         >
-          <option value="">Select a reason</option>
+          <option value="">{t("Select a reason")}</option>
           {soleOperatorReasons[target].map((code) => (
             <option key={code} value={code}>
               {soleOperatorReasonLabel[code]}
@@ -248,7 +257,11 @@ export function SoleOperatorSection({
           data-variant={target === "On" ? "primary" : undefined}
           disabled={busy || reason === "" || !verified}
         >
-          {busy ? "Saving…" : target === "On" ? "Turn on sole operator" : "Turn off sole operator"}
+          {busy
+            ? t("Saving…")
+            : target === "On"
+              ? t("Turn on sole operator")
+              : t("Turn off sole operator")}
         </button>
       </div>
       {fullSignIn ? <FullSignInPrompt csrf={csrf} fetcher={fetcher} /> : null}

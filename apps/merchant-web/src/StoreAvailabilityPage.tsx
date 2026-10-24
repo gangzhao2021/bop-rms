@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { Link } from "react-router";
@@ -32,22 +33,24 @@ import {
 
 /** WP-2423 8.5: which items this Store sells now — offer, sold out, back in stock. */
 const copy: Record<AvailabilityErrorCode | "Loading", string> = {
-  Loading: "Loading item availability…",
-  PermissionDenied:
+  Loading: t("Loading item availability…"),
+  PermissionDenied: t(
     "You do not have permission for this. Offering items is a Brand decision; kitchen and front-of-house staff can mark items sold out for today, and a manager can mark them sold out until further notice.",
-  NotFound: "This item is no longer sold by the Brand.",
-  Conflict:
+  ),
+  NotFound: t("This item is no longer sold by the Brand."),
+  Conflict: t(
     "The item changed since you opened the page, or is not offered here. Refresh and check.",
-  Invalid: "That request is not valid.",
-  Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
-  Unavailable: "Item availability is unavailable.",
+  ),
+  Invalid: t("That request is not valid."),
+  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Unavailable: t("Item availability is unavailable."),
 };
 const statusText = {
   Available: "Available",
-  SoldOut: "Sold out",
-  Unavailable: "Not available here",
-  NotOffered: "Not offered at this Store",
-  Varies: "Available for some order types",
+  SoldOut: t("Sold out"),
+  Unavailable: t("Not available here"),
+  NotOffered: t("Not offered at this Store"),
+  Varies: t("Available for some order types"),
 } as const;
 
 export function StoreAvailabilityPage({
@@ -99,7 +102,7 @@ export function StoreAvailabilityPage({
   const frame = kitchenDisplay
     ? {
         title: kitchenDisplay.storeLabel,
-        description: "Kitchen display",
+        description: t("Kitchen display"),
         className: "kitchen-shell",
         navigation: (
           <KitchenDisplayNavigation current="SoldOut" soldOutHref={kitchenDisplay.soldOutHref} />
@@ -113,7 +116,7 @@ export function StoreAvailabilityPage({
           />
         ),
       }
-    : { title: "Item availability", description: "", navigation: workspaceNavigation };
+    : { title: t("Item availability"), description: "", navigation: workspaceNavigation };
   const navigation = frame.navigation;
   const [state, setState] = useState<
     | { readonly kind: "Loading" | AvailabilityErrorCode }
@@ -143,7 +146,7 @@ export function StoreAvailabilityPage({
   if (state.kind !== "Found") {
     const panel = (
       <StatePanel
-        heading={state.kind === "PermissionDenied" ? noAccessHeading : "Item availability"}
+        heading={state.kind === "PermissionDenied" ? noAccessHeading : t("Item availability")}
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
@@ -236,7 +239,9 @@ export function StoreAvailabilityPage({
         case "ManagerBringsBack":
           return (
             <span key="manager" className="availability-note">
-              A manager marked this sold out until further notice. Ask a manager to bring it back.
+              {t(
+                "A manager marked this sold out until further notice. Ask a manager to bring it back.",
+              )}
             </span>
           );
         case "Offer":
@@ -261,17 +266,19 @@ export function StoreAvailabilityPage({
     <AppFrame {...frame}>
       <header className="screen-heading">
         <div>
-          <h2>Item availability</h2>
+          <h2>{t("Item availability")}</h2>
           {floorOnly ? (
             <p>
-              Ran out of something? Mark it sold out and customers can no longer order it. It comes
-              back by itself when today's business day ends, or when you mark it back in stock.{" "}
+              {t(
+                "Ran out of something? Mark it sold out and customers can no longer order it. It comes back by itself when today's business day ends, or when you mark it back in stock.",
+              )}{" "}
               <CheckedTime instant={view.sourceAsOf} timeZone={view.timeZone} />
             </p>
           ) : (
             <p>
-              Customers can order an item on a published menu only where it is offered and not sold
-              out; ingredient stock is checked again when they order.{" "}
+              {t(
+                "Customers can order an item on a published menu only where it is offered and not sold out; ingredient stock is checked again when they order.",
+              )}{" "}
               <CheckedTime instant={view.sourceAsOf} timeZone={view.timeZone} />
             </p>
           )}
@@ -279,7 +286,7 @@ export function StoreAvailabilityPage({
       </header>
       {message ? (
         <StatePanel
-          heading={message.tone === "error" ? "Not done" : "Done"}
+          heading={message.tone === "error" ? t("Not done") : t("Done")}
           tone={message.tone}
           status
         >
@@ -287,45 +294,45 @@ export function StoreAvailabilityPage({
         </StatePanel>
       ) : null}
       {items.length === 0 ? (
-        <StatePanel heading="No items" status>
+        <StatePanel heading={t("No items")} status>
           <p>
             {floorOnly
-              ? "No items are sold at this Store right now."
-              : "The Brand has no active items yet. Create products under Products."}
+              ? t("No items are sold at this Store right now.")
+              : t("The Brand has no active items yet. Create products under Products.")}
           </p>
         </StatePanel>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Item</th>
-              <th>Status</th>
-              <th aria-label="Actions" />
+              <th>{t("Item")}</th>
+              <th>{t("Status")}</th>
+              <th aria-label={t("Actions")} />
             </tr>
           </thead>
           <tbody>
             {items.map((item) => (
               <tr key={item.skuReference}>
                 <td>{label(item)}</td>
-                <td data-label="Status">
+                <td data-label={t("Status")}>
                   {item.status === "SoldOut"
                     ? soldOutText(item.soldOutUntil, view.timeZone)
                     : item.stockSoldOut != null &&
                         (item.status === "Available" || item.status === "Varies")
-                      ? "Sold out to guests (stock)"
+                      ? t("Sold out to guests (stock)")
                       : statusText[item.status]}
                   {item.stockSoldOut != null &&
                   (item.status === "Available" || item.status === "Varies") ? (
                     <p className="availability-note">
                       {stockSoldOutText(item.stockSoldOut)}{" "}
                       {stockHeldByOrders(item.stockSoldOut) ? (
-                        <Link to="/operations/orders">See Orders</Link>
+                        <Link to="/operations/orders">{t("See Orders")}</Link>
                       ) : (
                         // v15 aa3d9fac D3: stock comes back by recording the delivery or
                         // correcting the count (there is no separate stock overview screen).
                         <>
-                          <Link to="/operations/receiving">Record a delivery</Link> or{" "}
-                          <Link to="/operations/inventory/counts">count the stock</Link>
+                          <Link to="/operations/receiving">{t("Record a delivery")}</Link> {t("or")}{" "}
+                          <Link to="/operations/inventory/counts">{t("count the stock")}</Link>
                         </>
                       )}
                     </p>

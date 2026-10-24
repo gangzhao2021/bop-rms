@@ -1,3 +1,4 @@
+import { displayLocale, t } from "./i18n/i18n.js";
 import { createContext, useContext } from "react";
 
 /** WP-2423: the selected Store's IANA time zone, provided once by the workspace. */
@@ -9,7 +10,7 @@ export const StoreTimeZoneContext = createContext<string | undefined>(undefined)
  */
 export function storeTime(instant: string, timeZone: string | undefined, withDate = false): string {
   if (withDate) {
-    const text = new Intl.DateTimeFormat("en-US", {
+    const text = new Intl.DateTimeFormat(displayLocale(), {
       timeZone: timeZone ?? "UTC",
       year: "numeric",
       month: "short",
@@ -131,7 +132,7 @@ export function friendlyStoreTime(
   const year = (at: Date) =>
     new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric" }).format(at);
   const date = new Date(instant);
-  const text = new Intl.DateTimeFormat("en-US", {
+  const text = new Intl.DateTimeFormat(displayLocale(), {
     timeZone: zone,
     month: "short",
     day: "numeric",
@@ -163,14 +164,14 @@ export function storeDayTime(
   const today = day(now);
   const [y, m, d] = today.split("-").map(Number) as [number, number, number];
   const tomorrow = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
-  const time = new Intl.DateTimeFormat("en-US", {
+  const time = new Intl.DateTimeFormat(displayLocale(), {
     timeZone: zone,
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
   const suffix = timeZone === undefined ? " UTC" : "";
-  if (day(date) === today) return `${time}${suffix} today`;
-  if (day(date) === tomorrow) return `${time}${suffix} tomorrow`;
+  if (day(date) === today) return t("{time}{suffix} today", { time: time, suffix: suffix });
+  if (day(date) === tomorrow) return t("{time}{suffix} tomorrow", { time: time, suffix: suffix });
   return friendlyStoreTime(instant, timeZone, now);
 }
 
@@ -189,7 +190,7 @@ export function CheckedTime({
   const contextZone = useContext(StoreTimeZoneContext);
   return (
     <time dateTime={instant} title={instant}>
-      Checked {storeDayTime(instant, timeZone ?? contextZone)}
+      {t("Checked {instant}", { instant: storeDayTime(instant, timeZone ?? contextZone) })}
     </time>
   );
 }
@@ -228,14 +229,14 @@ export function Freshness({
         data-freshness={stale ? "Stale" : "Fresh"}
         title={at === undefined ? undefined : `Last change ${storeTime(at, timeZone)}`}
       >
-        {stale ? "Data may be out of date · last checked " : "Last checked "}
+        {stale ? t("Data may be out of date · last checked ") : t("Last checked ")}
         <time dateTime={checkedAt}>{storeTime(checkedAt, timeZone)}</time>
       </span>
     );
   const when = at === undefined ? null : storeTime(at, timeZone);
   return (
     <span className="workspace-page__freshness" data-freshness={stale ? "Stale" : "Fresh"}>
-      {stale ? "Data may be out of date" : "Updated"}
+      {stale ? t("Data may be out of date") : t("Updated")}
       {when === null ? "" : ` · ${when}`}
     </span>
   );
@@ -247,7 +248,7 @@ export function Freshness({
  */
 export function storeDate(value: string, timeZone: string | undefined): string {
   const plain = /^\d{4}-\d{2}-\d{2}$/u.test(value);
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(displayLocale(), {
     timeZone: plain ? "UTC" : (timeZone ?? "UTC"),
     year: "numeric",
     month: "short",

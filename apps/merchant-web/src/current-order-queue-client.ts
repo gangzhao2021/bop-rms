@@ -1,6 +1,7 @@
+import { t } from "./i18n/i18n.js";
 export class CurrentOrderQueueError extends Error {
   constructor(readonly code: "PermissionDenied" | "NotFound" | "Unavailable") {
-    super("Current orders could not be loaded");
+    super(t("Current orders could not be loaded"));
     this.name = "CurrentOrderQueueError";
   }
 }

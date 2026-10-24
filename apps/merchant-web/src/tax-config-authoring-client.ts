@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import {
   productCommandRecord as record,
   parseCatalogReference as ref,
@@ -29,7 +30,7 @@ export class TaxConfigAuthoringClientError extends Error {
       | "ScopeChanged"
       | "Stale",
   ) {
-    super("Tax Draft request could not be confirmed");
+    super(t("Tax Draft request could not be confirmed"));
     this.name = "TaxConfigAuthoringClientError";
   }
 }

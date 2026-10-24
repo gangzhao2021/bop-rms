@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import {
   OrderAcceptanceClientError,
@@ -61,32 +62,36 @@ export function OrderAcceptanceAction({
       {state === "Idle" || state === "Submitting" || state === "Unknown" || state === "Changed" ? (
         <button disabled={state === "Submitting"} onClick={() => void accept()}>
           {state === "Unknown"
-            ? "Retry acceptance for "
+            ? t("Retry acceptance for ")
             : state === "Submitting"
-              ? "Accepting "
-              : "Accept "}
+              ? t("Accepting ")
+              : t("Accept ")}
           {orderNumber}
         </button>
       ) : null}
       {state === "Unknown" ? (
         <p role="status">
-          Acceptance could not be confirmed. Retry the same request to recover its result.
+          {t("Acceptance could not be confirmed. Retry the same request to recover its result.")}
         </p>
       ) : state === "Changed" ? (
         <p role="status">
-          This order changed since the list was loaded. The list is refreshing; accept again if it
-          still waits.
+          {t(
+            "This order changed since the list was loaded. The list is refreshing; accept again if it still waits.",
+          )}
         </p>
       ) : state === "AlreadyAccepted" ? (
-        <p role="status">Already accepted by someone else. It is in the kitchen.</p>
+        <p role="status">{t("Already accepted by someone else. It is in the kitchen.")}</p>
       ) : state === "NotAcceptable" ? (
         <p role="status">
-          This can no longer be accepted as it is (its time ran out or an item ran out). Refresh
-          orders to see what to do.
+          {t(
+            "This can no longer be accepted as it is (its time ran out or an item ran out). Refresh orders to see what to do.",
+          )}
         </p>
       ) : state === "Denied" ? (
         <p role="status">
-          Acceptance was not confirmed. Refresh orders to check the current state and permissions.
+          {t(
+            "Acceptance was not confirmed. Refresh orders to check the current state and permissions.",
+          )}
         </p>
       ) : null}
     </div>

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /** WP-2423 / DEC-INV-LOCATIONS: INV-LOCATION-LIST view contract and same-origin client. */
 export type StockLocationErrorCode =
   | "PermissionDenied"
@@ -10,7 +11,7 @@ export type StockLocationErrorCode =
   | "Unavailable";
 export class StockLocationError extends Error {
   constructor(readonly code: StockLocationErrorCode) {
-    super("Stock locations are unavailable");
+    super(t("Stock locations are unavailable"));
     this.name = "StockLocationError";
   }
 }

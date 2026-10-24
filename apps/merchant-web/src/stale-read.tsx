@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useContext, useEffect, useRef } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { StatePanel } from "@bop-rms/ui";
@@ -89,13 +90,15 @@ export function StaleReadNotice({
   const offline = stale.reason === "Offline";
   return (
     <div className={className ?? "stale-read-notice"} data-stale-reason={stale.reason}>
-      <StatePanel heading="Read-only until reconnected" tone="offline" status>
+      <StatePanel heading={t("Read-only until reconnected")} tone="offline" status>
         <p>
-          {offline ? "Offline" : "Connection lost"} — showing the last update from{" "}
-          <time dateTime={stale.lastLoadedAt}>{storeTime(stale.lastLoadedAt, timeZone)}</time>.
-          Actions are paused until the connection returns.
+          {t("{value} — showing the last update from", {
+            value: offline ? t("Offline") : t("Connection lost"),
+          })}{" "}
+          <time dateTime={stale.lastLoadedAt}>{storeTime(stale.lastLoadedAt, timeZone)}</time>
+          {t(". Actions are paused until the connection returns.")}
         </p>
-        <p>Trying again automatically.</p>
+        <p>{t("Trying again automatically.")}</p>
       </StatePanel>
     </div>
   );

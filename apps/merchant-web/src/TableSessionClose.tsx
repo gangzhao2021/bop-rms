@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import {
@@ -19,9 +20,6 @@ import { TableGuestsLeft } from "./TableGuestsLeft.js";
 import { closeReasonTexts } from "./dining-close-reasons.js";
 import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session-client.js";
 
-const plural = (count: number, one: string, many: string) =>
-  `${String(count)} ${count === 1 ? one : many}`;
-
 /**
  * WP-2423 D4: what still stops a table's session from being closed, in staff words, each with
  * what to do. Empty when the table can be closed. The closing commands check the same facts
@@ -35,7 +33,14 @@ export function tableCloseBlockers(
   const awaiting = table.staffRoundsAwaitingPayment.length;
   if (awaiting > 0)
     blockers.push(
-      `${plural(awaiting, "round", "rounds")} entered by staff still ${awaiting === 1 ? "waits" : "wait"} for card-machine payment. Record the payment on the Orders page, or cancel the round there.`,
+      awaiting === 1
+        ? t(
+            "1 round entered by staff still waits for card-machine payment. Record the payment on the Orders page, or cancel the round there.",
+          )
+        : t(
+            "{count} rounds entered by staff still wait for card-machine payment. Record the payment on the Orders page, or cancel the rounds there.",
+            { count: awaiting },
+          ),
     );
   const open = (progress?.items ?? []).filter((item) => item.remainingQuantity > 0);
   const waiting = open.filter((item) => item.phase === "Submitted").length;
@@ -44,11 +49,23 @@ export function tableCloseBlockers(
   ).length;
   if (waiting > 0)
     blockers.push(
-      `${plural(waiting, "item is", "items are")} waiting for payment or for the kitchen to accept ${waiting === 1 ? "it" : "them"}. Ask the guest to finish paying on their phone, or cancel the unpaid round below (if the guests left) or on the Orders page.`,
+      waiting === 1
+        ? t(
+            "1 item is waiting for payment or for the kitchen to accept it. Ask the guest to finish paying on their phone, or cancel the unpaid round below (if the guests left) or on the Orders page.",
+          )
+        : t(
+            "{count} items are waiting for payment or for the kitchen to accept them. Ask the guest to finish paying on their phone, or cancel the unpaid round below (if the guests left) or on the Orders page.",
+            { count: waiting },
+          ),
     );
   if (unserved > 0)
     blockers.push(
-      `${plural(unserved, "item hasn't", "items haven't")} been served yet. Mark ${unserved === 1 ? "it" : "them"} served or cancel ${unserved === 1 ? "it" : "them"} on the Orders page.`,
+      unserved === 1
+        ? t("1 item hasn't been served yet. Mark it served or cancel it on the Orders page.")
+        : t(
+            "{count} items haven't been served yet. Mark them served or cancel them on the Orders page.",
+            { count: unserved },
+          ),
     );
   return blockers;
 }
@@ -239,7 +256,7 @@ export function TableSessionClose({
   const planBlocks = typeof openRounds === "number" && openRounds > 0;
   const ordersLink =
     orderReference === null ? null : (
-      <Link to={`/operations/orders/${orderReference}`}>Open this table&apos;s order</Link>
+      <Link to={`/operations/orders/${orderReference}`}>{t("Open this table's order")}</Link>
     );
 
   const close = async () => {
@@ -297,20 +314,24 @@ export function TableSessionClose({
   };
 
   return (
-    <section aria-label="Close this table" className="dining-table-close">
-      <h3>Close the table</h3>
+    <section aria-label={t("Close this table")} className="dining-table-close">
+      <h3>{t("Close the table")}</h3>
       {check.kind === "Checking" ? (
-        <p role="status">Checking this table&apos;s orders…</p>
+        <p role="status">{t("Checking this table's orders…")}</p>
       ) : check.kind === "Failed" ? (
         <p role="status">
           {check.denied
-            ? "You can't check this table's orders with your current access. Ask an Owner or Store Manager to close it."
+            ? t(
+                "You can't check this table's orders with your current access. Ask an Owner or Store Manager to close it.",
+              )
             : check.missing
-              ? "This table's order wasn't found at this store. Refresh the tables and try again."
-              : "Couldn't check this table's orders. Check the connection and try again."}{" "}
+              ? t(
+                  "This table's order wasn't found at this store. Refresh the tables and try again.",
+                )
+              : t("Couldn't check this table's orders. Check the connection and try again.")}{" "}
           {check.denied ? null : (
             <button type="button" onClick={() => setAttempt((value) => value + 1)}>
-              Check again
+              {t("Check again")}
             </button>
           )}
         </p>
@@ -318,7 +339,7 @@ export function TableSessionClose({
         <div role="note">
           {blockers.length > 0 ? (
             <>
-              <p>This table can&apos;t be closed yet:</p>
+              <p>{t("This table can't be closed yet:")}</p>
               <ul>
                 {blockers.map((text) => (
                   <li key={text}>{text}</li>
@@ -326,13 +347,13 @@ export function TableSessionClose({
               </ul>
             </>
           ) : (
-            <p>This table can&apos;t be closed yet. Close out its open rounds first.</p>
+            <p>{t("This table can't be closed yet. Close out its open rounds first.")}</p>
           )}
           {guestsLeft}
           <p>
             {ordersLink}{" "}
             <button type="button" onClick={() => setAttempt((value) => value + 1)}>
-              Check again
+              {t("Check again")}
             </button>
           </p>
         </div>
@@ -341,8 +362,9 @@ export function TableSessionClose({
       ) : (
         <>
           <p>
-            When the guests have left and everything is paid, close the table. Ordering at this
-            table stops, its order is closed and the table is free for the next party.
+            {t(
+              "When the guests have left and everything is paid, close the table. Ordering at this table stops, its order is closed and the table is free for the next party.",
+            )}
           </p>
           {outcome === "Unknown" ? null : (
             <label>
@@ -352,7 +374,7 @@ export function TableSessionClose({
                 disabled={submitting || locked}
                 onChange={(event) => setConfirmed(event.target.checked)}
               />
-              The guests at table {table.stableLabel} have left
+              {t("The guests at table {stableLabel} have left", { stableLabel: table.stableLabel })}
             </label>
           )}
           <button
@@ -361,31 +383,35 @@ export function TableSessionClose({
             onClick={() => void close()}
           >
             {submitting
-              ? "Closing the table…"
+              ? t("Closing the table…")
               : outcome === "Unknown"
-                ? "Try closing again"
-                : `Close table ${table.stableLabel}`}
+                ? t("Try closing again")
+                : t("Close table {stableLabel}", { stableLabel: table.stableLabel })}
           </button>
         </>
       )}
       {outcome === "Unknown" ? (
         <p role="alert">
-          We couldn&apos;t reach the server to confirm whether the table was closed, even after
-          checking again. Check this device&apos;s connection, then press Try closing again: it
-          reports what already happened and nothing is done twice.
+          {t(
+            "We couldn't reach the server to confirm whether the table was closed, even after checking again. Check this device's connection, then press Try closing again: it reports what already happened and nothing is done twice.",
+          )}
         </p>
       ) : outcome === "Denied" ? (
         <p role="alert">
-          Your access doesn&apos;t allow closing tables. Ask an Owner or Store Manager to close it.
+          {t(
+            "Your access doesn't allow closing tables. Ask an Owner or Store Manager to close it.",
+          )}
         </p>
       ) : outcome === "Refused" ? (
         <p role="alert">
-          The table wasn&apos;t closed: it changed while it was being closed (for example a payment
-          or refund came in). It has been checked again; review it and try again. {ordersLink}
+          {t(
+            "The table wasn't closed: it changed while it was being closed (for example a payment or refund came in). It has been checked again; review it and try again.",
+          )}{" "}
+          {ordersLink}
         </p>
       ) : typeof outcome === "object" && outcome !== null ? (
         <div role="alert">
-          <p>The table wasn&apos;t closed yet:</p>
+          <p>{t("The table wasn't closed yet:")}</p>
           <ul>
             {closeReasonTexts(outcome.reasons.length > 0 ? outcome.reasons : ["UNKNOWN"]).map(
               (text) => (

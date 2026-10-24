@@ -1,3 +1,4 @@
+import { staffContentName } from "./staff-content-locale.js";
 import { readClosedRecord } from "@bop/identity";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
@@ -36,7 +37,7 @@ function boundTransaction(transaction: {
 }
 
 const displayName = (names: Readonly<Record<string, string>>) =>
-  names["en-CA"] ?? names.en ?? Object.values(names)[0] ?? "Dish";
+  staffContentName(names, "en-CA") || "Dish";
 
 /** What staff see for one rework; no Actor identity beyond "you" and no internal codes in text. */
 function reworkView(

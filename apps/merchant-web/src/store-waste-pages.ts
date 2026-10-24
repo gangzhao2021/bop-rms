@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /** WP-2423 / DEC-INV-WASTE: waste recording and review contract and client. */
 export type StoreWasteErrorCode =
   | "PermissionDenied"
@@ -15,7 +16,7 @@ export class StoreWastePageError extends Error {
     readonly code: StoreWasteErrorCode,
     readonly lineReference: string | null = null,
   ) {
-    super("Waste is unavailable");
+    super(t("Waste is unavailable"));
     this.name = "StoreWastePageError";
   }
 }

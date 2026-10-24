@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 export interface OrderAcceptanceCommand {
   readonly acceptanceReference: string;
   readonly operationReference: string;
@@ -13,7 +14,7 @@ export class OrderAcceptanceClientError extends Error {
     readonly code: "PermissionDenied" | "Conflict" | "Unavailable" | "OutcomeUnknown",
     readonly conflict: OrderAcceptanceConflict | null = null,
   ) {
-    super("Order acceptance could not be confirmed");
+    super(t("Order acceptance could not be confirmed"));
     this.name = "OrderAcceptanceClientError";
   }
 }

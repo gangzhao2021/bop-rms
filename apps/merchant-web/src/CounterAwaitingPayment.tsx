@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { Link } from "react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -69,15 +70,15 @@ export function CounterAwaitingPayment({
         data-phase={recorded.payment.acceptance === "Accepted" ? "Accepted" : "Paid"}
       >
         <h2 id="counter-awaiting-paid" ref={paidHeading} tabIndex={-1}>
-          Order {recorded.orderNumber} paid
+          {t("Order {orderNumber} paid", { orderNumber: recorded.orderNumber })}
         </h2>
         <dl>
           <div>
-            <dt>Order</dt>
+            <dt>{t("Order")}</dt>
             <dd>{recorded.orderNumber}</dd>
           </div>
           <div>
-            <dt>Paid on card machine</dt>
+            <dt>{t("Paid on card machine")}</dt>
             <dd>
               <strong>
                 {orderMoney({ amountMinor: recorded.payment.amountMinor, currencyCode: "CAD" })}
@@ -94,9 +95,9 @@ export function CounterAwaitingPayment({
         </p>
         <div className="card-actions">
           <button type="button" onClick={() => setRecorded(null)}>
-            Done
+            {t("Done")}
           </button>
-          <Link to="/operations/orders">Open Orders</Link>
+          <Link to="/operations/orders">{t("Open Orders")}</Link>
         </div>
       </section>
     );
@@ -150,18 +151,19 @@ export function CounterAwaitingPayment({
         className="counter-order__awaiting store-card"
         aria-labelledby="counter-awaiting-heading"
       >
-        <h2 id="counter-awaiting-heading">Sent, not paid yet</h2>
+        <h2 id="counter-awaiting-heading">{t("Sent, not paid yet")}</h2>
         {failed ? (
           <div role="status">
-            <p>Couldn&apos;t check for sent orders waiting for payment. Orders lists them too.</p>
+            <p>{t("Couldn't check for sent orders waiting for payment. Orders lists them too.")}</p>
             <button type="button" onClick={() => setReads((value) => value + 1)}>
-              Try again
+              {t("Try again")}
             </button>
           </div>
         ) : (
           <p className="bop-muted">
-            Charge each on the card machine and record it here before its time ends, or it is
-            released and its items go back to stock.
+            {t(
+              "Charge each on the card machine and record it here before its time ends, or it is released and its items go back to stock.",
+            )}
           </p>
         )}
         <ul className="counter-order__awaiting-list">
@@ -171,21 +173,23 @@ export function CounterAwaitingPayment({
             return (
               <li key={order.orderReference}>
                 <p className="counter-order__awaiting-title">
-                  <strong>Order {order.orderNumber}</strong>{" "}
+                  <strong>{t("Order {orderNumber}", { orderNumber: order.orderNumber })}</strong>{" "}
                   <span className="bop-muted">
-                    sent {storeTime(order.submittedAt, timeZone)}
-                    {order.counter?.recordedAfterOutage ? " · paper order" : ""}
+                    {t("sent {submittedAt}{value}", {
+                      submittedAt: storeTime(order.submittedAt, timeZone),
+                      value: order.counter?.recordedAfterOutage ? t(" · paper order") : "",
+                    })}
                   </span>
                 </p>
                 <p className="order-accept-by" data-tier={counterPayByTier(payBy, now)}>
                   {counterPayByText(payBy, timeZone, now)}
                 </p>
                 {batch === undefined || !order.canRecordCardMachinePayment ? (
-                  <p className="bop-muted">Ask a manager to record its payment.</p>
+                  <p className="bop-muted">{t("Ask a manager to record its payment.")}</p>
                 ) : (
                   <StaffRoundPaymentAction
                     subject="order"
-                    label="Charge on card machine"
+                    label={t("Charge on card machine")}
                     csrf={csrf}
                     fetcher={fetcher}
                     orderReference={order.orderReference}

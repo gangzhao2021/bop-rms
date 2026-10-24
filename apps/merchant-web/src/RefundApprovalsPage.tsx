@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
@@ -64,7 +65,7 @@ export function ApprovalFailureNotice({
 }
 
 const person = (entry: RefundApprovalEntry) =>
-  entry.requestedByYou ? "You" : (entry.requesterName ?? "The staff member who asked");
+  entry.requestedByYou ? "You" : (entry.requesterName ?? t("The staff member who asked"));
 
 /** One refund awaiting approval: who asked, why, and the in-person approval that sends it. */
 function ApprovalCard({
@@ -176,18 +177,22 @@ function ApprovalCard({
         retry: false,
         message:
           code === "AlreadyPrepared"
-            ? "This refund was already sent, so it can no longer be declined. Refresh the list."
+            ? t("This refund was already sent, so it can no longer be declined. Refresh the list.")
             : code === "AlreadyDeclined"
-              ? "This refund was already declined. Refresh the list."
+              ? t("This refund was already declined. Refresh the list.")
               : code === "SamePerson"
-                ? "You asked for this refund. Another owner or finance member must decide."
+                ? t("You asked for this refund. Another owner or finance member must decide.")
                 : code === "NeedsReverification"
-                  ? "Confirm it is you with your authenticator code, then decline."
+                  ? t("Confirm it is you with your authenticator code, then decline.")
                   : code === "NotPermitted"
-                    ? "Only an owner or finance member who didn't ask for this refund can decline it."
+                    ? t(
+                        "Only an owner or finance member who didn't ask for this refund can decline it.",
+                      )
                     : code === "Denied"
-                      ? "Your session has ended. Sign in again, then decline."
-                      : "Result unknown. Decline again with the same reason — it is recorded once.",
+                      ? t("Your session has ended. Sign in again, then decline.")
+                      : t(
+                          "Result unknown. Decline again with the same reason — it is recorded once.",
+                        ),
       });
     } finally {
       pending.current = null;
@@ -231,25 +236,40 @@ function ApprovalCard({
         message:
           code === "NeedsReverification"
             ? party === "Requester"
-              ? `${who} must confirm it is them again (their verification is older than 15 minutes). Ask them to verify, then approve.`
+              ? t(
+                  "{who} must confirm it is them again (their verification is older than 15 minutes). Ask them to verify, then approve.",
+                  { who: who },
+                )
               : party === "Approver"
-                ? "Confirm it is you with your authenticator code, then approve."
-                : `You and ${who} must both confirm with an authenticator code again, then approve.`
+                ? t("Confirm it is you with your authenticator code, then approve.")
+                : t(
+                    "You and {who} must both confirm with an authenticator code again, then approve.",
+                    { who: who },
+                  )
             : code === "SoleOperatorNotInEffect"
-              ? "Someone else now also holds refund approval at this store, so they must approve this refund. See Sole operator on this page."
+              ? t(
+                  "Someone else now also holds refund approval at this store, so they must approve this refund. See Sole operator on this page.",
+                )
               : code === "SamePerson"
-                ? "You asked for this refund. Another owner or finance member must approve it."
+                ? t("You asked for this refund. Another owner or finance member must approve it.")
                 : code === "Changed" || code === "AlreadyDeclined" || code === "AlreadyPrepared"
                   ? code === "AlreadyDeclined"
-                    ? "This refund was declined. Refresh the list."
-                    : "This refund changed since it was shown. Refresh the list."
+                    ? t("This refund was declined. Refresh the list.")
+                    : t("This refund changed since it was shown. Refresh the list.")
                   : code === "NotPermitted"
-                    ? "Only an owner or finance member who didn't ask for this refund can approve it."
+                    ? t(
+                        "Only an owner or finance member who didn't ask for this refund can approve it.",
+                      )
                     : code === "RequesterNotEligible"
-                      ? `${who} can no longer request refunds at this store. Ask a store manager to request it again.`
+                      ? t(
+                          "{who} can no longer request refunds at this store. Ask a store manager to request it again.",
+                          { who: who },
+                        )
                       : code === "Denied"
-                        ? "Your session has ended. Sign in again, then approve."
-                        : "Result unknown. Approve again to retry the same approval — it will not refund twice.",
+                        ? t("Your session has ended. Sign in again, then approve.")
+                        : t(
+                            "Result unknown. Approve again to retry the same approval — it will not refund twice.",
+                          ),
       });
     } finally {
       pending.current = null;
@@ -268,30 +288,33 @@ function ApprovalCard({
   return (
     <li className="refund-approval-card">
       <h3>
-        Order {entry.orderNumber} · {formatCad(entry.amountMinor)}
+        {t("Order {orderNumber} · {amountMinor}", {
+          orderNumber: entry.orderNumber,
+          amountMinor: formatCad(entry.amountMinor),
+        })}
       </h3>
       <dl>
         <div>
-          <dt>Reason</dt>
+          <dt>{t("Reason")}</dt>
           <dd>{describeRefundReason(entry.reasonCode)}</dd>
         </div>
         {entry.note !== null ? (
           <div>
-            <dt>Note from {who === "You" ? "you" : who}</dt>
+            <dt>{t("Note from {value}", { value: who === "You" ? t("you") : who })}</dt>
             <dd>{entry.note}</dd>
           </div>
         ) : null}
         <div>
-          <dt>Asked by</dt>
+          <dt>{t("Asked by")}</dt>
           <dd>
             {who} · <SourceTime instant={entry.requestedAt} />
           </dd>
         </div>
         <div>
-          <dt>Why approval is needed</dt>
+          <dt>{t("Why approval is needed")}</dt>
           <dd>
             {entry.escalationReasons.length === 0 ? (
-              "Approved request still being sent"
+              t("Approved request still being sent")
             ) : (
               <ul>
                 {entry.escalationReasons.map((reason) => (
@@ -302,36 +325,40 @@ function ApprovalCard({
           </dd>
         </div>
         <div>
-          <dt>Status</dt>
+          <dt>{t("Status")}</dt>
           <dd>
             {outcome.kind === "Declined"
-              ? "Declined — nothing was refunded"
+              ? t("Declined — nothing was refunded")
               : machineApproved
-                ? "Approved — refund it on the store's card machine, then record it"
+                ? t("Approved — refund it on the store's card machine, then record it")
                 : outcome.kind === "Sent"
                   ? outcome.unknown
-                    ? "Approved — sending result unknown"
+                    ? t("Approved — sending result unknown")
                     : outcome.progress === "Refunded"
-                      ? "Refunded"
+                      ? t("Refunded")
                       : outcome.progress === "Sent" || outcome.progress === "StillPending"
-                        ? "Approved — sent, waiting for the card provider's answer"
+                        ? t("Approved — sent, waiting for the card provider's answer")
                         : outcome.progress === "NotSent"
-                          ? "Approved — not sent yet"
-                          : "Approved — sending to the card provider"
+                          ? t("Approved — not sent yet")
+                          : t("Approved — sending to the card provider")
                   : entry.state === "Approved"
-                    ? "Approved — sending not finished"
-                    : "Waiting for approval"}
+                    ? t("Approved — sending not finished")
+                    : t("Waiting for approval")}
           </dd>
         </div>
         <div>
-          <dt>{entry.requestedByYou ? "Your verification" : `${who}'s verification`}</dt>
+          <dt>
+            {entry.requestedByYou
+              ? t("Your verification")
+              : t("{who}'s verification", { who: who })}
+          </dt>
           <dd>
             {requesterCurrent && requesterVerifiedUntil !== null ? (
               <>
-                Current until <SourceTime instant={requesterVerifiedUntil} />
+                {t("Current until")} <SourceTime instant={requesterVerifiedUntil} />
               </>
             ) : (
-              "Needs to verify again before approval"
+              t("Needs to verify again before approval")
             )}
           </dd>
         </div>
@@ -339,10 +366,14 @@ function ApprovalCard({
       {sole && outcome.kind !== "Sent" && outcome.kind !== "Declined" ? (
         <div className="sole-operator-confirm">
           <p>
-            You asked for this refund and you are the only person who can approve refunds at this
-            store (sole operator). Check it before approving it yourself: order {entry.orderNumber},{" "}
-            {formatCad(entry.amountMinor)}, {describeRefundReason(entry.reasonCode)}. It will be
-            recorded as approved by you alone and shown at day-end settlement.
+            {t(
+              "You asked for this refund and you are the only person who can approve refunds at this store (sole operator). Check it before approving it yourself: order {orderNumber}, {amountMinor}, {reasonCode}. It will be recorded as approved by you alone and shown at day-end settlement.",
+              {
+                orderNumber: entry.orderNumber,
+                amountMinor: formatCad(entry.amountMinor),
+                reasonCode: describeRefundReason(entry.reasonCode),
+              },
+            )}
           </p>
           <label>
             <input
@@ -351,15 +382,17 @@ function ApprovalCard({
               disabled={busy}
               onChange={(event) => setConfirmed(event.currentTarget.checked)}
             />{" "}
-            I checked this refund and approve it on my own
+            {t("I checked this refund and approve it on my own")}
           </label>
         </div>
       ) : null}
       {entry.requestedByYou && !sole && entry.state === "AwaitingApproval" ? (
         <p>
           {soleOperator === "OtherApprovers"
-            ? "Someone else holds refund approval at this store, so they must approve your request."
-            : "An owner or finance member who did not ask for this refund must approve it."}
+            ? t(
+                "Someone else holds refund approval at this store, so they must approve your request.",
+              )
+            : t("An owner or finance member who did not ask for this refund must approve it.")}
         </p>
       ) : null}
       {entry.requestedByYou && !sole && outcome.kind !== "Sent" ? (
@@ -369,7 +402,7 @@ function ApprovalCard({
           verifiedUntil={viewerVerifiedUntil}
           onVerified={onViewerVerified}
           loadServerStatus={false}
-          label="Verify for the owner's approval"
+          label={t("Verify for the owner's approval")}
           fetcher={fetcher}
         />
       ) : null}
@@ -384,7 +417,7 @@ function ApprovalCard({
             verifiedUntil={viewerVerifiedUntil}
             onVerified={onViewerVerified}
             loadServerStatus={false}
-            label="Verify to approve"
+            label={t("Verify to approve")}
             fetcher={fetcher}
           />
           <button
@@ -394,18 +427,24 @@ function ApprovalCard({
             onClick={() => void approve()}
           >
             {busy
-              ? "Approving…"
+              ? t("Approving…")
               : sole && entry.state === "AwaitingApproval" && outcome.kind === "Idle"
-                ? `Approve my own refund of ${formatCad(entry.amountMinor)}`
+                ? t("Approve my own refund of {amountMinor}", {
+                    amountMinor: formatCad(entry.amountMinor),
+                  })
                 : outcome.kind === "Sent"
-                  ? "Retry sending the same refund"
+                  ? t("Retry sending the same refund")
                   : outcome.kind === "Failed" && outcome.retry
-                    ? "Retry same approval"
+                    ? t("Retry same approval")
                     : entry.state === "Approved"
-                      ? "Send approved refund"
+                      ? t("Send approved refund")
                       : onMachine
-                        ? `Approve card machine refund of ${formatCad(entry.amountMinor)}`
-                        : `Approve and refund ${formatCad(entry.amountMinor)}`}
+                        ? t("Approve card machine refund of {amountMinor}", {
+                            amountMinor: formatCad(entry.amountMinor),
+                          })
+                        : t("Approve and refund {amountMinor}", {
+                            amountMinor: formatCad(entry.amountMinor),
+                          })}
           </button>
         </div>
       ) : null}
@@ -421,7 +460,7 @@ function ApprovalCard({
           }}
         >
           <label htmlFor={"decline-reason-" + entry.requestReference}>
-            {sole ? "Withdraw reason" : "Decline reason"}
+            {sole ? t("Withdraw reason") : t("Decline reason")}
           </label>
           <select
             id={"decline-reason-" + entry.requestReference}
@@ -430,7 +469,7 @@ function ApprovalCard({
             disabled={busy}
             onChange={(event) => setDeclineReason(event.currentTarget.value as DeclineReason | "")}
           >
-            <option value="">Select a reason</option>
+            <option value="">{t("Select a reason")}</option>
             {(sole ? withdrawReasons : declineReasons).map((code) => (
               <option key={code} value={code}>
                 {declineReasonLabel[code]}
@@ -442,56 +481,68 @@ function ApprovalCard({
             data-variant="destructive"
             disabled={busy || !approverCurrent || declineReason === ""}
           >
-            {sole ? "Withdraw my request" : "Decline refund"}
+            {sole ? t("Withdraw my request") : t("Decline refund")}
           </button>
         </form>
       ) : null}
       {outcome.kind === "Declined" ? (
         <div role="status">
           <p>
-            Declined <SourceTime instant={outcome.declinedAt} />. Nothing was refunded and the
-            request no longer counts toward this order; {who === "You" ? "you" : who} can see why.
+            {t("Declined")} <SourceTime instant={outcome.declinedAt} />
+            {t(
+              ". Nothing was refunded and the request no longer counts toward this order; {value} can see why.",
+              { value: who === "You" ? t("you") : who },
+            )}
           </p>
           <button type="button" onClick={onChanged}>
-            Refresh list
+            {t("Refresh list")}
           </button>
         </div>
       ) : null}
       {!entry.canApprove && !entry.requestedByYou ? (
-        <p>Only an owner or finance member who did not ask for this refund can approve it.</p>
+        <p>
+          {t("Only an owner or finance member who did not ask for this refund can approve it.")}
+        </p>
       ) : null}
       <ApprovalFailureNotice outcome={outcome} csrf={csrf} fetcher={fetcher} />
       {machineApproved ? (
         <div role="status">
           <p>
-            Approved. Refund {formatCad(entry.amountMinor)} on the store&apos;s card machine to the
-            card the customer paid with, then record it on the payment page with the slip reference.
-            The refund counts on the day it is made on the machine.
+            {t(
+              "Approved. Refund {amountMinor} on the store's card machine to the card the customer paid with, then record it on the payment page with the slip reference. The refund counts on the day it is made on the machine.",
+              { amountMinor: formatCad(entry.amountMinor) },
+            )}
           </p>
           {/* v15 2026-10-17: the payment page lists it with its record action straight away. */}
-          <Link to={paymentDetail}>Record the card machine refund</Link>
+          <Link to={paymentDetail}>{t("Record the card machine refund")}</Link>
         </div>
       ) : null}
       {outcome.kind === "Sent" ? (
         <div role="status">
           <p>
             {outcome.unknown
-              ? "Approved, but sending was not confirmed. Retry sending: the same refund is reused and the customer is never refunded twice."
+              ? t(
+                  "Approved, but sending was not confirmed. Retry sending: the same refund is reused and the customer is never refunded twice.",
+                )
               : outcome.progress === "Refunded"
-                ? "Refunded to the customer's original payment method."
+                ? t("Refunded to the customer's original payment method.")
                 : outcome.progress === "StillPending"
-                  ? "Sent — the card provider has not answered yet. The amount stays set aside until it answers; open the payment to check its answer."
+                  ? t(
+                      "Sent — the card provider has not answered yet. The amount stays set aside until it answers; open the payment to check its answer.",
+                    )
                   : outcome.progress === "Sent"
-                    ? "Sent — waiting for the card provider's answer."
+                    ? t("Sent — waiting for the card provider's answer.")
                     : outcome.progress === "NotSent"
-                      ? "Approved, but the refund has not been sent yet. Retry sending: the same refund is reused and the customer is never refunded twice."
-                      : "Approved. Sending the refund to the card provider…"}
+                      ? t(
+                          "Approved, but the refund has not been sent yet. Retry sending: the same refund is reused and the customer is never refunded twice.",
+                        )
+                      : t("Approved. Sending the refund to the card provider…")}
           </p>
           {outcome.progress === "StillPending" ? (
-            <Link to={paymentPage}>Open the payment to check its answer</Link>
+            <Link to={paymentPage}>{t("Open the payment to check its answer")}</Link>
           ) : null}
           <button type="button" onClick={onChanged}>
-            Refresh list
+            {t("Refresh list")}
           </button>
         </div>
       ) : null}
@@ -552,41 +603,41 @@ export function RefundApprovalsPage({
   }, [refresh]);
   return (
     <WorkspacePage
-      title="Approvals"
+      title={t("Approvals")}
       meta={storeLabel}
       actions={
         <button type="button" disabled={state === "Loading"} onClick={reload}>
-          Refresh
+          {t("Refresh")}
         </button>
       }
     >
       <section aria-labelledby="refund-approvals-heading" data-screen-id="APPROVAL-INBOX">
-        <h2 id="refund-approvals-heading">Refunds awaiting approval</h2>
+        <h2 id="refund-approvals-heading">{t("Refunds awaiting approval")}</h2>
         <p>
-          Refunds above $100 for an order, from an earlier business day or more than 24 hours after
-          payment need an owner or finance member who did not ask for them. Approve in person: both
-          of you confirm with your authenticator code, then the refund is sent.
+          {t(
+            "Refunds above $100 for an order, from an earlier business day or more than 24 hours after payment need an owner or finance member who did not ask for them. Approve in person: both of you confirm with your authenticator code, then the refund is sent.",
+          )}
         </p>
         {state === "Loading" ? (
-          <StatePanel heading="Loading refunds" status>
-            <p>Checking refunds awaiting approval…</p>
+          <StatePanel heading={t("Loading refunds")} status>
+            <p>{t("Checking refunds awaiting approval…")}</p>
           </StatePanel>
         ) : state === "Denied" ? (
           <StatePanel heading={noAccessHeading} tone="error" status>
             <p>{pageAccessDeniedText}</p>
           </StatePanel>
         ) : state === "Unavailable" ? (
-          <StatePanel heading="Refunds could not be loaded" tone="error" status>
-            <p>Check your connection, then refresh.</p>
+          <StatePanel heading={t("Refunds could not be loaded")} tone="error" status>
+            <p>{t("Check your connection, then refresh.")}</p>
           </StatePanel>
         ) : view && view.entries.length === 0 ? (
-          <StatePanel heading="Nothing to approve" status>
-            <p>No refund at this store is waiting for approval.</p>
+          <StatePanel heading={t("Nothing to approve")} status>
+            <p>{t("No refund at this store is waiting for approval.")}</p>
           </StatePanel>
         ) : view ? (
           <>
             <p>
-              Last checked <SourceTime instant={view.observedAt} />.
+              {t("Last checked")} <SourceTime instant={view.observedAt} />.
             </p>
             <ul className="refund-approval-list">
               {view.entries.map((entry) => (

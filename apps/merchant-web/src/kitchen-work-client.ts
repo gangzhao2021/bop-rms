@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import {
   parseKitchenRouteReference,
   parseKitchenWorkItemView,
@@ -29,7 +30,7 @@ export class KitchenWorkClientError extends Error {
       // WP-2423 (v15 2026-10-16): the server was busy (503) and changed nothing; try again.
       | "Busy",
   ) {
-    super("Kitchen action could not be confirmed");
+    super(t("Kitchen action could not be confirmed"));
     this.name = "KitchenWorkClientError";
   }
 }

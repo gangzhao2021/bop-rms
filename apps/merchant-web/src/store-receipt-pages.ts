@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /** WP-2423 / DEC-INV-DIRECT-RECEIPT: Store receipt view contract and same-origin client. */
 export type StoreReceiptErrorCode =
   | "PermissionDenied"
@@ -14,7 +15,7 @@ export class StoreReceiptPageError extends Error {
     readonly code: StoreReceiptErrorCode,
     readonly lineReference: string | null = null,
   ) {
-    super("Receiving is unavailable");
+    super(t("Receiving is unavailable"));
     this.name = "StoreReceiptPageError";
   }
 }

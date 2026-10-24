@@ -1,3 +1,4 @@
+import { staffContentName } from "./staff-content-locale.js";
 import { createPostgresReceiptOrderSource } from "@rms/ordering";
 import { MemberDirectoryError, loadStoreMember } from "@bop/membership";
 import type { ConsumerTransaction } from "@bop/eventing";
@@ -264,10 +265,7 @@ export function createMerchantOrdinaryRefundItems(options: {
               occupied.some((ordinal) => ordinal > snapshot.quantity)
             )
               return deny();
-            const label =
-              snapshot.catalog.localizedNames[options.locale] ??
-              snapshot.catalog.localizedNames["en-CA"] ??
-              Object.values(snapshot.catalog.localizedNames)[0];
+            const label = staffContentName(snapshot.catalog.localizedNames, options.locale);
             if (!label) return deny();
             const paymentCaptured = paid.has(snapshot.orderBatchReference);
             const cancelledWithRefund =

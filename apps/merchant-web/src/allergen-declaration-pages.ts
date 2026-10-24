@@ -1,3 +1,4 @@
+import { allergenName as chineseAllergenName, t } from "./i18n/i18n.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 /** WP-2423 / DEC-ALLERGEN-DECLARATIONS: CMP-ALLERGEN-REVIEW view contract and same-origin client. */
 export type AllergenErrorCode =
@@ -13,7 +14,7 @@ export type AllergenErrorCode =
   | "Unavailable";
 export class AllergenPageError extends Error {
   constructor(readonly code: AllergenErrorCode) {
-    super("Allergens are unavailable");
+    super(t("Allergens are unavailable"));
     this.name = "AllergenPageError";
   }
 }
@@ -166,8 +167,12 @@ export const allergenName = (
   locale: string,
 ) => {
   const entry = registry?.entries.find((item) => item.allergenReference === reference);
-  if (!entry) return "Allergen " + reference.slice(-4);
-  return entry.localizedNames[locale] ?? Object.values(entry.localizedNames)[0] ?? entry.code;
+  if (!entry) return t("Allergen {reference}", { reference: reference.slice(-4) });
+  // Owner 2026-10-24: the priority allergens in Chinese while Chinese is chosen.
+  return chineseAllergenName(
+    entry.code,
+    entry.localizedNames[locale] ?? Object.values(entry.localizedNames)[0] ?? entry.code,
+  );
 };
 /** "Contains milk, soy · May contain sesame" or "No priority allergens". */
 export function declarationSummary(
@@ -181,10 +186,10 @@ export function declarationSummary(
       .map((a) => allergenName(registry, a.allergenReference, locale));
   const contains = names("Contains");
   const may = names("CrossContactPossible");
-  if (!contains.length && !may.length) return "No priority allergens";
+  if (!contains.length && !may.length) return t("No priority allergens");
   return [
     contains.length ? "Contains " + contains.join(", ") : null,
-    may.length ? "May contain " + may.join(", ") : null,
+    may.length ? t("May contain ") + may.join(", ") : null,
   ]
     .filter(Boolean)
     .join(" · ");

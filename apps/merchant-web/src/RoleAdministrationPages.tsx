@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { newOperationReference } from "./operation-reference.js";
@@ -27,21 +28,21 @@ type State =
   | { readonly kind: "Loading" | RoleAdministrationPageErrorCode }
   | { readonly kind: "Found"; readonly view: RoleAdministrationPageView };
 const copy = {
-  Loading: "Loading authorized role metadata…",
+  Loading: t("Loading authorized role metadata…"),
   PermissionDenied: actionAccessDeniedText,
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
-  NotFound: "The requested role is unavailable in this scope.",
-  FeatureDisabled: "Role administration is disabled.",
-  Stale: "The projection is stale. Refresh before acting.",
-  Conflict: "The role or policy changed, or the role is still assigned. Refresh and try again.",
-  CommandFailed: "The change was refused. No role or permission outcome was inferred.",
-  Offline: "Offline. Your change was not confirmed; retry sends the same request again.",
-  Unavailable: "Role administration metadata is unavailable.",
+  NotFound: t("The requested role is unavailable in this scope."),
+  FeatureDisabled: t("Role administration is disabled."),
+  Stale: t("The projection is stale. Refresh before acting."),
+  Conflict: t("The role or policy changed, or the role is still assigned. Refresh and try again."),
+  CommandFailed: t("The change was refused. No role or permission outcome was inferred."),
+  Offline: t("Offline. Your change was not confirmed; retry sends the same request again."),
+  Unavailable: t("Role administration metadata is unavailable."),
 } as const;
 const operationLabels: Record<RoleAdministrationOperation, string> = {
-  Duplicate: "Duplicate as custom role",
-  SaveDraft: "Save draft",
-  Submit: "Submit for approval",
+  Duplicate: t("Duplicate as custom role"),
+  SaveDraft: t("Save draft"),
+  Submit: t("Submit for approval"),
   Approve: "Approve",
   Reject: "Reject",
   Activate: "Activate",
@@ -61,10 +62,10 @@ function Status({ state }: { readonly state: Exclude<State["kind"], "Found"> }) 
     <StatePanel
       heading={
         state === "Loading"
-          ? "Loading roles"
+          ? t("Loading roles")
           : state === "PermissionDenied"
             ? noAccessHeading
-            : "Role administration unavailable"
+            : t("Role administration unavailable")
       }
       tone={state === "Loading" ? "neutral" : "error"}
       status
@@ -94,9 +95,9 @@ function PermissionPicker({
   }, [catalog, query]);
   return (
     <fieldset>
-      <legend>Permissions ({selected.size} selected)</legend>
+      <legend>{t("Permissions ({size} selected)", { size: selected.size })}</legend>
       <label>
-        Search permissions
+        {t("Search permissions")}
         <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
       </label>
       {groups.map(({ group, entries }) => (
@@ -115,7 +116,7 @@ function PermissionPicker({
                 }}
               />{" "}
               {entry.description}
-              {entry.highRisk ? <strong> · High risk</strong> : null}
+              {entry.highRisk ? <strong> {t("· High risk")}</strong> : null}
             </label>
           ))}
         </fieldset>
@@ -182,7 +183,7 @@ function Editor({
           ? {
               code: duplicate.code,
               displayName: duplicate.name,
-              description: `Custom role based on ${role.name}`,
+              description: t("Custom role based on {name}", { name: role.name }),
               actions: [...selected].sort(),
             }
           : null,
@@ -192,11 +193,11 @@ function Editor({
   return (
     <div className="detail-section-grid">
       {editable || duplicate ? (
-        <StatePanel heading={duplicate ? "New custom role" : "Edit draft"}>
+        <StatePanel heading={duplicate ? t("New custom role") : t("Edit draft")}>
           {duplicate ? (
             <>
               <label>
-                Role code (lowercase, e.g. shift_lead)
+                {t("Role code (lowercase, e.g. shift_lead)")}
                 <input
                   value={duplicate.code}
                   pattern="[a-z][a-z0-9_]{1,62}[a-z0-9]"
@@ -206,7 +207,7 @@ function Editor({
                 />
               </label>
               <label>
-                Role name
+                {t("Role name")}
                 <input
                   value={duplicate.name}
                   onChange={(event) =>
@@ -218,11 +219,11 @@ function Editor({
           ) : (
             <>
               <label>
-                Role name
+                {t("Role name")}
                 <input value={name} onChange={(event) => setName(event.currentTarget.value)} />
               </label>
               <label>
-                Description
+                {t("Description")}
                 <input
                   value={description}
                   onChange={(event) => setDescription(event.currentTarget.value)}
@@ -232,8 +233,9 @@ function Editor({
           )}
           <PermissionPicker catalog={view.catalog} selected={selected} onChange={setSelected} />
           <p>
-            Legacy combined permissions are added automatically when every permission they cover is
-            selected.
+            {t(
+              "Legacy combined permissions are added automatically when every permission they cover is selected.",
+            )}
           </p>
           {duplicate ? (
             <>
@@ -245,16 +247,16 @@ function Editor({
                 }
                 onClick={() => void run(request("Duplicate"))}
               >
-                Create draft role
+                {t("Create draft role")}
               </button>{" "}
               <button disabled={busy} onClick={() => setDuplicate(null)}>
-                Cancel
+                {t("Cancel")}
               </button>
             </>
           ) : null}
         </StatePanel>
       ) : (
-        <StatePanel heading="Permission groups">
+        <StatePanel heading={t("Permission groups")}>
           <ul>
             {role.permissions.map((permission) => (
               <li key={permission.action}>
@@ -265,30 +267,38 @@ function Editor({
                 permission.group
                   ? ""
                   : ` · ${permission.group}`}
-                {permission.highRisk ? " · High risk" : ""}
+                {permission.highRisk ? t(" · High risk") : ""}
               </li>
             ))}
           </ul>
         </StatePanel>
       )}
-      <StatePanel heading="Approval and history">
-        <p>Submitted by {role.submittedBy ?? "Not submitted"}</p>
-        <p>Approved by {role.approvedBy ?? "Independent approval pending"}</p>
+      <StatePanel heading={t("Approval and history")}>
+        <p>{t("Submitted by {value}", { value: role.submittedBy ?? t("Not submitted") })}</p>
+        <p>
+          {t("Approved by {value}", {
+            value: role.approvedBy ?? t("Independent approval pending"),
+          })}
+        </p>
         <ul>
           {role.history.map((item) => (
             <li key={item}>{item}</li>
           ))}
         </ul>
         {role.type === "System" ? (
-          <p>System template role: its permissions follow the released template.</p>
+          <p>{t("System template role: its permissions follow the released template.")}</p>
         ) : null}
         {role.memberCount > 0 && role.status === "Active" ? (
-          <p>Reassign the {role.memberCount} staff holding this role before deactivating it.</p>
+          <p>
+            {t("Reassign the {memberCount} staff holding this role before deactivating it.", {
+              memberCount: role.memberCount,
+            })}
+          </p>
         ) : null}
         {role.status === "InReview" && !role.operations.includes("Approve") ? (
-          <p>Another administrator must approve this change.</p>
+          <p>{t("Another administrator must approve this change.")}</p>
         ) : null}
-        <div role="group" aria-label="Role actions">
+        <div role="group" aria-label={t("Role actions")}>
           {role.operations
             .filter((operation) => operation !== "Duplicate")
             .map((operation) => (
@@ -313,23 +323,23 @@ function Editor({
           ) : null}
         </div>
         {error && needsFullSignIn(error) ? (
-          <StatePanel heading="Confirm it's you" status>
+          <StatePanel heading={t("Confirm it's you")} status>
             <FullSignInPrompt csrf={csrf} />
             {pending ? (
               <button disabled={busy} onClick={() => void run(pending)}>
-                Try again
+                {t("Try again")}
               </button>
             ) : null}
           </StatePanel>
         ) : error ? (
-          <StatePanel heading="Change not applied" tone="error" status>
+          <StatePanel heading={t("Change not applied")} tone="error" status>
             <p>{copy[error]}</p>
             {pending && error === "Offline" ? (
               <button disabled={busy} onClick={() => void run(pending)}>
-                Retry
+                {t("Retry")}
               </button>
             ) : (
-              <button onClick={reload}>Refresh</button>
+              <button onClick={reload}>{t("Refresh")}</button>
             )}
           </StatePanel>
         ) : null}
@@ -364,7 +374,7 @@ export function RoleAdministrationScreen({
   const editor = view.screenId === "IAM-ROLE-EDITOR";
   return (
     <AppFrame
-      title={editor ? "Role editor" : "Roles"}
+      title={editor ? t("Role editor") : t("Roles")}
       description={[
         editor ? "Edit a role and its permissions" : "Roles and permissions",
         view.freshness === "Stale" ? "may be out of date" : null,
@@ -375,14 +385,16 @@ export function RoleAdministrationScreen({
     >
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">{editor ? "Role editor" : "Roles"}</p>
-          <h2>Role and permission governance</h2>
+          <p className="bop-eyebrow">{editor ? t("Role editor") : t("Roles")}</p>
+          <h2>{t("Role and permission governance")}</h2>
           <p>
-            Source as of <SourceTime instant={view.sourceAsOf} />
+            {t("Source as of")} <SourceTime instant={view.sourceAsOf} />
           </p>
           {!editor && view.mayManage ? (
             <p>
-              To create a custom role, open a role and duplicate it, then adjust its permissions.
+              {t(
+                "To create a custom role, open a role and duplicate it, then adjust its permissions.",
+              )}
             </p>
           ) : null}
         </div>
@@ -390,13 +402,13 @@ export function RoleAdministrationScreen({
       {editor ? null : (
         <div className="list-filters" role="search">
           <label>
-            Role or permission
+            {t("Role or permission")}
             <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
           </label>
           <label>
-            Status
+            {t("Status")}
             <select value={status} onChange={(event) => setStatus(event.currentTarget.value)}>
-              <option value="All">All</option>
+              <option value="All">{t("All")}</option>
               {Object.entries(roleStatusLabels).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
@@ -407,8 +419,8 @@ export function RoleAdministrationScreen({
         </div>
       )}
       {roles.length === 0 ? (
-        <StatePanel heading="No matching roles" status>
-          <p>Change the safe filters.</p>
+        <StatePanel heading={t("No matching roles")} status>
+          <p>{t("Change the safe filters.")}</p>
         </StatePanel>
       ) : (
         roles.map((role) => (
@@ -418,17 +430,26 @@ export function RoleAdministrationScreen({
               tone={role.permissions.some((item) => item.highRisk) ? "offline" : "neutral"}
             >
               <p>
-                <strong>{roleStatusLabels[role.status]}</strong> · {roleScopeLabels[role.scope]} ·{" "}
-                {roleTypeLabels[role.type]} · version {role.version}
+                <strong>{roleStatusLabels[role.status]}</strong>{" "}
+                {t("· {value} · {value2} · version {version}", {
+                  value: roleScopeLabels[role.scope],
+                  value2: roleTypeLabels[role.type],
+                  version: role.version,
+                })}
               </p>
               <p>{role.description}</p>
               <p>
-                {role.memberCount} active assignments · {role.permissions.length} permissions
+                {t("{memberCount} active assignments · {length} permissions", {
+                  memberCount: role.memberCount,
+                  length: role.permissions.length,
+                })}
               </p>
               {editor ? (
-                <Link to="/app/organization/roles">Back to roles</Link>
+                <Link to="/app/organization/roles">{t("Back to roles")}</Link>
               ) : (
-                <Link to={`/app/organization/roles/${role.roleReference}`}>View and manage</Link>
+                <Link to={`/app/organization/roles/${role.roleReference}`}>
+                  {t("View and manage")}
+                </Link>
               )}
             </StatePanel>
             {editor ? (

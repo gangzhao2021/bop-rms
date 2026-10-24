@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useState } from "react";
 import { PIN_ELEVATION_EXPLANATION } from "./StaffPinControls.js";
 import { StaffSwitchButton } from "./StaffSession.js";
@@ -25,8 +26,8 @@ export function FullSignInPrompt({
 }) {
   const [verifiedUntil, setVerifiedUntil] = useState<string | null>(null);
   return (
-    <section className="full-sign-in-prompt" aria-label="Confirm it's you">
-      <p>{verifiedUntil === null ? FULL_SIGN_IN_REQUIRED_TEXT : "Verified. Try again now."}</p>
+    <section className="full-sign-in-prompt" aria-label={t("Confirm it's you")}>
+      <p>{verifiedUntil === null ? FULL_SIGN_IN_REQUIRED_TEXT : t("Verified. Try again now.")}</p>
       <StepUpVerification
         purpose="PinSessionElevation"
         csrf={csrf}
@@ -35,7 +36,7 @@ export function FullSignInPrompt({
           setVerifiedUntil(until);
           onVerified?.(until);
         }}
-        label="Verify it's you"
+        label={t("Verify it's you")}
         hint={false}
         fetcher={fetcher}
         loadServerStatus={false}
@@ -43,7 +44,7 @@ export function FullSignInPrompt({
       />
       {verifiedUntil === null ? (
         <StaffSwitchButton
-          label="Sign out and sign in with your account"
+          label={t("Sign out and sign in with your account")}
           {...(sessionClient ? { client: sessionClient } : {})}
         />
       ) : null}

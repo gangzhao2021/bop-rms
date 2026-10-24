@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { StepUpVerification } from "./StepUpVerification.js";
 import {
@@ -21,11 +22,13 @@ export const PIN_ELEVATION_EXPLANATION = Object.freeze({
   /** TEST-ONLY sign-in (internal test): the authenticator code is entered on this page. */
   code: "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, refunds, price changes and staff changes can go ahead on this PIN sign-in until the time shown.",
   /** DEC-COGNITO-STORE-STAFF: the staff member signs in again in a small window. */
-  signIn:
+  signIn: t(
     "Confirm it is you by signing in again with your password and authenticator app. After you verify, refunds, price changes and staff changes can go ahead on this PIN sign-in until the time shown.",
+  ),
 });
-export const PIN_FULL_SIGN_IN_TEXT =
-  "You signed in with a PIN. Confirm it's you with your authenticator app, or sign in with your account, to change your PIN.";
+export const PIN_FULL_SIGN_IN_TEXT = t(
+  "You signed in with a PIN. Confirm it's you with your authenticator app, or sign in with your account, to change your PIN.",
+);
 
 export type PinStatusSnapshot =
   | { readonly kind: "Loading" }
@@ -90,30 +93,32 @@ function defaultClient(csrf: string): StaffPinClient {
 }
 
 export function pinStateText(pin: PinRecord, timeZone: string | undefined): string {
-  if (pin.state === "NotSet") return "Set a PIN to switch quickly on this store's shared tablets.";
+  if (pin.state === "NotSet")
+    return t("Set a PIN to switch quickly on this store's shared tablets.");
   if (pin.state === "Reset")
-    return "A manager reset your PIN. Set a new one to use the shared tablets.";
+    return t("A manager reset your PIN. Set a new one to use the shared tablets.");
   return pin.changedAt === null
-    ? "Your PIN is set."
-    : `PIN set on ${storeDate(pin.changedAt, timeZone)}.`;
+    ? t("Your PIN is set.")
+    : t("PIN set on {changedAt}.", { changedAt: storeDate(pin.changedAt, timeZone) });
 }
 export const pinInvalidText: Record<PinInvalidReason, string> = {
-  Format: "Enter exactly 6 digits.",
-  Mismatch: "The two PINs don't match.",
-  TooSimple: "That PIN is too easy to guess. Choose a different one.",
+  Format: t("Enter exactly 6 digits."),
+  Mismatch: t("The two PINs don't match."),
+  TooSimple: t("That PIN is too easy to guess. Choose a different one."),
 };
-export const PIN_SAVED_TEXT = "Your PIN is saved. Use it on this store's shared tablets.";
-export const PIN_SESSION_NOTICE =
-  "Signed in with PIN. Refunds, price changes and staff changes need your authenticator code or a full sign-in.";
+export const PIN_SAVED_TEXT = t("Your PIN is saved. Use it on this store's shared tablets.");
+export const PIN_SESSION_NOTICE = t(
+  "Signed in with PIN. Refunds, price changes and staff changes need your authenticator code or a full sign-in.",
+);
 
 export function pinSaveFailureText(error: unknown): string {
   if (error instanceof StaffPinError) {
     if (error.code === "Invalid") return pinInvalidText[error.detail.reason ?? "Format"];
     if (error.code === "FullSignInRequired") return PIN_FULL_SIGN_IN_TEXT;
     if (error.code === "Denied")
-      return "Your sign-in has ended or doesn't allow this. Sign in again, then set your PIN.";
+      return t("Your sign-in has ended or doesn't allow this. Sign in again, then set your PIN.");
   }
-  return "Your PIN couldn't be saved. Check the connection and try again.";
+  return t("Your PIN couldn't be saved. Check the connection and try again.");
 }
 
 const digitsOnly = (value: string) => value.replace(/[^0-9]/gu, "").slice(0, 6);
@@ -200,7 +205,7 @@ export function StaffPinControls({
       csrf={csrf}
       verifiedUntil={status?.verifiedUntil ?? null}
       onVerified={onVerified}
-      label="Verify it's you"
+      label={t("Verify it's you")}
       hint={false}
       fetcher={fetcher}
       loadServerStatus={false}
@@ -212,18 +217,20 @@ export function StaffPinControls({
   return (
     <div className="staff-pin">
       {pinSignIn ? (
-        <section className="staff-pin__notice" aria-label="PIN sign-in">
+        <section className="staff-pin__notice" aria-label={t("PIN sign-in")}>
           <p>{PIN_SESSION_NOTICE}</p>
           {verification()}
         </section>
       ) : null}
       {status !== null && !pinSignIn && status.pin.state !== "Set" ? (
         <button type="button" className="staff-pin__prompt" onClick={open}>
-          {status.pin.state === "Reset" ? "Your PIN was reset. Set a new one." : "Set your PIN"}
+          {status.pin.state === "Reset"
+            ? t("Your PIN was reset. Set a new one.")
+            : t("Set your PIN")}
         </button>
       ) : null}
       <button type="button" className="staff-pin__open" onClick={open}>
-        My PIN
+        {t("My PIN")}
       </button>
       <dialog
         ref={dialog}
@@ -237,15 +244,17 @@ export function StaffPinControls({
           setConfirmation("");
         }}
       >
-        <h2 id={ids + "-title"}>My PIN</h2>
+        <h2 id={ids + "-title"}>{t("My PIN")}</h2>
         <p role="status">
           {status === null
             ? snapshot.kind === "Failed"
-              ? "Your PIN details couldn't be loaded. You can still set a new PIN."
-              : "Loading your PIN details…"
+              ? t("Your PIN details couldn't be loaded. You can still set a new PIN.")
+              : t("Loading your PIN details…")
             : pinStateText(status.pin, timeZone)}
           {locked && status?.pin.lockedUntil
-            ? ` It is locked until ${storeClockTime(status.pin.lockedUntil, timeZone)} after too many wrong tries.`
+            ? t(" It is locked until {lockedUntil} after too many wrong tries.", {
+                lockedUntil: storeClockTime(status.pin.lockedUntil, timeZone),
+              })
             : ""}
         </p>
         {needsVerification || (pinSignIn && !verified) ? (
@@ -261,7 +270,7 @@ export function StaffPinControls({
             void save();
           }}
         >
-          <label htmlFor={ids + "-new"}>New PIN</label>
+          <label htmlFor={ids + "-new"}>{t("New PIN")}</label>
           <input
             ref={first}
             id={ids + "-new"}
@@ -276,7 +285,7 @@ export function StaffPinControls({
             disabled={busy}
             onChange={(event) => setPin(digitsOnly(event.currentTarget.value))}
           />
-          <label htmlFor={ids + "-again"}>Enter it again</label>
+          <label htmlFor={ids + "-again"}>{t("Enter it again")}</label>
           <input
             id={ids + "-again"}
             name="confirm-pin"
@@ -290,17 +299,17 @@ export function StaffPinControls({
             onChange={(event) => setConfirmation(digitsOnly(event.currentTarget.value))}
           />
           <p id={ids + "-rules"} className="staff-pin__rules">
-            6 digits. Avoid easy PINs like 000000 or 123456.
+            {t("6 digits. Avoid easy PINs like 000000 or 123456.")}
           </p>
           <p role="alert" className="staff-pin__result" data-tone={result?.tone}>
             {result?.text ?? ""}
           </p>
           <div className="card-actions">
             <button type="submit" disabled={busy}>
-              {busy ? "Saving…" : "Save PIN"}
+              {busy ? t("Saving…") : t("Save PIN")}
             </button>
             <button type="button" disabled={busy} onClick={() => dialog.current?.close()}>
-              Close
+              {t("Close")}
             </button>
           </div>
         </form>

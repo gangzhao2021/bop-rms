@@ -1,9 +1,10 @@
+import { t } from "./i18n/i18n.js";
 /** WP-2423 slice 4: CAT-OPTIONSET-LIST / CAT-OPTIONSET-EDIT view contract and same-origin client. */
 export type OptionSetErrorCode =
   "PermissionDenied" | "NotFound" | "Conflict" | "Invalid" | "Offline" | "Unavailable";
 export class OptionSetPageError extends Error {
   constructor(readonly code: OptionSetErrorCode) {
-    super("Option sets are unavailable");
+    super(t("Option sets are unavailable"));
     this.name = "OptionSetPageError";
   }
 }
@@ -118,11 +119,18 @@ export function parseOptionSetEditView(value: unknown): OptionSetEditView {
 export function choiceRule(
   set: Pick<OptionSetRow, "kind" | "minimum" | "maximum" | "perOptionMaximum">,
 ) {
-  const need = set.minimum > 0 ? ` (at least ${set.minimum} required)` : " (optional)";
-  if (set.kind === "One") return set.minimum > 0 ? "Choose 1 (required)" : "Choose 1 (optional)";
-  const total = set.maximum === null ? "any number" : `up to ${set.maximum}`;
-  if (set.kind === "Any") return `Choose ${total}${need}`;
-  return `Up to ${set.perOptionMaximum} of each, ${total} in total${need}`;
+  const need =
+    set.minimum > 0 ? t(" (at least {minimum} required)", { minimum: set.minimum }) : " (optional)";
+  if (set.kind === "One")
+    return set.minimum > 0 ? t("Choose 1 (required)") : t("Choose 1 (optional)");
+  const total =
+    set.maximum === null ? t("any number") : t("up to {maximum}", { maximum: set.maximum });
+  if (set.kind === "Any") return t("Choose {total}{need}", { total: total, need: need });
+  return t("Up to {perOptionMaximum} of each, {total} in total{need}", {
+    perOptionMaximum: set.perOptionMaximum,
+    total: total,
+    need: need,
+  });
 }
 export const unavailableOptionSetClient: OptionSetClient = {
   list: async () => {
@@ -170,8 +178,10 @@ export function createOptionSetClient(
  * or which products offer it. Never "in use" for a set no product offers.
  */
 export function optionSetStateText(set: Pick<OptionSetRow, "archived" | "productNames">): string {
-  if (set.archived) return "Archived — it cannot be added to products.";
+  if (set.archived) return t("Archived — it cannot be added to products.");
   if (set.productNames.length === 0)
-    return "Saved, not on any product yet — customers cannot choose it until you add it to a product and publish a menu with that product.";
-  return `On ${set.productNames.join(", ")}.`;
+    return t(
+      "Saved, not on any product yet — customers cannot choose it until you add it to a product and publish a menu with that product.",
+    );
+  return t("On {value}.", { value: set.productNames.join(", ") });
 }

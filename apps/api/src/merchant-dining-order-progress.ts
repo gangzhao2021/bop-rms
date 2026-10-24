@@ -1,3 +1,4 @@
+import { staffContentLocale, staffNameLocales } from "./staff-content-locale.js";
 import { createMerchantDiningTableContext } from "./merchant-dining-table-context.js";
 import {
   createPostgresMerchantOrderIndex,
@@ -115,6 +116,7 @@ export function createMerchantDiningOrderProgress(options: {
           const labels = await createPostgresMerchantOrderItemLabels({
             ...scope,
             locale: options.locale,
+            preferredLocale: staffContentLocale(),
             authorize: allowed,
           }).load({ transaction: businessTransaction, orderReference });
           const membership = new Map(
@@ -135,7 +137,7 @@ export function createMerchantDiningOrderProgress(options: {
                 businessTransaction,
                 scope,
                 orderReference,
-                options.locale,
+                staffNameLocales(options.locale),
               );
               if (lines !== null)
                 details = new Map(lines.items.map((line) => [line.orderItemReference, line]));

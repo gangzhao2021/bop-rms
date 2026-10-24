@@ -1,3 +1,4 @@
+import { displayLocale, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -23,18 +24,18 @@ interface Pending {
 const soonDays = 30;
 const day = 24 * 60 * 60 * 1000;
 const date = (instant: string, timeZone: string | undefined) =>
-  new Intl.DateTimeFormat("en-CA", {
+  new Intl.DateTimeFormat(displayLocale(), {
     ...(timeZone ? { timeZone } : {}),
     year: "numeric",
     month: "long",
     day: "numeric",
   }).format(new Date(instant));
 const codeText: Record<TableQrRow["codeState"], string> = {
-  Active: "Ready to print",
-  None: "No code yet",
-  NotPrintable: "No printable code",
-  TurnedOff: "Turned off",
-  SetupIncomplete: "Table setup not finished",
+  Active: t("Ready to print"),
+  None: t("No code yet"),
+  NotPrintable: t("No printable code"),
+  TurnedOff: t("Turned off"),
+  SetupIncomplete: t("Table setup not finished"),
 };
 
 export function TableQrCodesPage({
@@ -104,18 +105,23 @@ export function TableQrCodesPage({
       setMessage({
         tone: "neutral",
         text:
-          `Downloaded ${sheet.fileName} with ${tables.length === 1 ? "the code for table " + (tables[0]?.stableLabel ?? "") : String(tables.length) + " table codes"}. ` +
-          "Open it and print at 100% scale.",
+          t("Downloaded {fileName} with {value}. ", {
+            fileName: sheet.fileName,
+            value:
+              tables.length === 1
+                ? "the code for table " + (tables[0]?.stableLabel ?? "")
+                : String(tables.length) + " table codes",
+          }) + t("Open it and print at 100% scale."),
       });
     } catch (error) {
       setMessage({
         tone: "error",
         text:
           error instanceof TableQrClientError && error.code === "Changed"
-            ? "A code changed since this page loaded. The list is refreshed; print again."
+            ? t("A code changed since this page loaded. The list is refreshed; print again.")
             : error instanceof TableQrClientError && error.code === "PermissionDenied"
-              ? "You don't have permission to print table codes."
-              : "The codes could not be downloaded. Nothing changed; try again.",
+              ? t("You don't have permission to print table codes.")
+              : t("The codes could not be downloaded. Nothing changed; try again."),
       });
       if (error instanceof TableQrClientError && error.code === "Changed") refresh();
     } finally {
@@ -150,10 +156,18 @@ export function TableQrCodesPage({
         tone: "neutral",
         text:
           pending.action === "TurnOff"
-            ? `The code for table ${row.stableLabel} is turned off. Guests who scan it are asked to see a staff member.`
+            ? t(
+                "The code for table {stableLabel} is turned off. Guests who scan it are asked to see a staff member.",
+                { stableLabel: row.stableLabel },
+              )
             : replaced
-              ? `Table ${row.stableLabel} has a new code. The old code no longer works. Print the new one now.`
-              : `Table ${row.stableLabel} has a code. Print it now.`,
+              ? t(
+                  "Table {stableLabel} has a new code. The old code no longer works. Print the new one now.",
+                  { stableLabel: row.stableLabel },
+                )
+              : t("Table {stableLabel} has a code. Print it now.", {
+                  stableLabel: row.stableLabel,
+                }),
       });
     } catch (error) {
       const code = error instanceof TableQrClientError ? error.code : "Unknown";
@@ -161,7 +175,9 @@ export function TableQrCodesPage({
         setPending({ ...pending, unknown: true });
         setMessage({
           tone: "error",
-          text: "We couldn't confirm whether this was done. Try again: the same request is sent, so it won't happen twice.",
+          text: t(
+            "We couldn't confirm whether this was done. Try again: the same request is sent, so it won't happen twice.",
+          ),
         });
       } else {
         setPending(null);
@@ -169,10 +185,12 @@ export function TableQrCodesPage({
           tone: "error",
           text:
             code === "Changed"
-              ? "This table changed since the page loaded. The list is refreshed; check it and try again."
+              ? t(
+                  "This table changed since the page loaded. The list is refreshed; check it and try again.",
+                )
               : code === "PermissionDenied"
-                ? "You don't have permission to change table codes."
-                : "Nothing changed. Try again.",
+                ? t("You don't have permission to change table codes.")
+                : t("Nothing changed. Try again."),
         });
         refresh();
       }
@@ -192,23 +210,37 @@ export function TableQrCodesPage({
     >
       <h2 id="table-qr-confirm-title">
         {pending.action === "TurnOff"
-          ? `Turn off the code for table ${pending.table.stableLabel}?`
+          ? t("Turn off the code for table {stableLabel}?", {
+              stableLabel: pending.table.stableLabel,
+            })
           : pending.table.codeState === "Active"
-            ? `Replace the code for table ${pending.table.stableLabel}?`
-            : `Create a code for table ${pending.table.stableLabel}?`}
+            ? t("Replace the code for table {stableLabel}?", {
+                stableLabel: pending.table.stableLabel,
+              })
+            : t("Create a code for table {stableLabel}?", {
+                stableLabel: pending.table.stableLabel,
+              })}
       </h2>
       <p>
         {pending.action === "TurnOff"
-          ? "Guests who scan this table's code will be asked to see a staff member. Use this when a table is taken out of service. You can create a new code later."
+          ? t(
+              "Guests who scan this table's code will be asked to see a staff member. Use this when a table is taken out of service. You can create a new code later.",
+            )
           : pending.table.codeState === "Active"
-            ? "Use this when a code is lost, stolen or copied. The old code stops working at once; only this table changes. If the sticker is only damaged, print it again instead."
-            : "The new code works as soon as it is printed and placed on the table."}
+            ? t(
+                "Use this when a code is lost, stolen or copied. The old code stops working at once; only this table changes. If the sticker is only damaged, print it again instead.",
+              )
+            : t("The new code works as soon as it is printed and placed on the table.")}
       </p>
       {pending.table.seated && pending.table.codeState === "Active" ? (
         <p className="table-qr__warning" role="note">
           {pending.action === "TurnOff"
-            ? "Guests are seated at this table now. Their phones stop working with this table's code and there is no new code to scan: they ask a staff member to order or pay. Their orders and bill are not affected."
-            : "Guests are seated at this table now. Their phones stop working with the old code: they scan the new code and enter the table's joining code again. Their orders and bill are not affected."}
+            ? t(
+                "Guests are seated at this table now. Their phones stop working with this table's code and there is no new code to scan: they ask a staff member to order or pay. Their orders and bill are not affected.",
+              )
+            : t(
+                "Guests are seated at this table now. Their phones stop working with the old code: they scan the new code and enter the table's joining code again. Their orders and bill are not affected.",
+              )}
         </p>
       ) : null}
       {pending.table.codeState === "Active" ? (
@@ -220,8 +252,8 @@ export function TableQrCodesPage({
             onChange={(event) => setUnderstood(event.currentTarget.checked)}
           />
           {pending.action === "TurnOff"
-            ? "I understand this table's code stops working"
-            : "I understand the old code stops working"}
+            ? t("I understand this table's code stops working")
+            : t("I understand the old code stops working")}
         </label>
       ) : null}
       <div className="table-qr__confirm-actions">
@@ -232,18 +264,18 @@ export function TableQrCodesPage({
           }
         >
           {busy
-            ? "Working…"
+            ? t("Working…")
             : pending.unknown
-              ? "Try again"
+              ? t("Try again")
               : pending.action === "TurnOff"
-                ? "Turn off code"
+                ? t("Turn off code")
                 : pending.table.codeState === "Active"
-                  ? "Replace code"
-                  : "Create code"}
+                  ? t("Replace code")
+                  : t("Create code")}
         </button>
         {pending.unknown ? null : (
           <button type="button" disabled={busy} onClick={() => setPending(null)}>
-            Cancel
+            {t("Cancel")}
           </button>
         )}
       </div>
@@ -252,7 +284,7 @@ export function TableQrCodesPage({
 
   return (
     <WorkspacePage
-      title="Table QR codes"
+      title={t("Table QR codes")}
       meta={storeLabel}
       actions={
         <>
@@ -261,22 +293,22 @@ export function TableQrCodesPage({
             disabled={busy || printable.length === 0 || pending !== null}
             onClick={() => void print(printable)}
           >
-            Print all codes
+            {t("Print all codes")}
           </button>
           <button type="button" disabled={busy} onClick={refresh}>
-            Refresh
+            {t("Refresh")}
           </button>
         </>
       }
     >
       <p className="table-qr__intro">
-        Guests scan the code on their table to order and pay. Print each code once. If a sticker is
-        damaged, print it again — the code stays the same. If a code is lost or copied, replace it:
-        the old one stops working at once, and only that table needs a new sticker.
+        {t(
+          "Guests scan the code on their table to order and pay. Print each code once. If a sticker is damaged, print it again — the code stays the same. If a code is lost or copied, replace it: the old one stops working at once, and only that table needs a new sticker.",
+        )}
       </p>
       {message ? (
         <StatePanel
-          heading={message.tone === "error" ? "Not done" : "Done"}
+          heading={message.tone === "error" ? t("Not done") : t("Done")}
           tone={message.tone}
           status
         >
@@ -284,56 +316,58 @@ export function TableQrCodesPage({
         </StatePanel>
       ) : null}
       {expiring.length > 0 ? (
-        <StatePanel heading="Codes stop working soon" tone="offline" status>
+        <StatePanel heading={t("Codes stop working soon")} tone="offline" status>
           <p>
-            {expiring.map((row) => row.stableLabel).join(", ")}:{" "}
-            {expiring.length === 1 ? "this code stops" : "these codes stop"} working on{" "}
-            {date(
-              expiring
-                .flatMap((row) => (row.validUntil === null ? [] : [row.validUntil]))
-                .sort()[0] ?? "",
-              timeZone,
-            )}
-            . Replace and print {expiring.length === 1 ? "it" : "them"} before then.
+            {t("{value}: {value2} working on {value3}. Replace and print {value4} before then.", {
+              value: expiring.map((row) => row.stableLabel).join(", "),
+              value2: expiring.length === 1 ? t("this code stops") : t("these codes stop"),
+              value3: date(
+                expiring
+                  .flatMap((row) => (row.validUntil === null ? [] : [row.validUntil]))
+                  .sort()[0] ?? "",
+                timeZone,
+              ),
+              value4: expiring.length === 1 ? t("it") : t("them"),
+            })}
           </p>
         </StatePanel>
       ) : null}
       {confirmation}
       {load.kind === "Loading" ? (
-        <p role="status">Loading tables…</p>
+        <p role="status">{t("Loading tables…")}</p>
       ) : load.kind === "PermissionDenied" ? (
         <StatePanel heading={noAccessHeading} tone="error" status>
           <p>{pageAccessDeniedText}</p>
         </StatePanel>
       ) : load.kind === "Unavailable" ? (
-        <StatePanel heading="Tables unavailable" tone="error" status>
-          <p>Check your connection and refresh. Codes already on the tables keep working.</p>
+        <StatePanel heading={t("Tables unavailable")} tone="error" status>
+          <p>{t("Check your connection and refresh. Codes already on the tables keep working.")}</p>
         </StatePanel>
       ) : rows.length === 0 ? (
-        <StatePanel heading="No tables" status>
-          <p>This Store has no tables yet.</p>
+        <StatePanel heading={t("No tables")} status>
+          <p>{t("This Store has no tables yet.")}</p>
         </StatePanel>
       ) : (
         <table className="table-qr__list">
           <thead>
             <tr>
-              <th scope="col">Table</th>
-              <th scope="col">Area</th>
-              <th scope="col">Code</th>
-              <th scope="col">Works until</th>
-              <th scope="col" aria-label="Actions" />
+              <th scope="col">{t("Table")}</th>
+              <th scope="col">{t("Area")}</th>
+              <th scope="col">{t("Code")}</th>
+              <th scope="col">{t("Works until")}</th>
+              <th scope="col" aria-label={t("Actions")} />
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.tableReference}>
                 <th scope="row">{row.stableLabel}</th>
-                <td data-label="Area">{row.areaCode}</td>
-                <td data-label="Code">
+                <td data-label={t("Area")}>{row.areaCode}</td>
+                <td data-label={t("Code")}>
                   {codeText[row.codeState]}
-                  {row.seated ? " · Guests seated" : ""}
+                  {row.seated ? t(" · Guests seated") : ""}
                 </td>
-                <td data-label="Works until">
+                <td data-label={t("Works until")}>
                   {row.validUntil === null ? "—" : date(row.validUntil, timeZone)}
                 </td>
                 <td className="table-qr__actions">
@@ -344,21 +378,21 @@ export function TableQrCodesPage({
                         disabled={busy || pending !== null}
                         onClick={() => void print([row])}
                       >
-                        Print
+                        {t("Print")}
                       </button>
                       <button
                         type="button"
                         disabled={busy || pending !== null}
                         onClick={() => start("Issue", row)}
                       >
-                        Replace
+                        {t("Replace")}
                       </button>
                       <button
                         type="button"
                         disabled={busy || pending !== null}
                         onClick={() => start("TurnOff", row)}
                       >
-                        Turn off
+                        {t("Turn off")}
                       </button>
                     </>
                   ) : row.codeState === "SetupIncomplete" ? null : (
@@ -367,7 +401,7 @@ export function TableQrCodesPage({
                       disabled={busy || pending !== null}
                       onClick={() => start("Issue", row)}
                     >
-                      Create code
+                      {t("Create code")}
                     </button>
                   )}
                 </td>

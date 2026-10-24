@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { PickupHandoffForm } from "./PickupHandoffForm.js";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -11,8 +12,9 @@ import { browserOffline } from "./stale-read.js";
 
 const client = createPickupProofClient();
 /** WP-2423: said when five wrong codes lock code checks, and kept on the order's card after. */
-export const pickupCodeLockedText =
-  "Too many wrong codes for this order. Check the customer in person instead: the order number with the name or the last four digits of the phone on the order.";
+export const pickupCodeLockedText = t(
+  "Too many wrong codes for this order. Check the customer in person instead: the order number with the name or the last four digits of the phone on the order.",
+);
 type Intent = ReturnType<typeof client.prepare>;
 export function PickupProofForm({
   item,
@@ -133,14 +135,15 @@ export function PickupProofForm({
   if (!open)
     return (
       <button disabled={paused} onClick={() => setOpen(true)}>
-        Check pickup code
+        {t("Check pickup code")}
       </button>
     );
   return (
-    <section aria-label="Pickup code check">
+    <section aria-label={t("Pickup code check")}>
       <p>
-        Ask the customer to read the 6-digit pickup code on their order page. A matching code does
-        not hand the order over by itself.
+        {t(
+          "Ask the customer to read the 6-digit pickup code on their order page. A matching code does not hand the order over by itself.",
+        )}
       </p>
       {status === "Idle" ? (
         <form
@@ -152,7 +155,7 @@ export function PickupProofForm({
           }}
         >
           <label>
-            Pickup code
+            {t("Pickup code")}
             <input
               ref={inputRef}
               type="text"
@@ -168,30 +171,36 @@ export function PickupProofForm({
             />
           </label>
           <button type="submit" disabled={!credential || paused}>
-            Check code
+            {t("Check code")}
           </button>
         </form>
       ) : null}
-      {paused ? <p role="status">Paused until the connection returns.</p> : null}
+      {paused ? <p role="status">{t("Paused until the connection returns.")}</p> : null}
       <div role="status">
-        {status === "Pending" ? "Checking the code…" : null}
+        {status === "Pending" ? t("Checking the code…") : null}
         {status === "Verified"
           ? workstation
-            ? "The code matches. Hand over the order below, then confirm."
-            : "The code matches, but this device is not set up as the pickup counter, so the handover cannot be recorded here. Record it on the pickup counter device."
+            ? t("The code matches. Hand over the order below, then confirm.")
+            : t(
+                "The code matches, but this device is not set up as the pickup counter, so the handover cannot be recorded here. Record it on the pickup counter device.",
+              )
           : null}
         {status === "Idle" && wrongCode === "Mismatch"
-          ? "That code doesn't match this order. Check the order number, then ask the customer to read the code again."
+          ? t(
+              "That code doesn't match this order. Check the order number, then ask the customer to read the code again.",
+            )
           : null}
         {status === "Idle" && wrongCode === "Format"
-          ? "Pickup codes have 6 digits. Ask the customer to read the code again."
+          ? t("Pickup codes have 6 digits. Ask the customer to read the code again.")
           : null}
         {status === "Locked" ? pickupCodeLockedText : null}
         {status === "Rejected"
-          ? "That code could not be checked. Refresh the list, then try again."
+          ? t("That code could not be checked. Refresh the list, then try again.")
           : null}
         {status === "OutcomeUnknown"
-          ? "The check could not be confirmed. Try the same check again before asking for the code again."
+          ? t(
+              "The check could not be confirmed. Try the same check again before asking for the code again.",
+            )
           : null}
       </div>
       {status === "Verified" && verification && workstation ? (
@@ -207,7 +216,7 @@ export function PickupProofForm({
       ) : null}
       {status === "OutcomeUnknown" ? (
         <button ref={retryButtonRef} disabled={paused} onClick={() => void submit(true)}>
-          Try the check again
+          {t("Try the check again")}
         </button>
       ) : null}
     </section>

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /**
  * WP-2423 Q7 (OPS-ORDER-ENTRY, DEC-COUNTER-PAYMENT-RECORD): the counter order client. Staff take a
  * pickup order for a guest at the counter (or enter a paper order taken during an outage); the
@@ -46,7 +47,7 @@ export class CounterOrderClientError extends Error {
      */
     readonly sharedStock = false,
   ) {
-    super("Counter order request failed");
+    super(t("Counter order request failed"));
     this.name = "CounterOrderClientError";
   }
 }

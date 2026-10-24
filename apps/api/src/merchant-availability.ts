@@ -1,3 +1,4 @@
+import { staffContentName } from "./staff-content-locale.js";
 import { createHash } from "node:crypto";
 import {
   availabilityTargetExists,
@@ -252,8 +253,9 @@ export function createMerchantAvailability(options: {
     };
   }
   type Scope = Awaited<ReturnType<typeof scopeFor>>;
+  // Owner 2026-10-24: names in the staff member's chosen language when the item has one.
   const name = (names: Readonly<Record<string, string>>, fallback: string) =>
-    names[options.locale] ?? Object.values(names)[0] ?? fallback;
+    staffContentName(names, options.locale) || fallback;
 
   const query = async (input: { sessionCookie: unknown; csrf: unknown }) => {
     const current = await session(input);

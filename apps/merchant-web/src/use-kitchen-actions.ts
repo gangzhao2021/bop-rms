@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createKitchenWorkClient,
@@ -102,9 +103,12 @@ export function kitchenStepText(
   const done = {
     Accepted: "accepted",
     Started: "started",
-    ProgressRecorded: `${result.completedQuantity} of ${item.requiredQuantity} done`,
+    ProgressRecorded: t("{completedQuantity} of {requiredQuantity} done", {
+      completedQuantity: result.completedQuantity,
+      requiredQuantity: item.requiredQuantity,
+    }),
     Completed: "done",
-    CompletedAndOrderItemReady: "done and ready",
+    CompletedAndOrderItemReady: t("done and ready"),
     OrderItemReady: "ready",
   }[result.outcome];
   return `${orderLabel} · ${item.displayName} ${done}.`;
@@ -234,31 +238,37 @@ export function kitchenActionNotice(
 ): { heading: string; text: string; retry: string | null } {
   if (state.kind === "Submitting")
     return {
-      heading: "Submitting Kitchen action",
-      text: "Please wait before taking another action.",
+      heading: t("Submitting Kitchen action"),
+      text: t("Please wait before taking another action."),
       retry: null,
     };
   if (state.kind === "Unknown")
     return state.busy
       ? {
-          heading: "Kitchen busy, try again",
-          text: "The kitchen system was busy for a moment and nothing was changed. Try again.",
-          retry: "Try again",
+          heading: t("Kitchen busy, try again"),
+          text: t("The kitchen system was busy for a moment and nothing was changed. Try again."),
+          retry: t("Try again"),
         }
       : {
-          heading: "Action result unknown",
-          text: "The response was lost. Retry this same operation to recover its result; do not create another operation.",
-          retry: "Retry same operation",
+          heading: t("Action result unknown"),
+          text: t(
+            "The response was lost. Retry this same operation to recover its result; do not create another operation.",
+          ),
+          retry: t("Retry same operation"),
         };
   return {
-    heading: "Kitchen action not completed",
+    heading: t("Kitchen action not completed"),
     text: rejectedRefreshed
-      ? "The queue has been refreshed. Review the current item before choosing an action."
+      ? t("The queue has been refreshed. Review the current item before choosing an action.")
       : state.code === "PermissionDenied"
-        ? "Your current permission or Store scope no longer allows this action. Refresh before continuing."
+        ? t(
+            "Your current permission or Store scope no longer allows this action. Refresh before continuing.",
+          )
         : state.code === "Conflict"
-          ? "The work item changed. Refresh and review its current state before choosing an action."
-          : "The action was not accepted. Refresh and review the current work item.",
+          ? t(
+              "The work item changed. Refresh and review its current state before choosing an action.",
+            )
+          : t("The action was not accepted. Refresh and review the current work item."),
     retry: null,
   };
 }

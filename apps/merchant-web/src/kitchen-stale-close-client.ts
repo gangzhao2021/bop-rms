@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /**
  * WP-2423 DEC-KITCHEN-STALE-TICKETS: close a kitchen ticket left open from an earlier business day.
  * The browser sends intent only; actor, Store, time and business days are decided by the server.
@@ -7,9 +8,9 @@ export type KitchenStaleCloseReason =
 
 export const kitchenStaleCloseReasonLabels: Readonly<Record<KitchenStaleCloseReason, string>> =
   Object.freeze({
-    ALREADY_SERVED: "Already served or handed over",
-    CANCELLED_ELSEWHERE: "Order cancelled elsewhere",
-    NOT_MADE_ABANDONED: "Not made — order abandoned",
+    ALREADY_SERVED: t("Already served or handed over"),
+    CANCELLED_ELSEWHERE: t("Order cancelled elsewhere"),
+    NOT_MADE_ABANDONED: t("Not made — order abandoned"),
   });
 
 export interface KitchenStaleCloseBody {
@@ -31,7 +32,7 @@ export class KitchenStaleCloseClientError extends Error {
       | "NothingOpen"
       | "OutcomeUnknown",
   ) {
-    super("Kitchen ticket was not closed");
+    super(t("Kitchen ticket was not closed"));
     this.name = "KitchenStaleCloseClientError";
   }
 }

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 /** WP-2423 slice 4.4: RECIPE-OPTION-LIST view contract and same-origin client. */
 export type OptionRecipeErrorCode =
@@ -22,7 +23,7 @@ export class OptionRecipePageError extends Error {
     readonly code: OptionRecipeErrorCode,
     readonly skuReference: string | null = null,
   ) {
-    super("Option recipes are unavailable");
+    super(t("Option recipes are unavailable"));
     this.name = "OptionRecipePageError";
   }
 }

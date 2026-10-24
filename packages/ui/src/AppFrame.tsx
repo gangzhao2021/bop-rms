@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
+import { useUiText } from "./UiText.js";
 
 /**
  * True inside a layout that already renders the page's skip link (one per document); the frame
@@ -24,10 +25,11 @@ export function AppFrame({
   headerStatus,
   mobileBrandTitle,
   navigation,
-  navigationLabel = "Primary",
+  navigationLabel,
   title,
 }: AppFrameProps) {
   const skipLinkProvided = useContext(SkipLinkProvidedContext);
+  const text = useUiText();
   return (
     <div
       className={`bop-shell${className ? ` ${className}` : ""}`}
@@ -35,7 +37,7 @@ export function AppFrame({
     >
       {skipLinkProvided ? null : (
         <a className="bop-skip-link" href="#main-content">
-          Skip to main content
+          {text.skipToMainContent}
         </a>
       )}
       <header className="bop-shell__header">
@@ -50,9 +52,12 @@ export function AppFrame({
         {headerStatus === undefined ? null : (
           <div className="bop-shell__header-status">{headerStatus}</div>
         )}
+        {text.headerExtra === undefined ? null : (
+          <div className="bop-shell__header-extra">{text.headerExtra}</div>
+        )}
       </header>
       {navigation ? (
-        <nav className="bop-shell__nav" aria-label={navigationLabel}>
+        <nav className="bop-shell__nav" aria-label={navigationLabel ?? text.primaryNavigation}>
           {navigation}
         </nav>
       ) : null}

@@ -131,15 +131,15 @@ export function SessionPaymentResultPage({
     : notCompleted
       ? t("Not charged")
       : result?.status === "Failed"
-        ? "Declined"
+        ? t("Declined")
         : result?.status === "Succeeded"
-          ? "Paid"
+          ? t("Paid")
           : result?.status === "Pending"
-            ? "Pending"
+            ? t("Pending")
             : state.status === "loading"
-              ? "Checking"
+              ? t("Checking")
               : state.status === "offline"
-                ? "Offline"
+                ? t("Offline")
                 : t("Not found");
   const badgeTone = unknown
     ? "warning"

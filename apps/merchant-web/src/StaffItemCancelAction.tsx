@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type CurrentOrderLine,
@@ -27,8 +28,8 @@ export function itemCancellationStatus(
 ) {
   return (
     (cancellation.refundStatus === "Refunded"
-      ? "Cancelled · refunded · "
-      : "Cancelled · refund pending · ") + orderMoney(cancellation.refund)
+      ? t("Cancelled · refunded · ")
+      : t("Cancelled · refund pending · ")) + orderMoney(cancellation.refund)
   );
 }
 
@@ -38,24 +39,35 @@ export function itemCancelPreviewText(order: Order, preview: ItemCancelPreview) 
   // DEC-TIP-REFUND-PROPORTIONAL: the items' share of the tip is refunded with them.
   if (preview.scope === "Items")
     return preview.refund.includesTip
-      ? `Refund ${refund} (items, tax and ${orderMoney({
-          amountMinor: preview.refund.tipAmountMinor,
-          currencyCode: preview.refund.currencyCode,
-        })} of the tip).`
-      : `Refund ${refund} (items and tax).`;
+      ? t("Refund {refund} (items, tax and {value} of the tip).", {
+          refund: refund,
+          value: orderMoney({
+            amountMinor: preview.refund.tipAmountMinor,
+            currencyCode: preview.refund.currencyCode,
+          }),
+        })
+      : t("Refund {refund} (items and tax).", { refund: refund });
   // 46940b76 L3: the tip left on the payment, stated as an amount (an older server: "any tip").
   const tip =
     preview.refund.tipAmountMinor !== "0"
-      ? `, including ${orderMoney({
-          amountMinor: preview.refund.tipAmountMinor,
-          currencyCode: preview.refund.currencyCode,
-        })} of the tip`
+      ? t(", including {value} of the tip", {
+          value: orderMoney({
+            amountMinor: preview.refund.tipAmountMinor,
+            currencyCode: preview.refund.currencyCode,
+          }),
+        })
       : preview.refund.includesTip
-        ? ", including any tip"
+        ? t(", including any tip")
         : "";
   return order.orderType === "Pickup"
-    ? `These are the last items: the whole order is cancelled and the remaining payment of ${refund} is refunded${tip}.`
-    : `These are the last items of this round: the whole round is cancelled and its remaining payment of ${refund} is refunded${tip}.`;
+    ? t(
+        "These are the last items: the whole order is cancelled and the remaining payment of {refund} is refunded{tip}.",
+        { refund: refund, tip: tip },
+      )
+    : t(
+        "These are the last items of this round: the whole round is cancelled and its remaining payment of {refund} is refunded{tip}.",
+        { refund: refund, tip: tip },
+      );
 }
 
 /** Why a preview or cancellation did not go through, and what to do next. */
@@ -82,10 +94,10 @@ export function itemCancelFailureText(order: Order, failure: ItemCancelFailure) 
 
 function cancelledText(order: Order, scope: ItemCancelScope) {
   return scope === "Items"
-    ? "Items cancelled. The customer's refund has started."
+    ? t("Items cancelled. The customer's refund has started.")
     : order.orderType === "Pickup"
-      ? "Order cancelled. The customer's refund has started."
-      : "Round cancelled. The customer's refund has started.";
+      ? t("Order cancelled. The customer's refund has started.")
+      : t("Round cancelled. The customer's refund has started.");
 }
 
 type PreviewState =
@@ -117,7 +129,7 @@ export function ItemCancelStatus({
   return (
     <p role="status">
       {outcome === "Pending"
-        ? "Cancelling…"
+        ? t("Cancelling…")
         : typeof outcome === "string" && outcome !== "Idle"
           ? itemCancelFailureText(order, outcome)
           : null}
@@ -237,7 +249,7 @@ export function StaffItemCancelAction({
         disabled={settled}
         onClick={() => dialog.current?.showModal()}
       >
-        Cancel items
+        {t("Cancel items")}
       </button>
       {settled ? <p role="status">{cancelledText(order, outcome.scope)}</p> : null}
       <dialog
@@ -255,12 +267,16 @@ export function StaffItemCancelAction({
       >
         <h2 id={titleId}>
           {pickup
-            ? `Cancel items from order ${order.orderNumber}`
-            : `Cancel items from round ${batch.sequence} of order ${order.orderNumber}`}
+            ? t("Cancel items from order {orderNumber}", { orderNumber: order.orderNumber })
+            : t("Cancel items from round {sequence} of order {orderNumber}", {
+                sequence: batch.sequence,
+                orderNumber: order.orderNumber,
+              })}
         </h2>
         <p>
-          Only items the kitchen has not started. The customer is refunded for the cancelled items,
-          their tax and their share of any tip; the rest of the order continues.
+          {t(
+            "Only items the kitchen has not started. The customer is refunded for the cancelled items, their tax and their share of any tip; the rest of the order continues.",
+          )}
         </p>
         <form
           hidden={!formOpen}
@@ -270,7 +286,7 @@ export function StaffItemCancelAction({
           }}
         >
           <fieldset className="order-item-cancel-items" disabled={locked}>
-            <legend>Items to cancel</legend>
+            <legend>{t("Items to cancel")}</legend>
             {offered.map((line) => (
               <label key={line.orderItemReference} data-unavailable={!line.canCancel || undefined}>
                 <input
@@ -291,7 +307,7 @@ export function StaffItemCancelAction({
                 <span className="order-item-cancel-name">
                   {line.quantity} × {line.name}
                   {line.canCancel ? null : (
-                    <span className="order-item-cancel-unavailable">Not available</span>
+                    <span className="order-item-cancel-unavailable">{t("Not available")}</span>
                   )}
                 </span>
                 <span className="order-line-amount">{orderMoney(line.subtotal)}</span>
@@ -299,14 +315,14 @@ export function StaffItemCancelAction({
             ))}
           </fieldset>
           <label>
-            Reason
+            {t("Reason")}
             <select
               required
               value={retrying ? (client.pendingIntent()?.reasonCode ?? reason) : reason}
               disabled={locked}
               onChange={(event) => setReason(event.currentTarget.value as StaffCancellationReason)}
             >
-              <option value="">Select a reason</option>
+              <option value="">{t("Select a reason")}</option>
               {staffCancellationReasonsFor(order.orderType).map((code) => (
                 <option key={code} value={code}>
                   {staffCancellationReasonLabel[code]}
@@ -318,16 +334,16 @@ export function StaffItemCancelAction({
             {ready !== null
               ? itemCancelPreviewText(order, ready)
               : preview.kind === "Loading"
-                ? "Checking the refund…"
+                ? t("Checking the refund…")
                 : preview.kind === "Failed"
                   ? preview.failure === "Unknown"
-                    ? "The refund could not be checked."
+                    ? t("The refund could not be checked.")
                     : itemCancelFailureText(order, preview.failure)
-                  : "Select the items to cancel."}
+                  : t("Select the items to cancel.")}
           </p>
           {preview.kind === "Failed" && preview.failure === "Unknown" && !locked ? (
             <button type="button" onClick={() => setPreviewAttempt((value) => value + 1)}>
-              Check refund again
+              {t("Check refund again")}
             </button>
           ) : null}
           <div className="card-actions">
@@ -337,30 +353,30 @@ export function StaffItemCancelAction({
               data-variant="destructive"
             >
               {retrying
-                ? "Retry same cancellation"
+                ? t("Retry same cancellation")
                 : outcome === "Pending"
-                  ? "Cancelling…"
+                  ? t("Cancelling…")
                   : ready?.scope === "Batch"
                     ? pickup
-                      ? "Cancel order and refund"
-                      : "Cancel round and refund"
+                      ? t("Cancel order and refund")
+                      : t("Cancel round and refund")
                     : count > 1
-                      ? `Cancel ${count} items and refund`
-                      : "Cancel item and refund"}
+                      ? t("Cancel {count} items and refund", { count: count })
+                      : t("Cancel item and refund")}
             </button>
             <button
               type="button"
               disabled={outcome === "Pending"}
               onClick={() => dialog.current?.close()}
             >
-              Keep items
+              {t("Keep items")}
             </button>
           </div>
         </form>
         <ItemCancelStatus order={order} outcome={outcome} csrf={csrf} fetcher={fetcher} />
         {!formOpen ? (
           <button type="button" onClick={() => dialog.current?.close()}>
-            Close
+            {t("Close")}
           </button>
         ) : null}
       </dialog>
@@ -381,13 +397,14 @@ const refundCheckText: Record<
   Exclude<RefundCheck, "Idle" | typeof FULL_SIGN_IN_REQUIRED>,
   string
 > = {
-  Checking: "Checking the refund…",
-  Pending:
+  Checking: t("Checking the refund…"),
+  Pending: t(
     "The refund hasn't gone through yet. If the payment provider or the internet is down, press Check refund again once it is back: the refund is sent then, never twice.",
+  ),
   Refunded: "Refunded.",
-  Failed: "The refund did not go through. Check this order's payment in Payments.",
-  Denied: "Only a store manager or owner can check this refund.",
-  Unavailable: "The refund status could not be checked. Try again.",
+  Failed: t("The refund did not go through. Check this order's payment in Payments."),
+  Denied: t("Only a store manager or owner can check this refund."),
+  Unavailable: t("The refund status could not be checked. Try again."),
 };
 
 /**
@@ -428,7 +445,7 @@ export function ItemRefundCheck({
   return (
     <span className="order-line-refund-check">
       <button type="button" disabled={state === "Checking"} onClick={() => void check()}>
-        Check refund
+        {t("Check refund")}
       </button>
       {state === FULL_SIGN_IN_REQUIRED ? (
         <FullSignInPrompt csrf={csrf} fetcher={fetcher} />

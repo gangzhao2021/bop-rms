@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /**
  * WP-2423 (staff PIN design "A"): the BFF refuses sensitive changes made on a PIN sign-in that has
  * not been confirmed (refunds, cancellations, prices, tax, staff and roles, payment settings,
@@ -9,8 +10,9 @@ export const FULL_SIGN_IN_REQUIRED = "FullSignInRequired" as const;
 export type FullSignInRequired = typeof FULL_SIGN_IN_REQUIRED;
 
 /** Plain-language guidance shown with the verification step (no internal codes). */
-export const FULL_SIGN_IN_REQUIRED_TEXT =
-  "You signed in with a PIN. Confirm it's you with your authenticator app, or sign in with your account, to do this.";
+export const FULL_SIGN_IN_REQUIRED_TEXT = t(
+  "You signed in with a PIN. Confirm it's you with your authenticator app, or sign in with your account, to do this.",
+);
 
 /** True for the BFF's PIN-session refusal (status and closed error code both match). */
 export function isFullSignInRequired(status: number, payload: unknown): boolean {

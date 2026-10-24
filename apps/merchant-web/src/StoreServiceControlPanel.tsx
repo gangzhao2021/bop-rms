@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { StoreConfigurationEditor } from "./StoreConfigurationEditor.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -24,9 +25,9 @@ export function serviceTime(value: string): string {
 }
 const exceptionKindLabel = (kind: string) =>
   kind === "TemporaryClosure"
-    ? "Temporary closure"
+    ? t("Temporary closure")
     : kind === "Override"
-      ? "Special hours"
+      ? t("Special hours")
       : kind === "Holiday"
         ? "Holiday"
         : kind;
@@ -34,7 +35,7 @@ const serviceModeLabel = (mode: string) =>
   mode === "DineIn" ? "Dine-in" : mode === "Pickup" ? "Pickup" : mode;
 const serviceMinutes = (seconds: number) => {
   const minutes = Math.round(seconds / 60);
-  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+  return minutes === 1 ? t("1 minute") : t("{minutes} minutes", { minutes: minutes });
 };
 
 export function ServiceHoursSummary({
@@ -54,22 +55,26 @@ export function ServiceHoursSummary({
         (interval.endsNextDay ? " (next day)" : ""),
       interval.serviceModes.map(serviceModeLabel).join(", "),
       ...(interval.orderCutoffSeconds > 0
-        ? ["last orders " + serviceMinutes(interval.orderCutoffSeconds) + " before closing"]
+        ? [t("last orders ") + serviceMinutes(interval.orderCutoffSeconds) + t(" before closing")]
         : []),
       ...(interval.leadTimeSeconds > 0
-        ? ["ready in " + serviceMinutes(interval.leadTimeSeconds)]
+        ? [t("ready in ") + serviceMinutes(interval.leadTimeSeconds)]
         : []),
     ].join(" · ");
   return (
     <section aria-labelledby="published-hours-title">
-      <h2 id="published-hours-title">Published hours</h2>
+      <h2 id="published-hours-title">{t("Published hours")}</h2>
       <p>
         {hours.configurationSource === "StoreOverride"
-          ? "Store configuration"
-          : "Inherited Brand configuration"}{" "}
+          ? t("Store configuration")
+          : t("Inherited Brand configuration")}{" "}
         · {timeZoneLabel(timeZone)}
       </p>
-      <p>Business day starts at {serviceTime(hours.businessDayStartLocalTime)}.</p>
+      <p>
+        {t("Business day starts at {businessDayStartLocalTime}.", {
+          businessDayStartLocalTime: serviceTime(hours.businessDayStartLocalTime),
+        })}
+      </p>
       <div className="detail-section-grid">
         {hours.weeklySchedule.map((day) => (
           <section key={day.isoWeekday}>
@@ -81,12 +86,12 @@ export function ServiceHoursSummary({
                 ))}
               </ul>
             ) : (
-              <p>Closed</p>
+              <p>{t("Closed")}</p>
             )}
           </section>
         ))}
       </div>
-      <h3>Exceptions and holidays</h3>
+      <h3>{t("Exceptions and holidays")}</h3>
       {hours.exceptions.length ? (
         <ul>
           {hours.exceptions.map((exception) => (
@@ -101,13 +106,13 @@ export function ServiceHoursSummary({
                   ))}
                 </ul>
               ) : (
-                <p>Closed</p>
+                <p>{t("Closed")}</p>
               )}
             </li>
           ))}
         </ul>
       ) : (
-        <p>No published exceptions.</p>
+        <p>{t("No published exceptions.")}</p>
       )}
     </section>
   );
@@ -118,7 +123,7 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
   const client = useMemo(() => createServiceControlClient(), []);
   const [view, setView] = useState<ServiceControlState | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("Loading service status…");
+  const [message, setMessage] = useState(t("Loading service status…"));
   const [minutes, setMinutes] = useState("30");
   const [mode, setMode] = useState("All");
   const [online, setOnline] = useState(navigator.onLine);
@@ -155,7 +160,8 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
       if (activeController.signal.aborted) return;
       if (error instanceof Error && error.message.startsWith("Permission denied."))
         setNoAccess(true);
-      else setMessage("Unable to load current service status. Check your connection and refresh.");
+      else
+        setMessage(t("Unable to load current service status. Check your connection and refresh."));
     } finally {
       if (controller.current === activeController) running.current = false;
       if (!activeController.signal.aborted) setBusy(false);
@@ -184,7 +190,7 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
     pending.current = request;
     running.current = true;
     setBusy(true);
-    setMessage("Saving service change…");
+    setMessage(t("Saving service change…"));
     const activeController = new AbortController();
     controller.current = activeController;
     let saved = false;
@@ -193,7 +199,7 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
       pending.current = null;
       setUncertain(false);
       saved = true;
-      setMessage("Service change saved. Refreshing status…");
+      setMessage(t("Service change saved. Refreshing status…"));
     } catch (error) {
       if (activeController.signal.aborted) return;
       const detail = error instanceof Error ? error.message : "";
@@ -205,7 +211,7 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
       } else {
         setUncertain(true);
         setMessage(
-          "The result could not be confirmed. Retry this same request to check its outcome.",
+          t("The result could not be confirmed. Retry this same request to check its outcome."),
         );
       }
     } finally {
@@ -222,7 +228,7 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
       duration <= 0 ||
       !Number.isFinite(new Date(Date.now() + duration * 60000).getTime())
     ) {
-      setMessage("Enter a positive whole number of minutes.");
+      setMessage(t("Enter a positive whole number of minutes."));
       return;
     }
     void submit({
@@ -250,13 +256,13 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
   }
   if (route !== store)
     return (
-      <section aria-label="Service controls">
-        <p role="status">Select this Store in your workspace before changing service.</p>
+      <section aria-label={t("Service controls")}>
+        <p role="status">{t("Select this Store in your workspace before changing service.")}</p>
       </section>
     );
   if (noAccess)
     return (
-      <WorkspacePage title="Hours & ordering">
+      <WorkspacePage title={t("Hours & ordering")}>
         <StatePanel heading={noAccessHeading} tone="error" status>
           <p>{pageAccessDeniedText}</p>
         </StatePanel>
@@ -264,43 +270,47 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
     );
   const disabled = busy || !online || uncertain;
   return (
-    <WorkspacePage title="Hours & ordering">
+    <WorkspacePage title={t("Hours & ordering")}>
       {view && <ServiceHoursSummary hours={view.hours} timeZone={view.timeZone} />}
       {configurable ? (
         <StoreConfigurationEditor key={store + csrf} store={store} csrf={csrf} />
       ) : null}
       <section aria-labelledby="service-controls-title" aria-busy={busy}>
-        <h2 id="service-controls-title">Service controls</h2>
+        <h2 id="service-controls-title">{t("Service controls")}</h2>
         <p>
-          Pause new service for a limited time. Existing paid orders and occupied dining tables
-          remain active.
+          {t(
+            "Pause new service for a limited time. Existing paid orders and occupied dining tables remain active.",
+          )}
         </p>
-        {!online && <p role="status">Offline read-only. Reconnect before changing service.</p>}
+        {!online && (
+          <p role="status">{t("Offline read-only. Reconnect before changing service.")}</p>
+        )}
         <p role="status" aria-live="polite">
           {message}
         </p>
         <button type="button" onClick={() => void load()} disabled={busy || !online || uncertain}>
-          Refresh service status
+          {t("Refresh service status")}
         </button>
         {uncertain && (
           <button type="button" onClick={() => void submit()} disabled={busy || !online}>
-            Retry same request
+            {t("Retry same request")}
           </button>
         )}
         {view && (
           <>
             <p>
-              Updated{" "}
-              {new Intl.DateTimeFormat(undefined, {
-                timeZone: view.timeZone,
-                dateStyle: "medium",
-                timeStyle: "short",
-              }).format(new Date(view.observedAt))}{" "}
-              ({timeZoneLabel(view.timeZone)})
+              {t("Updated {value} ({timeZone})", {
+                value: new Intl.DateTimeFormat(undefined, {
+                  timeZone: view.timeZone,
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                }).format(new Date(view.observedAt)),
+                timeZone: timeZoneLabel(view.timeZone),
+              })}
             </p>
             <fieldset disabled={disabled}>
-              <legend>Pause service</legend>
-              <label htmlFor="pause-duration">Pause duration (minutes)</label>
+              <legend>{t("Pause service")}</legend>
+              <label htmlFor="pause-duration">{t("Pause duration (minutes)")}</label>
               <input
                 id="pause-duration"
                 type="number"
@@ -309,44 +319,48 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
                 value={minutes}
                 onChange={(event) => setMinutes(event.target.value)}
               />
-              <label htmlFor="pause-mode">Service</label>
+              <label htmlFor="pause-mode">{t("Service")}</label>
               <select
                 id="pause-mode"
                 value={mode}
                 onChange={(event) => setMode(event.target.value)}
               >
-                <option value="All">All services</option>
+                <option value="All">{t("All services")}</option>
                 {view.enabledServiceModes.map((value) => (
                   <option key={value} value={value}>
-                    {value === "DineIn" ? "Dine-in" : value}
+                    {value === "DineIn" ? t("Dine-in") : value}
                   </option>
                 ))}
               </select>
               <button type="button" onClick={pause}>
-                Pause service
+                {t("Pause service")}
               </button>
             </fieldset>
-            <h3>Active pauses</h3>
+            <h3>{t("Active pauses")}</h3>
             {view.activePauses.length === 0 ? (
-              <p>No active pauses.</p>
+              <p>{t("No active pauses.")}</p>
             ) : (
               <ul>
                 {view.activePauses.map((item) => (
                   <li key={item.closureReference}>
                     <span>
-                      {item.serviceModes?.join(", ") ?? "All services"} — until{" "}
-                      {new Intl.DateTimeFormat(undefined, {
-                        timeZone: view.timeZone,
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      }).format(new Date(item.effectiveUntil))}
+                      {t("{value} — until {value2}", {
+                        value: item.serviceModes?.join(", ") ?? t("All services"),
+                        value2: new Intl.DateTimeFormat(undefined, {
+                          timeZone: view.timeZone,
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        }).format(new Date(item.effectiveUntil)),
+                      })}
                     </span>{" "}
                     <button
                       type="button"
                       disabled={disabled}
                       onClick={() => resume(item.closureReference)}
                     >
-                      Resume {item.serviceModes?.join(", ") ?? "all services"}
+                      {t("Resume {value}", {
+                        value: item.serviceModes?.join(", ") ?? t("all services"),
+                      })}
                     </button>
                   </li>
                 ))}

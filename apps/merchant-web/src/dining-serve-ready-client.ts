@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /** WP-2423: "Serve all ready items" for a round or a table (POST /merchant/dining/serve-ready). */
 export const DINING_SERVE_READY_MAX_LINES = 100;
 export interface DiningServeReadyLine {
@@ -26,7 +27,7 @@ export interface DiningServeReadyResult {
 }
 export class DiningServeReadyClientError extends Error {
   constructor(readonly code: "PermissionDenied" | "NotAvailable" | "OutcomeUnknown") {
-    super("Serving could not be confirmed");
+    super(t("Serving could not be confirmed"));
     this.name = "DiningServeReadyClientError";
   }
 }

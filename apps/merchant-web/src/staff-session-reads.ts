@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useSyncExternalStore } from "react";
 
 /**
@@ -102,7 +103,7 @@ export function gateStaffSignInFetch(
     if (!usesStaffSignIn(input, base())) return original(input, init);
     if (ended || leaving)
       return Promise.reject(
-        new DOMException("This screen's sign-in has ended; nothing was sent.", "AbortError"),
+        new DOMException(t("This screen's sign-in has ended; nothing was sent."), "AbortError"),
       );
     return original(input, init).then((response) => {
       if (response.status === 401 || response.status === 403) noteSignedInRequestRefused();

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { storeLocalInstant, storeTime } from "./StoreTime.js";
 import type { CounterOrderClientError } from "./staff-order-entry.js";
@@ -28,7 +29,7 @@ export function payErrorText(error: CounterOrderClientError) {
     case "OutcomeUnknown":
       return "No answer from the system. Record again — the same payment is never counted twice.";
     default:
-      return "The payment could not be recorded. Try again.";
+      return t("The payment could not be recorded. Try again.");
   }
 }
 
@@ -70,8 +71,14 @@ export function paymentWindowNotice(input: {
       tier: "urgent",
       ended: true,
       text: input.tableMode
-        ? `The time to pay this round ended at ${at}. It was not sent to the kitchen and is cancelled automatically; nothing was charged in the system. If you charged the card machine, refund it on the machine.`
-        : `The time to pay this order ended at ${at}. It is released and its items go back to stock. If you charged the card machine, refund it on the machine.`,
+        ? t(
+            "The time to pay this round ended at {at}. It was not sent to the kitchen and is cancelled automatically; nothing was charged in the system. If you charged the card machine, refund it on the machine.",
+            { at: at },
+          )
+        : t(
+            "The time to pay this order ended at {at}. It is released and its items go back to stock. If you charged the card machine, refund it on the machine.",
+            { at: at },
+          ),
     };
   const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
   if (minutes <= paymentUrgentMinutes)
@@ -79,15 +86,27 @@ export function paymentWindowNotice(input: {
       tier: "urgent",
       ended: false,
       text: input.tableMode
-        ? `${minutes} min left: record the payment by ${at} or this round is cancelled and its items go back to stock.`
-        : `${minutes} min left: record the payment by ${at} or the order is released and its items go back to stock.`,
+        ? t(
+            "{minutes} min left: record the payment by {at} or this round is cancelled and its items go back to stock.",
+            { minutes: minutes, at: at },
+          )
+        : t(
+            "{minutes} min left: record the payment by {at} or the order is released and its items go back to stock.",
+            { minutes: minutes, at: at },
+          ),
     };
   return {
     tier: "warning",
     ended: false,
     text: input.tableMode
-      ? `Record the payment by ${at}. The kitchen starts this order once it is recorded here; if it isn't recorded by then, the round is cancelled.`
-      : `Record the payment by ${at}. If it isn't paid by then the order is released and its items go back to stock.`,
+      ? t(
+          "Record the payment by {at}. The kitchen starts this order once it is recorded here; if it isn't recorded by then, the round is cancelled.",
+          { at: at },
+        )
+      : t(
+          "Record the payment by {at}. If it isn't paid by then the order is released and its items go back to stock.",
+          { at: at },
+        ),
   };
 }
 
@@ -117,11 +136,11 @@ export function counterPayByTier(payBy: string, now: number | undefined) {
 export function counterPayByText(payBy: string, timeZone: string | undefined, now?: number) {
   const left = Date.parse(payBy) - (now ?? Date.now());
   const at = storeTime(payBy, timeZone);
-  if (left <= 0) return `Payment time ended at ${at} · being released`;
+  if (left <= 0) return t("Payment time ended at {at} · being released", { at: at });
   const minutes = Math.max(1, Math.ceil(left / 60_000));
   return minutes <= paymentUrgentMinutes
-    ? `${minutes} min left to charge · released at ${at} if unpaid`
-    : `Charge on card machine by ${at} · released if unpaid`;
+    ? t("{minutes} min left to charge · released at {at} if unpaid", { minutes: minutes, at: at })
+    : t("Charge on card machine by {at} · released if unpaid", { at: at });
 }
 
 /**
@@ -135,14 +154,20 @@ export function paidNoteText(input: {
   readonly acceptance: "Accepted" | "NotAccepted";
 }): string {
   if (input.acceptance === "NotAccepted")
-    return "Paid, but not sent to the kitchen yet. Accept it in Orders now (or ask a manager to): an order that isn't accepted in time expires and must be refunded on the card machine.";
+    return t(
+      "Paid, but not sent to the kitchen yet. Accept it in Orders now (or ask a manager to): an order that isn't accepted in time expires and must be refunded on the card machine.",
+    );
   // A paper order was usually made and handed over already; it still goes through the list so its
   // records close, and nothing expires or is refunded by mistake.
   if (input.tableMode)
     return input.recordedAfterOutage
-      ? "Recorded after the outage and added to the table's order. If it was already made and served, mark it ready in Kitchen and served on the order."
-      : "Paid and sent to the kitchen. It shows on the table's order as entered by staff.";
+      ? t(
+          "Recorded after the outage and added to the table's order. If it was already made and served, mark it ready in Kitchen and served on the order.",
+        )
+      : t("Paid and sent to the kitchen. It shows on the table's order as entered by staff.");
   return input.recordedAfterOutage
-    ? "Recorded after the outage and accepted. If it was already made and handed over, mark it ready in Kitchen and handed over in Pickup."
-    : "Paid and sent to the kitchen.";
+    ? t(
+        "Recorded after the outage and accepted. If it was already made and handed over, mark it ready in Kitchen and handed over in Pickup.",
+      )
+    : t("Paid and sent to the kitchen.");
 }

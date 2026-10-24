@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import {
   defaultCommandOutcomeRecovery,
   withCommandOutcomeRecovery,
@@ -16,7 +17,7 @@ export class DiningOrderCloseClientError extends Error {
     /** NotReady: the server's reason codes (what is still outstanding). */
     readonly reasons: readonly string[] = [],
   ) {
-    super("Order closure could not be confirmed");
+    super(t("Order closure could not be confirmed"));
     this.name = "DiningOrderCloseClientError";
   }
 }

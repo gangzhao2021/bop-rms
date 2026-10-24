@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createDiningSessionCloseClient,
@@ -59,8 +60,10 @@ export function DiningSessionCloseAction({
     <div>
       <p>
         {action === "Begin"
-          ? "Begin closing this dining session to stop further ordering."
-          : "Finish closing this dining session. All orders, payments and unresolved exceptions will be checked before releasing its table."}
+          ? t("Begin closing this dining session to stop further ordering.")
+          : t(
+              "Finish closing this dining session. All orders, payments and unresolved exceptions will be checked before releasing its table.",
+            )}
       </p>
       <label>
         <input
@@ -69,7 +72,7 @@ export function DiningSessionCloseAction({
           disabled={state !== "Idle" || locked}
           onChange={(event) => setConfirmed(event.target.checked)}
         />
-        I confirm this dining session is ready for the next closing step
+        {t("I confirm this dining session is ready for the next closing step")}
       </label>
       {state !== "Denied" ? (
         <button
@@ -77,20 +80,23 @@ export function DiningSessionCloseAction({
           onClick={() => void submit()}
         >
           {state === "Unknown"
-            ? "Retry same session close request"
+            ? t("Retry same session close request")
             : state === "Submitting"
-              ? "Updating dining session…"
+              ? t("Updating dining session…")
               : action === "Begin"
-                ? "Begin session closing"
-                : "Finalize session closing"}
+                ? t("Begin session closing")
+                : t("Finalize session closing")}
         </button>
       ) : null}
       {state === "Unknown" ? (
-        <p role="status">The result is unknown. Retry the same request to recover its result.</p>
+        <p role="status">
+          {t("The result is unknown. Retry the same request to recover its result.")}
+        </p>
       ) : state === "Denied" ? (
         <p role="status">
-          Session closure was not confirmed. Refresh and check all orders, payments, exceptions and
-          permissions.
+          {t(
+            "Session closure was not confirmed. Refresh and check all orders, payments, exceptions and permissions.",
+          )}
         </p>
       ) : null}
     </div>

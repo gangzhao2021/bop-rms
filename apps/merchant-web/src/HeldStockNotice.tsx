@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useRef, useState } from "react";
 import type { CurrentOrderQueue } from "./current-order-queue-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -13,13 +14,23 @@ export function heldStockText(order: Pick<Order, "heldStock" | "orderType">): st
   if (held === null) return null;
   if (held.state === "Ended")
     return held.productionStarted
-      ? "This order from an earlier day is finished, but ingredients are still set aside for it because the kitchen started it and never marked it done. Mark it done on the kitchen board."
-      : "This order from an earlier day is finished, but ingredients are still set aside for it, so they cannot be sold. Release them to put them back into stock.";
+      ? t(
+          "This order from an earlier day is finished, but ingredients are still set aside for it because the kitchen started it and never marked it done. Mark it done on the kitchen board.",
+        )
+      : t(
+          "This order from an earlier day is finished, but ingredients are still set aside for it, so they cannot be sold. Release them to put them back into stock.",
+        );
   if (held.productionStarted)
-    return "Still open from an earlier day: the kitchen started it, and its ingredients stay set aside until it is done. Finish and hand it over, or mark it done on the kitchen board.";
+    return t(
+      "Still open from an earlier day: the kitchen started it, and its ingredients stay set aside until it is done. Finish and hand it over, or mark it done on the kitchen board.",
+    );
   return order.orderType === "Pickup"
-    ? "Still open from an earlier day and holding ingredients that cannot be sold. Make it and hand it over if the guest comes back; otherwise cancel it — the guest is refunded and the ingredients go back into stock."
-    : "Still open from an earlier day and holding ingredients that cannot be sold. Serve it, or cancel the round — the guest is refunded and the ingredients go back into stock.";
+    ? t(
+        "Still open from an earlier day and holding ingredients that cannot be sold. Make it and hand it over if the guest comes back; otherwise cancel it — the guest is refunded and the ingredients go back into stock.",
+      )
+    : t(
+        "Still open from an earlier day and holding ingredients that cannot be sold. Serve it, or cancel the round — the guest is refunded and the ingredients go back into stock.",
+      );
 }
 
 export function HeldStockNotice({ order }: { readonly order: Order }) {
@@ -34,12 +45,13 @@ export function HeldStockNotice({ order }: { readonly order: Order }) {
 type Outcome = "Idle" | "Pending" | "Released" | "NotReleasable" | "Started" | "Denied" | "Unknown";
 const outcomeText: Record<Exclude<Outcome, "Idle">, string> = {
   Pending: "Releasing…",
-  Released: "Released. The ingredients are back in stock.",
-  NotReleasable: "Nothing was released: this order changed. The list is refreshed.",
-  Started:
+  Released: t("Released. The ingredients are back in stock."),
+  NotReleasable: t("Nothing was released: this order changed. The list is refreshed."),
+  Started: t(
     "Nothing was released: the kitchen started this order. Mark it done on the kitchen board.",
-  Denied: "Only a store manager or owner can release stock held by an order.",
-  Unknown: "Result unknown. Release again to recover the result — nothing is released twice.",
+  ),
+  Denied: t("Only a store manager or owner can release stock held by an order."),
+  Unknown: t("Result unknown. Release again to recover the result — nothing is released twice."),
 };
 
 /** The release request: intent only; staff identity, time and eligibility are server-owned. */
@@ -51,7 +63,10 @@ export function heldStockReleasedText(
   order: Pick<Order, "orderNumber">,
   dayLabel: string | null,
 ): string {
-  return `Ingredients for Order ${order.orderNumber}${dayLabel === null ? "" : ` (${dayLabel})`} returned to stock.`;
+  return t("Ingredients for Order {orderNumber}{value} returned to stock.", {
+    orderNumber: order.orderNumber,
+    value: dayLabel === null ? "" : ` (${dayLabel})`,
+  });
 }
 
 export function heldStockReleaseBody(order: Order, operationReference: string) {
@@ -120,7 +135,7 @@ export function HeldStockReleaseAction({
   return (
     <div className="order-held-stock-action">
       <button type="button" disabled={outcome === "Pending"} onClick={() => void release()}>
-        {outcome === "Unknown" ? "Release again" : "Release held ingredients"}
+        {outcome === "Unknown" ? t("Release again") : t("Release held ingredients")}
       </button>
       {outcome === "Idle" ? null : <p role="status">{outcomeText[outcome]}</p>}
     </div>

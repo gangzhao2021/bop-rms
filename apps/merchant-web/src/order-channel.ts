@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /**
  * WP-2423 (DEC-ORDER-CHANNEL-LABEL): the one staff-facing mapping of how an order came in, shared
  * by the Orders list and the Operational dashboard. Staff never see stored channel codes.
@@ -61,9 +62,9 @@ export function sourceChannelFilterLabel(
   sourceChannel: "All" | "Api" | "Pos" | "Qr" | "Web",
   orderType: "All" | "DineIn" | "Pickup",
 ): string {
-  if (sourceChannel === "All") return "All channels";
+  if (sourceChannel === "All") return t("All channels");
   if (sourceChannel === "Pos" || sourceChannel === "Api") return orderChannelLabel(sourceChannel);
   if (orderType === "Pickup") return orderChannelLabel("Online");
   if (orderType === "DineIn") return orderChannelLabel("TableQr");
-  return "Online or table QR code";
+  return t("Online or table QR code");
 }

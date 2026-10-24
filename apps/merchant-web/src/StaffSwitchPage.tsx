@@ -1,3 +1,4 @@
+import { LanguageSwitch, t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createStaffPinClient,
@@ -81,12 +82,12 @@ export function SignInWithAccount({ entry }: { readonly entry: SignInEntry }) {
   return (
     <p className="staff-session__sign-in">
       <a className="shell-action" href={entry.path}>
-        Sign in with your account
+        {t("Sign in with your account")}
       </a>
       {entry.testOnly ? (
         <span className="staff-session__test-only">
-          <strong>TEST-ONLY</strong> internal pilot sign-in. A live store signs in with each staff
-          member’s own account.
+          <strong>{t("TEST-ONLY")}</strong>{" "}
+          {t("internal pilot sign-in. A live store signs in with each staff member’s own account.")}
         </span>
       ) : null}
     </p>
@@ -153,44 +154,53 @@ export function StaffSwitchView({
         <p className="staff-switch__brand">
           <strong aria-label="BOP">BOP</strong>
         </p>
-        <h1>{storeLabel === null ? "Switch staff" : `Switch staff · ${storeLabel}`}</h1>
+        <h1>
+          {storeLabel === null
+            ? t("Switch staff")
+            : t("Switch staff · {storeLabel}", { storeLabel: storeLabel })}
+        </h1>
+        <LanguageSwitch className="staff-switch__language" />
       </header>
       {load.kind === "Loading" ? (
         <p role="status" className="staff-switch__note">
-          Loading staff…
+          {t("Loading staff…")}
         </p>
       ) : load.kind === "Offline" || load.kind === "Unavailable" ? (
         <section className="staff-switch__panel" role="alert" aria-labelledby="staff-switch-down">
           <h2 id="staff-switch-down">
-            {load.kind === "Offline" ? "No connection" : "Couldn't load the staff list"}
+            {load.kind === "Offline" ? t("No connection") : t("Couldn't load the staff list")}
           </h2>
           <p>
             {load.kind === "Offline"
-              ? "This tablet can't reach the store system, and PINs need the connection. Check the Wi-Fi or network cable, then try again. Once the connection is back, you can also sign in with your account."
-              : "The staff list couldn't be loaded. Check the connection and try again. If it keeps happening, sign in with your account."}
+              ? t(
+                  "This tablet can't reach the store system, and PINs need the connection. Check the Wi-Fi or network cable, then try again. Once the connection is back, you can also sign in with your account.",
+                )
+              : t(
+                  "The staff list couldn't be loaded. Check the connection and try again. If it keeps happening, sign in with your account.",
+                )}
           </p>
           <button type="button" className="staff-switch__action" onClick={onRetry}>
-            Try again
+            {t("Try again")}
           </button>
         </section>
       ) : load.kind === "NotRegistered" ? (
         <section className="staff-switch__panel" aria-labelledby="staff-switch-unregistered">
-          <h2 id="staff-switch-unregistered">This tablet isn&apos;t set up for staff PINs</h2>
-          <p>A manager can set it up under “Shared tablets &amp; PINs” after signing in.</p>
+          <h2 id="staff-switch-unregistered">{t("This tablet isn't set up for staff PINs")}</h2>
+          <p>{t("A manager can set it up under “Shared tablets & PINs” after signing in.")}</p>
           <SignInWithAccount entry={load.fullSignIn} />
         </section>
       ) : entry === null ? (
         <section className="staff-switch__panel" aria-labelledby="staff-switch-who">
           <h2 id="staff-switch-who" tabIndex={-1}>
-            Who&apos;s working?
+            {t("Who's working?")}
           </h2>
           {listChanged ? (
             <p role="status" className="staff-switch__note">
-              The staff list has changed. Choose your name again.
+              {t("The staff list has changed. Choose your name again.")}
             </p>
           ) : null}
           {load.staff.length === 0 ? (
-            <p>No one has set a PIN for this store yet.</p>
+            <p>{t("No one has set a PIN for this store yet.")}</p>
           ) : (
             <ul className="staff-switch__people">
               {load.staff.map((person) => (
@@ -210,7 +220,7 @@ export function StaffSwitchView({
       ) : (
         <section className="staff-switch__panel" aria-labelledby="staff-switch-pin">
           <h2 id="staff-switch-pin" tabIndex={-1}>
-            Enter {entry.person.name}&apos;s PIN
+            {t("Enter {name}'s PIN", { name: entry.person.name })}
           </h2>
           <div className="staff-switch__dots" aria-hidden="true">
             {Array.from({ length: PIN_LENGTH }, (_, index) => (
@@ -218,14 +228,19 @@ export function StaffSwitchView({
             ))}
           </div>
           <p role="status" aria-live="polite" className="staff-switch__count">
-            {entry.busy ? "Checking…" : `${entry.pinLength} of ${PIN_LENGTH} digits entered`}
+            {entry.busy
+              ? t("Checking…")
+              : t("{pinLength} of {value} digits entered", {
+                  pinLength: entry.pinLength,
+                  value: PIN_LENGTH,
+                })}
           </p>
           <p role="alert" className="staff-switch__message" data-kind={entry.message?.kind}>
             {entry.message === null
               ? ""
               : switchMessageText(entry.message, entry.person.name, timeZone)}
           </p>
-          <div className="staff-switch__keypad" role="group" aria-label="PIN keypad">
+          <div className="staff-switch__keypad" role="group" aria-label={t("PIN keypad")}>
             {keys.map((key) => (
               <button
                 key={key}
@@ -249,13 +264,13 @@ export function StaffSwitchView({
             onClick={onBack}
             disabled={entry.busy}
           >
-            Not {entry.person.name}? Choose someone else
+            {t("Not {name}? Choose someone else", { name: entry.person.name })}
           </button>
         </section>
       )}
       {load.kind === "Ready" ? (
         <footer className="staff-switch__footer">
-          <p>Not on the list? Sign in with your account and choose “My PIN” to set one.</p>
+          <p>{t("Not on the list? Sign in with your account and choose “My PIN” to set one.")}</p>
           <SignInWithAccount entry={load.fullSignIn} />
         </footer>
       ) : null}
@@ -304,7 +319,7 @@ export function StaffSwitchPage({ client }: { readonly client?: StaffPinClient }
     return () => active.current?.abort();
   }, [read]);
   useEffect(() => {
-    document.title = "Switch staff";
+    document.title = t("Switch staff");
   }, []);
 
   const back = useCallback(() => {

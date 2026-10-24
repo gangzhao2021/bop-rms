@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import { paidRoundWait, tableRoundWaitText, type PaidRoundWaitTier } from "./paid-round-wait.js";
 import { DiningHostTransferAction } from "./DiningHostTransferAction.js";
@@ -27,21 +28,23 @@ type AvailabilityOperation = ReturnType<
 >;
 /** WP-2423 Q8: staff pick a plain reason; the stored reason stays a stable code. */
 const tableBlockReasons = [
-  ["CLEANING", "Being cleaned"],
+  ["CLEANING", t("Being cleaned")],
   ["RESERVED", "Reserved"],
-  ["OUT_OF_SERVICE", "Out of service"],
-  ["AREA_CLOSED", "Section closed"],
+  ["OUT_OF_SERVICE", t("Out of service")],
+  ["AREA_CLOSED", t("Section closed")],
 ] as const;
 /** WP-2423 follow-up: how long a session has been open, in words staff read at a glance. */
 export function elapsedText(minutes: number): string {
-  if (minutes < 60) return `${String(minutes)} min`;
+  if (minutes < 60) return t("{minutes} min", { minutes: String(minutes) });
   const hours = Math.floor(minutes / 60);
   if (hours < 24) {
     const rest = minutes % 60;
-    return rest === 0 ? `${String(hours)} h` : `${String(hours)} h ${String(rest)} min`;
+    return rest === 0
+      ? `${String(hours)} h`
+      : t("{hours} h {rest} min", { hours: String(hours), rest: String(rest) });
   }
   const days = Math.floor(hours / 24);
-  return `${String(days)} day${days === 1 ? "" : "s"}`;
+  return t("{days} day{value}", { days: String(days), value: days === 1 ? "" : "s" });
 }
 export { longOpenSessionMinutes };
 /** What staff see on the floor: free, blocked, seated, or seated so long the guests have likely left. */
@@ -59,14 +62,18 @@ export function tableFloorStatus(
   const blocked = table.operationalState === "TemporarilyBlocked";
   if (table.currentDiningSessionReference === null)
     return blocked
-      ? { state: "Unavailable", label: "Temporarily unavailable" }
+      ? { state: "Unavailable", label: t("Temporarily unavailable") }
       : { state: "Available", label: "Available" };
-  const suffix = blocked ? " · Temporarily unavailable" : "";
-  if (table.elapsedMinutes === null) return { state: "Seated", label: `Seated${suffix}` };
+  const suffix = blocked ? t(" · Temporarily unavailable") : "";
+  if (table.elapsedMinutes === null)
+    return { state: "Seated", label: t("Seated{suffix}", { suffix: suffix }) };
   const open = elapsedText(table.elapsedMinutes);
   return table.elapsedMinutes > longOpenSessionMinutes
-    ? { state: "LongOpen", label: `Guests may have left · open ${open}${suffix}` }
-    : { state: "Seated", label: `Seated · open ${open}${suffix}` };
+    ? {
+        state: "LongOpen",
+        label: t("Guests may have left · open {open}{suffix}", { open: open, suffix: suffix }),
+      }
+    : { state: "Seated", label: t("Seated · open {open}{suffix}", { open: open, suffix: suffix }) };
 }
 /** The "Table state" filter: free tables, tables with guests, or blocked tables. */
 export function tableMatchesStateFilter(table: StaffDiningTable, filter: string): boolean {
@@ -78,10 +85,13 @@ export function tableMatchesStateFilter(table: StaffDiningTable, filter: string)
 /** WP-2423 Q11: warn on the floor when guests can't scan in, or soon won't be able to. */
 export function tableCodeNotice(table: StaffDiningTable, now = Date.now()): string | null {
   if (table.lifecycle !== "Published") return null;
-  if (table.qrCodeValidUntil === null) return "No table QR code. Ask a manager to print one.";
+  if (table.qrCodeValidUntil === null) return t("No table QR code. Ask a manager to print one.");
   const days = Math.ceil((Date.parse(table.qrCodeValidUntil) - now) / 86_400_000);
   return days <= 30
-    ? `Table QR code stops working in ${String(Math.max(days, 0))} day${days === 1 ? "" : "s"}. Ask a manager to print a new one.`
+    ? t("Table QR code stops working in {value} day{value2}. Ask a manager to print a new one.", {
+        value: String(Math.max(days, 0)),
+        value2: days === 1 ? "" : "s",
+      })
     : null;
 }
 
@@ -100,23 +110,37 @@ export function staffRoundPaymentNotice(
   const first = table.staffRoundsAwaitingPayment[0];
   if (first === undefined) return null;
   const count = table.staffRoundsAwaitingPayment.length;
-  const rounds = count === 1 ? "A round" : `${String(count)} rounds`;
+  const rounds = count === 1 ? t("A round") : t("{count} rounds", { count: String(count) });
   const remainingMs = Date.parse(first.payBy) - now;
   const at = storeTime(first.payBy, timeZone);
   if (remainingMs <= 0)
     return {
       tier: "urgent",
-      text: `${rounds} entered by staff wasn't paid by ${at} and is being cancelled; it won't go to the kitchen. If the card machine was charged, refund it on the machine.`,
+      text: t(
+        "{rounds} entered by staff wasn't paid by {at} and is being cancelled; it won't go to the kitchen. If the card machine was charged, refund it on the machine.",
+        { rounds: rounds, at: at },
+      ),
     };
   const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
   return minutes <= staffRoundUrgentMinutes
     ? {
         tier: "urgent",
-        text: `${String(minutes)} min left: record the card-machine payment for ${count === 1 ? "the round" : "the rounds"} entered by staff by ${at}, or ${count === 1 ? "it is" : "they are"} cancelled.`,
+        text: t(
+          "{minutes} min left: record the card-machine payment for {value} entered by staff by {at}, or {value2} cancelled.",
+          {
+            minutes: String(minutes),
+            value: count === 1 ? "the round" : "the rounds",
+            at: at,
+            value2: count === 1 ? "it is" : "they are",
+          },
+        ),
       }
     : {
         tier: "warning",
-        text: `${rounds} entered by staff ${count === 1 ? "awaits" : "await"} card-machine payment. Record it by ${at}; the kitchen starts once it is recorded.`,
+        text: t(
+          "{rounds} entered by staff {value} card-machine payment. Record it by {at}; the kitchen starts once it is recorded.",
+          { rounds: rounds, value: count === 1 ? "awaits" : "await", at: at },
+        ),
       };
 }
 
@@ -135,8 +159,8 @@ export function guestRoundPaymentNotice(
   if (first === undefined) return null;
   const names =
     rounds.length === 1
-      ? `Round ${String(first.roundNumber)}`
-      : `Rounds ${rounds.map((round) => String(round.roundNumber)).join(", ")}`;
+      ? t("Round {roundNumber}", { roundNumber: String(first.roundNumber) })
+      : t("Rounds {value}", { value: rounds.map((round) => String(round.roundNumber)).join(", ") });
   const remainingMs = Date.parse(first.payBy) - now;
   const at = storeTime(first.payBy, timeZone);
   // WP-2423 abandoned payment: still here well after the deadline, the card provider couldn't
@@ -146,27 +170,41 @@ export function guestRoundPaymentNotice(
   if (firstUnconfirmed !== undefined)
     return {
       tier: "urgent",
-      text: `${
-        unconfirmed.length === 1
-          ? `Round ${String(firstUnconfirmed.roundNumber)}`
-          : `Rounds ${unconfirmed.map((round) => String(round.roundNumber)).join(", ")}`
-      }: the card provider couldn't confirm the guest's payment (due by ${storeTime(firstUnconfirmed.payBy, timeZone)}), so it wasn't cancelled automatically. Ask the guest whether their card was charged. If it wasn't, cancel the round; a charge that still comes through is refunded automatically.`,
+      text: t(
+        "{value}: the card provider couldn't confirm the guest's payment (due by {payBy}), so it wasn't cancelled automatically. Ask the guest whether their card was charged. If it wasn't, cancel the round; a charge that still comes through is refunded automatically.",
+        {
+          value:
+            unconfirmed.length === 1
+              ? `Round ${String(firstUnconfirmed.roundNumber)}`
+              : `Rounds ${unconfirmed.map((round) => String(round.roundNumber)).join(", ")}`,
+          payBy: storeTime(firstUnconfirmed.payBy, timeZone),
+        },
+      ),
     };
   if (remainingMs <= 0)
     return {
       tier: "urgent",
-      text: `${names} wasn't paid by ${at} and is being cancelled; it won't go to the kitchen and nobody is charged.`,
+      text: t(
+        "{names} wasn't paid by {at} and is being cancelled; it won't go to the kitchen and nobody is charged.",
+        { names: names, at: at },
+      ),
     };
   const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
   const verb = rounds.length === 1 ? "isn't" : "aren't";
   return minutes <= staffRoundUrgentMinutes
     ? {
         tier: "urgent",
-        text: `${String(minutes)} min left: ${names} ${verb} paid. Ask the guest to finish paying on their phone by ${at}, or it is cancelled.`,
+        text: t(
+          "{minutes} min left: {names} {verb} paid. Ask the guest to finish paying on their phone by {at}, or it is cancelled.",
+          { minutes: String(minutes), names: names, verb: verb, at: at },
+        ),
       }
     : {
         tier: "warning",
-        text: `${names} ${verb} paid yet. The guest pays on their phone (their table page has a pay button); unpaid at ${at}, it is cancelled and nobody is charged.`,
+        text: t(
+          "{names} {verb} paid yet. The guest pays on their phone (their table page has a pay button); unpaid at {at}, it is cancelled and nobody is charged.",
+          { names: names, verb: verb, at: at },
+        ),
       };
 }
 
@@ -184,11 +222,11 @@ export function guestRoundCancelHint(
   const first = table.guestRoundsAwaitingPayment[0];
   if (first === undefined) return null;
   if (table.guestRoundsAwaitingPayment.some((round) => isPaymentUnconfirmed(round.payBy, now)))
-    return canCancel ? null : "Only a manager can cancel it, here or on the Orders page.";
+    return canCancel ? null : t("Only a manager can cancel it, here or on the Orders page.");
   if (Date.parse(first.payBy) <= now) return null;
   return canCancel
-    ? "If the guest won't pay for it, cancel it now."
-    : "If the guest won't pay for it, a manager can cancel it here or on the Orders page.";
+    ? t("If the guest won't pay for it, cancel it now.")
+    : t("If the guest won't pay for it, a manager can cancel it here or on the Orders page.");
 }
 
 /**
@@ -209,7 +247,12 @@ export function paidRoundAcceptanceNotice(
     tier: paidRoundWait(oldest.paidAt, now).tier,
     text:
       tableRoundWaitText(oldest.roundNumber, oldest.paidAt, now) +
-      (others > 0 ? ` (and ${String(others)} more paid round${others === 1 ? "" : "s"})` : ""),
+      (others > 0
+        ? t(" (and {others} more paid round{value})", {
+            others: String(others),
+            value: others === 1 ? "" : "s",
+          })
+        : ""),
   };
 }
 
@@ -236,8 +279,10 @@ export function tableAttentionNotices(
     notices.push({
       tier: null,
       text: canCloseSessions
-        ? "Open for a long time — if the guests have left, select the table and close it."
-        : "Open for a long time — if the guests have left, ask a manager or the owner to close the table.",
+        ? t("Open for a long time — if the guests have left, select the table and close it.")
+        : t(
+            "Open for a long time — if the guests have left, ask a manager or the owner to close the table.",
+          ),
     });
   const code = tableCodeNotice(table, now);
   if (code !== null) notices.push({ tier: null, text: code });
@@ -257,11 +302,11 @@ export function DiningEntryCode({
 }) {
   return (
     <div className="dining-entry-code">
-      <p>Share this one-time code with the party at this table.</p>
+      <p>{t("Share this one-time code with the party at this table.")}</p>
       <p>
-        Entry code: <strong>{code}</strong>
+        {t("Entry code:")} <strong>{code}</strong>
       </p>
-      <button onClick={onHide}>Hide entry code</button>
+      <button onClick={onHide}>{t("Hide entry code")}</button>
     </div>
   );
 }
@@ -357,7 +402,7 @@ export function DiningSessionWorkspace({
         setCanTransferHost(result.canTransferHost);
         setCanCancelUnpaidRounds(result.canCancelUnpaidRounds);
         if (result.items.length === 0 && !more)
-          setMessage("No tables are available in this Store.");
+          setMessage(t("No tables are available in this Store."));
       }
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -377,8 +422,8 @@ export function DiningSessionWorkspace({
           setCanOperateTables(false);
           setMessage(
             denied
-              ? "Your current permissions do not allow table operations."
-              : "Tables unavailable. Check your connection and refresh.",
+              ? t("Your current permissions do not allow table operations.")
+              : t("Tables unavailable. Check your connection and refresh."),
           );
         }
       }
@@ -480,7 +525,9 @@ export function DiningSessionWorkspace({
         setMessage(
           result.joinCredential
             ? ""
-            : "The request already completed. Its code cannot be displayed again. Confirm replacement to generate a new code.",
+            : t(
+                "The request already completed. Its code cannot be displayed again. Confirm replacement to generate a new code.",
+              ),
         );
       }
     } catch (error) {
@@ -494,8 +541,8 @@ export function DiningSessionWorkspace({
         }
         setMessage(
           unknown
-            ? "The result is unknown. Retry the same request before starting another operation."
-            : "The request was not confirmed. Refresh the table and check your permissions.",
+            ? t("The result is unknown. Retry the same request before starting another operation.")
+            : t("The request was not confirmed. Refresh the table and check your permissions."),
         );
       }
     } finally {
@@ -545,8 +592,8 @@ export function DiningSessionWorkspace({
         setState("Idle");
         setMessage(
           action === "SetBlock"
-            ? "Table marked temporarily unavailable."
-            : "Table marked available.",
+            ? t("Table marked temporarily unavailable.")
+            : t("Table marked available."),
         );
       }
     } catch (error) {
@@ -557,8 +604,10 @@ export function DiningSessionWorkspace({
         if (!unknown) availabilityOperation.current = null;
         setMessage(
           unknown
-            ? "The result is unknown. Retry the same table request before starting another operation."
-            : "The table request was not confirmed. Refresh and check current permissions.",
+            ? t(
+                "The result is unknown. Retry the same table request before starting another operation.",
+              )
+            : t("The table request was not confirmed. Refresh and check current permissions."),
         );
       }
     } finally {
@@ -601,15 +650,20 @@ export function DiningSessionWorkspace({
   return (
     <WorkspacePage
       className="dining-floor"
-      title="Tables"
+      title={t("Tables")}
       meta={storeLabel}
       status={
         tables.length > 0 ? (
           <span className="dining-floor-summary">
-            <span>{`${String(freeCount)} available`}</span>
-            <span>{`${String(seatedCount)} seated`}</span>
+            <span>{t("{freeCount} available", { freeCount: String(freeCount) })}</span>
+            <span>{t("{seatedCount} seated", { seatedCount: String(seatedCount) })}</span>
             {attentionCount > 0 ? (
-              <span data-attention="true">{`${String(attentionCount)} need${attentionCount === 1 ? "s" : ""} attention`}</span>
+              <span data-attention="true">
+                {t("{attentionCount} need{value} attention", {
+                  attentionCount: String(attentionCount),
+                  value: attentionCount === 1 ? "s" : "",
+                })}
+              </span>
             ) : null}
           </span>
         ) : null
@@ -617,11 +671,11 @@ export function DiningSessionWorkspace({
       actions={
         <>
           <button disabled={locked} onClick={() => void load()}>
-            Refresh tables
+            {t("Refresh tables")}
           </button>
           {next ? (
             <button disabled={locked || stale !== null} onClick={() => void load(true)}>
-              Load more tables
+              {t("Load more tables")}
             </button>
           ) : null}
         </>
@@ -629,54 +683,54 @@ export function DiningSessionWorkspace({
     >
       <section className="dining-table-browser" aria-labelledby="dining-table-browser-title">
         <h2 id="dining-table-browser-title" className="visually-hidden">
-          Find a table
+          {t("Find a table")}
         </h2>
-        <div className="dining-floor-filters" role="search" aria-label="Find a table">
+        <div className="dining-floor-filters" role="search" aria-label={t("Find a table")}>
           <label>
-            <span className="visually-hidden">Table</span>
+            <span className="visually-hidden">{t("Table")}</span>
             <input
               type="search"
-              placeholder="Search tables"
+              placeholder={t("Search tables")}
               value={search}
               onChange={(event) => setSearch(event.currentTarget.value)}
             />
           </label>
           <label>
-            <span className="visually-hidden">Area</span>
+            <span className="visually-hidden">{t("Area")}</span>
             <select
               value={areaFilter}
               onChange={(event) => setAreaFilter(event.currentTarget.value)}
             >
-              <option value="All">All areas</option>
+              <option value="All">{t("All areas")}</option>
               {areas.map((value) => (
                 <option key={value}>{value}</option>
               ))}
             </select>
           </label>
           <label>
-            <span className="visually-hidden">Table state</span>
+            <span className="visually-hidden">{t("Table state")}</span>
             <select
               value={stateFilter}
               onChange={(event) => setStateFilter(event.currentTarget.value)}
             >
-              <option value="All">All tables</option>
-              <option value="Available">Available</option>
-              <option value="Seated">Seated</option>
-              <option value="TemporarilyBlocked">Temporarily unavailable</option>
+              <option value="All">{t("All tables")}</option>
+              <option value="Available">{t("Available")}</option>
+              <option value="Seated">{t("Seated")}</option>
+              <option value="TemporarilyBlocked">{t("Temporarily unavailable")}</option>
             </select>
           </label>
         </div>
       </section>
       {stale ? <StaleReadNotice stale={stale} /> : null}
       <div className="dining-floor-layout">
-        <section className="dining-floor-board" aria-label="Dining tables by area">
+        <section className="dining-floor-board" aria-label={t("Dining tables by area")}>
           {visibleAreas.length === 0 ? (
             <p role="status" className="dining-floor-empty" data-loading={state === "Loading"}>
               {tables.length === 0
                 ? state === "Loading"
-                  ? "Loading tables…"
-                  : message || "No tables have been loaded."
-                : "No tables match the current filters."}
+                  ? t("Loading tables…")
+                  : message || t("No tables have been loaded.")
+                : t("No tables match the current filters.")}
             </p>
           ) : (
             visibleAreas.map((area) => {
@@ -685,7 +739,12 @@ export function DiningSessionWorkspace({
                 <section className="dining-area-lane" key={area} aria-label={`${area} area`}>
                   <header>
                     <h2>{area}</h2>
-                    <span>{`${String(areaTables.length)} table${areaTables.length === 1 ? "" : "s"}`}</span>
+                    <span>
+                      {t("{length} table{value}", {
+                        length: String(areaTables.length),
+                        value: areaTables.length === 1 ? "" : "s",
+                      })}
+                    </span>
                   </header>
                   <div className="dining-table-grid">
                     {areaTables.map((table) => {
@@ -714,7 +773,9 @@ export function DiningSessionWorkspace({
                               ))}
                             </span>
                           </div>
-                          <p className="dining-table-tile__capacity">Seats {table.capacity}</p>
+                          <p className="dining-table-tile__capacity">
+                            {t("Seats {capacity}", { capacity: table.capacity })}
+                          </p>
                           {notices.map((notice, index) =>
                             notice.tier === null ? (
                               <p key={index} className="dining-table-tile__notice">
@@ -737,7 +798,9 @@ export function DiningSessionWorkspace({
                             aria-pressed={selected?.tableReference === table.tableReference}
                             onClick={() => select(table)}
                           >
-                            <span className="visually-hidden">Select {table.stableLabel}</span>
+                            <span className="visually-hidden">
+                              {t("Select {stableLabel}", { stableLabel: table.stableLabel })}
+                            </span>
                           </button>
                         </article>
                       );
@@ -751,7 +814,7 @@ export function DiningSessionWorkspace({
         <aside
           ref={detailRef}
           className="dining-session-detail"
-          aria-label="Selected table details"
+          aria-label={t("Selected table details")}
           aria-live="polite"
         >
           {selected ? (
@@ -759,20 +822,22 @@ export function DiningSessionWorkspace({
               <p className="bop-eyebrow">
                 {selected.areaCode} · {tableFloorStatus(selected).label}
               </p>
-              <h2>Table {selected.stableLabel}</h2>
+              <h2>{t("Table {stableLabel}", { stableLabel: selected.stableLabel })}</h2>
               <dl>
                 <div>
-                  <dt>Capacity</dt>
+                  <dt>{t("Capacity")}</dt>
                   <dd>{selected.capacity}</dd>
                 </div>
                 <div>
-                  <dt>Session</dt>
+                  <dt>{t("Session")}</dt>
                   <dd>
                     {selected.currentDiningSessionReference
                       ? selected.elapsedMinutes === null
-                        ? "Linked · elapsed time unavailable"
-                        : `Linked · open ${elapsedText(selected.elapsedMinutes)}`
-                      : "None"}
+                        ? t("Linked · elapsed time unavailable")
+                        : t("Linked · open {elapsedMinutes}", {
+                            elapsedMinutes: elapsedText(selected.elapsedMinutes),
+                          })
+                      : t("None")}
                   </dd>
                 </div>
               </dl>
@@ -790,7 +855,9 @@ export function DiningSessionWorkspace({
                 const notice = staffRoundPaymentNotice(selected, now, timeZone);
                 return notice === null ? null : (
                   <p className="order-accept-by" data-tier={notice.tier} role="note">
-                    {notice.text} The table&apos;s rounds and payments are on the Orders page.
+                    {t("{text} The table's rounds and payments are on the Orders page.", {
+                      text: notice.text,
+                    })}
                   </p>
                 );
               })()}
@@ -799,7 +866,7 @@ export function DiningSessionWorkspace({
                 const notice = guestRoundPaymentNotice(selected, now, timeZone);
                 const hint = guestRoundCancelHint(selected, now, canCancelUnpaidRounds);
                 return notice === null ? null : (
-                  <section aria-label="Unpaid rounds">
+                  <section aria-label={t("Unpaid rounds")}>
                     <p className="order-accept-by" data-tier={notice.tier} role="note">
                       {notice.text}
                       {hint === null ? null : " " + hint}
@@ -834,13 +901,13 @@ export function DiningSessionWorkspace({
                   locked={locked || paused}
                   onBusy={() => undefined}
                   onClosed={() => {
-                    void loadRef
-                      .current()
-                      .then(() =>
-                        setMessage(
-                          `Table ${selected.stableLabel} is closed and free for the next party.`,
-                        ),
-                      );
+                    void loadRef.current().then(() =>
+                      setMessage(
+                        t("Table {stableLabel} is closed and free for the next party.", {
+                          stableLabel: selected.stableLabel,
+                        }),
+                      ),
+                    );
                   }}
                   onRefresh={() => void loadRef.current(false, true)}
                 />
@@ -848,29 +915,34 @@ export function DiningSessionWorkspace({
                 // WP-2423 (3cd0f8dd M7): closing a table stays with the Owner and Store Manager;
                 // say who, so staff know whom to tell when the guests have left.
                 <p role="note" className="dining-close-who">
-                  A manager or the owner closes the table. Tell them when the guests have left.
+                  {t(
+                    "A manager or the owner closes the table. Tell them when the guests have left.",
+                  )}
                 </p>
               ) : null}
               {canTakeOrders && eligible ? (
                 // WP-2423 Q7 slice 2: a round for guests who can't or won't order on a phone.
-                <section aria-label="Take an order for this table">
+                <section aria-label={t("Take an order for this table")}>
                   <p>
-                    Order for guests who can&apos;t or won&apos;t use their phone, or enter a paper
-                    order after an outage. It joins this table&apos;s order.
+                    {t(
+                      "Order for guests who can't or won't use their phone, or enter a paper order after an outage. It joins this table's order.",
+                    )}
                   </p>
                   {selected.qrCodeValidUntil === null ? (
                     // DEC-STAFF-DINE-IN-ROUND (2026-10-15): a staff round joins the table the
                     // way a guest does, through the table's code, so it needs one first.
                     <p role="note">
-                      Orders can&apos;t be taken for table {selected.stableLabel} yet: it has no
-                      table QR code.{" "}
+                      {t("Orders can't be taken for table")} {selected.stableLabel}{" "}
+                      {t("yet: it has no table QR code.")}{" "}
                       {tableQrHref !== undefined ? (
                         <>
-                          Create one on <Link to={tableQrHref}>Table QR codes</Link> (it can be
-                          printed later), then take the order.
+                          {t("Create one on")} <Link to={tableQrHref}>{t("Table QR codes")}</Link>{" "}
+                          {t("(it can be printed later), then take the order.")}
                         </>
                       ) : (
-                        "Ask a manager to create one on the Table QR codes page, then take the order."
+                        t(
+                          "Ask a manager to create one on the Table QR codes page, then take the order.",
+                        )
                       )}
                     </p>
                   ) : (
@@ -878,7 +950,9 @@ export function DiningSessionWorkspace({
                       className="dining-take-order"
                       to={`/operations/order-entry?table=${encodeURIComponent(selected.tableReference)}`}
                     >
-                      Take order for table {selected.stableLabel}
+                      {t("Take order for table {stableLabel}", {
+                        stableLabel: selected.stableLabel,
+                      })}
                     </Link>
                   )}
                 </section>
@@ -887,25 +961,28 @@ export function DiningSessionWorkspace({
               selected.qrCodeValidUntil === null ? (
                 // WP-2423 item 7: guests join a session by scanning the table's QR code and
                 // then entering its code, so a session for a table without one can't be used.
-                <section aria-label="Dining session action">
+                <section aria-label={t("Dining session action")}>
                   <p role="note">
-                    A dining session can&apos;t be started for table {selected.stableLabel} yet: it
-                    has no table QR code, so guests can&apos;t join.{" "}
+                    {t("A dining session can't be started for table")} {selected.stableLabel}{" "}
+                    {t("yet: it has no table QR code, so guests can't join.")}{" "}
                     {tableQrHref !== undefined ? (
                       <>
-                        Create one on <Link to={tableQrHref}>Table QR codes</Link> first.
+                        {t("Create one on")} <Link to={tableQrHref}>{t("Table QR codes")}</Link>{" "}
+                        {t("first.")}
                       </>
                     ) : (
-                      "Ask a manager to create one on the Table QR codes page."
+                      t("Ask a manager to create one on the Table QR codes page.")
                     )}
                   </p>
                 </section>
               ) : (
-                <section aria-label="Dining session action">
+                <section aria-label={t("Dining session action")}>
                   <p>
                     {selected.currentDiningSessionReference
-                      ? "Replacing the entry code invalidates the previous code. Existing participants remain joined."
-                      : "Start a new dining session for this party."}
+                      ? t(
+                          "Replacing the entry code invalidates the previous code. Existing participants remain joined.",
+                        )
+                      : t("Start a new dining session for this party.")}
                   </p>
                   <label>
                     <input
@@ -914,7 +991,7 @@ export function DiningSessionWorkspace({
                       disabled={locked || paused}
                       onChange={(event) => setConfirmed(event.target.checked)}
                     />
-                    I confirm the selected table and session action
+                    {t("I confirm the selected table and session action")}
                   </label>
                   <button
                     disabled={
@@ -928,12 +1005,12 @@ export function DiningSessionWorkspace({
                     onClick={() => void execute()}
                   >
                     {state === "Unknown" && unknownAction === "Session"
-                      ? "Retry same session request"
+                      ? t("Retry same session request")
                       : state === "Submitting"
-                        ? "Submitting…"
+                        ? t("Submitting…")
                         : selected.currentDiningSessionReference
-                          ? "Replace entry code"
-                          : "Start dining session"}
+                          ? t("Replace entry code")
+                          : t("Start dining session")}
                   </button>
                   {selected.currentDiningSessionReference && canTransferHost ? (
                     <DiningHostTransferAction
@@ -947,19 +1024,19 @@ export function DiningSessionWorkspace({
                 </section>
               )}
               {canOperateTables ? (
-                <section aria-label="Table availability action">
-                  <p>Mark a table unavailable while it can&apos;t be seated.</p>
+                <section aria-label={t("Table availability action")}>
+                  <p>{t("Mark a table unavailable while it can't be seated.")}</p>
                   {selected.operationalState === "Available" ? (
                     <>
                       <label className="dining-table-reason">
-                        Reason
+                        {t("Reason")}
                         <select
                           value={blockReasonCode}
                           aria-describedby="dining-table-reason-help"
                           disabled={locked || paused}
                           onChange={(event) => setBlockReasonCode(event.target.value)}
                         >
-                          <option value="">Choose a reason</option>
+                          <option value="">{t("Choose a reason")}</option>
                           {tableBlockReasons.map(([code, label]) => (
                             <option key={code} value={code}>
                               {label}
@@ -967,7 +1044,7 @@ export function DiningSessionWorkspace({
                           ))}
                         </select>
                         <small id="dining-table-reason-help">
-                          Required. Guests can&apos;t be seated here until you mark it available.
+                          {t("Required. Guests can't be seated here until you mark it available.")}
                         </small>
                       </label>
                       <button
@@ -982,10 +1059,10 @@ export function DiningSessionWorkspace({
                         onClick={() => void executeAvailability("SetBlock")}
                       >
                         {state === "Unknown" && unknownAction === "Availability"
-                          ? "Retry same availability request"
+                          ? t("Retry same availability request")
                           : state === "Submitting"
-                            ? "Updating availability…"
-                            : "Mark table unavailable"}
+                            ? t("Updating availability…")
+                            : t("Mark table unavailable")}
                       </button>
                     </>
                   ) : (
@@ -1000,10 +1077,10 @@ export function DiningSessionWorkspace({
                       onClick={() => void executeAvailability("ClearBlock")}
                     >
                       {state === "Unknown" && unknownAction === "Availability"
-                        ? "Retry same availability request"
+                        ? t("Retry same availability request")
                         : state === "Submitting"
-                          ? "Updating availability…"
-                          : "Mark table available"}
+                          ? t("Updating availability…")
+                          : t("Mark table available")}
                     </button>
                   )}
                 </section>
@@ -1012,17 +1089,18 @@ export function DiningSessionWorkspace({
             </>
           ) : (
             <div className="dining-session-detail__empty">
-              <p>Select a table to review its current state and available session action.</p>
+              <p>{t("Select a table to review its current state and available session action.")}</p>
               <p>
-                Start a session when a party sits down and give them the table code. Their orders
-                and payments are on the Orders page.
+                {t(
+                  "Start a session when a party sits down and give them the table code. Their orders and payments are on the Orders page.",
+                )}
               </p>
             </div>
           )}
         </aside>
       </div>
       <p role="status" className="dining-floor-message">
-        {state === "Loading" ? "Loading tables…" : message}
+        {state === "Loading" ? t("Loading tables…") : message}
       </p>
     </WorkspacePage>
   );

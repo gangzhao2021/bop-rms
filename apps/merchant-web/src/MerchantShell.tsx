@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import type { ReactNode } from "react";
 import type { MerchantWorkspaceSnapshot } from "./merchant-workspace.js";
@@ -38,12 +39,12 @@ function StateView({ state }: { readonly state: Exclude<MerchantShellState, { ki
     Exclude<MerchantShellState, { kind: "Ready" }>["kind"],
     readonly [string, string, "neutral" | "error" | "offline"]
   > = {
-    Loading: ["Loading workspace", "Checking your session…", "neutral"],
-    SignedOut: ["Sign in required", "Sign in to open your Store workspace.", "neutral"],
-    Offline: ["You’re offline", "Reconnect to load your Store workspace.", "offline"],
+    Loading: [t("Loading workspace"), t("Checking your session…"), "neutral"],
+    SignedOut: [t("Sign in required"), t("Sign in to open your Store workspace."), "neutral"],
+    Offline: [t("You’re offline"), t("Reconnect to load your Store workspace."), "offline"],
     Failure: [
-      "Unable to load",
-      "The workspace is unavailable. No business action was attempted.",
+      t("Unable to load"),
+      t("The workspace is unavailable. No business action was attempted."),
       "error",
     ],
   };
@@ -68,7 +69,7 @@ export function MerchantShell({
   const liveBusinessDay = useStoreBusinessDay();
   if (state.kind !== "Ready")
     return (
-      <AppFrame title="Operations" description="Store workspace">
+      <AppFrame title={t("Operations")} description={t("Store workspace")}>
         <StateView state={state} />
       </AppFrame>
     );
@@ -94,7 +95,7 @@ export function MerchantShell({
               if (typeof target === "string") void onSwitchStore(target);
             }}
           >
-            <label htmlFor="store-scope">Authorized Store</label>
+            <label htmlFor="store-scope">{t("Authorized Store")}</label>
             <select
               key={scope.storeReference}
               id="store-scope"
@@ -109,26 +110,28 @@ export function MerchantShell({
               ))}
             </select>
             <button type="submit" disabled={ready.switching}>
-              {ready.switching ? "Switching…" : "Switch Store"}
+              {ready.switching ? t("Switching…") : t("Switch Store")}
             </button>
           </form>
         ) : null
       }
     >
-      <section id="overview" aria-label="Store overview">
+      <section id="overview" aria-label={t("Store overview")}>
         {ready.switchFailed === FULL_SIGN_IN_REQUIRED ? (
           <>
-            <p role="status">Your previous Store is unchanged. After you verify, switch again.</p>
+            <p role="status">
+              {t("Your previous Store is unchanged. After you verify, switch again.")}
+            </p>
             <FullSignInPrompt csrf={ready.csrf ?? ""} />
           </>
         ) : ready.switchFailed ? (
           <p className="command-error" role="alert">
-            Store switch failed. Your previous Store is unchanged.
+            {t("Store switch failed. Your previous Store is unchanged.")}
           </p>
         ) : null}
         {ready.workspace.freshness === "Stale" ? (
           <p className="stale-warning" role="status">
-            Stale data · refresh before relying on operational status.
+            {t("Stale data · refresh before relying on operational status.")}
           </p>
         ) : null}
         {prompt}
@@ -138,18 +141,23 @@ export function MerchantShell({
               className="overview-card overview-card--status"
               aria-labelledby="live-store-status-heading"
             >
-              <h3 id="live-store-status-heading">Store status</h3>
+              <h3 id="live-store-status-heading">{t("Store status")}</h3>
               <p className="overview-status-value">
                 <span>{ready.workspace.storeStatus}</span>
               </p>
-              <p className="overview-status-date">Business date {businessDateText(businessDate)}</p>
+              <p className="overview-status-date">
+                {t("Business date {businessDate}", {
+                  businessDate: businessDateText(businessDate),
+                })}
+              </p>
             </section>
             {today ?? (
               <section className="overview-card" aria-labelledby="today-summary-heading">
-                <h3 id="today-summary-heading">Today</h3>
+                <h3 id="today-summary-heading">{t("Today")}</h3>
                 <p>
-                  Sales, open orders and exceptions for the day are not available in this release.
-                  Use Orders, Kitchen, Pickup and Exceptions from the menu.
+                  {t(
+                    "Sales, open orders and exceptions for the day are not available in this release. Use Orders, Kitchen, Pickup and Exceptions from the menu.",
+                  )}
                 </p>
               </section>
             )}

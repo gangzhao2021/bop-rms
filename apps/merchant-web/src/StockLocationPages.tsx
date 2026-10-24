@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -16,22 +17,24 @@ import {
 } from "./stock-location-pages.js";
 
 const copy: Record<StockLocationErrorCode | "Loading", string> = {
-  Loading: "Loading stock locations…",
-  PermissionDenied: "You do not have permission to manage stock locations.",
-  NotFound: "This location no longer exists in the selected Store.",
-  Conflict:
+  Loading: t("Loading stock locations…"),
+  PermissionDenied: t("You do not have permission to manage stock locations."),
+  NotFound: t("This location no longer exists in the selected Store."),
+  Conflict: t(
     "The location changed, the code is already used, or the Store is already set up. Refresh and try again.",
-  DefaultRequired: "The default location cannot be deactivated; the Store always needs one.",
-  StockRemaining:
+  ),
+  DefaultRequired: t("The default location cannot be deactivated; the Store always needs one."),
+  StockRemaining: t(
     "Stock is still held, reserved or expected at this location. Move or count it out first.",
-  Invalid: "Some values are not valid. Codes use capital letters, digits, - or _.",
-  Offline: "Offline. The change was not confirmed; retry sends the same request again.",
-  Unavailable: "Stock locations are unavailable.",
+  ),
+  Invalid: t("Some values are not valid. Codes use capital letters, digits, - or _."),
+  Offline: t("Offline. The change was not confirmed; retry sends the same request again."),
+  Unavailable: t("Stock locations are unavailable."),
 };
 const zones: readonly (readonly [TemperatureZone, string])[] = [
-  ["Ambient", "Ambient (dry storage)"],
-  ["Chilled", "Chilled (fridge)"],
-  ["Frozen", "Frozen (freezer)"],
+  ["Ambient", t("Ambient (dry storage)")],
+  ["Chilled", t("Chilled (fridge)")],
+  ["Frozen", t("Frozen (freezer)")],
 ];
 const zoneLabel = (zone: TemperatureZone) => zones.find(([value]) => value === zone)?.[1] ?? zone;
 type State =
@@ -60,15 +63,15 @@ function useRunner(client: StockLocationClient, reload: () => void) {
     }
   };
   const errorPanel = error ? (
-    <StatePanel heading="Change not applied" tone="error" status>
+    <StatePanel heading={t("Change not applied")} tone="error" status>
       <p>{copy[error]}</p>
       {pending && error === "Offline" ? (
         <button type="button" disabled={busy} onClick={() => void run(pending)}>
-          Retry
+          {t("Retry")}
         </button>
       ) : (
         <button type="button" onClick={reload}>
-          Refresh
+          {t("Refresh")}
         </button>
       )}
     </StatePanel>
@@ -79,7 +82,7 @@ function useRunner(client: StockLocationClient, reload: () => void) {
 function Setup({ client, reload }: { client: StockLocationClient; reload: () => void }) {
   const [siteName, setSiteName] = useState("Store"),
     [locationCode, setLocationCode] = useState("BACK"),
-    [locationName, setLocationName] = useState("Back room"),
+    [locationName, setLocationName] = useState(t("Back room")),
     [zone, setZone] = useState<TemperatureZone>("Ambient");
   const { busy, run, errorPanel } = useRunner(client, reload);
   return (
@@ -98,13 +101,14 @@ function Setup({ client, reload }: { client: StockLocationClient; reload: () => 
         });
       }}
     >
-      <h3>Set up Store stock</h3>
+      <h3>{t("Set up Store stock")}</h3>
       <p>
-        Stock is kept by location. Start with the Store and its main storage location; add fridges,
-        freezers or a bar afterwards.
+        {t(
+          "Stock is kept by location. Start with the Store and its main storage location; add fridges, freezers or a bar afterwards.",
+        )}
       </p>
       <label>
-        Store stock site name
+        {t("Store stock site name")}
         <input
           required
           maxLength={80}
@@ -113,7 +117,7 @@ function Setup({ client, reload }: { client: StockLocationClient; reload: () => 
         />
       </label>
       <label>
-        Main location code
+        {t("Main location code")}
         <input
           required
           maxLength={32}
@@ -122,7 +126,7 @@ function Setup({ client, reload }: { client: StockLocationClient; reload: () => 
         />
       </label>
       <label>
-        Main location name
+        {t("Main location name")}
         <input
           required
           maxLength={80}
@@ -131,7 +135,7 @@ function Setup({ client, reload }: { client: StockLocationClient; reload: () => 
         />
       </label>
       <label>
-        Temperature
+        {t("Temperature")}
         <select value={zone} onChange={(e) => setZone(e.currentTarget.value as TemperatureZone)}>
           {zones.map(([value, label]) => (
             <option key={value} value={value}>
@@ -140,7 +144,7 @@ function Setup({ client, reload }: { client: StockLocationClient; reload: () => 
           ))}
         </select>
       </label>
-      <button disabled={busy}>Set up stock locations</button>
+      <button disabled={busy}>{t("Set up stock locations")}</button>
       {errorPanel}
     </form>
   );
@@ -166,12 +170,12 @@ function LocationRow({
     <li>
       <strong>{location.name}</strong> · {location.code} · {zoneLabel(location.temperatureZone)} ·{" "}
       {location.lifecycle}
-      {location.isDefault ? " · Default" : ""}
-      {location.holdsStock ? " · Holds stock" : ""}{" "}
+      {location.isDefault ? t(" · Default") : ""}
+      {location.holdsStock ? t(" · Holds stock") : ""}{" "}
       {mayManage && !editing ? (
         <>
           <button type="button" disabled={busy} onClick={() => setEditing(true)}>
-            Edit
+            {t("Edit")}
           </button>{" "}
           {location.lifecycle === "Active" && !location.isDefault ? (
             <button
@@ -187,7 +191,7 @@ function LocationRow({
                 })
               }
             >
-              Deactivate
+              {t("Deactivate")}
             </button>
           ) : null}
           {location.lifecycle === "Inactive" ? (
@@ -203,7 +207,7 @@ function LocationRow({
                 })
               }
             >
-              Activate
+              {t("Activate")}
             </button>
           ) : null}
         </>
@@ -224,7 +228,7 @@ function LocationRow({
           }}
         >
           <label>
-            Name
+            {t("Name")}
             <input
               required
               maxLength={80}
@@ -233,7 +237,7 @@ function LocationRow({
             />
           </label>
           <label>
-            Temperature
+            {t("Temperature")}
             <select
               value={zone}
               onChange={(e) => setZone(e.currentTarget.value as TemperatureZone)}
@@ -246,7 +250,7 @@ function LocationRow({
             </select>
           </label>
           <label>
-            Display order
+            {t("Display order")}
             <input
               type="number"
               min={0}
@@ -255,9 +259,9 @@ function LocationRow({
               onChange={(e) => setOrder(e.currentTarget.value)}
             />
           </label>
-          <button disabled={busy}>Save</button>{" "}
+          <button disabled={busy}>{t("Save")}</button>{" "}
           <button type="button" onClick={() => setEditing(false)}>
-            Cancel
+            {t("Cancel")}
           </button>
         </form>
       ) : null}
@@ -302,9 +306,9 @@ function AddLocation({
         });
       }}
     >
-      <h3>Add a location</h3>
+      <h3>{t("Add a location")}</h3>
       <label>
-        Code (e.g. FRIDGE-1)
+        {t("Code (e.g. FRIDGE-1)")}
         <input
           required
           maxLength={32}
@@ -313,7 +317,7 @@ function AddLocation({
         />
       </label>
       <label>
-        Name
+        {t("Name")}
         <input
           required
           maxLength={80}
@@ -322,7 +326,7 @@ function AddLocation({
         />
       </label>
       <label>
-        Temperature
+        {t("Temperature")}
         <select value={zone} onChange={(e) => setZone(e.currentTarget.value as TemperatureZone)}>
           {zones.map(([value, label]) => (
             <option key={value} value={value}>
@@ -331,7 +335,7 @@ function AddLocation({
           ))}
         </select>
       </label>
-      <button disabled={busy}>Add location</button>
+      <button disabled={busy}>{t("Add location")}</button>
       {errorPanel}
     </form>
   );
@@ -363,23 +367,24 @@ export function StockLocationListPage({
   if (state.kind !== "Found")
     return (
       <StatePanel
-        heading={state.kind === "PermissionDenied" ? noAccessHeading : "Stock locations"}
+        heading={state.kind === "PermissionDenied" ? noAccessHeading : t("Stock locations")}
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
         <p>{state.kind === "PermissionDenied" ? pageAccessDeniedText : copy[state.kind]}</p>
-        {state.kind !== "Loading" ? <button onClick={reload}>Refresh</button> : null}
+        {state.kind !== "Loading" ? <button onClick={reload}>{t("Refresh")}</button> : null}
       </StatePanel>
     );
   const view = state.view;
   return (
-    <AppFrame title="Stock locations" description="">
+    <AppFrame title={t("Stock locations")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Stock locations</p>
-          <h2>Stock locations</h2>
+          <p className="bop-eyebrow">{t("Stock locations")}</p>
+          <h2>{t("Stock locations")}</h2>
           <p>
-            Where this Store keeps its stock. Source as of <SourceTime instant={view.sourceAsOf} />
+            {t("Where this Store keeps its stock. Source as of")}{" "}
+            <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
       </header>
@@ -387,8 +392,8 @@ export function StockLocationListPage({
         view.mayManage ? (
           <Setup client={client} reload={reload} />
         ) : (
-          <StatePanel heading="Not set up" status>
-            <p>This Store has no stock locations yet. Ask a manager to set them up.</p>
+          <StatePanel heading={t("Not set up")} status>
+            <p>{t("This Store has no stock locations yet. Ask a manager to set them up.")}</p>
           </StatePanel>
         )
       ) : (
@@ -397,7 +402,7 @@ export function StockLocationListPage({
             <section key={site.stockSiteReference} className="detail-section">
               <h3>
                 {site.name} · {site.code}
-                {site.isDefault ? " · Default site" : ""}
+                {site.isDefault ? t(" · Default site") : ""}
               </h3>
               <ul>
                 {view.locations

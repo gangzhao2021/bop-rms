@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   createRefundApprovalClient,
@@ -20,17 +21,21 @@ import { SourceTime } from "./StoreTime.js";
 
 const failureMessage = (error: StepUpError): string => {
   const messages: Record<StepUpFailure, string> = {
-    CodeRejected:
+    CodeRejected: t(
       "That code did not match. Check the six-digit code in your authenticator app and try again.",
-    CodeAlreadyUsed: "That code was already used. Wait for the next code and enter it.",
+    ),
+    CodeAlreadyUsed: t("That code was already used. Wait for the next code and enter it."),
     TooManyAttempts:
       error.retryAfterSeconds === null
-        ? "Too many wrong codes. Wait a few minutes before trying again."
-        : `Too many wrong codes. Try again in ${Math.ceil(error.retryAfterSeconds / 60)} minute(s).`,
-    NotSetUp:
+        ? t("Too many wrong codes. Wait a few minutes before trying again.")
+        : t("Too many wrong codes. Try again in {value} minute(s).", {
+            value: Math.ceil(error.retryAfterSeconds / 60),
+          }),
+    NotSetUp: t(
       "Verification is not set up for you yet. Ask the store owner to add your authenticator app.",
-    Denied: "Your session ended or does not allow this. Sign in again, then verify.",
-    Unavailable: "The code could not be checked. Check your connection and try again.",
+    ),
+    Denied: t("Your session ended or does not allow this. Sign in again, then verify."),
+    Unavailable: t("The code could not be checked. Check your connection and try again."),
   };
   return messages[error.code];
 };
@@ -39,8 +44,9 @@ export interface StepUpExplanation {
   readonly code: string;
   readonly signIn: string;
 }
-export const STEP_UP_CODE_EXPLANATION =
-  "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, approvals and refunds can go ahead for 15 minutes.";
+export const STEP_UP_CODE_EXPLANATION = t(
+  "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, approvals and refunds can go ahead for 15 minutes.",
+);
 /** The dialog text for how this sign-in confirms it is the person (never a code in sign-in mode). */
 export function stepUpExplanationText(
   method: StepUpMethod,
@@ -168,7 +174,7 @@ export function StepUpVerification({
       } catch {
         if (active && result === "verified") {
           setWaiting(false);
-          setMessage("We couldn't check your sign-in. Check your connection and try again.");
+          setMessage(t("We couldn't check your sign-in. Check your connection and try again."));
         }
       }
     };
@@ -184,7 +190,7 @@ export function StepUpVerification({
   const current = verifiedUntil !== null && Date.parse(verifiedUntil) > now;
   const submit = async () => {
     if (busy || !/^[0-9]{6}$/u.test(code)) {
-      setMessage("Enter the six-digit code from your authenticator app.");
+      setMessage(t("Enter the six-digit code from your authenticator app."));
       return;
     }
     const sent = code;
@@ -246,12 +252,12 @@ export function StepUpVerification({
         <p role="status">
           {current ? (
             <>
-              Verified until <SourceTime instant={verifiedUntil} />.
+              {t("Verified until")} <SourceTime instant={verifiedUntil} />.
             </>
           ) : signIn ? (
-            "Confirm it is you by signing in again."
+            t("Confirm it is you by signing in again.")
           ) : (
-            "Confirm it is you with the code from your authenticator app."
+            t("Confirm it is you with the code from your authenticator app.")
           )}
         </p>
       ) : null}
@@ -272,21 +278,21 @@ export function StepUpVerification({
           setWaiting(false);
         }}
       >
-        <h2 id={titleId}>Confirm it is you</h2>
+        <h2 id={titleId}>{t("Confirm it is you")}</h2>
         {signIn ? (
           <>
             <p>{stepUpExplanationText("SignIn", explanation)}</p>
             {waiting ? (
               <p role="status">
-                Finish signing in in the new window. This page continues when you are done.
+                {t("Finish signing in in the new window. This page continues when you are done.")}
               </p>
             ) : null}
             <div className="card-actions">
               <button type="button" onClick={startSignIn}>
-                Continue to sign in
+                {t("Continue to sign in")}
               </button>
               <button type="button" onClick={() => dialog.current?.close()}>
-                Cancel
+                {t("Cancel")}
               </button>
             </div>
             <p role="alert">{message}</p>
@@ -300,7 +306,7 @@ export function StepUpVerification({
                 void submit();
               }}
             >
-              <label htmlFor={titleId + "-code"}>Six-digit code</label>
+              <label htmlFor={titleId + "-code"}>{t("Six-digit code")}</label>
               <input
                 ref={input}
                 id={titleId + "-code"}
@@ -316,13 +322,15 @@ export function StepUpVerification({
               />
               <div className="card-actions">
                 <button type="submit" disabled={busy || checkingMethod || code.length !== 6}>
-                  {busy ? "Checking…" : "Verify"}
+                  {busy ? t("Checking…") : t("Verify")}
                 </button>
                 <button type="button" disabled={busy} onClick={() => dialog.current?.close()}>
-                  Cancel
+                  {t("Cancel")}
                 </button>
               </div>
-              <p role="alert">{checkingMethod ? "Checking how to confirm it is you…" : message}</p>
+              <p role="alert">
+                {checkingMethod ? t("Checking how to confirm it is you…") : message}
+              </p>
             </form>
           </>
         )}

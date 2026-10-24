@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StoreDate } from "./StoreTime.js";
@@ -52,7 +53,7 @@ export interface TaxReviewClient {
 }
 export class TaxReviewPageError extends Error {
   constructor(readonly code: "PermissionDenied" | "Offline" | "Unavailable") {
-    super("Tax review is unavailable");
+    super(t("Tax review is unavailable"));
     this.name = "TaxReviewPageError";
   }
 }
@@ -104,38 +105,38 @@ export function percent(rate: string): string {
   return scaled + (rest ? "." + rest : "") + "%";
 }
 const copy = {
-  Loading: "Loading tax review…",
-  PermissionDenied: "You do not have permission to read this Store's tax configuration.",
-  Offline: "Offline. Check your connection and refresh.",
-  Unavailable: "Tax review is unavailable.",
+  Loading: t("Loading tax review…"),
+  PermissionDenied: t("You do not have permission to read this Store's tax configuration."),
+  Offline: t("Offline. Check your connection and refresh."),
+  Unavailable: t("Tax review is unavailable."),
 } as const;
 const endText = {
-  Configuration: "the configuration ends",
-  RegistrationEvidence: "its tax registration evidence expires",
-  ProfessionalEvidence: "its professional review expires",
+  Configuration: t("the configuration ends"),
+  RegistrationEvidence: t("its tax registration evidence expires"),
+  ProfessionalEvidence: t("its professional review expires"),
 } as const;
 const orderTypeText: Record<string, string> = { Pickup: "Pickup", DineIn: "Dine-in" };
 const treatmentText: Record<string, string> = {
   ZeroRated: "zero-rated",
   Exempt: "tax-exempt",
-  OutOfScope: "not taxed",
+  OutOfScope: t("not taxed"),
 };
 const provinceText: Readonly<Record<string, string>> = {
   "CA-AB": "Alberta",
-  "CA-BC": "British Columbia",
+  "CA-BC": t("British Columbia"),
   "CA-MB": "Manitoba",
-  "CA-NB": "New Brunswick",
-  "CA-NL": "Newfoundland and Labrador",
-  "CA-NS": "Nova Scotia",
-  "CA-NT": "Northwest Territories",
+  "CA-NB": t("New Brunswick"),
+  "CA-NL": t("Newfoundland and Labrador"),
+  "CA-NS": t("Nova Scotia"),
+  "CA-NT": t("Northwest Territories"),
   "CA-NU": "Nunavut",
   "CA-ON": "Ontario",
-  "CA-PE": "Prince Edward Island",
+  "CA-PE": t("Prince Edward Island"),
   "CA-QC": "Quebec",
   "CA-SK": "Saskatchewan",
   "CA-YT": "Yukon",
 };
-const currencyText: Readonly<Record<string, string>> = { CAD: "Canadian dollars" };
+const currencyText: Readonly<Record<string, string>> = { CAD: t("Canadian dollars") };
 
 /**
  * WP-2423 Q15/Q16: tells staff, where they review tax, that customer receipts print no GST/HST
@@ -154,21 +155,24 @@ export function ReceiptSetupNotice({
   if (gaps === undefined || (!gaps.taxRegistrationMissing && !gaps.privacyNoticeMissing))
     return null;
   return (
-    <StatePanel heading="Receipts and privacy need the Owner's details" tone="error" status>
+    <StatePanel heading={t("Receipts and privacy need the Owner's details")} tone="error" status>
       <ul>
         {gaps.taxRegistrationMissing ? (
           <li>
-            Customer receipts show no GST/HST registration number. If the business is registered for
-            GST/HST (or QST/PST), the Owner adds the number so receipts can be used as tax receipts.
+            {t(
+              "Customer receipts show no GST/HST registration number. If the business is registered for GST/HST (or QST/PST), the Owner adds the number so receipts can be used as tax receipts.",
+            )}
           </li>
         ) : null}
         {gaps.privacyNoticeMissing ? (
-          <li>Add your privacy notice link before going live. Checkout and receipts show none.</li>
+          <li>
+            {t("Add your privacy notice link before going live. Checkout and receipts show none.")}
+          </li>
         ) : null}
       </ul>
       {storeSetupHref ? (
         <p>
-          <Link to={storeSetupHref}>Enter them in Store setup → Receipts and privacy</Link>
+          <Link to={storeSetupHref}>{t("Enter them in Store setup → Receipts and privacy")}</Link>
         </p>
       ) : null}
     </StatePanel>
@@ -204,7 +208,7 @@ export function StoreTaxReviewPage({
   if (state.kind !== "Found")
     return (
       <StatePanel
-        heading={state.kind === "PermissionDenied" ? noAccessHeading : "Tax review"}
+        heading={state.kind === "PermissionDenied" ? noAccessHeading : t("Tax review")}
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
@@ -215,79 +219,88 @@ export function StoreTaxReviewPage({
   const c = view.configuration;
   const classLabel = (reference: string | null) => {
     const index = view.classes.findIndex((item) => item.taxClassificationReference === reference);
-    return index < 0 ? "Not taxed at this Store" : `Tax class ${index + 1}`;
+    return index < 0 ? t("Not taxed at this Store") : t("Tax class {value}", { value: index + 1 });
   };
   const problems = view.products.filter((product) => product.status !== "Covered");
   return (
-    <AppFrame title="Tax review" description="">
+    <AppFrame title={t("Tax review")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Tax review · Store</p>
-          <h2>Tax review</h2>
+          <p className="bop-eyebrow">{t("Tax review · Store")}</p>
+          <h2>{t("Tax review")}</h2>
           <p>
-            The tax this Store charges on each product for pickup and dine-in. Rates change only
-            through the tax configuration, with registration and professional review evidence.
-            Source as of <SourceTime instant={view.sourceAsOf} />
+            {t(
+              "The tax this Store charges on each product for pickup and dine-in. Rates change only through the tax configuration, with registration and professional review evidence. Source as of",
+            )}{" "}
+            <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
-        <Link to="/app/commerce/products">Products</Link>
+        <Link to="/app/commerce/products">{t("Products")}</Link>
       </header>
       <ReceiptSetupNotice
         gaps={view.receiptSetup}
         {...(storeSetupHref === undefined ? {} : { storeSetupHref })}
       />
       {c === null ? (
-        <StatePanel heading="No tax configuration in effect" tone="error" status>
+        <StatePanel heading={t("No tax configuration in effect")} tone="error" status>
           <p>
-            This Store has no current tax configuration, so no order can be priced. A tax
-            configuration with registration and professional review evidence is required.
+            {t(
+              "This Store has no current tax configuration, so no order can be priced. A tax configuration with registration and professional review evidence is required.",
+            )}
           </p>
         </StatePanel>
       ) : (
         <>
           {c.testOnly ? (
-            <StatePanel heading="Internal test rates" tone="error" status>
+            <StatePanel heading={t("Internal test rates")} tone="error" status>
               <p>
-                These rates are test values for internal testing only, not verified tax facts.
-                Before real sales, the Store's registration and a professional review must confirm
-                the rates (for example Ontario HST and any point-of-sale rebate on prepared food).
+                {t(
+                  "These rates are test values for internal testing only, not verified tax facts. Before real sales, the Store's registration and a professional review must confirm the rates (for example Ontario HST and any point-of-sale rebate on prepared food).",
+                )}
               </p>
             </StatePanel>
           ) : null}
           {c.endingSoon && c.endsAt !== null && c.endsBecause !== null ? (
-            <StatePanel heading="Tax configuration ending soon" tone="error" status>
+            <StatePanel heading={t("Tax configuration ending soon")} tone="error" status>
               <p>
-                Orders can be priced until <StoreDate value={c.endsAt} />, when{" "}
-                {endText[c.endsBecause]}. Renew it before then or the Store cannot take orders.
+                {t("Orders can be priced until")} <StoreDate value={c.endsAt} />
+                {t(", when {value}. Renew it before then or the Store cannot take orders.", {
+                  value: endText[c.endsBecause],
+                })}
               </p>
             </StatePanel>
           ) : null}
           <section className="detail-section" aria-labelledby="tax-configuration">
-            <h3 id="tax-configuration">Configuration</h3>
+            <h3 id="tax-configuration">{t("Configuration")}</h3>
             <dl>
-              <dt>Configuration</dt>
+              <dt>{t("Configuration")}</dt>
               <dd>
-                {c.testOnly ? "Test configuration (internal testing only)" : "Tax configuration"} ·
-                version {c.versionNumber} · {provinceText[c.jurisdictionCode] ?? c.jurisdictionCode}{" "}
-                · prices in {currencyText[c.currencyCode] ?? c.currencyCode}
+                {t("{value} · version {versionNumber} · {value2} · prices in {value3}", {
+                  value: c.testOnly
+                    ? t("Test configuration (internal testing only)")
+                    : t("Tax configuration"),
+                  versionNumber: c.versionNumber,
+                  value2: provinceText[c.jurisdictionCode] ?? c.jurisdictionCode,
+                  value3: currencyText[c.currencyCode] ?? c.currencyCode,
+                })}
               </dd>
-              <dt>In effect</dt>
+              <dt>{t("In effect")}</dt>
               <dd>
-                from <StoreDate value={c.effectiveFrom} />
+                {t("from")} <StoreDate value={c.effectiveFrom} />
                 {c.effectiveUntil === null ? (
-                  ", no end date"
+                  t(", no end date")
                 ) : (
                   <>
                     {" "}
-                    until <StoreDate value={c.effectiveUntil} />
+                    {t("until")} <StoreDate value={c.effectiveUntil} />
                   </>
                 )}
               </dd>
-              <dt>Registration evidence valid until</dt>
+              <dt>{t("Registration evidence valid until")}</dt>
               <dd>
                 <StoreDate value={c.registrationEvidenceValidUntil} />
               </dd>
-              <dt>Professional review valid until</dt>
+              <dt>{t("Professional review valid until")}</dt>
               <dd>
                 <StoreDate value={c.professionalEvidenceValidUntil} />
               </dd>
@@ -296,23 +309,23 @@ export function StoreTaxReviewPage({
         </>
       )}
       <section className="detail-section" aria-labelledby="tax-classes">
-        <h3 id="tax-classes">Tax classes</h3>
+        <h3 id="tax-classes">{t("Tax classes")}</h3>
         {view.classes.length === 0 ? (
-          <p>No tax class is in effect.</p>
+          <p>{t("No tax class is in effect.")}</p>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>Class</th>
-                <th>Rates</th>
-                <th>Products</th>
+                <th>{t("Class")}</th>
+                <th>{t("Rates")}</th>
+                <th>{t("Products")}</th>
               </tr>
             </thead>
             <tbody>
               {view.classes.map((item, index) => (
                 <tr key={item.taxClassificationReference}>
-                  <td>Tax class {index + 1}</td>
-                  <td data-label="Rates">
+                  <td>{t("Tax class {value}", { value: index + 1 })}</td>
+                  <td data-label={t("Rates")}>
                     {item.rules
                       .map(
                         (rule) =>
@@ -320,11 +333,11 @@ export function StoreTaxReviewPage({
                             rule.treatment === "Taxable"
                               ? percent(rule.rate)
                               : (treatmentText[rule.treatment] ?? rule.treatment.toLowerCase())
-                          }${rule.priceInclusion === "Inclusive" ? " (included in price)" : ""}`,
+                          }${rule.priceInclusion === "Inclusive" ? t(" (included in price)") : ""}`,
                       )
                       .join(" · ")}
                   </td>
-                  <td data-label="Products">
+                  <td data-label={t("Products")}>
                     {item.productNames.length === 0 ? "—" : item.productNames.join(", ")}
                   </td>
                 </tr>
@@ -334,22 +347,23 @@ export function StoreTaxReviewPage({
         )}
       </section>
       <section className="detail-section" aria-labelledby="tax-products">
-        <h3 id="tax-products">Products</h3>
+        <h3 id="tax-products">{t("Products")}</h3>
         {problems.length > 0 ? (
-          <StatePanel heading="Products that cannot be taxed" tone="error" status>
+          <StatePanel heading={t("Products that cannot be taxed")} tone="error" status>
             <p>
-              {problems.length} product{problems.length === 1 ? "" : "s"} cannot be priced for every
-              order type. Menus offering them are not submitted for review until fixed on the
-              product page.
+              {t(
+                "{length} product{value} cannot be priced for every order type. Menus offering them are not submitted for review until fixed on the product page.",
+                { length: problems.length, value: problems.length === 1 ? "" : "s" },
+              )}
             </p>
           </StatePanel>
         ) : null}
         <table>
           <thead>
             <tr>
-              <th>Product</th>
-              <th>Tax class</th>
-              <th>Status</th>
+              <th>{t("Product")}</th>
+              <th>{t("Tax class")}</th>
+              <th>{t("Status")}</th>
             </tr>
           </thead>
           <tbody>
@@ -359,21 +373,23 @@ export function StoreTaxReviewPage({
                   <Link to={`/app/commerce/products/${product.productReference}/edit`}>
                     {product.name}
                   </Link>
-                  {product.selling ? "" : " (not selling yet)"}
+                  {product.selling ? "" : t(" (not selling yet)")}
                 </td>
-                <td data-label="Tax class">
+                <td data-label={t("Tax class")}>
                   {product.taxClassificationReference === null
-                    ? "None"
+                    ? t("None")
                     : classLabel(product.taxClassificationReference)}
                 </td>
-                <td data-label="Status">
+                <td data-label={t("Status")}>
                   {product.status === "Covered"
-                    ? "Taxed for pickup and dine-in"
+                    ? t("Taxed for pickup and dine-in")
                     : product.status === "NoTaxClass"
-                      ? "No tax class"
-                      : `No rate for ${product.missingOrderTypes
-                          .map((type) => orderTypeText[type] ?? type)
-                          .join(" and ")}`}
+                      ? t("No tax class")
+                      : t("No rate for {value}", {
+                          value: product.missingOrderTypes
+                            .map((type) => orderTypeText[type] ?? type)
+                            .join(" and "),
+                        })}
                 </td>
               </tr>
             ))}

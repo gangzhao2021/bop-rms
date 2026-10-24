@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useRef, useState } from "react";
 import { orderMoney } from "./order-money.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
@@ -24,7 +25,7 @@ type Failure = "Denied" | FullSignInRequired | "SameApprover" | "Changed" | "Unk
 
 /** Whole-cent CAD from integer minor units in the app's one money format; never floating point. */
 export function formatMinorCad(amountMinor: string): string {
-  if (!/^[0-9]{1,12}$/u.test(amountMinor)) return "Amount unavailable";
+  if (!/^[0-9]{1,12}$/u.test(amountMinor)) return t("Amount unavailable");
   return orderMoney({ amountMinor: String(BigInt(amountMinor)), currencyCode: "CAD" });
 }
 export function unmatchedRefundFailure(status: number, error: unknown): Failure {
@@ -110,58 +111,60 @@ export function UnmatchedCaptureRefundAction({
     }
   };
   const failureText: Record<Exclude<Failure, FullSignInRequired>, string> = {
-    Denied: "You do not have refund authority for this store.",
-    SameApprover: "The person who requested this refund cannot approve it. Ask another manager.",
-    Changed: "This refund changed. Review it again.",
-    Unknown: "Result unknown. Retry the same action to recover its result.",
+    Denied: t("You do not have refund authority for this store."),
+    SameApprover: t("The person who requested this refund cannot approve it. Ask another manager."),
+    Changed: t("This refund changed. Review it again."),
+    Unknown: t("Result unknown. Retry the same action to recover its result."),
   };
   if (view === null || view.status === "NotApplicable")
     return (
-      <section className="unmatched-refund" aria-label="Unmatched charge refund">
+      <section className="unmatched-refund" aria-label={t("Unmatched charge refund")}>
         <button disabled={busy} onClick={() => void post("status")}>
-          Review unmatched charge
+          {t("Review unmatched charge")}
         </button>
         {view?.status === "NotApplicable" ? (
-          <p>No charge without a matching order is recorded for this difference.</p>
+          <p>{t("No charge without a matching order is recorded for this difference.")}</p>
         ) : null}
         {failure === FULL_SIGN_IN_REQUIRED ? (
           <FullSignInPrompt csrf={csrf} fetcher={fetcher} />
         ) : (
-          <p role="status">{failure ? failureText[failure] : busy ? "Loading…" : null}</p>
+          <p role="status">{failure ? failureText[failure] : busy ? t("Loading…") : null}</p>
         )}
       </section>
     );
   const amount = formatMinorCad(view.amountMinor ?? "");
   const next = unmatchedRefundNextStep(view);
   return (
-    <section className="unmatched-refund" aria-label="Unmatched charge refund">
+    <section className="unmatched-refund" aria-label={t("Unmatched charge refund")}>
       <dl>
         <div>
-          <dt>Charged by the payment provider</dt>
+          <dt>{t("Charged by the payment provider")}</dt>
           <dd>
             {amount} · {view.capturedAt ? <SourceTime instant={view.capturedAt} /> : null}
           </dd>
         </div>
         <div>
-          <dt>Refund</dt>
+          <dt>{t("Refund")}</dt>
           <dd>
             {view.status === "Refunded" ? (
               <>
-                Refunded in full ·{" "}
+                {t("Refunded in full ·")}{" "}
                 {view.refundedAt ? <SourceTime instant={view.refundedAt} /> : null}
               </>
             ) : view.status === "Approved" ? (
               <>
-                Approved · {view.approvedAt ? <SourceTime instant={view.approvedAt} /> : null} · the
-                payment provider has not confirmed it yet
+                {t("Approved ·")}{" "}
+                {view.approvedAt ? <SourceTime instant={view.approvedAt} /> : null}{" "}
+                {t("· the payment provider has not confirmed it yet")}
               </>
             ) : view.status === "Requested" ? (
               <>
-                Requested · {view.requestedAt ? <SourceTime instant={view.requestedAt} /> : null} ·
-                awaiting approval by another manager
+                {t("Requested ·")}{" "}
+                {view.requestedAt ? <SourceTime instant={view.requestedAt} /> : null}{" "}
+                {t("· awaiting approval by another manager")}
               </>
             ) : (
-              "Not requested"
+              t("Not requested")
             )}
           </dd>
         </div>
@@ -169,8 +172,9 @@ export function UnmatchedCaptureRefundAction({
       {next === "Request" ? (
         <>
           <p>
-            No order or payment of this store matches this charge. Refund it in full to the card it
-            came from. Another manager must approve before it is sent.
+            {t(
+              "No order or payment of this store matches this charge. Refund it in full to the card it came from. Another manager must approve before it is sent.",
+            )}
           </p>
           <label>
             <input
@@ -179,15 +183,17 @@ export function UnmatchedCaptureRefundAction({
               disabled={readOnly}
               onChange={(event) => setConfirmed(event.currentTarget.checked)}
             />
-            I checked that no order of this store was paid by this charge
+            {t("I checked that no order of this store was paid by this charge")}
           </label>
           <button disabled={readOnly || busy || !confirmed} onClick={() => void post("request")}>
-            {failure === "Unknown" ? "Retry same request" : `Request refund of ${amount}`}
+            {failure === "Unknown"
+              ? t("Retry same request")
+              : t("Request refund of {amount}", { amount: amount })}
           </button>
         </>
       ) : null}
       {next === "AwaitApproval" ? (
-        <p>You requested this refund. Another manager must approve and send it.</p>
+        <p>{t("You requested this refund. Another manager must approve and send it.")}</p>
       ) : null}
       {next === "Approve" || next === "Resend" ? (
         <>
@@ -199,7 +205,7 @@ export function UnmatchedCaptureRefundAction({
                 disabled={readOnly}
                 onChange={(event) => setConfirmed(event.currentTarget.checked)}
               />
-              I approve refunding {amount} in full to the original card
+              {t("I approve refunding {amount} in full to the original card", { amount: amount })}
             </label>
           ) : null}
           <button
@@ -207,8 +213,8 @@ export function UnmatchedCaptureRefundAction({
             onClick={() => void post("approve")}
           >
             {next === "Resend" || failure === "Unknown"
-              ? "Retry sending the approved refund"
-              : "Approve and send refund"}
+              ? t("Retry sending the approved refund")
+              : t("Approve and send refund")}
           </button>
         </>
       ) : null}
@@ -221,9 +227,11 @@ export function UnmatchedCaptureRefundAction({
           : failure
             ? failureText[failure]
             : busy
-              ? "Working…"
+              ? t("Working…")
               : view.providerResult === "Unknown"
-                ? "Approved. The payment provider has not confirmed it yet; send it again to get its answer."
+                ? t(
+                    "Approved. The payment provider has not confirmed it yet; send it again to get its answer.",
+                  )
                 : null}
       </p>
     </section>

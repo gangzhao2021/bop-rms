@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /** Closed normal Product wire values. Independent of owning Domain runtime.
  * Complete optional Draft content is a wire candidate, never source authority. */
 import {
@@ -10,7 +11,7 @@ export class ProductCommandClientError extends Error {
       "Invalid" | "Denied" | "FeatureDisabled" | "Conflict" | "Unavailable" | "OutcomeUnknown",
     readonly attemptCode?: "Invalid" | "Denied" | "FeatureDisabled" | "Conflict",
   ) {
-    super("Product save could not be confirmed");
+    super(t("Product save could not be confirmed"));
     this.name = "ProductCommandClientError";
   }
 }

@@ -1,3 +1,4 @@
+import { staffNameLocales } from "./staff-content-locale.js";
 import { readClosedRecord } from "@bop/identity";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
@@ -224,7 +225,7 @@ export function createMerchantPickupQuery(options: {
           tx,
           selected,
           order,
-          options.locale ?? "en-CA",
+          staffNameLocales(options.locale ?? "en-CA"),
         ).catch(() => null);
         for (const line of lines?.items ?? [])
           if (line.name.length > 0)

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useState, type ReactNode } from "react";
 import { StepUpVerification } from "./StepUpVerification.js";
 
@@ -38,9 +39,9 @@ export function parseSoleOperatorGate(value: unknown): SoleOperatorGateView | nu
 }
 /** "Mia", "Mia and Noah", "Mia, Noah and Sam". */
 export function soleOperatorOtherNames(gate: SoleOperatorGateView): string {
-  const names = gate.otherApprovers.map((p) => p.displayName ?? "another staff member");
+  const names = gate.otherApprovers.map((p) => p.displayName ?? t("another staff member"));
   return names.length <= 1
-    ? (names[0] ?? "another staff member")
+    ? (names[0] ?? t("another staff member"))
     : names.slice(0, -1).join(", ") + " and " + names.at(-1);
 }
 
@@ -59,7 +60,7 @@ export function SoleOperatorSelfApproval({
   busy,
   onApprove,
   fetcher,
-  yourPart = "You made this change",
+  yourPart = t("You made this change"),
 }: {
   readonly gate: SoleOperatorGateView | null;
   readonly csrf: string | undefined;
@@ -84,28 +85,40 @@ export function SoleOperatorSelfApproval({
   if (gate === null || gate.status === "NotSet")
     return (
       <p>
-        {yourPart}, so someone else who holds {permissionName} must approve it.
-        {gate === null ? " " : " Sole operator is off. "}If you run this business on your own, the
-        brand owner can turn on Sole operator on the Approvals page.
+        {t(
+          "{yourPart}, so someone else who holds {permissionName} must approve it.{value}If you run this business on your own, the brand owner can turn on Sole operator on the Approvals page.",
+          {
+            yourPart: yourPart,
+            permissionName: permissionName,
+            value: gate === null ? " " : t(" Sole operator is off. "),
+          },
+        )}
       </p>
     );
   if (gate.status === "OtherApprovers")
     return (
       <p>
-        Sole operator is on, but {soleOperatorOtherNames(gate)} also{" "}
-        {gate.otherApprovers.length === 1 ? "holds" : "hold"} {permissionName}, so they must approve
-        this.
+        {t(
+          "Sole operator is on, but {gate} also {value} {permissionName}, so they must approve this.",
+          {
+            gate: soleOperatorOtherNames(gate),
+            value: gate.otherApprovers.length === 1 ? t("holds") : t("hold"),
+            permissionName: permissionName,
+          },
+        )}
       </p>
     );
   const verified = verifiedUntil !== null && Date.parse(verifiedUntil) > Date.now();
   return (
     <div className="sole-operator-confirm">
       <p>
-        {yourPart} and you are the only person who holds {permissionName} (sole operator), so you
-        may approve it yourself. Check it first:
+        {t(
+          "{yourPart} and you are the only person who holds {permissionName} (sole operator), so you may approve it yourself. Check it first:",
+          { yourPart: yourPart, permissionName: permissionName },
+        )}
       </p>
       {summary}
-      <p>It will be recorded as approved by you alone.</p>
+      <p>{t("It will be recorded as approved by you alone.")}</p>
       {csrf === undefined ? null : (
         <StepUpVerification
           purpose="SoleOperatorApproval"
@@ -113,7 +126,7 @@ export function SoleOperatorSelfApproval({
           verifiedUntil={verifiedUntil}
           onVerified={setVerifiedUntil}
           loadServerStatus={false}
-          label="Verify to approve on your own"
+          label={t("Verify to approve on your own")}
           fetcher={fetcher}
         />
       )}
@@ -124,7 +137,7 @@ export function SoleOperatorSelfApproval({
           disabled={busy}
           onChange={(event) => setConfirmed(event.currentTarget.checked)}
         />{" "}
-        I checked {what} and approve on my own
+        {t("I checked {what} and approve on my own", { what: what })}
       </label>{" "}
       <button
         type="button"

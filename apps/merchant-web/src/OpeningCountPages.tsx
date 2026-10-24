@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -17,19 +18,22 @@ import {
 } from "./opening-count-pages.js";
 
 const copy: Record<OpeningCountErrorCode | "Loading", string> = {
-  Loading: "Loading the opening count…",
-  PermissionDenied: "You do not have permission for this step of the opening count.",
-  NotFound: "This opening count does not exist for the selected Store.",
-  Conflict: "The count changed since you opened it. Refresh and try again.",
-  AlreadyPosted:
+  Loading: t("Loading the opening count…"),
+  PermissionDenied: t("You do not have permission for this step of the opening count."),
+  NotFound: t("This opening count does not exist for the selected Store."),
+  Conflict: t("The count changed since you opened it. Refresh and try again."),
+  AlreadyPosted: t(
     "The Store's opening stock has already been posted. Later stock arrives through receipts and counts.",
-  StockExists:
+  ),
+  StockExists: t(
     "Stock has already been recorded for the highlighted line, so it cannot receive an opening balance.",
-  LineInvalid:
+  ),
+  LineInvalid: t(
     "The highlighted line is not valid: check the item, location, quantity precision, lot and expiry.",
-  Invalid: "The count is not valid. A count needs at least one line before it is submitted.",
-  Offline: "Offline. The change was not confirmed; retry sends the same request again.",
-  Unavailable: "The opening count is unavailable.",
+  ),
+  Invalid: t("The count is not valid. A count needs at least one line before it is submitted."),
+  Offline: t("Offline. The change was not confirmed; retry sends the same request again."),
+  Unavailable: t("The opening count is unavailable."),
 };
 type State =
   | { readonly kind: "Loading" | OpeningCountErrorCode }
@@ -157,17 +161,20 @@ function Editor({
   return (
     <section className="detail-section">
       <h3>
-        Opening count · {selected.lifecycle} · version {selected.version}
+        {t("Opening count · {lifecycle} · version {version}", {
+          lifecycle: selected.lifecycle,
+          version: selected.version,
+        })}
       </h3>
       <table>
         <thead>
           <tr>
-            <th>Item</th>
-            <th>Location</th>
-            <th>Lot code</th>
-            <th>Expiry</th>
-            <th>Quantity</th>
-            <th>Unit cost ($)</th>
+            <th>{t("Item")}</th>
+            <th>{t("Location")}</th>
+            <th>{t("Lot code")}</th>
+            <th>{t("Expiry")}</th>
+            <th>{t("Quantity")}</th>
+            <th>{t("Unit cost ($)")}</th>
             {draft ? <th /> : null}
           </tr>
         </thead>
@@ -185,7 +192,7 @@ function Editor({
                 <td>
                   {draft ? (
                     <select
-                      aria-label="Item"
+                      aria-label={t("Item")}
                       value={line.itemReference}
                       onChange={(e) => update(index, { itemReference: e.currentTarget.value })}
                     >
@@ -202,7 +209,7 @@ function Editor({
                 <td>
                   {draft ? (
                     <select
-                      aria-label="Location"
+                      aria-label={t("Location")}
                       value={line.locationReference}
                       onChange={(e) => update(index, { locationReference: e.currentTarget.value })}
                     >
@@ -219,20 +226,20 @@ function Editor({
                 <td>
                   {draft && mode !== "NoLot" ? (
                     <input
-                      aria-label="Lot code"
+                      aria-label={t("Lot code")}
                       required={mode !== "LotOptional"}
                       maxLength={64}
                       value={line.lotCode}
                       onChange={(e) => update(index, { lotCode: e.currentTarget.value })}
                     />
                   ) : (
-                    line.lotCode || (mode === "NoLot" ? "Not tracked" : "")
+                    line.lotCode || (mode === "NoLot" ? t("Not tracked") : "")
                   )}
                 </td>
                 <td>
                   {draft && mode !== "NoLot" ? (
                     <input
-                      aria-label="Expiry date"
+                      aria-label={t("Expiry date")}
                       type="date"
                       required={mode === "LotExpiryRequired"}
                       value={line.expiryDate}
@@ -245,7 +252,7 @@ function Editor({
                 <td>
                   {draft ? (
                     <input
-                      aria-label="Quantity"
+                      aria-label={t("Quantity")}
                       inputMode="decimal"
                       required
                       value={line.quantity}
@@ -259,7 +266,7 @@ function Editor({
                 <td>
                   {draft ? (
                     <input
-                      aria-label="Unit cost"
+                      aria-label={t("Unit cost")}
                       inputMode="decimal"
                       value={line.unitCost}
                       onChange={(e) => update(index, { unitCost: e.currentTarget.value })}
@@ -275,7 +282,7 @@ function Editor({
                       disabled={busy}
                       onClick={() => setLines((current) => current.filter((_, i) => i !== index))}
                     >
-                      Remove
+                      {t("Remove")}
                     </button>
                   </td>
                 ) : null}
@@ -304,14 +311,14 @@ function Editor({
               ])
             }
           >
-            Add line
+            {t("Add line")}
           </button>
           <button
             type="button"
             disabled={busy}
             onClick={() => void save().then((ok) => ok && reload())}
           >
-            Save count
+            {t("Save count")}
           </button>
           <button
             type="button"
@@ -323,19 +330,21 @@ function Editor({
               })
             }
           >
-            Save and submit for posting
+            {t("Save and submit for posting")}
           </button>
           <button
             type="button"
             disabled={busy}
             onClick={() => void send("Cancel", selected.version).then((ok) => ok && reload())}
           >
-            Cancel count
+            {t("Cancel count")}
           </button>
           {view.items.length === 0 ? (
-            <p>Create and activate stock-tracked inventory items first.</p>
+            <p>{t("Create and activate stock-tracked inventory items first.")}</p>
           ) : null}
-          {view.locations.length === 0 ? <p>Set up the Store's stock locations first.</p> : null}
+          {view.locations.length === 0 ? (
+            <p>{t("Set up the Store's stock locations first.")}</p>
+          ) : null}
         </div>
       ) : null}
       {selected.lifecycle === "Submitted" ? (
@@ -346,46 +355,47 @@ function Editor({
               disabled={busy}
               onClick={() => void send("Reopen", selected.version).then((ok) => ok && reload())}
             >
-              Reopen for changes
+              {t("Reopen for changes")}
             </button>
           ) : null}
           {view.permissions.mayPost ? (
             confirmPost ? (
               <>
                 <p>
-                  Posting sets the Store's opening stock from these {selected.lines.length} lines.
-                  It happens once per Store and cannot be edited afterwards; later changes go
-                  through receipts, counts and waste.
+                  {t(
+                    "Posting sets the Store's opening stock from these {length} lines. It happens once per Store and cannot be edited afterwards; later changes go through receipts, counts and waste.",
+                    { length: selected.lines.length },
+                  )}
                 </p>
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => void send("Post", selected.version).then((ok) => ok && reload())}
                 >
-                  Post opening stock
+                  {t("Post opening stock")}
                 </button>{" "}
                 <button type="button" disabled={busy} onClick={() => setConfirmPost(false)}>
-                  Back
+                  {t("Back")}
                 </button>
               </>
             ) : (
               <button type="button" disabled={busy} onClick={() => setConfirmPost(true)}>
-                Review and post
+                {t("Review and post")}
               </button>
             )
           ) : (
-            <p>Waiting for an Owner to post the opening stock.</p>
+            <p>{t("Waiting for an Owner to post the opening stock.")}</p>
           )}
         </div>
       ) : null}
       {selected.lifecycle === "Posted" ? (
-        <p>Posted. These quantities are the Store's opening stock.</p>
+        <p>{t("Posted. These quantities are the Store's opening stock.")}</p>
       ) : null}
       {error ? (
-        <StatePanel heading="Change not applied" tone="error" status>
+        <StatePanel heading={t("Change not applied")} tone="error" status>
           <p>{copy[error.code]}</p>
           <button type="button" onClick={reload}>
-            Refresh
+            {t("Refresh")}
           </button>
         </StatePanel>
       ) : null}
@@ -410,7 +420,7 @@ export function OpeningCountPage({
   if (state.kind !== "Found")
     return (
       <StatePanel
-        heading={state.kind === "PermissionDenied" ? noAccessHeading : "Opening count"}
+        heading={state.kind === "PermissionDenied" ? noAccessHeading : t("Opening count")}
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
@@ -442,36 +452,43 @@ export function OpeningCountPage({
     }
   };
   return (
-    <AppFrame title="Opening count" description="">
+    <AppFrame title={t("Opening count")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Opening count</p>
-          <h2>Opening stock count</h2>
+          <p className="bop-eyebrow">{t("Opening count")}</p>
+          <h2>{t("Opening stock count")}</h2>
           <p>
-            Count what the Store holds before it opens. Posting turns the count into the Store's
-            opening stock, once. Source as of <SourceTime instant={view.sourceAsOf} />
+            {t(
+              "Count what the Store holds before it opens. Posting turns the count into the Store's opening stock, once. Source as of",
+            )}{" "}
+            <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
       </header>
       {view.postedCountReference ? (
-        <StatePanel heading="Opening stock posted" status>
-          <p>The Store's opening stock is set. New stock arrives through receipts and counts.</p>
+        <StatePanel heading={t("Opening stock posted")} status>
+          <p>
+            {t("The Store's opening stock is set. New stock arrives through receipts and counts.")}
+          </p>
           {reference !== view.postedCountReference ? (
             <Link to={`/app/supply/opening-count/${view.postedCountReference}`}>
-              View the posted count
+              {t("View the posted count")}
             </Link>
           ) : null}
         </StatePanel>
       ) : null}
       {!view.postedCountReference && !open && view.permissions.mayCount ? (
         <button disabled={busy} onClick={() => void start()}>
-          Start opening count
+          {t("Start opening count")}
         </button>
       ) : null}
       {open && reference !== open.countReference ? (
         <p>
           <Link to={`/app/supply/opening-count/${open.countReference}`}>
-            Continue the {open.lifecycle.toLowerCase()} count ({open.lineCount} lines)
+            {t("Continue the {value} count ({lineCount} lines)", {
+              value: open.lifecycle.toLowerCase(),
+              lineCount: open.lineCount,
+            })}
           </Link>
         </p>
       ) : null}
@@ -485,7 +502,7 @@ export function OpeningCountPage({
         />
       ) : null}
       {error ? (
-        <StatePanel heading="Not started" tone="error" status>
+        <StatePanel heading={t("Not started")} tone="error" status>
           <p>{copy[error]}</p>
         </StatePanel>
       ) : null}

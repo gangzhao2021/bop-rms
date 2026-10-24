@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 /** WP-2423 / DEC-RECIPE-AUTHORING: RECIPE-LIST / RECIPE-EDITOR view contract and same-origin client. */
 export type RecipeErrorCode =
@@ -21,7 +22,7 @@ export class RecipePageError extends Error {
     readonly code: RecipeErrorCode,
     readonly line: number | null = null,
   ) {
-    super("Recipes are unavailable");
+    super(t("Recipes are unavailable"));
     this.name = "RecipePageError";
   }
 }
@@ -103,10 +104,10 @@ export function allergenText(value: {
   readonly contains: readonly string[];
   readonly mayContain: readonly string[];
 }): string {
-  if (!value.contains.length && !value.mayContain.length) return "No priority allergens";
+  if (!value.contains.length && !value.mayContain.length) return t("No priority allergens");
   return [
     value.contains.length ? "Contains " + value.contains.join(", ") : null,
-    value.mayContain.length ? "May contain " + value.mayContain.join(", ") : null,
+    value.mayContain.length ? t("May contain ") + value.mayContain.join(", ") : null,
   ]
     .filter(Boolean)
     .join(" · ");

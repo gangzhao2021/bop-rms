@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import {
   FULL_SIGN_IN_REQUIRED,
   responseNeedsFullSignIn,
@@ -10,7 +11,7 @@ export class OrdinaryRefundClientError extends Error {
     readonly code:
       "Denied" | FullSignInRequired | "Conflict" | "Changed" | "Unavailable" | "OutcomeUnknown",
   ) {
-    super("Refund request could not be confirmed");
+    super(t("Refund request could not be confirmed"));
   }
 }
 /** The server was briefly busy (503 retry_later): a read is tried once more. */

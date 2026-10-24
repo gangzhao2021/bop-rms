@@ -1,3 +1,4 @@
+import { countOf, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
@@ -18,15 +19,14 @@ import { WorkspacePage } from "./WorkspacePage.js";
 
 const money = formatCad;
 export const channelLabel: Record<StoreReportChannel, string> = {
-  Online: "Online (card)",
-  CardMachine: "Store card machine",
+  Online: t("Online (card)"),
+  CardMachine: t("Store card machine"),
 };
 export const orderTypeLabel: Record<StoreReportOrderType, string> = {
   DineIn: "Dine-in",
   Pickup: "Pickup",
   Counter: "Counter",
 };
-const plural = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? one : many}`;
 
 /** "2026-10-14" → the date `days` earlier/later, by calendar arithmetic in UTC (no time zone). */
 export function shiftDate(date: string, days: number): string {
@@ -36,7 +36,7 @@ export function shiftDate(date: string, days: number): string {
 }
 function rangeLabel(view: StoreReportsView): string {
   return view.from === view.to
-    ? `Business day ${businessDateText(view.from)}`
+    ? t("Business day {from}", { from: businessDateText(view.from) })
     : `${businessDateText(view.from)} – ${businessDateText(view.to)}`;
 }
 
@@ -88,33 +88,34 @@ function Table({
 
 function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
   const lines: [string, string, boolean?][] = [
-    ["Gross sales", money(summary.grossSalesMinor)],
+    [t("Gross sales"), money(summary.grossSalesMinor)],
     ["Discounts", "−" + money(summary.discountsMinor)],
-    ["Net sales", money(summary.netSalesMinor), true],
+    [t("Net sales"), money(summary.netSalesMinor), true],
   ];
   if (summary.serviceChargesMinor !== "0")
-    lines.push(["Service charges", money(summary.serviceChargesMinor)]);
-  for (const tax of summary.taxes) lines.push([`Tax · ${tax.label}`, money(tax.amountMinor)]);
+    lines.push([t("Service charges"), money(summary.serviceChargesMinor)]);
+  for (const tax of summary.taxes)
+    lines.push([t("Tax · {label}", { label: tax.label }), money(tax.amountMinor)]);
   if (summary.taxes.length !== 1) lines.push(["Tax", money(summary.taxMinor)]);
   lines.push(["Tips", money(summary.tipsMinor)]);
   if (summary.unmatchedMinor !== "0")
-    lines.push(["Paid but not matched to items", money(summary.unmatchedMinor)]);
-  lines.push(["Total collected", money(summary.collectedMinor), true]);
+    lines.push([t("Paid but not matched to items"), money(summary.unmatchedMinor)]);
+  lines.push([t("Total collected"), money(summary.collectedMinor), true]);
   lines.push([
-    `Refunds (${plural(summary.refundCount, "refund")})`,
+    t("Refunds ({refundCount})", { refundCount: countOf(summary.refundCount, "refund") }),
     "−" + money(summary.refundsMinor),
   ]);
   if (summary.refundsMinor !== "0") {
-    lines.push(["  of which sales", money(summary.refunds.salesMinor)]);
-    lines.push(["  of which tax", money(summary.refunds.taxMinor)]);
-    lines.push(["  of which tips", money(summary.refunds.tipsMinor)]);
+    lines.push([t("  of which sales"), money(summary.refunds.salesMinor)]);
+    lines.push([t("  of which tax"), money(summary.refunds.taxMinor)]);
+    lines.push([t("  of which tips"), money(summary.refunds.tipsMinor)]);
     if (summary.refunds.serviceChargesMinor !== "0")
-      lines.push(["  of which service charges", money(summary.refunds.serviceChargesMinor)]);
+      lines.push([t("  of which service charges"), money(summary.refunds.serviceChargesMinor)]);
     if (summary.refunds.notItemizedMinor !== "0")
-      lines.push(["  not split by item", money(summary.refunds.notItemizedMinor)]);
+      lines.push([t("  not split by item"), money(summary.refunds.notItemizedMinor)]);
   }
-  lines.push(["Net collected", money(summary.netCollectedMinor), true]);
-  lines.push(["Net sales after refunds", money(summary.netSalesAfterRefundsMinor)]);
+  lines.push([t("Net collected"), money(summary.netCollectedMinor), true]);
+  lines.push([t("Net sales after refunds"), money(summary.netSalesAfterRefundsMinor)]);
   return (
     <dl className="store-reports__lines">
       {lines.map(([term, value, strong]) => (
@@ -159,7 +160,7 @@ function ReportSection({
             disabled={downloading !== null}
             aria-label={`Download ${title.toLowerCase()} as CSV`}
           >
-            {downloading === report ? "Preparing…" : "Download CSV"}
+            {downloading === report ? t("Preparing…") : t("Download CSV")}
           </button>
         )}
       </header>
@@ -189,84 +190,108 @@ export function StoreReports({
           <h3 id="store-reports-range">{rangeLabel(view)}</h3>
           {view.includesOpenDay ? (
             <span className="status-chip" data-state="open">
-              Today so far
+              {t("Today so far")}
             </span>
           ) : null}
         </header>
         <p className="bop-muted">
-          {storeTime(view.startsAt, view.timeZone, true)} to{" "}
-          {storeTime(view.endsAt, view.timeZone, true)} (store time). A sale counts on the business
-          day it was paid and a refund on the day the money went back, the same as the day-end
-          settlement. Orders cancelled before payment are not sales.
+          {t(
+            "{startsAt} to {endsAt} (store time). A sale counts on the business day it was paid and a refund on the day the money went back, the same as the day-end settlement. Orders cancelled before payment are not sales.",
+            {
+              startsAt: storeTime(view.startsAt, view.timeZone, true),
+              endsAt: storeTime(view.endsAt, view.timeZone, true),
+            },
+          )}
         </p>
         {r.matchesSettlement && view.includesOpenDay ? (
           // v15 store-day L6: an open business day has no day-end settlement yet.
           <p role="status" className="store-reports__match">
             {view.days.some((day) => day.status === "Closed")
-              ? "Closed days match the day-end settlement. Today is checked against it when the day closes."
-              : "Checked against the day-end settlement when the day closes."}
+              ? t(
+                  "Closed days match the day-end settlement. Today is checked against it when the day closes.",
+                )
+              : t("Checked against the day-end settlement when the day closes.")}
           </p>
         ) : r.matchesSettlement ? (
           <p role="status" className="store-reports__match">
-            Matches the day-end settlement: {money(r.settlementCollectedMinor)} collected,{" "}
-            {money(r.settlementRefundedMinor)} refunded.
+            {t(
+              "Matches the day-end settlement: {settlementCollectedMinor} collected, {settlementRefundedMinor} refunded.",
+              {
+                settlementCollectedMinor: money(r.settlementCollectedMinor),
+                settlementRefundedMinor: money(r.settlementRefundedMinor),
+              },
+            )}
           </p>
         ) : (
           <p role="alert" className="command-error">
-            These totals differ from the day-end settlement ({money(r.reportCollectedMinor)} vs{" "}
-            {money(r.settlementCollectedMinor)} collected, {money(r.reportRefundedMinor)} vs{" "}
-            {money(r.settlementRefundedMinor)} refunded). Refresh; if it stays, use the{" "}
-            <Link to="/app/operations/payment-reconciliation">Settlement</Link> figures and tell the
-            Owner.
+            {t(
+              "These totals differ from the day-end settlement ({reportCollectedMinor} vs {settlementCollectedMinor} collected, {reportRefundedMinor} vs {settlementRefundedMinor} refunded). Refresh; if it stays, use the",
+              {
+                reportCollectedMinor: money(r.reportCollectedMinor),
+                settlementCollectedMinor: money(r.settlementCollectedMinor),
+                reportRefundedMinor: money(r.reportRefundedMinor),
+                settlementRefundedMinor: money(r.settlementRefundedMinor),
+              },
+            )}{" "}
+            <Link to="/app/operations/payment-reconciliation">{t("Settlement")}</Link>{" "}
+            {t("figures and tell the Owner.")}
           </p>
         )}
         {r.pendingOnlineRefundCount > 0 ? (
           <p role="note">
-            {plural(r.pendingOnlineRefundCount, "online refund")}{" "}
-            {r.pendingOnlineRefundCount === 1 ? "is" : "are"} still waiting for the card company to
-            confirm and {r.pendingOnlineRefundCount === 1 ? "is" : "are"} not counted yet.
+            {r.pendingOnlineRefundCount === 1
+              ? t(
+                  "1 online refund is still waiting for the card company to confirm and is not counted yet.",
+                )
+              : t(
+                  "{count} online refunds are still waiting for the card company to confirm and are not counted yet.",
+                  { count: r.pendingOnlineRefundCount },
+                )}
           </p>
         ) : null}
       </section>
-      <ul className="overview-counts store-reports__totals" aria-label="Totals">
+      <ul className="overview-counts store-reports__totals" aria-label={t("Totals")}>
         <li>
-          <span className="overview-count__label">Net sales</span>
+          <span className="overview-count__label">{t("Net sales")}</span>
           <strong className="overview-count__value">{money(s.netSalesMinor)}</strong>
           <span className="overview-count__detail">
-            {plural(s.orderCount, "order")} · {plural(s.paymentCount, "payment")}
+            {countOf(s.orderCount, "order")} · {countOf(s.paymentCount, "payment")}
           </span>
         </li>
         <li>
-          <span className="overview-count__label">Tax</span>
+          <span className="overview-count__label">{t("Tax")}</span>
           <strong className="overview-count__value">{money(s.taxMinor)}</strong>
-          <span className="overview-count__detail">Collected on sales</span>
+          <span className="overview-count__detail">{t("Collected on sales")}</span>
         </li>
         <li>
-          <span className="overview-count__label">Tips</span>
+          <span className="overview-count__label">{t("Tips")}</span>
           <strong className="overview-count__value">{money(s.tipsMinor)}</strong>
-          <span className="overview-count__detail">Before refunds</span>
+          <span className="overview-count__detail">{t("Before refunds")}</span>
         </li>
         <li>
-          <span className="overview-count__label">Net collected</span>
+          <span className="overview-count__label">{t("Net collected")}</span>
           <strong className="overview-count__value">{money(s.netCollectedMinor)}</strong>
           <span className="overview-count__detail">
-            {money(s.collectedMinor)} collected − {money(s.refundsMinor)} refunded
+            {t("{collectedMinor} collected − {refundsMinor} refunded", {
+              collectedMinor: money(s.collectedMinor),
+              refundsMinor: money(s.refundsMinor),
+            })}
           </span>
         </li>
       </ul>
       <ReportSection
         id="store-reports-summary"
-        title="Sales summary"
+        title={t("Sales summary")}
         report="summary"
         onDownload={download}
         downloading={downloading}
       >
         <SummaryLines summary={s} />
-        <h4>By payment</h4>
+        <h4>{t("By payment")}</h4>
         <Table
-          label="Sales by payment"
+          label={t("Sales by payment")}
           columns={["Payment", "Payments", "Collected", "Tips", "Refunds", "Net"]}
-          empty="No payments in this period."
+          empty={t("No payments in this period.")}
           rows={view.byChannel
             .filter((entry) => entry.paymentCount > 0 || entry.refundCount > 0)
             .map((entry) => [
@@ -278,11 +303,11 @@ export function StoreReports({
               money(entry.netCollectedMinor),
             ])}
         />
-        <h4>By order type</h4>
+        <h4>{t("By order type")}</h4>
         <Table
-          label="Sales by order type"
+          label={t("Sales by order type")}
           columns={["Order type", "Orders", "Net sales", "Tax", "Tips", "Refunds", "Net collected"]}
-          empty="No orders in this period."
+          empty={t("No orders in this period.")}
           rows={view.byOrderType
             .filter((entry) => entry.paymentCount > 0 || entry.refundCount > 0)
             .map((entry) => [
@@ -297,13 +322,13 @@ export function StoreReports({
         />
         {view.days.length > 1 ? (
           <>
-            <h4>By day</h4>
+            <h4>{t("By day")}</h4>
             <Table
-              label="Sales by day"
+              label={t("Sales by day")}
               columns={["Day", "Payments", "Net sales", "Tax", "Tips", "Refunds", "Net collected"]}
-              empty="No days."
+              empty={t("No days.")}
               rows={view.days.map((day) => [
-                businessDateText(day.businessDate) + (day.status === "Open" ? " (so far)" : ""),
+                businessDateText(day.businessDate) + (day.status === "Open" ? t(" (so far)") : ""),
                 day.summary.paymentCount,
                 money(day.summary.netSalesMinor),
                 money(day.summary.taxMinor),
@@ -317,14 +342,16 @@ export function StoreReports({
       </ReportSection>
       <ReportSection
         id="store-reports-items"
-        title="Item sales"
-        description="Each menu item and size, before tax. Options chosen with an item are included in its price. Refunds include dishes cancelled after payment."
+        title={t("Item sales")}
+        description={t(
+          "Each menu item and size, before tax. Options chosen with an item are included in its price. Refunds include dishes cancelled after payment.",
+        )}
         report="items"
         onDownload={download}
         downloading={downloading}
       >
         <Table
-          label="Item sales"
+          label={t("Item sales")}
           columns={[
             "Item",
             "Sold",
@@ -335,7 +362,7 @@ export function StoreReports({
             "Refunds",
             "Net after refunds",
           ]}
-          empty="No items sold or refunded in this period."
+          empty={t("No items sold or refunded in this period.")}
           rows={view.items.map((row) => [
             row.name,
             row.quantitySold,
@@ -350,16 +377,16 @@ export function StoreReports({
       </ReportSection>
       <ReportSection
         id="store-reports-hours"
-        title="Sales by hour"
+        title={t("Sales by hour")}
         description={`By the store-time hour the payment was taken${view.days.length > 1 ? ", all days together" : ""}.`}
         report="hourly"
         onDownload={download}
         downloading={downloading}
       >
         <Table
-          label="Sales by hour"
+          label={t("Sales by hour")}
           columns={["Hour", "Payments", "Net sales", "Tax", "Tips", "Collected"]}
-          empty="No payments in this period."
+          empty={t("No payments in this period.")}
           rows={view.hours.map((row) => [
             row.hour,
             row.paymentCount,
@@ -372,16 +399,18 @@ export function StoreReports({
       </ReportSection>
       <ReportSection
         id="store-reports-tips"
-        title="Tips"
-        description="Tips are recorded with each payment. The system does not record which staff member earned them; share them by your own tip-out rules."
+        title={t("Tips")}
+        description={t(
+          "Tips are recorded with each payment. The system does not record which staff member earned them; share them by your own tip-out rules.",
+        )}
         report="tips"
         onDownload={download}
         downloading={downloading}
       >
         <Table
-          label="Tips by day and payment"
+          label={t("Tips by day and payment")}
           columns={["Day", "Payment", "Tips", "Refunded", "Net tips"]}
-          empty="No tips in this period."
+          empty={t("No tips in this period.")}
           rows={view.tips.flatMap((day) =>
             day.channels
               .filter((entry) => entry.tipsMinor !== "0" || entry.refundedMinor !== "0")
@@ -396,7 +425,7 @@ export function StoreReports({
         />
       </ReportSection>
       {view.mayExport ? null : (
-        <p className="bop-muted">Downloading reports needs the export permission.</p>
+        <p className="bop-muted">{t("Downloading reports needs the export permission.")}</p>
       )}
     </div>
   );
@@ -511,7 +540,7 @@ export function StoreReportsPage({
     draft.to > shiftDate(draft.from, 30);
   return (
     <WorkspacePage
-      title="Reports"
+      title={t("Reports")}
       meta={storeLabel}
       status={view ? <Freshness status="Fresh" at={view.generatedAt} /> : null}
       actions={
@@ -520,20 +549,20 @@ export function StoreReportsPage({
           onClick={() => setRevision((value) => value + 1)}
           disabled={range === null}
         >
-          Refresh
+          {t("Refresh")}
         </button>
       }
     >
       <form
         className="list-filters store-reports__picker"
-        aria-label="Report period"
+        aria-label={t("Report period")}
         onSubmit={(event) => {
           event.preventDefault();
           if (!invalid) show(draft.from, draft.to);
         }}
       >
         <label>
-          From
+          {t("From")}
           <input
             type="date"
             name="from"
@@ -543,7 +572,7 @@ export function StoreReportsPage({
           />
         </label>
         <label>
-          To
+          {t("To")}
           <input
             type="date"
             name="to"
@@ -553,24 +582,24 @@ export function StoreReportsPage({
           />
         </label>
         <button type="submit" disabled={invalid}>
-          Show
+          {t("Show")}
         </button>
         {today === null ? null : (
-          <div className="store-reports__presets" role="group" aria-label="Quick periods">
+          <div className="store-reports__presets" role="group" aria-label={t("Quick periods")}>
             <button type="button" onClick={() => show(today, today)}>
-              Today
+              {t("Today")}
             </button>
             <button type="button" onClick={() => show(shiftDate(today, -1), shiftDate(today, -1))}>
-              Yesterday
+              {t("Yesterday")}
             </button>
             <button type="button" onClick={() => show(shiftDate(today, -6), today)}>
-              Last 7 days
+              {t("Last 7 days")}
             </button>
           </div>
         )}
         {invalid && draft.from !== "" && draft.to !== "" ? (
           <p className="bop-muted store-reports__hint" role="status">
-            Choose up to 31 days, ending no later than today&apos;s business day.
+            {t("Choose up to 31 days, ending no later than today's business day.")}
           </p>
         ) : null}
       </form>
@@ -580,26 +609,31 @@ export function StoreReportsPage({
         </p>
       )}
       {state.kind === "Loading" ? (
-        <StatePanel heading="Loading" tone="neutral" status>
-          <p>Reading the store&apos;s sales…</p>
+        <StatePanel heading={t("Loading")} tone="neutral" status>
+          <p>{t("Reading the store's sales…")}</p>
         </StatePanel>
       ) : state.kind === "PermissionDenied" ? (
         <StatePanel heading={noAccessHeading} tone="error" status>
           <p>{pageAccessDeniedText}</p>
         </StatePanel>
       ) : state.kind === "Busy" ? (
-        <StatePanel heading="Busy for a moment" tone="neutral" status>
+        <StatePanel heading={t("Busy for a moment")} tone="neutral" status>
           <p>
             {busyRetries >= 3
-              ? "The store's records are still busy with orders and payments. Refresh in a minute."
-              : "The store's records are busy with orders and payments. Trying again in a few seconds…"}
+              ? t(
+                  "The store's records are still busy with orders and payments. Refresh in a minute.",
+                )
+              : t(
+                  "The store's records are busy with orders and payments. Trying again in a few seconds…",
+                )}
           </p>
         </StatePanel>
       ) : state.kind === "Unavailable" ? (
-        <StatePanel heading="Reports unavailable" tone="error" status>
+        <StatePanel heading={t("Reports unavailable")} tone="error" status>
           <p>
-            The reports could not be read. Check your connection and refresh. A period before the
-            Store&apos;s setup took effect cannot be shown.
+            {t(
+              "The reports could not be read. Check your connection and refresh. A period before the Store's setup took effect cannot be shown.",
+            )}
           </p>
         </StatePanel>
       ) : view ? (

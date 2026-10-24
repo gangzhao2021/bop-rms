@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -23,19 +24,21 @@ import {
 /** WP-2423 slice 4.3: what each option costs on each product; another approver publishes, or the
  * author alone as sole operator (DEC-SOLE-OPERATOR-APPROVAL). */
 const copy: Record<OptionPriceErrorCode | "Loading", string> = {
-  Loading: "Loading option prices…",
-  PermissionDenied: "You do not have permission for this price action.",
+  Loading: t("Loading option prices…"),
+  PermissionDenied: t("You do not have permission for this price action."),
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
-  NotFound: "That option is no longer offered on the product. Refresh and check.",
-  Conflict: "Prices changed since you opened the page. Refresh and check again.",
-  ApprovalRequired:
+  NotFound: t("That option is no longer offered on the product. Refresh and check."),
+  Conflict: t("Prices changed since you opened the page. Refresh and check again."),
+  ApprovalRequired: t(
     "A price you set yourself must be published by another person who may approve prices.",
-  Invalid: "A price is not valid. Enter an amount such as 0.75, or 0 for no charge.",
-  SoleOperatorNotInEffect:
+  ),
+  Invalid: t("A price is not valid. Enter an amount such as 0.75, or 0 for no charge."),
+  SoleOperatorNotInEffect: t(
     "Someone else now holds price approval, so they must publish these prices. Refresh to see who.",
-  NeedsReverification: "Confirm it is you with your authenticator code, then publish again.",
-  Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
-  Unavailable: "Option prices are unavailable.",
+  ),
+  NeedsReverification: t("Confirm it is you with your authenticator code, then publish again."),
+  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Unavailable: t("Option prices are unavailable."),
 };
 const key = (binding: string, option: string) => binding + ":" + option;
 /** "$" for CAD in en-CA (the amount itself stays an exact decimal string, never a float). */
@@ -88,7 +91,7 @@ export function StoreOptionPricesPage({
   if (state.kind !== "Found")
     return (
       <StatePanel
-        heading={state.kind === "PermissionDenied" ? noAccessHeading : "Option prices"}
+        heading={state.kind === "PermissionDenied" ? noAccessHeading : t("Option prices")}
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
@@ -176,8 +179,10 @@ export function StoreOptionPricesPage({
         })),
       },
       soleOperatorOn
-        ? "Prices saved. They take effect when you publish them below."
-        : "Prices saved. They take effect when another person who may approve prices publishes them.",
+        ? t("Prices saved. They take effect when you publish them below.")
+        : t(
+            "Prices saved. They take effect when another person who may approve prices publishes them.",
+          ),
     );
   const publish = () =>
     void send(
@@ -189,7 +194,7 @@ export function StoreOptionPricesPage({
           expectedAggregateVersion: option.aggregateVersion ?? 1,
         })),
       },
-      "Prices published. Customers pay them from now on.",
+      t("Prices published. Customers pay them from now on."),
     );
   const publishOwn = () =>
     void send(
@@ -202,7 +207,7 @@ export function StoreOptionPricesPage({
         })),
         approvalMode: "SoleOperator",
       },
-      "Prices published, approved by you alone. Customers pay them from now on.",
+      t("Prices published, approved by you alone. Customers pay them from now on."),
     );
   const applyEverywhere = (setName: string, optionName: string, text: string) => {
     setEverywhere((current) => ({ ...current, [setName + " · " + optionName]: text }));
@@ -216,28 +221,34 @@ export function StoreOptionPricesPage({
   };
 
   return (
-    <AppFrame title="Option prices" description="">
+    <AppFrame title={t("Option prices")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Option prices · Brand</p>
-          <h2>Option prices</h2>
+          <p className="bop-eyebrow">{t("Option prices · Brand")}</p>
+          <h2>{t("Option prices")}</h2>
           <p>
-            What each option adds to a product's price, for every size, pickup and dine-in. Enter 0
-            for no charge.{" "}
-            {soleOperatorOn
-              ? "You run this business alone (sole operator), so you may publish your own new prices after confirming it is you."
-              : "A new price takes effect when another person who may approve prices publishes it."}{" "}
-            An option without a published price cannot be ordered. Source as of{" "}
+            {t(
+              "What each option adds to a product's price, for every size, pickup and dine-in. Enter 0 for no charge. {value} An option without a published price cannot be ordered. Source as of",
+              {
+                value: soleOperatorOn
+                  ? t(
+                      "You run this business alone (sole operator), so you may publish your own new prices after confirming it is you.",
+                    )
+                  : t(
+                      "A new price takes effect when another person who may approve prices publishes it.",
+                    ),
+              },
+            )}{" "}
             <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
-        <Link to="/app/commerce/option-sets">Options</Link>
+        <Link to="/app/commerce/option-sets">{t("Options")}</Link>
       </header>
       {message?.fullSignIn === true && csrf !== undefined ? (
         <FullSignInPrompt csrf={csrf} fetcher={fetcher} />
       ) : message ? (
         <StatePanel
-          heading={message.tone === "error" ? "Not done" : "Done"}
+          heading={message.tone === "error" ? t("Not done") : t("Done")}
           tone={message.tone}
           status
         >
@@ -245,50 +256,55 @@ export function StoreOptionPricesPage({
         </StatePanel>
       ) : null}
       {rows.length === 0 ? (
-        <StatePanel heading="No options on products" status>
-          <p>Add option sets to products on the product page first.</p>
+        <StatePanel heading={t("No options on products")} status>
+          <p>{t("Add option sets to products on the product page first.")}</p>
         </StatePanel>
       ) : null}
       {missing.length > 0 ? (
-        <StatePanel heading="Prices needed" tone="error" status>
+        <StatePanel heading={t("Prices needed")} tone="error" status>
           <p>
-            {missing.length} option{missing.length === 1 ? "" : "s"} on products have no published
-            price and cannot be ordered yet.
+            {t(
+              "{length} option{value} on products have no published price and cannot be ordered yet.",
+              { length: missing.length, value: missing.length === 1 ? "" : "s" },
+            )}
           </p>
         </StatePanel>
       ) : null}
       {view.permissions.mayApprove && publishable.length > 0 ? (
         <section className="detail-section" aria-labelledby="publish-prices">
-          <h3 id="publish-prices">Waiting for approval</h3>
+          <h3 id="publish-prices">{t("Waiting for approval")}</h3>
           <ul>
             {publishable.map(({ product, set, option }) => (
               <li key={key(set.bindingReference, option.optionReference)}>
                 {product.name} · {set.name} · {option.name}:{" "}
-                {option.priceMinor === null ? "no price" : money(option.priceMinor)} →{" "}
+                {option.priceMinor === null ? t("no price") : money(option.priceMinor)} →{" "}
                 {money(option.pending?.priceMinor ?? "0")}
               </li>
             ))}
           </ul>
           <button type="button" disabled={busy} onClick={publish}>
             {pending?.action === "Publish" && pending.approvalMode === undefined
-              ? "Retry publish"
-              : `Publish ${publishable.length} price${publishable.length === 1 ? "" : "s"}`}
+              ? t("Retry publish")
+              : t("Publish {length} price{value}", {
+                  length: publishable.length,
+                  value: publishable.length === 1 ? "" : "s",
+                })}
           </button>
         </section>
       ) : null}
       {view.permissions.mayApprove && ownWaiting.length > 0 ? (
         <section className="detail-section" aria-labelledby="publish-own-prices">
-          <h3 id="publish-own-prices">Your prices waiting for approval</h3>
+          <h3 id="publish-own-prices">{t("Your prices waiting for approval")}</h3>
           <SoleOperatorSelfApproval
             gate={view.soleOperator}
             csrf={csrf}
             fetcher={fetcher}
-            what="these prices"
-            permissionName="price approval"
+            what={t("these prices")}
+            permissionName={t("price approval")}
             busy={busy}
             actionLabel={
               pending?.action === "Publish" && pending.approvalMode === "SoleOperator"
-                ? "Retry publish"
+                ? t("Retry publish")
                 : `Publish ${ownWaiting.length} price${ownWaiting.length === 1 ? "" : "s"} on my own`
             }
             summary={
@@ -296,7 +312,7 @@ export function StoreOptionPricesPage({
                 {ownWaiting.map(({ product, set, option }) => (
                   <li key={key(set.bindingReference, option.optionReference)}>
                     {product.name} · {set.name} · {option.name}:{" "}
-                    {option.priceMinor === null ? "no price" : money(option.priceMinor)} →{" "}
+                    {option.priceMinor === null ? t("no price") : money(option.priceMinor)} →{" "}
                     {money(option.pending?.priceMinor ?? "0")}
                   </li>
                 ))}
@@ -308,20 +324,22 @@ export function StoreOptionPricesPage({
       ) : null}
       {view.permissions.mayEdit && shared.length > 0 ? (
         <section className="detail-section" aria-labelledby="price-everywhere">
-          <h3 id="price-everywhere">Same price on every product</h3>
-          <p>Fills the price below for each product that offers the option; review, then save.</p>
+          <h3 id="price-everywhere">{t("Same price on every product")}</h3>
+          <p>
+            {t("Fills the price below for each product that offers the option; review, then save.")}
+          </p>
           <table>
             <thead>
               <tr>
-                <th>Option</th>
-                <th>Price</th>
+                <th>{t("Option")}</th>
+                <th>{t("Price")}</th>
               </tr>
             </thead>
             <tbody>
               {shared.map(([label, item]) => (
                 <tr key={label}>
                   <td>{label}</td>
-                  <td data-label="Price">
+                  <td data-label={t("Price")}>
                     <input
                       aria-label={`Price of ${label} on every product`}
                       inputMode="decimal"
@@ -343,10 +361,10 @@ export function StoreOptionPricesPage({
           <table>
             <thead>
               <tr>
-                <th>Option</th>
-                <th>Price now</th>
-                <th>Waiting for approval</th>
-                <th>New price</th>
+                <th>{t("Option")}</th>
+                <th>{t("Price now")}</th>
+                <th>{t("Waiting for approval")}</th>
+                <th>{t("New price")}</th>
               </tr>
             </thead>
             <tbody>
@@ -358,18 +376,18 @@ export function StoreOptionPricesPage({
                     <tr key={id}>
                       <td>
                         {label}
-                        {option.offered ? "" : " (not offered)"}
+                        {option.offered ? "" : t(" (not offered)")}
                       </td>
-                      <td data-label="Price now">
-                        {option.priceMinor === null ? "No price" : money(option.priceMinor)}
+                      <td data-label={t("Price now")}>
+                        {option.priceMinor === null ? t("No price") : money(option.priceMinor)}
                       </td>
-                      <td data-label="Waiting for approval">
+                      <td data-label={t("Waiting for approval")}>
                         {option.pending === null
                           ? "—"
                           : money(option.pending.priceMinor) +
                             (option.pending.byViewer ? " (yours)" : "")}
                       </td>
-                      <td data-label="New price">
+                      <td data-label={t("New price")}>
                         {view.permissions.mayEdit ? (
                           <input
                             aria-label={`New price of ${label} on ${product.name}`}
@@ -399,8 +417,11 @@ export function StoreOptionPricesPage({
           {invalid ? <p>{copy.Invalid}</p> : null}
           <button type="button" disabled={busy || invalid || toSave.length === 0} onClick={save}>
             {pending?.action === "SetPrices"
-              ? "Retry"
-              : `Save ${toSave.length} price${toSave.length === 1 ? "" : "s"}`}
+              ? t("Retry")
+              : t("Save {length} price{value}", {
+                  length: toSave.length,
+                  value: toSave.length === 1 ? "" : "s",
+                })}
           </button>
         </>
       ) : null}

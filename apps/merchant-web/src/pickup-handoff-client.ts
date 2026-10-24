@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import type { PickupVerification } from "./pickup-proof-client.js";
 import {
   parsePickupExecution,
@@ -22,7 +23,7 @@ export class PickupHandoffClientError extends Error {
   constructor(
     readonly code: "Invalid" | "PermissionDenied" | "Conflict" | "Rejected" | "OutcomeUnknown",
   ) {
-    super("Pickup handoff could not be confirmed");
+    super(t("Pickup handoff could not be confirmed"));
     this.name = "PickupHandoffClientError";
   }
 }

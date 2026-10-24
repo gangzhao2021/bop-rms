@@ -1,3 +1,4 @@
+import { LanguageSwitch, t } from "./i18n/i18n.js";
 import { CurrentOrderDetailRoute, CurrentOrderQueuePage } from "./CurrentOrderQueuePage.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import {
@@ -479,8 +480,8 @@ function SessionPending({
 }) {
   if (!pending) return <>{children}</>;
   return (
-    <StatePanel heading="Loading" tone="neutral" status>
-      <p>Loading this page…</p>
+    <StatePanel heading={t("Loading")} tone="neutral" status>
+      <p>{t("Loading this page…")}</p>
     </StatePanel>
   );
 }
@@ -681,6 +682,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           demo === null ? (
             <>
               <StaffSwitchButton />
+              <LanguageSwitch className="workspace-sidebar__language" />
               <StaffPinControls
                 csrf={state.csrf}
                 timeZone={state.workspace.selectedScope.timeZone}
@@ -698,8 +700,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
   const routeTree = (
     <Suspense
       fallback={
-        <StatePanel heading="Loading" tone="neutral" status>
-          <p>Loading this page…</p>
+        <StatePanel heading={t("Loading")} tone="neutral" status>
+          <p>{t("Loading this page…")}</p>
         </StatePanel>
       }
     >
@@ -743,7 +745,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
               {state.kind === "Ready" && !state.switching ? (
                 <TaskInboxPage key={state.workspace.selectedScope.storeReference + state.csrf} />
               ) : (
-                <AppFrame title="Tasks" description="TASK-INBOX">
+                <AppFrame title={t("Tasks")} description="TASK-INBOX">
                   <TaskInboxStatePanel
                     state={
                       state.kind === "Offline"
@@ -792,8 +794,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     <StoreReceiptPrivacyPanel csrf={state.csrf} />
                   </StoreSetupDraftPage>
                 ) : (
-                  <StatePanel heading="Store setup unavailable" status>
-                    <p>A current merchant session and selected Store are required.</p>
+                  <StatePanel heading={t("Store setup unavailable")} status>
+                    <p>{t("A current merchant session and selected Store are required.")}</p>
                   </StatePanel>
                 )}
               </LocalDemoRoute>
@@ -814,8 +816,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     csrf={state.csrf}
                   />
                 ) : (
-                  <StatePanel heading="Hours and service unavailable" status>
-                    <p>A current merchant session and Store are required.</p>
+                  <StatePanel heading={t("Hours and service unavailable")} status>
+                    <p>{t("A current merchant session and Store are required.")}</p>
                   </StatePanel>
                 )}
               </LocalDemoRoute>
@@ -834,8 +836,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   storeLabel={state.workspace.selectedScope.storeLabel}
                 />
               ) : (
-                <StatePanel heading="Store capabilities unavailable" status>
-                  <p>A current merchant session and selected Store are required.</p>
+                <StatePanel heading={t("Store capabilities unavailable")} status>
+                  <p>{t("A current merchant session and selected Store are required.")}</p>
                 </StatePanel>
               )}
             </SessionPending>
@@ -1238,8 +1240,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   csrf={state.csrf}
                 />
               ) : (
-                <StatePanel heading="Tax Configuration unavailable" status>
-                  <p>A current merchant session and selected Store are required.</p>
+                <StatePanel heading={t("Tax Configuration unavailable")} status>
+                  <p>{t("A current merchant session and selected Store are required.")}</p>
                 </StatePanel>
               )}
             </SessionPending>
@@ -1306,8 +1308,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     timeZone={state.workspace.selectedScope.timeZone}
                   />
                 ) : (
-                  <StatePanel heading="Order Queue unavailable" status>
-                    <p>A current merchant session and Store are required.</p>
+                  <StatePanel heading={t("Order Queue unavailable")} status>
+                    <p>{t("A current merchant session and Store are required.")}</p>
                   </StatePanel>
                 )}
               </LocalDemoRoute>
@@ -1334,8 +1336,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   }
                 />
               ) : (
-                <StatePanel heading="Counter order unavailable" status>
-                  <p>A current merchant session and Store are required.</p>
+                <StatePanel heading={t("Counter order unavailable")} status>
+                  <p>{t("A current merchant session and Store are required.")}</p>
                 </StatePanel>
               )}
             </SessionPending>
@@ -1660,9 +1662,9 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
               ) : demo !== null ? (
                 <OperationalDashboardPage />
               ) : (
-                <WorkspacePage title="Reports">
-                  <StatePanel heading="Reports unavailable" tone="error" status>
-                    <p>A current merchant session and Store are required.</p>
+                <WorkspacePage title={t("Reports")}>
+                  <StatePanel heading={t("Reports unavailable")} tone="error" status>
+                    <p>{t("A current merchant session and Store are required.")}</p>
                   </StatePanel>
                 </WorkspacePage>
               )}
@@ -1797,8 +1799,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     timeZone={state.workspace.selectedScope.timeZone}
                   />
                 ) : (
-                  <StatePanel heading="Order unavailable" status>
-                    <p>A current merchant session and Store are required.</p>
+                  <StatePanel heading={t("Order unavailable")} status>
+                    <p>{t("A current merchant session and Store are required.")}</p>
                   </StatePanel>
                 )}
               </LocalDemoRoute>
@@ -1818,8 +1820,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     storeLabel={state.workspace.selectedScope.storeLabel}
                   />
                 ) : (
-                  <StatePanel heading="Payment unavailable" status>
-                    <p>Sign in and select a Store to continue.</p>
+                  <StatePanel heading={t("Payment unavailable")} status>
+                    <p>{t("Sign in and select a Store to continue.")}</p>
                   </StatePanel>
                 )}
               </SessionPending>
@@ -1850,8 +1852,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     onKnownOperator={onKnownKitchenOperator}
                   />
                 ) : (
-                  <StatePanel heading="Kitchen unavailable">
-                    <p>A current merchant session and Store are required.</p>
+                  <StatePanel heading={t("Kitchen unavailable")}>
+                    <p>{t("A current merchant session and Store are required.")}</p>
                   </StatePanel>
                 )}
               </LocalDemoRoute>
@@ -1878,8 +1880,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   }
                 />
               ) : (
-                <StatePanel heading="Dining unavailable">
-                  <p>A current merchant session and Store are required.</p>
+                <StatePanel heading={t("Dining unavailable")}>
+                  <p>{t("A current merchant session and Store are required.")}</p>
                 </StatePanel>
               )}
             </SessionPending>
@@ -1908,8 +1910,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     onKnownOperator={onKnownKitchenOperator}
                   />
                 ) : (
-                  <StatePanel heading="Kitchen work item unavailable">
-                    <p>A current merchant session and Store are required.</p>
+                  <StatePanel heading={t("Kitchen work item unavailable")}>
+                    <p>{t("A current merchant session and Store are required.")}</p>
                   </StatePanel>
                 )}
               </LocalDemoRoute>
@@ -1928,8 +1930,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   storeLabel={state.workspace.selectedScope.storeLabel}
                 />
               ) : (
-                <StatePanel heading="Pickup Queue unavailable">
-                  <p>A current merchant session and Store are required.</p>
+                <StatePanel heading={t("Pickup Queue unavailable")}>
+                  <p>{t("A current merchant session and Store are required.")}</p>
                 </StatePanel>
               )}
             </SessionPending>
@@ -1949,9 +1951,9 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   timeZone={state.workspace.selectedScope.timeZone}
                 />
               ) : (
-                <WorkspacePage title="Table QR codes">
-                  <StatePanel heading="Table QR codes unavailable" tone="error" status>
-                    <p>A current merchant session and Store are required.</p>
+                <WorkspacePage title={t("Table QR codes")}>
+                  <StatePanel heading={t("Table QR codes unavailable")} tone="error" status>
+                    <p>{t("A current merchant session and Store are required.")}</p>
                   </StatePanel>
                 </WorkspacePage>
               )}
@@ -1970,9 +1972,9 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   storeLabel={state.workspace.selectedScope.storeLabel}
                 />
               ) : (
-                <WorkspacePage title="Approvals">
-                  <StatePanel heading="Approvals unavailable" tone="error" status>
-                    <p>A current merchant session and Store are required.</p>
+                <WorkspacePage title={t("Approvals")}>
+                  <StatePanel heading={t("Approvals unavailable")} tone="error" status>
+                    <p>{t("A current merchant session and Store are required.")}</p>
                   </StatePanel>
                 </WorkspacePage>
               )}
@@ -1990,9 +1992,9 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   timeZone={state.workspace.selectedScope.timeZone}
                 />
               ) : (
-                <WorkspacePage title="Settlement">
-                  <StatePanel heading="Settlement unavailable" tone="error" status>
-                    <p>A current merchant session and Store are required.</p>
+                <WorkspacePage title={t("Settlement")}>
+                  <StatePanel heading={t("Settlement unavailable")} tone="error" status>
+                    <p>{t("A current merchant session and Store are required.")}</p>
                   </StatePanel>
                 </WorkspacePage>
               )}
@@ -2009,8 +2011,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   csrf={state.csrf}
                 />
               ) : (
-                <StatePanel heading="Exceptions unavailable" tone="error" status>
-                  <p>A current merchant session and Store are required.</p>
+                <StatePanel heading={t("Exceptions unavailable")} tone="error" status>
+                  <p>{t("A current merchant session and Store are required.")}</p>
                 </StatePanel>
               )}
             </SessionPending>
@@ -2040,8 +2042,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   timeZone={state.workspace.selectedScope.timeZone}
                 />
               ) : (
-                <WorkspacePage title="Shared tablets & PINs">
-                  <StaffSignedOutPanel message="Sign in to manage this store's shared tablets and staff PINs." />
+                <WorkspacePage title={t("Shared tablets & PINs")}>
+                  <StaffSignedOutPanel
+                    message={t("Sign in to manage this store's shared tablets and staff PINs.")}
+                  />
                 </WorkspacePage>
               )}
             </SessionPending>
@@ -2114,7 +2118,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         {state.kind === "Ready" && usesWorkspaceLayout(pathname) && !soldOutFromKitchen ? (
           workspaceFrame(routes)
         ) : state.kind === "SignedOut" && demo === null && staffPage ? (
-          <AppFrame title="Operations" description="Store workspace">
+          <AppFrame title={t("Operations")} description={t("Store workspace")}>
             <StaffSignedOutPanel />
           </AppFrame>
         ) : (

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
 
 /**
@@ -66,7 +67,7 @@ export type TaxClassificationErrorCode =
   | typeof FULL_SIGN_IN_REQUIRED;
 export class TaxClassificationPageError extends Error {
   constructor(readonly code: TaxClassificationErrorCode) {
-    super("Tax classifications could not be loaded or changed");
+    super(t("Tax classifications could not be loaded or changed"));
     this.name = "TaxClassificationPageError";
   }
 }
@@ -233,20 +234,24 @@ export function createTaxClassificationClient(
 /** Plain words for every refusal (never a code). */
 export const taxClassificationMessages: Readonly<Record<TaxClassificationErrorCode, string>> =
   Object.freeze({
-    PermissionDenied: "Only the Brand Owner can add or change tax classifications.",
+    PermissionDenied: t("Only the Brand Owner can add or change tax classifications."),
     Invalid:
       "Check the names: each needs up to 120 characters and cannot contain links or the characters < > { } [ ].",
-    NotFound: "That classification is no longer in the list. Reload to see the current list.",
-    NameTaken: "Another classification in use already has that name. Choose a different name.",
-    Retired: "That classification is retired. It can't be renamed, made the default or used again.",
-    Conflict: "Someone else changed the list. Reload to see the latest list, then try again.",
-    Unavailable: "Tax classifications can't be reached right now. Try again in a moment.",
-    Offline: "You're offline. Check the connection and try again; nothing was changed.",
-    FullSignInRequired: "Confirm it's you before changing tax classifications.",
+    NotFound: t("That classification is no longer in the list. Reload to see the current list."),
+    NameTaken: t("Another classification in use already has that name. Choose a different name."),
+    Retired: t(
+      "That classification is retired. It can't be renamed, made the default or used again.",
+    ),
+    Conflict: t("Someone else changed the list. Reload to see the latest list, then try again."),
+    Unavailable: t("Tax classifications can't be reached right now. Try again in a moment."),
+    Offline: t("You're offline. Check the connection and try again; nothing was changed."),
+    FullSignInRequired: t("Confirm it's you before changing tax classifications."),
   });
 /** The label of a name field: the Brand's default language is required, the other optional. */
 export function nameFieldLabel(fieldLocale: string, defaultLocale: string): string {
   const language =
-    fieldLocale === "fr-CA" ? "French" : fieldLocale === "en-CA" ? "English" : "Other language";
-  return fieldLocale === defaultLocale ? `${language} name` : `${language} name (optional)`;
+    fieldLocale === "fr-CA" ? "French" : fieldLocale === "en-CA" ? "English" : t("Other language");
+  return fieldLocale === defaultLocale
+    ? t("{language} name", { language: language })
+    : t("{language} name (optional)", { language: language });
 }

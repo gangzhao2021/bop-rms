@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useRef, useState } from "react";
 import type { CurrentOrderQueue } from "./current-order-queue-client.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
@@ -21,11 +22,13 @@ export function heldOrders(view: CurrentOrderQueue): readonly Order[] {
 
 /** "Paid during an outage · decide" status text for the order row. */
 export function acceptanceHoldText(hold: Hold, now: number): string {
-  if (hold.refundChosen) return "Refund chosen · refund pending";
-  if (hold.decideBy === null) return "Paid during an outage · decide";
+  if (hold.refundChosen) return t("Refund chosen · refund pending");
+  if (hold.decideBy === null) return t("Paid during an outage · decide");
   const left = Date.parse(hold.decideBy) - now;
-  if (left <= 0) return "Decision time ended · refund pending";
-  return `Paid during an outage · decide within ${Math.ceil(left / 60_000)} min`;
+  if (left <= 0) return t("Decision time ended · refund pending");
+  return t("Paid during an outage · decide within {value} min", {
+    value: Math.ceil(left / 60_000),
+  });
 }
 
 export function acceptanceHoldTier(hold: Hold, now: number): "warning" | "urgent" | "lapsed" {
@@ -48,17 +51,22 @@ export function AcceptanceHoldNotice({
   if (held.length === 0) return null;
   return (
     <section className="order-hold-notice" role="status" aria-labelledby="order-hold-heading">
-      <h2 id="order-hold-heading">Paid during an outage — decide</h2>
+      <h2 id="order-hold-heading">{t("Paid during an outage — decide")}</h2>
       <p>
-        {held.length === 1
-          ? "1 online order was paid while the store was offline. "
-          : `${held.length} online orders were paid while the store was offline. `}
-        They were not refunded automatically. Accept each one (also if you already made it from a
-        paper ticket), or refund it. Once the store is back online you have 15 minutes; after that
-        an order you have not accepted is refunded automatically.
+        {t(
+          "{value}They were not refunded automatically. Accept each one (also if you already made it from a paper ticket), or refund it. Once the store is back online you have 15 minutes; after that an order you have not accepted is refunded automatically.",
+          {
+            value:
+              held.length === 1
+                ? t("1 online order was paid while the store was offline. ")
+                : t("{length} online orders were paid while the store was offline. ", {
+                    length: held.length,
+                  }),
+          },
+        )}
       </p>
       <button type="button" onClick={onShow}>
-        Show these orders
+        {t("Show these orders")}
       </button>
     </section>
   );
@@ -67,11 +75,11 @@ export function AcceptanceHoldNotice({
 type Outcome = "Idle" | "Pending" | "Done" | "NotHeld" | "Denied" | FullSignInRequired | "Unknown";
 const message: Record<Exclude<Outcome, "Idle">, string> = {
   Pending: "Refunding…",
-  Done: "Refund chosen. The customer's payment is being refunded in full.",
-  NotHeld: "This order was already accepted or closed. Refresh to see it.",
-  Denied: "Only a store manager or owner can refund this order.",
+  Done: t("Refund chosen. The customer's payment is being refunded in full."),
+  NotHeld: t("This order was already accepted or closed. Refresh to see it."),
+  Denied: t("Only a store manager or owner can refund this order."),
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
-  Unknown: "Result unknown. Try again; the refund is only made once.",
+  Unknown: t("Result unknown. Try again; the refund is only made once."),
 };
 
 /** The refund answer for a held order; a PIN sign-in refusal is not a missing permission. */
@@ -163,24 +171,32 @@ export function AcceptanceHoldDecision({
     return (
       <div className="order-hold-decision">
         <p className="order-workbench-closed" role="note">
-          You chose to refund this order. The customer&apos;s payment is being refunded in full to
-          their original payment method.
+          {t(
+            "You chose to refund this order. The customer's payment is being refunded in full to their original payment method.",
+          )}
         </p>
       </div>
     );
   return (
     <div className="order-hold-decision">
       <p className="order-workbench-closed" role="note">
-        Paid online at a time the store was offline
-        {hold.storeLastSeenAt === null
-          ? ""
-          : ` (staff screens last active ${storeTime(hold.storeLastSeenAt, timeZone, true)})`}
-        . It was not refunded automatically.{" "}
-        {hold.decideBy === null
-          ? "Decide once the store is back online."
-          : `Accept or refund it by ${storeTime(hold.decideBy, timeZone, true)}; otherwise it is refunded automatically.`}{" "}
-        If you already made it from a paper ticket, accept it, then mark it ready and hand it over
-        as usual.
+        {t(
+          "Paid online at a time the store was offline{value}. It was not refunded automatically. {value2} If you already made it from a paper ticket, accept it, then mark it ready and hand it over as usual.",
+          {
+            value:
+              hold.storeLastSeenAt === null
+                ? ""
+                : t(" (staff screens last active {storeLastSeenAt})", {
+                    storeLastSeenAt: storeTime(hold.storeLastSeenAt, timeZone, true),
+                  }),
+            value2:
+              hold.decideBy === null
+                ? t("Decide once the store is back online.")
+                : t("Accept or refund it by {decideBy}; otherwise it is refunded automatically.", {
+                    decideBy: storeTime(hold.decideBy, timeZone, true),
+                  }),
+          },
+        )}
       </p>
       <div className="card-actions">
         {accept}
@@ -191,7 +207,7 @@ export function AcceptanceHoldDecision({
             disabled={outcome === "Done"}
             onClick={() => dialog.current?.showModal()}
           >
-            Refund instead
+            {t("Refund instead")}
           </button>
         ) : null}
       </div>
@@ -204,22 +220,23 @@ export function AcceptanceHoldDecision({
           if (outcome === "Pending") event.preventDefault();
         }}
       >
-        <h2 id={titleId}>Refund order {order.orderNumber}</h2>
+        <h2 id={titleId}>{t("Refund order {orderNumber}", { orderNumber: order.orderNumber })}</h2>
         <p>
-          The order will not be made. The customer is refunded in full to their original payment
-          method and sees that the store could not accept it.
+          {t(
+            "The order will not be made. The customer is refunded in full to their original payment method and sees that the store could not accept it.",
+          )}
         </p>
         <AcceptanceHoldRefundStatus outcome={outcome} csrf={csrf} fetcher={fetcher} />
         <div className="card-actions">
           <button type="button" onClick={() => void refund()} disabled={outcome === "Pending"}>
-            Refund order
+            {t("Refund order")}
           </button>
           <button
             type="button"
             onClick={() => dialog.current?.close()}
             disabled={outcome === "Pending"}
           >
-            Keep it
+            {t("Keep it")}
           </button>
         </div>
       </dialog>

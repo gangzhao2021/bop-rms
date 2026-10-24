@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { createContractParsers } from "./contract-parsers.js";
 export type OperationalDashboardClientErrorCode =
   | "PermissionDenied"
@@ -11,7 +12,7 @@ export type OperationalDashboardClientErrorCode =
 
 export class OperationalDashboardClientError extends Error {
   constructor(readonly code: OperationalDashboardClientErrorCode) {
-    super("Operational Dashboard unavailable");
+    super(t("Operational Dashboard unavailable"));
     this.name = "OperationalDashboardClientError";
   }
 }

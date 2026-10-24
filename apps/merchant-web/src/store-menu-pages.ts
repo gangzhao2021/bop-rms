@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 /** WP-2423 / DEC-MENU-REVISION: CAT-MENU-LIST / CAT-MENU-BUILDER view contract and same-origin client. */
 export type MenuErrorCode =
@@ -24,7 +25,7 @@ export class MenuPageError extends Error {
     /** WP-2423 (v15 2026-10-22): what a blocked review found missing, when the server knows. */
     readonly problem: MenuReviewProblem | null = null,
   ) {
-    super("Menus are unavailable");
+    super(t("Menus are unavailable"));
     this.name = "MenuPageError";
   }
 }
@@ -67,7 +68,7 @@ export function parseMenuReviewProblem(value: unknown): MenuReviewProblem | null
 export function menuReviewProblemText(problem: MenuReviewProblem): string {
   const item =
     problem.productName === null
-      ? "An item on this menu"
+      ? t("An item on this menu")
       : problem.sizeName === null || problem.sizeName === problem.productName
         ? problem.productName
         : `${problem.productName} — ${problem.sizeName}`;
@@ -87,10 +88,14 @@ export function menuReviewProblemText(problem: MenuReviewProblem): string {
     case "AllergenDeclaration": {
       const ingredient =
         problem.ingredientName === null
-          ? "An ingredient"
-          : `The ingredient ${problem.ingredientName}`;
-      const where = option === null ? item : `${item} with ${option}`;
-      return `${ingredient} in ${where} has no current allergen declaration. Record or renew it under Allergens, then submit again.`;
+          ? t("An ingredient")
+          : t("The ingredient {ingredientName}", { ingredientName: problem.ingredientName });
+      const where =
+        option === null ? item : t("{item} with {option}", { item: item, option: option });
+      return t(
+        "{ingredient} in {where} has no current allergen declaration. Record or renew it under Allergens, then submit again.",
+        { ingredient: ingredient, where: where },
+      );
     }
     case "AllergenList":
       return "The Brand allergen list this menu uses is not approved. Approve it under Allergens, then submit again.";
@@ -376,27 +381,27 @@ export function customerViewChangeSummary(view: MenuCustomerView): string | null
   const descriptions = view.items.filter((item) => item.descriptionChange !== null).length;
   const photos = view.items.filter((item) => item.photoChange !== null).length;
   const parts = [
-    newItems ? count(newItems, "new item", "new items") : "",
-    descriptions ? count(descriptions, "description changed", "descriptions changed") : "",
-    photos ? count(photos, "photo changed", "photos changed") : "",
+    newItems ? count(newItems, t("new item"), t("new items")) : "",
+    descriptions ? count(descriptions, t("description changed"), t("descriptions changed")) : "",
+    photos ? count(photos, t("photo changed"), t("photos changed")) : "",
     view.removedFromMenu.length
-      ? count(view.removedFromMenu.length, "item removed", "items removed")
+      ? count(view.removedFromMenu.length, t("item removed"), t("items removed"))
       : "",
   ].filter(Boolean);
   return parts.length === 0
-    ? "No changes to items, descriptions or photos."
+    ? t("No changes to items, descriptions or photos.")
     : parts.join(", ") + ".";
 }
 export const descriptionChangeText = {
-  Added: "New description",
-  Changed: "Description changed",
-  Removed: "Description removed",
+  Added: t("New description"),
+  Changed: t("Description changed"),
+  Removed: t("Description removed"),
 } as const;
 export const photoChangeText = {
-  Added: "New photo",
-  Replaced: "Photo replaced",
-  Removed: "Photo removed",
-  DescriptionChanged: "Photo description changed",
+  Added: t("New photo"),
+  Replaced: t("Photo replaced"),
+  Removed: t("Photo removed"),
+  DescriptionChanged: t("Photo description changed"),
 } as const;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 export const parseMenuRouteReference = (value: string | undefined): string | null =>
@@ -411,7 +416,7 @@ export const sectionCode = (name: string) =>
     .slice(0, 40);
 /** WP-2423: plain names for a menu's sales channels and order types (never the internal codes). */
 const channelNames: Readonly<Record<string, string>> = {
-  CUSTOMER_PWA: "Customer ordering app",
+  CUSTOMER_PWA: t("Customer ordering app"),
   POS: "Counter",
 };
 const orderTypeNames: Readonly<Record<string, string>> = {
@@ -458,24 +463,29 @@ export function menuRevisionAction(
   stage: ReturnType<typeof menuStage>,
   hasPublishedMenu: boolean,
 ): { readonly label: string; readonly note: string; readonly done: string } | null {
-  const customers = hasPublishedMenu ? " Customers keep seeing the published menu meanwhile." : "";
+  const customers = hasPublishedMenu
+    ? t(" Customers keep seeing the published menu meanwhile.")
+    : "";
   if (stage === "Editing") return null;
   if (stage === "InReview" || stage === "Approved")
     return {
-      label: "Withdraw to make changes",
+      label: t("Withdraw to make changes"),
       note:
         (stage === "InReview"
-          ? "Takes this version out of review and opens a copy to edit; it must be submitted for review again."
-          : "Sets this approved version aside unpublished and opens a copy to edit; it must be submitted and approved again.") +
-        customers,
-      done: "Withdrawn. Edit the new draft and submit it for review again.",
+          ? t(
+              "Takes this version out of review and opens a copy to edit; it must be submitted for review again.",
+            )
+          : t(
+              "Sets this approved version aside unpublished and opens a copy to edit; it must be submitted and approved again.",
+            )) + customers,
+      done: t("Withdrawn. Edit the new draft and submit it for review again."),
     };
   return {
-    label: "Start a revision",
+    label: t("Start a revision"),
     note: hasPublishedMenu
-      ? "Customers keep seeing the published menu until the revision is published."
-      : "Opens a copy to edit; it must be submitted for review and published again.",
-    done: "A new version was started from this one; edit it and submit it for review.",
+      ? t("Customers keep seeing the published menu until the revision is published.")
+      : t("Opens a copy to edit; it must be submitted for review and published again."),
+    done: t("A new version was started from this one; edit it and submit it for review."),
   };
 }
 /**

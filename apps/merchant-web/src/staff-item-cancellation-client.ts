@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import type { StaffCancellationReason } from "./current-order-queue-client.js";
 import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -11,7 +12,7 @@ const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a
 const minor = /^(0|[1-9][0-9]{0,17})$/u;
 class Invalid extends Error {}
 const invalid = (): never => {
-  throw new Invalid("invalid item cancellation answer");
+  throw new Invalid(t("invalid item cancellation answer"));
 };
 function exact(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (

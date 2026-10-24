@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /** WP-2423 / DEC-CAT-PRODUCT-ADMIN: CAT-PRODUCT-LIST / CAT-PRODUCT-EDIT view contract and client. */
 export type ProductErrorCode =
   | "PermissionDenied"
@@ -12,7 +13,7 @@ export type ProductErrorCode =
   | "Unavailable";
 export class ProductPageError extends Error {
   constructor(readonly code: ProductErrorCode) {
-    super("Products are unavailable");
+    super(t("Products are unavailable"));
     this.name = "ProductPageError";
   }
 }
@@ -338,7 +339,7 @@ export type ProductPhotoErrorCode =
   | "Unavailable";
 export class ProductPhotoError extends Error {
   constructor(readonly code: ProductPhotoErrorCode) {
-    super("The photo was not recorded");
+    super(t("The photo was not recorded"));
     this.name = "ProductPhotoError";
   }
 }
@@ -386,7 +387,7 @@ const orderTypeText: Readonly<Record<string, string>> = {
 const treatmentText: Readonly<Record<string, string>> = {
   ZeroRated: "zero-rated",
   Exempt: "tax-exempt",
-  OutOfScope: "not taxed",
+  OutOfScope: t("not taxed"),
 };
 /** "Pickup 13% · Dine-in 13%" — each order type's sellable rate (rates are exact decimals). */
 export function taxClassText(choice: ProductTaxClass): string {
@@ -408,8 +409,8 @@ export function taxClassText(choice: ProductTaxClass): string {
     .join(" · ");
 }
 export const productTypeText: Record<string, string> = {
-  PreparedFood: "Prepared food",
-  NonAlcoholicBeverage: "Non-alcoholic beverage",
+  PreparedFood: t("Prepared food"),
+  NonAlcoholicBeverage: t("Non-alcoholic beverage"),
 };
 export const unavailableProductClient: ProductClient = {
   load: async () => {

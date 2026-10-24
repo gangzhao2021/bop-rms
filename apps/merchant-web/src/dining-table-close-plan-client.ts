@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /**
  * DEC-TABLE-CLOSE-GUESTS-LEFT (WP-2423): the rounds still open at a table whose guests left, what
  * closing each does and what it refunds, read from the server (owner facts), and the existing staff
@@ -7,7 +8,7 @@ import { serviceOperationReference } from "./service-control-client.js";
 
 export class TableClosePlanError extends Error {
   constructor(readonly code: "PermissionDenied" | "NotFound" | "Unavailable") {
-    super("Table close plan unavailable");
+    super(t("Table close plan unavailable"));
   }
 }
 const fail = (): never => {

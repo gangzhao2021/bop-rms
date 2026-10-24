@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
 
 export type RoleAdministrationPageErrorCode =
@@ -12,7 +13,7 @@ export type RoleAdministrationPageErrorCode =
   | "Unavailable";
 export class RoleAdministrationPageError extends Error {
   constructor(readonly code: RoleAdministrationPageErrorCode) {
-    super("Role administration is unavailable");
+    super(t("Role administration is unavailable"));
     this.name = "RoleAdministrationPageError";
   }
 }
@@ -59,16 +60,16 @@ export interface RoleAdministrationItemView {
 export const roleStatusLabels: Readonly<Record<RoleAdministrationItemView["status"], string>> =
   Object.freeze({
     Draft: "Draft",
-    InReview: "Waiting for approval",
-    Approved: "Approved, not yet active",
+    InReview: t("Waiting for approval"),
+    Approved: t("Approved, not yet active"),
     Active: "Active",
     Rejected: "Rejected",
     Deactivated: "Deactivated",
   });
 export const roleScopeLabels: Readonly<Record<RoleAdministrationItemView["scope"], string>> =
-  Object.freeze({ Brand: "All stores in the brand", Store: "This store" });
+  Object.freeze({ Brand: t("All stores in the brand"), Store: t("This store") });
 export const roleTypeLabels: Readonly<Record<RoleAdministrationItemView["type"], string>> =
-  Object.freeze({ System: "Built-in role", Custom: "Custom role" });
+  Object.freeze({ System: t("Built-in role"), Custom: t("Custom role") });
 /** A permission as staff read it: the catalog's description, else its group. */
 export function rolePermissionLabel(
   action: string,

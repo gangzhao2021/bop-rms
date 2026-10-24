@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import {
   copyProductCommandValue,
   productCommandRecord as record,
@@ -22,7 +23,7 @@ export class ProductPublicationClientError extends Error {
       "Invalid" | "Denied" | "Conflict" | "FeatureDisabled" | "Unavailable" | "OutcomeUnknown",
     readonly attemptCode?: "Invalid" | "Denied" | "Conflict" | "FeatureDisabled",
   ) {
-    super("Product publication action could not be confirmed");
+    super(t("Product publication action could not be confirmed"));
     this.name = "ProductPublicationClientError";
   }
 }

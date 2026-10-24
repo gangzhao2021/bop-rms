@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 
@@ -18,7 +19,7 @@ export type OptionPriceErrorCode =
   | "Unavailable";
 export class OptionPricePageError extends Error {
   constructor(readonly code: OptionPriceErrorCode) {
-    super("Option prices are unavailable");
+    super(t("Option prices are unavailable"));
     this.name = "OptionPricePageError";
   }
 }

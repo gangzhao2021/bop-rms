@@ -1,3 +1,4 @@
+import { displayLocale, t } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createDiningHostTransferClient,
@@ -46,15 +47,17 @@ export function DiningHostTransferAction({
         setSource(result);
         if (!result.participants.some((p) => !p.isHost))
           setMessage(
-            "No other active participants are available. Ask the guest to join this table first.",
+            t(
+              "No other active participants are available. Ask the guest to join this table first.",
+            ),
           );
       }
     } catch (error) {
       if (!controller.signal.aborted)
         setMessage(
           error instanceof DiningHostClientError && error.code === "Denied"
-            ? "Your current permissions do not allow host transfer."
-            : "Participants unavailable. Refresh to try again.",
+            ? t("Your current permissions do not allow host transfer.")
+            : t("Participants unavailable. Refresh to try again."),
         );
     } finally {
       if (pending.current === controller) {
@@ -95,7 +98,9 @@ export function DiningHostTransferAction({
         setTarget("");
         setConfirmed(false);
         setMessage(
-          `Host transfer recorded at ${new Date(result.transferredAt).toLocaleString()}. Refresh participants to see the current host.`,
+          t("Host transfer recorded at {value}. Refresh participants to see the current host.", {
+            value: new Date(result.transferredAt).toLocaleString(displayLocale()),
+          }),
         );
       }
     } catch (error) {
@@ -109,8 +114,12 @@ export function DiningHostTransferAction({
         }
         setMessage(
           unresolved
-            ? "The result is unknown. Retry the same host transfer before choosing another table or operation."
-            : "Host transfer was not confirmed. Refresh participants and check your permissions.",
+            ? t(
+                "The result is unknown. Retry the same host transfer before choosing another table or operation.",
+              )
+            : t(
+                "Host transfer was not confirmed. Refresh participants and check your permissions.",
+              ),
         );
       }
     } finally {
@@ -124,27 +133,31 @@ export function DiningHostTransferAction({
     }
   };
   return (
-    <section aria-label="Dining host transfer">
-      <h3>Order host</h3>
+    <section aria-label={t("Dining host transfer")}>
+      <h3>{t("Order host")}</h3>
       <p>
-        The host manages the shared cart. A transfer changes future permissions and preserves
-        previous actions.
+        {t(
+          "The host manages the shared cart. A transfer changes future permissions and preserves previous actions.",
+        )}
       </p>
       <button disabled={locked} onClick={() => void load()}>
-        Refresh participants
+        {t("Refresh participants")}
       </button>
       {source ? (
         <>
           <ul>
             {source.participants.map((p, index) => (
               <li key={p.participantReference}>
-                Participant {index + 1} · Joined {new Date(p.joinedAt).toLocaleString()}
-                {p.isHost ? " · Current host" : ""}
+                {t("Participant {value} · Joined {value2}{value3}", {
+                  value: index + 1,
+                  value2: new Date(p.joinedAt).toLocaleString(displayLocale()),
+                  value3: p.isHost ? t(" · Current host") : "",
+                })}
               </li>
             ))}
           </ul>
           <label>
-            New order host
+            {t("New order host")}
             <select
               value={target}
               disabled={locked}
@@ -153,11 +166,14 @@ export function DiningHostTransferAction({
                 setConfirmed(false);
               }}
             >
-              <option value="">Select a participant</option>
+              <option value="">{t("Select a participant")}</option>
               {source.participants.map((p, index) =>
                 p.isHost ? null : (
                   <option key={p.participantReference} value={p.participantReference}>
-                    Participant {index + 1} · Joined {new Date(p.joinedAt).toLocaleString()}
+                    {t("Participant {value} · Joined {value2}", {
+                      value: index + 1,
+                      value2: new Date(p.joinedAt).toLocaleString(displayLocale()),
+                    })}
                   </option>
                 ),
               )}
@@ -170,7 +186,7 @@ export function DiningHostTransferAction({
               disabled={locked || !target}
               onChange={(event) => setConfirmed(event.target.checked)}
             />
-            I have identified the selected guest and confirm the host transfer
+            {t("I have identified the selected guest and confirm the host transfer")}
           </label>
         </>
       ) : null}
@@ -184,12 +200,12 @@ export function DiningHostTransferAction({
         onClick={() => void execute()}
       >
         {state === "Unknown"
-          ? "Retry same host transfer"
+          ? t("Retry same host transfer")
           : state === "Submitting"
-            ? "Transferring…"
-            : "Transfer order host"}
+            ? t("Transferring…")
+            : t("Transfer order host")}
       </button>
-      <p role="status">{state === "Loading" ? "Loading participants…" : message}</p>
+      <p role="status">{state === "Loading" ? t("Loading participants…") : message}</p>
     </section>
   );
 }

@@ -1,6 +1,7 @@
+import { t } from "./i18n/i18n.js";
 export class DiningProgressError extends Error {
   constructor(readonly code: "PermissionDenied" | "NotFound" | "Unavailable") {
-    super("Dining progress unavailable");
+    super(t("Dining progress unavailable"));
   }
 }
 const fail = (): never => {

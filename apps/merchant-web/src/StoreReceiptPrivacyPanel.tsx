@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -37,18 +38,22 @@ export function receiptPrivacyFieldErrors(fields: Fields): Partial<Record<keyof 
     fields.gstHstNumber.trim() !== "" &&
     !/^[0-9]{9}RT[0-9]{4}$/u.test(compact(fields.gstHstNumber))
   )
-    errors.gstHstNumber =
-      "Enter the 15-character number from the Canada Revenue Agency: 9 digits, RT, 4 digits (for example 123456789RT0001).";
+    errors.gstHstNumber = t(
+      "Enter the 15-character number from the Canada Revenue Agency: 9 digits, RT, 4 digits (for example 123456789RT0001).",
+    );
   if (fields.qstNumber.trim() !== "" && !/^[0-9]{10}TQ[0-9]{4}$/u.test(compact(fields.qstNumber)))
-    errors.qstNumber =
-      "Enter the 16-character number from Revenu Québec: 10 digits, TQ, 4 digits (for example 1234567890TQ0001).";
+    errors.qstNumber = t(
+      "Enter the 16-character number from Revenu Québec: 10 digits, TQ, 4 digits (for example 1234567890TQ0001).",
+    );
   if (
     fields.pstNumber.trim() !== "" &&
     !/^[A-Z0-9][A-Z0-9 -]{2,30}[A-Z0-9]$/u.test(
       fields.pstNumber.trim().toUpperCase().replace(/\s+/gu, " "),
     )
   )
-    errors.pstNumber = "Enter the provincial number exactly as issued (letters, digits, hyphens).";
+    errors.pstNumber = t(
+      "Enter the provincial number exactly as issued (letters, digits, hyphens).",
+    );
   const url = fields.privacyNoticeUrl.trim();
   if (url !== "") {
     let ok: boolean;
@@ -111,8 +116,8 @@ export function StoreReceiptPrivacyPanel({
   if (status === "Loading")
     return (
       <section id="receipts-and-privacy" className="receipt-privacy" aria-busy="true">
-        <h3>Receipts and privacy</h3>
-        <p role="status">Loading receipt and privacy details…</p>
+        <h3>{t("Receipts and privacy")}</h3>
+        <p role="status">{t("Loading receipt and privacy details…")}</p>
       </section>
     );
   if (status === "Unavailable" || view === null)
@@ -122,11 +127,15 @@ export function StoreReceiptPrivacyPanel({
         className="receipt-privacy"
         aria-labelledby="receipt-privacy-heading"
       >
-        <h3 id="receipt-privacy-heading">Receipts and privacy</h3>
-        <StatePanel heading="Receipt and privacy details could not be loaded" tone="error" status>
-          <p>Check your connection, then try again.</p>
+        <h3 id="receipt-privacy-heading">{t("Receipts and privacy")}</h3>
+        <StatePanel
+          heading={t("Receipt and privacy details could not be loaded")}
+          tone="error"
+          status
+        >
+          <p>{t("Check your connection, then try again.")}</p>
           <button type="button" onClick={() => void load()}>
-            Try again
+            {t("Try again")}
           </button>
         </StatePanel>
       </section>
@@ -163,7 +172,9 @@ export function StoreReceiptPrivacyPanel({
       setShowErrors(false);
       setMessage({
         tone: "status",
-        text: "Saved. Receipts issued from now on show these details; receipts already issued are not changed.",
+        text: t(
+          "Saved. Receipts issued from now on show these details; receipts already issued are not changed.",
+        ),
       });
       await load();
     } catch (error) {
@@ -173,16 +184,20 @@ export function StoreReceiptPrivacyPanel({
         tone: "alert",
         text:
           code === "Invalid"
-            ? "Check the highlighted details and try again."
+            ? t("Check the highlighted details and try again.")
             : code === "Conflict"
-              ? "Someone changed these details since you opened this page. They have been reloaded — check them and save again."
+              ? t(
+                  "Someone changed these details since you opened this page. They have been reloaded — check them and save again.",
+                )
               : code === "NoChange"
-                ? "Nothing changed — these details are already saved."
+                ? t("Nothing changed — these details are already saved.")
                 : code === "PermissionDenied"
-                  ? "Only the Owner can change these details. Sign in again if your session ended."
+                  ? t(
+                      "Only the Owner can change these details. Sign in again if your session ended.",
+                    )
                   : code === "OutcomeUnknown"
-                    ? "We could not confirm the save. Try again — it is recorded once."
-                    : "The details could not be saved. Check your connection and try again.",
+                    ? t("We could not confirm the save. Try again — it is recorded once.")
+                    : t("The details could not be saved. Check your connection and try again."),
       });
       if (code === "Conflict") await load();
     } finally {
@@ -233,20 +248,19 @@ export function StoreReceiptPrivacyPanel({
       className="receipt-privacy"
       aria-labelledby="receipt-privacy-heading"
     >
-      <h3 id="receipt-privacy-heading">Receipts and privacy</h3>
+      <h3 id="receipt-privacy-heading">{t("Receipts and privacy")}</h3>
       <p>
-        Customer receipts show your business name, the store address, each tax with its rate, and
-        the registration numbers below. Customers see your privacy notice link where they enter
-        their contact details and on their receipt. Enter only your own registered numbers and
-        notice; leave a number empty if the business is not registered for that tax.
+        {t(
+          "Customer receipts show your business name, the store address, each tax with its rate, and the registration numbers below. Customers see your privacy notice link where they enter their contact details and on their receipt. Enter only your own registered numbers and notice; leave a number empty if the business is not registered for that tax.",
+        )}
       </p>
       <ReceiptSetupNotice gaps={view.gaps} />
       {view.recordedAt !== null ? (
         <p className="receipt-privacy__hint">
-          Last saved <SourceTime instant={view.recordedAt} />
+          {t("Last saved")} <SourceTime instant={view.recordedAt} />
         </p>
       ) : null}
-      {!view.canChange ? <p role="note">Only the Owner can change these details.</p> : null}
+      {!view.canChange ? <p role="note">{t("Only the Owner can change these details.")}</p> : null}
       <form
         noValidate
         onSubmit={(event) => {
@@ -256,29 +270,31 @@ export function StoreReceiptPrivacyPanel({
       >
         {field(
           "gstHstNumber",
-          "GST/HST registration number",
-          "From the Canada Revenue Agency, e.g. 123456789RT0001.",
+          t("GST/HST registration number"),
+          t("From the Canada Revenue Agency, e.g. 123456789RT0001."),
         )}
         {field(
           "qstNumber",
-          "QST registration number (Québec only)",
-          "From Revenu Québec, e.g. 1234567890TQ0001. Leave empty outside Québec.",
+          t("QST registration number (Québec only)"),
+          t("From Revenu Québec, e.g. 1234567890TQ0001. Leave empty outside Québec."),
         )}
         {field(
           "pstNumber",
-          "PST registration number (BC, Saskatchewan or Manitoba only)",
-          "As issued by the province. Leave empty if you do not charge PST.",
+          t("PST registration number (BC, Saskatchewan or Manitoba only)"),
+          t("As issued by the province. Leave empty if you do not charge PST."),
         )}
         {field(
           "privacyNoticeUrl",
-          "Privacy notice link",
-          "The web address of your own privacy notice (how you use and delete customer contact details).",
+          t("Privacy notice link"),
+          t(
+            "The web address of your own privacy notice (how you use and delete customer contact details).",
+          ),
           { type: "url", inputMode: "url" },
         )}
         {view.canChange ? (
           <div className="card-actions">
             <button type="submit" data-variant="primary" disabled={busy}>
-              {busy ? "Saving…" : "Save receipt and privacy details"}
+              {busy ? t("Saving…") : t("Save receipt and privacy details")}
             </button>
           </div>
         ) : null}

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useContext, useEffect, useRef, useState } from "react";
 import { StoreTimeZoneContext, friendlyStoreTime } from "./StoreTime.js";
 import { languageName } from "./staff-text.js";
@@ -78,15 +79,15 @@ export function receiptTemplateStoreOptions(input: {
       value: input.live,
       label:
         input.live === input.startedWith
-          ? "Receipt template in use today (the one the Store started with)"
-          : "Receipt template in use today",
+          ? t("Receipt template in use today (the one the Store started with)")
+          : t("Receipt template in use today"),
     });
   if (
     input.startedWith !== null &&
     input.startedWith !== input.live &&
     !input.saved.includes(input.startedWith)
   )
-    options.push({ value: input.startedWith, label: "Receipt template the Store started with" });
+    options.push({ value: input.startedWith, label: t("Receipt template the Store started with") });
   return options;
 }
 export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelectionProps) {
@@ -278,21 +279,23 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
   return (
     <section
       hidden={props.hidden}
-      aria-label="Published receipt template selection"
+      aria-label={t("Published receipt template selection")}
       className="store-setup-reference-editor"
     >
-      <h4>Published receipt template</h4>
+      <h4>{t("Published receipt template")}</h4>
       <p>
-        Keep the template the Store issues receipts with today, or choose a saved template and check
-        its currently effective version for this store language. Save the setup draft separately to
-        keep the selection.
+        {t(
+          "Keep the template the Store issues receipts with today, or choose a saved template and check its currently effective version for this store language. Save the setup draft separately to keep the selection.",
+        )}
       </p>
       {live !== null && (
         <div>
           <p>
             {usingLive
-              ? "This setup uses the receipt template the Store issues receipts with today."
-              : "The Store issues receipts with a published template today. Keep it unless you want customers' receipts to change."}
+              ? t("This setup uses the receipt template the Store issues receipts with today.")
+              : t(
+                  "The Store issues receipts with a published template today. Keep it unless you want customers' receipts to change.",
+                )}
           </p>
           <button
             type="button"
@@ -303,7 +306,7 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
               void preview(live, true);
             }}
           >
-            Keep the receipt template in use today
+            {t("Keep the receipt template in use today")}
           </button>
         </div>
       )}
@@ -311,8 +314,8 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
         <div>
           <p>
             {usingStartedWith
-              ? "This setup goes back to the receipt template the Store started with."
-              : "You can go back to the receipt template the Store started with."}
+              ? t("This setup goes back to the receipt template the Store started with.")
+              : t("You can go back to the receipt template the Store started with.")}
           </p>
           <button
             type="button"
@@ -323,14 +326,14 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
               void preview(startedWith, true);
             }}
           >
-            Use the receipt template the Store started with
+            {t("Use the receipt template the Store started with")}
           </button>
         </div>
       )}
       <label>
-        Saved templates
+        {t("Saved templates")}
         <select
-          aria-label="Saved templates"
+          aria-label={t("Saved templates")}
           disabled={blocked}
           value={selected}
           onChange={(e) => {
@@ -340,7 +343,7 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
             setError("");
           }}
         >
-          <option value="">Choose a saved template</option>
+          <option value="">{t("Choose a saved template")}</option>
           {receiptTemplateStoreOptions({
             live,
             startedWith,
@@ -352,7 +355,10 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
           ))}
           {roster?.entries.map((entry) => (
             <option key={entry.content.templateReference} value={entry.content.templateReference}>
-              {languageName(entry.content.locale)} · draft {entry.revision}
+              {t("{locale} · draft {revision}", {
+                locale: languageName(entry.content.locale),
+                revision: entry.revision,
+              })}
             </option>
           ))}
         </select>
@@ -366,55 +372,71 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
             loadInstalled();
           }}
         >
-          Refresh saved templates
+          {t("Refresh saved templates")}
         </button>
         <button
           type="button"
           disabled={blocked || !roster?.nextAfter}
           onClick={() => void loadRoster(roster?.nextAfter ?? null)}
         >
-          Next saved templates
+          {t("Next saved templates")}
         </button>
         <button
           type="button"
           disabled={blocked || !selected}
           onClick={() => void preview(selected)}
         >
-          Check published receipt template
+          {t("Check published receipt template")}
         </button>
       </div>
       <p role="status" aria-live="polite">
         {busy
-          ? "Loading published receipt template…"
+          ? t("Loading published receipt template…")
           : error
             ? error === "Denied"
-              ? "You do not have permission to choose receipt templates. The saved selection is kept."
+              ? t(
+                  "You do not have permission to choose receipt templates. The saved selection is kept.",
+                )
               : error === "NotFound"
-                ? "This template has not been published for this Store's language yet. The saved selection is kept."
-                : "Published receipt templates could not be loaded. Refresh to try again; the saved selection is kept."
+                ? t(
+                    "This template has not been published for this Store's language yet. The saved selection is kept.",
+                  )
+                : t(
+                    "Published receipt templates could not be loaded. Refresh to try again; the saved selection is kept.",
+                  )
             : expired
-              ? "This check is out of date. Check the published template again."
+              ? t("This check is out of date. Check the published template again.")
               : ""}
       </p>
       {installed?.state === "Unavailable" && (
         <p>
-          The receipt template the Store started with could not be checked now. Refresh saved
-          templates to try again.
+          {t(
+            "The receipt template the Store started with could not be checked now. Refresh saved templates to try again.",
+          )}
         </p>
       )}
       {candidate && (
         <div>
           <p>
-            {languageName(candidate.currentVersion.locale)} · published version{" "}
-            {candidate.currentVersion.versionNumber}
+            {t("{locale} · published version {versionNumber}", {
+              locale: languageName(candidate.currentVersion.locale),
+              versionNumber: candidate.currentVersion.versionNumber,
+            })}
           </p>
           <p>
-            In use from {friendlyStoreTime(candidate.currentVersion.effectiveFrom, timeZone)}
-            {candidate.currentVersion.effectiveUntil
-              ? ` until ${friendlyStoreTime(candidate.currentVersion.effectiveUntil, timeZone)}`
-              : ""}
+            {t("In use from {effectiveFrom}{value}", {
+              effectiveFrom: friendlyStoreTime(candidate.currentVersion.effectiveFrom, timeZone),
+              value: candidate.currentVersion.effectiveUntil
+                ? t(" until {effectiveUntil}", {
+                    effectiveUntil: friendlyStoreTime(
+                      candidate.currentVersion.effectiveUntil,
+                      timeZone,
+                    ),
+                  })
+                : "",
+            })}
           </p>
-          <p>This template has not been checked by a tax or legal professional.</p>
+          <p>{t("This template has not been checked by a tax or legal professional.")}</p>
           <button
             type="button"
             disabled={blocked || !fresh}
@@ -432,7 +454,7 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
               }
             }}
           >
-            Use published receipt template
+            {t("Use published receipt template")}
           </button>
         </div>
       )}
@@ -446,9 +468,9 @@ export function ReceiptTemplateStoreSelection(props: ReceiptTemplateStoreSelecti
           }
         }}
       >
-        Clear receipt template choice
+        {t("Clear receipt template choice")}
       </button>
-      <p>A setup without a receipt template can be saved, but it cannot be published.</p>
+      <p>{t("A setup without a receipt template can be saved, but it cannot be published.")}</p>
     </section>
   );
 }

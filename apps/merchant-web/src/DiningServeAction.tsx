@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import { createDiningServeClient, DiningServeClientError } from "./dining-serve-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -73,7 +74,10 @@ export function DiningServeAction({
   return (
     <div>
       <label>
-        Quantity served · {item.displayName} · round {item.batchSequence}
+        {t("Quantity served · {displayName} · round {batchSequence}", {
+          displayName: item.displayName,
+          batchSequence: item.batchSequence,
+        })}
         <input
           type="number"
           min="1"
@@ -94,7 +98,11 @@ export function DiningServeAction({
           disabled={frozen}
           onChange={(event) => setConfirmed(event.target.checked)}
         />
-        I confirm {quantity} × {item.displayName} delivered to table {view.tableLabel}
+        {t("I confirm {quantity} × {displayName} delivered to table {tableLabel}", {
+          quantity: quantity,
+          displayName: item.displayName,
+          tableLabel: view.tableLabel,
+        })}
       </label>
       {state !== "Denied" ? (
         <button
@@ -104,21 +112,23 @@ export function DiningServeAction({
           onClick={() => void submit()}
         >
           {state === "Unknown"
-            ? "Retry same serving request"
+            ? t("Retry same serving request")
             : state === "Submitting"
-              ? "Recording served quantity…"
-              : "Confirm served quantity"}
+              ? t("Recording served quantity…")
+              : t("Confirm served quantity")}
         </button>
       ) : null}
       {state === "Unknown" ? (
         <p role="status">
-          The result is unknown. Retry this same request to recover its result; do not create
-          another serving operation.
+          {t(
+            "The result is unknown. Retry this same request to recover its result; do not create another serving operation.",
+          )}
         </p>
       ) : state === "Denied" ? (
         <p role="status">
-          Serving was not confirmed. Refresh progress to check current quantities, table and
-          permissions.
+          {t(
+            "Serving was not confirmed. Refresh progress to check current quantities, table and permissions.",
+          )}
         </p>
       ) : null}
     </div>

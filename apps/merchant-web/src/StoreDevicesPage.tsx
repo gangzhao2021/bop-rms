@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import {
   useCallback,
@@ -39,8 +40,9 @@ export type PendingAction =
   | { readonly kind: "Remove"; readonly device: StoreDevice }
   | { readonly kind: "Reset"; readonly person: StaffPinRow };
 
-export const FULL_SIGN_IN_GUIDANCE =
-  "You signed in with a PIN. Confirm it's you with your authenticator app, or sign in with your account, to manage shared tablets and PINs.";
+export const FULL_SIGN_IN_GUIDANCE = t(
+  "You signed in with a PIN. Confirm it's you with your authenticator app, or sign in with your account, to manage shared tablets and PINs.",
+);
 
 export function staffPinStatusText(
   row: StaffPinRow,
@@ -48,32 +50,38 @@ export function staffPinStatusText(
   now: number,
 ): string {
   if (row.lockedUntil !== null && Date.parse(row.lockedUntil) > now)
-    return `Locked until ${storeClockTime(row.lockedUntil, timeZone)}`;
-  if (row.state === "Set") return "PIN set";
-  if (row.state === "Reset") return "Reset — waiting for a new PIN";
-  return "No PIN";
+    return t("Locked until {lockedUntil}", {
+      lockedUntil: storeClockTime(row.lockedUntil, timeZone),
+    });
+  if (row.state === "Set") return t("PIN set");
+  if (row.state === "Reset") return t("Reset — waiting for a new PIN");
+  return t("No PIN");
 }
 
 export function commandFailureText(error: unknown, action: "Register" | PendingAction): string {
   const code = error instanceof StaffPinError ? error.code : "Unavailable";
   if (code === "FullSignInRequired") return FULL_SIGN_IN_GUIDANCE;
-  if (code === "Denied") return "You don't have permission to do this. Ask the store owner.";
+  if (code === "Denied") return t("You don't have permission to do this. Ask the store owner.");
   if (code === "Offline" || code === "Unavailable")
-    return "Nothing changed. Check the connection and try again.";
+    return t("Nothing changed. Check the connection and try again.");
   if (action === "Register") {
     if (code === "AlreadyRegistered")
-      return "This tablet is already set up. The page is refreshed.";
-    if (code === "Invalid") return "Enter a tablet name of 1 to 40 characters.";
+      return t("This tablet is already set up. The page is refreshed.");
+    if (code === "Invalid") return t("Enter a tablet name of 1 to 40 characters.");
   } else if (action.kind === "Remove") {
     if (code === "NotFound")
-      return `${action.device.label} was already removed. The list is refreshed.`;
+      return t("{label} was already removed. The list is refreshed.", {
+        label: action.device.label,
+      });
   } else {
     if (code === "NotFound")
-      return `${action.person.name} is no longer on this store's staff. The list is refreshed.`;
+      return t("{name} is no longer on this store's staff. The list is refreshed.", {
+        name: action.person.name,
+      });
     if (code === "PinNotSet")
-      return `${action.person.name} has no PIN to reset. The list is refreshed.`;
+      return t("{name} has no PIN to reset. The list is refreshed.", { name: action.person.name });
   }
-  return "Nothing changed. Try again.";
+  return t("Nothing changed. Try again.");
 }
 
 /**
@@ -97,8 +105,12 @@ export function commandFailureOutcome(
 
 export function removedText(label: string, signedOut: number): string {
   return signedOut === 0
-    ? `${label} is removed. No one was signed in on it with a PIN.`
-    : `${label} is removed. ${signedOut} ${signedOut === 1 ? "person was" : "people were"} signed out.`;
+    ? t("{label} is removed. No one was signed in on it with a PIN.", { label: label })
+    : t("{label} is removed. {signedOut} {value} signed out.", {
+        label: label,
+        signedOut: signedOut,
+        value: signedOut === 1 ? "person was" : "people were",
+      });
 }
 
 /** What the page shows; the page component owns loading and commands. */
@@ -140,23 +152,23 @@ export function StoreDevicesView({
   const locked = busy || pending !== null;
   return (
     <WorkspacePage
-      title="Shared tablets & PINs"
+      title={t("Shared tablets & PINs")}
       meta={storeLabel}
       actions={
         <button type="button" disabled={busy || load.kind === "Loading"} onClick={onRefresh}>
-          Refresh
+          {t("Refresh")}
         </button>
       }
       className="store-devices"
     >
       <p className="store-devices__intro">
-        On a shared tablet, staff switch to themselves with their own 6-digit PIN instead of signing
-        in each time. Refunds, price and staff changes still need a full sign-in or the
-        authenticator code.
+        {t(
+          "On a shared tablet, staff switch to themselves with their own 6-digit PIN instead of signing in each time. Refunds, price and staff changes still need a full sign-in or the authenticator code.",
+        )}
       </p>
       {message ? (
         <StatePanel
-          heading={message.tone === "error" ? "Not done" : "Done"}
+          heading={message.tone === "error" ? t("Not done") : t("Done")}
           tone={message.tone}
           status
         >
@@ -164,36 +176,40 @@ export function StoreDevicesView({
         </StatePanel>
       ) : null}
       {needsVerification ? (
-        <section className="store-devices__verify" aria-label="Confirm it's you">
+        <section className="store-devices__verify" aria-label={t("Confirm it's you")}>
           <p>{FULL_SIGN_IN_GUIDANCE}</p>
           {verification}
         </section>
       ) : null}
       {load.kind === "NeedsVerification" ? null : load.kind === "Loading" ? (
-        <p role="status">Loading shared tablets and PINs…</p>
+        <p role="status">{t("Loading shared tablets and PINs…")}</p>
       ) : load.kind === "Denied" ? (
-        <StatePanel heading="No access" tone="error" status>
-          <p>Your role can&apos;t manage shared tablets or staff PINs. Ask the store owner.</p>
+        <StatePanel heading={t("No access")} tone="error" status>
+          <p>{t("Your role can't manage shared tablets or staff PINs. Ask the store owner.")}</p>
         </StatePanel>
       ) : load.kind === "Offline" || load.kind === "Failed" ? (
-        <StatePanel heading="Couldn't load this page" tone="error" status>
+        <StatePanel heading={t("Couldn't load this page")} tone="error" status>
           <p>
-            {load.kind === "Offline"
-              ? "This device can't reach the store system. Check the connection, then try again."
-              : "Shared tablets and PINs couldn't be loaded. Try again in a moment."}{" "}
-            Tablets already set up keep working.
+            {t("{value} Tablets already set up keep working.", {
+              value:
+                load.kind === "Offline"
+                  ? t(
+                      "This device can't reach the store system. Check the connection, then try again.",
+                    )
+                  : t("Shared tablets and PINs couldn't be loaded. Try again in a moment."),
+            })}
           </p>
           <button type="button" onClick={onRefresh}>
-            Try again
+            {t("Try again")}
           </button>
         </StatePanel>
       ) : read === null ? null : (
         <>
           {read.devices === null ? null : (
             <section className="store-devices__section" aria-labelledby="store-devices-this">
-              <h2 id="store-devices-this">This tablet</h2>
+              <h2 id="store-devices-this">{t("This tablet")}</h2>
               {read.thisDevice !== null ? (
-                <p>This tablet is set up as “{read.thisDevice.label}”.</p>
+                <p>{t("This tablet is set up as “{label}”.", { label: read.thisDevice.label })}</p>
               ) : (
                 <form
                   className="store-devices__register"
@@ -204,27 +220,27 @@ export function StoreDevicesView({
                   }}
                 >
                   <p>
-                    Staff can then switch to themselves here with their 6-digit PIN. Refunds, price
-                    and staff changes still need a full sign-in. Do this on the shared tablet
-                    itself, not on a personal phone or computer.
+                    {t(
+                      "Staff can then switch to themselves here with their 6-digit PIN. Refunds, price and staff changes still need a full sign-in. Do this on the shared tablet itself, not on a personal phone or computer.",
+                    )}
                   </p>
-                  <label htmlFor="store-devices-label">Tablet name</label>
+                  <label htmlFor="store-devices-label">{t("Tablet name")}</label>
                   <input
                     id="store-devices-label"
                     name="tablet-name"
                     maxLength={40}
                     autoComplete="off"
-                    placeholder="e.g. Front counter"
+                    placeholder={t("e.g. Front counter")}
                     aria-describedby="store-devices-label-hint"
                     value={label}
                     disabled={locked}
                     onChange={(event) => onLabel(event.currentTarget.value)}
                   />
                   <p id="store-devices-label-hint" className="store-devices__hint">
-                    A name staff recognise, up to 40 characters.
+                    {t("A name staff recognise, up to 40 characters.")}
                   </p>
                   <button type="submit" disabled={locked || !validDeviceLabel(label)}>
-                    {busy ? "Setting up…" : "Set up this tablet for staff PINs"}
+                    {busy ? t("Setting up…") : t("Set up this tablet for staff PINs")}
                   </button>
                 </form>
               )}
@@ -232,19 +248,19 @@ export function StoreDevicesView({
           )}
           {read.devices === null ? null : (
             <section className="store-devices__section" aria-labelledby="store-devices-list">
-              <h2 id="store-devices-list">Shared tablets</h2>
+              <h2 id="store-devices-list">{t("Shared tablets")}</h2>
               {read.devices.length === 0 ? (
-                <p>No tablets are set up yet.</p>
+                <p>{t("No tablets are set up yet.")}</p>
               ) : (
                 <table>
                   <thead>
                     <tr>
-                      <th scope="col">Tablet</th>
-                      <th scope="col">Set up by</th>
-                      <th scope="col">Set up on</th>
-                      <th scope="col">Last used</th>
+                      <th scope="col">{t("Tablet")}</th>
+                      <th scope="col">{t("Set up by")}</th>
+                      <th scope="col">{t("Set up on")}</th>
+                      <th scope="col">{t("Last used")}</th>
                       <th scope="col">
-                        <span className="visually-hidden">Actions</span>
+                        <span className="visually-hidden">{t("Actions")}</span>
                       </th>
                     </tr>
                   </thead>
@@ -253,15 +269,15 @@ export function StoreDevicesView({
                       <tr key={device.device}>
                         <td>
                           {device.label}
-                          {read.thisDevice?.device === device.device ? " (this tablet)" : ""}
+                          {read.thisDevice?.device === device.device ? t(" (this tablet)") : ""}
                         </td>
-                        <td data-label="Set up by">{device.registeredBy ?? "—"}</td>
-                        <td data-label="Set up on">
+                        <td data-label={t("Set up by")}>{device.registeredBy ?? "—"}</td>
+                        <td data-label={t("Set up on")}>
                           {friendlyStoreTime(device.registeredAt, timeZone)}
                         </td>
-                        <td data-label="Last used">
+                        <td data-label={t("Last used")}>
                           {device.lastUsedAt === null
-                            ? "Not used yet"
+                            ? t("Not used yet")
                             : friendlyStoreTime(device.lastUsedAt, timeZone)}
                         </td>
                         <td>
@@ -271,7 +287,7 @@ export function StoreDevicesView({
                             aria-label={`Remove ${device.label}`}
                             onClick={() => onAsk({ kind: "Remove", device })}
                           >
-                            Remove
+                            {t("Remove")}
                           </button>
                         </td>
                       </tr>
@@ -283,17 +299,17 @@ export function StoreDevicesView({
           )}
           {read.staffPins === null ? null : (
             <section className="store-devices__section" aria-labelledby="store-devices-pins">
-              <h2 id="store-devices-pins">Staff PINs</h2>
+              <h2 id="store-devices-pins">{t("Staff PINs")}</h2>
               {read.staffPins.length === 0 ? (
-                <p>No staff at this store yet.</p>
+                <p>{t("No staff at this store yet.")}</p>
               ) : (
                 <table>
                   <thead>
                     <tr>
-                      <th scope="col">Name</th>
-                      <th scope="col">Status</th>
+                      <th scope="col">{t("Name")}</th>
+                      <th scope="col">{t("Status")}</th>
                       <th scope="col">
-                        <span className="visually-hidden">Actions</span>
+                        <span className="visually-hidden">{t("Actions")}</span>
                       </th>
                     </tr>
                   </thead>
@@ -301,7 +317,7 @@ export function StoreDevicesView({
                     {read.staffPins.map((row) => (
                       <tr key={row.staff}>
                         <td>{row.name}</td>
-                        <td data-label="Status">{staffPinStatusText(row, timeZone, now)}</td>
+                        <td data-label={t("Status")}>{staffPinStatusText(row, timeZone, now)}</td>
                         <td>
                           {row.state === "Set" ? (
                             <button
@@ -310,7 +326,7 @@ export function StoreDevicesView({
                               aria-label={`Reset ${row.name}'s PIN`}
                               onClick={() => onAsk({ kind: "Reset", person: row })}
                             >
-                              Reset PIN
+                              {t("Reset PIN")}
                             </button>
                           ) : null}
                         </td>
@@ -410,7 +426,10 @@ export function StoreDevicesPage({
       setLabel("");
       setMessage({
         tone: "neutral",
-        text: `This tablet is set up as “${device.label}”. Staff can now switch to themselves here with their PIN.`,
+        text: t(
+          "This tablet is set up as “{label}”. Staff can now switch to themselves here with their PIN.",
+          { label: device.label },
+        ),
       });
       refresh();
     } catch (error) {
@@ -432,7 +451,9 @@ export function StoreDevicesPage({
         await source.resetPin(action.person.staff);
         setMessage({
           tone: "neutral",
-          text: `${action.person.name}'s PIN is reset. They sign in with their account and set a new one.`,
+          text: t("{name}'s PIN is reset. They sign in with their account and set a new one.", {
+            name: action.person.name,
+          }),
         });
       }
       refresh();
@@ -462,12 +483,12 @@ export function StoreDevicesPage({
           onVerified={(until) => {
             setVerifiedUntil(until);
             setNeedsVerification(false);
-            setMessage({ tone: "neutral", text: "Verified. Try again now." });
+            setMessage({ tone: "neutral", text: t("Verified. Try again now.") });
             if (load.kind !== "Ready") refresh();
           }}
           // WP-2423 item 7: the same label as the sidebar; the guidance above already names
           // the authenticator app, so the button's own hint is not repeated.
-          label="Verify it's you"
+          label={t("Verify it's you")}
           hint={false}
           fetcher={fetcher}
           loadServerStatus={false}
@@ -496,13 +517,17 @@ export function StoreDevicesPage({
             <>
               <h2 id="store-devices-confirm-title">
                 {pending.kind === "Remove"
-                  ? `Remove ${pending.device.label}?`
-                  : `Reset ${pending.person.name}'s PIN?`}
+                  ? t("Remove {label}?", { label: pending.device.label })
+                  : t("Reset {name}'s PIN?", { name: pending.person.name })}
               </h2>
               <p>
                 {pending.kind === "Remove"
-                  ? "Anyone signed in on it with a PIN is signed out, and it will need to be set up again."
-                  : "They sign in with their account and set a new one. This also unlocks a locked PIN and signs them out of PIN sign-ins."}
+                  ? t(
+                      "Anyone signed in on it with a PIN is signed out, and it will need to be set up again.",
+                    )
+                  : t(
+                      "They sign in with their account and set a new one. This also unlocks a locked PIN and signs them out of PIN sign-ins.",
+                    )}
               </p>
               <div className="card-actions">
                 <button
@@ -511,10 +536,14 @@ export function StoreDevicesPage({
                   disabled={busy}
                   onClick={() => void confirm()}
                 >
-                  {busy ? "Working…" : pending.kind === "Remove" ? "Remove tablet" : "Reset PIN"}
+                  {busy
+                    ? t("Working…")
+                    : pending.kind === "Remove"
+                      ? t("Remove tablet")
+                      : t("Reset PIN")}
                 </button>
                 <button type="button" disabled={busy} onClick={() => setPending(null)}>
-                  Cancel
+                  {t("Cancel")}
                 </button>
               </div>
             </>

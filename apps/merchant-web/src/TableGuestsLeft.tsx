@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createTableClosePlanClient,
@@ -12,14 +13,18 @@ import { storeTime } from "./StoreTime.js";
 /** The plan's amounts are the store's CAD minor units; the app's one money format ("$11.30"). */
 const cad = (minor: string | bigint) =>
   orderMoney({ amountMinor: BigInt(minor).toString(), currencyCode: "CAD" });
-const items = (count: number) => `${String(count)} item${count === 1 ? "" : "s"}`;
+const items = (count: number) =>
+  t("{count} item{value}", { count: String(count), value: count === 1 ? "" : "s" });
 /** Started items by kitchen readiness: still being made, or marked ready and waiting to be served. */
 const startedText = (started: number, ready: number) =>
   ready === 0
-    ? `${items(started)} already being made`
+    ? t("{started} already being made", { started: items(started) })
     : ready === started
-      ? `${items(ready)} ready to serve`
-      : `${items(started - ready)} being made and ${String(ready)} ready to serve`;
+      ? t("{ready} ready to serve", { ready: items(ready) })
+      : t("{value} being made and {ready} ready to serve", {
+          value: items(started - ready),
+          ready: String(ready),
+        });
 
 /**
  * DEC-TABLE-CLOSE-GUESTS-LEFT: one round of a table whose guests left, in staff words — what it is
@@ -32,7 +37,7 @@ export function guestsLeftRoundText(
   now: number,
   partlyRefund: string | null = null,
 ): string {
-  const name = `Round ${String(round.sequence)}`;
+  const name = t("Round {sequence}", { sequence: String(round.sequence) });
   const machine = round.refund?.method === "CardMachine";
   switch (round.state) {
     case "NotPaid":
@@ -58,7 +63,9 @@ export function guestsLeftRoundText(
     case "PartlyStarted":
       return (
         `${name}: ${items(round.cancellableItemReferences.length)} not started will be cancelled and ` +
-        (partlyRefund === null ? "refunded" : `${cad(partlyRefund)} refunded`) +
+        (partlyRefund === null
+          ? "refunded"
+          : t("{partlyRefund} refunded", { partlyRefund: cad(partlyRefund) })) +
         `. ${startedText(round.startedItemCount, round.readyItemCount)}: serve them, or mark them served on the Orders page.`
       );
     case "BeingMade":
@@ -153,13 +160,14 @@ export function TableGuestsLeft({
     return () => controller.abort();
   }, [orderReference, diningSessionReference, csrf, fetcher, attempt, reload]);
 
-  if (load.kind === "Loading") return <p role="status">Checking which rounds are still open…</p>;
+  if (load.kind === "Loading")
+    return <p role="status">{t("Checking which rounds are still open…")}</p>;
   if (load.kind === "Failed")
     return load.denied ? null : (
       <p role="status">
-        Couldn&apos;t check the table&apos;s open rounds. Check the connection and try again.{" "}
+        {t("Couldn't check the table's open rounds. Check the connection and try again.")}{" "}
         <button type="button" onClick={() => setReload((value) => value + 1)}>
-          Check again
+          {t("Check again")}
         </button>
       </p>
     );
@@ -222,8 +230,8 @@ export function TableGuestsLeft({
   };
 
   return (
-    <section aria-label="Guests have left" className="dining-table-guests-left">
-      <h5>If the guests have left</h5>
+    <section aria-label={t("Guests have left")} className="dining-table-guests-left">
+      <h5>{t("If the guests have left")}</h5>
       <ul>
         {plan.rounds.map((round) => (
           <li key={round.orderBatchReference} data-round-state={round.state}>
@@ -239,20 +247,27 @@ export function TableGuestsLeft({
       {actionable.length > 0 ? (
         <>
           <p>
-            Closing out{" "}
-            {actionable.length === 1 ? "this round" : `these ${String(actionable.length)} rounds`}{" "}
+            {t("Closing out")}{" "}
+            {actionable.length === 1
+              ? t("this round")
+              : t("these {length} rounds", { length: String(actionable.length) })}{" "}
             {online > 0n || unknownPartly ? (
               <>
-                refunds {cad(online)} to the guest online
-                {unknownPartly ? " plus the items not started" : ""}
-                {machine > 0n ? ` and ${cad(machine)} to refund on the card machine` : ""}
+                {t("refunds {online} to the guest online{value}{value2}", {
+                  online: cad(online),
+                  value: unknownPartly ? t(" plus the items not started") : "",
+                  value2:
+                    machine > 0n
+                      ? t(" and {machine} to refund on the card machine", { machine: cad(machine) })
+                      : "",
+                })}
               </>
             ) : machine > 0n ? (
-              `leaves ${cad(machine)} to refund on the card machine`
+              t("leaves {machine} to refund on the card machine", { machine: cad(machine) })
             ) : (
-              "refunds nothing more: what was paid has already been refunded"
+              t("refunds nothing more: what was paid has already been refunded")
             )}
-            . The reason recorded is &ldquo;Guests left&rdquo;.
+            {t(". The reason recorded is “Guests left”.")}
           </p>
           {run === "Unknown" || run === "FullSignInRequired" ? null : (
             <label>
@@ -262,7 +277,7 @@ export function TableGuestsLeft({
                 disabled={run === "Running" || locked}
                 onChange={(event) => setConfirmed(event.target.checked)}
               />
-              The guests at table {tableLabel} have left
+              {t("The guests at table {tableLabel} have left", { tableLabel: tableLabel })}
             </label>
           )}
           <button
@@ -275,29 +290,31 @@ export function TableGuestsLeft({
             onClick={() => void confirm()}
           >
             {run === "Running"
-              ? "Closing out the rounds…"
+              ? t("Closing out the rounds…")
               : run === "Unknown" || run === "FullSignInRequired"
-                ? "Try again"
+                ? t("Try again")
                 : actionable.length === 1
-                  ? "Cancel the round and refund"
-                  : `Cancel ${String(actionable.length)} rounds and refund`}
+                  ? t("Cancel the round and refund")
+                  : t("Cancel {length} rounds and refund", { length: String(actionable.length) })}
           </button>
         </>
       ) : null}
       {run === "FullSignInRequired" ? <FullSignInPrompt csrf={csrf} fetcher={fetcher} /> : null}
       {run === "Unknown" ? (
         <p role="alert">
-          We couldn&apos;t confirm every round was closed out (the connection may have dropped). Try
-          again; nothing is cancelled or refunded twice.
+          {t(
+            "We couldn't confirm every round was closed out (the connection may have dropped). Try again; nothing is cancelled or refunded twice.",
+          )}
         </p>
       ) : run === "Denied" ? (
         <p role="alert">
-          Your access doesn&apos;t allow cancelling rounds. Ask an Owner or Store Manager.
+          {t("Your access doesn't allow cancelling rounds. Ask an Owner or Store Manager.")}
         </p>
       ) : run === "Refused" ? (
         <p role="alert">
-          A round changed while closing out (for example the kitchen started it). The list above is
-          up to date; check it and try again.
+          {t(
+            "A round changed while closing out (for example the kitchen started it). The list above is up to date; check it and try again.",
+          )}
         </p>
       ) : null}
     </section>

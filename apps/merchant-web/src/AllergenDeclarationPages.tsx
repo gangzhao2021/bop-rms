@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StoreDate } from "./StoreTime.js";
@@ -25,33 +26,37 @@ import {
 
 /** WP-2423 / DEC-ALLERGEN-DECLARATIONS: Brand allergen registry and ingredient declarations. */
 const copy: Record<AllergenErrorCode | "Loading", string> = {
-  Loading: "Loading allergens…",
-  PermissionDenied: "You do not have permission for this allergen action at Brand level.",
-  NotFound: "This ingredient does not exist or is not active.",
-  Conflict:
+  Loading: t("Loading allergens…"),
+  PermissionDenied: t("You do not have permission for this allergen action at Brand level."),
+  NotFound: t("This ingredient does not exist or is not active."),
+  Conflict: t(
     "The ingredient or the allergen list changed since you opened it. Refresh and declare again.",
-  RegistryMissing: "Approve the Brand allergen list before declaring ingredients.",
-  Invalid:
+  ),
+  RegistryMissing: t("Approve the Brand allergen list before declaring ingredients."),
+  Invalid: t(
     "The declaration is not valid. Choose where it comes from, name the document and give a future valid-until date.",
-  ApprovalRequired:
+  ),
+  ApprovalRequired: t(
     "You recorded this list: someone else holding allergen list approval approves it.",
-  SoleOperatorNotInEffect:
+  ),
+  SoleOperatorNotInEffect: t(
     "Someone else now holds allergen list approval, so they must approve this list. Refresh to see who.",
-  NeedsReverification: "Confirm it is you with your authenticator code, then approve again.",
-  Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
-  Unavailable: "Allergens are unavailable.",
+  ),
+  NeedsReverification: t("Confirm it is you with your authenticator code, then approve again."),
+  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Unavailable: t("Allergens are unavailable."),
 };
 const statusText: Record<DeclarationStatus, string> = {
   Current: "Declared",
-  ExpiringSoon: "Declared — expires within 30 days",
-  ItemChanged: "Ingredient changed — declare again",
-  RegistryChanged: "Allergen list changed — declare again",
-  Missing: "Not declared",
+  ExpiringSoon: t("Declared — expires within 30 days"),
+  ItemChanged: t("Ingredient changed — declare again"),
+  RegistryChanged: t("Allergen list changed — declare again"),
+  Missing: t("Not declared"),
 };
 const sourceText: Record<string, string> = {
-  SupplierSpecification: "Supplier specification",
-  ProductLabel: "Product label",
-  ManufacturerStatement: "Manufacturer statement",
+  SupplierSpecification: t("Supplier specification"),
+  ProductLabel: t("Product label"),
+  ManufacturerStatement: t("Manufacturer statement"),
 };
 type State<V> =
   { readonly kind: "Loading" | AllergenErrorCode } | { readonly kind: "Found"; readonly view: V };
@@ -83,7 +88,7 @@ function useAllergenView<V>(
 function Failure({ code }: { readonly code: AllergenErrorCode | "Loading" }) {
   return (
     <StatePanel
-      heading={code === "PermissionDenied" ? noAccessHeading : "Allergens"}
+      heading={code === "PermissionDenied" ? noAccessHeading : t("Allergens")}
       tone={code === "Loading" ? "neutral" : "error"}
       status
     >
@@ -132,22 +137,22 @@ export function AllergenListPage({
   const view: AllergenListView = state.view;
   const missing = view.items.filter((item) => item.status !== "Current").length;
   return (
-    <AppFrame title="Allergens" description="">
+    <AppFrame title={t("Allergens")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Allergens · Brand</p>
-          <h2>Allergens</h2>
+          <p className="bop-eyebrow">{t("Allergens · Brand")}</p>
+          <h2>{t("Allergens")}</h2>
           <p>
-            Every ingredient used in a recipe needs an allergen declaration taken from its supplier
-            specification, label or manufacturer statement. Recipes carry these declarations; a
-            recipe's food safety review approves them, and menus disclose them to customers. Source
-            as of <SourceTime instant={view.sourceAsOf} />
+            {t(
+              "Every ingredient used in a recipe needs an allergen declaration taken from its supplier specification, label or manufacturer statement. Recipes carry these declarations; a recipe's food safety review approves them, and menus disclose them to customers. Source as of",
+            )}{" "}
+            <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
       </header>
       {message ? (
         <StatePanel
-          heading={message.tone === "error" ? "Not done" : "Done"}
+          heading={message.tone === "error" ? t("Not done") : t("Done")}
           tone={message.tone}
           status
         >
@@ -155,11 +160,13 @@ export function AllergenListPage({
         </StatePanel>
       ) : null}
       <section className="detail-section" aria-labelledby="registry">
-        <h3 id="registry">Allergen list</h3>
+        <h3 id="registry">{t("Allergen list")}</h3>
         {view.registry ? (
           <>
             <p>
-              {view.registry.jurisdictionCode} list approved{" "}
+              {t("{jurisdictionCode} list approved", {
+                jurisdictionCode: view.registry.jurisdictionCode,
+              })}{" "}
               <StoreDate value={view.registry.reviewedAt} />:{" "}
               {view.registry.entries
                 .map((entry) => allergenName(view.registry, entry.allergenReference, view.locale))
@@ -170,14 +177,18 @@ export function AllergenListPage({
         ) : (
           <>
             <p>
-              No allergen list is approved for the Brand. Proposed list (
-              {view.registryTemplate.jurisdictionCode}):{" "}
-              {view.registryTemplate.allergens.map((a) => a.name).join(", ")}.
+              {t(
+                "No allergen list is approved for the Brand. Proposed list ({jurisdictionCode}): {value}.",
+                {
+                  jurisdictionCode: view.registryTemplate.jurisdictionCode,
+                  value: view.registryTemplate.allergens.map((a) => a.name).join(", "),
+                },
+              )}
             </p>
             <p>{view.registryTemplate.policyDocument}</p>
             {/* WP-2423 Q19: one person records the list, another approves it. */}
             {!view.permissions.mayManageRegistry ? (
-              <p>Someone holding allergen list approval must record and approve it.</p>
+              <p>{t("Someone holding allergen list approval must record and approve it.")}</p>
             ) : view.registryProposal === null ? (
               <button
                 type="button"
@@ -189,24 +200,28 @@ export function AllergenListPage({
                       operationReference: newOperationReference(),
                       template: "CA_PRIORITY_TEST",
                     },
-                    "Allergen list recorded. Someone else holding allergen list approval approves it.",
+                    t(
+                      "Allergen list recorded. Someone else holding allergen list approval approves it.",
+                    ),
                   )
                 }
               >
-                {pending ? "Retry" : "Record this allergen list for approval"}
+                {pending ? t("Retry") : t("Record this allergen list for approval")}
               </button>
             ) : view.registryProposal.recordedByYou ? (
               <SoleOperatorSelfApproval
                 gate={view.soleOperator}
                 csrf={csrf}
-                what="this allergen list"
-                permissionName="allergen list approval"
+                what={t("this allergen list")}
+                permissionName={t("allergen list approval")}
                 busy={busy}
-                actionLabel={pending ? "Retry" : "Approve this list on my own"}
+                actionLabel={pending ? t("Retry") : t("Approve this list on my own")}
                 summary={
                   <p>
-                    {view.registryTemplate.jurisdictionCode} list of{" "}
-                    {view.registryTemplate.allergens.length} allergens, recorded by you{" "}
+                    {t("{jurisdictionCode} list of {length} allergens, recorded by you", {
+                      jurisdictionCode: view.registryTemplate.jurisdictionCode,
+                      length: view.registryTemplate.allergens.length,
+                    })}{" "}
                     <SourceTime instant={view.registryProposal.recordedAt} />.
                   </p>
                 }
@@ -218,7 +233,7 @@ export function AllergenListPage({
                       proposalReference: view.registryProposal?.proposalReference ?? "",
                       approvalMode: "SoleOperator",
                     },
-                    "Allergen list approved.",
+                    t("Allergen list approved."),
                   )
                 }
               />
@@ -233,30 +248,33 @@ export function AllergenListPage({
                       operationReference: newOperationReference(),
                       proposalReference: view.registryProposal?.proposalReference ?? "",
                     },
-                    "Allergen list approved.",
+                    t("Allergen list approved."),
                   )
                 }
               >
-                {pending ? "Retry" : "Approve the recorded allergen list"}
+                {pending ? t("Retry") : t("Approve the recorded allergen list")}
               </button>
             )}
           </>
         )}
       </section>
       <section className="detail-section" aria-labelledby="ingredients">
-        <h3 id="ingredients">Ingredients</h3>
+        <h3 id="ingredients">{t("Ingredients")}</h3>
         <p>
           {missing === 0
-            ? "Every active ingredient has a current declaration."
-            : `${missing} of ${view.items.length} active ingredients need a declaration.`}
+            ? t("Every active ingredient has a current declaration.")
+            : t("{missing} of {length} active ingredients need a declaration.", {
+                missing: missing,
+                length: view.items.length,
+              })}
         </p>
         <table>
           <thead>
             <tr>
-              <th>Ingredient</th>
-              <th>Status</th>
-              <th>Declared allergens</th>
-              <th>Valid through</th>
+              <th>{t("Ingredient")}</th>
+              <th>{t("Status")}</th>
+              <th>{t("Declared allergens")}</th>
+              <th>{t("Valid through")}</th>
             </tr>
           </thead>
           <tbody>
@@ -353,10 +371,10 @@ function AllergenItem({
     validUntil > view.sourceAsOf.slice(0, 10) &&
     confirmed;
   return (
-    <AppFrame title={item.name} description="Allergens">
+    <AppFrame title={item.name} description={t("Allergens")}>
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Allergens · Ingredient</p>
+          <p className="bop-eyebrow">{t("Allergens · Ingredient")}</p>
           <h2>{item.name}</h2>
           <p>
             {statusText[item.status]}
@@ -365,11 +383,11 @@ function AllergenItem({
               : ""}
           </p>
         </div>
-        <Link to="/app/compliance/allergens">Back to allergens</Link>
+        <Link to="/app/compliance/allergens">{t("Back to allergens")}</Link>
       </header>
       {message ? (
         <StatePanel
-          heading={message.tone === "error" ? "Not recorded" : "Recorded"}
+          heading={message.tone === "error" ? t("Not recorded") : t("Recorded")}
           tone={message.tone}
           status
         >
@@ -377,7 +395,7 @@ function AllergenItem({
         </StatePanel>
       ) : null}
       {registry === null ? (
-        <StatePanel heading="No allergen list" status>
+        <StatePanel heading={t("No allergen list")} status>
           <p>{copy.RegistryMissing}</p>
         </StatePanel>
       ) : view.permissions.mayDeclare ? (
@@ -402,19 +420,21 @@ function AllergenItem({
                 note: note.trim() || null,
                 validUntilDate: validUntil,
               },
-              "Declaration recorded. Recipes using this ingredient must be saved again to carry it.",
+              t(
+                "Declaration recorded. Recipes using this ingredient must be saved again to carry it.",
+              ),
             );
           }}
         >
           <fieldset disabled={busy}>
-            <legend>Declaration</legend>
+            <legend>{t("Declaration")}</legend>
             <table>
               <thead>
                 <tr>
-                  <th>Allergen</th>
-                  <th>Not present</th>
-                  <th>Contains</th>
-                  <th>May contain (cross-contact)</th>
+                  <th>{t("Allergen")}</th>
+                  <th>{t("Not present")}</th>
+                  <th>{t("Contains")}</th>
+                  <th>{t("May contain (cross-contact)")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -451,7 +471,7 @@ function AllergenItem({
               </tbody>
             </table>
             <label>
-              Based on
+              {t("Based on")}
               <select value={sourceKind} onChange={(event) => setSourceKind(event.target.value)}>
                 {view.sources.map((source) => (
                   <option key={source} value={source}>
@@ -461,7 +481,7 @@ function AllergenItem({
               </select>
             </label>
             <label>
-              Document (supplier, product and document date or number)
+              {t("Document (supplier, product and document date or number)")}
               <input
                 value={documentReference}
                 maxLength={200}
@@ -469,7 +489,7 @@ function AllergenItem({
               />
             </label>
             <label>
-              Note (optional)
+              {t("Note (optional)")}
               <input
                 value={note}
                 maxLength={500}
@@ -477,7 +497,7 @@ function AllergenItem({
               />
             </label>
             <label>
-              Valid until
+              {t("Valid until")}
               <input
                 type="date"
                 value={validUntil}
@@ -490,28 +510,32 @@ function AllergenItem({
                 checked={confirmed}
                 onChange={(event) => setConfirmed(event.target.checked)}
               />
-              I checked every allergen against the document named above.
+              {t("I checked every allergen against the document named above.")}
             </label>
           </fieldset>
           <button type="submit" disabled={!valid || busy}>
-            {pending ? "Retry" : "Record declaration"}
+            {pending ? t("Retry") : t("Record declaration")}
           </button>
         </form>
       ) : (
-        <p>You may view declarations but not record them.</p>
+        <p>{t("You may view declarations but not record them.")}</p>
       )}
       <section className="detail-section" aria-labelledby="history">
-        <h3 id="history">Declarations</h3>
+        <h3 id="history">{t("Declarations")}</h3>
         {view.history.length === 0 ? (
-          <p>None yet.</p>
+          <p>{t("None yet.")}</p>
         ) : (
           <ul>
             {view.history.map((d) => (
               <li key={d.evidenceReference}>
-                <StoreDate value={d.reviewedAt} />: {declarationSummary(registry, d, view.locale)} ·{" "}
-                {sourceText[d.sourceKind] ?? d.sourceKind}: {d.documentReference} · valid through{" "}
+                <StoreDate value={d.reviewedAt} />
+                {t(": {registry} · {value}: {documentReference} · valid through", {
+                  registry: declarationSummary(registry, d, view.locale),
+                  value: sourceText[d.sourceKind] ?? d.sourceKind,
+                  documentReference: d.documentReference,
+                })}{" "}
                 <StoreDate value={d.validThrough ?? d.validUntil} />
-                {d.declaredBy === view.viewer ? " · by you" : ""}
+                {d.declaredBy === view.viewer ? t(" · by you") : ""}
               </li>
             ))}
           </ul>

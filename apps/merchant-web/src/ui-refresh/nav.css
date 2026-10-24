@@ -312,3 +312,10 @@
     display: none;
   }
 }
+
+/* Owner 2026-10-24: "中文 / English" beneath the navigation, beside the session actions. */
+.workspace-sidebar .workspace-sidebar__language {
+  min-height: 44px;
+  width: 100%;
+  margin-top: 8px;
+}

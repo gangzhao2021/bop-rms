@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect } from "react";
 import { Link, useLocation } from "react-router";
 import {
@@ -12,11 +13,12 @@ import {
 export const STEP_UP_CLOSE_WAIT_MS = 300;
 
 export const stepUpCompleteText: Record<StepUpResult, string> = {
-  verified: "You're verified. You can go back to what you were doing.",
-  cancelled: "Sign-in was cancelled.",
-  failed: "We couldn't confirm it's you.",
-  unavailable:
+  verified: t("You're verified. You can go back to what you were doing."),
+  cancelled: t("Sign-in was cancelled."),
+  failed: t("We couldn't confirm it's you."),
+  unavailable: t(
     "Signing in again isn't available right now, so nothing was changed. Try again in a few minutes; if it keeps happening, tell your manager.",
+  ),
 };
 
 export interface StepUpCompleteWindow {
@@ -65,11 +67,11 @@ export function StepUpCompleteView({
         <p className="staff-switch__brand">
           <strong aria-label="BOP">BOP</strong>
         </p>
-        <h1>Confirm it is you</h1>
+        <h1>{t("Confirm it is you")}</h1>
       </header>
-      <section className="staff-switch__panel" aria-label="Result">
+      <section className="staff-switch__panel" aria-label={t("Result")}>
         {result === null ? (
-          <p>This sign-in check has ended.</p>
+          <p>{t("This sign-in check has ended.")}</p>
         ) : (
           <p role={result === "failed" || result === "unavailable" ? "alert" : "status"}>
             {stepUpCompleteText[result]}
@@ -77,7 +79,7 @@ export function StepUpCompleteView({
         )}
         <p>
           <Link className="staff-sign-in__link" to={returnTo}>
-            Go back
+            {t("Go back")}
           </Link>
         </p>
       </section>

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import type { StepUpPurpose } from "./refund-approval-client.js";
 
 /**
@@ -123,11 +124,13 @@ export function openStepUpSignIn(url: string, target: StepUpWindow): "Popup" | "
   return "SameWindow";
 }
 
-export const STEP_UP_SIGN_IN_EXPLANATION =
-  "Confirm it is you by signing in again with your password and authenticator app. After you verify, approvals and refunds can go ahead for 15 minutes.";
+export const STEP_UP_SIGN_IN_EXPLANATION = t(
+  "Confirm it is you by signing in again with your password and authenticator app. After you verify, approvals and refunds can go ahead for 15 minutes.",
+);
 export const stepUpResultText: Record<Exclude<StepUpResult, "verified">, string> = {
-  cancelled: "You didn't finish signing in. Try again when you're ready.",
-  failed: "We couldn't confirm it's you. Try again, or ask a manager if it keeps happening.",
-  unavailable:
+  cancelled: t("You didn't finish signing in. Try again when you're ready."),
+  failed: t("We couldn't confirm it's you. Try again, or ask a manager if it keeps happening."),
+  unavailable: t(
     "Signing in again isn't available right now, so nothing was changed. Try again in a few minutes; if it keeps happening, tell your manager.",
+  ),
 };

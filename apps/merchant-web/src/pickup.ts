@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 export interface PickupQueueItem {
   readonly fulfillmentReference: string;
   readonly orderReference: string;
@@ -68,7 +69,7 @@ export class PickupClientError extends Error {
     readonly code:
       "PermissionDenied" | "NotFound" | "Offline" | "Conflict" | "CommandFailed" | "Unavailable",
   ) {
-    super("Pickup is unavailable");
+    super(t("Pickup is unavailable"));
     this.name = "PickupClientError";
   }
 }
@@ -254,7 +255,7 @@ export function pickupItemLabel(
   item: Pick<PickupExecution["items"][number], "name" | "options">,
   index: number,
 ): string {
-  if (item.name === undefined) return `Item ${String(index + 1)}`;
+  if (item.name === undefined) return t("Item {value}", { value: String(index + 1) });
   const options = (item.options ?? []).map((option) =>
     option.quantity > 1 ? `${String(option.quantity)} × ${option.name}` : option.name,
   );

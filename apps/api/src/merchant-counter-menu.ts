@@ -1,3 +1,4 @@
+import { staffContentLocale } from "./staff-content-locale.js";
 import type { CustomerMenuFound, CustomerMenuQueryInput } from "@rms/catalog";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { publicFound, type CustomerMenuPort } from "./customer-menu.js";
@@ -56,7 +57,9 @@ export function createMerchantCounterMenu(options: {
         publicStoreReference: options.publicStoreReference(scope),
         channelCode: "CUSTOMER_PWA",
         orderTypeCode: input.orderType === "DineIn" ? "DINE_IN" : "PICKUP",
-        locale: options.locale,
+        // Owner 2026-10-24: the menu in the staff member's chosen language (missing names fall
+        // back to the menu language); what is ordered is the same either way.
+        locale: staffContentLocale() ?? options.locale,
         requestedAt: options.persistence.now(),
         searchTerm: null,
         sectionReference: null,

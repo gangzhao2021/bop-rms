@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useId, useRef, useState } from "react";
 import { StatePanel } from "@bop-rms/ui";
 import { kitchenOrderText, type KitchenBoardItem } from "./kitchen-board.js";
@@ -170,61 +171,67 @@ export function KitchenReworkStatus({
   const heading =
     state.kind === "Submitting"
       ? creating
-        ? "Sending remake"
+        ? t("Sending remake")
         : cancelling
-          ? "Cancelling remake"
-          : "Updating remake"
+          ? t("Cancelling remake")
+          : t("Updating remake")
       : state.kind === "Unknown"
-        ? "Remake result unknown"
+        ? t("Remake result unknown")
         : state.kind === "Confirmed"
           ? creating
-            ? "Remake sent to the kitchen"
+            ? t("Remake sent to the kitchen")
             : cancelling
-              ? "Remake cancelled"
-              : "Remake updated"
+              ? t("Remake cancelled")
+              : t("Remake updated")
           : cancelling
-            ? "Remake not cancelled"
-            : "Remake not recorded";
+            ? t("Remake not cancelled")
+            : t("Remake not recorded");
   const text =
     state.kind === "Submitting"
-      ? "Please wait."
+      ? t("Please wait.")
       : state.kind === "Unknown"
         ? cancelling
-          ? "The answer was lost. Retry the same cancellation; it will not be applied twice."
-          : "The answer was lost. Retry the same remake; it will not be sent twice."
+          ? t("The answer was lost. Retry the same cancellation; it will not be applied twice.")
+          : t("The answer was lost. Retry the same remake; it will not be sent twice.")
         : state.kind === "Confirmed"
           ? creating && state.body.reasonCode === "NOT_READY"
-            ? "The dish is back in progress. Nothing was recorded as waste."
+            ? t("The dish is back in progress. Nothing was recorded as waste.")
             : creating
-              ? "The first dish is recorded as waste. The guest is not charged again."
+              ? t("The first dish is recorded as waste. The guest is not charged again.")
               : cancelling
                 ? state.body.cancelReasonCode === "OPENED_BY_MISTAKE"
-                  ? "It is off the board. Anything recorded as waste for it is put back in stock."
-                  : "It is off the board. The first dish stays recorded as waste."
-                : "The board now shows the remake's current state."
+                  ? t(
+                      "It is off the board. Anything recorded as waste for it is put back in stock.",
+                    )
+                  : t("It is off the board. The first dish stays recorded as waste.")
+                : t("The board now shows the remake's current state.")
           : cancelling && state.code === "PreconditionFailed"
-            ? "This remake is already done or cancelled. The board has been refreshed."
+            ? t("This remake is already done or cancelled. The board has been refreshed.")
             : state.code === "WindowClosed"
               ? state.body.action === "CreateKitchenRework" && state.body.reasonCode === "NOT_READY"
-                ? "More than two minutes have passed since it was marked done. Choose another reason to remake it."
-                : "This dish was finished too long ago to remake. Close the old order instead."
+                ? t(
+                    "More than two minutes have passed since it was marked done. Choose another reason to remake it.",
+                  )
+                : t("This dish was finished too long ago to remake. Close the old order instead.")
               : state.code === "PermissionDenied"
-                ? "Your role does not allow remakes. Ask a manager or kitchen lead."
+                ? t("Your role does not allow remakes. Ask a manager or kitchen lead.")
                 : state.code === "Conflict"
-                  ? "The remake changed on another screen. The board has been refreshed."
-                  : "The dish is not finished, or it was already remade too many times. The board has been refreshed.";
+                  ? t("The remake changed on another screen. The board has been refreshed.")
+                  : t(
+                      "The dish is not finished, or it was already remade too many times. The board has been refreshed.",
+                    );
   return (
     <div className="kitchen-rework-status" data-kind={state.kind}>
       <StatePanel heading={heading} tone={state.kind === "Rejected" ? "error" : "neutral"} status>
         <p>{text}</p>
         {state.kind === "Unknown" ? (
           <button type="button" onClick={rework.retry}>
-            {cancelling ? "Retry same cancellation" : "Retry same remake"}
+            {cancelling ? t("Retry same cancellation") : t("Retry same remake")}
           </button>
         ) : null}
         {state.kind === "Confirmed" || state.kind === "Rejected" ? (
           <button type="button" onClick={rework.dismiss}>
-            Dismiss
+            {t("Dismiss")}
           </button>
         ) : null}
       </StatePanel>
@@ -255,9 +262,9 @@ export function KitchenRemakeLane({
   const open = items.filter(kitchenReworkOpen);
   if (open.length === 0) return null;
   return (
-    <section className="kitchen-station-lane kitchen-remake-lane" aria-label="Remakes">
+    <section className="kitchen-station-lane kitchen-remake-lane" aria-label={t("Remakes")}>
       <header className="kitchen-station-lane__heading">
-        <h3>Remakes</h3>
+        <h3>{t("Remakes")}</h3>
         <span aria-label={`${open.length} open remakes`}>{open.length}</span>
       </header>
       <div className="kitchen-station-lane__items">
@@ -286,16 +293,16 @@ export function KitchenRemakeLane({
             </div>
             <div className="kitchen-work-item__state">
               <strong data-status={rework.status}>
-                {rework.status === "In Progress" ? "In progress" : rework.status}
+                {rework.status === "In Progress" ? t("In progress") : rework.status}
               </strong>
             </div>
             <div className="kitchen-work-item__facts">
               <dl className="kitchen-work-item__quantity">
-                <dt>Quantity</dt>
+                <dt>{t("Quantity")}</dt>
                 <dd>{rework.quantity}</dd>
               </dl>
               {rework.selectedOptions.length > 0 ? (
-                <ul className="kitchen-work-item__options" aria-label="Modifiers">
+                <ul className="kitchen-work-item__options" aria-label={t("Modifiers")}>
                   {rework.selectedOptions.map((option, index) => (
                     <li key={`${option.displayName}:${index}`}>
                       {option.quantity > 1
@@ -307,18 +314,18 @@ export function KitchenRemakeLane({
               ) : null}
               {rework.customerNote ? (
                 <p className="kitchen-work-item__note">
-                  <span>Note:</span> {rework.customerNote}
+                  <span>{t("Note:")}</span> {rework.customerNote}
                 </p>
               ) : null}
               {rework.note ? (
                 <p className="kitchen-work-item__note kitchen-remake-note">
-                  <span>Why:</span> {rework.note}
+                  <span>{t("Why:")}</span> {rework.note}
                 </p>
               ) : null}
             </div>
             <div className="kitchen-work-item__actions">
               <button type="button" disabled={readOnly} onClick={() => onAdvance(rework)}>
-                {rework.status === "Queued" ? "Start remake" : "Remake done"}
+                {rework.status === "Queued" ? t("Start remake") : t("Remake done")}
               </button>
               {onCancel ? (
                 <button
@@ -328,7 +335,7 @@ export function KitchenRemakeLane({
                   onClick={() => onCancel(rework)}
                   aria-label={`Cancel remake of ${rework.displayName}, ${orderText(rework.orderLabel)}`}
                 >
-                  Cancel remake
+                  {t("Cancel remake")}
                 </button>
               ) : null}
             </div>
@@ -403,9 +410,9 @@ export function KitchenRemakeDialog({
             dialog.current?.close();
           }}
         >
-          <h2 id={titleId}>Remake {item.displayName}</h2>
+          <h2 id={titleId}>{t("Remake {displayName}", { displayName: item.displayName })}</h2>
           <fieldset>
-            <legend>Why does it need to be made again?</legend>
+            <legend>{t("Why does it need to be made again?")}</legend>
             {reasons.map((value) => (
               <label key={value} className="kitchen-remake-dialog__reason">
                 <input
@@ -421,7 +428,11 @@ export function KitchenRemakeDialog({
           </fieldset>
           {item.requiredQuantity > 1 && reason !== "NOT_READY" ? (
             <label className="kitchen-remake-dialog__field">
-              <span>How many to remake (of {item.requiredQuantity})</span>
+              <span>
+                {t("How many to remake (of {requiredQuantity})", {
+                  requiredQuantity: item.requiredQuantity,
+                })}
+              </span>
               <input
                 type="number"
                 inputMode="numeric"
@@ -434,7 +445,9 @@ export function KitchenRemakeDialog({
           ) : null}
           <label className="kitchen-remake-dialog__field">
             <span>
-              {reason === "OTHER" ? "What happened (required)" : "Note for the kitchen (optional)"}
+              {reason === "OTHER"
+                ? t("What happened (required)")
+                : t("Note for the kitchen (optional)")}
             </span>
             <textarea
               rows={2}
@@ -445,15 +458,17 @@ export function KitchenRemakeDialog({
           </label>
           <p className="kitchen-remake-dialog__effect">
             {reason === "NOT_READY"
-              ? "The dish goes back to in progress on this board. Nothing is recorded as waste."
-              : "The first dish's ingredients are recorded as waste. The guest is not charged again, and the order is not shown as served twice."}
+              ? t("The dish goes back to in progress on this board. Nothing is recorded as waste.")
+              : t(
+                  "The first dish's ingredients are recorded as waste. The guest is not charged again, and the order is not shown as served twice.",
+                )}
           </p>
           <div className="kitchen-remake-dialog__actions">
             <button type="button" onClick={() => dialog.current?.close()}>
-              Cancel
+              {t("Cancel")}
             </button>
             <button type="submit" disabled={!valid}>
-              {reason === "NOT_READY" ? "Put back in progress" : "Send remake"}
+              {reason === "NOT_READY" ? t("Put back in progress") : t("Send remake")}
             </button>
           </div>
         </form>
@@ -501,7 +516,7 @@ export function KitchenRecentlyFinished({
     ).length;
   return (
     <details className="kitchen-recent-finished">
-      <summary>Recently finished · {finished.length}</summary>
+      <summary>{t("Recently finished · {length}", { length: finished.length })}</summary>
       <ul>
         {finished.map((item) => (
           <li key={item.workItemReference}>
@@ -509,7 +524,7 @@ export function KitchenRecentlyFinished({
               <strong>{item.displayName}</strong>
               <span>
                 {orderLabel(item)} · {item.requiredQuantity} ×
-                {remade(item) > 0 ? ` · Remade ${remade(item)}×` : ""}
+                {remade(item) > 0 ? t(" · Remade {item}×", { item: remade(item) }) : ""}
               </span>
             </span>
             <button
@@ -518,7 +533,7 @@ export function KitchenRecentlyFinished({
               onClick={() => onRemake(item)}
               aria-label={`Remake ${item.displayName}, ${orderLabel(item)}`}
             >
-              Remake
+              {t("Remake")}
             </button>
           </li>
         ))}
@@ -557,11 +572,15 @@ export function KitchenRemakeCancelDialog({
       ? null
       : reason === "OPENED_BY_MISTAKE"
         ? notReady
-          ? "The dish counts as done again, as it was before."
-          : "Nothing was thrown away, so the first dish's waste record is reversed and its ingredients go back to stock."
+          ? t("The dish counts as done again, as it was before.")
+          : t(
+              "Nothing was thrown away, so the first dish's waste record is reversed and its ingredients go back to stock.",
+            )
         : notReady
-          ? "The dish comes off the board. Nothing was recorded as waste."
-          : "The first dish was still thrown away, so it stays recorded as waste. The guest is not charged again.";
+          ? t("The dish comes off the board. Nothing was recorded as waste.")
+          : t(
+              "The first dish was still thrown away, so it stays recorded as waste. The guest is not charged again.",
+            );
   return (
     <dialog
       ref={dialog}
@@ -579,13 +598,15 @@ export function KitchenRemakeCancelDialog({
             dialog.current?.close();
           }}
         >
-          <h2 id={titleId}>Cancel remake of {rework.displayName}</h2>
+          <h2 id={titleId}>
+            {t("Cancel remake of {displayName}", { displayName: rework.displayName })}
+          </h2>
           <p>
             {orderText(rework.orderLabel)} · {rework.quantity} × ·{" "}
             {kitchenReworkBadge(rework.reasonCode)}
           </p>
           <fieldset>
-            <legend>Why is it no longer needed?</legend>
+            <legend>{t("Why is it no longer needed?")}</legend>
             {kitchenReworkCancelReasons.map((value) => (
               <label key={value} className="kitchen-remake-dialog__reason">
                 <input
@@ -602,10 +623,10 @@ export function KitchenRemakeCancelDialog({
           {effect ? <p className="kitchen-remake-dialog__effect">{effect}</p> : null}
           <div className="kitchen-remake-dialog__actions">
             <button type="button" onClick={() => dialog.current?.close()}>
-              Keep remake
+              {t("Keep remake")}
             </button>
             <button type="submit" disabled={reason === null}>
-              Cancel remake
+              {t("Cancel remake")}
             </button>
           </div>
         </form>

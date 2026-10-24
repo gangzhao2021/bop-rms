@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -16,15 +17,15 @@ import { SourceTime } from "./StoreTime.js";
  */
 export const provinceNames: Readonly<Record<string, string>> = {
   AB: "Alberta",
-  BC: "British Columbia",
+  BC: t("British Columbia"),
   MB: "Manitoba",
-  NB: "New Brunswick",
-  NL: "Newfoundland and Labrador",
-  NS: "Nova Scotia",
-  NT: "Northwest Territories",
+  NB: t("New Brunswick"),
+  NL: t("Newfoundland and Labrador"),
+  NS: t("Nova Scotia"),
+  NT: t("Northwest Territories"),
   NU: "Nunavut",
   ON: "Ontario",
-  PE: "Prince Edward Island",
+  PE: t("Prince Edward Island"),
   QC: "Quebec",
   SK: "Saskatchewan",
   YT: "Yukon",
@@ -79,34 +80,34 @@ export function storePublicProfileFieldErrors(
   const errors: Partial<Record<string, string>> = {};
   for (const [locale, name] of Object.entries(fields.names)) {
     const value = name.trim();
-    if (value === "") errors["name-" + locale] = "Enter the store name customers will see.";
-    else if (value.length > 120) errors["name-" + locale] = "Use 120 characters or fewer.";
+    if (value === "") errors["name-" + locale] = t("Enter the store name customers will see.");
+    else if (value.length > 120) errors["name-" + locale] = t("Use 120 characters or fewer.");
     else if (markup.test(value))
       errors["name-" + locale] =
         "Use letters, digits and ordinary punctuation only (no # * _ < >).";
   }
   fields.addressLines.forEach((line, index) => {
     const value = line.trim();
-    if (index === 0 && value === "") errors["line-0"] = "Enter the street address.";
-    else if (value.length > 160) errors["line-" + index] = "Use 160 characters or fewer.";
+    if (index === 0 && value === "") errors["line-0"] = t("Enter the street address.");
+    else if (value.length > 160) errors["line-" + index] = t("Use 160 characters or fewer.");
     else if (markup.test(value))
       errors["line-" + index] = "Write the unit as “Unit 4” or “Suite 4” (no # * _ < >).";
   });
-  if (fields.locality.trim() === "") errors.locality = "Enter the city or town.";
-  else if (markup.test(fields.locality)) errors.locality = "Use letters and spaces only.";
-  if (fields.regionCode === "") errors.regionCode = "Choose the province or territory.";
+  if (fields.locality.trim() === "") errors.locality = t("Enter the city or town.");
+  else if (markup.test(fields.locality)) errors.locality = t("Use letters and spaces only.");
+  if (fields.regionCode === "") errors.regionCode = t("Choose the province or territory.");
   const postal = fields.postalCode
     .trim()
     .toUpperCase()
     .replace(/[\s-]+/gu, "");
   if (!/^[ABCEGHJ-NPRSTVXY][0-9][ABCEGHJ-NPRSTV-Z][0-9][ABCEGHJ-NPRSTV-Z][0-9]$/u.test(postal))
-    errors.postalCode = "Enter a Canadian postal code, for example K1A 0B1.";
+    errors.postalCode = t("Enter a Canadian postal code, for example K1A 0B1.");
   const phone = fields.phone.trim();
   if (phone !== "") {
     const digits = phone.replace(/[^0-9]/gu, "");
     const national = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
     if (!/^\+?[0-9 ().-]+$/u.test(phone) || !/^[2-9][0-9]{2}[2-9][0-9]{6}$/u.test(national))
-      errors.phone = "Enter a 10-digit phone number, for example (416) 555-0100.";
+      errors.phone = t("Enter a 10-digit phone number, for example (416) 555-0100.");
   }
   return errors;
 }
@@ -151,8 +152,8 @@ export function StorePublicProfilePanel({
   if (status === "Loading")
     return (
       <section id="store-public-profile" className="receipt-privacy" aria-busy="true">
-        <h3>Name and contact shown to customers</h3>
-        <p role="status">Loading the store name and contact details…</p>
+        <h3>{t("Name and contact shown to customers")}</h3>
+        <p role="status">{t("Loading the store name and contact details…")}</p>
       </section>
     );
   if (status === "Unavailable" || view === null || fields === null)
@@ -162,15 +163,15 @@ export function StorePublicProfilePanel({
         className="receipt-privacy"
         aria-labelledby="store-public-profile-heading"
       >
-        <h3 id="store-public-profile-heading">Name and contact shown to customers</h3>
+        <h3 id="store-public-profile-heading">{t("Name and contact shown to customers")}</h3>
         <StatePanel
-          heading="The store name and contact details could not be loaded"
+          heading={t("The store name and contact details could not be loaded")}
           tone="error"
           status
         >
-          <p>Check your connection, then try again.</p>
+          <p>{t("Check your connection, then try again.")}</p>
           <button type="button" onClick={() => void load()}>
-            Try again
+            {t("Try again")}
           </button>
         </StatePanel>
       </section>
@@ -209,7 +210,9 @@ export function StorePublicProfilePanel({
       setShowErrors(false);
       setMessage({
         tone: "status",
-        text: "Published. Customers see these details the next time a page opens or refreshes, and receipts issued from now on use this name. Receipts already issued keep the name they were issued with.",
+        text: t(
+          "Published. Customers see these details the next time a page opens or refreshes, and receipts issued from now on use this name. Receipts already issued keep the name they were issued with.",
+        ),
       });
       await load();
     } catch (error) {
@@ -219,16 +222,20 @@ export function StorePublicProfilePanel({
         tone: "alert",
         text:
           code === "Invalid"
-            ? "Check the highlighted details and try again."
+            ? t("Check the highlighted details and try again.")
             : code === "Conflict"
-              ? "Someone published new details since you opened this page. They have been reloaded — check them and publish again."
+              ? t(
+                  "Someone published new details since you opened this page. They have been reloaded — check them and publish again.",
+                )
               : code === "NoChange"
-                ? "Nothing changed — customers already see these details."
+                ? t("Nothing changed — customers already see these details.")
                 : code === "PermissionDenied"
-                  ? "Only the Owner can change these details. Sign in again if your session ended."
+                  ? t(
+                      "Only the Owner can change these details. Sign in again if your session ended.",
+                    )
                   : code === "OutcomeUnknown"
-                    ? "We could not confirm the change. Try again — it is published once."
-                    : "The details could not be published. Check your connection and try again.",
+                    ? t("We could not confirm the change. Try again — it is published once.")
+                    : t("The details could not be published. Check your connection and try again."),
       });
       if (code === "Conflict") await load();
     } finally {
@@ -285,22 +292,22 @@ export function StorePublicProfilePanel({
       className="receipt-privacy"
       aria-labelledby="store-public-profile-heading"
     >
-      <h3 id="store-public-profile-heading">Name and contact shown to customers</h3>
+      <h3 id="store-public-profile-heading">{t("Name and contact shown to customers")}</h3>
       <p>
-        Customers see this name on the menu, their order page, the pickup screen and their receipt,
-        and use the address and phone to reach the store. Receipts already issued keep the name they
-        were issued with.
+        {t(
+          "Customers see this name on the menu, their order page, the pickup screen and their receipt, and use the address and phone to reach the store. Receipts already issued keep the name they were issued with.",
+        )}
       </p>
       {view.current !== null ? (
         <p className="receipt-privacy__hint">
-          Last published <SourceTime instant={view.current.publishedAt} />
+          {t("Last published")} <SourceTime instant={view.current.publishedAt} />
         </p>
       ) : (
         <p role="note">
-          Customers cannot open this store’s menu until its name and address are published.
+          {t("Customers cannot open this store’s menu until its name and address are published.")}
         </p>
       )}
-      {readOnly ? <p role="note">Only the Owner can change these details.</p> : null}
+      {readOnly ? <p role="note">{t("Only the Owner can change these details.")}</p> : null}
       <form
         noValidate
         onSubmit={(event) => {
@@ -312,17 +319,17 @@ export function StorePublicProfilePanel({
           input(
             "name-" + locale,
             view.locales.length > 1
-              ? `Store name customers see (${languageName(locale)})`
-              : "Store name customers see",
+              ? t("Store name customers see ({locale})", { locale: languageName(locale) })
+              : t("Store name customers see"),
             fields.names[locale] ?? "",
             (next) => update({ names: { ...fields.names, [locale]: next } }),
-            { hint: "For example “Maple Noodle House – King Street”." },
+            { hint: t("For example “Maple Noodle House – King Street”.") },
           ),
         )}
         {fields.addressLines.map((line, index) =>
           input(
             "line-" + index,
-            index === 0 ? "Street address" : "Unit or suite (optional)",
+            index === 0 ? t("Street address") : t("Unit or suite (optional)"),
             line,
             (next) =>
               update({
@@ -331,11 +338,17 @@ export function StorePublicProfilePanel({
             { autoComplete: index === 0 ? "address-line1" : "address-line2" },
           ),
         )}
-        {input("locality", "City or town", fields.locality, (next) => update({ locality: next }), {
-          autoComplete: "address-level2",
-        })}
+        {input(
+          "locality",
+          t("City or town"),
+          fields.locality,
+          (next) => update({ locality: next }),
+          {
+            autoComplete: "address-level2",
+          },
+        )}
         <div className="receipt-privacy__field">
-          <label htmlFor="store-public-profile-regionCode">Province or territory</label>
+          <label htmlFor="store-public-profile-regionCode">{t("Province or territory")}</label>
           <select
             id="store-public-profile-regionCode"
             value={fields.regionCode}
@@ -344,7 +357,7 @@ export function StorePublicProfilePanel({
             aria-describedby={regionError ? "store-public-profile-regionCode-error" : undefined}
             onChange={(event) => update({ regionCode: event.currentTarget.value })}
           >
-            <option value="">Choose…</option>
+            <option value="">{t("Choose…")}</option>
             {view.regionCodes.map((code) => (
               <option key={code} value={code}>
                 {provinceNames[code] ?? code}
@@ -363,18 +376,18 @@ export function StorePublicProfilePanel({
         </div>
         {input(
           "postalCode",
-          "Postal code",
+          t("Postal code"),
           fields.postalCode,
           (next) => update({ postalCode: next }),
           { autoComplete: "postal-code" },
         )}
         {input(
           "phone",
-          "Phone number (optional)",
+          t("Phone number (optional)"),
           fields.phone,
           (next) => update({ phone: next }),
           {
-            hint: "Customers call this number about their order.",
+            hint: t("Customers call this number about their order."),
             autoComplete: "tel",
             inputMode: "tel",
           },
@@ -382,7 +395,7 @@ export function StorePublicProfilePanel({
         {view.canChange ? (
           <div className="card-actions">
             <button type="submit" data-variant="primary" disabled={busy}>
-              {busy ? "Publishing…" : "Publish name and contact details"}
+              {busy ? t("Publishing…") : t("Publish name and contact details")}
             </button>
           </div>
         ) : null}

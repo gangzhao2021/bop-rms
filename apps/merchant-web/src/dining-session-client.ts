@@ -1,6 +1,7 @@
+import { t } from "./i18n/i18n.js";
 export class DiningSessionClientError extends Error {
   constructor(readonly code: "Denied" | "Unavailable" | "Unknown") {
-    super("Dining session request unavailable");
+    super(t("Dining session request unavailable"));
   }
 }
 const fail = (): never => {

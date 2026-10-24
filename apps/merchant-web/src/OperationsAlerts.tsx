@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { storeTime } from "./StoreTime.js";
@@ -187,11 +188,11 @@ export type OperationsAlertsRead =
 function outboundNote(outbound: OperationsAlertView["outbound"]): string {
   const channels = [
     ...(outbound.email ? ["email"] : []),
-    ...(outbound.webhooks > 0 ? ["phone or message alerts"] : []),
+    ...(outbound.webhooks > 0 ? [t("phone or message alerts")] : []),
   ];
   return channels.length === 0
-    ? "Alerts appear only on this screen: no email or phone alerts are set up yet."
-    : `The Owner is also alerted by ${channels.join(" and ")}.`;
+    ? t("Alerts appear only on this screen: no email or phone alerts are set up yet.")
+    : t("The Owner is also alerted by {value}.", { value: channels.join(" and ") });
 }
 
 /** The pure card, so every state can be rendered and checked without a network. */
@@ -234,31 +235,39 @@ export function OperationsAlertsCard({
       aria-labelledby="system-alerts-heading"
     >
       <header>
-        <h3 id="system-alerts-heading">Store system</h3>
+        <h3 id="system-alerts-heading">{t("Store system")}</h3>
         {onRefresh ? (
           <button type="button" onClick={onRefresh} disabled={busy}>
-            Check again
+            {t("Check again")}
           </button>
         ) : null}
       </header>
       <div aria-live="polite">
         {read.kind === "Loading" ? (
-          <p role="status">Checking the store system…</p>
+          <p role="status">{t("Checking the store system…")}</p>
         ) : read.kind === "Unavailable" ? (
           <p role="status">
-            System alerts could not be read. Check again in a moment; if this stays, ask the pilot
-            operator to check the store system.
+            {t(
+              "System alerts could not be read. Check again in a moment; if this stays, ask the pilot operator to check the store system.",
+            )}
           </p>
         ) : read.value.monitor === "NotRunning" ? (
           <p className="system-alert__headline">
-            The alert monitor is not running, so problems with the store system, backups and
-            certificate are not being checked. Ask the pilot operator to start it.
+            {t(
+              "The alert monitor is not running, so problems with the store system, backups and certificate are not being checked. Ask the pilot operator to start it.",
+            )}
           </p>
         ) : read.value.monitor === "Silent" ? (
           <p className="system-alert__headline">
-            The alert monitor stopped reporting
-            {read.value.observedAt === null ? "" : ` at ${at(read.value.observedAt)}`}. Problems are
-            not being checked. Ask the pilot operator to restart it.
+            {t(
+              "The alert monitor stopped reporting{value}. Problems are not being checked. Ask the pilot operator to restart it.",
+              {
+                value:
+                  read.value.observedAt === null
+                    ? ""
+                    : t(" at {observedAt}", { observedAt: at(read.value.observedAt) }),
+              },
+            )}
           </p>
         ) : (
           <>
@@ -267,16 +276,20 @@ export function OperationsAlertsCard({
               // down when its window ends, the usual urgent alert follows at once.
               <div className="system-alert system-alert--update">
                 <p className="system-alert__headline">
-                  System update in progress — ordering may pause for a few minutes.
+                  {t("System update in progress — ordering may pause for a few minutes.")}
                 </p>
                 <p>
-                  Started {at(read.value.plannedUpdate.startedAt)}. If guests or staff screens still
-                  can’t order after {at(read.value.plannedUpdate.expiresAt)}, this card shows an
-                  urgent alert.
+                  {t(
+                    "Started {startedAt}. If guests or staff screens still can’t order after {expiresAt}, this card shows an urgent alert.",
+                    {
+                      startedAt: at(read.value.plannedUpdate.startedAt),
+                      expiresAt: at(read.value.plannedUpdate.expiresAt),
+                    },
+                  )}
                 </p>
               </div>
             ) : read.value.active.length === 0 ? (
-              <p className="system-alert__headline">Everything is working.</p>
+              <p className="system-alert__headline">{t("Everything is working.")}</p>
             ) : null}
             {read.value.active.length === 0 ? null : (
               <ul className="system-alerts">
@@ -284,16 +297,18 @@ export function OperationsAlertsCard({
                   <li key={item.key} className={"system-alert system-alert--" + item.severity}>
                     <p className="system-alert__title">
                       <span className="system-alert__badge">
-                        {item.severity === "critical" ? "Urgent" : "Today"}
+                        {item.severity === "critical" ? t("Urgent") : t("Today")}
                       </span>
                       <strong>{item.title}</strong>
                     </p>
                     <p>{item.summary}</p>
                     <p>
-                      <span className="system-alert__label">What to do: </span>
+                      <span className="system-alert__label">{t("What to do:")} </span>
                       {item.action}
                     </p>
-                    <p className="system-alert__since">Since {at(item.raisedAt)}</p>
+                    <p className="system-alert__since">
+                      {t("Since {raisedAt}", { raisedAt: at(item.raisedAt) })}
+                    </p>
                   </li>
                 ))}
               </ul>
@@ -305,21 +320,26 @@ export function OperationsAlertsCard({
         <div className="system-alert__footer">
           {view.recentlyCleared.length > 0 ? (
             <p className="system-alert__resolved">
-              Resolved recently:{" "}
-              {view.recentlyCleared
-                .slice(-3)
-                .reverse()
-                .map((item) => `${item.title} (${at(item.clearedAt)})`)
-                .join("; ")}
+              {t("Resolved recently: {value}", {
+                value: view.recentlyCleared
+                  .slice(-3)
+                  .reverse()
+                  .map((item) => `${item.title} (${at(item.clearedAt)})`)
+                  .join("; "),
+              })}
             </p>
           ) : null}
           <p className="overview-updated">
             {view.lastSuccessfulBackupAt === null
-              ? "No backup recorded yet"
-              : `Last backup ${at(view.lastSuccessfulBackupAt)}`}
+              ? t("No backup recorded yet")
+              : t("Last backup {lastSuccessfulBackupAt}", {
+                  lastSuccessfulBackupAt: at(view.lastSuccessfulBackupAt),
+                })}
             {view.observedAt === null
               ? ""
-              : ` · Last checked ${storeTime(view.observedAt, timeZone)}`}
+              : t(" · Last checked {observedAt}", {
+                  observedAt: storeTime(view.observedAt, timeZone),
+                })}
           </p>
           <p className="overview-updated">{outboundNote(view.outbound)}</p>
         </div>

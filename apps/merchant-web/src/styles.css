@@ -9409,3 +9409,26 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0 0 var(--bop-space-2);
   font-weight: 600;
 }
+
+/* Owner 2026-10-24: the staff language switch in frame headers and on the sign-in pages. */
+.language-switch {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  color: var(--bop-color-text-default);
+  background: var(--bop-color-surface-default);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.language-switch:hover {
+  border-color: var(--bop-color-text-default);
+}
+.bop-shell__header-extra {
+  margin-left: auto;
+  align-self: center;
+}
+.staff-switch__language {
+  justify-self: start;
+}

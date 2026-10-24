@@ -1,3 +1,4 @@
+import { countOf, t } from "./i18n/i18n.js";
 /**
  * WP-2423 (v15 2026-10-16, decision DEC-DINE-IN-PAID-ROUND-WAIT): a paid dine-in round reaches the
  * kitchen only when staff accept it, and it is never cancelled or refunded automatically — the
@@ -24,23 +25,33 @@ export function paidRoundWait(paidAt: string, now: number) {
 /** The Orders page line next to Accept. */
 export function paidRoundWaitText(paidAt: string, now: number): string {
   const { minutes, tier } = paidRoundWait(paidAt, now);
-  if (tier === "ok") return "Paid · the kitchen gets it once you accept it";
+  if (tier === "ok") return t("Paid · the kitchen gets it once you accept it");
   if (tier === "warning")
-    return `Paid ${minutes} min ago · the guest is waiting. Accept it to send it to the kitchen`;
-  return `Paid ${minutes} min ago and still not accepted · accept it now. It is never cancelled or refunded automatically; if it can't be made, accept it and a manager can cancel it for a full refund`;
+    return t("Paid {minutes} min ago · the guest is waiting. Accept it to send it to the kitchen", {
+      minutes: minutes,
+    });
+  return t(
+    "Paid {minutes} min ago and still not accepted · accept it now. It is never cancelled or refunded automatically; if it can't be made, accept it and a manager can cancel it for a full refund",
+    { minutes: minutes },
+  );
 }
 
 /** The Tables page line for a table with a paid round waiting. */
 export function tableRoundWaitText(roundNumber: number, paidAt: string, now: number): string {
   const { minutes, tier } = paidRoundWait(paidAt, now);
-  const waited = minutes < 1 ? "just now" : `${minutes} min ago`;
+  const waited = minutes < 1 ? t("just now") : t("{minutes} min ago", { minutes: minutes });
   return tier === "urgent"
-    ? `Round ${roundNumber} paid ${waited} and still not accepted · accept it on the Orders page now`
-    : `Round ${roundNumber} paid ${waited} · accept it on the Orders page to send it to the kitchen`;
+    ? t(
+        "Round {roundNumber} paid {waited} and still not accepted · accept it on the Orders page now",
+        { roundNumber: roundNumber, waited: waited },
+      )
+    : t(
+        "Round {roundNumber} paid {waited} · accept it on the Orders page to send it to the kitchen",
+        { roundNumber: roundNumber, waited: waited },
+      );
 }
 
 /** "1 round" / "2 rounds". */
-const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 /**
  * Home's acceptance count: orders, or rounds when an order has more than one round to accept
@@ -53,9 +64,16 @@ export function awaitingAcceptanceText(input: {
 }): string {
   const base =
     input.rounds > input.orders
-      ? `${plural(input.rounds, "round")} awaiting acceptance in ${plural(input.orders, "order")}`
-      : `${input.orders} awaiting acceptance`;
+      ? t("{rounds} awaiting acceptance in {orders}", {
+          rounds: countOf(input.rounds, "round"),
+          orders: countOf(input.orders, "order"),
+        })
+      : t("{orders} awaiting acceptance", { orders: input.orders });
   return input.urgentRounds > 0
-    ? `${base} (${input.urgentRounds} paid ${paidRoundUrgentMinutes}+ min ago)`
+    ? t("{base} ({urgentRounds} paid {paidRoundUrgentMinutes}+ min ago)", {
+        base: base,
+        urgentRounds: input.urgentRounds,
+        paidRoundUrgentMinutes: paidRoundUrgentMinutes,
+      })
     : base;
 }

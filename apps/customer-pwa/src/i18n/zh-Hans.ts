@@ -1065,4 +1065,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Included: "免费",
   Refund: "退款",
   Voided: "已作废",
+  Declined: "被拒",
+  Pending: "处理中",
+  Checking: "正在确认",
+  Offline: "离线",
+  "Show this pickup confirmation to staff at the pickup counter.":
+    "请在取餐柜台向店员出示这个取餐确认。",
 });

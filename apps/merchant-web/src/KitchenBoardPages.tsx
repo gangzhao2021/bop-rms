@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { kitchenActionNotice, kitchenStepText, useKitchenActions } from "./use-kitchen-actions.js";
 import { useKitchenClock } from "./kitchen-clock.js";
@@ -73,7 +74,7 @@ export function kitchenTicketAge(
 }
 /** The waiting tier in words, so a ticket's urgency never rests on colour alone. */
 export function kitchenTicketTierText(tier: "ok" | "warning" | "late" | "done"): string | null {
-  return tier === "late" ? "Overdue" : tier === "warning" ? "Running long" : null;
+  return tier === "late" ? "Overdue" : tier === "warning" ? t("Running long") : null;
 }
 
 import { playKitchenChime } from "./alert-chime.js";
@@ -217,7 +218,10 @@ export function kitchenSearchHiddenText(input: {
   const { matches, search } = input;
   if (matches.length === 0) return null;
   if (matches.some(isActiveKitchenWork))
-    return `Order or table “${search}” has work, but the filters hide it. Clear the filters to see it.`;
+    return t(
+      "Order or table “{search}” has work, but the filters hide it. Clear the filters to see it.",
+      { search: search },
+    );
   const term = kitchenOrderSearchTerm(search);
   const number = (value: string) => value.toUpperCase().replace(/^0+(?=\d)/u, "");
   const byNumber = matches.find(
@@ -229,16 +233,18 @@ export function kitchenSearchHiddenText(input: {
   );
   const subject =
     byNumber && !byTable
-      ? `order ${byNumber.orderLabel?.orderNumber ?? search}`
+      ? t("order {value}", { value: byNumber.orderLabel?.orderNumber ?? search })
       : byTable && !byNumber
-        ? `table ${byTable.orderLabel?.tableLabel ?? search}`
-        : `order or table “${search}”`;
+        ? t("table {value}", { value: byTable.orderLabel?.tableLabel ?? search })
+        : t("order or table “{search}”", { search: search });
   const allCancelled = matches.every((item) => item.status === "Cancelled");
   const capitalized = subject.charAt(0).toUpperCase() + subject.slice(1);
   return allCancelled
-    ? `${capitalized} has nothing left to make: its items were cancelled.`
-    : `All of ${subject} is done.` +
-        (input.inRecentlyFinished ? " Its dishes are listed under Recently finished." : "");
+    ? t("{capitalized} has nothing left to make: its items were cancelled.", {
+        capitalized: capitalized,
+      })
+    : t("All of {subject} is done.", { subject: subject }) +
+        (input.inRecentlyFinished ? t(" Its dishes are listed under Recently finished.") : "");
 }
 
 /**
@@ -254,21 +260,32 @@ export function kitchenSearchAwaitingText(
   const [first] = labels;
   if (first === undefined) return null;
   if (labels.length > 1)
-    return `${labels.length} orders for “${search}” are not accepted yet — accept them on Orders.`;
+    return t("{length} orders for “{search}” are not accepted yet — accept them on Orders.", {
+      length: labels.length,
+      search: search,
+    });
   const subject =
     first.orderType === "DineIn" && first.tableLabel
-      ? `Order ${first.orderNumber} (table ${first.tableLabel})`
-      : `Order ${first.orderNumber}`;
+      ? t("Order {orderNumber} (table {tableLabel})", {
+          orderNumber: first.orderNumber,
+          tableLabel: first.tableLabel,
+        })
+      : t("Order {orderNumber}", { orderNumber: first.orderNumber });
   return hasKitchenWork
-    ? `${subject} has a new round that is not accepted yet — accept it on Orders.`
-    : `${subject} is not accepted yet — accept it on Orders.`;
+    ? t("{subject} has a new round that is not accepted yet — accept it on Orders.", {
+        subject: subject,
+      })
+    : t("{subject} is not accepted yet — accept it on Orders.", { subject: subject });
 }
 
 /** WP-2423: how many of the earlier days' tickets carry the searched number, in staff words. */
 export function earlierDaySearchText(count: number, search: string): string {
   return count === 1
-    ? `1 ticket from an earlier day has number or table “${search}”`
-    : `${count} tickets from earlier days have number or table “${search}”`;
+    ? t("1 ticket from an earlier day has number or table “{search}”", { search: search })
+    : t("{count} tickets from earlier days have number or table “{search}”", {
+        count: count,
+        search: search,
+      });
 }
 
 /**
@@ -339,7 +356,7 @@ function KitchenFrame({
   return (
     <AppFrame
       title={title}
-      description="Kitchen display"
+      description={t("Kitchen display")}
       navigation={navigation}
       headerStatus={headerStatus}
       className="kitchen-shell"
@@ -367,7 +384,7 @@ export function KitchenDisplayNavigation({
         to="/operations/kitchen"
         aria-current={current === "Kitchen" ? "page" : undefined}
       >
-        Kitchen
+        {t("Kitchen")}
       </Link>
       {soldOutHref ? (
         <Link
@@ -375,7 +392,7 @@ export function KitchenDisplayNavigation({
           to={kitchenSoldOutHref(soldOutHref)}
           aria-current={current === "SoldOut" ? "page" : undefined}
         >
-          Mark an item sold out
+          {t("Mark an item sold out")}
         </Link>
       ) : null}
     </>
@@ -401,9 +418,9 @@ export function KitchenDisplayHeaderControls({
     <div className="kitchen-display-controls">
       <span className="kitchen-screen-awake" data-state={awake} role="status">
         {awake === "Held"
-          ? "Screen kept on"
+          ? t("Screen kept on")
           : awake === "Unsupported"
-            ? "This browser cannot keep the screen on — set the device to never sleep"
+            ? t("This browser cannot keep the screen on — set the device to never sleep")
             : ""}
       </span>
       {handoverOffered ? (
@@ -413,12 +430,12 @@ export function KitchenDisplayHeaderControls({
           disabled={handover === "SigningOut"}
           onClick={onHandover}
         >
-          Hand over / sign out
+          {t("Hand over / sign out")}
         </button>
       ) : null}
       {handover === "Failed" ? (
         <span className="kitchen-handover-failed" role="alert">
-          Handover was not recorded or sign-out was not confirmed. Retry before handing over.
+          {t("Handover was not recorded or sign-out was not confirmed. Retry before handing over.")}
         </span>
       ) : null}
     </div>
@@ -428,11 +445,11 @@ export function KitchenDisplayHeaderControls({
 /** WP-2423: how the board names who is using it, in staff words. */
 export function kitchenOperatorText(status: KitchenBoardView["operatorStatus"]): string {
   return {
-    Named: "Kitchen display",
-    Locked: "Kitchen display locked",
-    HandoverRequired: "Handover needed",
-    Unavailable: "Kitchen display sign-in not confirmed",
-    Unverified: "View only",
+    Named: t("Kitchen display"),
+    Locked: t("Kitchen display locked"),
+    HandoverRequired: t("Handover needed"),
+    Unavailable: t("Kitchen display sign-in not confirmed"),
+    Unverified: t("View only"),
   }[status];
 }
 
@@ -451,34 +468,39 @@ function KitchenBoardLock({
   if (operatorStatus === "Unverified")
     return (
       <div className="kitchen-board-lock">
-        <StatePanel heading="View only on this screen" tone="neutral" status>
+        <StatePanel heading={t("View only on this screen")} tone="neutral" status>
           <p>
-            You are signed in for the counter or office, so this screen cannot change tickets. To
-            work tickets on this device, start the kitchen display: this signs you out here, then
-            choose “Start kitchen display” for yourself.
+            {t(
+              "You are signed in for the counter or office, so this screen cannot change tickets. To work tickets on this device, start the kitchen display: this signs you out here, then choose “Start kitchen display” for yourself.",
+            )}
           </p>
-          <StaffSwitchButton label="Start kitchen display here" />
+          <StaffSwitchButton label={t("Start kitchen display here")} />
         </StatePanel>
       </div>
     );
   if (operatorStatus === "Named" && freshnessStatus !== "Fresh")
     return (
       <div className="kitchen-board-lock">
-        <StatePanel heading="Catching up with new orders" tone="offline" status>
+        <StatePanel heading={t("Catching up with new orders")} tone="offline" status>
           <p>
-            Kitchen steps are paused until the board is up to date. It checks again on its own;
-            press Refresh if this stays.
+            {t(
+              "Kitchen steps are paused until the board is up to date. It checks again on its own; press Refresh if this stays.",
+            )}
           </p>
         </StatePanel>
       </div>
     );
   return (
     <div className="kitchen-board-lock">
-      <StatePanel heading="Kitchen display paused" tone="offline" status>
+      <StatePanel heading={t("Kitchen display paused")} tone="offline" status>
         <p>
           {operatorStatus === "HandoverRequired"
-            ? "The previous cook’s shift must be handed over first. Use Hand over / sign out, then start the kitchen display again."
-            : "This device’s kitchen display sign-in can no longer be confirmed. Use Hand over / sign out, then start the kitchen display again."}
+            ? t(
+                "The previous cook’s shift must be handed over first. Use Hand over / sign out, then start the kitchen display again.",
+              )
+            : t(
+                "This device’s kitchen display sign-in can no longer be confirmed. Use Hand over / sign out, then start the kitchen display again.",
+              )}
         </p>
       </StatePanel>
     </div>
@@ -494,7 +516,7 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
   if (allergens === undefined || allergens.status === "Unavailable")
     return (
       <p className="kitchen-work-item__allergens" data-kind="unavailable" role="note">
-        Allergens not available · check the recipe
+        {t("Allergens not available · check the recipe")}
       </p>
     );
   const none = allergens.contains.length === 0 && allergens.mayContain.length === 0;
@@ -505,11 +527,11 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
       role="note"
       aria-label={
         none
-          ? "No menu allergens declared"
+          ? t("No menu allergens declared")
           : [
               allergens.contains.length > 0 ? "Contains " + allergens.contains.join(", ") : "",
               allergens.mayContain.length > 0
-                ? "May contain " + allergens.mayContain.join(", ")
+                ? t("May contain ") + allergens.mayContain.join(", ")
                 : "",
             ]
               .filter(Boolean)
@@ -517,19 +539,21 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
       }
     >
       {none ? (
-        "No menu allergens declared"
+        t("No menu allergens declared")
       ) : (
         <>
           {allergens.contains.length > 0 ? (
-            <strong>Contains: {allergens.contains.join(", ")}</strong>
+            <strong>{t("Contains: {value}", { value: allergens.contains.join(", ") })}</strong>
           ) : null}
           {allergens.mayContain.length > 0 ? (
-            <span>May contain: {allergens.mayContain.join(", ")}</span>
+            <span>{t("May contain: {value}", { value: allergens.mayContain.join(", ") })}</span>
           ) : null}
         </>
       )}
       {item.selectedOptions.length > 0 && !allergens.forChoices ? (
-        <span className="kitchen-work-item__allergens-modifiers">Modifiers may add allergens</span>
+        <span className="kitchen-work-item__allergens-modifiers">
+          {t("Modifiers may add allergens")}
+        </span>
       ) : null}
     </p>
   );
@@ -682,21 +706,24 @@ export function KitchenBoardStatePanel({
   readonly state: Exclude<LoadState<never>["kind"], "Found">;
 }) {
   const copy = {
-    Loading: ["Loading", "Loading the kitchen queue…"],
+    Loading: ["Loading", t("Loading the kitchen queue…")],
     PermissionDenied: [noAccessHeading, pageAccessDeniedText],
-    NotFound: ["Work item unavailable", "This work item is not at the selected Store."],
-    Offline: ["You’re offline", "Reconnect and refresh before taking an action."],
-    Conflict: ["Work item changed", "Refresh to see its current state before trying again."],
-    CommandFailed: ["Action not confirmed", "Nothing is assumed. Refresh before trying again."],
+    NotFound: [t("Work item unavailable"), t("This work item is not at the selected Store.")],
+    Offline: [t("You’re offline"), t("Reconnect and refresh before taking an action.")],
+    Conflict: [t("Work item changed"), t("Refresh to see its current state before trying again.")],
+    CommandFailed: [
+      t("Action not confirmed"),
+      t("Nothing is assumed. Refresh before trying again."),
+    ],
     Unavailable: [
-      "Kitchen unavailable",
-      "The kitchen queue could not be loaded. Refresh to try again.",
+      t("Kitchen unavailable"),
+      t("The kitchen queue could not be loaded. Refresh to try again."),
     ],
   } as const;
   return (
     <StatePanel heading={copy[state][0]} tone={state === "Loading" ? "neutral" : "error"} status>
       <p>{copy[state][1]}</p>
-      <Link to="/app">Home</Link>
+      <Link to="/app">{t("Home")}</Link>
     </StatePanel>
   );
 }
@@ -778,10 +805,10 @@ function WorkCard({
     Math.floor((Date.parse(ageAt ?? observedAt) - Date.parse(item.createdAt)) / 60_000),
   );
   const allergenLabel = {
-    None: "No allergen cue",
-    ReviewRequired: "Allergen review required",
-    Acknowledged: "Allergen acknowledged",
-    Unavailable: "Allergen status unavailable",
+    None: t("No allergen cue"),
+    ReviewRequired: t("Allergen review required"),
+    Acknowledged: t("Allergen acknowledged"),
+    Unavailable: t("Allergen status unavailable"),
   }[item.allergenCue];
   return (
     <article
@@ -816,27 +843,27 @@ function WorkCard({
       <div className="kitchen-work-item__state">
         <strong data-status={item.status}>
           {item.status === "In Progress"
-            ? "In progress"
+            ? t("In progress")
             : item.status === "Queued" && item.execution?.acceptedAt
-              ? "Accepted"
+              ? t("Accepted")
               : item.status}
         </strong>
         {!isActiveKitchenWork(item) ? (
-          <span data-age="done">Done</span>
+          <span data-age="done">{t("Done")}</span>
         ) : (
           <span data-age={kitchenAgeTier(age)}>{kitchenWaitText(age)}</span>
         )}
       </div>
       <div className="kitchen-work-item__facts">
         <dl className="kitchen-work-item__quantity">
-          <dt>Quantity</dt>
+          <dt>{t("Quantity")}</dt>
           <dd>
             {item.completedQuantity} / {item.requiredQuantity}
           </dd>
         </dl>
         <KitchenAllergenLine item={item} />
         {!showModifiers && item.selectedOptions.length > 0 ? (
-          <ul className="kitchen-work-item__options" aria-label="Modifiers">
+          <ul className="kitchen-work-item__options" aria-label={t("Modifiers")}>
             {item.selectedOptions.map((option, index) => (
               <li key={`${option.displayName}:${index}`}>
                 {option.quantity > 1
@@ -847,11 +874,11 @@ function WorkCard({
           </ul>
         ) : null}
         {item.orderLabel?.enteredByStaff ? (
-          <p className="kitchen-work-item__staff">Entered by staff</p>
+          <p className="kitchen-work-item__staff">{t("Entered by staff")}</p>
         ) : null}
         {item.customerNote ? (
           <p className="kitchen-work-item__note">
-            <span>Note:</span> {item.customerNote}
+            <span>{t("Note:")}</span> {item.customerNote}
           </p>
         ) : null}
         {item.allergenCue !== "Unavailable" ? (
@@ -869,15 +896,15 @@ function WorkCard({
             data-kind="exception"
             data-value={item.exceptionStatus}
           >
-            Exception reported
+            {t("Exception reported")}
           </span>
         ) : null}
       </div>
       {showModifiers ? (
-        <section className="kitchen-work-item__modifiers" aria-label="Modifiers">
-          <h4>Modifiers</h4>
+        <section className="kitchen-work-item__modifiers" aria-label={t("Modifiers")}>
+          <h4>{t("Modifiers")}</h4>
           {item.selectedOptions.length === 0 ? (
-            <p>No selected modifiers</p>
+            <p>{t("No selected modifiers")}</p>
           ) : (
             <ul>
               {item.selectedOptions.map((option, index) => (
@@ -900,7 +927,7 @@ function WorkCard({
                     disabled={readOnly || !onAction}
                     onClick={() => onAction?.(item, "AcceptKitchenWorkItem")}
                   >
-                    Accept
+                    {t("Accept")}
                   </button>
                 ) : null}
                 {item.status === "Queued" && item.execution.acceptedAt !== null ? (
@@ -908,7 +935,7 @@ function WorkCard({
                     disabled={readOnly || !onAction}
                     onClick={() => onAction?.(item, "StartKitchenWorkItem")}
                   >
-                    Start
+                    {t("Start")}
                   </button>
                 ) : null}
                 {item.status === "In Progress" && item.completedQuantity < item.requiredQuantity ? (
@@ -916,7 +943,7 @@ function WorkCard({
                     disabled={readOnly || !onAction}
                     onClick={() => onAction?.(item, "CompleteKitchenWorkItem")}
                   >
-                    Complete quantity
+                    {t("Complete quantity")}
                   </button>
                 ) : null}
                 {item.status === "Completed" && item.execution.readyAt === null ? (
@@ -924,7 +951,7 @@ function WorkCard({
                     disabled={readOnly || !onAction}
                     onClick={() => onAction?.(item, "MarkKitchenOrderItemReady")}
                   >
-                    Mark ready
+                    {t("Mark ready")}
                   </button>
                 ) : null}
                 {onRemake && remakeOffered(item, observedAt) ? (
@@ -933,13 +960,13 @@ function WorkCard({
                     disabled={readOnly}
                     onClick={() => onRemake(item)}
                   >
-                    Remake
+                    {t("Remake")}
                   </button>
                 ) : null}
               </>
             ) : (
               <span className="kitchen-work-item__no-actions">
-                No kitchen steps for this item on this screen
+                {t("No kitchen steps for this item on this screen")}
               </span>
             )
           ) : null}
@@ -1101,8 +1128,8 @@ export function KitchenBoardScreen({
   const actionLabels: Record<KitchenAction, string> = {
     AcceptKitchenWorkItem: "Accept",
     StartKitchenWorkItem: "Start",
-    CompleteKitchenWorkItem: "Complete quantity",
-    MarkKitchenOrderItemReady: "Mark ready",
+    CompleteKitchenWorkItem: t("Complete quantity"),
+    MarkKitchenOrderItemReady: t("Mark ready"),
   };
   // WP-2423: after a kitchen step the cook stays where they were: on the same card (its next
   // step once the board shows it), or on the next card when this one has left the list.
@@ -1179,7 +1206,7 @@ export function KitchenBoardScreen({
         {view.operatorStatus === "Named" ? null : (
           <>
             {" "}
-            <Link to="/operations/orders">Open Orders</Link>
+            <Link to="/operations/orders">{t("Open Orders")}</Link>
           </>
         )}
       </>
@@ -1224,7 +1251,7 @@ export function KitchenBoardScreen({
     <form
       className={`kitchen-reference-search kitchen-reference-search--${layout}`}
       role="search"
-      aria-label="Find an order"
+      aria-label={t("Find an order")}
       onSubmit={(event) => {
         event.preventDefault();
         const term = kitchenOrderSearchTerm(orderInput);
@@ -1237,7 +1264,7 @@ export function KitchenBoardScreen({
         className={`kitchen-reference-search__label${layout === "desktop" ? " kitchen-filter-visually-hidden" : ""}`}
         htmlFor={`kitchen-reference-search-${layout}`}
       >
-        Order number or table
+        {t("Order number or table")}
       </label>
       <input
         id={`kitchen-reference-search-${layout}`}
@@ -1245,7 +1272,7 @@ export function KitchenBoardScreen({
         type="search"
         inputMode="text"
         aria-describedby={`kitchen-reference-search-hint-${layout}`}
-        placeholder="Order number or table"
+        placeholder={t("Order number or table")}
         value={orderInput}
         onChange={(event) => setOrderInput(event.currentTarget.value)}
         maxLength={40}
@@ -1253,11 +1280,11 @@ export function KitchenBoardScreen({
         spellCheck={false}
       />
       <div className="kitchen-reference-search__actions">
-        <button type="submit">Find</button>
+        <button type="submit">{t("Find")}</button>
         {layout === "mobile" || searchApplied ? (
           <button
             type="button"
-            aria-label="Clear search"
+            aria-label={t("Clear search")}
             disabled={!searchApplied && orderInput.length === 0}
             onClick={() => {
               setOrderInput("");
@@ -1267,7 +1294,7 @@ export function KitchenBoardScreen({
               }
             }}
           >
-            Clear
+            {t("Clear")}
           </button>
         ) : null}
       </div>
@@ -1275,7 +1302,7 @@ export function KitchenBoardScreen({
         className={`kitchen-reference-search__hint${layout === "desktop" ? " kitchen-filter-visually-hidden" : ""}`}
         id={`kitchen-reference-search-hint-${layout}`}
       >
-        The number on the ticket or receipt, or the table. Shows only that order&apos;s work.
+        {t("The number on the ticket or receipt, or the table. Shows only that order's work.")}
       </span>
     </form>
   );
@@ -1283,7 +1310,7 @@ export function KitchenBoardScreen({
     <div
       className={`list-filters kitchen-board-filters kitchen-board-filters--${layout}`}
       role="search"
-      aria-label="Filter Kitchen work items"
+      aria-label={t("Filter Kitchen work items")}
     >
       {/* WP-2423: a filter is offered only when every loaded item carries that fact. */}
       {stationFilterAvailable ? (
@@ -1293,10 +1320,10 @@ export function KitchenBoardScreen({
               layout === "mobile" ? "kitchen-board-filter-label" : "kitchen-filter-visually-hidden"
             }
           >
-            Station
+            {t("Station")}
           </span>
           <select value={activeStation} onChange={(event) => setStation(event.currentTarget.value)}>
-            <option value="All">All stations</option>
+            <option value="All">{t("All stations")}</option>
             {stations.map((value) => (
               <option key={value}>{value}</option>
             ))}
@@ -1309,16 +1336,16 @@ export function KitchenBoardScreen({
             layout === "mobile" ? "kitchen-board-filter-label" : "kitchen-filter-visually-hidden"
           }
         >
-          Work state
+          {t("Work state")}
         </span>
         <select value={status} onChange={(event) => setStatus(event.currentTarget.value)}>
-          <option value="Active">Active work</option>
-          <option value="All">All states</option>
-          <option>Queued</option>
-          <option>Held</option>
-          <option>In Progress</option>
-          <option>Completed</option>
-          <option>Cancelled</option>
+          <option value="Active">{t("Active work")}</option>
+          <option value="All">{t("All states")}</option>
+          <option>{t("Queued")}</option>
+          <option>{t("Held")}</option>
+          <option>{t("In Progress")}</option>
+          <option>{t("Completed")}</option>
+          <option>{t("Cancelled")}</option>
         </select>
       </label>
       {allergenFilterAvailable ? (
@@ -1328,16 +1355,16 @@ export function KitchenBoardScreen({
               layout === "mobile" ? "kitchen-board-filter-label" : "kitchen-filter-visually-hidden"
             }
           >
-            Allergen
+            {t("Allergen")}
           </span>
           <select
             value={activeAllergen}
             onChange={(event) => setAllergen(event.currentTarget.value)}
           >
-            <option value="All">{layout === "mobile" ? "All" : "Allergen"}</option>
-            <option value="None">No allergen cue</option>
-            <option value="ReviewRequired">Needs allergen review</option>
-            <option value="Acknowledged">Allergen checked</option>
+            <option value="All">{layout === "mobile" ? t("All") : t("Allergen")}</option>
+            <option value="None">{t("No allergen cue")}</option>
+            <option value="ReviewRequired">{t("Needs allergen review")}</option>
+            <option value="Acknowledged">{t("Allergen checked")}</option>
           </select>
         </label>
       ) : null}
@@ -1348,15 +1375,15 @@ export function KitchenBoardScreen({
               layout === "mobile" ? "kitchen-board-filter-label" : "kitchen-filter-visually-hidden"
             }
           >
-            Exception
+            {t("Exception")}
           </span>
           <select
             value={activeException}
             onChange={(event) => setException(event.currentTarget.value)}
           >
-            <option value="All">{layout === "mobile" ? "All" : "Exception"}</option>
-            <option value="None">No exception</option>
-            <option value="Reported">Exception reported</option>
+            <option value="All">{layout === "mobile" ? t("All") : t("Exception")}</option>
+            <option value="None">{t("No exception")}</option>
+            <option value="Reported">{t("Exception reported")}</option>
           </select>
         </label>
       ) : null}
@@ -1371,7 +1398,7 @@ export function KitchenBoardScreen({
             setException("All");
           }}
         >
-          Clear filters
+          {t("Clear filters")}
         </button>
       ) : null}
       {layout === "mobile" ? (
@@ -1380,7 +1407,7 @@ export function KitchenBoardScreen({
           type="button"
           onClick={() => filterSheetRef.current?.close()}
         >
-          Done
+          {t("Done")}
         </button>
       ) : null}
     </div>
@@ -1395,7 +1422,7 @@ export function KitchenBoardScreen({
       <div className="kitchen-board-workspace" ref={workspaceRef}>
         <header className="screen-heading kitchen-board-heading">
           <div>
-            {workspaceFrame ? <h1>Kitchen</h1> : <h2>Kitchen</h2>}
+            {workspaceFrame ? <h1>{t("Kitchen")}</h1> : <h2>{t("Kitchen")}</h2>}
             <p className="kitchen-board-freshness">
               <Freshness
                 status={stale ? "Stale" : view.freshnessStatus}
@@ -1405,13 +1432,13 @@ export function KitchenBoardScreen({
               <span data-operator={view.operatorStatus}>
                 {kitchenOperatorText(view.operatorStatus)}
               </span>
-              {autoRefresh && !stale ? <span>Auto-refresh every 10 s</span> : null}
+              {autoRefresh && !stale ? <span>{t("Auto-refresh every 10 s")}</span> : null}
             </p>
           </div>
           <div className="kitchen-board-heading__actions">
             {soldOutHref ? (
               <Link className="kitchen-sold-out-link" to={soldOutHref}>
-                Mark an item sold out
+                {t("Mark an item sold out")}
               </Link>
             ) : null}
             {onSoundToggle ? (
@@ -1421,11 +1448,11 @@ export function KitchenBoardScreen({
                 onClick={onSoundToggle}
                 className="kitchen-sound-toggle"
               >
-                {soundOn ? "Sound on" : "Sound off"}
+                {soundOn ? t("Sound on") : t("Sound off")}
               </button>
             ) : null}
             <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
-              Refresh
+              {t("Refresh")}
             </button>
           </div>
         </header>
@@ -1436,7 +1463,9 @@ export function KitchenBoardScreen({
           aria-haspopup="dialog"
           onClick={openFilterSheet}
         >
-          Filters{hasFilters || searchApplied ? " · Applied" : " · Active work"}
+          {t("Filters{value}", {
+            value: hasFilters || searchApplied ? t(" · Applied") : t(" · Active work"),
+          })}
         </button>
         {stale ? (
           <StaleReadNotice stale={stale} className="kitchen-board-lock kitchen-board-stale" />
@@ -1449,14 +1478,17 @@ export function KitchenBoardScreen({
         <div className="kitchen-queue-bar">
           <header className="kitchen-queue-heading">
             <h2 id="kitchen-queue-heading" tabIndex={-1}>
-              Queue
+              {t("Queue")}
             </h2>
           </header>
           <div className="kitchen-filter-toolbar">
             {renderOrderSearch("desktop")}
             {renderFilters("desktop")}
             <span className="kitchen-queue-count" aria-live="polite">
-              {items.length} work {items.length === 1 ? "item" : "items"}
+              {t("{length} work {value}", {
+                length: items.length,
+                value: items.length === 1 ? t("item") : t("items"),
+              })}
             </span>
           </div>
         </div>
@@ -1466,9 +1498,9 @@ export function KitchenBoardScreen({
           aria-labelledby="kitchen-filter-title"
         >
           <div className="kitchen-filter-sheet__heading">
-            <h2 id="kitchen-filter-title">Filter Kitchen work</h2>
+            <h2 id="kitchen-filter-title">{t("Filter Kitchen work")}</h2>
             <button type="button" onClick={() => filterSheetRef.current?.close()}>
-              Close
+              {t("Close")}
             </button>
           </div>
           {renderOrderSearch("mobile")}
@@ -1476,7 +1508,7 @@ export function KitchenBoardScreen({
         </dialog>
         {remakes?.readFailed ? (
           <p className="kitchen-remake-read-failed" role="status">
-            Remakes could not be refreshed. The board keeps trying.
+            {t("Remakes could not be refreshed. The board keeps trying.")}
           </p>
         ) : null}
         {remakes ? (
@@ -1493,18 +1525,23 @@ export function KitchenBoardScreen({
         {earlierTickets.length > 0 ? (
           <details className="kitchen-earlier-days">
             <summary>
-              <span>From earlier days — check and close</span>
+              <span>{t("From earlier days — check and close")}</span>
               <span className="kitchen-earlier-days__count">
                 {earlierElsewhere ??
-                  (earlierTickets.length === 1 ? "1 ticket" : `${earlierTickets.length} tickets`)}
+                  (earlierTickets.length === 1
+                    ? t("1 ticket")
+                    : t("{length} tickets", { length: earlierTickets.length }))}
               </span>
             </summary>
             <p className="kitchen-earlier-days__intro">
-              These tickets are from an earlier business day. Order numbers restart every day, so
-              they are not today&apos;s orders with the same number.{" "}
-              {canCloseEarlier
-                ? "Check what happened to each one, then close it."
-                : "Ask a manager to check and close them."}
+              {t(
+                "These tickets are from an earlier business day. Order numbers restart every day, so they are not today's orders with the same number. {value}",
+                {
+                  value: canCloseEarlier
+                    ? t("Check what happened to each one, then close it.")
+                    : t("Ask a manager to check and close them."),
+                },
+              )}
             </p>
             <div className="kitchen-earlier-days__tickets">
               {earlierTickets.map((ticket) => {
@@ -1522,8 +1559,8 @@ export function KitchenBoardScreen({
                       <div>
                         <h4 className="kitchen-order-group__label">{ticket.orderLabel}</h4>
                         <p className="kitchen-earlier-ticket__day">
-                          <strong>{earlierDayText(ticket.businessDate)}</strong> · waiting{" "}
-                          {kitchenWaitText(waited)}
+                          <strong>{earlierDayText(ticket.businessDate)}</strong>{" "}
+                          {t("· waiting {waited}", { waited: kitchenWaitText(waited) })}
                         </p>
                       </div>
                       {canCloseEarlier ? (
@@ -1537,7 +1574,7 @@ export function KitchenBoardScreen({
                           }
                           onClick={() => setCloseTarget(ticket)}
                         >
-                          Close ticket
+                          {t("Close ticket")}
                         </button>
                       ) : null}
                     </header>
@@ -1568,8 +1605,8 @@ export function KitchenBoardScreen({
             <StatePanel
               heading={
                 searchApplied || (hasFilters && view.items.length > earlierOpen.size)
-                  ? "No matching work"
-                  : "No active work"
+                  ? t("No matching work")
+                  : t("No active work")
               }
               status
             >
@@ -1589,14 +1626,20 @@ export function KitchenBoardScreen({
                             ),
                         })
                       : earlierElsewhere !== null
-                        ? `Nothing from today for order or table “${orderSearch}”. ${earlierElsewhere}: see From earlier days above.`
-                        : `Nothing on the board for order or table “${orderSearch}”. Clear the search to see the whole queue.`
+                        ? t(
+                            "Nothing from today for order or table “{orderSearch}”. {earlierElsewhere}: see From earlier days above.",
+                            { orderSearch: orderSearch, earlierElsewhere: earlierElsewhere },
+                          )
+                        : t(
+                            "Nothing on the board for order or table “{orderSearch}”. Clear the search to see the whole queue.",
+                            { orderSearch: orderSearch },
+                          )
                     : view.items.length > 0 && view.items.length === earlierOpen.size
-                      ? "Nothing from today is waiting. Earlier days' tickets are listed above."
+                      ? t("Nothing from today is waiting. Earlier days' tickets are listed above.")
                       : !hasFilters || view.items.length === 0
                         ? // v15 2026-10-16: an empty board with no filter set is simply quiet.
-                          "Nothing to make right now."
-                        : "Nothing matches these filters. Clear the filters to see all work."}
+                          t("Nothing to make right now.")
+                        : t("Nothing matches these filters. Clear the filters to see all work.")}
               </p>
             </StatePanel>
           </div>
@@ -1608,7 +1651,9 @@ export function KitchenBoardScreen({
               const unnamed = stationLanes.filter((entry) => entry.stationLabel === null);
               const stationName =
                 lane.stationLabel ??
-                (unnamed.length > 1 ? `Station ${unnamed.indexOf(lane) + 1}` : "All work");
+                (unnamed.length > 1
+                  ? t("Station {value}", { value: unnamed.indexOf(lane) + 1 })
+                  : t("All work"));
               const stationItems = lane.items;
               return (
                 <section
@@ -1617,7 +1662,7 @@ export function KitchenBoardScreen({
                   key={lane.key}
                   aria-label={
                     lane.stationLabel === null && unnamed.length === 1
-                      ? "All kitchen work"
+                      ? t("All kitchen work")
                       : `${stationName} station`
                   }
                 >
@@ -1644,7 +1689,7 @@ export function KitchenBoardScreen({
                             </h4>
                             <p className="kitchen-ticket__wait">
                               {ticket.minutes === null ? (
-                                <span className="kitchen-ticket__timer">Done</span>
+                                <span className="kitchen-ticket__timer">{t("Done")}</span>
                               ) : (
                                 <span className="kitchen-ticket__timer" data-age={ticket.tier}>
                                   {kitchenWaitText(ticket.minutes)}
@@ -1736,12 +1781,12 @@ export function KitchenWorkItemScreen({
   const queueState = restoredQueueScope(location.state);
   const readOnly = view.freshnessStatus !== "Fresh" || view.operatorStatus !== "Named";
   const milestones = [
-    { label: "Work item created", at: view.item.createdAt },
+    { label: t("Work item created"), at: view.item.createdAt },
     ...(view.item.execution?.acceptedAt
       ? [{ label: "Accepted", at: view.item.execution.acceptedAt }]
       : []),
     ...(view.item.execution?.readyAt
-      ? [{ label: "Order item marked ready", at: view.item.execution.readyAt }]
+      ? [{ label: t("Order item marked ready"), at: view.item.execution.readyAt }]
       : []),
   ].sort((left, right) => left.at.localeCompare(right.at) || left.label.localeCompare(right.label));
   return (
@@ -1772,10 +1817,10 @@ export function KitchenWorkItemScreen({
               to="/operations/kitchen"
               state={queueState ? { kitchenQueueScope: queueState } : undefined}
             >
-              Return to Kitchen queue
+              {t("Return to Kitchen queue")}
             </Link>
             <button onClick={onRefresh} disabled={!onRefresh}>
-              Refresh
+              {t("Refresh")}
             </button>
           </div>
         </header>
@@ -1786,7 +1831,7 @@ export function KitchenWorkItemScreen({
           />
         ) : null}
         <section className="kitchen-work-item-screen__content" aria-labelledby="work-item-current">
-          <h3 id="work-item-current">Current work</h3>
+          <h3 id="work-item-current">{t("Current work")}</h3>
           <WorkCard
             item={view.item}
             readOnly
@@ -1799,14 +1844,17 @@ export function KitchenWorkItemScreen({
         </section>
         <section className="kitchen-work-item-screen__details" aria-labelledby="work-item-details">
           <header>
-            <h3 id="work-item-details">Additional detail</h3>
-            <p>Only recorded milestones are shown.</p>
+            <h3 id="work-item-details">{t("Additional detail")}</h3>
+            <p>{t("Only recorded milestones are shown.")}</p>
           </header>
           <dl>
             <div className="kitchen-work-item-screen__history-row">
-              <dt>Work item history</dt>
+              <dt>{t("Work item history")}</dt>
               <dd>
-                <ol className="kitchen-work-item-screen__history" aria-label="Work item milestones">
+                <ol
+                  className="kitchen-work-item-screen__history"
+                  aria-label={t("Work item milestones")}
+                >
                   {milestones.map((milestone) => (
                     <li key={`${milestone.label}:${milestone.at}`}>
                       <span>{milestone.label}</span>
@@ -1815,13 +1863,13 @@ export function KitchenWorkItemScreen({
                   ))}
                 </ol>
                 <p className="kitchen-work-item-screen__history-note">
-                  Start, progress and completion times are not recorded on this screen yet.
+                  {t("Start, progress and completion times are not recorded on this screen yet.")}
                 </p>
               </dd>
             </div>
           </dl>
           <p className="kitchen-work-item-screen__command-note">
-            Take actions from the queue. Your filters are kept when you return.
+            {t("Take actions from the queue. Your filters are kept when you return.")}
           </p>
         </section>
       </div>
@@ -1849,17 +1897,17 @@ function KitchenWorkItemUnavailableScreen({
       <div className="kitchen-board-workspace kitchen-work-item-screen">
         <header className="screen-heading kitchen-board-heading">
           <div>
-            <p className="kitchen-board-eyebrow">Work item</p>
-            {workspaceFrame ? <h1>Work item detail</h1> : <h2>Work item detail</h2>}
+            <p className="kitchen-board-eyebrow">{t("Work item")}</p>
+            {workspaceFrame ? <h1>{t("Work item detail")}</h1> : <h2>{t("Work item detail")}</h2>}
           </div>
           <div className="kitchen-work-item-screen__heading-actions">
             <Link
               to="/operations/kitchen"
               state={queueState ? { kitchenQueueScope: queueState } : undefined}
             >
-              Return to Kitchen queue
+              {t("Return to Kitchen queue")}
             </Link>
-            <button onClick={onRefresh}>Refresh</button>
+            <button onClick={onRefresh}>{t("Refresh")}</button>
           </div>
         </header>
         <KitchenBoardStatePanel state={state} />
@@ -2123,16 +2171,16 @@ function KitchenBoardContent(
       ) : (
         <KitchenFrame
           workspaceFrame={workspaceFrame}
-          title={props.storeLabel ?? "Kitchen"}
+          title={props.storeLabel ?? t("Kitchen")}
           navigation={navigation}
           headerStatus={headerStatus}
         >
-          {workspaceFrame ? <h1 className="kitchen-workspace-title">Kitchen</h1> : null}
+          {workspaceFrame ? <h1 className="kitchen-workspace-title">{t("Kitchen")}</h1> : null}
           {notices}
           <KitchenBoardStatePanel state={state.kind} />
           {state.kind !== "Loading" ? (
             <button ref={refreshButtonRef} onClick={refresh}>
-              Refresh
+              {t("Refresh")}
             </button>
           ) : null}
         </KitchenFrame>
@@ -2223,10 +2271,10 @@ export function useKitchenHandover(csrf: string | undefined, signOut?: () => Pro
 /** WP-2423: what a kitchen display shows once its shift has been handed over. */
 export function KitchenSignedOutPanel() {
   return (
-    <StatePanel heading="Kitchen display signed out" status>
-      <p>The next named operator must sign in before using this board.</p>
+    <StatePanel heading={t("Kitchen display signed out")} status>
+      <p>{t("The next named operator must sign in before using this board.")}</p>
       {/* WP-2423 Q18: the sign-in that works here (the labelled test sign-in in the pilot). */}
-      <StaffSignInLink label="Sign in to the kitchen display" />
+      <StaffSignInLink label={t("Sign in to the kitchen display")} />
     </StatePanel>
   );
 }
@@ -2264,10 +2312,11 @@ export function KitchenBoardPage(
   if (handover === "SignedOut") return <KitchenSignedOutPanel />;
   if (covered && !viewOnly)
     return (
-      <StatePanel heading="Kitchen display covered" tone="offline" status>
+      <StatePanel heading={t("Kitchen display covered")} tone="offline" status>
         <p>
-          The board was hidden while this device was away. Resume reloads the board and rechecks the
-          current operator Session.
+          {t(
+            "The board was hidden while this device was away. Resume reloads the board and rechecks the current operator Session.",
+          )}
         </p>
         <button
           onClick={() => {
@@ -2275,7 +2324,7 @@ export function KitchenBoardPage(
             setResumed((value) => value + 1);
           }}
         >
-          Resume as current operator
+          {t("Resume as current operator")}
         </button>
       </StatePanel>
     );

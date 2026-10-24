@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StaffTime, StoreDate } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
@@ -23,22 +24,25 @@ import {
 import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 
 const copy: Record<StaffPageErrorCode | "Loading", string> = {
-  Loading: "Loading Store staff…",
+  Loading: t("Loading Store staff…"),
   PermissionDenied: actionAccessDeniedText,
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
-  NotFound: "This staff member is not assigned to the selected Store.",
-  Conflict: "The staff or role state changed. Refresh and try again.",
-  LastOwner: "The Store must keep at least one active Owner. Assign another Owner first.",
-  PendingRequestsRemain:
+  NotFound: t("This staff member is not assigned to the selected Store."),
+  Conflict: t("The staff or role state changed. Refresh and try again."),
+  LastOwner: t("The Store must keep at least one active Owner. Assign another Owner first."),
+  PendingRequestsRemain: t(
     "Someone else has requested a role for this person. Ask an administrator who may approve roles to reject it, or to remove the person.",
-  BrandRolesRemain:
+  ),
+  BrandRolesRemain: t(
     "This person also holds Brand roles (all Stores). Only someone who manages Brand staff can remove them; ask the Owner.",
-  Invalid: "The change was refused because the input is invalid.",
-  AlreadyInvited: "This email already has an open invitation.",
-  EmailMismatch:
+  ),
+  Invalid: t("The change was refused because the input is invalid."),
+  AlreadyInvited: t("This email already has an open invitation."),
+  EmailMismatch: t(
     "That's not the email this invitation was sent to. Cancel this invitation and invite again with the new address.",
-  Offline: "Offline. Your change was not confirmed; retry sends the same request again.",
-  Unavailable: "Staff administration is unavailable.",
+  ),
+  Offline: t("Offline. Your change was not confirmed; retry sends the same request again."),
+  Unavailable: t("Staff administration is unavailable."),
 };
 type State =
   | { readonly kind: "Loading" | StaffPageErrorCode }
@@ -46,23 +50,27 @@ type State =
 
 /** Membership in plain words (never the stored status code). */
 export function membershipText(status: string): string {
-  if (status === "PendingActivation") return "Invited (not signed in yet)";
+  if (status === "PendingActivation") return t("Invited (not signed in yet)");
   if (status === "Active") return "Active";
   if (status === "Suspended") return "Suspended";
   return status;
 }
 
-export const INVITE_NAME_HELP = "Required — orders, refunds and records show who did what.";
-export const INVITE_ROLE_NOTE = "The role starts after another manager approves it.";
+export const INVITE_NAME_HELP = t("Required — orders, refunds and records show who did what.");
+export const INVITE_ROLE_NOTE = t("The role starts after another manager approves it.");
 export function inviteSentText(delivery: StaffInvitationView["delivery"]): string {
   return delivery === "Unknown"
-    ? "The invitation was saved but we couldn't confirm the email went out. Use Resend on their page."
-    : "Invitation sent. They'll get an email with a temporary password; it expires in 7 days.";
+    ? t(
+        "The invitation was saved but we couldn't confirm the email went out. Use Resend on their page.",
+      )
+    : t("Invitation sent. They'll get an email with a temporary password; it expires in 7 days.");
 }
 export function resendSentText(delivery: StaffInvitationView["delivery"]): string {
   return delivery === "Unknown"
-    ? "The invitation was saved but we couldn't confirm the email went out. Try Resend again in a few minutes."
-    : "Invitation sent again. They'll get a new temporary password; it expires in 7 days.";
+    ? t(
+        "The invitation was saved but we couldn't confirm the email went out. Try Resend again in a few minutes.",
+      )
+    : t("Invitation sent again. They'll get a new temporary password; it expires in 7 days.");
 }
 /** All three fields are needed (Owner decision 2026-10-18: a name is mandatory). */
 export function inviteReady(name: string, email: string, role: string): boolean {
@@ -77,13 +85,13 @@ export function InvitationStatusLine({
 }) {
   if (invitation === null) return null;
   if (invitation.status === "Expired")
-    return <p className="staff-invitation__status">Invitation expired</p>;
+    return <p className="staff-invitation__status">{t("Invitation expired")}</p>;
   if (invitation.status !== "Pending") return null;
   if (invitation.delivery === "Unknown")
-    return <p className="staff-invitation__status">Invited · email not confirmed</p>;
+    return <p className="staff-invitation__status">{t("Invited · email not confirmed")}</p>;
   return (
     <p className="staff-invitation__status">
-      Invited · email sent <StaffTime instant={invitation.sentAt} /> · expires{" "}
+      {t("Invited · email sent")} <StaffTime instant={invitation.sentAt} /> {t("· expires")}{" "}
       <StoreDate value={invitation.expiresAt} />
     </p>
   );
@@ -107,24 +115,24 @@ function CommandError({
   if (error === null) return null;
   if (needsFullSignIn(error))
     return (
-      <StatePanel heading="Confirm it's you" status>
+      <StatePanel heading={t("Confirm it's you")} status>
         <FullSignInPrompt csrf={csrf} />
         {retry ? (
           <button disabled={busy} onClick={retry}>
-            Try again
+            {t("Try again")}
           </button>
         ) : null}
       </StatePanel>
     );
   return (
-    <StatePanel heading="Change not applied" tone="error" status>
+    <StatePanel heading={t("Change not applied")} tone="error" status>
       <p>{text[error]}</p>
       {retry && error === "Offline" ? (
         <button disabled={busy} onClick={retry}>
-          Retry
+          {t("Retry")}
         </button>
       ) : (
-        <button onClick={reload}>Refresh</button>
+        <button onClick={reload}>{t("Refresh")}</button>
       )}
     </StatePanel>
   );
@@ -132,7 +140,7 @@ function CommandError({
 
 const inviteCopy: Record<StaffPageErrorCode | "Loading", string> = {
   ...copy,
-  Invalid: "Check the name and email.",
+  Invalid: t("Check the name and email."),
 };
 
 /** WP-2423 DEC-COGNITO-STORE-STAFF: invite a new staff member to sign in with their own account. */
@@ -176,10 +184,11 @@ function InvitePanel({
   };
   const ready = inviteReady(name, email, role);
   return (
-    <StatePanel heading="Invite a staff member">
+    <StatePanel heading={t("Invite a staff member")}>
       <p>
-        They get an email with a temporary password and sign in with their work email, a password
-        they choose and an authenticator app.
+        {t(
+          "They get an email with a temporary password and sign in with their work email, a password they choose and an authenticator app.",
+        )}
       </p>
       <form
         className="staff-invite"
@@ -197,7 +206,7 @@ function InvitePanel({
       >
         <div className="staff-invite__field">
           <label>
-            Name
+            {t("Name")}
             <input
               value={name}
               maxLength={80}
@@ -212,7 +221,7 @@ function InvitePanel({
           </p>
         </div>
         <label>
-          Work email
+          {t("Work email")}
           <input
             type="email"
             value={email}
@@ -223,18 +232,18 @@ function InvitePanel({
           />
         </label>
         <label>
-          Role
+          {t("Role")}
           <select
             value={role}
             required
             aria-describedby="staff-invite-role-note"
             onChange={(event) => setRole(event.currentTarget.value)}
           >
-            <option value="">Choose a role</option>
+            <option value="">{t("Choose a role")}</option>
             {view.roles.map((item) => (
               <option key={item.roleReference} value={item.roleReference}>
                 {item.name}
-                {item.scope === "Brand" ? " — Brand, all Stores" : " — this Store"}
+                {item.scope === "Brand" ? t(" — Brand, all Stores") : t(" — this Store")}
               </option>
             ))}
           </select>
@@ -243,7 +252,7 @@ function InvitePanel({
           {INVITE_ROLE_NOTE}
         </p>
         <button type="submit" disabled={busy || !ready}>
-          {busy ? "Sending…" : "Send invitation"}
+          {busy ? t("Sending…") : t("Send invitation")}
         </button>
       </form>
       {notice ? <p role="status">{notice}</p> : null}
@@ -319,20 +328,24 @@ function InvitationPanel({
       ...(withEmail === undefined ? {} : { email: withEmail }),
     });
   return (
-    <StatePanel heading="Invitation">
+    <StatePanel heading={t("Invitation")}>
       <div className="staff-invitation">
         <p>
-          {invitation.status === "Expired" ? "Invitation expired" : "Invited"} · sent to{" "}
-          {invitation.emailHint}
+          {t("{value} · sent to {emailHint}", {
+            value: invitation.status === "Expired" ? t("Invitation expired") : t("Invited"),
+            emailHint: invitation.emailHint,
+          })}
         </p>
         <p>
-          Sent <StaffTime instant={invitation.sentAt} />
-          {invitation.sendCount > 1 ? ` · sent ${invitation.sendCount} times` : ""} ·{" "}
-          {invitation.status === "Expired" ? "expired" : "expires"}{" "}
+          {t("Sent")} <StaffTime instant={invitation.sentAt} />
+          {invitation.sendCount > 1
+            ? t(" · sent {sendCount} times", { sendCount: invitation.sendCount })
+            : ""}{" "}
+          · {invitation.status === "Expired" ? t("expired") : t("expires")}{" "}
           <StoreDate value={invitation.expiresAt} />
         </p>
         {invitation.status === "Pending" && invitation.delivery === "Unknown" ? (
-          <p>We couldn&apos;t confirm the email went out. Resend the invitation.</p>
+          <p>{t("We couldn't confirm the email went out. Resend the invitation.")}</p>
         ) : null}
         {needEmail ? (
           <form
@@ -343,7 +356,7 @@ function InvitationPanel({
             }}
           >
             <label>
-              Enter their work email again to send a new invitation
+              {t("Enter their work email again to send a new invitation")}
               <input
                 type="email"
                 value={email}
@@ -354,12 +367,12 @@ function InvitationPanel({
               />
             </label>
             <button type="submit" disabled={busy || !email.trim()}>
-              Resend invitation
+              {t("Resend invitation")}
             </button>
           </form>
         ) : invitation.mayResend ? (
           <button disabled={busy} onClick={() => resend()}>
-            Resend invitation
+            {t("Resend invitation")}
           </button>
         ) : null}
         {invitation.mayRevoke ? (
@@ -380,15 +393,15 @@ function InvitationPanel({
                   )
                 }
               >
-                Confirm: cancel the invitation for {member.label}
+                {t("Confirm: cancel the invitation for {label}", { label: member.label })}
               </button>{" "}
               <button disabled={busy} onClick={() => setConfirmCancel(false)}>
-                Keep the invitation
+                {t("Keep the invitation")}
               </button>
             </p>
           ) : (
             <button disabled={busy} onClick={() => setConfirmCancel(true)}>
-              Cancel invitation
+              {t("Cancel invitation")}
             </button>
           )
         ) : null}
@@ -460,10 +473,12 @@ function Member({
           reload={reload}
         />
       ) : null}
-      <StatePanel heading="Profile">
+      <StatePanel heading={t("Profile")}>
         <p>
-          Membership {membershipText(member.membershipStatus)} · Store assignment{" "}
-          {member.storeAssignmentStatus}
+          {t("Membership {membershipStatus} · Store assignment {storeAssignmentStatus}", {
+            membershipStatus: membershipText(member.membershipStatus),
+            storeAssignmentStatus: member.storeAssignmentStatus,
+          })}
         </p>
         {member.mayRename ? (
           <form
@@ -479,7 +494,7 @@ function Member({
             }}
           >
             <label>
-              Display name shown to staff
+              {t("Display name shown to staff")}
               <input
                 value={name}
                 maxLength={80}
@@ -487,18 +502,21 @@ function Member({
               />
             </label>
             <button disabled={busy || !name.trim() || name.trim() === member.displayName}>
-              Save name
+              {t("Save name")}
             </button>
           </form>
         ) : null}
       </StatePanel>
-      <StatePanel heading="Roles">
-        {member.assignments.length === 0 ? <p>No active role.</p> : null}
+      <StatePanel heading={t("Roles")}>
+        {member.assignments.length === 0 ? <p>{t("No active role.")}</p> : null}
         <ul>
           {member.assignments.map((item) => (
             <li key={item.assignmentReference}>
               <strong>{item.roleName}</strong>
-              {item.scope === "Brand" ? " (all Stores of the Brand)" : " (this Store)"} · since{" "}
+              {t("{value} · since", {
+                value:
+                  item.scope === "Brand" ? t(" (all Stores of the Brand)") : t(" (this Store)"),
+              })}{" "}
               <StaffTime instant={item.since} />{" "}
               {item.mayRevoke ? (
                 <button
@@ -511,13 +529,13 @@ function Member({
                     })
                   }
                 >
-                  Remove role
+                  {t("Remove role")}
                 </button>
               ) : null}
             </li>
           ))}
         </ul>
-        {member.self ? <p>You cannot change your own roles.</p> : null}
+        {member.self ? <p>{t("You cannot change your own roles.")}</p> : null}
         {member.mayRequest ? (
           <form
             onSubmit={(event) => {
@@ -532,28 +550,31 @@ function Member({
             }}
           >
             <label>
-              Assign role (takes effect after another administrator approves)
+              {t("Assign role (takes effect after another administrator approves)")}
               <select value={role} onChange={(event) => setRole(event.currentTarget.value)}>
-                <option value="">Choose a role</option>
+                <option value="">{t("Choose a role")}</option>
                 {requestable.map((item) => (
                   <option key={item.roleReference} value={item.roleReference}>
                     {item.name}
-                    {item.scope === "Brand" ? " — Brand, all Stores" : " — this Store"}
+                    {item.scope === "Brand" ? t(" — Brand, all Stores") : t(" — this Store")}
                   </option>
                 ))}
               </select>
             </label>
-            <button disabled={busy || !role}>Request assignment</button>
+            <button disabled={busy || !role}>{t("Request assignment")}</button>
           </form>
         ) : null}
       </StatePanel>
-      <StatePanel heading="Pending approval">
-        {member.pending.length === 0 ? <p>No pending change.</p> : null}
+      <StatePanel heading={t("Pending approval")}>
+        {member.pending.length === 0 ? <p>{t("No pending change.")}</p> : null}
         <ul>
           {member.pending.map((item) => (
             <li key={item.changeReference}>
               <strong>{item.roleName}</strong>
-              {item.scope === "Brand" ? " (Brand)" : ""} · requested by {item.requestedBy} at{" "}
+              {t("{value} · requested by {requestedBy} at", {
+                value: item.scope === "Brand" ? t(" (Brand)") : "",
+                requestedBy: item.requestedBy,
+              })}{" "}
               <StaffTime instant={item.requestedAt} />{" "}
               {item.mayDecide ? (
                 <>
@@ -563,7 +584,7 @@ function Member({
                       void run({ operation: "Approve", changeReference: item.changeReference })
                     }
                   >
-                    Approve
+                    {t("Approve")}
                   </button>{" "}
                   <button
                     disabled={busy}
@@ -571,7 +592,7 @@ function Member({
                       void run({ operation: "Reject", changeReference: item.changeReference })
                     }
                   >
-                    Reject
+                    {t("Reject")}
                   </button>
                 </>
               ) : item.mayWithdraw ? (
@@ -581,13 +602,16 @@ function Member({
                     void run({ operation: "Withdraw", changeReference: item.changeReference })
                   }
                 >
-                  Withdraw request
+                  {t("Withdraw request")}
                 </button>
               ) : (
                 <span>
                   {member.membershipStatus === "PendingActivation"
-                    ? `Starts after ${member.label} accepts the invitation and another manager approves it.`
-                    : "Waiting for another administrator."}
+                    ? t(
+                        "Starts after {label} accepts the invitation and another manager approves it.",
+                        { label: member.label },
+                      )
+                    : t("Waiting for another administrator.")}
                 </span>
               )}
             </li>
@@ -595,11 +619,11 @@ function Member({
         </ul>
       </StatePanel>
       {member.mayRemove ? (
-        <StatePanel heading="Remove from this Store">
+        <StatePanel heading={t("Remove from this Store")}>
           <p>
-            For someone who no longer works here: ends all their roles at this Store (and their
-            Brand roles), ends their Store assignment and signs them out now. History stays on
-            record.
+            {t(
+              "For someone who no longer works here: ends all their roles at this Store (and their Brand roles), ends their Store assignment and signs them out now. History stays on record.",
+            )}
           </p>
           {confirmRemoval ? (
             <>
@@ -617,37 +641,37 @@ function Member({
                   )
                 }
               >
-                Confirm: remove {member.label}
+                {t("Confirm: remove {label}", { label: member.label })}
               </button>{" "}
               <button disabled={busy} onClick={() => setConfirmRemoval(false)}>
-                Cancel
+                {t("Cancel")}
               </button>
             </>
           ) : (
             <button disabled={busy} onClick={() => setConfirmRemoval(true)}>
-              Remove from this Store
+              {t("Remove from this Store")}
             </button>
           )}
         </StatePanel>
       ) : null}
       {error && needsFullSignIn(error) ? (
-        <StatePanel heading="Confirm it's you" status>
+        <StatePanel heading={t("Confirm it's you")} status>
           <FullSignInPrompt csrf={csrf} />
           {pending ? (
             <button disabled={busy} onClick={() => void run(pending)}>
-              Try again
+              {t("Try again")}
             </button>
           ) : null}
         </StatePanel>
       ) : error ? (
-        <StatePanel heading="Change not applied" tone="error" status>
+        <StatePanel heading={t("Change not applied")} tone="error" status>
           <p>{copy[error]}</p>
           {pending && error === "Offline" ? (
             <button disabled={busy} onClick={() => void run(pending)}>
-              Retry
+              {t("Retry")}
             </button>
           ) : (
-            <button onClick={reload}>Refresh</button>
+            <button onClick={reload}>{t("Refresh")}</button>
           )}
         </StatePanel>
       ) : null}
@@ -696,10 +720,10 @@ function Page({
       <StatePanel
         heading={
           state.kind === "Loading"
-            ? "Loading staff"
+            ? t("Loading staff")
             : state.kind === "PermissionDenied"
               ? noAccessHeading
-              : "Staff unavailable"
+              : t("Staff unavailable")
         }
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
@@ -710,13 +734,13 @@ function Page({
   const view = state.view;
   const detail = screenId === "IAM-USER-DETAIL";
   return (
-    <AppFrame title={detail ? "Staff member" : "Staff"} description="">
+    <AppFrame title={detail ? t("Staff member") : t("Staff")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">{detail ? "Staff member" : "Staff"}</p>
-          <h2>Store staff and roles</h2>
+          <p className="bop-eyebrow">{detail ? t("Staff member") : t("Staff")}</p>
+          <h2>{t("Store staff and roles")}</h2>
           <p>
-            Source as of <SourceTime instant={view.sourceAsOf} />
+            {t("Source as of")} <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
       </header>
@@ -724,22 +748,26 @@ function Page({
         <InvitePanel view={view} client={client} csrf={csrf} reload={reload} />
       ) : null}
       {view.staff.length === 0 ? (
-        <StatePanel heading="No staff" status>
-          <p>No member is assigned to this Store.</p>
+        <StatePanel heading={t("No staff")} status>
+          <p>{t("No member is assigned to this Store.")}</p>
         </StatePanel>
       ) : (
         view.staff.map((member) => (
           <section key={member.actorReference}>
             <StatePanel heading={member.label}>
               <p>
-                {member.assignments.map((item) => item.roleName).join(", ") || "No active role"}
-                {member.pending.length ? ` · ${member.pending.length} pending approval` : ""}
+                {member.assignments.map((item) => item.roleName).join(", ") || t("No active role")}
+                {member.pending.length
+                  ? t(" · {length} pending approval", { length: member.pending.length })
+                  : ""}
               </p>
               <InvitationStatusLine invitation={member.invitation} />
               {detail ? (
-                <Link to="/app/organization/users">Back to staff</Link>
+                <Link to="/app/organization/users">{t("Back to staff")}</Link>
               ) : (
-                <Link to={`/app/organization/users/${member.actorReference}`}>View and manage</Link>
+                <Link to={`/app/organization/users/${member.actorReference}`}>
+                  {t("View and manage")}
+                </Link>
               )}
             </StatePanel>
             {detail ? (

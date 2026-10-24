@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -76,17 +77,21 @@ export function choicesComplete(item: CounterMenuItem, choices: Record<string, s
 const menuError: Record<string, [string, string]> = {
   PermissionDenied: [noAccessHeading, pageAccessDeniedText],
   TableUnavailable: [
-    "This table can't take an order now",
-    "It may be marked unavailable or its session may be closing. Check it on the Tables page.",
+    t("This table can't take an order now"),
+    t("It may be marked unavailable or its session may be closing. Check it on the Tables page."),
   ],
   TableHasNoQr: [
-    "This table has no table QR code yet",
-    "Orders for a table use its code. Ask a manager to create one on the Table QR codes page, then take the order.",
+    t("This table has no table QR code yet"),
+    t(
+      "Orders for a table use its code. Ask a manager to create one on the Table QR codes page, then take the order.",
+    ),
   ],
-  TableUnknown: ["Table not found", "Open the table from the Tables page to take its order."],
+  TableUnknown: [t("Table not found"), t("Open the table from the Tables page to take its order.")],
   Unavailable: [
-    "The menu could not be loaded",
-    "Check the connection and try again. If the system stays down, take the order on paper and record it here afterwards.",
+    t("The menu could not be loaded"),
+    t(
+      "Check the connection and try again. If the system stays down, take the order on paper and record it here afterwards.",
+    ),
   ],
 };
 
@@ -117,20 +122,34 @@ export function placeErrorText(
       const line = error.lineIndex === null ? undefined : lines[error.lineIndex];
       // WP-2423: each item could be made on its own, but not together (they share an ingredient).
       if (line && error.sharedStock)
-        return `There isn't enough left to make ${line.item.name} with the rest of this order (other items use the same ingredients). Remove ${line.item.name} or change the other items, then send again. Nothing was sent or charged.`;
+        return t(
+          "There isn't enough left to make {name} with the rest of this order (other items use the same ingredients). Remove {name2} or change the other items, then send again. Nothing was sent or charged.",
+          { name: line.item.name, name2: line.item.name },
+        );
       return line
-        ? `${line.item.name} can't be sold right now (sold out or off the menu). Remove it and send again. Nothing was sent or charged.`
-        : "An item can't be sold right now (it may have just sold out). Check the order and send again. Nothing was sent or charged.";
+        ? t(
+            "{name} can't be sold right now (sold out or off the menu). Remove it and send again. Nothing was sent or charged.",
+            { name: line.item.name },
+          )
+        : t(
+            "An item can't be sold right now (it may have just sold out). Check the order and send again. Nothing was sent or charged.",
+          );
     }
     case "ItemShort": {
       // v15 run: name the short item and how many are left; the order stays as entered.
       const line = error.lineIndex === null ? undefined : lines[error.lineIndex];
       const left = error.available ?? 0;
       if (line === undefined)
-        return `An item has only ${left} left. Remove it and add ${left} back, then send again. Nothing was sent or charged.`;
+        return t(
+          "An item has only {left} left. Remove it and add {left2} back, then send again. Nothing was sent or charged.",
+          { left: left, left2: left },
+        );
       // WP-2423: short only because other items in the order use the same ingredients.
       if (error.sharedStock)
-        return `Only ${left} ${line.item.name} can be made with the rest of this order (other items use the same ingredients). Lower ${line.item.name} to ${left} or change the other items, then send again. Nothing was sent or charged.`;
+        return t(
+          "Only {left} {name} can be made with the rest of this order (other items use the same ingredients). Lower {name2} to {left2} or change the other items, then send again. Nothing was sent or charged.",
+          { left: left, name: line.item.name, name2: line.item.name, left2: left },
+        );
       const options = (entry: Line) =>
         JSON.stringify(
           entry.options.map((option) => [option.optionReference, option.quantity]).sort(),
@@ -142,7 +161,10 @@ export function placeErrorText(
             options(other) === options(line),
         )
         .reduce((sum, other) => sum + other.quantity, 0);
-      return `Only ${left} ${line.item.name} left, ${ordered} in this order. Remove ${line.item.name} and add ${left} back, then send again. Nothing was sent or charged.`;
+      return t(
+        "Only {left} {name} left, {ordered} in this order. Remove {name2} and add {left2} back, then send again. Nothing was sent or charged.",
+        { left: left, name: line.item.name, ordered: ordered, name2: line.item.name, left2: left },
+      );
     }
     case "StoreNotTakingOrders":
       return table !== null
@@ -166,7 +188,9 @@ export function placeErrorText(
         : "The system couldn't place this order (a problem on our side, not with the order). Nothing was charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.";
     default:
       // WP-2423: e.g. no order can be priced right now; Home shows the alert and what to do.
-      return "The order could not be sent. Check the order and try again. If it keeps failing, check Home for an alert and take the order on paper.";
+      return t(
+        "The order could not be sent. Check the order and try again. If it keeps failing, check Home for an alert and take the order on paper.",
+      );
   }
 }
 
@@ -414,7 +438,7 @@ export function StaffOrderEntryPage({
         placeErrorText(
           failure,
           lines,
-          tableLabel === null ? null : `Table ${tableLabel}`,
+          tableLabel === null ? null : t("Table {tableLabel}", { tableLabel: tableLabel }),
           tableQrHref !== undefined,
         ),
       );
@@ -485,14 +509,14 @@ export function StaffOrderEntryPage({
 
   const pageTitle = tableMode
     ? tableLabel === null
-      ? "Table order"
-      : `Table ${tableLabel} order`
-    : "Counter order";
+      ? t("Table order")
+      : t("Table {tableLabel} order", { tableLabel: tableLabel })
+    : t("Counter order");
   if (menu.kind === "Loading")
     return (
       <WorkspacePage title={pageTitle} meta={storeLabel}>
-        <StatePanel heading="Loading the menu" status>
-          <p>Loading what the store sells now…</p>
+        <StatePanel heading={t("Loading the menu")} status>
+          <p>{t("Loading what the store sells now…")}</p>
         </StatePanel>
       </WorkspacePage>
     );
@@ -505,21 +529,21 @@ export function StaffOrderEntryPage({
           {createCode ? (
             // Same rule as the Tables page: staff who can create codes get the link.
             <p>
-              Orders for a table use its code. Create one on{" "}
-              <Link to={createCode}>Table QR codes</Link> (it can be printed later), then take the
-              order.
+              {t("Orders for a table use its code. Create one on")}{" "}
+              <Link to={createCode}>{t("Table QR codes")}</Link>{" "}
+              {t("(it can be printed later), then take the order.")}
             </p>
           ) : (
             <p>{text}</p>
           )}
           {menu.code === "Unavailable" ? (
             <button type="button" onClick={() => setReload((value) => value + 1)}>
-              Try again
+              {t("Try again")}
             </button>
           ) : tableMode ? (
-            <Link to="/operations/dining">Back to Tables</Link>
+            <Link to="/operations/dining">{t("Back to Tables")}</Link>
           ) : (
-            <Link to="/app">Back to home</Link>
+            <Link to="/app">{t("Back to home")}</Link>
           )}
         </StatePanel>
       </WorkspacePage>
@@ -553,10 +577,10 @@ export function StaffOrderEntryPage({
       )}
       <div className="counter-order__layout">
         <section className="counter-order__menu" aria-labelledby="counter-menu-heading">
-          <h2 id="counter-menu-heading">Menu</h2>
+          <h2 id="counter-menu-heading">{t("Menu")}</h2>
           {menu.menu.sections.length > 1 ? (
             // Square/Toast-style category jump bar: stays at the top while the menu scrolls.
-            <nav className="counter-order__categories" aria-label="Menu categories">
+            <nav className="counter-order__categories" aria-label={t("Menu categories")}>
               {menu.menu.sections.map((section) => (
                 <button
                   key={section.sectionReference}
@@ -574,8 +598,9 @@ export function StaffOrderEntryPage({
           ) : null}
           {menu.menu.sections.length === 0 ? (
             <p className="counter-order__menu-empty">
-              Nothing is on the menu right now. Check the menu&apos;s hours and items on the Menus
-              page.
+              {t(
+                "Nothing is on the menu right now. Check the menu's hours and items on the Menus page.",
+              )}
             </p>
           ) : null}
           {menu.menu.sections.map((section) => (
@@ -593,9 +618,9 @@ export function StaffOrderEntryPage({
                     <span className="counter-order__item-price">
                       {item.available
                         ? item.priceMinor === null
-                          ? "Price at checkout"
+                          ? t("Price at checkout")
                           : cad(item.priceMinor)
-                        : "Sold out"}
+                        : t("Sold out")}
                     </span>
                     {/* The Add button covers the whole tile (CSS), so the tile is the tap target. */}
                     <button
@@ -606,7 +631,7 @@ export function StaffOrderEntryPage({
                         setChoosing({ item, choices: defaultChoices(item), quantity: 1, note: "" })
                       }
                     >
-                      Add
+                      {t("Add")}
                     </button>
                   </li>
                 ))}
@@ -622,11 +647,11 @@ export function StaffOrderEntryPage({
         >
           <header className="counter-order__ticket-header">
             <h2 id="counter-ticket" ref={ticketHeading} tabIndex={-1}>
-              Order
+              {t("Order")}
             </h2>
             {itemCount > 0 ? (
               <span className="counter-order__count">
-                {itemCount === 1 ? "1 item" : `${itemCount} items`}
+                {itemCount === 1 ? t("1 item") : t("{itemCount} items", { itemCount: itemCount })}
               </span>
             ) : null}
           </header>
@@ -672,7 +697,7 @@ export function StaffOrderEntryPage({
                   <fieldset key={rule.bindingReference}>
                     <legend>
                       {rule.name}
-                      {rule.minimumSelections > 0 ? " (required)" : ""}
+                      {rule.minimumSelections > 0 ? t(" (required)") : ""}
                     </legend>
                     {rule.options.map((option) => (
                       <label key={option.optionReference}>
@@ -710,7 +735,7 @@ export function StaffOrderEntryPage({
                 );
               })}
               <label className="counter-order__quantity">
-                Quantity
+                {t("Quantity")}
                 <input
                   type="number"
                   inputMode="numeric"
@@ -727,7 +752,7 @@ export function StaffOrderEntryPage({
               </label>
               {tableMode ? (
                 <label className="counter-order__note">
-                  Note for the kitchen (optional)
+                  {t("Note for the kitchen (optional)")}
                   <input
                     value={choosing.note}
                     maxLength={140}
@@ -740,21 +765,21 @@ export function StaffOrderEntryPage({
               ) : null}
               <div className="card-actions">
                 <button type="submit" disabled={!choicesComplete(choosing.item, choosing.choices)}>
-                  Add to order
+                  {t("Add to order")}
                 </button>
                 <button type="button" onClick={() => setChoosing(null)}>
-                  Cancel
+                  {t("Cancel")}
                 </button>
               </div>
             </form>
           ) : null}
           {lines.length === 0 ? (
             <div className="counter-order__empty">
-              <p className="counter-order__empty-title">No items yet</p>
-              <p className="bop-muted">Add items from the menu.</p>
+              <p className="counter-order__empty-title">{t("No items yet")}</p>
+              <p className="bop-muted">{t("Add items from the menu.")}</p>
             </div>
           ) : (
-            <ul className="counter-order__lines" aria-label="Items in this order">
+            <ul className="counter-order__lines" aria-label={t("Items in this order")}>
               {lines.map((line) => {
                 const each = estimatedLineMinor(line);
                 const setQuantity = (quantity: number) =>
@@ -771,7 +796,12 @@ export function StaffOrderEntryPage({
                           · {line.options.map((option) => option.name).join(", ")}
                         </span>
                       ) : null}
-                      {line.note ? <span className="bop-muted"> · Note: {line.note}</span> : null}
+                      {line.note ? (
+                        <span className="bop-muted">
+                          {" "}
+                          {t("· Note: {note}", { note: line.note })}
+                        </span>
+                      ) : null}
                     </span>
                     <span className="counter-order__line-price">
                       {each === null ? "" : cad(each.toString())}
@@ -806,7 +836,7 @@ export function StaffOrderEntryPage({
                             changeLines(lines.filter((other) => other.key !== line.key))
                           }
                         >
-                          Remove
+                          {t("Remove")}
                         </button>
                       </span>
                     ) : null}
@@ -818,20 +848,27 @@ export function StaffOrderEntryPage({
           {estimate !== null && lines.length > 0 ? (
             <div className="counter-order__totals">
               <p className="counter-order__subtotal">
-                <span>Subtotal</span>
+                <span>{t("Subtotal")}</span>
                 <span>{cad(estimate.toString())}</span>
               </p>
               <p className="counter-order__estimate">
                 {placed !== null && !ordering
                   ? phase === "Paid" || phase === "Accepted"
-                    ? `Sent and paid: ${cad(placed.totalMinor)} with tax and tip.`
-                    : `Sent. Charge ${cad(placed.totalMinor)} with tax and tip on the card machine.`
-                  : `About ${cad(estimate.toString())} before tax and tip. The final total comes when you send the order.`}
+                    ? t("Sent and paid: {totalMinor} with tax and tip.", {
+                        totalMinor: cad(placed.totalMinor),
+                      })
+                    : t("Sent. Charge {totalMinor} with tax and tip on the card machine.", {
+                        totalMinor: cad(placed.totalMinor),
+                      })
+                  : t(
+                      "About {value} before tax and tip. The final total comes when you send the order.",
+                      { value: cad(estimate.toString()) },
+                    )}
               </p>
             </div>
           ) : null}
           <fieldset className="counter-order__tip" disabled={!ordering}>
-            <legend>Tip</legend>
+            <legend>{t("Tip")}</legend>
             {(["0", "10", "15", "18"] as const).map((value) => (
               <label key={value}>
                 <input
@@ -843,7 +880,7 @@ export function StaffOrderEntryPage({
                     setTip(value);
                   }}
                 />
-                {value === "0" ? "No tip" : `${value}%`}
+                {value === "0" ? t("No tip") : `${value}%`}
               </label>
             ))}
             <label>
@@ -856,11 +893,11 @@ export function StaffOrderEntryPage({
                   setTip("Custom");
                 }}
               />
-              Other amount
+              {t("Other amount")}
             </label>
             {tip === "Custom" ? (
               <label className="counter-order__custom-tip">
-                Tip amount ($)
+                {t("Tip amount ($)")}
                 <input
                   inputMode="decimal"
                   value={customTip}
@@ -874,7 +911,7 @@ export function StaffOrderEntryPage({
             ) : null}
           </fieldset>
           <fieldset className="counter-order__paper" disabled={!ordering}>
-            <legend>Paper order</legend>
+            <legend>{t("Paper order")}</legend>
             <label>
               <input
                 type="checkbox"
@@ -884,11 +921,11 @@ export function StaffOrderEntryPage({
                   setPaper(event.currentTarget.checked);
                 }}
               />
-              Recorded after an outage (taken on paper)
+              {t("Recorded after an outage (taken on paper)")}
             </label>
             {paper ? (
               <label>
-                Paid at (store time, from the paper order)
+                {t("Paid at (store time, from the paper order)")}
                 <input
                   type="datetime-local"
                   value={paidAt}
@@ -903,21 +940,23 @@ export function StaffOrderEntryPage({
             ) : null}
             {paper ? (
               <p id="counter-paper-hint" className="field-hint">
-                Within the last 3 days. The order is marked &ldquo;Recorded after outage&rdquo; and
-                its payment counts on the day it was paid.
+                {t(
+                  "Within the last 3 days. The order is marked “Recorded after outage” and its payment counts on the day it was paid.",
+                )}
               </p>
             ) : null}
           </fieldset>
           {tableMode && ordering ? (
             <p className="field-hint">
-              Sending gives this order its own table code, so a table code you handed out that
-              hasn&apos;t been used yet stops working. Guests already at the table stay joined.
+              {t(
+                "Sending gives this order its own table code, so a table code you handed out that hasn't been used yet stops working. Guests already at the table stay joined.",
+              )}
             </p>
           ) : null}
           {problem !== null && ordering ? <p role="alert">{problem}</p> : null}
           {problem !== null && ordering && problemNeedsTableCode && tableQrHref !== undefined ? (
             <p>
-              <Link to={tableQrHref}>Table QR codes</Link>
+              <Link to={tableQrHref}>{t("Table QR codes")}</Link>
             </p>
           ) : null}
           {ordering ? (
@@ -928,7 +967,7 @@ export function StaffOrderEntryPage({
                 disabled={!canSend}
                 onClick={() => void send()}
               >
-                {phase === "Sending" ? "Sending…" : "Send order"}
+                {phase === "Sending" ? t("Sending…") : t("Send order")}
               </button>
             </div>
           ) : null}
@@ -939,7 +978,9 @@ export function StaffOrderEntryPage({
           // order's count and estimate in view and takes staff to it to send.
           <div className="counter-order__summary-bar">
             <span className="counter-order__summary-text">
-              <span>{itemCount === 1 ? "1 item" : `${itemCount} items`}</span>
+              <span>
+                {itemCount === 1 ? t("1 item") : t("{itemCount} items", { itemCount: itemCount })}
+              </span>
               {estimate !== null ? <strong>{cad(estimate.toString())}</strong> : null}
             </span>
             <button
@@ -952,7 +993,7 @@ export function StaffOrderEntryPage({
                 ticketHeading.current?.focus({ preventScroll: true });
               }}
             >
-              View order
+              {t("View order")}
             </button>
           </div>
         ) : null}
@@ -966,25 +1007,27 @@ export function StaffOrderEntryPage({
             <h2 id="counter-charge" ref={chargeHeading} tabIndex={-1}>
               {phase === "Paid" || phase === "Accepted"
                 ? tableMode
-                  ? `Table ${placed.tableLabel ?? tableLabel ?? ""} order paid`
-                  : `Order ${placed.orderNumber} paid`
-                : `Charge ${cad(placed.totalMinor)} on the card machine`}
+                  ? t("Table {value} order paid", { value: placed.tableLabel ?? tableLabel ?? "" })
+                  : t("Order {orderNumber} paid", { orderNumber: placed.orderNumber })
+                : t("Charge {totalMinor} on the card machine", {
+                    totalMinor: cad(placed.totalMinor),
+                  })}
             </h2>
             <dl>
               <div>
-                <dt>Order</dt>
+                <dt>{t("Order")}</dt>
                 <dd>{placed.orderNumber}</dd>
               </div>
               <div>
-                <dt>Order total incl. tax</dt>
+                <dt>{t("Order total incl. tax")}</dt>
                 <dd>{cad(placed.orderMinor)}</dd>
               </div>
               <div>
-                <dt>Tip</dt>
+                <dt>{t("Tip")}</dt>
                 <dd>{cad(placed.tipMinor)}</dd>
               </div>
               <div>
-                <dt>To charge</dt>
+                <dt>{t("To charge")}</dt>
                 <dd>
                   <strong>{cad(placed.totalMinor)}</strong>
                 </dd>
@@ -1016,7 +1059,7 @@ export function StaffOrderEntryPage({
                   }}
                 >
                   <label>
-                    Slip reference (optional)
+                    {t("Slip reference (optional)")}
                     <input
                       value={slip}
                       maxLength={40}
@@ -1027,16 +1070,18 @@ export function StaffOrderEntryPage({
                     />
                   </label>
                   <p id="counter-slip-hint" className="field-hint">
-                    The approval or reference code on the card machine slip, to match the
-                    machine&apos;s day total. Never the card number.
+                    {t(
+                      "The approval or reference code on the card machine slip, to match the machine's day total. Never the card number.",
+                    )}
                   </p>
                   {placed.recordedAfterOutage ? (
                     <p role="note">
-                      Paper order paid at{" "}
-                      {paperInstant === null
-                        ? "— set the time above"
-                        : storeTime(paperInstant, timeZone, true)}
-                      .
+                      {t("Paper order paid at {value}.", {
+                        value:
+                          paperInstant === null
+                            ? t("— set the time above")
+                            : storeTime(paperInstant, timeZone, true),
+                      })}
                     </p>
                   ) : null}
                   {problem !== null ? <p role="alert">{problem}</p> : null}
@@ -1051,26 +1096,34 @@ export function StaffOrderEntryPage({
                       }
                     >
                       {phase === "Recording"
-                        ? "Recording…"
-                        : `Paid on card machine · ${cad(placed.totalMinor)}`}
+                        ? t("Recording…")
+                        : t("Paid on card machine · {totalMinor}", {
+                            totalMinor: cad(placed.totalMinor),
+                          })}
                     </button>
                   </div>
                 </form>
                 <p className="bop-muted">
                   {tableMode
-                    ? `Card declined? Try another card. Nothing goes to the kitchen until this is recorded; after ${storeTime(placed.payBy, timeZone)} it can no longer be paid here and must be sent again.`
-                    : `Card declined? Try another card. Not paying? Leave it: the order is released at ${storeTime(placed.payBy, timeZone)}.`}
+                    ? t(
+                        "Card declined? Try another card. Nothing goes to the kitchen until this is recorded; after {payBy} it can no longer be paid here and must be sent again.",
+                        { payBy: storeTime(placed.payBy, timeZone) },
+                      )
+                    : t(
+                        "Card declined? Try another card. Not paying? Leave it: the order is released at {payBy}.",
+                        { payBy: storeTime(placed.payBy, timeZone) },
+                      )}
                 </p>
               </>
             ) : (
               <>
-                <p role="status">{paidNote ?? "Paid on the card machine."}</p>
+                <p role="status">{paidNote ?? t("Paid on the card machine.")}</p>
                 <div className="card-actions">
                   <button type="button" onClick={startOver}>
-                    {tableMode ? "Another order for this table" : "New counter order"}
+                    {tableMode ? t("Another order for this table") : t("New counter order")}
                   </button>
-                  {tableMode ? <Link to="/operations/dining">Back to Tables</Link> : null}
-                  <Link to="/operations/orders">Open Orders</Link>
+                  {tableMode ? <Link to="/operations/dining">{t("Back to Tables")}</Link> : null}
+                  <Link to="/operations/orders">{t("Open Orders")}</Link>
                 </div>
               </>
             )}

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /**
  * WP-2423 DEC-STORE-CUSTOMER-NAME: the Store's name, address and phone as customers see them
  * (menu, order page, pickup panel and new receipts). The browser sends what the Owner typed and
@@ -45,7 +46,7 @@ export class StorePublicProfileClientError extends Error {
     readonly code:
       "PermissionDenied" | "Invalid" | "Conflict" | "NoChange" | "Unavailable" | "OutcomeUnknown",
   ) {
-    super("Store name and contact details are unavailable");
+    super(t("Store name and contact details are unavailable"));
     this.name = "StorePublicProfileClientError";
   }
 }

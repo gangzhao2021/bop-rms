@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -40,23 +41,26 @@ import {
 
 /** WP-2423 / DEC-CAT-PRODUCT-ADMIN: Brand Products and their sizes (SKUs). */
 const copy: Record<ProductErrorCode | "Loading", string> = {
-  Loading: "Loading products…",
-  PermissionDenied: "You do not have permission for this product action at Brand level.",
-  NotFound: "This product does not exist for the Brand.",
-  Conflict: "The product changed since you opened it. Refresh and check again.",
-  CodeTaken: "Another product or size of the Brand already uses this code.",
-  SizeInUse:
+  Loading: t("Loading products…"),
+  PermissionDenied: t("You do not have permission for this product action at Brand level."),
+  NotFound: t("This product does not exist for the Brand."),
+  Conflict: t("The product changed since you opened it. Refresh and check again."),
+  CodeTaken: t("Another product or size of the Brand already uses this code."),
+  SizeInUse: t(
     "A size that has started selling cannot be removed: orders, prices and recipes refer to it.",
-  TaxClassUnavailable:
+  ),
+  TaxClassUnavailable: t(
     "This Store's current tax configuration does not cover the chosen tax class. Choose one it covers.",
-  Lifecycle: "This step is not possible in the product's current state.",
-  Invalid:
+  ),
+  Lifecycle: t("This step is not possible in the product's current state."),
+  Invalid: t(
     "The product is not valid. A name, a code (capital letters, digits, hyphen), a tax class and at least one size with its own code and name are required; size names must differ.",
-  Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
-  Unavailable: "Products are unavailable.",
+  ),
+  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Unavailable: t("Products are unavailable."),
 };
 const lifecycleText: Record<string, string> = {
-  Draft: "Not selling yet",
+  Draft: t("Not selling yet"),
   Active: "Selling",
   Suspended: "Paused",
   Discontinued: "Discontinued",
@@ -92,7 +96,7 @@ function useProductView<V>(
 function Failure({ code }: { readonly code: ProductErrorCode | "Loading" }) {
   return (
     <StatePanel
-      heading={code === "PermissionDenied" ? noAccessHeading : "Products"}
+      heading={code === "PermissionDenied" ? noAccessHeading : t("Products")}
       tone={code === "Loading" ? "neutral" : "error"}
       status
     >
@@ -103,7 +107,7 @@ function Failure({ code }: { readonly code: ProductErrorCode | "Loading" }) {
 const taxLabel = (classes: readonly ProductTaxClass[], reference: string | null) => {
   if (reference === null) return "—";
   const choice = classes.find((item) => item.taxClassificationReference === reference);
-  return choice ? taxClassText(choice) : "Not covered by this Store's tax configuration";
+  return choice ? taxClassText(choice) : t("Not covered by this Store's tax configuration");
 };
 
 export function ProductListPage({
@@ -115,35 +119,36 @@ export function ProductListPage({
   if (state.kind !== "Found") return <Failure code={state.kind} />;
   const view: ProductListView = state.view;
   return (
-    <AppFrame title="Products" description="">
+    <AppFrame title={t("Products")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Products · Brand</p>
-          <h2>Products</h2>
+          <p className="bop-eyebrow">{t("Products · Brand")}</p>
+          <h2>{t("Products")}</h2>
           <p>
-            Products and their sizes are shared by every Store of the Brand. A size is what a
-            customer orders; prices, menus and recipes refer to it. Source as of{" "}
+            {t(
+              "Products and their sizes are shared by every Store of the Brand. A size is what a customer orders; prices, menus and recipes refer to it. Source as of",
+            )}{" "}
             <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
         {view.permissions.mayCreate ? (
-          <Link to="/app/commerce/products/new">New product</Link>
+          <Link to="/app/commerce/products/new">{t("New product")}</Link>
         ) : null}
       </header>
       {view.products.length === 0 ? (
-        <StatePanel heading="No products yet" status>
-          <p>Create a product for each item on your menu, with one size or several.</p>
+        <StatePanel heading={t("No products yet")} status>
+          <p>{t("Create a product for each item on your menu, with one size or several.")}</p>
         </StatePanel>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Product</th>
-              <th>Code</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th>Sizes selling</th>
-              <th>Tax</th>
+              <th>{t("Product")}</th>
+              <th>{t("Code")}</th>
+              <th>{t("Type")}</th>
+              <th>{t("Status")}</th>
+              <th>{t("Sizes selling")}</th>
+              <th>{t("Tax")}</th>
             </tr>
           </thead>
           <tbody>
@@ -158,7 +163,10 @@ export function ProductListPage({
                 <td>{productTypeText[product.productType] ?? product.productType}</td>
                 <td>{lifecycleText[product.lifecycle] ?? product.lifecycle}</td>
                 <td>
-                  {product.activeSizes} of {product.sizes}
+                  {t("{activeSizes} of {sizes}", {
+                    activeSizes: product.activeSizes,
+                    sizes: product.sizes,
+                  })}
                 </td>
                 <td>{taxLabel(view.taxClasses, product.taxClassificationReference)}</td>
               </tr>
@@ -318,7 +326,7 @@ function ProductEditor({
       }
       setMessage({
         tone: "neutral",
-        text: command.action === "StartSelling" ? "Selling started." : "Saved.",
+        text: command.action === "StartSelling" ? t("Selling started.") : "Saved.",
       });
       if (result.product) setLatest(result.product);
       reload();
@@ -408,33 +416,39 @@ function ProductEditor({
 
   return (
     <AppFrame
-      title={product ? product.name : "New product"}
-      description={product ? "Edit product" : "New product"}
+      title={product ? product.name : t("New product")}
+      description={product ? t("Edit product") : t("New product")}
     >
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">{product ? "Edit product" : "New product"} · Brand</p>
-          <h2>{product ? product.name : "New product"}</h2>
+          <p className="bop-eyebrow">
+            {t("{value} · Brand", { value: product ? t("Edit product") : t("New product") })}
+          </p>
+          <h2>{product ? product.name : t("New product")}</h2>
           <p>
             {product ? (
               <>
-                {lifecycleText[product.lifecycle] ?? product.lifecycle} · version{" "}
-                {product.aggregateVersion} · updated <SourceTime instant={product.updatedAt} />
+                {t("{value} · version {aggregateVersion} · updated", {
+                  value: lifecycleText[product.lifecycle] ?? product.lifecycle,
+                  aggregateVersion: product.aggregateVersion,
+                })}{" "}
+                <SourceTime instant={product.updatedAt} />
               </>
             ) : (
-              "Name the product, choose its tax class and list the sizes a customer can order."
+              t("Name the product, choose its tax class and list the sizes a customer can order.")
             )}
           </p>
           <p>
-            Pilot: changes apply to the Brand's product directly, without a separate publication
-            review; every change is recorded with its author.
+            {t(
+              "Pilot: changes apply to the Brand's product directly, without a separate publication review; every change is recorded with its author.",
+            )}
           </p>
         </div>
-        <Link to="/app/commerce/products">Back to products</Link>
+        <Link to="/app/commerce/products">{t("Back to products")}</Link>
       </header>
       {message ? (
         <StatePanel
-          heading={message.tone === "error" ? "Not saved" : "Done"}
+          heading={message.tone === "error" ? t("Not saved") : t("Done")}
           tone={message.tone}
           status
         >
@@ -454,9 +468,9 @@ function ProductEditor({
         }}
       >
         <fieldset disabled={!mayEdit || busy}>
-          <legend>Product</legend>
+          <legend>{t("Product")}</legend>
           <label>
-            Name
+            {t("Name")}
             <input
               value={name}
               maxLength={120}
@@ -465,7 +479,7 @@ function ProductEditor({
             />
           </label>
           <label>
-            Chinese name (中文名称, optional)
+            {t("Chinese name (中文名称, optional)")}
             <input
               lang="zh-Hans"
               value={nameZh}
@@ -475,10 +489,10 @@ function ProductEditor({
             />
           </label>
           <p id="product-chinese-help">
-            Customers who choose 中文 see this name; without it they see the name above.
+            {t("Customers who choose 中文 see this name; without it they see the name above.")}
           </p>
           <label>
-            Code
+            {t("Code")}
             <input
               value={codeTouched || product ? code : code || suggestProductCode(name)}
               maxLength={64}
@@ -491,10 +505,12 @@ function ProductEditor({
             />
           </label>
           <p id="product-code-help">
-            Capital letters, digits and hyphens; it cannot be changed after the product is created.
+            {t(
+              "Capital letters, digits and hyphens; it cannot be changed after the product is created.",
+            )}
           </p>
           <label>
-            Type
+            {t("Type")}
             <select
               value={productType}
               disabled={product !== null}
@@ -508,38 +524,42 @@ function ProductEditor({
             </select>
           </label>
           <label>
-            Tax class
+            {t("Tax class")}
             <select value={taxClass} required onChange={(event) => setTaxClass(event.target.value)}>
-              <option value="">Choose…</option>
+              <option value="">{t("Choose…")}</option>
               {view.taxClasses.map((choice, index) => (
                 <option
                   key={choice.taxClassificationReference}
                   value={choice.taxClassificationReference}
                 >
-                  {`Tax class ${index + 1} — ${taxClassText(choice)}`}
+                  {t("Tax class {value} — {choice}", {
+                    value: index + 1,
+                    choice: taxClassText(choice),
+                  })}
                 </option>
               ))}
             </select>
           </label>
           {view.taxClasses.length === 0 ? (
-            <p>This Store has no current tax configuration for sellable items.</p>
+            <p>{t("This Store has no current tax configuration for sellable items.")}</p>
           ) : (
             <p>
-              Classes and rates come from this Store's current tax configuration (internal test
-              rates, not verified tax advice).
+              {t(
+                "Classes and rates come from this Store's current tax configuration (internal test rates, not verified tax advice).",
+              )}
             </p>
           )}
         </fieldset>
         <fieldset disabled={!mayEdit || busy}>
-          <legend>Sizes</legend>
+          <legend>{t("Sizes")}</legend>
           <table>
             <thead>
               <tr>
-                <th>Size name</th>
-                <th>Chinese name</th>
-                <th>Size code</th>
-                <th>Status</th>
-                <th aria-label="Remove" />
+                <th>{t("Size name")}</th>
+                <th>{t("Chinese name")}</th>
+                <th>{t("Size code")}</th>
+                <th>{t("Status")}</th>
+                <th aria-label={t("Remove")} />
               </tr>
             </thead>
             <tbody>
@@ -600,7 +620,7 @@ function ProductEditor({
                           setSizes((current) => current.filter((item) => item.key !== size.key))
                         }
                       >
-                        Remove
+                        {t("Remove")}
                       </button>
                     ) : null}
                   </td>
@@ -625,7 +645,7 @@ function ProductEditor({
                 ])
               }
             >
-              Add size
+              {t("Add size")}
             </button>
           ) : null}
         </fieldset>
@@ -656,32 +676,36 @@ function ProductEditor({
         {mayEdit ? (
           <button type="submit" disabled={!valid || busy || !changed || photoUploading}>
             {pending && pending.action !== "StartSelling"
-              ? "Retry"
+              ? t("Retry")
               : product
-                ? "Save changes"
-                : "Create product"}
+                ? t("Save changes")
+                : t("Create product")}
           </button>
         ) : null}
       </form>
       {product && notSelling && view.permissions.mayStartSelling ? (
         <section className="detail-section" aria-labelledby="start-selling">
-          <h3 id="start-selling">Start selling</h3>
+          <h3 id="start-selling">{t("Start selling")}</h3>
           <p>
-            Makes the product and every size not yet selling available to price and to place on
-            menus. Customers see it once it is on a published menu with a price.
+            {t(
+              "Makes the product and every size not yet selling available to price and to place on menus. Customers see it once it is on a published menu with a price.",
+            )}
           </p>
           <button type="button" disabled={busy || changed} onClick={startSelling}>
-            {pending && pending.action === "StartSelling" ? "Retry start selling" : "Start selling"}
+            {pending && pending.action === "StartSelling"
+              ? t("Retry start selling")
+              : t("Start selling")}
           </button>
-          {changed ? <p>Save your changes first.</p> : null}
+          {changed ? <p>{t("Save your changes first.")}</p> : null}
         </section>
       ) : null}
       {product && view.screenId === "CAT-PRODUCT-DETAIL" && view.availabilityHere ? (
         <section className="detail-section" aria-labelledby="at-this-store">
-          <h3 id="at-this-store">At this Store</h3>
+          <h3 id="at-this-store">{t("At this Store")}</h3>
           <p>
-            Customers at this Store see a size only when it is offered here, priced and on a
-            published menu.
+            {t(
+              "Customers at this Store see a size only when it is offered here, priced and on a published menu.",
+            )}
           </p>
           <ul>
             {product.sizes.map((size) => (
@@ -692,7 +716,7 @@ function ProductEditor({
             ))}
           </ul>
           <p>
-            <Link to="/app/commerce/availability">Item availability</Link>
+            <Link to="/app/commerce/availability">{t("Item availability")}</Link>
           </p>
         </section>
       ) : null}
@@ -702,11 +726,11 @@ function ProductEditor({
 
 /** WP-2423: a size's availability at the selected Store, as staff say it. */
 const storeAvailabilityText = {
-  Available: "Offered here",
-  SoldOut: "Offered here, sold out right now",
-  Unavailable: "Not offered here (stopped)",
-  NotOffered: "Not offered at this Store yet — customers here don't see it",
-  Varies: "Offered here for some order types",
+  Available: t("Offered here"),
+  SoldOut: t("Offered here, sold out right now"),
+  Unavailable: t("Not offered here (stopped)"),
+  NotOffered: t("Not offered at this Store yet — customers here don't see it"),
+  Varies: t("Offered here for some order types"),
 } as const;
 
 /** WP-2423 slice 4: the option sets customers choose from on this product, and which options. */
@@ -740,12 +764,13 @@ function ProductOptionSetsFieldset({
   };
   return (
     <fieldset disabled={disabled}>
-      <legend>Options</legend>
+      <legend>{t("Options")}</legend>
       <p>
-        Choices customers make on this product, in the order they see them. Customers see changes
-        when a menu with this product is next published.
+        {t(
+          "Choices customers make on this product, in the order they see them. Customers see changes when a menu with this product is next published.",
+        )}
       </p>
-      {value.length === 0 ? <p>No options on this product.</p> : null}
+      {value.length === 0 ? <p>{t("No options on this product.")}</p> : null}
       {value.map((item, index) => {
         const choice = choices.find(
           (candidate) => candidate.optionSetReference === item.optionSetReference,
@@ -766,7 +791,7 @@ function ProductOptionSetsFieldset({
           <section key={item.optionSetReference} className="detail-section">
             <h3>{choice.name}</h3>
             {choice.archived ? (
-              <p>This option set is archived; remove it from the product.</p>
+              <p>{t("This option set is archived; remove it from the product.")}</p>
             ) : null}
             <ul aria-label={`Options from ${choice.name} on this product`}>
               {choice.options.map((option) => (
@@ -782,23 +807,23 @@ function ProductOptionSetsFieldset({
                       onChange={(event) => toggle(option.optionReference, event.target.checked)}
                     />
                     {option.name}
-                    {option.offered ? "" : " (not offered by the Brand now)"}
+                    {option.offered ? "" : t(" (not offered by the Brand now)")}
                   </label>
                 </li>
               ))}
             </ul>
             {index > 0 ? (
               <button type="button" onClick={() => move(index, -1)}>
-                Up
+                {t("Up")}
               </button>
             ) : null}
             {index < value.length - 1 ? (
               <button type="button" onClick={() => move(index, 1)}>
-                Down
+                {t("Down")}
               </button>
             ) : null}
             <button type="button" onClick={() => replace(index, null)}>
-              Remove {choice.name}
+              {t("Remove {name}", { name: choice.name })}
             </button>
           </section>
         );
@@ -806,9 +831,9 @@ function ProductOptionSetsFieldset({
       {addable.length > 0 ? (
         <div>
           <label>
-            Add option set
+            {t("Add option set")}
             <select value={adding} onChange={(event) => setAdding(event.target.value)}>
-              <option value="">Choose…</option>
+              <option value="">{t("Choose…")}</option>
               {addable.map((choice) => (
                 <option key={choice.optionSetReference} value={choice.optionSetReference}>
                   {choice.name}
@@ -834,7 +859,7 @@ function ProductOptionSetsFieldset({
               setAdding("");
             }}
           >
-            Add
+            {t("Add")}
           </button>
         </div>
       ) : null}
@@ -848,17 +873,19 @@ const emptyPresentation: PresentationDraft = {
   photo: null,
   altText: "",
 };
-const presentationNote =
-  "Customers see the description and photo after the menu is next published.";
+const presentationNote = t(
+  "Customers see the description and photo after the menu is next published.",
+);
 const photoErrorText: Record<ProductPhotoErrorCode, string> = {
-  PhotoTypeUnsupported: "Use a JPEG, PNG or WebP photo.",
-  PhotoTooLarge: "This photo is larger than 10 MB. Choose a smaller one.",
-  PhotoTooSmall:
+  PhotoTypeUnsupported: t("Use a JPEG, PNG or WebP photo."),
+  PhotoTooLarge: t("This photo is larger than 10 MB. Choose a smaller one."),
+  PhotoTooSmall: t(
     "This photo is too small or too narrow. Use one at least 480 pixels on its shorter side.",
-  PhotoUnreadable: "This file couldn't be read as a photo. Try another one.",
-  PhotoStorageUnavailable: "The photo didn't upload. Check the connection and try again.",
-  Offline: "The photo didn't upload. Check the connection and try again.",
-  Unavailable: "The photo didn't upload. Check the connection and try again.",
+  ),
+  PhotoUnreadable: t("This file couldn't be read as a photo. Try another one."),
+  PhotoStorageUnavailable: t("The photo didn't upload. Check the connection and try again."),
+  Offline: t("The photo didn't upload. Check the connection and try again."),
+  Unavailable: t("The photo didn't upload. Check the connection and try again."),
   PermissionDenied: copy.PermissionDenied,
   NotFound: copy.NotFound,
 };
@@ -866,11 +893,17 @@ const photoErrorText: Record<ProductPhotoErrorCode, string> = {
 export const photoUploadMessage = (code: ProductPhotoErrorCode) => photoErrorText[code];
 const presentationProblemText = (problem: PresentationProblem, field: "description" | "alt") =>
   problem === "AltTextMissing"
-    ? "Describe the photo before saving. Customers who use a screen reader hear this description."
+    ? t(
+        "Describe the photo before saving. Customers who use a screen reader hear this description.",
+      )
     : problem === "TooLong"
       ? field === "description"
-        ? `Keep the description to ${presentationLimits.description} characters.`
-        : `Keep the photo description to ${presentationLimits.altText} characters.`
+        ? t("Keep the description to {description} characters.", {
+            description: presentationLimits.description,
+          })
+        : t("Keep the photo description to {altText} characters.", {
+            altText: presentationLimits.altText,
+          })
       : "Use plain words only: no links and none of these characters: < > { }";
 
 type PhotoUploadState =
@@ -936,7 +969,7 @@ export function ProductCustomerMenuFieldset({
     }
   };
   const descriptionLeft = presentationLimits.description - value.description.length;
-  const photoLabel = value.photo ? "Replace photo" : "Add photo";
+  const photoLabel = value.photo ? t("Replace photo") : t("Add photo");
   const altMissing = value.photo !== null && value.altText.trim() === "";
   const ids = {
     description: `${id}-description`,
@@ -953,10 +986,10 @@ export function ProductCustomerMenuFieldset({
   const photoError = upload.kind === "Failed" ? upload : null;
   return (
     <fieldset className="product-customer-menu" disabled={disabled}>
-      <legend>Customer menu</legend>
+      <legend>{t("Customer menu")}</legend>
       <p className="product-customer-menu__note">{presentationNote}</p>
       <div className="product-customer-menu__field">
-        <label htmlFor={ids.description}>Description</label>
+        <label htmlFor={ids.description}>{t("Description")}</label>
         <textarea
           id={ids.description}
           value={value.description}
@@ -973,11 +1006,15 @@ export function ProductCustomerMenuFieldset({
           onChange={(event) => onChange({ ...value, description: event.target.value })}
         />
         <p id={ids.descriptionHelp} className="product-customer-menu__help">
-          Shown to customers under the product name. Plain text, up to{" "}
-          {presentationLimits.description} characters.
+          {t(
+            "Shown to customers under the product name. Plain text, up to {description} characters.",
+            { description: presentationLimits.description },
+          )}
         </p>
         <p id={ids.descriptionCount} className="product-customer-menu__count">
-          {descriptionLeft === 1 ? "1 character left" : `${descriptionLeft} characters left`}
+          {descriptionLeft === 1
+            ? t("1 character left")
+            : t("{descriptionLeft} characters left", { descriptionLeft: descriptionLeft })}
         </p>
         {problems.description ? (
           <p id={ids.descriptionError} className="product-customer-menu__error" role="alert">
@@ -986,7 +1023,9 @@ export function ProductCustomerMenuFieldset({
         ) : null}
       </div>
       <div className="product-customer-menu__field">
-        <label htmlFor={`${id}-description-zh`}>Chinese description (中文描述, optional)</label>
+        <label htmlFor={`${id}-description-zh`}>
+          {t("Chinese description (中文描述, optional)")}
+        </label>
         <textarea
           id={`${id}-description-zh`}
           lang="zh-Hans"
@@ -998,7 +1037,7 @@ export function ProductCustomerMenuFieldset({
           onChange={(event) => onChange({ ...value, descriptionZh: event.target.value })}
         />
         <p id={`${id}-description-zh-help`} className="product-customer-menu__help">
-          Customers who choose 中文 see this; without it they see the description above.
+          {t("Customers who choose 中文 see this; without it they see the description above.")}
         </p>
         {problems.descriptionZh ? (
           <p className="product-customer-menu__error" role="alert">
@@ -1007,7 +1046,7 @@ export function ProductCustomerMenuFieldset({
         ) : null}
       </div>
       <div className="product-customer-menu__field">
-        <span className="product-customer-menu__label">Photo</span>
+        <span className="product-customer-menu__label">{t("Photo")}</span>
         {value.photo ? (
           <figure className="product-customer-menu__preview">
             <img
@@ -1019,13 +1058,13 @@ export function ProductCustomerMenuFieldset({
             />
             {altMissing ? (
               <figcaption id={`${id}-preview-pending`} className="visually-hidden">
-                Photo preview, not described yet
+                {t("Photo preview, not described yet")}
               </figcaption>
             ) : null}
           </figure>
         ) : (
           <p id={ids.photoHelp} className="product-customer-menu__help">
-            No photo. A clear photo helps customers choose. JPEG, PNG or WebP, up to 10 MB.
+            {t("No photo. A clear photo helps customers choose. JPEG, PNG or WebP, up to 10 MB.")}
           </p>
         )}
         <div className="product-customer-menu__actions">
@@ -1064,13 +1103,13 @@ export function ProductCustomerMenuFieldset({
                 setUpload({ kind: "Idle" });
               }}
             >
-              Remove photo
+              {t("Remove photo")}
             </button>
           ) : null}
         </div>
         {uploading ? (
           <p role="status" className="product-customer-menu__help">
-            Uploading photo…
+            {t("Uploading photo…")}
           </p>
         ) : null}
         {photoError ? (
@@ -1087,7 +1126,7 @@ export function ProductCustomerMenuFieldset({
                     void start(photoError.file, photoError.operationReference);
                 }}
               >
-                Retry
+                {t("Retry")}
               </button>
             ) : null}
           </div>
@@ -1095,7 +1134,7 @@ export function ProductCustomerMenuFieldset({
       </div>
       {value.photo ? (
         <div className="product-customer-menu__field">
-          <label htmlFor={ids.alt}>Photo description (alt text)</label>
+          <label htmlFor={ids.alt}>{t("Photo description (alt text)")}</label>
           <input
             ref={altTextRef}
             id={ids.alt}
@@ -1109,8 +1148,9 @@ export function ProductCustomerMenuFieldset({
             onChange={(event) => onChange({ ...value, altText: event.target.value })}
           />
           <p id={ids.altHelp} className="product-customer-menu__help">
-            Describe the photo for customers who use a screen reader, e.g. 'Flat white in a white
-            ceramic cup'.
+            {t(
+              "Describe the photo for customers who use a screen reader, e.g. 'Flat white in a white ceramic cup'.",
+            )}
           </p>
           {problems.altText ? (
             <p id={ids.altError} className="product-customer-menu__error" role="alert">
@@ -1131,11 +1171,11 @@ export function ProductCustomerMenuReadOnly({
 }) {
   return (
     <section className="product-customer-menu" aria-labelledby="customer-menu-heading">
-      <h3 id="customer-menu-heading">Customer menu</h3>
+      <h3 id="customer-menu-heading">{t("Customer menu")}</h3>
       <p className="product-customer-menu__note">{presentationNote}</p>
-      <h4>Description</h4>
-      <p>{presentation.description === "" ? "No description." : presentation.description}</p>
-      <h4>Photo</h4>
+      <h4>{t("Description")}</h4>
+      <p>{presentation.description === "" ? t("No description.") : presentation.description}</p>
+      <h4>{t("Photo")}</h4>
       {presentation.photo ? (
         <figure className="product-customer-menu__preview">
           <img
@@ -1144,10 +1184,12 @@ export function ProductCustomerMenuReadOnly({
             width={presentation.photo.width}
             height={presentation.photo.height}
           />
-          <figcaption>Photo description: {presentation.photo.altText}</figcaption>
+          <figcaption>
+            {t("Photo description: {altText}", { altText: presentation.photo.altText })}
+          </figcaption>
         </figure>
       ) : (
-        <p>No photo.</p>
+        <p>{t("No photo.")}</p>
       )}
     </section>
   );

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /** WP-2423 / DEC-INV-STOCK-COUNT: INV-COUNT-LIST / INV-COUNT-WORKBENCH contract and client. */
 export type StockCountErrorCode =
   | "PermissionDenied"
@@ -17,7 +18,7 @@ export class StockCountPageError extends Error {
     readonly code: StockCountErrorCode,
     readonly lineReferences: readonly string[] = [],
   ) {
-    super("Stock counts are unavailable");
+    super(t("Stock counts are unavailable"));
     this.name = "StockCountPageError";
   }
 }

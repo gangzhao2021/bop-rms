@@ -1,3 +1,4 @@
+import { staffNameLocales } from "./staff-content-locale.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createPostgresCounterOrderEntryStore,
@@ -232,7 +233,7 @@ export function createPersistentMerchantOrderQueue(options: {
                       storeReference: String(resolved.store.storeReference),
                     },
                     only.orderReference,
-                    options.locale ?? "en-CA",
+                    staffNameLocales(options.locale ?? "en-CA"),
                   );
                 })();
           // WP-2423: a paid Order that can no longer be fulfilled (for example not accepted before its

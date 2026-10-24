@@ -1,3 +1,4 @@
+import { countOf, t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link } from "react-router";
@@ -238,9 +239,9 @@ export interface CountShown {
 export function countShown(n: number, more: boolean, partOfList: string): CountShown {
   return more
     ? {
-        qualifier: n > 0 ? "At least" : null,
+        qualifier: n > 0 ? t("At least") : null,
         number: String(n),
-        note: `Counted from ${partOfList} only`,
+        note: t("Counted from {partOfList} only", { partOfList: partOfList }),
       }
     : { qualifier: null, number: String(n), note: null };
 }
@@ -283,7 +284,7 @@ function Count<T>({
         </>
       ) : (
         <span className="overview-count__detail" role="status">
-          {read.kind === "Loading" ? "Reading…" : "Could not be read"}
+          {read.kind === "Loading" ? t("Reading…") : t("Could not be read")}
         </span>
       )}
       <Link to={href}>{linkLabel}</Link>
@@ -303,7 +304,6 @@ export function OverviewToday({
   readonly busy?: boolean;
   readonly onRefresh?: (() => void) | undefined;
 }) {
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
   if (
     [state.orders, state.pickups, state.exceptions, state.tables].every(
       (read) => read.kind === "Hidden",
@@ -315,86 +315,93 @@ export function OverviewToday({
   return (
     <section className="overview-card overview-card--today" aria-labelledby="today-summary-heading">
       <header>
-        <h3 id="today-summary-heading">Right now</h3>
+        <h3 id="today-summary-heading">{t("Right now")}</h3>
         <div className="overview-card__tools">
           <p className="overview-updated">
             {state.updatedAt === null
-              ? "Reading current work…"
-              : `Last checked ${storeTime(state.updatedAt, timeZone)}`}
+              ? t("Reading current work…")
+              : t("Last checked {updatedAt}", { updatedAt: storeTime(state.updatedAt, timeZone) })}
           </p>
           {onRefresh ? (
             <button type="button" onClick={onRefresh} disabled={busy}>
-              Refresh
+              {t("Refresh")}
             </button>
           ) : null}
         </div>
       </header>
       <ul className="overview-counts">
         <Count
-          label="Open orders"
+          label={t("Open orders")}
           read={state.orders}
-          value={(o) => countShown(o.open, o.more, "the most recent orders")}
+          value={(o) => countShown(o.open, o.more, t("the most recent orders"))}
           detail={(o) =>
             awaitingAcceptanceText({
               orders: o.awaitingAcceptance,
               rounds: o.awaitingRounds,
               urgentRounds: o.urgentRounds,
-            }) + (o.dineIn ? ` · ${o.readyToServe} ready to serve` : "")
+            }) +
+            (o.dineIn
+              ? t(" · {readyToServe} ready to serve", { readyToServe: o.readyToServe })
+              : "")
           }
           href="/operations/orders"
-          linkLabel="View orders"
+          linkLabel={t("View orders")}
         />
         <Count
-          label="Pickups waiting"
+          label={t("Pickups waiting")}
           read={state.pickups}
-          value={(p) => countShown(p.waiting, p.more, "the first pickups listed")}
+          value={(p) => countShown(p.waiting, p.more, t("the first pickups listed"))}
           detail={(p) =>
             p.waiting === 0
-              ? "Nothing waiting for collection"
+              ? t("Nothing waiting for collection")
               : p.remaking === 0
-                ? "Ready for collection"
-                : `${plural(p.remaking, "order")} waiting on a remake`
+                ? t("Ready for collection")
+                : t("{remaking} waiting on a remake", { remaking: countOf(p.remaking, "order") })
           }
           href="/operations/pickup"
-          linkLabel="View pickups"
+          linkLabel={t("View pickups")}
         />
         {pickups.kind === "Ready" && pickups.value.earlierDays > 0 ? (
           // WP-2423 (3cd0f8dd L7): earlier days' uncollected orders apart from today's, with the
           // Pickup page's "check and close" section.
           <Count
-            label="Pickups from earlier days"
+            label={t("Pickups from earlier days")}
             read={pickups}
             value={(p) => String(p.earlierDays)}
             detail={() =>
-              "Check whether they were collected; if not, a manager marks them not collected"
+              t("Check whether they were collected; if not, a manager marks them not collected")
             }
             href="/operations/pickup"
-            linkLabel="Check and close"
+            linkLabel={t("Check and close")}
           />
         ) : null}
         <Count
-          label="Open tables"
+          label={t("Open tables")}
           read={tables}
-          value={(t) => countShown(t.open, t.more, "the first tables listed")}
-          detail={(t) =>
-            t.open === 0
-              ? "No tables open"
-              : t.toClose === null
-                ? "A manager or the owner closes tables when the guests have left"
-                : t.toClose === 0
-                  ? "None waiting to be closed"
-                  : `${plural(t.toClose, "table")} served — close when the guests have left`
+          value={(read) => countShown(read.open, read.more, t("the first tables listed"))}
+          detail={(read) =>
+            read.open === 0
+              ? t("No tables open")
+              : read.toClose === null
+                ? t("A manager or the owner closes tables when the guests have left")
+                : read.toClose === 0
+                  ? t("None waiting to be closed")
+                  : t("{toClose} served — close when the guests have left", {
+                      toClose: countOf(read.toClose, "table"),
+                    })
           }
           href="/operations/dining"
-          linkLabel="View tables"
+          linkLabel={t("View tables")}
         />
         <Count
-          label="Open exceptions"
+          label={t("Open exceptions")}
           read={state.exceptions}
           value={(e) => String(e.open)}
-          detail={(e) => (e.overdue === 0 ? "None overdue" : `${e.overdue} overdue`)}
+          detail={(e) =>
+            e.overdue === 0 ? t("None overdue") : t("{overdue} overdue", { overdue: e.overdue })
+          }
           href="/operations/order-exceptions"
-          linkLabel="View exceptions"
+          linkLabel={t("View exceptions")}
         />
       </ul>
     </section>
@@ -407,16 +414,19 @@ export function OverviewToday({
  */
 export function settlementStatusText(view: SettlementView): string {
   const reconciliation = view.reconciliation;
-  if (reconciliation === null) return "Not checked yet";
+  if (reconciliation === null) return t("Not checked yet");
   const attention = reconciliation.differences.filter((check) => !unfinishedGuestPayment(check));
   if (attention.length > 0)
-    return `${attention.length} payment${attention.length === 1 ? "" : "s"} to look at`;
+    return t("{length} payment{value} to look at", {
+      length: attention.length,
+      value: attention.length === 1 ? "" : "s",
+    });
   const settlement = reconciliation.settlement;
-  if (settlement === null) return "Not checked against the payment provider yet";
+  if (settlement === null) return t("Not checked against the payment provider yet");
   const checks = settlement.recheck === null ? settlement.checks : [settlement.recheck.check];
   return checks.every((check) => check.outcome === "Matched" || check.outcome === "Healed")
-    ? "Matches the payment provider"
-    : "Differs from the payment provider — look at it";
+    ? t("Matches the payment provider")
+    : t("Differs from the payment provider — look at it");
 }
 export type SettlementStatusRead = OverviewRead<{
   readonly businessDate: string;
@@ -444,7 +454,7 @@ function readStatus<T>(
 const left = (n: number, more = false) =>
   n === 0
     ? { status: "Done", done: true }
-    : { status: `${more ? "At least " : ""}${n} left`, done: false };
+    : { status: `${more ? t("At least ") : ""}${n} left`, done: false };
 /**
  * WP-2423 (3cd0f8dd M6): what staff check when they open and close the Store, each line from the
  * same reads as "Right now" (and the last closed day's settlement). Lines whose screen the staff
@@ -491,16 +501,18 @@ export function dayChecklist(
       : [
           instruction(
             "ordering-on",
-            "If online ordering was paused at closing, turn it back on.",
+            t("If online ordering was paused at closing, turn it back on."),
             serviceHref,
-            "Hours & ordering",
+            t("Hours & ordering"),
           ),
         ]),
     ...item(
       "settlement",
       settlement.kind === "Ready"
-        ? `Settlement for ${businessDateText(settlement.value.businessDate)}`
-        : "Settlement for the last closed day",
+        ? t("Settlement for {businessDate}", {
+            businessDate: businessDateText(settlement.value.businessDate),
+          })
+        : t("Settlement for the last closed day"),
       readStatus(settlement, (v) => ({
         status: v.text,
         done: v.text === "Matches the payment provider",
@@ -510,14 +522,14 @@ export function dayChecklist(
     ),
     ...item(
       "earlier-pickups",
-      "Pickups from earlier days: check whether they were collected, then close them",
+      t("Pickups from earlier days: check whether they were collected, then close them"),
       readStatus(state.pickups, (p) => left(p.earlierDays)),
       "/operations/pickup",
       "Pickup",
     ),
     ...item(
       "tables-left-open",
-      "Tables still open from before",
+      t("Tables still open from before"),
       readStatus(tables, (t) =>
         t.earlierDays === null ? { status: "Reading…", done: false } : left(t.earlierDays, t.more),
       ),
@@ -528,28 +540,28 @@ export function dayChecklist(
   const closing: ChecklistItem[] = [
     ...item(
       "orders",
-      "Every order made and served or handed over",
+      t("Every order made and served or handed over"),
       readStatus(state.orders, (o) => left(o.open, o.more)),
       "/operations/orders",
       "Orders",
     ),
     ...item(
       "pickups",
-      "Pickups not collected: a manager marks them not collected",
+      t("Pickups not collected: a manager marks them not collected"),
       readStatus(state.pickups, (p) => left(p.waiting + p.earlierDays, p.more)),
       "/operations/pickup",
       "Pickup",
     ),
     ...item(
       "tables",
-      "Tables closed once the guests have left",
+      t("Tables closed once the guests have left"),
       readStatus(tables, (t) => left(t.open, t.more)),
       "/operations/dining",
       "Tables",
     ),
     ...item(
       "exceptions",
-      "Exceptions handled or noted for tomorrow",
+      t("Exceptions handled or noted for tomorrow"),
       readStatus(state.exceptions, (e) => left(e.open)),
       "/operations/order-exceptions",
       "Exceptions",
@@ -559,9 +571,11 @@ export function dayChecklist(
       : [
           instruction(
             "ordering-off",
-            "When you stop taking orders, pause online ordering so guests can't order after close.",
+            t(
+              "When you stop taking orders, pause online ordering so guests can't order after close.",
+            ),
             serviceHref,
-            "Hours & ordering",
+            t("Hours & ordering"),
           ),
         ]),
     ...(settlement.kind === "Hidden"
@@ -569,7 +583,9 @@ export function dayChecklist(
       : [
           {
             key: "settlement-later",
-            text: "Today's payments are checked against the payment provider after the business day ends. Look at the result when you open.",
+            text: t(
+              "Today's payments are checked against the payment provider after the business day ends. Look at the result when you open.",
+            ),
             status: null,
             done: false,
           },
@@ -596,7 +612,9 @@ function ChecklistList({
               <strong className="overview-checklist__status">{entry.status}</strong>
             )}
             {entry.href === undefined ? null : (
-              <Link to={entry.href}>Go to {entry.linkLabel ?? "the page"}</Link>
+              <Link to={entry.href}>
+                {t("Go to {value}", { value: entry.linkLabel ?? t("the page") })}
+              </Link>
             )}
           </li>
         ))}
@@ -623,10 +641,10 @@ export function DayChecklist({
       aria-labelledby="day-checklist-heading"
     >
       <header>
-        <h3 id="day-checklist-heading">Opening and closing</h3>
+        <h3 id="day-checklist-heading">{t("Opening and closing")}</h3>
       </header>
-      <ChecklistList label="When you open" items={opening} />
-      <ChecklistList label="Before you close" items={closing} />
+      <ChecklistList label={t("When you open")} items={opening} />
+      <ChecklistList label={t("Before you close")} items={closing} />
     </section>
   );
 }

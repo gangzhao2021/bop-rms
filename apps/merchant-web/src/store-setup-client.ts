@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { parseTaxConfigClassificationChoices } from "./tax-config-authoring-client.js";
 import {
   productCommandRecord as record,
@@ -44,7 +45,7 @@ export class StoreSetupClientError extends Error {
       // WP-2423 (v15 2026-10-16): approved alone while sole operator was off; cannot be published.
       | "SoleOperatorApprovalInvalid",
   ) {
-    super("Store setup could not be confirmed");
+    super(t("Store setup could not be confirmed"));
     this.name = "StoreSetupClientError";
   }
 }

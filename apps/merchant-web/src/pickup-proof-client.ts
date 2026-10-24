@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { parsePickupExecution, parsePickupReference, type PickupQueueItem } from "./pickup.js";
 
 export class PickupProofClientError extends Error {
@@ -11,7 +12,7 @@ export class PickupProofClientError extends Error {
       | "Locked"
       | "OutcomeUnknown",
   ) {
-    super("Pickup proof verification could not be confirmed");
+    super(t("Pickup proof verification could not be confirmed"));
     this.name = "PickupProofClientError";
   }
 }

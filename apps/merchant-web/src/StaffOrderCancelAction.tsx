@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useRef, useState } from "react";
 import { Link } from "react-router";
 import {
@@ -19,11 +20,11 @@ type Batch = Order["batches"][number];
 
 /** WP-2423 Q6: the reason labels staff choose from; the codes stay server-owned. */
 export const staffCancellationReasonLabel: Readonly<Record<StaffCancellationReason, string>> = {
-  CUSTOMER_REQUEST: "Customer request",
-  SOLD_OUT: "Sold out",
-  STORE_ERROR: "Store error",
-  DUPLICATE_ORDER: "Duplicate order",
-  GUEST_LEFT: "Guests left",
+  CUSTOMER_REQUEST: t("Customer request"),
+  SOLD_OUT: t("Sold out"),
+  STORE_ERROR: t("Store error"),
+  DUPLICATE_ORDER: t("Duplicate order"),
+  GUEST_LEFT: t("Guests left"),
 };
 
 /**
@@ -77,23 +78,38 @@ export function staffCancelRefundText(
   preview: StaffCancelRefundPreview | "Checking" | "Failed",
 ): string {
   const what = pickup ? "order" : "round";
-  if (preview === "Checking") return "Checking what will be refunded…";
+  if (preview === "Checking") return t("Checking what will be refunded…");
   if (preview === "Failed")
-    return `What is refunded could not be checked. The customer gets back whatever is left of this ${what}'s payment, including tip.`;
+    return t(
+      "What is refunded could not be checked. The customer gets back whatever is left of this {what}'s payment, including tip.",
+      { what: what },
+    );
   const money = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CAD" });
   const refund = BigInt(preview.refundMinor),
     paid = BigInt(preview.paidMinor);
   const machine = preview.refundMethod === "CardMachine";
   if (refund === 0n)
-    return `This ${what} was already refunded in full; nothing more will be refunded.`;
+    return t("This {what} was already refunded in full; nothing more will be refunded.", {
+      what: what,
+    });
   if (refund >= paid)
     return machine
-      ? `Refund ${money(preview.refundMinor)} in full, including tip, on the card machine.`
-      : `The customer is refunded in full, ${money(preview.refundMinor)} including tip.`;
+      ? t("Refund {refundMinor} in full, including tip, on the card machine.", {
+          refundMinor: money(preview.refundMinor),
+        })
+      : t("The customer is refunded in full, {refundMinor} including tip.", {
+          refundMinor: money(preview.refundMinor),
+        });
   const already = money((paid - refund).toString());
   return machine
-    ? `${already} was already refunded. Refund the remaining ${money(preview.refundMinor)} on the card machine.`
-    : `${already} was already refunded. The customer is refunded the remaining ${money(preview.refundMinor)}.`;
+    ? t("{already} was already refunded. Refund the remaining {refundMinor} on the card machine.", {
+        already: already,
+        refundMinor: money(preview.refundMinor),
+      })
+    : t("{already} was already refunded. The customer is refunded the remaining {refundMinor}.", {
+        already: already,
+        refundMinor: money(preview.refundMinor),
+      });
 }
 
 /** "Cancelled by store · refund pending" (pickup) or "Batch 2 cancelled · refunded" (dine-in). */
@@ -101,14 +117,16 @@ export function staffCancellationSummary(order: Order, batch: Batch) {
   if (batch.staffCancellation === null) return null;
   const machine = batch.staffCancellation.refundMethod === "CardMachine";
   return (
-    (order.orderType === "Pickup" ? "Cancelled by store" : `Round ${batch.sequence} cancelled`) +
+    (order.orderType === "Pickup"
+      ? t("Cancelled by store")
+      : t("Round {sequence} cancelled", { sequence: batch.sequence })) +
     (batch.staffCancellation.refundStatus === "Refunded"
       ? machine
-        ? " · refunded on card machine"
-        : " · refunded"
+        ? t(" · refunded on card machine")
+        : t(" · refunded")
       : machine
-        ? " · refund on card machine"
-        : " · refund pending")
+        ? t(" · refund on card machine")
+        : t(" · refund pending"))
   );
 }
 
@@ -166,15 +184,17 @@ export function staffCancelOutcome(
 
 const message: Record<Exclude<Outcome, "Idle">, string> = {
   Pending: "Cancelling…",
-  Cancelled: "Cancelled. The customer's refund has started.",
-  PreparationStarted: "The kitchen has started — use a refund instead.",
-  VersionConflict:
+  Cancelled: t("Cancelled. The customer's refund has started."),
+  PreparationStarted: t("The kitchen has started — use a refund instead."),
+  VersionConflict: t(
     "This order changed since it was shown. Close to refresh it, then cancel again if needed.",
-  NotCancellable: "This order can no longer be cancelled. Close to refresh it.",
-  Denied:
+  ),
+  NotCancellable: t("This order can no longer be cancelled. Close to refresh it."),
+  Denied: t(
     "This cancellation was refused. Only a store manager or owner can cancel a paid order; refresh if your session changed.",
+  ),
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
-  Unknown: "Result unknown. Retry the same cancellation to recover its result.",
+  Unknown: t("Result unknown. Retry the same cancellation to recover its result."),
 };
 
 /** Retry keeps the same operation: the result is unknown, or a PIN sign-in must be confirmed first. */
@@ -250,7 +270,7 @@ export function StaffOrderCancelAction({
       setPreview("Failed");
     }
   };
-  const label = pickup ? "Cancel order" : "Cancel round";
+  const label = pickup ? t("Cancel order") : t("Cancel round");
   const titleId = "staff-cancel-" + batch.orderBatchReference;
   const submit = async () => {
     if (outcome === "Pending" || order.currentVersion === null) return;
@@ -315,7 +335,7 @@ export function StaffOrderCancelAction({
       {outcome === "Cancelled" || outcome === "PreparationStarted" ? (
         <p role="status">
           {outcome === "Cancelled" && nothingToRefund
-            ? "Cancelled. It was already refunded in full; nothing more was refunded."
+            ? t("Cancelled. It was already refunded in full; nothing more was refunded.")
             : message[outcome]}
         </p>
       ) : null}
@@ -334,31 +354,35 @@ export function StaffOrderCancelAction({
       >
         <h2 id={titleId}>
           {pickup
-            ? `Cancel order ${order.orderNumber}`
-            : `Cancel round ${batch.sequence} of order ${order.orderNumber}`}
+            ? t("Cancel order {orderNumber}", { orderNumber: order.orderNumber })
+            : t("Cancel round {sequence} of order {orderNumber}", {
+                sequence: batch.sequence,
+                orderNumber: order.orderNumber,
+              })}
         </h2>
-        <p>Only before the kitchen starts.</p>
+        <p>{t("Only before the kitchen starts.")}</p>
         <p className="order-cancel-refund" aria-live="polite">
           {staffCancelRefundText(pickup, preview)}
           {preview === "Failed" ? (
             <>
               {" "}
               <button type="button" onClick={() => void checkRefund()}>
-                Check again
+                {t("Check again")}
               </button>
             </>
           ) : null}
         </p>
         <p>
           {pickup
-            ? "The order leaves the queue and its items return to stock."
-            : "Only this round is cancelled; the rest of the table's order continues."}
+            ? t("The order leaves the queue and its items return to stock.")
+            : t("Only this round is cancelled; the rest of the table's order continues.")}
         </p>
         {pickup ? (
           <p className="order-cancel-no-show">
-            Customer not coming? If they told you, choose Customer request. If they just never came,
-            keep the order: once it is ready and the one-hour pickup hold has passed, close it as
-            not collected in <Link to="/operations/pickup">Pickup</Link>.
+            {t(
+              "Customer not coming? If they told you, choose Customer request. If they just never came, keep the order: once it is ready and the one-hour pickup hold has passed, close it as not collected in",
+            )}{" "}
+            <Link to="/operations/pickup">{t("Pickup")}</Link>.
           </p>
         ) : null}
         <form
@@ -369,14 +393,14 @@ export function StaffOrderCancelAction({
           }}
         >
           <label>
-            Reason
+            {t("Reason")}
             <select
               required
               value={retrying ? (intent.current?.reasonCode ?? reason) : reason}
               disabled={retrying || outcome === "Pending"}
               onChange={(event) => setReason(event.currentTarget.value as StaffCancellationReason)}
             >
-              <option value="">Select a reason</option>
+              <option value="">{t("Select a reason")}</option>
               {staffCancellationReasonsFor(order.orderType).map((code) => (
                 <option key={code} value={code}>
                   {staffCancellationReasonLabel[code]}
@@ -391,30 +415,30 @@ export function StaffOrderCancelAction({
               data-variant="destructive"
             >
               {retrying
-                ? "Retry same cancellation"
+                ? t("Retry same cancellation")
                 : outcome === "Pending"
-                  ? "Cancelling…"
+                  ? t("Cancelling…")
                   : pickup
                     ? nothingToRefund
-                      ? "Cancel order"
-                      : "Cancel order and refund"
+                      ? t("Cancel order")
+                      : t("Cancel order and refund")
                     : nothingToRefund
-                      ? "Cancel round"
-                      : "Cancel round and refund"}
+                      ? t("Cancel round")
+                      : t("Cancel round and refund")}
             </button>
             <button
               type="button"
               disabled={outcome === "Pending"}
               onClick={() => dialog.current?.close()}
             >
-              Keep {pickup ? "order" : "round"}
+              {t("Keep {value}", { value: pickup ? t("order") : t("round") })}
             </button>
           </div>
         </form>
         <StaffCancelStatus outcome={outcome} csrf={csrf} fetcher={fetcher} />
         {!formOpen ? (
           <button type="button" onClick={() => dialog.current?.close()}>
-            Close
+            {t("Close")}
           </button>
         ) : null}
       </dialog>

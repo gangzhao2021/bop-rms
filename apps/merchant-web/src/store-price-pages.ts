@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 import {
   FULL_SIGN_IN_REQUIRED,
@@ -27,7 +28,7 @@ export class PricePageError extends Error {
     readonly code: PriceErrorCode,
     readonly sellableReferences: readonly string[] = [],
   ) {
-    super("Prices are unavailable");
+    super(t("Prices are unavailable"));
     this.name = "PricePageError";
   }
 }

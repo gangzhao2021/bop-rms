@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /** WP-2423: Section 88 IAM-USER-LIST / IAM-USER-DETAIL view contract and same-origin client. */
 import { FULL_SIGN_IN_REQUIRED, isFullSignInRequired } from "./full-sign-in.js";
 
@@ -18,7 +19,7 @@ export type StaffPageErrorCode =
   | "Unavailable";
 export class StaffPageError extends Error {
   constructor(readonly code: StaffPageErrorCode) {
-    super("Staff administration is unavailable");
+    super(t("Staff administration is unavailable"));
     this.name = "StaffPageError";
   }
 }

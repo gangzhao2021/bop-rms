@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { escalationReasons, type EscalationReason } from "./ordinary-refund-client.js";
 import {
   FULL_SIGN_IN_REQUIRED,
@@ -49,7 +50,7 @@ export class StepUpError extends Error {
     readonly code: StepUpFailure,
     readonly retryAfterSeconds: number | null = null,
   ) {
-    super("Verification was not accepted");
+    super(t("Verification was not accepted"));
     this.name = "StepUpError";
   }
 }
@@ -73,7 +74,7 @@ export class RefundApprovalClientError extends Error {
     readonly code: ApprovalFailure,
     readonly party: "Requester" | "Approver" | "Both" | null = null,
   ) {
-    super("Refund approval could not be confirmed");
+    super(t("Refund approval could not be confirmed"));
     this.name = "RefundApprovalClientError";
   }
 }

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -104,47 +105,47 @@ export function TaxClassificationsView({
     ));
   const retiringEntry = view.classifications.find((c) => c.classificationReference === retiring);
   return (
-    <AppFrame title="Tax classifications" description="">
+    <AppFrame title={t("Tax classifications")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Tax classifications · Brand</p>
-          <h2>Tax classifications</h2>
+          <p className="bop-eyebrow">{t("Tax classifications · Brand")}</p>
+          <h2>{t("Tax classifications")}</h2>
           <p>
-            Your Brand&rsquo;s own labels for how things are taxed, such as Prepared food, Alcohol
-            or Fees. Each product, and each Store fee (service charge, delivery fee and tips), names
-            one. No rates are set here: the tax configuration sets the rates for each
-            classification, and Tax review shows them. Updated{" "}
+            {t(
+              "Your Brand’s own labels for how things are taxed, such as Prepared food, Alcohol or Fees. Each product, and each Store fee (service charge, delivery fee and tips), names one. No rates are set here: the tax configuration sets the rates for each classification, and Tax review shows them. Updated",
+            )}{" "}
             <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
-        <Link to="/app/commerce/tax-review">Tax review</Link>
+        <Link to="/app/commerce/tax-review">{t("Tax review")}</Link>
       </header>
       {!manage ? (
-        <StatePanel heading="View only" status>
+        <StatePanel heading={t("View only")} status>
           <p>{taxClassificationMessages.PermissionDenied}</p>
         </StatePanel>
       ) : null}
       {error === FULL_SIGN_IN_REQUIRED ? (
         <FullSignInPrompt csrf={csrf} />
       ) : error !== null ? (
-        <StatePanel heading="Not saved" tone="error" status>
+        <StatePanel heading={t("Not saved")} tone="error" status>
           <p>{taxClassificationMessages[error]}</p>
           {error === "Conflict" || error === "NotFound" ? (
             <button type="button" onClick={onReload} disabled={busy}>
-              Reload the list
+              {t("Reload the list")}
             </button>
           ) : null}
         </StatePanel>
       ) : null}
       {notice ? <p role="status">{notice}</p> : null}
       <section className="detail-section" aria-labelledby="tax-classifications-in-use">
-        <h3 id="tax-classifications-in-use">In use</h3>
+        <h3 id="tax-classifications-in-use">{t("In use")}</h3>
         {inUse.length === 0 ? (
           <p>
-            No tax classifications yet.
-            {manage
-              ? " Add the first one below. Store setup fees can then be turned on with it."
-              : " The Brand Owner adds them."}
+            {t("No tax classifications yet.{value}", {
+              value: manage
+                ? t(" Add the first one below. Store setup fees can then be turned on with it.")
+                : t(" The Brand Owner adds them."),
+            })}
           </p>
         ) : (
           <table>
@@ -155,9 +156,9 @@ export function TaxClassificationsView({
                     {nameFieldLabel(l, l).replace(" name", "")}
                   </th>
                 ))}
-                <th scope="col">Brand default</th>
-                {productUse !== null ? <th scope="col">Products</th> : null}
-                {manage ? <th scope="col">Changes</th> : null}
+                <th scope="col">{t("Brand default")}</th>
+                {productUse !== null ? <th scope="col">{t("Products")}</th> : null}
+                {manage ? <th scope="col">{t("Changes")}</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -171,16 +172,16 @@ export function TaxClassificationsView({
                         {entry.names[l] ?? "—"}
                       </td>
                     ))}
-                    <td data-label="Brand default">
-                      {entry.isDefault ? "Default for products without their own" : "—"}
+                    <td data-label={t("Brand default")}>
+                      {entry.isDefault ? t("Default for products without their own") : "—"}
                     </td>
                     {productUse !== null ? (
-                      <td data-label="Products">
-                        {productsOf(entry.classificationReference).join(", ") || "None yet"}
+                      <td data-label={t("Products")}>
+                        {productsOf(entry.classificationReference).join(", ") || t("None yet")}
                       </td>
                     ) : null}
                     {manage ? (
-                      <td data-label="Changes">
+                      <td data-label={t("Changes")}>
                         {editing && renaming ? (
                           <form
                             aria-label={`Rename ${name}`}
@@ -204,10 +205,10 @@ export function TaxClassificationsView({
                                 type="submit"
                                 disabled={busy || !(renaming.names[defaultLocale] ?? "").trim()}
                               >
-                                Save name
+                                {t("Save name")}
                               </button>
                               <button type="button" onClick={() => setRenaming(null)}>
-                                Cancel
+                                {t("Cancel")}
                               </button>
                             </div>
                           </form>
@@ -224,7 +225,7 @@ export function TaxClassificationsView({
                                 })
                               }
                             >
-                              Rename
+                              {t("Rename")}
                             </button>
                             {entry.lifecycle === "Active" ? (
                               <button
@@ -244,7 +245,7 @@ export function TaxClassificationsView({
                                   })
                                 }
                               >
-                                {entry.isDefault ? "Stop using as default" : "Make default"}
+                                {entry.isDefault ? t("Stop using as default") : t("Make default")}
                               </button>
                             ) : null}
                             <button
@@ -253,7 +254,7 @@ export function TaxClassificationsView({
                               aria-label={`Retire ${name}`}
                               onClick={() => setRetiring(entry.classificationReference)}
                             >
-                              Retire
+                              {t("Retire")}
                             </button>
                           </div>
                         )}
@@ -273,15 +274,21 @@ export function TaxClassificationsView({
             aria-describedby="retire-classification-text"
           >
             <h4 id="retire-classification-heading">
-              Retire {displayName(retiringEntry, defaultLocale)} for good?
+              {t("Retire {retiringEntry} for good?", {
+                retiringEntry: displayName(retiringEntry, defaultLocale),
+              })}
             </h4>
             <p id="retire-classification-text">
-              A retired classification can&rsquo;t be used again or brought back. Products and Store
-              fees that use it must be moved to another classification before they are next
-              published; menus and Store settings already published keep working.
-              {retiringEntry.isDefault
-                ? " It is the Brand default now, so the Brand will have no default until you choose another."
-                : ""}
+              {t(
+                "A retired classification can’t be used again or brought back. Products and Store fees that use it must be moved to another classification before they are next published; menus and Store settings already published keep working.{value}",
+                {
+                  value: retiringEntry.isDefault
+                    ? t(
+                        " It is the Brand default now, so the Brand will have no default until you choose another.",
+                      )
+                    : "",
+                },
+              )}
             </p>
             <div className="card-actions">
               <button
@@ -295,10 +302,10 @@ export function TaxClassificationsView({
                   setRetiring(null);
                 }}
               >
-                Retire for good
+                {t("Retire for good")}
               </button>
               <button type="button" onClick={() => setRetiring(null)}>
-                Keep it
+                {t("Keep it")}
               </button>
             </div>
           </section>
@@ -307,21 +314,22 @@ export function TaxClassificationsView({
       {notListed.length > 0 || withoutClass !== undefined ? (
         <section className="detail-section" aria-labelledby="tax-classes-not-listed">
           <h3 id="tax-classes-not-listed">
-            Tax classes your products use that are not listed above
+            {t("Tax classes your products use that are not listed above")}
           </h3>
           {notListed.length > 0 ? (
             <>
               <p>
-                These products use a tax class that comes from this Store&rsquo;s tax configuration
-                and has no name in the Brand&rsquo;s list above. Tax review shows its rates. To give
-                products a named class, add it above, then choose it on each product once the tax
-                configuration sets its rates.
+                {t(
+                  "These products use a tax class that comes from this Store’s tax configuration and has no name in the Brand’s list above. Tax review shows its rates. To give products a named class, add it above, then choose it on each product once the tax configuration sets its rates.",
+                )}
               </p>
               <ul>
                 {notListed.map((use, index) => (
                   <li key={use.classificationReference}>
-                    Unnamed tax class{notListed.length > 1 ? ` ${index + 1}` : ""}:{" "}
-                    {use.productNames.join(", ")}
+                    {t("Unnamed tax class{value}: {value2}", {
+                      value: notListed.length > 1 ? ` ${index + 1}` : "",
+                      value2: use.productNames.join(", "),
+                    })}
                   </li>
                 ))}
               </ul>
@@ -329,16 +337,17 @@ export function TaxClassificationsView({
           ) : null}
           {withoutClass !== undefined ? (
             <p>
-              No tax class yet: {withoutClass.productNames.join(", ")}. These products cannot be
-              sold until each names one.
+              {t("No tax class yet: {value}. These products cannot be sold until each names one.", {
+                value: withoutClass.productNames.join(", "),
+              })}
             </p>
           ) : null}
-          <Link to="/app/commerce/tax-review">See rates in Tax review</Link>
+          <Link to="/app/commerce/tax-review">{t("See rates in Tax review")}</Link>
         </section>
       ) : null}
       {manage ? (
         <section className="detail-section" aria-labelledby="tax-classification-add">
-          <h3 id="tax-classification-add">Add a classification</h3>
+          <h3 id="tax-classification-add">{t("Add a classification")}</h3>
           <form
             aria-labelledby="tax-classification-add"
             onSubmit={(e) => {
@@ -348,20 +357,21 @@ export function TaxClassificationsView({
           >
             {nameFields(adding, setAdding, "add-classification")}
             <p className="field-hint">
-              Use a name staff will recognise. You can rename it later; products and fees keep using
-              it.
+              {t(
+                "Use a name staff will recognise. You can rename it later; products and fees keep using it.",
+              )}
             </p>
             <button type="submit" disabled={busy || !(adding[defaultLocale] ?? "").trim()}>
-              Add classification
+              {t("Add classification")}
             </button>
           </form>
         </section>
       ) : null}
       {retired.length > 0 ? (
         <section className="detail-section" aria-labelledby="tax-classifications-retired">
-          <h3 id="tax-classifications-retired">Retired</h3>
+          <h3 id="tax-classifications-retired">{t("Retired")}</h3>
           <p>
-            Kept for the history of products and fees that used them; they can&rsquo;t be chosen.
+            {t("Kept for the history of products and fees that used them; they can’t be chosen.")}
           </p>
           <ul>
             {retired.map((entry) => (
@@ -375,7 +385,7 @@ export function TaxClassificationsView({
 }
 
 const loadCopy = {
-  Loading: "Loading tax classifications…",
+  Loading: t("Loading tax classifications…"),
   ...taxClassificationMessages,
 } as const;
 
@@ -417,7 +427,7 @@ export function TaxClassificationsPage({
   if (view === null)
     return (
       <StatePanel
-        heading={loadError === "PermissionDenied" ? noAccessHeading : "Tax classifications"}
+        heading={loadError === "PermissionDenied" ? noAccessHeading : t("Tax classifications")}
         tone={loadError === "Loading" ? "neutral" : "error"}
         status
       >
@@ -467,14 +477,14 @@ export function TaxClassificationsPage({
         setView(result.view);
         setNotice(
           change.action === "Add"
-            ? `Added ${label}.`
+            ? t("Added {label}.", { label: label })
             : change.action === "Rename"
-              ? `Renamed to ${label}.`
+              ? t("Renamed to {label}.", { label: label })
               : change.action === "Retire"
-                ? `Retired ${label}.`
+                ? t("Retired {label}.", { label: label })
                 : change.classificationReference === null
-                  ? "The Brand has no default classification now."
-                  : `${label} is now the Brand default.`,
+                  ? t("The Brand has no default classification now.")
+                  : t("{label} is now the Brand default.", { label: label }),
         );
       })
       .catch((reason: unknown) =>

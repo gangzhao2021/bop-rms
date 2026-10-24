@@ -92,6 +92,7 @@ import {
   customerCartBindingRoutes,
   unavailableCustomerCartBindingHandler,
 } from "./customer-cart-binding.js";
+import { staffContentLocaleMiddleware } from "./staff-content-locale.js";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import {
   type PaymentProviderWebhookHandler,
@@ -314,6 +315,8 @@ export function createApp({
       "/merchant/organization/brands",
       createMerchantBrandAdministrationRouter(brandAdministration),
     );
+  // Owner 2026-10-24: the staff member's chosen language for Store content names on /merchant reads.
+  app.use("/merchant", staffContentLocaleMiddleware());
   if (merchantBff !== undefined) app.use("/merchant", createMerchantBffRouter(merchantBff));
   // SNS posts JSON as text/plain: parsed by its own route-level text parser, before JSON parsing.
   app.post(

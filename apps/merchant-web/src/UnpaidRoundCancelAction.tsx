@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useRef, useState } from "react";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import {
@@ -51,14 +52,17 @@ export function unpaidRoundCancelOutcome(
 
 export const unpaidRoundCancelMessage: Record<Exclude<Outcome, "Idle">, string> = {
   Pending: "Cancelling…",
-  Cancelled: "Round cancelled. It never went to the kitchen and nobody was charged.",
-  Paid: "Payment just arrived: the guest paid for this round, so nothing was cancelled. Refresh to see it as paid.",
-  PaymentInProgress:
+  Cancelled: t("Round cancelled. It never went to the kitchen and nobody was charged."),
+  Paid: t(
+    "Payment just arrived: the guest paid for this round, so nothing was cancelled. Refresh to see it as paid.",
+  ),
+  PaymentInProgress: t(
     "The guest's card payment is still being confirmed. Try again in a minute; nothing was cancelled.",
-  NotCancellable: "This round can no longer be cancelled. Close to refresh it.",
-  Denied: "Only a store manager or owner can cancel a round. Refresh if your session changed.",
+  ),
+  NotCancellable: t("This round can no longer be cancelled. Close to refresh it."),
+  Denied: t("Only a store manager or owner can cancel a round. Refresh if your session changed."),
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
-  Unknown: "Result unknown. Retry the same cancellation to recover its result.",
+  Unknown: t("Result unknown. Retry the same cancellation to recover its result."),
 };
 const keepsIntent = (outcome: Outcome) =>
   outcome === "Unknown" || outcome === FULL_SIGN_IN_REQUIRED;
@@ -148,7 +152,7 @@ export function UnpaidRoundCancelAction({
         disabled={outcome === "Cancelled"}
         onClick={() => dialog.current?.showModal()}
       >
-        Cancel unpaid round {roundNumber}
+        {t("Cancel unpaid round {roundNumber}", { roundNumber: roundNumber })}
       </button>
       {outcome === "Cancelled" ? <p role="status">{unpaidRoundCancelMessage.Cancelled}</p> : null}
       <dialog
@@ -165,28 +169,32 @@ export function UnpaidRoundCancelAction({
         }}
       >
         <h2 id={titleId}>
-          Cancel unpaid round {roundNumber} of {orderLabel}?
+          {t("Cancel unpaid round {roundNumber} of {orderLabel}?", {
+            roundNumber: roundNumber,
+            orderLabel: orderLabel,
+          })}
         </h2>
         {paymentUnconfirmed ? (
           <>
             <p>
-              The card provider couldn&apos;t confirm the guest&apos;s payment for this round. Ask
-              the guest whether their card was charged for it.
+              {t(
+                "The card provider couldn't confirm the guest's payment for this round. Ask the guest whether their card was charged for it.",
+              )}
             </p>
             <p>
-              Cancel only if it wasn&apos;t: the round never goes to the kitchen and its items go
-              back to stock. If a charge still comes through later, it is refunded to the guest
-              automatically.
+              {t(
+                "Cancel only if it wasn't: the round never goes to the kitchen and its items go back to stock. If a charge still comes through later, it is refunded to the guest automatically.",
+              )}
             </p>
           </>
         ) : (
           <>
             <p>
-              Nobody has paid for this round. Cancelling it means it never goes to the kitchen, its
-              items go back to stock and the guest can&apos;t pay for it any more. Nobody is
-              charged.
+              {t(
+                "Nobody has paid for this round. Cancelling it means it never goes to the kitchen, its items go back to stock and the guest can't pay for it any more. Nobody is charged.",
+              )}
             </p>
-            <p>If the guest is still paying on their phone, ask them first.</p>
+            <p>{t("If the guest is still paying on their phone, ask them first.")}</p>
           </>
         )}
         <div className="card-actions">
@@ -197,16 +205,16 @@ export function UnpaidRoundCancelAction({
             onClick={() => void submit()}
           >
             {retrying
-              ? "Retry same cancellation"
+              ? t("Retry same cancellation")
               : outcome === "Pending"
-                ? "Cancelling…"
+                ? t("Cancelling…")
                 : paymentUnconfirmed
-                  ? `Not charged: cancel round ${roundNumber}`
-                  : `Cancel round ${roundNumber}`}
+                  ? t("Not charged: cancel round {roundNumber}", { roundNumber: roundNumber })
+                  : t("Cancel round {roundNumber}", { roundNumber: roundNumber })}
           </button>
           {outcome === "Paid" ? (
             <button type="button" onClick={() => dialog.current?.close()}>
-              Refresh
+              {t("Refresh")}
             </button>
           ) : null}
           <button
@@ -214,7 +222,7 @@ export function UnpaidRoundCancelAction({
             disabled={outcome === "Pending"}
             onClick={() => dialog.current?.close()}
           >
-            Keep round
+            {t("Keep round")}
           </button>
         </div>
         {outcome === FULL_SIGN_IN_REQUIRED ? (

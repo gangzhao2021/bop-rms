@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { PickupProofForm, pickupCodeLockedText } from "./PickupProofForm.js";
 import { PickupHandoffForm } from "./PickupHandoffForm.js";
@@ -42,24 +43,24 @@ type State =
     };
 export function PickupStatePanel({ state }: { readonly state: Exclude<State["kind"], "Found"> }) {
   const copy = {
-    Loading: ["Loading", "Loading pickups…"],
+    Loading: ["Loading", t("Loading pickups…")],
     PermissionDenied: [noAccessHeading, pageAccessDeniedText],
-    NotFound: ["Pickup unavailable", "This pickup is not at the selected Store."],
-    Offline: ["You’re offline", "Reconnect and refresh before handing over a pickup."],
-    Conflict: ["Pickup changed", "Refresh to see the current pickup before trying again."],
+    NotFound: [t("Pickup unavailable"), t("This pickup is not at the selected Store.")],
+    Offline: [t("You’re offline"), t("Reconnect and refresh before handing over a pickup.")],
+    Conflict: [t("Pickup changed"), t("Refresh to see the current pickup before trying again.")],
     CommandFailed: [
-      "Action not confirmed",
-      "The handoff was not confirmed. Refresh before trying again.",
+      t("Action not confirmed"),
+      t("The handoff was not confirmed. Refresh before trying again."),
     ],
     Unavailable: [
-      "Pickups unavailable",
-      "The pickup queue could not be loaded. Refresh to try again.",
+      t("Pickups unavailable"),
+      t("The pickup queue could not be loaded. Refresh to try again."),
     ],
   } as const;
   return (
     <StatePanel heading={copy[state][0]} tone={state === "Loading" ? "neutral" : "error"} status>
       <p>{copy[state][1]}</p>
-      <Link to="/app">Home</Link>
+      <Link to="/app">{t("Home")}</Link>
     </StatePanel>
   );
 }
@@ -87,13 +88,13 @@ export function waitTier(waitMinutes: number, completed: boolean): "ok" | "warni
 }
 /** "20 min", "3 h 5 min", "5 days" — long waits in hours or days, never thousands of minutes. */
 export function pickupWaitText(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) return t("{minutes} min", { minutes: minutes });
   if (minutes < 24 * 60) {
     const rest = minutes % 60;
-    return `${Math.floor(minutes / 60)} h${rest ? ` ${rest} min` : ""}`;
+    return `${Math.floor(minutes / 60)} h${rest ? t(" {rest} min", { rest: rest }) : ""}`;
   }
   const days = Math.floor(minutes / (24 * 60));
-  return days === 1 ? "1 day" : `${days} days`;
+  return days === 1 ? t("1 day") : t("{days} days", { days: days });
 }
 /** WP-2423 Q26: an order from an earlier business day (its number may repeat today). */
 export function fromEarlierDay(item: PickupQueueItem, today: string | null | undefined): boolean {
@@ -147,7 +148,7 @@ function PickupCard({
   // WP-2423: taken at the counter: no pickup code is sent; staff hand it over in person.
   const counter = item.takenAtCounter === true && item.proofReadiness === "NotIssued";
   const orderLabel =
-    item.publicOrderNumber ?? item.execution?.publicOrderReference ?? "number unavailable";
+    item.publicOrderNumber ?? item.execution?.publicOrderReference ?? t("number unavailable");
   const recorded = onHandedOver ? () => onHandedOver(orderLabel) : undefined;
   const tier = waitTier(wait, completed);
   // What is in the bag, as ordered, for a quick match at the counter.
@@ -162,29 +163,34 @@ function PickupCard({
       <header>
         <div>
           <p className="bop-eyebrow pickup-queue__phase" data-wait={tier}>
-            {completed ? "Completed" : `Ready for ${pickupWaitText(wait)}`}
+            {completed ? t("Completed") : t("Ready for {wait}", { wait: pickupWaitText(wait) })}
           </p>
           <h3 className="pickup-queue__number">
-            Order <span className="pickup-queue__number-value">{orderLabel}</span>
+            {t("Order")} <span className="pickup-queue__number-value">{orderLabel}</span>
           </h3>
           {earlier && item.businessDate ? (
-            <p className="pickup-queue__day">From {businessDateText(item.businessDate)}</p>
+            <p className="pickup-queue__day">
+              {t("From {businessDate}", { businessDate: businessDateText(item.businessDate) })}
+            </p>
           ) : null}
         </div>
         <strong className="pickup-queue__status" data-completed={completed}>
-          {completed ? "Handed over" : "Waiting"}
+          {completed ? t("Handed over") : t("Waiting")}
         </strong>
       </header>
       {earlier && !completed ? (
         <p className="pickup-queue__earlier" role="note">
-          From an earlier business day. Check whether it was collected, then close it.
+          {t("From an earlier business day. Check whether it was collected, then close it.")}
         </p>
       ) : null}
       {!completed && item.remakeQuantity ? (
         <p className="pickup-queue__remake" role="status">
-          Kitchen is remaking{" "}
-          {item.remakeQuantity === 1 ? "1 item" : `${item.remakeQuantity} items`} — wait for it
-          before handing this order over.
+          {t("Kitchen is remaking {value} — wait for it before handing this order over.", {
+            value:
+              item.remakeQuantity === 1
+                ? t("1 item")
+                : t("{remakeQuantity} items", { remakeQuantity: item.remakeQuantity }),
+          })}
         </p>
       ) : null}
       {contents.length > 0 ? (
@@ -199,45 +205,45 @@ function PickupCard({
       ) : null}
       <dl>
         <div>
-          <dt>Pickup code</dt>
+          <dt>{t("Pickup code")}</dt>
           <dd>
             {counter
-              ? "Not needed · taken at the counter"
+              ? t("Not needed · taken at the counter")
               : item.proofReadiness === "Expired"
-                ? "Code expired · check in person"
+                ? t("Code expired · check in person")
                 : item.proofReadiness === "Locked"
-                  ? "Too many wrong codes · check in person"
+                  ? t("Too many wrong codes · check in person")
                   : item.proofReadiness === "NotIssued"
-                    ? "No code sent · check in person"
+                    ? t("No code sent · check in person")
                     : item.proofReadiness === "Ready"
-                      ? "Sent to customer"
-                      : "Not known yet · check in person"}
+                      ? t("Sent to customer")
+                      : t("Not known yet · check in person")}
           </dd>
         </div>
         <div>
-          <dt>Shelf</dt>
-          <dd>{item.stagingLocation ?? "Not set"}</dd>
+          <dt>{t("Shelf")}</dt>
+          <dd>{item.stagingLocation ?? t("Not set")}</dd>
         </div>
         <div>
-          <dt>Packages</dt>
-          <dd>{item.packageCount ?? "Not set"}</dd>
+          <dt>{t("Packages")}</dt>
+          <dd>{item.packageCount ?? t("Not set")}</dd>
         </div>
         {item.allergenCue !== "Unavailable" ? (
           <div>
-            <dt>Allergen</dt>
-            <dd>{item.allergenCue === "Present" ? "Allergen present" : "No cue"}</dd>
+            <dt>{t("Allergen")}</dt>
+            <dd>{item.allergenCue === "Present" ? t("Allergen present") : t("No cue")}</dd>
           </div>
         ) : null}
         {item.exceptionStatus === "Reported" ? (
           <div>
-            <dt>Exception</dt>
-            <dd>Reported</dd>
+            <dt>{t("Exception")}</dt>
+            <dd>{t("Reported")}</dd>
           </div>
         ) : null}
       </dl>
       {!completed && counter ? (
         <p className="pickup-queue__counter" role="note">
-          Taken at the counter — call the order number and hand it over.
+          {t("Taken at the counter — call the order number and hand it over.")}
         </p>
       ) : null}
       {!completed && item.proofReadiness === "Locked" ? (
@@ -306,7 +312,7 @@ function PickupCard({
         </div>
       ) : null}
       {canComplete && !workstation ? (
-        <p role="status">Handoff is not available on this device. Ask a manager.</p>
+        <p role="status">{t("Handoff is not available on this device. Ask a manager.")}</p>
       ) : null}
     </article>
   );
@@ -381,7 +387,7 @@ export function PickupQueueScreen({
   return (
     <WorkspacePage
       className="pickup-queue"
-      title="Pickup"
+      title={t("Pickup")}
       meta={view.storeLabel}
       status={
         <Freshness
@@ -392,31 +398,31 @@ export function PickupQueueScreen({
       }
       actions={
         <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
-          Refresh
+          {t("Refresh")}
         </button>
       }
     >
       <>
         {handedOver ? (
           <p className="pickup-queue__handed-over" role="status">
-            Order {handedOver} handed over.
+            {t("Order {handedOver} handed over.", { handedOver: handedOver })}
           </p>
         ) : null}
         {notCollected ? (
           <p className="pickup-queue__handed-over" role="status">
-            Order {notCollected} closed as not collected.
+            {t("Order {notCollected} closed as not collected.", { notCollected: notCollected })}
           </p>
         ) : null}
         {stale ? (
           <StaleReadNotice stale={stale} />
         ) : readOnly ? (
-          <StatePanel heading="Data may be out of date" tone="offline" status>
-            <p>Refresh before confirming a handoff.</p>
+          <StatePanel heading={t("Data may be out of date")} tone="offline" status>
+            <p>{t("Refresh before confirming a handoff.")}</p>
           </StatePanel>
         ) : null}
         <div className="list-filters pickup-queue__filters">
           <label>
-            Order number
+            {t("Order number")}
             <input
               type="search"
               value={orderQuery}
@@ -432,42 +438,42 @@ export function PickupQueueScreen({
               disabled={!onCompletedChange}
               onChange={(event) => onCompletedChange?.(event.currentTarget.checked)}
             />
-            Include completed pickups
+            {t("Include completed pickups")}
           </label>
           <label>
-            Status
+            {t("Status")}
             <select value={filter} onChange={(event) => setFilter(event.currentTarget.value)}>
-              <option value="All">All</option>
-              <option value="Ready">Ready</option>
-              <option value="Waiting">Waiting</option>
-              <option value="InProgress">In progress</option>
-              <option value="Completed">Completed</option>
+              <option value="All">{t("All")}</option>
+              <option value="Ready">{t("Ready")}</option>
+              <option value="Waiting">{t("Waiting")}</option>
+              <option value="InProgress">{t("In progress")}</option>
+              <option value="Completed">{t("Completed")}</option>
             </select>
           </label>
           {/* WP-2423: a filter is offered only when the loaded pickups carry that fact. */}
           {claimFilterAvailable ? (
             <label>
-              Claim
+              {t("Claim")}
               <select
                 value={claimFilter}
                 onChange={(event) => setClaimFilter(event.currentTarget.value)}
               >
-                <option value="All">All</option>
-                <option value="Unclaimed">Not claimed</option>
-                <option value="Claimed">Claimed</option>
+                <option value="All">{t("All")}</option>
+                <option value="Unclaimed">{t("Not claimed")}</option>
+                <option value="Claimed">{t("Claimed")}</option>
               </select>
             </label>
           ) : null}
           {exceptionFilterAvailable ? (
             <label>
-              Exception
+              {t("Exception")}
               <select
                 value={exceptionFilter}
                 onChange={(event) => setExceptionFilter(event.currentTarget.value)}
               >
-                <option value="All">All</option>
-                <option value="None">No exception</option>
-                <option value="Reported">Exception reported</option>
+                <option value="All">{t("All")}</option>
+                <option value="None">{t("No exception")}</option>
+                <option value="Reported">{t("Exception reported")}</option>
               </select>
             </label>
           ) : null}
@@ -481,14 +487,18 @@ export function PickupQueueScreen({
               setExceptionFilter("All");
             }}
           >
-            Clear filters
+            {t("Clear filters")}
           </button>
         </div>
         {view.items.length > 0 ? (
           <p className="pickup-queue__summary">
-            {waitingCount === 1 ? "1 order waiting" : `${waitingCount} orders waiting`}
-            {completedCount > 0 ? ` · ${completedCount} handed over` : ""}
-            {onNext || onPrevious ? " on this page" : ""}
+            {waitingCount === 1
+              ? t("1 order waiting")
+              : t("{waitingCount} orders waiting", { waitingCount: waitingCount })}
+            {completedCount > 0
+              ? t(" · {completedCount} handed over", { completedCount: completedCount })
+              : ""}
+            {onNext || onPrevious ? t(" on this page") : ""}
           </p>
         ) : null}
         {todayItems.length ? (
@@ -515,11 +525,11 @@ export function PickupQueueScreen({
             className="pickup-queue__earlier-section"
             aria-labelledby="pickup-earlier-heading"
           >
-            <h2 id="pickup-earlier-heading">From earlier days — check and close</h2>
+            <h2 id="pickup-earlier-heading">{t("From earlier days — check and close")}</h2>
             <p>
-              These orders are from an earlier business day. Their numbers may repeat today&apos;s.
-              If the customer collected the order, hand it over with the code or in person; if not,
-              a manager closes it as not collected.
+              {t(
+                "These orders are from an earlier business day. Their numbers may repeat today's. If the customer collected the order, hand it over with the code or in person; if not, a manager closes it as not collected.",
+              )}
             </p>
             <div className="store-card-grid pickup-queue__cards">
               {earlierItems.map((item) => (
@@ -544,26 +554,32 @@ export function PickupQueueScreen({
         {items.length === 0 ? (
           <div className="pickup-queue__empty" data-filtered={view.items.length > 0}>
             <StatePanel
-              heading={view.items.length === 0 ? "No pickups waiting" : "No matching pickups"}
+              heading={view.items.length === 0 ? t("No pickups waiting") : t("No matching pickups")}
               status
             >
               <p>
                 {view.items.length === 0
                   ? includeCompleted
-                    ? "Nothing is waiting or handed over on this page. Ready orders show here as soon as the kitchen marks them ready."
-                    : "Nothing is waiting for pickup right now. Ready orders show here as soon as the kitchen marks them ready."
-                  : "No pickup on this page matches the filters. Clear the filters to see every pickup."}
+                    ? t(
+                        "Nothing is waiting or handed over on this page. Ready orders show here as soon as the kitchen marks them ready.",
+                      )
+                    : t(
+                        "Nothing is waiting for pickup right now. Ready orders show here as soon as the kitchen marks them ready.",
+                      )
+                  : t(
+                      "No pickup on this page matches the filters. Clear the filters to see every pickup.",
+                    )}
               </p>
             </StatePanel>
           </div>
         ) : null}
         {onPrevious || onNext ? (
-          <nav className="pickup-pagination" aria-label="Pickup pages">
+          <nav className="pickup-pagination" aria-label={t("Pickup pages")}>
             <button disabled={!onPrevious} onClick={onPrevious}>
-              Previous page
+              {t("Previous page")}
             </button>
             <button disabled={!onNext} onClick={onNext}>
-              Next page
+              {t("Next page")}
             </button>
           </nav>
         ) : null}
@@ -705,12 +721,12 @@ export function PickupQueuePage(props: {
     return (
       <WorkspacePage
         className="pickup-queue"
-        title="Pickup"
+        title={t("Pickup")}
         meta={props.storeLabel}
         actions={
           state.kind !== "Loading" ? (
             <button ref={refreshButtonRef} onClick={refresh}>
-              Refresh
+              {t("Refresh")}
             </button>
           ) : null
         }

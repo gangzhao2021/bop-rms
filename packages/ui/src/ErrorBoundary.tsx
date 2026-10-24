@@ -1,17 +1,16 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { useUiText } from "./UiText.js";
 
 /** The page shown when rendering throws: plain words, one way forward, no error internals. */
 export function ErrorFallback({ onReload }: { readonly onReload?: (() => void) | undefined }) {
   const reload = onReload ?? (() => globalThis.location?.reload());
+  const text = useUiText();
   return (
     <main id="main-content" className="bop-error-page" tabIndex={-1}>
-      <h1>Something went wrong</h1>
-      <p>
-        This page could not be shown. Reload to try again. If you were in the middle of something,
-        check it after reloading before doing it again.
-      </p>
+      <h1>{text.errorHeading}</h1>
+      <p>{text.errorBody}</p>
       <button type="button" onClick={reload}>
-        Reload
+        {text.reload}
       </button>
     </main>
   );

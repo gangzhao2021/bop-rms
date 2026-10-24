@@ -1,5 +1,6 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { parseOrderingReference, parseOrderingInstant } from "../../domain/cart.js";
+import { orderLocalizedName } from "../../domain/order-item-option-lines.js";
 import {
   decodeConfiguredOrderItemSnapshot,
   decodeOrderItemSnapshot,
@@ -389,7 +390,11 @@ export async function loadMerchantOrderLines(
   transaction: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
   orderReference: string,
-  locale: string,
+  /**
+   * Names in the first of these locales each name has (Owner 2026-10-24: the staff member's
+   * chosen language, then the Store's), else any name it has.
+   */
+  locale: string | readonly string[],
 ): Promise<{
   readonly items: readonly MerchantOrderLine[];
   readonly totals: Readonly<
@@ -413,8 +418,13 @@ export async function loadMerchantOrderLines(
   ).rows;
   if (rows.length === 0) return null;
   if (rows.length > 100) return unavailable();
-  const name = (names: Readonly<Record<string, string>>) =>
-    names[locale] ?? names[locale.slice(0, 2)] ?? Object.values(names)[0] ?? "";
+  const name = (names: Readonly<Record<string, string>>) => {
+    try {
+      return orderLocalizedName(names, locale);
+    } catch {
+      return "";
+    }
+  };
   const money = (value: { readonly amountMinor: bigint; readonly currencyCode: string }) =>
     Object.freeze({ amountMinor: String(value.amountMinor), currencyCode: value.currencyCode });
   const sums = { subtotal: 0n, discount: 0n, tax: 0n, fee: 0n, total: 0n };

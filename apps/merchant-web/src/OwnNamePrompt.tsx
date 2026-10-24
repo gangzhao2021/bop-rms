@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useId, useRef, useState } from "react";
 import { newOperationReference } from "./operation-reference.js";
 
@@ -18,7 +19,7 @@ export type OwnNameErrorCode =
   "PermissionDenied" | "NotFound" | "Conflict" | "Invalid" | "Offline" | "Unavailable";
 export class OwnNameError extends Error {
   constructor(readonly code: OwnNameErrorCode) {
-    super("Your name could not be read or saved");
+    super(t("Your name could not be read or saved"));
     this.name = "OwnNameError";
   }
 }
@@ -30,11 +31,12 @@ export interface OwnNameClient {
   }): Promise<{ readonly status: "Applied" | "AlreadyApplied" }>;
 }
 
-export const OWN_NAME_PURPOSE = "Shown to your team so everyone can see who did what.";
-export const OWN_NAME_PROMPT =
-  "Your store asks every staff member for their name. Orders, refunds and other records show it, so your team can see who did what.";
-export const OWN_NAME_REQUIRED = "This stays here until you add your name.";
-export const OWN_NAME_SAVED = "Thanks. Your team now sees your name.";
+export const OWN_NAME_PURPOSE = t("Shown to your team so everyone can see who did what.");
+export const OWN_NAME_PROMPT = t(
+  "Your store asks every staff member for their name. Orders, refunds and other records show it, so your team can see who did what.",
+);
+export const OWN_NAME_REQUIRED = t("This stays here until you add your name.");
+export const OWN_NAME_SAVED = t("Thanks. Your team now sees your name.");
 
 const exact = (value: unknown, keys: readonly string[]): Record<string, unknown> => {
   if (
@@ -66,9 +68,9 @@ export function parseOwnNameState(value: unknown): OwnNameState {
 /** The name as it will be stored: trimmed, 1–80 characters, no control characters. */
 export function ownNameProblem(value: string): string | null {
   const name = value.trim();
-  if (name.length === 0) return "Enter your name.";
-  if ([...name].length > 80) return "Use 80 characters or fewer.";
-  if (/[\p{Cc}\p{Cf}]/u.test(name)) return "Use letters, spaces and punctuation only.";
+  if (name.length === 0) return t("Enter your name.");
+  if ([...name].length > 80) return t("Use 80 characters or fewer.");
+  if (/[\p{Cc}\p{Cf}]/u.test(name)) return t("Use letters, spaces and punctuation only.");
   return null;
 }
 
@@ -160,7 +162,7 @@ export function OwnNamePromptView({
       className="overview-card own-name-prompt own-name-prompt--required"
       aria-labelledby={idPrefix + "-heading"}
     >
-      <h3 id={idPrefix + "-heading"}>Add your name</h3>
+      <h3 id={idPrefix + "-heading"}>{t("Add your name")}</h3>
       <p>{OWN_NAME_PROMPT}</p>
       <p className="own-name-prompt__required">{OWN_NAME_REQUIRED}</p>
       <form
@@ -170,7 +172,7 @@ export function OwnNamePromptView({
           onSubmit();
         }}
       >
-        <label htmlFor={field}>Your name</label>
+        <label htmlFor={field}>{t("Your name")}</label>
         <input
           id={field}
           name="displayName"
@@ -191,7 +193,7 @@ export function OwnNamePromptView({
           </p>
         )}
         <button type="submit" disabled={busy}>
-          {busy ? "Saving…" : "Save name"}
+          {busy ? t("Saving…") : t("Save name")}
         </button>
       </form>
     </section>
@@ -228,7 +230,7 @@ export function OwnNamePrompt({
   if (state === "Hidden") return null;
   if (state === "Saved")
     return (
-      <section className="overview-card own-name-prompt" aria-label="Your name">
+      <section className="overview-card own-name-prompt" aria-label={t("Your name")}>
         <p role="status">{OWN_NAME_SAVED}</p>
       </section>
     );

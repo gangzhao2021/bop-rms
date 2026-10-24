@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -24,43 +25,49 @@ import { unitText } from "./recipe-pages.js";
 
 /** WP-2423 slice 4.4: what each option does to a product's recipes, reviewed and published. */
 const copy: Record<OptionRecipeErrorCode | "Loading", string> = {
-  Loading: "Loading option recipes…",
-  PermissionDenied: "You do not have permission for this recipe action at Brand level.",
-  NotFound: "That option is no longer on the product. Refresh and check.",
-  Conflict: "This changed since you opened the page, or was already decided. Refresh and check.",
-  NoRecipe:
+  Loading: t("Loading option recipes…"),
+  PermissionDenied: t("You do not have permission for this recipe action at Brand level."),
+  NotFound: t("That option is no longer on the product. Refresh and check."),
+  Conflict: t("This changed since you opened the page, or was already decided. Refresh and check."),
+  NoRecipe: t(
     "A size of this product has no published recipe. Publish and bind its recipe under Recipes first.",
-  IngredientMissing: "A size's recipe does not use the ingredient to replace or remove.",
-  IngredientPresent:
+  ),
+  IngredientMissing: t("A size's recipe does not use the ingredient to replace or remove."),
+  IngredientPresent: t(
     "A size's recipe already uses the new ingredient. Choose “Add” to use more of it.",
-  UnitMismatch:
+  ),
+  UnitMismatch: t(
     "The ingredients are measured differently (for example weight and volume), so the same amount cannot be used.",
-  ItemUnavailable: "The new ingredient is not an active stock item.",
-  AllergenUndeclared:
+  ),
+  ItemUnavailable: t("The new ingredient is not an active stock item."),
+  AllergenUndeclared: t(
     "The new ingredient has no current allergen declaration. Declare it under Allergens first.",
-  ReviewRequired:
+  ),
+  ReviewRequired: t(
     "Publishing needs an approved cost review and an approved food-safety review, by two people other than the author.",
-  ReviewerNotIndependent: "The person who saved this change cannot review it.",
-  SoleOperatorNotInEffect:
+  ),
+  ReviewerNotIndependent: t("The person who saved this change cannot review it."),
+  SoleOperatorNotInEffect: t(
     "Someone else now also holds recipe review, so another person must review. Refresh to see who.",
-  NeedsReverification: "Confirm it is you with your authenticator code, then review again.",
-  Invalid: "The change is not valid. Check the amounts.",
-  Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
-  Unavailable: "Option recipes are unavailable.",
+  ),
+  NeedsReverification: t("Confirm it is you with your authenticator code, then review again."),
+  Invalid: t("The change is not valid. Check the amounts."),
+  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Unavailable: t("Option recipes are unavailable."),
 };
 const statusText: Record<OptionRecipeStatus, string> = {
-  NotSet: "Not set — customers cannot choose it",
-  NeedsReview: "Waiting for reviews",
-  Rejected: "Rejected — change and save again",
-  ReadyToPublish: "Approved — ready to publish",
+  NotSet: t("Not set — customers cannot choose it"),
+  NeedsReview: t("Waiting for reviews"),
+  Rejected: t("Rejected — change and save again"),
+  ReadyToPublish: t("Approved — ready to publish"),
   Published: "Published",
-  NeedsUpdate: "A recipe changed — save again",
+  NeedsUpdate: t("A recipe changed — save again"),
 };
 const kindText: Record<OptionRecipeChangeKind, string> = {
-  NoChange: "No change to the recipe",
-  Replace: "Replace an ingredient (same amount)",
-  Add: "Add an amount of an ingredient per one chosen",
-  Remove: "Remove an ingredient",
+  NoChange: t("No change to the recipe"),
+  Replace: t("Replace an ingredient (same amount)"),
+  Add: t("Add an amount of an ingredient per one chosen"),
+  Remove: t("Remove an ingredient"),
 };
 const blank: OptionRecipeChangeContent = {
   kind: "NoChange",
@@ -109,7 +116,7 @@ export function StoreOptionRecipesPage({
   if (state.kind !== "Found")
     return (
       <StatePanel
-        heading={state.kind === "PermissionDenied" ? noAccessHeading : "Option recipes"}
+        heading={state.kind === "PermissionDenied" ? noAccessHeading : t("Option recipes")}
         tone={state.kind === "Loading" ? "neutral" : "error"}
         status
       >
@@ -125,10 +132,14 @@ export function StoreOptionRecipesPage({
   const summary = (content: OptionRecipeChangeContent) => {
     const from = item(content.fromItemReference)?.name ?? "";
     const to = item(content.toItemReference)?.name ?? "";
-    if (content.kind === "NoChange") return "No change to the recipe";
-    if (content.kind === "Replace") return `${from} → ${to} (same amount)`;
-    if (content.kind === "Remove") return `Without ${from}`;
-    return `+ ${content.quantity ?? ""} ${unitText(item(content.toItemReference)?.unitCode)} ${to} per one chosen`;
+    if (content.kind === "NoChange") return t("No change to the recipe");
+    if (content.kind === "Replace") return t("{from} → {to} (same amount)", { from: from, to: to });
+    if (content.kind === "Remove") return t("Without {from}", { from: from });
+    return t("+ {value} {unitCode} {to} per one chosen", {
+      value: content.quantity ?? "",
+      unitCode: unitText(item(content.toItemReference)?.unitCode),
+      to: to,
+    });
   };
   const send = async (command: OptionRecipeCommand, done: string) => {
     if (!client.command) return;
@@ -204,14 +215,20 @@ export function StoreOptionRecipesPage({
                 draft.kind === "Replace" || draft.kind === "Add" ? draft.toItemReference : null,
             },
           },
-          "Saved. Two reviewers (cost and food safety) can now approve it.",
+          t("Saved. Two reviewers (cost and food safety) can now approve it."),
         );
       }}
     >
       <fieldset disabled={busy}>
-        <legend>{`${row.setName} · ${row.optionName} on ${row.productName}`}</legend>
+        <legend>
+          {t("{setName} · {optionName} on {productName}", {
+            setName: row.setName,
+            optionName: row.optionName,
+            productName: row.productName,
+          })}
+        </legend>
         <label>
-          What choosing it does
+          {t("What choosing it does")}
           <select
             value={draft.kind}
             onChange={(event) =>
@@ -227,14 +244,14 @@ export function StoreOptionRecipesPage({
         </label>
         {draft.kind === "Replace" || draft.kind === "Remove" ? (
           <label>
-            {draft.kind === "Replace" ? "Ingredient to replace" : "Ingredient to remove"}
+            {draft.kind === "Replace" ? t("Ingredient to replace") : t("Ingredient to remove")}
             <select
               value={draft.fromItemReference ?? ""}
               onChange={(event) =>
                 setDraft({ ...draft, fromItemReference: event.target.value || null })
               }
             >
-              <option value="">Choose…</option>
+              <option value="">{t("Choose…")}</option>
               {view.ingredients.map((choice) => (
                 <option key={choice.itemReference} value={choice.itemReference}>
                   {choice.name}
@@ -246,7 +263,7 @@ export function StoreOptionRecipesPage({
         {draft.kind === "Replace" || draft.kind === "Add" ? (
           <>
             <label>
-              {draft.kind === "Replace" ? "Replace with" : "Ingredient to add"}
+              {draft.kind === "Replace" ? t("Replace with") : t("Ingredient to add")}
               <select
                 value={draft.toItemReference ?? ""}
                 onChange={(event) => {
@@ -258,18 +275,20 @@ export function StoreOptionRecipesPage({
                   });
                 }}
               >
-                <option value="">Choose…</option>
+                <option value="">{t("Choose…")}</option>
                 {view.ingredients.map((choice) => (
                   <option key={choice.itemReference} value={choice.itemReference}>
                     {choice.name}
-                    {choice.declared ? "" : " (no allergen declaration)"}
+                    {choice.declared ? "" : t(" (no allergen declaration)")}
                   </option>
                 ))}
               </select>
             </label>
             {draft.kind === "Add" ? (
               <label>
-                {`Amount per one chosen (${unitText(item(draft.toItemReference)?.unitCode)})`}
+                {t("Amount per one chosen ({unitCode})", {
+                  unitCode: unitText(item(draft.toItemReference)?.unitCode),
+                })}
                 <input
                   inputMode="decimal"
                   value={draft.quantity ?? ""}
@@ -278,7 +297,9 @@ export function StoreOptionRecipesPage({
               </label>
             ) : null}
             <label>
-              {`Cost (cents per ${unitText(item(draft.toItemReference)?.unitCode)}; empty if unknown)`}
+              {t("Cost (cents per {unitCode}; empty if unknown)", {
+                unitCode: unitText(item(draft.toItemReference)?.unitCode),
+              })}
               <input
                 inputMode="decimal"
                 value={draft.unitCostCents ?? ""}
@@ -288,15 +309,21 @@ export function StoreOptionRecipesPage({
           </>
         ) : null}
         <p>
-          Saving applies this to every size's recipe
-          {row.quantities.length > 1 ? ` and each quantity up to ${row.quantities.length}` : ""};
-          reviewers see the result for each size.
+          {t(
+            "Saving applies this to every size's recipe{value}; reviewers see the result for each size.",
+            {
+              value:
+                row.quantities.length > 1
+                  ? t(" and each quantity up to {length}", { length: row.quantities.length })
+                  : "",
+            },
+          )}
         </p>
         <button type="submit" disabled={!valid || busy}>
-          {pending?.action === "Save" ? "Retry" : "Save change"}
+          {pending?.action === "Save" ? t("Retry") : t("Save change")}
         </button>
         <button type="button" onClick={() => setEditing(null)}>
-          Cancel
+          {t("Cancel")}
         </button>
       </fieldset>
     </form>
@@ -316,7 +343,7 @@ export function StoreOptionRecipesPage({
             setDraft(change?.content ?? blank);
           }}
         >
-          {change === null ? "Set" : "Change"}
+          {change === null ? t("Set") : t("Change")}
         </button>,
       );
     if (change !== null && !change.published && !change.byViewer && view.permissions.mayReview)
@@ -337,11 +364,11 @@ export function StoreOptionRecipesPage({
                     decision: "Approved",
                     comment: null,
                   },
-                  kind === "Cost" ? "Cost review recorded." : "Food-safety review recorded.",
+                  kind === "Cost" ? t("Cost review recorded.") : t("Food-safety review recorded."),
                 )
               }
             >
-              {kind === "Cost" ? "Approve cost" : "Approve food safety"}
+              {kind === "Cost" ? t("Approve cost") : t("Approve food safety")}
             </button>,
           );
     if (status === "ReadyToPublish" && view.permissions.mayPublish && change !== null)
@@ -357,11 +384,11 @@ export function StoreOptionRecipesPage({
                 operationReference: newOperationReference(),
                 changeVersionReference: change.changeVersionReference,
               },
-              "Published. The next menu publication offers this option with its recipe.",
+              t("Published. The next menu publication offers this option with its recipe."),
             )
           }
         >
-          Publish
+          {t("Publish")}
         </button>,
       );
     // Spaced apart, so the actions read as separate words (and wrap on narrow screens).
@@ -376,23 +403,23 @@ export function StoreOptionRecipesPage({
       row.change.reviews.length < 2,
   );
   return (
-    <AppFrame title="Option recipes" description="">
+    <AppFrame title={t("Option recipes")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Option recipes · Brand</p>
-          <h2>Option recipes</h2>
+          <p className="bop-eyebrow">{t("Option recipes · Brand")}</p>
+          <h2>{t("Option recipes")}</h2>
           <p>
-            What choosing an option does to each size's recipe — for stock, cost, kitchen and the
-            allergens customers see. A change needs a cost review and a food-safety review by two
-            people other than its author, then publication. Source as of{" "}
+            {t(
+              "What choosing an option does to each size's recipe — for stock, cost, kitchen and the allergens customers see. A change needs a cost review and a food-safety review by two people other than its author, then publication. Source as of",
+            )}{" "}
             <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
-        <Link to="/app/commerce/option-sets">Options</Link>
+        <Link to="/app/commerce/option-sets">{t("Options")}</Link>
       </header>
       {message ? (
         <StatePanel
-          heading={message.tone === "error" ? "Not done" : "Done"}
+          heading={message.tone === "error" ? t("Not done") : t("Done")}
           tone={message.tone}
           status
         >
@@ -400,8 +427,8 @@ export function StoreOptionRecipesPage({
         </StatePanel>
       ) : null}
       {view.options.length === 0 ? (
-        <StatePanel heading="No options on products" status>
-          <p>Add option sets to products on the product page first.</p>
+        <StatePanel heading={t("No options on products")} status>
+          <p>{t("Add option sets to products on the product page first.")}</p>
         </StatePanel>
       ) : null}
       {products.map((product) => (
@@ -410,10 +437,10 @@ export function StoreOptionRecipesPage({
           <table>
             <thead>
               <tr>
-                <th>Option</th>
-                <th>Recipe change</th>
-                <th>Status</th>
-                <th aria-label="Actions" />
+                <th>{t("Option")}</th>
+                <th>{t("Recipe change")}</th>
+                <th>{t("Status")}</th>
+                <th aria-label={t("Actions")} />
               </tr>
             </thead>
             <tbody>
@@ -423,9 +450,9 @@ export function StoreOptionRecipesPage({
                   <tr key={keyOf(row)}>
                     <td>
                       {row.setName} · {row.optionName}
-                      {row.offered ? "" : " (not offered)"}
+                      {row.offered ? "" : t(" (not offered)")}
                     </td>
-                    <td data-label="Recipe change">
+                    <td data-label={t("Recipe change")}>
                       {row.change === null ? "—" : summary(row.change.content)}
                       {row.change !== null && row.change.lines.length > 0 ? (
                         <ul aria-label={`Result per size for ${row.optionName}`}>
@@ -435,7 +462,7 @@ export function StoreOptionRecipesPage({
                                 ?.name ?? ""}
                               {row.quantities.length > 1 ? ` ×${line.quantity}` : ""}:{" "}
                               {line.changes.length === 0
-                                ? "as recipe"
+                                ? t("as recipe")
                                 : line.changes
                                     .map((change) =>
                                       change.fromItemReference === change.toItemReference
@@ -457,7 +484,7 @@ export function StoreOptionRecipesPage({
                         </ul>
                       ) : null}
                     </td>
-                    <td data-label="Status">
+                    <td data-label={t("Status")}>
                       {statusText[optionRecipeStatus(row)]}
                       {row.change !== null ? <ChangeHistory row={row} /> : null}
                     </td>
@@ -483,11 +510,11 @@ export function StoreOptionRecipesPage({
         if (own.length === 0) return null;
         return (
           <section className="detail-section" aria-labelledby="own-option-reviews">
-            <h3 id="own-option-reviews">Reviews you cannot give as a second person</h3>
+            <h3 id="own-option-reviews">{t("Reviews you cannot give as a second person")}</h3>
             <p>
-              You saved these changes or already gave one of their reviews, so another person who
-              holds recipe review gives the remaining review — unless Sole operator is on and you
-              are the only one who holds it.
+              {t(
+                "You saved these changes or already gave one of their reviews, so another person who holds recipe review gives the remaining review — unless Sole operator is on and you are the only one who holds it.",
+              )}
             </p>
             {own.map((row) => {
               const change = row.change;
@@ -499,14 +526,21 @@ export function StoreOptionRecipesPage({
               return (
                 <div key={keyOf(row)}>
                   <p>
-                    {row.productName} · {row.setName} · {row.optionName}: the{" "}
-                    {kind === "Cost" ? "cost" : "food safety"} review is still needed.
+                    {t(
+                      "{productName} · {setName} · {optionName}: the {value} review is still needed.",
+                      {
+                        productName: row.productName,
+                        setName: row.setName,
+                        optionName: row.optionName,
+                        value: kind === "Cost" ? t("cost") : t("food safety"),
+                      },
+                    )}
                   </p>
                   <SoleOperatorSelfApproval
                     gate={view.soleOperator}
                     csrf={csrf}
                     what={`the ${kind === "Cost" ? "cost" : "food safety"} of this option change`}
-                    permissionName="recipe review"
+                    permissionName={t("recipe review")}
                     yourPart={
                       change.byViewer
                         ? "You saved this change"
@@ -514,7 +548,9 @@ export function StoreOptionRecipesPage({
                     }
                     busy={busy}
                     actionLabel={
-                      kind === "Cost" ? "Approve cost on my own" : "Approve food safety on my own"
+                      kind === "Cost"
+                        ? t("Approve cost on my own")
+                        : t("Approve food safety on my own")
                     }
                     summary={<p>{summary(change.content)}</p>}
                     onApprove={() =>
@@ -528,7 +564,9 @@ export function StoreOptionRecipesPage({
                           comment: null,
                           approvalMode: "SoleOperator",
                         },
-                        kind === "Cost" ? "Cost review recorded." : "Food-safety review recorded.",
+                        kind === "Cost"
+                          ? t("Cost review recorded.")
+                          : t("Food-safety review recorded."),
                       )
                     }
                   />
@@ -540,10 +578,10 @@ export function StoreOptionRecipesPage({
       })()}
       {rejectable.length > 0 ? (
         <section className="detail-section" aria-labelledby="reject-change">
-          <h3 id="reject-change">Reject a change</h3>
-          <p>Tell the author what to fix; they save a corrected change for review.</p>
+          <h3 id="reject-change">{t("Reject a change")}</h3>
+          <p>{t("Tell the author what to fix; they save a corrected change for review.")}</p>
           <label>
-            Reason
+            {t("Reason")}
             <input
               value={comment}
               maxLength={500}
@@ -572,11 +610,11 @@ export function StoreOptionRecipesPage({
                             decision: "Rejected",
                             comment: comment.trim(),
                           },
-                          "Rejection recorded.",
+                          t("Rejection recorded."),
                         )
                       }
                     >
-                      {kind === "Cost" ? "Reject cost" : "Reject food safety"}
+                      {kind === "Cost" ? t("Reject cost") : t("Reject food safety")}
                     </button>
                   ))}
               </li>
@@ -592,19 +630,24 @@ export function StoreOptionRecipesPage({
 export function ChangeHistory({ row }: { readonly row: OptionRecipeRow }) {
   const change = row.change;
   if (change === null) return null;
-  const kindName = (kind: "Cost" | "FoodSafety") => (kind === "Cost" ? "Cost" : "Food safety");
+  const kindName = (kind: "Cost" | "FoodSafety") => (kind === "Cost" ? "Cost" : t("Food safety"));
   const missing = (["Cost", "FoodSafety"] as const).filter(
     (kind) => !change.reviews.some((review) => review.kind === kind),
   );
   return (
     <ul aria-label={`Reviews for ${row.optionName}`}>
       <li>
-        Saved by {change.authorLabel} on <SourceTime instant={change.recordedAt} />
+        {t("Saved by {authorLabel} on", { authorLabel: change.authorLabel })}{" "}
+        <SourceTime instant={change.recordedAt} />
       </li>
       {change.reviews.map((review) => (
         <li key={review.kind}>
-          {kindName(review.kind)}: {review.decision === "Approved" ? "approved" : "rejected"} by{" "}
-          {review.reviewerLabel} on <SourceTime instant={review.reviewedAt} />
+          {t("{kind}: {value} by {reviewerLabel} on", {
+            kind: kindName(review.kind),
+            value: review.decision === "Approved" ? t("approved") : t("rejected"),
+            reviewerLabel: review.reviewerLabel,
+          })}{" "}
+          <SourceTime instant={review.reviewedAt} />
           {review.comment ? ` — ${review.comment}` : ""}
         </li>
       ))}
@@ -612,10 +655,13 @@ export function ChangeHistory({ row }: { readonly row: OptionRecipeRow }) {
       missing.length > 0 &&
       !change.reviews.some((review) => review.decision === "Rejected") ? (
         <li>
-          Still needed: {missing.map((kind) => kindName(kind).toLowerCase()).join(" and ")} review,
-          by someone who holds recipe review
-          {change.byViewer ? " other than you" : " other than the person who saved it"}
-          {change.reviews.length > 0 ? " and the first reviewer" : ""}
+          {t("Still needed: {value} review, by someone who holds recipe review{value2}{value3}", {
+            value: missing.map((kind) => kindName(kind).toLowerCase()).join(" and "),
+            value2: change.byViewer
+              ? t(" other than you")
+              : t(" other than the person who saved it"),
+            value3: change.reviews.length > 0 ? t(" and the first reviewer") : "",
+          })}
         </li>
       ) : null}
     </ul>

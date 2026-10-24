@@ -2,3 +2,4 @@ export { AppFrame, SkipLinkProvidedContext, type AppFrameProps } from "./AppFram
 export { AppErrorBoundary, ErrorFallback } from "./ErrorBoundary.js";
 export { StatePanel, type StatePanelProps } from "./StatePanel.js";
 export { bopPilotNeutralTokenNames } from "./tokens.js";
+export { UiTextContext, englishUiText, useUiText, type UiText } from "./UiText.js";

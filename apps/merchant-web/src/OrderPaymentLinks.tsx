@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { createOrdinaryRefundClient, OrdinaryRefundClientError } from "./ordinary-refund-client.js";
@@ -9,8 +10,9 @@ import { FULL_SIGN_IN_REQUIRED_TEXT, needsFullSignIn } from "./full-sign-in.js";
  */
 const client = createOrdinaryRefundClient();
 
-const DENIED_TEXT =
-  "Payments and refunds for this order are handled by a manager. Ask a manager if the guest needs a refund.";
+const DENIED_TEXT = t(
+  "Payments and refunds for this order are handled by a manager. Ask a manager if the guest needs a refund.",
+);
 
 /** What staff are told when a payment or refund read or command fails. */
 export const refundErrorText = (error: unknown) =>
@@ -19,10 +21,10 @@ export const refundErrorText = (error: unknown) =>
     : error instanceof OrdinaryRefundClientError && error.code === "Denied"
       ? DENIED_TEXT
       : error instanceof OrdinaryRefundClientError && error.code === "Changed"
-        ? "This order changed while it was loading. Refresh to see the latest."
+        ? t("This order changed while it was loading. Refresh to see the latest.")
         : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
-          ? "The payment or refund selection changed. Refresh before trying again."
-          : "Unable to refresh this information. Check your connection and try again.";
+          ? t("The payment or refund selection changed. Refresh before trying again.")
+          : t("Unable to refresh this information. Check your connection and try again.");
 
 export function OrderPaymentLinks({
   orderReference,
@@ -62,7 +64,7 @@ export function OrderPaymentLinks({
           ),
         ];
         setLinks(ids);
-        if (!ids.length) setMessage("This order has no paid payment yet.");
+        if (!ids.length) setMessage(t("This order has no paid payment yet."));
       }
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -75,17 +77,17 @@ export function OrderPaymentLinks({
     }
   };
   return (
-    <section aria-label="Order payments">
+    <section aria-label={t("Order payments")}>
       {denied ? null : (
         <button disabled={busy} onClick={() => void load()}>
-          Payments and refunds
+          {t("Payments and refunds")}
         </button>
       )}
       <p role="status">{message}</p>
       {links.map((reference, index) => (
         <p key={reference}>
           <Link to={"/app/operations/payments/" + reference}>
-            Payment {index + 1} · refunds and details
+            {t("Payment {value} · refunds and details", { value: index + 1 })}
           </Link>
         </p>
       ))}

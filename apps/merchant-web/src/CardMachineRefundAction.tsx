@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useRef, useState } from "react";
 import type { CurrentOrderQueue } from "./current-order-queue-client.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
@@ -46,13 +47,14 @@ export function cardMachineRefundOutcome(
 
 const message: Record<Exclude<Outcome, "Idle">, string> = {
   Pending: "Recording…",
-  Recorded: "Recorded: refunded on the card machine.",
-  NothingOwed: "Nothing is left to refund on this order. Close to refresh it.",
-  Invalid: "Check the slip reference: letters and numbers only, never the card number.",
-  Denied:
+  Recorded: t("Recorded: refunded on the card machine."),
+  NothingOwed: t("Nothing is left to refund on this order. Close to refresh it."),
+  Invalid: t("Check the slip reference: letters and numbers only, never the card number."),
+  Denied: t(
     "Only a store manager or owner can record this refund. Ask them to record it after refunding on the card machine.",
+  ),
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
-  Unknown: "Result unknown. Record it again; the same refund is never counted twice.",
+  Unknown: t("Result unknown. Record it again; the same refund is never counted twice."),
 };
 
 /** The dialog's answer line; a PIN sign-in refusal shows how to confirm it is them instead. */
@@ -150,7 +152,7 @@ export function CardMachineRefundAction({
   return (
     <div className="card-actions card-machine-refund-action">
       <button type="button" onClick={() => dialog.current?.showModal()}>
-        Record card-machine refund
+        {t("Record card-machine refund")}
       </button>
       <dialog
         ref={dialog}
@@ -160,10 +162,12 @@ export function CardMachineRefundAction({
           if (outcome === "Pending") event.preventDefault();
         }}
       >
-        <h2 id={titleId}>Refund {amount} on the card machine</h2>
+        <h2 id={titleId}>{t("Refund {amount} on the card machine", { amount: amount })}</h2>
         <p>
-          Order {order.orderNumber} was paid on the store&apos;s card machine. Refund {amount} to
-          the customer&apos;s card on the machine first, then record it here.
+          {t(
+            "Order {orderNumber} was paid on the store's card machine. Refund {amount} to the customer's card on the machine first, then record it here.",
+            { orderNumber: order.orderNumber, amount: amount },
+          )}
         </p>
         <form
           onSubmit={(event) => {
@@ -172,7 +176,7 @@ export function CardMachineRefundAction({
           }}
         >
           <label>
-            Slip reference (optional)
+            {t("Slip reference (optional)")}
             <input
               value={slip}
               maxLength={40}
@@ -184,7 +188,7 @@ export function CardMachineRefundAction({
             />
           </label>
           <p id={titleId + "-hint"} className="field-hint">
-            The approval or reference code printed on the refund slip. Never the card number.
+            {t("The approval or reference code printed on the refund slip. Never the card number.")}
           </p>
           {outcome === FULL_SIGN_IN_REQUIRED ? null : (
             <CardMachineRefundStatus outcome={outcome} csrf={csrf} fetcher={fetcher} />
@@ -194,14 +198,16 @@ export function CardMachineRefundAction({
               type="submit"
               disabled={outcome === "Pending" || !validSlipReference(slip.trim())}
             >
-              {outcome === "Pending" ? "Recording…" : `Refunded ${amount} on card machine`}
+              {outcome === "Pending"
+                ? t("Recording…")
+                : t("Refunded {amount} on card machine", { amount: amount })}
             </button>
             <button
               type="button"
               disabled={outcome === "Pending"}
               onClick={() => dialog.current?.close()}
             >
-              Close
+              {t("Close")}
             </button>
           </div>
         </form>

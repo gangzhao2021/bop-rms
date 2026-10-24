@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   StoreTimeZoneContext,
@@ -837,15 +838,19 @@ export function ReceiptTemplateDraftEditor({
           setPublishedHistory(result.receipt.result?.publishedVersion ?? null);
           setNotice(
             result.receipt.outcome === "Abandoned"
-              ? "Original review action did not commit."
+              ? t("Original review action did not commit.")
               : result.historical
-                ? "Original review action confirmed from history; the current review is shown separately."
+                ? t(
+                    "Original review action confirmed from history; the current review is shown separately.",
+                  )
                 : result.receipt.action === "Approve"
                   ? result.receipt.result?.approvedByReference === scope.actorReference &&
                     approvalMode === "SoleOperator"
-                    ? "Approved by you alone as sole operator. You can now publish it."
-                    : "Independent approval confirmed. Publication remains separate."
-                  : "Template publication confirmed. Store selection and operational readiness remain separate.",
+                    ? t("Approved by you alone as sole operator. You can now publish it.")
+                    : t("Independent approval confirmed. Publication remains separate.")
+                  : t(
+                      "Template publication confirmed. Store selection and operational readiness remain separate.",
+                    ),
           );
         }
         return;
@@ -904,8 +909,8 @@ export function ReceiptTemplateDraftEditor({
           setReviewNow(Date.now());
           setNotice(
             result.receipt.outcome === "Committed"
-              ? "Original review submission confirmed. Approval and publication remain separate."
-              : "Original submission did not commit. You may submit the saved draft again.",
+              ? t("Original review submission confirmed. Approval and publication remain separate.")
+              : t("Original submission did not commit. You may submit the saved draft again."),
           );
         }
         return;
@@ -1008,8 +1013,8 @@ export function ReceiptTemplateDraftEditor({
         setReady(true);
         setNotice(
           result.receipt.outcome === "Committed"
-            ? "Saved template draft confirmed. Publication has not been evaluated."
-            : "Earlier save did not commit. You can save a new draft.",
+            ? t("Saved template draft confirmed. Publication has not been evaluated.")
+            : t("Earlier save did not commit. You can save a new draft."),
         );
         setSubject(result.current.templateReference);
       }
@@ -1074,33 +1079,38 @@ export function ReceiptTemplateDraftEditor({
       review?.lifecycle?.state === "Published" &&
       review.submission?.versionReference === selected?.content.versionReference;
   return (
-    <section hidden={hidden} aria-label="Receipt template drafts">
-      <h4>Receipt template drafts</h4>
+    <section hidden={hidden} aria-label={t("Receipt template drafts")}>
+      <h4>{t("Receipt template drafts")}</h4>
       <p>
-        Write a receipt template and preview the standard fields it shows. Saving keeps it as a
-        draft: customer receipts do not change until it is published and chosen for this store under
-        Published receipt template in Store setup. Saving does not mean a tax or legal professional
-        has checked it.
+        {t(
+          "Write a receipt template and preview the standard fields it shows. Saving keeps it as a draft: customer receipts do not change until it is published and chosen for this store under Published receipt template in Store setup. Saving does not mean a tax or legal professional has checked it.",
+        )}
       </p>
       <label>
-        Receipt template
+        {t("Receipt template")}
         <select
-          aria-label="Receipt template"
+          aria-label={t("Receipt template")}
           value={subject ?? ""}
           disabled={locked || listing}
           onChange={(e) => setSubject(e.target.value || null)}
         >
-          <option value="">New template draft</option>
+          <option value="">{t("New template draft")}</option>
           {subject && !rows.some((r) => r.content.templateReference === subject) && (
             <option value={subject}>
               {selected
-                ? `${languageName(selected.content.locale)} · draft ${selected.revision}`
-                : "Selected saved template"}
+                ? t("{locale} · draft {revision}", {
+                    locale: languageName(selected.content.locale),
+                    revision: selected.revision,
+                  })
+                : t("Selected saved template")}
             </option>
           )}
           {rows.map((r) => (
             <option key={r.content.templateReference} value={r.content.templateReference}>
-              {languageName(r.content.locale)} · draft {r.revision}
+              {t("{locale} · draft {revision}", {
+                locale: languageName(r.content.locale),
+                revision: r.revision,
+              })}
             </option>
           ))}
         </select>
@@ -1118,7 +1128,7 @@ export function ReceiptTemplateDraftEditor({
           }
           onClick={() => void refreshRoster(null)}
         >
-          Refresh template list
+          {t("Refresh template list")}
         </button>
         <button
           type="button"
@@ -1133,26 +1143,33 @@ export function ReceiptTemplateDraftEditor({
           }
           onClick={() => void refreshRoster(roster?.nextAfter ?? null)}
         >
-          Next templates
+          {t("Next templates")}
         </button>
       </div>
       {selected && (
         <p>
-          Saved {languageName(selected.content.locale)} template, draft {selected.revision}.{" "}
-          {publicationRecorded ? "Publication recorded." : "Publication has not been evaluated."}
+          {t("Saved {locale} template, draft {revision}. {value}", {
+            locale: languageName(selected.content.locale),
+            revision: selected.revision,
+            value: publicationRecorded
+              ? t("Publication recorded.")
+              : t("Publication has not been evaluated."),
+          })}
         </p>
       )}
       {lifecyclePending && (
         <div>
           <p role="status">
-            Recover the original approval or publication before another write or template selection.
+            {t(
+              "Recover the original approval or publication before another write or template selection.",
+            )}
           </p>
           <button
             type="button"
             disabled={disabled || busy || loadedIdentity.current !== identityKey}
             onClick={() => void action("LifecycleResolve")}
           >
-            Recover earlier template review action
+            {t("Recover earlier template review action")}
           </button>
           {lifecycleOriginal.current && (
             <button
@@ -1160,7 +1177,7 @@ export function ReceiptTemplateDraftEditor({
               disabled={disabled || busy || loadedIdentity.current !== identityKey}
               onClick={() => void action("LifecycleRetry")}
             >
-              Retry exact template review action
+              {t("Retry exact template review action")}
             </button>
           )}
         </div>
@@ -1177,7 +1194,7 @@ export function ReceiptTemplateDraftEditor({
             }
             onClick={() => void action("Approve")}
           >
-            Approve receipt template
+            {t("Approve receipt template")}
           </button>
           <button
             type="button"
@@ -1189,36 +1206,44 @@ export function ReceiptTemplateDraftEditor({
             }
             onClick={() => void action("Publish")}
           >
-            Publish receipt template
+            {t("Publish receipt template")}
           </button>
           {ownReview && soleGate === undefined && (
-            <p role="status">Checking who can approve this template…</p>
+            <p role="status">{t("Checking who can approve this template…")}</p>
           )}
           {ownReview && soleGate === "failed" && (
             <p>
-              You wrote or sent this template, so another person with Owner access must approve it.
-              Whether you may approve it on your own could not be checked; refresh to try again.
+              {t(
+                "You wrote or sent this template, so another person with Owner access must approve it. Whether you may approve it on your own could not be checked; refresh to try again.",
+              )}
             </p>
           )}
           {ownReview && soleGate === null && (
             <p>
-              You wrote or sent this template, so another person with Owner access must approve it.
+              {t(
+                "You wrote or sent this template, so another person with Owner access must approve it.",
+              )}
             </p>
           )}
           {ownReview && soleGate !== undefined && soleGate !== null && soleGate !== "failed" && (
-            <section aria-label="Approve your own receipt template">
+            <section aria-label={t("Approve your own receipt template")}>
               <SoleOperatorSelfApproval
                 gate={soleGate}
                 csrf={csrf}
                 summary={
                   <p>
-                    {languageName(selected.content.locale)} receipt template, draft{" "}
-                    {review.submission?.draftRevision}, as checked when it was sent for approval.
+                    {t(
+                      "{locale} receipt template, draft {draftRevision}, as checked when it was sent for approval.",
+                      {
+                        locale: languageName(selected.content.locale),
+                        draftRevision: review.submission?.draftRevision,
+                      },
+                    )}
                   </p>
                 }
-                what="this receipt template"
-                permissionName="Owner access to this Store"
-                actionLabel="Approve receipt template on my own"
+                what={t("this receipt template")}
+                permissionName={t("Owner access to this Store")}
+                actionLabel={t("Approve receipt template on my own")}
                 busy={
                   locked ||
                   dirty ||
@@ -1239,54 +1264,72 @@ export function ReceiptTemplateDraftEditor({
         </div>
       )}
       {publishedHistory && (
-        <section aria-label="Original template publication">
-          <h5>Original publication receipt</h5>
+        <section aria-label={t("Original template publication")}>
+          <h5>{t("Original publication receipt")}</h5>
           <p>
-            {languageName(publishedHistory.locale)} · Published{" "}
-            {friendlyStoreTime(publishedHistory.publishedAt, timeZone)}
+            {t("{locale} · Published {publishedAt}", {
+              locale: languageName(publishedHistory.locale),
+              publishedAt: friendlyStoreTime(publishedHistory.publishedAt, timeZone),
+            })}
           </p>
           <p>
-            In use from {friendlyStoreTime(publishedHistory.effectiveFrom, timeZone)}
-            {publishedHistory.effectiveUntil === null
-              ? " with no end date"
-              : ` until ${friendlyStoreTime(publishedHistory.effectiveUntil, timeZone)}`}
-            . This is the record of that publication; whether this store uses it is chosen under
-            Published receipt template in Store setup, and it has not been checked by a tax or legal
-            professional.
+            {t(
+              "In use from {effectiveFrom}{value}. This is the record of that publication; whether this store uses it is chosen under Published receipt template in Store setup, and it has not been checked by a tax or legal professional.",
+              {
+                effectiveFrom: friendlyStoreTime(publishedHistory.effectiveFrom, timeZone),
+                value:
+                  publishedHistory.effectiveUntil === null
+                    ? t(" with no end date")
+                    : t(" until {effectiveUntil}", {
+                        effectiveUntil: friendlyStoreTime(
+                          publishedHistory.effectiveUntil,
+                          timeZone,
+                        ),
+                      }),
+              },
+            )}
           </p>
         </section>
       )}
       {review && (
-        <section aria-label="Receipt template review status">
-          <h5>Recorded review</h5>
+        <section aria-label={t("Receipt template review status")}>
+          <h5>{t("Recorded review")}</h5>
           {review.submission && review.lifecycle ? (
             <>
               <p>
-                {receiptTemplateStateLabel(review.lifecycle.state)} · submitted draft{" "}
-                {review.submission.draftRevision}.{" "}
-                {Date.parse(review.submission.validationValidUntil) <= reviewNow
-                  ? "The check made at submission has expired; submit again to approve it."
-                  : "The check made at submission holds until " +
-                    friendlyStoreTime(review.submission.validationValidUntil, timeZone) +
-                    "."}
+                {t("{state} · submitted draft {draftRevision}. {value}", {
+                  state: receiptTemplateStateLabel(review.lifecycle.state),
+                  draftRevision: review.submission.draftRevision,
+                  value:
+                    Date.parse(review.submission.validationValidUntil) <= reviewNow
+                      ? t("The check made at submission has expired; submit again to approve it.")
+                      : t("The check made at submission holds until ") +
+                        friendlyStoreTime(review.submission.validationValidUntil, timeZone) +
+                        ".",
+                })}
               </p>
               {review.submission.versionReference !== selected?.content.versionReference && (
-                <p>This review refers to an earlier saved draft, not the current edited version.</p>
+                <p>
+                  {t(
+                    "This review refers to an earlier saved draft, not the current edited version.",
+                  )}
+                </p>
               )}
             </>
           ) : (
-            <p>The saved draft has not been submitted for review.</p>
+            <p>{t("The saved draft has not been submitted for review.")}</p>
           )}
           <p>
-            Professional and legal review are not evaluated.
-            {review.lifecycle?.state !== "Published" && " Publication remains separate."}
+            {t("Professional and legal review are not evaluated.")}
+            {review.lifecycle?.state !== "Published" && t(" Publication remains separate.")}
           </p>
         </section>
       )}
       {submitPending && (
         <p role="status">
-          An original review submission must be recovered before saving, submitting or selecting
-          another template.
+          {t(
+            "An original review submission must be recovered before saving, submitting or selecting another template.",
+          )}
         </p>
       )}
       {selected && !submitPending && (
@@ -1301,11 +1344,11 @@ export function ReceiptTemplateDraftEditor({
           }
           onClick={() => void action("Submit")}
         >
-          Submit template for review
+          {t("Submit template for review")}
         </button>
       )}
       {selected && dirty && !submitPending && (
-        <p>Save the changed template fields before submitting for review.</p>
+        <p>{t("Save the changed template fields before submitting for review.")}</p>
       )}
       {selected && (
         <button
@@ -1321,7 +1364,7 @@ export function ReceiptTemplateDraftEditor({
           }
           onClick={() => void action("Refresh")}
         >
-          Refresh template review
+          {t("Refresh template review")}
         </button>
       )}
       {submitPending && (
@@ -1331,7 +1374,7 @@ export function ReceiptTemplateDraftEditor({
             disabled={disabled || busy || loadedIdentity.current !== identityKey}
             onClick={() => void action("SubmitResolve")}
           >
-            Recover earlier template submission
+            {t("Recover earlier template submission")}
           </button>
           {submitOriginal.current && (
             <button
@@ -1339,129 +1382,147 @@ export function ReceiptTemplateDraftEditor({
               disabled={disabled || busy || loadedIdentity.current !== identityKey}
               onClick={() => void action("SubmitRetry")}
             >
-              Retry exact template submission
+              {t("Retry exact template submission")}
             </button>
           )}
         </div>
       )}
-      {busy && <p role="status">Loading template draft…</p>}
+      {busy && <p role="status">{t("Loading template draft…")}</p>}
       {notice && <p role="status">{notice}</p>}
       {error && (
         <p role="alert">
           {error === "OutcomeUnknown"
-            ? "The request could not be confirmed. Recover its original save or submission before writing again."
+            ? t(
+                "The request could not be confirmed. Recover its original save or submission before writing again.",
+              )
             : error === "Denied"
-              ? "Permission denied. An earlier save remains protected."
+              ? t("Permission denied. An earlier save remains protected.")
               : error === "Invalid"
-                ? "Check the language, saved receipt presets and the start and end times. An earlier save remains protected."
+                ? t(
+                    "Check the language, saved receipt presets and the start and end times. An earlier save remains protected.",
+                  )
                 : error === "Conflict"
-                  ? "The template changed or the original save conflicts. Refresh or recover the original save; no version has been silently substituted."
+                  ? t(
+                      "The template changed or the original save conflicts. Refresh or recover the original save; no version has been silently substituted.",
+                    )
                   : error === "SoleOperatorOff"
-                    ? "Sole operator is off, so another person with Owner access must approve this template. If you run the business on your own, the brand owner can turn on Sole operator on the Approvals page. Recover the request, then refresh."
+                    ? t(
+                        "Sole operator is off, so another person with Owner access must approve this template. If you run the business on your own, the brand owner can turn on Sole operator on the Approvals page. Recover the request, then refresh.",
+                      )
                     : error === "SoleOperatorNotInEffect"
-                      ? "Someone else also holds Owner access to this Store, so they must approve this template. Recover the request, then refresh."
+                      ? t(
+                          "Someone else also holds Owner access to this Store, so they must approve this template. Recover the request, then refresh.",
+                        )
                       : error === "SoleOperatorNeedsVerification"
-                        ? "Your verification is more than 15 minutes old, so the approval was not recorded. Recover the request, verify again, then approve."
-                        : "The template draft could not be loaded or saved. Refresh when connected; an earlier save remains protected."}
+                        ? t(
+                            "Your verification is more than 15 minutes old, so the approval was not recorded. Recover the request, verify again, then approve.",
+                          )
+                        : t(
+                            "The template draft could not be loaded or saved. Refresh when connected; an earlier save remains protected.",
+                          )}
         </p>
       )}
       {pending && (
         <p role="status">
-          An earlier template draft save must be recovered before another save or template
-          selection.
+          {t(
+            "An earlier template draft save must be recovered before another save or template selection.",
+          )}
         </p>
       )}
       <fieldset disabled={locked || frozenReview}>
-        <legend>Authored template fields</legend>
+        <legend>{t("Authored template fields")}</legend>
         <label>
-          Receipt language
+          {t("Receipt language")}
           <input
-            aria-label="Receipt language"
+            aria-label={t("Receipt language")}
             value={locale}
             onChange={(e) => setLocale(e.target.value)}
           />
         </label>
         <label>
-          Receipt layout selection
+          {t("Receipt layout selection")}
           <select
-            aria-label="Receipt layout selection"
+            aria-label={t("Receipt layout selection")}
             value={layout}
             onChange={(e) => setLayout(e.target.value)}
           >
-            <option value="">Choose saved receipt layout</option>
+            <option value="">{t("Choose saved receipt layout")}</option>
             {layout && layout !== currentLayout?.artifactReference && (
-              <option value={layout}>Saved layout selection (retained)</option>
+              <option value={layout}>{t("Saved layout selection (retained)")}</option>
             )}
             {currentLayout && (
               <option value={currentLayout.artifactReference}>
-                Saved layout revision {currentLayout.revision}
+                {t("Saved layout revision {revision}", { revision: currentLayout.revision })}
               </option>
             )}
           </select>
         </label>
         <label>
-          Receipt required fields selection
+          {t("Receipt required fields selection")}
           <select
-            aria-label="Receipt required fields selection"
+            aria-label={t("Receipt required fields selection")}
             value={compliance}
             onChange={(e) => setCompliance(e.target.value)}
           >
-            <option value="">Choose saved required fields</option>
+            <option value="">{t("Choose saved required fields")}</option>
             {compliance && compliance !== currentCompliance?.artifactReference && (
-              <option value={compliance}>Saved required fields selection (retained)</option>
+              <option value={compliance}>{t("Saved required fields selection (retained)")}</option>
             )}
             {currentCompliance && (
               <option value={currentCompliance.artifactReference}>
-                Saved required fields revision {currentCompliance.revision}
+                {t("Saved required fields revision {revision}", {
+                  revision: currentCompliance.revision,
+                })}
               </option>
             )}
           </select>
         </label>
         {!currentLayout || !currentCompliance ? (
-          <p>Save both receipt presets above, then refresh available presets.</p>
+          <p>{t("Save both receipt presets above, then refresh available presets.")}</p>
         ) : null}
         <button type="button" onClick={() => void refreshArtifacts()}>
-          Refresh available presets
+          {t("Refresh available presets")}
         </button>
         <label>
-          Template activation
+          {t("Template activation")}
           <select
-            aria-label="Template activation"
+            aria-label={t("Template activation")}
             value={activation}
             onChange={(e) =>
               setActivation(e.target.value === "Scheduled" ? "Scheduled" : "Immediate")
             }
           >
-            <option value="Immediate">As soon as it is published</option>
-            <option value="Scheduled">From a set date and time</option>
+            <option value="Immediate">{t("As soon as it is published")}</option>
+            <option value="Scheduled">{t("From a set date and time")}</option>
           </select>
         </label>
         {activation === "Scheduled" && (
           <label>
-            Starts at (Store time)
+            {t("Starts at (Store time)")}
             <input
               type="datetime-local"
-              aria-label="Starts at (Store time)"
+              aria-label={t("Starts at (Store time)")}
               value={localInput(start)}
               onChange={(e) => setStart(instantInput(e.target.value))}
             />
           </label>
         )}
         <label>
-          Ends at (Store time, optional)
+          {t("Ends at (Store time, optional)")}
           <input
             type="datetime-local"
-            aria-label="Ends at (Store time, optional)"
+            aria-label={t("Ends at (Store time, optional)")}
             value={localInput(end)}
             onChange={(e) => setEnd(instantInput(e.target.value))}
           />
         </label>
       </fieldset>
-      <section aria-label="Receipt field preview">
-        <h5>Standard receipt field preview</h5>
+      <section aria-label={t("Receipt field preview")}>
+        <h5>{t("Standard receipt field preview")}</h5>
         <p>
-          Standard fields supported by the saved digital receipt layout. No actual order or payment
-          details are shown.
+          {t(
+            "Standard fields supported by the saved digital receipt layout. No actual order or payment details are shown.",
+          )}
         </p>
         <ul>
           {receiptTemplateArtifactRequiredFields.map((field) => (
@@ -1475,7 +1536,7 @@ export function ReceiptTemplateDraftEditor({
           disabled={disabled || busy || loadedIdentity.current !== identityKey}
           onClick={() => void action("Refresh")}
         >
-          Refresh saved template draft
+          {t("Refresh saved template draft")}
         </button>
         {pending ? (
           <>
@@ -1484,7 +1545,7 @@ export function ReceiptTemplateDraftEditor({
               disabled={disabled || busy || loadedIdentity.current !== identityKey}
               onClick={() => void action("Resolve")}
             >
-              Recover original template draft save
+              {t("Recover original template draft save")}
             </button>
             {original.current && (
               <button
@@ -1492,7 +1553,7 @@ export function ReceiptTemplateDraftEditor({
                 disabled={disabled || busy || loadedIdentity.current !== identityKey}
                 onClick={() => void action("Retry")}
               >
-                Retry exact template draft save
+                {t("Retry exact template draft save")}
               </button>
             )}
           </>
@@ -1502,7 +1563,7 @@ export function ReceiptTemplateDraftEditor({
             disabled={locked || frozenReview || !layout || !compliance}
             onClick={() => void action("Save")}
           >
-            Save template draft
+            {t("Save template draft")}
           </button>
         )}
       </div>

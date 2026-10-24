@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -20,36 +21,39 @@ import {
 } from "./supply-item-pages.js";
 
 const copy: Record<SupplyItemErrorCode | "Loading", string> = {
-  Loading: "Loading inventory items…",
-  PermissionDenied: "You do not have permission for this inventory action.",
-  NotFound: "This inventory item does not exist for the selected Brand.",
-  Conflict:
+  Loading: t("Loading inventory items…"),
+  PermissionDenied: t("You do not have permission for this inventory action."),
+  NotFound: t("This inventory item does not exist for the selected Brand."),
+  Conflict: t(
     "The item changed or the action is not allowed in its current status. Refresh and try again.",
-  StockRemaining:
+  ),
+  StockRemaining: t(
     "A Store still holds, reserves or expects stock of this item. Use or adjust that stock before archiving.",
-  Locked:
+  ),
+  Locked: t(
     "Stock has been recorded for this item, so its base unit cannot change and tracking changes need a migration plan.",
-  Invalid: "Some values are not valid. Check the code, name and tracking settings.",
-  Offline: "Offline. The change was not confirmed; retry sends the same request again.",
-  Unavailable: "Inventory items are unavailable.",
+  ),
+  Invalid: t("Some values are not valid. Check the code, name and tracking settings."),
+  Offline: t("Offline. The change was not confirmed; retry sends the same request again."),
+  Unavailable: t("Inventory items are unavailable."),
 };
 const itemTypes = [
-  ["RawMaterial", "Raw material"],
+  ["RawMaterial", t("Raw material")],
   ["Packaging", "Packaging"],
-  ["SemiFinished", "Semi-finished (prepared in store)"],
-  ["FinishedGood", "Finished good"],
-  ["NonFoodSupply", "Non-food supply"],
+  ["SemiFinished", t("Semi-finished (prepared in store)")],
+  ["FinishedGood", t("Finished good")],
+  ["NonFoodSupply", t("Non-food supply")],
 ] as const;
 const lotModes: readonly (readonly [LotTracking, string])[] = [
-  ["NoLot", "No lot tracking"],
-  ["LotOptional", "Lot optional"],
-  ["LotRequired", "Lot required"],
-  ["LotExpiryRequired", "Lot and expiry required (FEFO)"],
+  ["NoLot", t("No lot tracking")],
+  ["LotOptional", t("Lot optional")],
+  ["LotRequired", t("Lot required")],
+  ["LotExpiryRequired", t("Lot and expiry required (FEFO)")],
 ];
 const negativePolicies: readonly (readonly [NegativeStockPolicy, string])[] = [
-  ["Block", "Block when stock would go negative"],
-  ["ManagerOverride", "Manager override required"],
-  ["AllowWithWarning", "Allow with a warning"],
+  ["Block", t("Block when stock would go negative")],
+  ["ManagerOverride", t("Manager override required")],
+  ["AllowWithWarning", t("Allow with a warning")],
 ];
 type State =
   | { readonly kind: "Loading" | SupplyItemErrorCode }
@@ -65,12 +69,12 @@ function routeReference(value: unknown): string | null {
 function Failure({ code, onRefresh }: { code: SupplyItemErrorCode; onRefresh?: () => void }) {
   return (
     <StatePanel
-      heading={code === "PermissionDenied" ? noAccessHeading : "Inventory items"}
+      heading={code === "PermissionDenied" ? noAccessHeading : t("Inventory items")}
       tone="error"
       status
     >
       <p>{code === "PermissionDenied" ? pageAccessDeniedText : copy[code]}</p>
-      {onRefresh ? <button onClick={onRefresh}>Refresh</button> : null}
+      {onRefresh ? <button onClick={onRefresh}>{t("Refresh")}</button> : null}
     </StatePanel>
   );
 }
@@ -141,7 +145,7 @@ export function SupplyItemListPage({
   });
   if (state.kind === "Loading")
     return (
-      <StatePanel heading="Inventory items" status>
+      <StatePanel heading={t("Inventory items")} status>
         <p>{copy.Loading}</p>
       </StatePanel>
     );
@@ -149,17 +153,19 @@ export function SupplyItemListPage({
   const view = state.view;
   const items = [...view.items, ...pages];
   return (
-    <AppFrame title="Inventory items" description="">
+    <AppFrame title={t("Inventory items")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Inventory items</p>
-          <h2>Inventory items</h2>
+          <p className="bop-eyebrow">{t("Inventory items")}</p>
+          <h2>{t("Inventory items")}</h2>
           <p>
-            Ingredients and supplies the Brand stocks. Source as of{" "}
+            {t("Ingredients and supplies the Brand stocks. Source as of")}{" "}
             <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
-        {view.permissions.mayCreate ? <Link to="/app/supply/items/new">Create item</Link> : null}
+        {view.permissions.mayCreate ? (
+          <Link to="/app/supply/items/new">{t("Create item")}</Link>
+        ) : null}
       </header>
       <form
         className="list-filters"
@@ -170,7 +176,7 @@ export function SupplyItemListPage({
         }}
       >
         <label>
-          Name or code
+          {t("Name or code")}
           <input
             value={search}
             maxLength={80}
@@ -178,33 +184,33 @@ export function SupplyItemListPage({
           />
         </label>
         <label>
-          Status
+          {t("Status")}
           <select value={lifecycle} onChange={(event) => setLifecycle(event.currentTarget.value)}>
-            <option>All</option>
-            <option>Active</option>
-            <option>Inactive</option>
-            <option>Archived</option>
+            <option>{t("All")}</option>
+            <option>{t("Active")}</option>
+            <option>{t("Inactive")}</option>
+            <option>{t("Archived")}</option>
           </select>
         </label>
-        <button>Search</button>
+        <button>{t("Search")}</button>
       </form>
       {items.length === 0 ? (
-        <StatePanel heading="No inventory items" status>
+        <StatePanel heading={t("No inventory items")} status>
           <p>
             {view.permissions.mayCreate
-              ? "Create the first ingredient or supply the Store stocks."
-              : "No item matches."}
+              ? t("Create the first ingredient or supply the Store stocks.")
+              : t("No item matches.")}
           </p>
         </StatePanel>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Code</th>
-              <th>Unit</th>
-              <th>Tracking</th>
-              <th>Status</th>
+              <th>{t("Name")}</th>
+              <th>{t("Code")}</th>
+              <th>{t("Unit")}</th>
+              <th>{t("Tracking")}</th>
+              <th>{t("Status")}</th>
             </tr>
           </thead>
           <tbody>
@@ -219,7 +225,7 @@ export function SupplyItemListPage({
                   {item.stockTracked
                     ? (lotModes.find(([mode]) => mode === item.lotTracking)?.[1] ??
                       item.lotTracking)
-                    : "Not stock tracked"}
+                    : t("Not stock tracked")}
                 </td>
                 <td>{item.lifecycle}</td>
               </tr>
@@ -227,7 +233,7 @@ export function SupplyItemListPage({
           </tbody>
         </table>
       )}
-      {view.hasMore ? <button onClick={() => void loadMore()}>Load more</button> : null}
+      {view.hasMore ? <button onClick={() => void loadMore()}>{t("Load more")}</button> : null}
     </AppFrame>
   );
 }
@@ -270,7 +276,7 @@ export function SupplyItemDetailPage({
   if (reference === null) return <Failure code="NotFound" />;
   if (state.kind === "Loading")
     return (
-      <StatePanel heading="Inventory item" status>
+      <StatePanel heading={t("Inventory item")} status>
         <p>{copy.Loading}</p>
       </StatePanel>
     );
@@ -290,47 +296,51 @@ export function SupplyItemDetailPage({
       if (result) reload();
     });
   return (
-    <AppFrame title={item.name} description="Inventory item">
+    <AppFrame title={item.name} description={t("Inventory item")}>
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Inventory item</p>
+          <p className="bop-eyebrow">{t("Inventory item")}</p>
           <h2>{item.name}</h2>
           <p>
-            {item.internalCode} · {item.itemType} · <strong>{item.lifecycle}</strong> · version{" "}
-            {item.version}
+            {item.internalCode} · {item.itemType} · <strong>{item.lifecycle}</strong>{" "}
+            {t("· version {version}", { version: item.version })}
           </p>
         </div>
-        <Link to="/app/supply/items">Back to items</Link>
+        <Link to="/app/supply/items">{t("Back to items")}</Link>
       </header>
       <section className="detail-section">
-        <h3>Units and tracking</h3>
-        <p>Base unit {item.unitCode}</p>
+        <h3>{t("Units and tracking")}</h3>
+        <p>{t("Base unit {unitCode}", { unitCode: item.unitCode })}</p>
         <p>
           {item.stockTracked
             ? (lotModes.find(([mode]) => mode === item.lotTracking)?.[1] ?? item.lotTracking)
-            : "Not stock tracked"}
-          {item.shelfLifeDays !== null ? ` · shelf life ${item.shelfLifeDays} days` : ""}
+            : t("Not stock tracked")}
+          {item.shelfLifeDays !== null
+            ? t(" · shelf life {shelfLifeDays} days", { shelfLifeDays: item.shelfLifeDays })
+            : ""}
           {item.expiryWarningDays !== null
-            ? ` · warn ${item.expiryWarningDays} days before expiry`
+            ? t(" · warn {expiryWarningDays} days before expiry", {
+                expiryWarningDays: item.expiryWarningDays,
+              })
             : ""}
         </p>
         <p>{negativePolicies.find(([policy]) => policy === item.negativeStockPolicy)?.[1]}</p>
         {view.stockRemaining ? (
-          <p>A Store currently holds or reserves stock of this item.</p>
+          <p>{t("A Store currently holds or reserves stock of this item.")}</p>
         ) : null}
       </section>
-      <div className="card-actions" role="group" aria-label="Item actions">
+      <div className="card-actions" role="group" aria-label={t("Item actions")}>
         {may.mayUpdate && item.lifecycle !== "Archived" ? (
-          <Link to={`/app/supply/items/${item.itemReference}/edit`}>Edit</Link>
+          <Link to={`/app/supply/items/${item.itemReference}/edit`}>{t("Edit")}</Link>
         ) : null}
         {may.mayActivate && item.lifecycle === "Inactive" ? (
           <button disabled={busy} onClick={() => transition("Activate", "ITEM_READY_FOR_USE")}>
-            Activate
+            {t("Activate")}
           </button>
         ) : null}
         {may.mayDeactivate && item.lifecycle === "Active" ? (
           <button disabled={busy} onClick={() => transition("Deactivate", "ITEM_NOT_IN_USE")}>
-            Deactivate
+            {t("Deactivate")}
           </button>
         ) : null}
         {may.mayArchive && item.lifecycle === "Inactive" ? (
@@ -339,24 +349,24 @@ export function SupplyItemDetailPage({
             title={view.stockRemaining ? copy.StockRemaining : undefined}
             onClick={() => transition("Archive", "ITEM_DISCONTINUED")}
           >
-            Archive
+            {t("Archive")}
           </button>
         ) : null}
         {may.mayRestore && item.lifecycle === "Archived" ? (
           <button disabled={busy} onClick={() => transition("Restore", "ITEM_REINSTATED")}>
-            Restore
+            {t("Restore")}
           </button>
         ) : null}
       </div>
       {error ? (
-        <StatePanel heading="Change not applied" tone="error" status>
+        <StatePanel heading={t("Change not applied")} tone="error" status>
           <p>{copy[error]}</p>
           {pending && error === "Offline" ? (
             <button disabled={busy} onClick={() => void run(pending).then((r) => r && reload())}>
-              Retry
+              {t("Retry")}
             </button>
           ) : (
-            <button onClick={reload}>Refresh</button>
+            <button onClick={reload}>{t("Refresh")}</button>
           )}
         </StatePanel>
       ) : null}
@@ -427,7 +437,7 @@ function ItemForm({
       ) : (
         <>
           <label>
-            Internal code (letters, digits, - or _)
+            {t("Internal code (letters, digits, - or _)")}
             <input
               required
               maxLength={64}
@@ -436,7 +446,7 @@ function ItemForm({
             />
           </label>
           <label>
-            Item type
+            {t("Item type")}
             <select
               value={fields.itemType}
               onChange={(event) => set({ itemType: event.currentTarget.value })}
@@ -451,7 +461,7 @@ function ItemForm({
         </>
       )}
       <label>
-        Name
+        {t("Name")}
         <input
           required
           maxLength={120}
@@ -460,7 +470,9 @@ function ItemForm({
         />
       </label>
       <label>
-        Base unit {unitLocked ? "(requires unit management permission)" : ""}
+        {t("Base unit {value}", {
+          value: unitLocked ? t("(requires unit management permission)") : "",
+        })}
         <select
           disabled={unitLocked}
           value={fields.unitCode}
@@ -475,7 +487,9 @@ function ItemForm({
       </label>
       <fieldset disabled={trackingLocked}>
         <legend>
-          Tracking {trackingLocked ? "(requires tracking management permission)" : ""}
+          {t("Tracking {value}", {
+            value: trackingLocked ? t("(requires tracking management permission)") : "",
+          })}
         </legend>
         <label>
           <input
@@ -483,10 +497,10 @@ function ItemForm({
             checked={fields.stockTracked}
             onChange={(event) => set({ stockTracked: event.currentTarget.checked })}
           />{" "}
-          Track stock for this item
+          {t("Track stock for this item")}
         </label>
         <label>
-          Lots and expiry
+          {t("Lots and expiry")}
           <select
             disabled={!fields.stockTracked}
             value={fields.lotTracking}
@@ -500,7 +514,7 @@ function ItemForm({
           </select>
         </label>
         <label>
-          Shelf life (days){expiry ? " — required" : ""}
+          {t("Shelf life (days){value}", { value: expiry ? t(" — required") : "" })}
           <input
             type="number"
             min={1}
@@ -510,7 +524,7 @@ function ItemForm({
           />
         </label>
         <label>
-          Expiry warning (days before){expiry ? " — required" : ""}
+          {t("Expiry warning (days before){value}", { value: expiry ? t(" — required") : "" })}
           <input
             type="number"
             min={0}
@@ -520,7 +534,7 @@ function ItemForm({
           />
         </label>
         <label>
-          When stock would go negative
+          {t("When stock would go negative")}
           <select
             value={fields.negativeStockPolicy}
             onChange={(event) =>
@@ -535,17 +549,19 @@ function ItemForm({
           </select>
         </label>
       </fieldset>
-      {!editing ? <p>New items start Inactive. Activate an item when it is ready to use.</p> : null}
-      <button disabled={busy}>{editing ? "Save changes" : "Create item"}</button>{" "}
+      {!editing ? (
+        <p>{t("New items start Inactive. Activate an item when it is ready to use.")}</p>
+      ) : null}
+      <button disabled={busy}>{editing ? t("Save changes") : t("Create item")}</button>{" "}
       <Link to={item ? `/app/supply/items/${item.itemReference}` : "/app/supply/items"}>
-        Cancel
+        {t("Cancel")}
       </Link>
       {error ? (
-        <StatePanel heading="Not saved" tone="error" status>
+        <StatePanel heading={t("Not saved")} tone="error" status>
           <p>{copy[error]}</p>
           {pending && error === "Offline" ? (
             <button type="button" disabled={busy} onClick={() => void submit(pending)}>
-              Retry
+              {t("Retry")}
             </button>
           ) : null}
         </StatePanel>
@@ -572,7 +588,7 @@ export function SupplyItemFormPage({
   if (mode === "Edit" && reference === null) return <Failure code="NotFound" />;
   if (state.kind === "Loading")
     return (
-      <StatePanel heading="Inventory item" status>
+      <StatePanel heading={t("Inventory item")} status>
         <p>{copy.Loading}</p>
       </StatePanel>
     );
@@ -582,17 +598,19 @@ export function SupplyItemFormPage({
     return <Failure code="PermissionDenied" />;
   return (
     <AppFrame
-      title={mode === "Create" ? "Create inventory item" : "Edit inventory item"}
-      description={mode === "Create" ? "New inventory item" : "Edit inventory item"}
+      title={mode === "Create" ? t("Create inventory item") : t("Edit inventory item")}
+      description={mode === "Create" ? t("New inventory item") : t("Edit inventory item")}
     >
       <header className="screen-heading">
         <div>
           <p className="bop-eyebrow">
-            {mode === "Create" ? "New inventory item" : "Edit inventory item"}
+            {mode === "Create" ? t("New inventory item") : t("Edit inventory item")}
           </p>
-          <h2>{mode === "Create" ? "Create inventory item" : "Edit inventory item"}</h2>
+          <h2>{mode === "Create" ? t("Create inventory item") : t("Edit inventory item")}</h2>
           <p>
-            Quantities are never edited here; stock changes only through receipts, counts and waste.
+            {t(
+              "Quantities are never edited here; stock changes only through receipts, counts and waste.",
+            )}
           </p>
         </div>
       </header>

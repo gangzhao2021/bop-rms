@@ -1,3 +1,4 @@
+import { countOf, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
@@ -25,34 +26,36 @@ const netMinor = (captured: string, refunded: string) =>
   (BigInt(captured) - BigInt(refunded)).toString();
 
 export const differenceReasonLabel: Record<string, string> = {
-  StateMismatch: "State differs",
-  AmountMismatch: "Amount differs",
-  RefundMismatch: "Refund differs",
-  TerminalConflict: "Terminal conflict",
+  StateMismatch: t("State differs"),
+  AmountMismatch: t("Amount differs"),
+  RefundMismatch: t("Refund differs"),
+  TerminalConflict: t("Terminal conflict"),
 };
 const outcomeLabel: Record<SettlementOutcome, string> = {
   Matched: "Matched",
   Healed: "Healed",
   Difference: "Difference",
   Unresolved: "Unresolved",
-  Unavailable: "Provider unavailable",
+  Unavailable: t("Provider unavailable"),
 };
 /** Payment states a Store Manager reads without the Provider's vocabulary. */
 export const paymentStatusLabel: Record<string, string> = {
-  RequiresCustomerAction: "Awaiting customer action",
-  RequiresPaymentMethod: "Awaiting payment method",
+  RequiresCustomerAction: t("Awaiting customer action"),
+  RequiresPaymentMethod: t("Awaiting payment method"),
   Processing: "Processing",
   Captured: "Paid",
   Canceled: "Cancelled",
 };
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 /** "12 matched · 1 unresolved · 1 difference": matched first, then only what is not zero. */
 export function summarizeOutcomes(outcomes: Readonly<Record<SettlementOutcome, number>>): string {
-  const parts = [`${outcomes.Matched} matched`];
-  if (outcomes.Healed > 0) parts.push(`${outcomes.Healed} healed`);
-  if (outcomes.Unresolved > 0) parts.push(`${outcomes.Unresolved} unresolved`);
-  if (outcomes.Difference > 0) parts.push(plural(outcomes.Difference, "difference"));
-  if (outcomes.Unavailable > 0) parts.push(`${outcomes.Unavailable} provider unavailable`);
+  const parts = [t("{Matched} matched", { Matched: outcomes.Matched })];
+  if (outcomes.Healed > 0) parts.push(t("{Healed} healed", { Healed: outcomes.Healed }));
+  if (outcomes.Unresolved > 0)
+    parts.push(t("{Unresolved} unresolved", { Unresolved: outcomes.Unresolved }));
+  if (outcomes.Difference > 0) parts.push(countOf(outcomes.Difference, "difference"));
+  if (outcomes.Unavailable > 0)
+    parts.push(t("{Unavailable} provider unavailable", { Unavailable: outcomes.Unavailable }));
   return parts.join(" · ");
 }
 type DaySettlement = NonNullable<SettlementReconciliation["settlement"]>;
@@ -65,19 +68,22 @@ const settled = (settlement: DaySettlement) =>
   );
 const ordinal = (n: number) =>
   n % 10 === 1 && n % 100 !== 11
-    ? `${n}st`
+    ? t("{n}st", { n: n })
     : n % 10 === 2 && n % 100 !== 12
-      ? `${n}nd`
+      ? t("{n}nd", { n: n })
       : n % 10 === 3 && n % 100 !== 13
-        ? `${n}rd`
-        : `${n}th`;
+        ? t("{n}rd", { n: n })
+        : t("{n}th", { n: n });
 /** "$22.60 more at the payment provider" / "$22.60 less at the payment provider". */
 function providerGap(ours: string, provider: string | null): string {
-  if (provider === null) return "the payment provider's figure could not be read";
+  if (provider === null) return t("the payment provider's figure could not be read");
   const gap = BigInt(provider) - BigInt(ours);
   return gap === 0n
-    ? "the same"
-    : `${formatSettlementMoney((gap < 0n ? -gap : gap).toString())} ${gap > 0n ? "more" : "less"} at the payment provider`;
+    ? t("the same")
+    : t("{value} {value2} at the payment provider", {
+        value: formatSettlementMoney((gap < 0n ? -gap : gap).toString()),
+        value2: gap > 0n ? "more" : "less",
+      });
 }
 
 /**
@@ -95,22 +101,38 @@ function DayDifferenceHelp({ check }: { readonly check: SettlementCheck }) {
       aria-labelledby="settlement-day-difference"
     >
       <h4 id="settlement-day-difference">
-        {refunds ? "Refunds for this day differ" : "Payments for this day differ"}
+        {refunds ? t("Refunds for this day differ") : t("Payments for this day differ")}
       </h4>
       <p>
-        The store&apos;s records show {formatSettlementMoney(ours)} in{" "}
-        {refunds ? "refunds" : "payments"}; the payment provider&apos;s statement shows{" "}
-        {provider === null ? "an amount that could not be read" : formatSettlementMoney(provider)} (
-        {providerGap(ours, provider)}).
+        {t(
+          "The store's records show {ours} in {value}; the payment provider's statement shows {value2} ({ours2}).",
+          {
+            ours: formatSettlementMoney(ours),
+            value: refunds ? t("refunds") : t("payments"),
+            value2:
+              provider === null
+                ? t("an amount that could not be read")
+                : formatSettlementMoney(provider),
+            ours2: providerGap(ours, provider),
+          },
+        )}
       </p>
       <p>
-        <span className="system-alert__label">What to do: </span>
-        {refunds
-          ? "Check whether a refund for this day was made directly with the payment provider, or is still waiting for the provider to confirm it (open the order from Orders). "
-          : "A charge the payment provider took that matches no order is listed in Exceptions as an unmatched charge: review it there and refund it if the guest should not have paid. Otherwise check the day's orders and payments. "}
-        This day is checked again automatically when new records arrive. If it still differs, note
-        what you found on the difference in{" "}
-        <Link to="/operations/order-exceptions">Exceptions</Link> and tell the pilot operator.
+        <span className="system-alert__label">{t("What to do:")} </span>
+        {t(
+          "{value}This day is checked again automatically when new records arrive. If it still differs, note what you found on the difference in",
+          {
+            value: refunds
+              ? t(
+                  "Check whether a refund for this day was made directly with the payment provider, or is still waiting for the provider to confirm it (open the order from Orders). ",
+                )
+              : t(
+                  "A charge the payment provider took that matches no order is listed in Exceptions as an unmatched charge: review it there and refund it if the guest should not have paid. Otherwise check the day's orders and payments. ",
+                ),
+          },
+        )}{" "}
+        <Link to="/operations/order-exceptions">{t("Exceptions")}</Link>{" "}
+        {t("and tell the pilot operator.")}
       </p>
     </div>
   );
@@ -151,54 +173,64 @@ export function SettlementReport({
   const attention = differences.filter((check) => !unfinishedGuestPayment(check));
   const money = (amount: SettlementView["captured"]) =>
     amount === null
-      ? "Could not be read"
+      ? t("Could not be read")
       : formatSettlementMoney(amount.amountMinor, amount.currencyCode);
   return (
     <div className="settlement">
       <section className="store-card settlement__day" aria-labelledby="settlement-day">
         <header>
-          <h3 id="settlement-day">Business day: {businessDateText(view.businessDate)}</h3>
+          <h3 id="settlement-day">
+            {t("Business day: {businessDate}", {
+              businessDate: businessDateText(view.businessDate),
+            })}
+          </h3>
           <span className="status-chip" data-state={open ? "open" : "closed"}>
-            {open ? "Still open" : "Closed"}
+            {open ? t("Still open") : t("Closed")}
           </span>
         </header>
         <dl>
           <div>
-            <dt>From</dt>
+            <dt>{t("From")}</dt>
             <dd>{storeTime(view.window.startsAt, zone, true)}</dd>
           </div>
           <div>
-            <dt>{open ? "Counted until" : "To"}</dt>
+            <dt>{open ? t("Counted until") : t("To")}</dt>
             <dd>{storeTime(view.window.endsAt, zone, true)}</dd>
           </div>
         </dl>
         {open ? (
           <p className="bop-muted">
-            Totals grow until the business day closes; the settlement run happens after that.
+            {t("Totals grow until the business day closes; the settlement run happens after that.")}
           </p>
         ) : null}
       </section>
-      <ul className="overview-counts settlement__totals" aria-label="Day totals">
+      <ul className="overview-counts settlement__totals" aria-label={t("Day totals")}>
         <li>
-          <span className="overview-count__label">Paid online</span>
+          <span className="overview-count__label">{t("Paid online")}</span>
           <strong className="overview-count__value">{money(view.captured)}</strong>
           <span className="overview-count__detail">
             {view.captured === null
-              ? "Payment source unavailable"
-              : `${view.captured.count} payment${view.captured.count === 1 ? "" : "s"}`}
+              ? t("Payment source unavailable")
+              : t("{count} payment{value}", {
+                  count: view.captured.count,
+                  value: view.captured.count === 1 ? "" : "s",
+                })}
           </span>
         </li>
         <li>
-          <span className="overview-count__label">Refunded</span>
+          <span className="overview-count__label">{t("Refunded")}</span>
           <strong className="overview-count__value">{money(view.refunded)}</strong>
           <span className="overview-count__detail">
             {view.refunded === null
-              ? "Refund source unavailable"
-              : `${view.refunded.count} refund${view.refunded.count === 1 ? "" : "s"}`}
+              ? t("Refund source unavailable")
+              : t("{count} refund{value}", {
+                  count: view.refunded.count,
+                  value: view.refunded.count === 1 ? "" : "s",
+                })}
           </span>
         </li>
         <li>
-          <span className="overview-count__label">Net</span>
+          <span className="overview-count__label">{t("Net")}</span>
           <strong className="overview-count__value">
             {view.captured && view.refunded
               ? formatSettlementMoney(
@@ -206,13 +238,13 @@ export function SettlementReport({
                 )
               : "—"}
           </strong>
-          <span className="overview-count__detail">Paid online minus refunded</span>
+          <span className="overview-count__detail">{t("Paid online minus refunded")}</span>
         </li>
       </ul>
       {/* WP-2423 Q7: the Store's own card machine, kept apart to match its batch total. */}
       {view.cardMachine === undefined ? null : view.cardMachine === null ? (
         <p className="bop-muted" role="status">
-          Card-machine payments could not be read.
+          {t("Card-machine payments could not be read.")}
         </p>
       ) : (
         <section
@@ -220,28 +252,32 @@ export function SettlementReport({
           aria-labelledby="settlement-card-machine"
         >
           <header>
-            <h3 id="settlement-card-machine">Store card machine</h3>
+            <h3 id="settlement-card-machine">{t("Store card machine")}</h3>
           </header>
-          <ul className="overview-counts settlement__totals" aria-label="Card machine totals">
+          <ul className="overview-counts settlement__totals" aria-label={t("Card machine totals")}>
             <li>
-              <span className="overview-count__label">Taken on card machine</span>
+              <span className="overview-count__label">{t("Taken on card machine")}</span>
               <strong className="overview-count__value">{money(view.cardMachine.taken)}</strong>
               <span className="overview-count__detail">
-                {view.cardMachine.taken.count} payment
-                {view.cardMachine.taken.count === 1 ? "" : "s"} · tips{" "}
-                {formatSettlementMoney(view.cardMachine.tipMinor)}
+                {t("{count} payment{value} · tips {tipMinor}", {
+                  count: view.cardMachine.taken.count,
+                  value: view.cardMachine.taken.count === 1 ? "" : "s",
+                  tipMinor: formatSettlementMoney(view.cardMachine.tipMinor),
+                })}
               </span>
             </li>
             <li>
-              <span className="overview-count__label">Refunded on card machine</span>
+              <span className="overview-count__label">{t("Refunded on card machine")}</span>
               <strong className="overview-count__value">{money(view.cardMachine.refunded)}</strong>
               <span className="overview-count__detail">
-                {view.cardMachine.refunded.count} refund
-                {view.cardMachine.refunded.count === 1 ? "" : "s"}
+                {t("{count} refund{value}", {
+                  count: view.cardMachine.refunded.count,
+                  value: view.cardMachine.refunded.count === 1 ? "" : "s",
+                })}
               </span>
             </li>
             <li>
-              <span className="overview-count__label">Card machine net</span>
+              <span className="overview-count__label">{t("Card machine net")}</span>
               <strong className="overview-count__value">
                 {formatSettlementMoney(
                   netMinor(
@@ -251,43 +287,51 @@ export function SettlementReport({
                 )}
               </strong>
               <span className="overview-count__detail">
-                Compare with the machine&apos;s batch total
+                {t("Compare with the machine's batch total")}
               </span>
             </li>
           </ul>
           {view.cardMachine.recordedAfterOutageCount > 0 ? (
             <p role="note">
-              {view.cardMachine.recordedAfterOutageCount} payment
-              {view.cardMachine.recordedAfterOutageCount === 1 ? " was" : "s were"} recorded after
-              an outage from paper orders; they count on the day they were paid.
+              {view.cardMachine.recordedAfterOutageCount === 1
+                ? t(
+                    "1 payment was recorded after an outage from a paper order; it counts on the day it was paid.",
+                  )
+                : t(
+                    "{recordedAfterOutageCount} payments were recorded after an outage from paper orders; they count on the day they were paid.",
+                    { recordedAfterOutageCount: view.cardMachine.recordedAfterOutageCount },
+                  )}
             </p>
           ) : null}
           <p className="bop-muted">
-            Not included in the online totals above or in the payment provider reconciliation.
+            {t(
+              "Not included in the online totals above or in the payment provider reconciliation.",
+            )}
           </p>
         </section>
       )}
       {view.currentDaySelfApprovedRefunds !== null &&
       view.currentDaySelfApprovedRefunds.count > 0 ? (
         <p role="status" className="settlement__self-approved-today">
-          Today so far ({businessDateText(view.currentDaySelfApprovedRefunds.businessDate)}):{" "}
-          {view.currentDaySelfApprovedRefunds.count} refund
+          {t("Today so far (")}
+          {businessDateText(view.currentDaySelfApprovedRefunds.businessDate)}):{" "}
+          {view.currentDaySelfApprovedRefunds.count} {t("refund")}
           {view.currentDaySelfApprovedRefunds.count === 1 ? "" : "s"} ·{" "}
-          {formatSettlementMoney(view.currentDaySelfApprovedRefunds.amountMinor)} approved by the
-          owner alone.{" "}
+          {formatSettlementMoney(view.currentDaySelfApprovedRefunds.amountMinor)}{" "}
+          {t("approved by the owner alone.")}{" "}
           {onShowDay ? (
             <button
               type="button"
               onClick={() => onShowDay(view.currentDaySelfApprovedRefunds?.businessDate ?? "")}
             >
-              View today
+              {t("View today")}
             </button>
           ) : null}
         </p>
       ) : null}
       {view.selfApprovedRefunds === null ? (
         <p className="bop-muted" role="status">
-          Refunds approved by the owner alone could not be read.
+          {t("Refunds approved by the owner alone could not be read.")}
         </p>
       ) : view.selfApprovedRefunds.count > 0 ? (
         <section
@@ -295,14 +339,17 @@ export function SettlementReport({
           aria-labelledby="settlement-self-approved"
         >
           <header>
-            <h3 id="settlement-self-approved">Refunds the owner approved alone</h3>
+            <h3 id="settlement-self-approved">{t("Refunds the owner approved alone")}</h3>
           </header>
           <p role="status">
-            {view.selfApprovedRefunds.count} refund
-            {view.selfApprovedRefunds.count === 1 ? "" : "s"} ·{" "}
-            {formatSettlementMoney(view.selfApprovedRefunds.amountMinor)} approved by the owner
-            without a second person (sole operator) this business day. Review them against the
-            orders.
+            {t(
+              "{count} refund{value} · {amountMinor} approved by the owner without a second person (sole operator) this business day. Review them against the orders.",
+              {
+                count: view.selfApprovedRefunds.count,
+                value: view.selfApprovedRefunds.count === 1 ? "" : "s",
+                amountMinor: formatSettlementMoney(view.selfApprovedRefunds.amountMinor),
+              },
+            )}
           </p>
         </section>
       ) : null}
@@ -311,35 +358,43 @@ export function SettlementReport({
         aria-labelledby="settlement-reconciliation"
       >
         <header>
-          <h3 id="settlement-reconciliation">Reconciliation with the payment provider</h3>
+          <h3 id="settlement-reconciliation">{t("Reconciliation with the payment provider")}</h3>
         </header>
         {reconciliation === null || operational === null ? (
-          <p role="status">Reconciliation records could not be read.</p>
+          <p role="status">{t("Reconciliation records could not be read.")}</p>
         ) : (
           <>
             {open ? (
               <p role="status">
-                The settlement run compares the day&apos;s totals with the provider&apos;s statement
-                after the business day closes.
+                {t(
+                  "The settlement run compares the day's totals with the provider's statement after the business day closes.",
+                )}
               </p>
             ) : settlement === null ? (
               <p role="status" data-reconciled="pending">
-                Not settled yet. The settlement run for this day has not completed.
+                {t("Not settled yet. The settlement run for this day has not completed.")}
               </p>
             ) : (
               <p role="status" data-reconciled={settled(settlement)}>
                 {settled(settlement)
-                  ? "Settled · the day's totals match the provider statement"
-                  : "Settlement difference · the day's totals differ from the provider statement"}
+                  ? t("Settled · the day's totals match the provider statement")
+                  : t(
+                      "Settlement difference · the day's totals differ from the provider statement",
+                    )}
               </p>
             )}
             {settlement ? (
               <>
                 <p className="bop-muted">
-                  Settlement run {storeTime(settlement.run.completedAt, zone, true)}
-                  {settlement.recheck === null
-                    ? ""
-                    : ` · checked again ${storeTime(settlement.recheck.run.completedAt, zone, true)}`}
+                  {t("Settlement run {completedAt}{value}", {
+                    completedAt: storeTime(settlement.run.completedAt, zone, true),
+                    value:
+                      settlement.recheck === null
+                        ? ""
+                        : t(" · checked again {completedAt}", {
+                            completedAt: storeTime(settlement.recheck.run.completedAt, zone, true),
+                          }),
+                  })}
                 </p>
                 <table
                   className="settlement__statement"
@@ -347,10 +402,10 @@ export function SettlementReport({
                 >
                   <thead>
                     <tr>
-                      <th scope="col">Statement</th>
-                      <th scope="col">Result</th>
-                      <th scope="col">Paid (ours / provider)</th>
-                      <th scope="col">Refunded (ours / provider)</th>
+                      <th scope="col">{t("Statement")}</th>
+                      <th scope="col">{t("Result")}</th>
+                      <th scope="col">{t("Paid (ours / provider)")}</th>
+                      <th scope="col">{t("Refunded (ours / provider)")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -361,14 +416,20 @@ export function SettlementReport({
                         )
                         .map((check) => ({
                           check,
-                          label: `Earlier check of ${businessDateText(view.businessDate)}`,
+                          label: t("Earlier check of {businessDate}", {
+                            businessDate: businessDateText(view.businessDate),
+                          }),
                         })),
                       ...settlement.checks.map((check) => ({
                         check,
                         label:
                           settlement.recheck === null
-                            ? `Provider statement for ${businessDateText(view.businessDate)}`
-                            : `First check of ${businessDateText(view.businessDate)}`,
+                            ? t("Provider statement for {businessDate}", {
+                                businessDate: businessDateText(view.businessDate),
+                              })
+                            : t("First check of {businessDate}", {
+                                businessDate: businessDateText(view.businessDate),
+                              }),
                       })),
                       ...(settlement.recheck === null
                         ? []
@@ -377,8 +438,10 @@ export function SettlementReport({
                               check: settlement.recheck.check,
                               label:
                                 settlement.recheck.count === 1
-                                  ? "Checked again"
-                                  : `Checked again (${ordinal(settlement.recheck.count)} time)`,
+                                  ? t("Checked again")
+                                  : t("Checked again ({count} time)", {
+                                      count: ordinal(settlement.recheck.count),
+                                    }),
                             },
                           ]),
                       ...settlement.additionalChecks
@@ -387,16 +450,18 @@ export function SettlementReport({
                         )
                         .map((check) => ({
                           check,
-                          label: `Additional check of ${businessDateText(view.businessDate)}`,
+                          label: t("Additional check of {businessDate}", {
+                            businessDate: businessDateText(view.businessDate),
+                          }),
                         })),
                     ].map(({ check, label }) => (
                       <tr key={check.checkReference}>
-                        <td data-label="Statement">{label}</td>
-                        <td data-label="Result">{resultLabel(check)}</td>
-                        <td data-label="Paid">
+                        <td data-label={t("Statement")}>{label}</td>
+                        <td data-label={t("Result")}>{resultLabel(check)}</td>
+                        <td data-label={t("Paid")}>
                           {moneyPair(check.internalCapturedMinor, check.providerCapturedMinor)}
                         </td>
-                        <td data-label="Refunded">
+                        <td data-label={t("Refunded")}>
                           {moneyPair(check.internalRefundedMinor, check.providerRefundedMinor)}
                         </td>
                       </tr>
@@ -407,18 +472,32 @@ export function SettlementReport({
                 settled(settlement) &&
                 settlement.checks.some((check) => check.outcome === "Difference") ? (
                   <p role="note" className="settlement__resolved">
-                    The first check found a difference. The day was checked again after new records
-                    arrived and now matches the provider statement, so that difference is resolved.
-                    Both checks stay in the history.
+                    {t(
+                      "The first check found a difference. The day was checked again after new records arrived and now matches the provider statement, so that difference is resolved. Both checks stay in the history.",
+                    )}
                   </p>
                 ) : null}
                 {settlement.additionalChecks.length > 0 ? (
                   <p role="note" className="settlement__resolved">
-                    This day was checked more than once when it closed. The day&apos;s result is its
-                    scheduled check
-                    {settlement.recheck === null ? "" : " and the checks made again after it"}; the
-                    other {settlement.additionalChecks.length === 1 ? "check stays" : "checks stay"}{" "}
-                    in the history.
+                    {settlement.additionalChecks.length === 1
+                      ? t(
+                          "This day was checked more than once when it closed. The day's result is its scheduled check{value}; the other check stays in the history.",
+                          {
+                            value:
+                              settlement.recheck === null
+                                ? ""
+                                : t(" and the checks made again after it"),
+                          },
+                        )
+                      : t(
+                          "This day was checked more than once when it closed. The day's result is its scheduled check{value}; the other checks stay in the history.",
+                          {
+                            value:
+                              settlement.recheck === null
+                                ? ""
+                                : t(" and the checks made again after it"),
+                          },
+                        )}
                   </p>
                 ) : null}
                 {currentChecks(settlement)
@@ -432,72 +511,94 @@ export function SettlementReport({
             (view.unmatchedProviderCharges.captured.count > 0 ||
               view.unmatchedProviderCharges.refunded.count > 0) ? (
               <div className="settlement__unmatched" aria-labelledby="settlement-unmatched">
-                <h4 id="settlement-unmatched">Charges that match no order</h4>
+                <h4 id="settlement-unmatched">{t("Charges that match no order")}</h4>
                 <ul>
                   {view.unmatchedProviderCharges.captured.count > 0 ? (
                     <li>
-                      Charge the payment provider took that matches no order:{" "}
-                      {plural(view.unmatchedProviderCharges.captured.count, "charge")} ·{" "}
-                      {formatSettlementMoney(view.unmatchedProviderCharges.captured.amountMinor)}.
-                      Review it in <Link to="/operations/order-exceptions">Exceptions</Link>.
+                      {t(
+                        "Charge the payment provider took that matches no order: {count} · {amountMinor}. Review it in",
+                        {
+                          count: countOf(view.unmatchedProviderCharges.captured.count, "charge"),
+                          amountMinor: formatSettlementMoney(
+                            view.unmatchedProviderCharges.captured.amountMinor,
+                          ),
+                        },
+                      )}{" "}
+                      <Link to="/operations/order-exceptions">{t("Exceptions")}</Link>.
                     </li>
                   ) : null}
                   {view.unmatchedProviderCharges.refunded.count > 0 ? (
                     <li>
-                      Refund of an unmatched provider charge:{" "}
-                      {plural(view.unmatchedProviderCharges.refunded.count, "refund")} ·{" "}
-                      {formatSettlementMoney(view.unmatchedProviderCharges.refunded.amountMinor)}
+                      {t("Refund of an unmatched provider charge: {count} · {amountMinor}", {
+                        count: countOf(view.unmatchedProviderCharges.refunded.count, "refund"),
+                        amountMinor: formatSettlementMoney(
+                          view.unmatchedProviderCharges.refunded.amountMinor,
+                        ),
+                      })}
                     </li>
                   ) : null}
                 </ul>
                 <p className="bop-muted">
-                  Not in the Paid online and Refunded totals above, which are the store&apos;s own
-                  orders. The provider statement check counts them on the store&apos;s side.
+                  {t(
+                    "Not in the Paid online and Refunded totals above, which are the store's own orders. The provider statement check counts them on the store's side.",
+                  )}
                 </p>
               </div>
             ) : null}
             <p className="bop-muted">
               {operational.latestRun === null
-                ? "No payment checks in this day yet."
-                : `${plural(operational.paymentCount, "payment")} checked in ${plural(operational.runCount, "run")} · last ${storeTime(operational.latestRun.completedAt, zone, true)} · ${summarizeOutcomes(operational.outcomes)}`}
+                ? t("No payment checks in this day yet.")
+                : t("{paymentCount} checked in {runCount} · last {completedAt} · {outcomes}", {
+                    paymentCount: countOf(operational.paymentCount, "payment"),
+                    runCount: countOf(operational.runCount, "run"),
+                    completedAt: storeTime(operational.latestRun.completedAt, zone, true),
+                    outcomes: summarizeOutcomes(operational.outcomes),
+                  })}
             </p>
             {unfinished.length > 0 ? (
               <p role="note" className="bop-muted settlement__unfinished">
-                {unfinished.length === 1
-                  ? "1 online payment was started by a guest but not finished"
-                  : `${unfinished.length} online payments were started by guests but not finished`}{" "}
-                (the guest left or is still paying). Nothing was charged, so there is nothing to do.
+                {t(
+                  "{value} (the guest left or is still paying). Nothing was charged, so there is nothing to do.",
+                  {
+                    value:
+                      unfinished.length === 1
+                        ? t("1 online payment was started by a guest but not finished")
+                        : t("{length} online payments were started by guests but not finished", {
+                            length: unfinished.length,
+                          }),
+                  },
+                )}
               </p>
             ) : null}
             {attention.length > 0 ? (
               <>
-                <h4 id="settlement-attention">Payments needing attention</h4>
+                <h4 id="settlement-attention">{t("Payments needing attention")}</h4>
                 <table className="settlement__differences" aria-labelledby="settlement-attention">
                   <thead>
                     <tr>
-                      <th scope="col">Checked</th>
-                      <th scope="col">Result</th>
-                      <th scope="col">Paid (ours / provider)</th>
-                      <th scope="col">Refunded (ours / provider)</th>
-                      <th scope="col">Exception</th>
+                      <th scope="col">{t("Checked")}</th>
+                      <th scope="col">{t("Result")}</th>
+                      <th scope="col">{t("Paid (ours / provider)")}</th>
+                      <th scope="col">{t("Refunded (ours / provider)")}</th>
+                      <th scope="col">{t("Exception")}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {attention.map((d) => (
                       <tr key={d.checkReference}>
-                        <td data-label="Checked">{storeTime(d.checkedAt, zone)}</td>
-                        <td data-label="Result">{resultLabel(d)}</td>
-                        <td data-label="Paid">
+                        <td data-label={t("Checked")}>{storeTime(d.checkedAt, zone)}</td>
+                        <td data-label={t("Result")}>{resultLabel(d)}</td>
+                        <td data-label={t("Paid")}>
                           {moneyPair(d.internalCapturedMinor, d.providerCapturedMinor)}
                         </td>
-                        <td data-label="Refunded">
+                        <td data-label={t("Refunded")}>
                           {moneyPair(d.internalRefundedMinor, d.providerRefundedMinor)}
                         </td>
-                        <td data-label="Exception">
+                        <td data-label={t("Exception")}>
                           {d.exceptionReference === null ? (
                             "—"
                           ) : (
-                            <Link to="/operations/order-exceptions">Exceptions</Link>
+                            <Link to="/operations/order-exceptions">{t("Exceptions")}</Link>
                           )}
                         </td>
                       </tr>
@@ -506,8 +607,10 @@ export function SettlementReport({
                 </table>
                 {reconciliation.differenceCount > reconciliation.differences.length ? (
                   <p className="bop-muted">
-                    Showing the latest {reconciliation.differences.length} of{" "}
-                    {reconciliation.differenceCount} payments.
+                    {t("Showing the latest {length} of {differenceCount} payments.", {
+                      length: reconciliation.differences.length,
+                      differenceCount: reconciliation.differenceCount,
+                    })}
                   </p>
                 ) : null}
               </>
@@ -530,14 +633,18 @@ export function SettlementNotCovered({
   readonly onShowDay?: (businessDate: string) => void;
 }) {
   return (
-    <StatePanel heading="No settlement records for this day" tone="neutral" status>
+    <StatePanel heading={t("No settlement records for this day")} tone="neutral" status>
       <p>
-        {requestedDate === null ? "This day" : businessDateText(requestedDate)} is before the store
-        started using this system, so there is nothing to settle. The store&apos;s records begin on{" "}
-        {businessDateText(firstBusinessDate)}.
+        {t(
+          "{value} is before the store started using this system, so there is nothing to settle. The store's records begin on {firstBusinessDate}.",
+          {
+            value: requestedDate === null ? t("This day") : businessDateText(requestedDate),
+            firstBusinessDate: businessDateText(firstBusinessDate),
+          },
+        )}
       </p>
       <button type="button" onClick={() => onShowDay?.(firstBusinessDate)}>
-        Show {businessDateText(firstBusinessDate)}
+        {t("Show {firstBusinessDate}", { firstBusinessDate: businessDateText(firstBusinessDate) })}
       </button>
     </StatePanel>
   );
@@ -623,12 +730,12 @@ export function SettlementPage({
   const view = state.kind === "Ready" ? state.view : null;
   return (
     <WorkspacePage
-      title="Settlement"
+      title={t("Settlement")}
       meta={storeLabel}
       status={view ? <Freshness status="Fresh" at={view.projectedAt} /> : null}
       actions={
         <button type="button" onClick={refresh}>
-          Refresh
+          {t("Refresh")}
         </button>
       }
     >
@@ -640,7 +747,7 @@ export function SettlementPage({
         }}
       >
         <label>
-          Business day
+          {t("Business day")}
           <input
             type="date"
             name="businessDate"
@@ -649,7 +756,7 @@ export function SettlementPage({
             onChange={(event) => setDraft(event.currentTarget.value)}
           />
         </label>
-        <button type="submit">Show</button>
+        <button type="submit">{t("Show")}</button>
         <button
           type="button"
           onClick={() => {
@@ -657,23 +764,27 @@ export function SettlementPage({
             setRequested(null);
           }}
         >
-          Latest closed day
+          {t("Latest closed day")}
         </button>
       </form>
       {state.kind === "Loading" ? (
-        <StatePanel heading="Loading" tone="neutral" status>
-          <p>Reading the day…</p>
+        <StatePanel heading={t("Loading")} tone="neutral" status>
+          <p>{t("Reading the day…")}</p>
         </StatePanel>
       ) : state.kind === "PermissionDenied" ? (
         <StatePanel heading={noAccessHeading} tone="error" status>
           <p>{pageAccessDeniedText}</p>
         </StatePanel>
       ) : state.kind === "Busy" ? (
-        <StatePanel heading="Busy for a moment" tone="neutral" status>
+        <StatePanel heading={t("Busy for a moment")} tone="neutral" status>
           <p>
             {busyRetries >= 3
-              ? "The store's records are still busy with orders and payments. Refresh in a minute."
-              : "The store's records are busy with orders and payments. Trying again in a few seconds…"}
+              ? t(
+                  "The store's records are still busy with orders and payments. Refresh in a minute.",
+                )
+              : t(
+                  "The store's records are busy with orders and payments. Trying again in a few seconds…",
+                )}
           </p>
         </StatePanel>
       ) : state.kind === "NotCovered" ? (
@@ -686,11 +797,13 @@ export function SettlementPage({
           }}
         />
       ) : state.kind === "Unavailable" ? (
-        <StatePanel heading="Settlement unavailable" tone="error" status>
+        <StatePanel heading={t("Settlement unavailable")} tone="error" status>
           <p>
             {requested === null
-              ? "The day could not be read. Check your connection and refresh."
-              : "That day could not be read. It may be in the future or before the Store's configuration took effect."}
+              ? t("The day could not be read. Check your connection and refresh.")
+              : t(
+                  "That day could not be read. It may be in the future or before the Store's configuration took effect.",
+                )}
           </p>
         </StatePanel>
       ) : view ? (

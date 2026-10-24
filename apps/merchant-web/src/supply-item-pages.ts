@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /** WP-2423: INV-ITEM-LIST / DETAIL / CREATE / EDIT view contract and same-origin client. */
 export type SupplyItemErrorCode =
   | "PermissionDenied"
@@ -10,7 +11,7 @@ export type SupplyItemErrorCode =
   | "Unavailable";
 export class SupplyItemError extends Error {
   constructor(readonly code: SupplyItemErrorCode) {
-    super("Inventory items are unavailable");
+    super(t("Inventory items are unavailable"));
     this.name = "SupplyItemError";
   }
 }

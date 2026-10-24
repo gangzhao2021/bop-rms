@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -68,7 +69,9 @@ export function CompensationReconciliationAction({
     } catch {
       if (!controller.signal.aborted)
         setMessage(
-          "The confirmed refund could not be read. Refresh once the refund is confirmed and your access is current.",
+          t(
+            "The confirmed refund could not be read. Refresh once the refund is confirmed and your access is current.",
+          ),
         );
     } finally {
       pending.current = null;
@@ -94,14 +97,18 @@ export function CompensationReconciliationAction({
         setUnknown(false);
         setRecorded(true);
         setMessage(
-          "Your check of the refund is recorded. Refresh the page to see whether the case is closed.",
+          t(
+            "Your check of the refund is recorded. Refresh the page to see whether the case is closed.",
+          ),
         );
       }
     } catch {
       if (!controller.signal.aborted) {
         setUnknown(true);
         setMessage(
-          "Result unknown. Keep this page open and retry the same acknowledgment after restoring your connection and access.",
+          t(
+            "Result unknown. Keep this page open and retry the same acknowledgment after restoring your connection and access.",
+          ),
         );
       }
     } finally {
@@ -113,20 +120,21 @@ export function CompensationReconciliationAction({
     ? orderMoney({ amountMinor: view.refund.amountMinor, currencyCode: "CAD" })
     : "";
   return (
-    <section aria-label="Compensation reconciliation">
+    <section aria-label={t("Compensation reconciliation")}>
       <button disabled={busy || unknown || !online} onClick={() => void load()}>
-        Review confirmed refund
+        {t("Review confirmed refund")}
       </button>
-      {!online ? <p role="status">Offline — reconciliation is read-only.</p> : null}
+      {!online ? <p role="status">{t("Offline — reconciliation is read-only.")}</p> : null}
       {view ? (
         <>
           <p>
-            Confirmed refund: {amount} · <SourceTime instant={view.refund.confirmedAt} />
+            {t("Confirmed refund: {amount} ·", { amount: amount })}{" "}
+            <SourceTime instant={view.refund.confirmedAt} />
           </p>
-          <p>Case: {view.caseState}</p>
+          <p>{t("Case: {caseState}", { caseState: view.caseState })}</p>
           {recorded ? (
             <p role="status">
-              Operator acknowledgment recorded. Case closure is checked separately.
+              {t("Operator acknowledgment recorded. Case closure is checked separately.")}
             </p>
           ) : (
             <>
@@ -137,20 +145,20 @@ export function CompensationReconciliationAction({
                   disabled={busy || unknown || readOnly || !online}
                   onChange={(e) => setConfirmed(e.currentTarget.checked)}
                 />
-                I have reviewed this confirmed refund and reconciled this case
+                {t("I have reviewed this confirmed refund and reconciled this case")}
               </label>
               <button
                 ref={actionButton}
                 disabled={busy || !confirmed || readOnly || !online}
                 onClick={() => void submit()}
               >
-                {unknown ? "Retry same acknowledgment" : "Record operations reconciliation"}
+                {unknown ? t("Retry same acknowledgment") : t("Record operations reconciliation")}
               </button>
             </>
           )}
         </>
       ) : null}
-      {busy ? <p role="status">Reading or recording current reconciliation…</p> : null}
+      {busy ? <p role="status">{t("Reading or recording current reconciliation…")}</p> : null}
       {message ? (
         <p ref={completionAnnouncement} role="status" tabIndex={-1}>
           {message}

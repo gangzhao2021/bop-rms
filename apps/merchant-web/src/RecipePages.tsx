@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -28,29 +29,36 @@ import {
 
 /** WP-2423 / DEC-RECIPE-AUTHORING: Brand recipes — drafts, independent review, publication, SKUs. */
 const copy: Record<RecipeErrorCode | "Loading", string> = {
-  Loading: "Loading recipes…",
-  PermissionDenied: "You do not have permission for this recipe action at Brand level.",
-  NotFound: "This recipe does not exist for the Brand.",
-  Conflict: "The recipe changed or this step was already recorded. Refresh and check again.",
-  CodeTaken: "Another recipe of the Brand already uses this code.",
-  AllergenUndeclared:
+  Loading: t("Loading recipes…"),
+  PermissionDenied: t("You do not have permission for this recipe action at Brand level."),
+  NotFound: t("This recipe does not exist for the Brand."),
+  Conflict: t("The recipe changed or this step was already recorded. Refresh and check again."),
+  CodeTaken: t("Another recipe of the Brand already uses this code."),
+  AllergenUndeclared: t(
     "The highlighted ingredient has no current allergen declaration in this version. Declare it under Allergens, then save the recipe again (its reviews start over).",
-  ReviewRequired:
+  ),
+  ReviewRequired: t(
     "Publishing needs an approved Cost review and an approved Food safety review of exactly this version, by two different reviewers who are not the author and still hold reviewer permission.",
-  ReviewerNotIndependent:
+  ),
+  ReviewerNotIndependent: t(
     "A reviewer cannot be the author, and one person cannot give both reviews.",
-  SoleOperatorNotInEffect:
+  ),
+  SoleOperatorNotInEffect: t(
     "Someone else now also holds recipe review, so another person must review. Refresh to see who.",
-  NeedsReverification: "Confirm it is you with your authenticator code, then review again.",
-  Lifecycle: "This step is not possible in the recipe's current state.",
-  InUse:
+  ),
+  NeedsReverification: t("Confirm it is you with your authenticator code, then review again."),
+  Lifecycle: t("This step is not possible in the recipe's current state."),
+  InUse: t(
     "The recipe is used by a SKU or by another recipe. Move those to another recipe first (Store-specific assignments can be removed in their Store).",
-  LineInvalid:
+  ),
+  LineInvalid: t(
     "The highlighted line is not valid: check the item or sub-recipe (active, stock-tracked), quantity, loss, cost and kitchen station.",
-  Invalid:
+  ),
+  Invalid: t(
     "The recipe is not valid. A name, a code (capital letters, digits, hyphen), a yield, at least one ingredient and one kitchen step are required.",
-  Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
-  Unavailable: "Recipes are unavailable.",
+  ),
+  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Unavailable: t("Recipes are unavailable."),
 };
 const lifecycleText: Record<string, string> = {
   Draft: "Draft",
@@ -58,7 +66,7 @@ const lifecycleText: Record<string, string> = {
   Invalidated: "Invalidated",
   Archived: "Archived",
 };
-const kindText = { Cost: "Cost", FoodSafety: "Food safety" } as const;
+const kindText = { Cost: "Cost", FoodSafety: t("Food safety") } as const;
 
 type State<V> =
   { readonly kind: "Loading" | RecipeErrorCode } | { readonly kind: "Found"; readonly view: V };
@@ -90,7 +98,7 @@ function useRecipeView<V>(
 function Failure({ code }: { code: RecipeErrorCode | "Loading" }) {
   return (
     <StatePanel
-      heading={code === "PermissionDenied" ? noAccessHeading : "Recipes"}
+      heading={code === "PermissionDenied" ? noAccessHeading : t("Recipes")}
       tone={code === "Loading" ? "neutral" : "error"}
       status
     >
@@ -99,7 +107,7 @@ function Failure({ code }: { code: RecipeErrorCode | "Loading" }) {
   );
 }
 const skuName = (choices: RecipeChoices, sku: string) =>
-  choices.skus.find((item) => item.skuReference === sku)?.name ?? "A size no longer listed";
+  choices.skus.find((item) => item.skuReference === sku)?.name ?? t("A size no longer listed");
 
 export function RecipeListPage({
   client = unavailableRecipeClient,
@@ -110,37 +118,39 @@ export function RecipeListPage({
   if (state.kind !== "Found") return <Failure code={state.kind} />;
   const view: RecipeListView = state.view;
   return (
-    <AppFrame title="Recipes" description="">
+    <AppFrame title={t("Recipes")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Recipes · Brand</p>
-          <h2>Recipes</h2>
+          <p className="bop-eyebrow">{t("Recipes · Brand")}</p>
+          <h2>{t("Recipes")}</h2>
           <p>
-            Recipes are shared by every Store of the Brand. A recipe is published after an
-            independent cost review and food safety review; a SKU uses its recipe to reserve and
-            consume stock and to show kitchen instructions. Source as of{" "}
+            {t(
+              "Recipes are shared by every Store of the Brand. A recipe is published after an independent cost review and food safety review; a SKU uses its recipe to reserve and consume stock and to show kitchen instructions. Source as of",
+            )}{" "}
             <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
         {view.permissions.mayEdit ? (
-          <Link to="/app/commerce/recipes/new/edit">New recipe</Link>
+          <Link to="/app/commerce/recipes/new/edit">{t("New recipe")}</Link>
         ) : null}
       </header>
       {view.recipes.length === 0 ? (
-        <StatePanel heading="No recipes yet" status>
-          <p>Create a recipe for each item you sell, and for batch preparations used in them.</p>
+        <StatePanel heading={t("No recipes yet")} status>
+          <p>
+            {t("Create a recipe for each item you sell, and for batch preparations used in them.")}
+          </p>
         </StatePanel>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Recipe</th>
-              <th>Code</th>
-              <th>Status</th>
-              <th>Yield</th>
-              <th>Standard cost</th>
-              <th>Kitchen instructions</th>
-              <th>Used by</th>
+              <th>{t("Recipe")}</th>
+              <th>{t("Code")}</th>
+              <th>{t("Status")}</th>
+              <th>{t("Yield")}</th>
+              <th>{t("Standard cost")}</th>
+              <th>{t("Kitchen instructions")}</th>
+              <th>{t("Used by")}</th>
             </tr>
           </thead>
           <tbody>
@@ -150,7 +160,9 @@ export function RecipeListPage({
                   <Link to={`/app/commerce/recipes/${recipe.recipeReference}/edit`}>
                     {recipe.name}
                   </Link>
-                  {recipe.familyRevision > 1 ? ` (revision ${recipe.familyRevision})` : ""}
+                  {recipe.familyRevision > 1
+                    ? t(" (revision {familyRevision})", { familyRevision: recipe.familyRevision })
+                    : ""}
                 </td>
                 <td>{recipe.code}</td>
                 <td>{lifecycleText[recipe.lifecycle]}</td>
@@ -158,13 +170,13 @@ export function RecipeListPage({
                   {recipe.yieldQuantity} {unitText(recipe.yieldUnit)}
                 </td>
                 <td>${centsText(recipe.standardCostCents)}</td>
-                <td>{recipe.kitchenInstructions === "Published" ? "Published" : "—"}</td>
+                <td>{recipe.kitchenInstructions === "Published" ? t("Published") : "—"}</td>
                 <td>
                   {recipe.bindings
                     .map(
                       (binding) =>
                         skuName(view.choices, binding.skuReference) +
-                        (binding.storeReference ? " (this Store)" : ""),
+                        (binding.storeReference ? t(" (this Store)") : ""),
                     )
                     .join(", ") || "—"}
                 </td>
@@ -335,9 +347,9 @@ function DraftForm({
         submit();
       }}
     >
-      <h3>Recipe</h3>
+      <h3>{t("Recipe")}</h3>
       <label>
-        Name
+        {t("Name")}
         <input
           required
           maxLength={120}
@@ -350,7 +362,7 @@ function DraftForm({
         />
       </label>
       <label>
-        Code {codeEditable ? "(cannot be changed later)" : ""}
+        {t("Code {value}", { value: codeEditable ? t("(cannot be changed later)") : "" })}
         <input
           required
           maxLength={40}
@@ -363,7 +375,7 @@ function DraftForm({
         />
       </label>
       <label>
-        Yield
+        {t("Yield")}
         <input
           required
           inputMode="decimal"
@@ -372,20 +384,20 @@ function DraftForm({
         />
       </label>
       <label>
-        Yield unit
+        {t("Yield unit")}
         <select value={yieldUnit} onChange={(event) => setYieldUnit(event.currentTarget.value)}>
           {choices.yieldUnits.map((unit) => (
             <option key={unit} value={unit}>
               {unit === "EACH"
-                ? "each (portions sold as a size)"
-                : unitText(unit) + " (batch preparation)"}
+                ? t("each (portions sold as a size)")
+                : unitText(unit) + t(" (batch preparation)")}
             </option>
           ))}
         </select>
       </label>
-      <h3>Ingredients</h3>
+      <h3>{t("Ingredients")}</h3>
       {choices.items.length === 0 ? (
-        <p>Activate stock-tracked inventory items (mass, volume or count) first.</p>
+        <p>{t("Activate stock-tracked inventory items (mass, volume or count) first.")}</p>
       ) : null}
       {ingredients.map((item, index) => {
         const flagged = errorLine === index + 1;
@@ -409,9 +421,9 @@ function DraftForm({
             aria-invalid={flagged}
             style={flagged ? { outline: "2px solid #b42318" } : undefined}
           >
-            <legend>Ingredient {index + 1}</legend>
+            <legend>{t("Ingredient {value}", { value: index + 1 })}</legend>
             <label>
-              Type
+              {t("Type")}
               <select
                 value={item.kind}
                 onChange={(event) => {
@@ -426,14 +438,14 @@ function DraftForm({
                   });
                 }}
               >
-                <option value="InventoryItem">Inventory item</option>
+                <option value="InventoryItem">{t("Inventory item")}</option>
                 <option value="SubRecipe" disabled={choices.subRecipes.length === 0}>
-                  Published sub-recipe
+                  {t("Published sub-recipe")}
                 </option>
               </select>
             </label>
             <label>
-              {item.kind === "InventoryItem" ? "Item" : "Sub-recipe"}
+              {item.kind === "InventoryItem" ? t("Item") : t("Sub-recipe")}
               <select
                 value={item.sourceReference}
                 onChange={(event) => {
@@ -465,19 +477,20 @@ function DraftForm({
             </label>
             {item.kind === "InventoryItem" && item.sourceReference ? (
               <p>
-                Allergens:{" "}
-                {(() => {
-                  const status = items.get(item.sourceReference)?.allergens;
-                  if (!status || status.status === "Missing")
-                    return "not declared — declare under Allergens before publishing";
-                  if (status.status === "Outdated")
-                    return "declaration out of date — declare again under Allergens";
-                  return allergenText(status);
-                })()}
+                {t("Allergens: {value}", {
+                  value: (() => {
+                    const status = items.get(item.sourceReference)?.allergens;
+                    if (!status || status.status === "Missing")
+                      return t("not declared — declare under Allergens before publishing");
+                    if (status.status === "Outdated")
+                      return t("declaration out of date — declare again under Allergens");
+                    return allergenText(status);
+                  })(),
+                })}
               </p>
             ) : null}
             <label>
-              Quantity ({unit})
+              {t("Quantity ({unit})", { unit: unit })}
               <input
                 required
                 inputMode="decimal"
@@ -488,7 +501,7 @@ function DraftForm({
               />
             </label>
             <label>
-              Preparation loss %
+              {t("Preparation loss %")}
               <input
                 inputMode="decimal"
                 value={item.lossPercent}
@@ -499,7 +512,7 @@ function DraftForm({
             </label>
             {item.kind === "InventoryItem" ? (
               <label>
-                Standard cost per {unit} ($)
+                {t("Standard cost per {unit} ($)", { unit: unit })}
                 <input
                   inputMode="decimal"
                   value={item.unitCost}
@@ -509,12 +522,12 @@ function DraftForm({
                 />
               </label>
             ) : null}
-            {cents !== null ? <p>Line cost: ${centsText(cents)}</p> : null}
+            {cents !== null ? <p>{t("Line cost: ${cents}", { cents: centsText(cents) })}</p> : null}
             <button
               type="button"
               onClick={() => setIngredients((current) => current.filter((_, i) => i !== index))}
             >
-              Remove ingredient
+              {t("Remove ingredient")}
             </button>
           </fieldset>
         );
@@ -524,18 +537,22 @@ function DraftForm({
         disabled={choices.items.length === 0}
         onClick={() => setIngredients((current) => [...current, newIngredient()])}
       >
-        Add ingredient
+        {t("Add ingredient")}
       </button>
-      <p>Standard cost of the yield (inventory items): ${centsText(total.toString())}</p>
-      <h3>Kitchen steps</h3>
+      <p>
+        {t("Standard cost of the yield (inventory items): ${value}", {
+          value: centsText(total.toString()),
+        })}
+      </p>
+      <h3>{t("Kitchen steps")}</h3>
       {choices.stations.length === 0 ? (
-        <p>This Store has no kitchen station configured; kitchen steps need a station.</p>
+        <p>{t("This Store has no kitchen station configured; kitchen steps need a station.")}</p>
       ) : null}
       {steps.map((step, index) => (
         <fieldset key={step.key}>
-          <legend>Step {index + 1}</legend>
+          <legend>{t("Step {value}", { value: index + 1 })}</legend>
           <label>
-            Order (steps with the same number may run in parallel)
+            {t("Order (steps with the same number may run in parallel)")}
             <input
               inputMode="numeric"
               value={step.sequence}
@@ -543,7 +560,7 @@ function DraftForm({
             />
           </label>
           <label>
-            Instruction
+            {t("Instruction")}
             <textarea
               required
               maxLength={500}
@@ -552,7 +569,7 @@ function DraftForm({
             />
           </label>
           <label>
-            Duration (minutes)
+            {t("Duration (minutes)")}
             <input
               inputMode="decimal"
               value={step.minutes}
@@ -560,7 +577,7 @@ function DraftForm({
             />
           </label>
           <label>
-            Kitchen station
+            {t("Kitchen station")}
             <select
               value={step.capabilityReference}
               onChange={(event) =>
@@ -578,7 +595,7 @@ function DraftForm({
             type="button"
             onClick={() => setSteps((current) => current.filter((_, i) => i !== index))}
           >
-            Remove step
+            {t("Remove step")}
           </button>
         </fieldset>
       ))}
@@ -587,11 +604,13 @@ function DraftForm({
         disabled={choices.stations.length === 0}
         onClick={() => setSteps((current) => [...current, newStep()])}
       >
-        Add step
+        {t("Add step")}
       </button>{" "}
-      <button disabled={busy || ingredients.length === 0 || steps.length === 0}>Save draft</button>
+      <button disabled={busy || ingredients.length === 0 || steps.length === 0}>
+        {t("Save draft")}
+      </button>
       {localError ? (
-        <StatePanel heading="Not saved" tone="error" status>
+        <StatePanel heading={t("Not saved")} tone="error" status>
           <p>{localError}</p>
         </StatePanel>
       ) : null}
@@ -603,9 +622,9 @@ function DraftForm({
 function lineAllergens(recipe: RecipeDetail, line: number): string {
   const entry = recipe.ingredientAllergens?.find((item) => item.line === line);
   if (!entry) return "—";
-  if (entry.kind === "SubRecipe") return "From the sub-recipe";
-  if (!entry.declared) return "Not declared";
-  return allergenText(entry) + (entry.current ? "" : " (declaration since replaced)");
+  if (entry.kind === "SubRecipe") return t("From the sub-recipe");
+  if (!entry.declared) return t("Not declared");
+  return allergenText(entry) + (entry.current ? "" : t(" (declaration since replaced)"));
 }
 function AllergenSummary({ recipe }: { readonly recipe: RecipeDetail }) {
   const lines = (recipe.ingredientAllergens ?? []).filter((line) => line.kind === "InventoryItem");
@@ -617,14 +636,15 @@ function AllergenSummary({ recipe }: { readonly recipe: RecipeDetail }) {
   const undeclared = lines.filter((line) => !line.declared).length;
   return (
     <p>
-      <strong>Allergens from ingredients:</strong>{" "}
-      {undeclared
-        ? `unknown — ${undeclared} ingredient(s) not declared` +
-          (contains.length || mayContain.length
-            ? "; declared so far: " + allergenText({ contains, mayContain })
-            : "")
-        : allergenText({ contains, mayContain })}
-      . Sub-recipes add their own.
+      <strong>{t("Allergens from ingredients:")}</strong>{" "}
+      {t("{value}. Sub-recipes add their own.", {
+        value: undeclared
+          ? t("unknown — {undeclared} ingredient(s) not declared", { undeclared: undeclared }) +
+            (contains.length || mayContain.length
+              ? t("; declared so far: ") + allergenText({ contains, mayContain })
+              : "")
+          : allergenText({ contains, mayContain }),
+      })}
     </p>
   );
 }
@@ -641,15 +661,15 @@ function ReadOnlyRecipe({
   const stations = new Map(choices.stations.map((item) => [item.capabilityReference, item.name]));
   return (
     <section className="detail-section">
-      <h3>Ingredients</h3>
+      <h3>{t("Ingredients")}</h3>
       <table>
         <thead>
           <tr>
-            <th>Ingredient</th>
-            <th>Quantity</th>
-            <th>Loss %</th>
-            <th>Standard cost per unit</th>
-            <th>Allergens (this version)</th>
+            <th>{t("Ingredient")}</th>
+            <th>{t("Quantity")}</th>
+            <th>{t("Loss %")}</th>
+            <th>{t("Standard cost per unit")}</th>
+            <th>{t("Allergens (this version)")}</th>
           </tr>
         </thead>
         <tbody>
@@ -657,8 +677,8 @@ function ReadOnlyRecipe({
             <tr key={index}>
               <td>
                 {item.kind === "InventoryItem"
-                  ? (items.get(item.sourceReference)?.name ?? "Inactive item")
-                  : (subs.get(item.sourceReference)?.name ?? "Sub-recipe")}
+                  ? (items.get(item.sourceReference)?.name ?? t("Inactive item"))
+                  : (subs.get(item.sourceReference)?.name ?? t("Sub-recipe"))}
               </td>
               <td>
                 {item.quantity}{" "}
@@ -680,15 +700,20 @@ function ReadOnlyRecipe({
         </tbody>
       </table>
       <AllergenSummary recipe={recipe} />
-      <h3>Kitchen steps</h3>
+      <h3>{t("Kitchen steps")}</h3>
       <ol>
         {recipe.draft.steps.map((step, index, all) => (
           <li key={index}>
-            Step {index + 1}: {step.instruction} — {Math.round(step.durationSeconds / 6) / 10} min,{" "}
-            {stations.get(step.capabilityReference) ?? "station"}
-            {index > 0 && all[index - 1]?.sequence === step.sequence
-              ? " (at the same time as the step before)"
-              : ""}
+            {t("Step {value}: {instruction} — {value2} min, {value3}{value4}", {
+              value: index + 1,
+              instruction: step.instruction,
+              value2: Math.round(step.durationSeconds / 6) / 10,
+              value3: stations.get(step.capabilityReference) ?? t("station"),
+              value4:
+                index > 0 && all[index - 1]?.sequence === step.sequence
+                  ? t(" (at the same time as the step before)")
+                  : "",
+            })}
           </li>
         ))}
       </ol>
@@ -721,16 +746,19 @@ function ReviewPanel({
           const review = reviews.find((item) => item.kind === kind);
           return (
             <li key={kind}>
-              <strong>{kindText[kind]} review:</strong>{" "}
+              <strong>{t("{value} review:", { value: kindText[kind] })}</strong>{" "}
               {review ? (
                 <>
-                  {review.decision} by {review.reviewerLabel} on{" "}
+                  {t("{decision} by {reviewerLabel} on", {
+                    decision: review.decision,
+                    reviewerLabel: review.reviewerLabel,
+                  })}{" "}
                   <SourceTime instant={review.reviewedAt} />
                   {review.comment ? ` — “${review.comment}”` : ""}
-                  {review.current ? "" : " (content changed since)"}
+                  {review.current ? "" : t(" (content changed since)")}
                 </>
               ) : (
-                "waiting"
+                t("waiting")
               )}
             </li>
           );
@@ -739,7 +767,7 @@ function ReviewPanel({
       {view.permissions.mayReview && !isAuthor && !reviewedHere ? (
         <div>
           <label>
-            Review comment (required to reject)
+            {t("Review comment (required to reject)")}
             <textarea
               maxLength={500}
               value={comment}
@@ -768,7 +796,8 @@ function ReviewPanel({
                       })
                     }
                   >
-                    {decision === "Approved" ? "Approve" : "Reject"} {kindText[kind].toLowerCase()}
+                    {decision === "Approved" ? t("Approve") : t("Reject")}{" "}
+                    {kindText[kind].toLowerCase()}
                   </button>
                 ))}{" "}
               </span>
@@ -791,7 +820,7 @@ function ReviewPanel({
               gate={view.soleOperator}
               csrf={csrf}
               what={`the ${kindText[kind].toLowerCase()} of this version`}
-              permissionName="recipe review"
+              permissionName={t("recipe review")}
               yourPart={
                 isAuthor
                   ? "You wrote this version"
@@ -801,9 +830,15 @@ function ReviewPanel({
               actionLabel={`Approve ${kindText[kind].toLowerCase()} on my own`}
               summary={
                 <p>
-                  {recipe.name} ({recipe.code}) — {kindText[kind].toLowerCase()} review
-                  {subject === "Preparation" ? " of the kitchen steps" : ""}.
-                  {isAuthor ? " You wrote this version." : " You gave the other review."}
+                  {t("{name} ({code}) — {value} review{value2}.{value3}", {
+                    name: recipe.name,
+                    code: recipe.code,
+                    value: kindText[kind].toLowerCase(),
+                    value2: subject === "Preparation" ? t(" of the kitchen steps") : "",
+                    value3: isAuthor
+                      ? t(" You wrote this version.")
+                      : t(" You gave the other review."),
+                  })}
                 </p>
               }
               onApprove={() =>
@@ -823,7 +858,7 @@ function ReviewPanel({
           );
         })()
       ) : isAuthor ? (
-        <p>You wrote this version; two other reviewers decide.</p>
+        <p>{t("You wrote this version; two other reviewers decide.")}</p>
       ) : null}
     </div>
   );
@@ -843,13 +878,15 @@ function Bindings({
   const [sku, setSku] = useState(""),
     [storeOnly, setStoreOnly] = useState(false);
   return (
-    <StatePanel heading="Used by SKUs">
-      {recipe.bindings.length === 0 ? <p>No SKU uses this recipe yet.</p> : null}
+    <StatePanel heading={t("Used by SKUs")}>
+      {recipe.bindings.length === 0 ? <p>{t("No SKU uses this recipe yet.")}</p> : null}
       <ul>
         {recipe.bindings.map((binding) => (
           <li key={binding.bindingReference}>
-            {skuName(view.choices, binding.skuReference)} ·{" "}
-            {binding.storeReference ? "this Store only" : "all Stores of the Brand"} · since{" "}
+            {t("{choices} · {value} · since", {
+              choices: skuName(view.choices, binding.skuReference),
+              value: binding.storeReference ? t("this Store only") : t("all Stores of the Brand"),
+            })}{" "}
             <SourceTime instant={binding.since} />{" "}
             {binding.storeReference && view.permissions.mayPublish ? (
               <button
@@ -863,7 +900,7 @@ function Bindings({
                   })
                 }
               >
-                Remove Store-specific recipe
+                {t("Remove Store-specific recipe")}
               </button>
             ) : null}
           </li>
@@ -887,9 +924,9 @@ function Bindings({
           }}
         >
           <label>
-            SKU
+            {t("SKU")}
             <select value={sku} onChange={(event) => setSku(event.currentTarget.value)}>
-              <option value="">Choose a SKU</option>
+              <option value="">{t("Choose a SKU")}</option>
               {candidates.map((option) => (
                 <option key={option.skuReference} value={option.skuReference}>
                   {option.name} ({option.code})
@@ -903,13 +940,15 @@ function Bindings({
               checked={storeOnly}
               onChange={(event) => setStoreOnly(event.currentTarget.checked)}
             />{" "}
-            Only in this Store (other Stores keep the Brand recipe)
+            {t("Only in this Store (other Stores keep the Brand recipe)")}
           </label>
-          <button disabled={busy || !sku}>Use this recipe</button>
-          <p>The SKU's previous recipe in the same scope stops applying at the same moment.</p>
+          <button disabled={busy || !sku}>{t("Use this recipe")}</button>
+          <p>
+            {t("The SKU's previous recipe in the same scope stops applying at the same moment.")}
+          </p>
         </form>
       ) : recipe.lifecycle === "Published" && recipe.yieldUnit !== "EACH" ? (
-        <p>Batch recipes are used as sub-recipes, not by SKUs.</p>
+        <p>{t("Batch recipes are used as sub-recipes, not by SKUs.")}</p>
       ) : null}
     </StatePanel>
   );
@@ -983,7 +1022,7 @@ function RecipeEditor({
   if (state.kind !== "Found") return <Failure code={state.kind} />;
   const view = state.view;
   const errorPanel = error ? (
-    <StatePanel heading="Not recorded" tone="error" status>
+    <StatePanel heading={t("Not recorded")} tone="error" status>
       <p>{copy[error.code]}</p>
     </StatePanel>
   ) : null;
@@ -994,18 +1033,24 @@ function RecipeEditor({
       ? view.recipes.find((recipe) => recipe.recipeReference === revisionOf)
       : undefined;
     return (
-      <AppFrame title="New recipe" description="Recipe">
+      <AppFrame title={t("New recipe")} description={t("Recipe")}>
         <header className="screen-heading">
           <div>
-            <p className="bop-eyebrow">Recipe · {base ? "Revision" : "New"}</p>
-            <h2>{base ? `Revise ${base.name}` : "New recipe"}</h2>
+            <p className="bop-eyebrow">
+              {t("Recipe · {value}", { value: base ? t("Revision") : t("New") })}
+            </p>
+            <h2>{base ? t("Revise {name}", { name: base.name }) : t("New recipe")}</h2>
             <p>
               {base
-                ? "The published recipe stays in use until this revision is reviewed, published and assigned to its SKUs."
-                : "Save a draft, then two reviewers check cost and food safety before it can be published."}
+                ? t(
+                    "The published recipe stays in use until this revision is reviewed, published and assigned to its SKUs.",
+                  )
+                : t(
+                    "Save a draft, then two reviewers check cost and food safety before it can be published.",
+                  )}
             </p>
           </div>
-          <Link to="/app/commerce/recipes">All recipes</Link>
+          <Link to="/app/commerce/recipes">{t("All recipes")}</Link>
         </header>
         <RevisionSeed client={client} base={revisionOf}>
           {(initial) => (
@@ -1042,26 +1087,31 @@ function RecipeEditor({
       (review) => review.subject === subject && review.decision === "Approved" && review.current,
     ).length === 2;
   return (
-    <AppFrame title={recipe.name} description="Recipe">
+    <AppFrame title={recipe.name} description={t("Recipe")}>
       <header className="screen-heading">
         <div>
           <p className="bop-eyebrow">
-            Recipe · {recipe.code}
-            {recipe.familyRevision > 1 ? ` · revision ${recipe.familyRevision}` : ""}
+            {t("Recipe · {code}{value}", {
+              code: recipe.code,
+              value:
+                recipe.familyRevision > 1
+                  ? t(" · revision {familyRevision}", { familyRevision: recipe.familyRevision })
+                  : "",
+            })}
           </p>
           <h2>{recipe.name}</h2>
           <p>
-            {lifecycleText[recipe.lifecycle]} · yield {recipe.yieldQuantity}{" "}
-            {unitText(recipe.yieldUnit)} · standard cost ${centsText(recipe.standardCostCents)} ·
-            written by {recipe.authorLabel}
+            {lifecycleText[recipe.lifecycle]} {t("· yield")} {recipe.yieldQuantity}{" "}
+            {unitText(recipe.yieldUnit)} {t("· standard cost $")}
+            {centsText(recipe.standardCostCents)} {t("· written by")} {recipe.authorLabel}
           </p>
         </div>
-        <Link to="/app/commerce/recipes">All recipes</Link>
+        <Link to="/app/commerce/recipes">{t("All recipes")}</Link>
       </header>
       {errorPanel}
       {recipe.family.length > 1 ? (
         <p>
-          Revisions:{" "}
+          {t("Revisions:")}{" "}
           {recipe.family.map((member, index) => (
             <span key={member.recipeReference}>
               {index > 0 ? ", " : ""}
@@ -1101,8 +1151,8 @@ function RecipeEditor({
         <ReadOnlyRecipe recipe={recipe} choices={view.choices} />
       )}
       {recipe.lifecycle === "Draft" ? (
-        <StatePanel heading="Review and publication">
-          <p>Saving the draft again starts the reviews over for the new version.</p>
+        <StatePanel heading={t("Review and publication")}>
+          <p>{t("Saving the draft again starts the reviews over for the new version.")}</p>
           <ReviewPanel
             view={view}
             subject="Recipe"
@@ -1123,20 +1173,25 @@ function RecipeEditor({
                 })
               }
             >
-              Publish recipe
+              {t("Publish recipe")}
             </button>
           ) : null}
         </StatePanel>
       ) : null}
       {recipe.lifecycle === "Published" ? (
-        <StatePanel heading="Kitchen instructions">
+        <StatePanel heading={t("Kitchen instructions")}>
           {recipe.kitchenInstructions === "Published" ? (
-            <p>Published. Kitchen tickets show these steps for every SKU that uses this recipe.</p>
+            <p>
+              {t(
+                "Published. Kitchen tickets show these steps for every SKU that uses this recipe.",
+              )}
+            </p>
           ) : (
             <>
               <p>
-                The kitchen steps of the published version are reviewed once more (cost and food
-                safety) before kitchen tickets can show them.
+                {t(
+                  "The kitchen steps of the published version are reviewed once more (cost and food safety) before kitchen tickets can show them.",
+                )}
               </p>
               <ReviewPanel
                 view={view}
@@ -1157,7 +1212,7 @@ function RecipeEditor({
                     })
                   }
                 >
-                  Publish kitchen instructions
+                  {t("Publish kitchen instructions")}
                 </button>
               ) : null}
             </>
@@ -1170,7 +1225,7 @@ function RecipeEditor({
       {recipe.lifecycle === "Published" && view.permissions.mayEdit ? (
         <p>
           <Link to={`/app/commerce/recipes/new/edit?revisionOf=${recipe.recipeReference}`}>
-            Revise this recipe
+            {t("Revise this recipe")}
           </Link>
         </p>
       ) : null}
@@ -1187,7 +1242,7 @@ function RecipeEditor({
             })
           }
         >
-          Archive recipe
+          {t("Archive recipe")}
         </button>
       ) : null}
     </AppFrame>

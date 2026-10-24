@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { StoreSetupClientError, type StoreSetupScope } from "./store-setup-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -117,12 +118,12 @@ export interface ReceiptTemplateArtifactEditorProps {
 }
 export function ReceiptTemplateArtifactEditor(props: ReceiptTemplateArtifactEditorProps) {
   return (
-    <section hidden={props.hidden} aria-label="Receipt presets">
-      <h4>Receipt presets</h4>
+    <section hidden={props.hidden} aria-label={t("Receipt presets")}>
+      <h4>{t("Receipt presets")}</h4>
       <p>
-        Save the receipt layout and the fields every receipt must show; receipt templates are built
-        from these presets. Saving them does not change customer receipts and does not mean a legal
-        professional has approved them.
+        {t(
+          "Save the receipt layout and the fields every receipt must show; receipt templates are built from these presets. Saving them does not change customer receipts and does not mean a legal professional has approved them.",
+        )}
       </p>
       {(["Layout", "Compliance"] as const).map((kind) => (
         <Preset key={kind} {...props} kind={kind} />
@@ -149,7 +150,7 @@ function Preset({
     active = useRef<AbortController | null>(null),
     running = useRef(false),
     journal = useRef<ReceiptTemplateArtifactPendingJournal | null>(null);
-  const label = kind === "Layout" ? "receipt layout" : "required receipt fields",
+  const label = kind === "Layout" ? t("receipt layout") : t("required receipt fields"),
     scopeKey = JSON.stringify(scope);
   useEffect(() => {
     const e = ++epoch.current,
@@ -249,8 +250,8 @@ function Preset({
         setReady(true);
         setNotice(
           result.receipt.outcome === "Committed"
-            ? "Saved preset confirmed."
-            : "Earlier save did not commit. You can save again.",
+            ? t("Saved preset confirmed.")
+            : t("Earlier save did not commit. You can save again."),
         );
       }
     } catch (v) {
@@ -266,34 +267,46 @@ function Preset({
   const saved = kind === "Layout" ? view?.layout : view?.compliance;
   return (
     <section aria-label={label}>
-      <h5>{kind === "Layout" ? "Accessible receipt layout" : "Required receipt fields"}</h5>
+      <h5>{kind === "Layout" ? t("Accessible receipt layout") : t("Required receipt fields")}</h5>
       <p>
         {kind === "Layout"
-          ? "Accessible digital receipt, using the standard receipt fields."
-          : "Issuer, Store, order number, issue time, items, subtotal, discount, fee, tax, tip, total, payment status and refunded total. Professional and legal review have not been evaluated."}
+          ? t("Accessible digital receipt, using the standard receipt fields.")
+          : t(
+              "Issuer, Store, order number, issue time, items, subtotal, discount, fee, tax, tip, total, payment status and refunded total. Professional and legal review have not been evaluated.",
+            )}
       </p>
-      {saved ? <p>Saved revision {saved.revision}.</p> : ready ? <p>No saved preset yet.</p> : null}
-      {busy && <p role="status">Loading {label}…</p>}
+      {saved ? (
+        <p>{t("Saved revision {revision}.", { revision: saved.revision })}</p>
+      ) : ready ? (
+        <p>{t("No saved preset yet.")}</p>
+      ) : null}
+      {busy && <p role="status">{t("Loading {label}…", { label: label })}</p>}
       {notice && <p role="status">{notice}</p>}
       {error && (
         <p role="alert">
           {error === "Denied"
-            ? "You do not have permission to manage this receipt preset."
+            ? t("You do not have permission to manage this receipt preset.")
             : error === "Conflict"
-              ? "The saved preset changed. Refresh before saving."
+              ? t("The saved preset changed. Refresh before saving.")
               : error === "OutcomeUnknown"
-                ? "The save could not be confirmed. Recover the original save before saving again."
-                : "Receipt presets could not be loaded. Refresh when connected; an earlier save remains protected."}
+                ? t(
+                    "The save could not be confirmed. Recover the original save before saving again.",
+                  )
+                : t(
+                    "Receipt presets could not be loaded. Refresh when connected; an earlier save remains protected.",
+                  )}
         </p>
       )}
-      {pending && <p role="status">An earlier save must be recovered before another save.</p>}
+      {pending && (
+        <p role="status">{t("An earlier save must be recovered before another save.")}</p>
+      )}
       <button
         style={{ minHeight: 44 }}
         type="button"
         disabled={disabled || busy}
         onClick={() => void action("Refresh")}
       >
-        Refresh saved {label}
+        {t("Refresh saved {label}", { label: label })}
       </button>
       {pending ? (
         <button
@@ -302,7 +315,7 @@ function Preset({
           disabled={disabled || busy}
           onClick={() => void action("Resolve")}
         >
-          Recover original {label} save
+          {t("Recover original {label} save", { label: label })}
         </button>
       ) : (
         <button
@@ -311,7 +324,7 @@ function Preset({
           disabled={disabled || busy || !ready}
           onClick={() => void action("Save")}
         >
-          Save {label}
+          {t("Save {label}", { label: label })}
         </button>
       )}
     </section>

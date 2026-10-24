@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -28,36 +29,40 @@ export function TaskInboxStatePanel({ state }: { readonly state: PageState["kind
     PageState["kind"],
     readonly [string, string, "neutral" | "error" | "offline"]
   > = {
-    Loading: ["Loading Task Inbox", "Loading the authorized Task queue for this Store…", "neutral"],
+    Loading: [
+      t("Loading Task Inbox"),
+      t("Loading the authorized Task queue for this Store…"),
+      "neutral",
+    ],
     PermissionDenied: [noAccessHeading, pageAccessDeniedText, "error"],
     NotFound: [
-      "Task Inbox unavailable",
-      "The requested Task Inbox route was not found.",
+      t("Task Inbox unavailable"),
+      t("The requested Task Inbox route was not found."),
       "neutral",
     ],
     FeatureDisabled: [
-      "Task Inbox unavailable",
-      "The authorized Task queue is not enabled for this Store.",
+      t("Task Inbox unavailable"),
+      t("The authorized Task queue is not enabled for this Store."),
       "neutral",
     ],
     Unavailable: [
-      "Task Inbox unavailable",
-      "No Task, SLA, or source outcome is inferred from an unavailable read.",
+      t("Task Inbox unavailable"),
+      t("No Task, SLA, or source outcome is inferred from an unavailable read."),
       "error",
     ],
     Offline: [
-      "Offline read-only",
-      "No cached Task data is available. Reconnect to load the authorized queue.",
+      t("Offline read-only"),
+      t("No cached Task data is available. Reconnect to load the authorized queue."),
       "offline",
     ],
-    Ready: ["Task Inbox", "", "neutral"],
+    Ready: [t("Task Inbox"), "", "neutral"],
   };
   const [heading, description, tone] = values[state];
   if (state === "Ready") return null;
   return (
     <StatePanel heading={heading} tone={tone} status>
       <p>{description}</p>
-      <Link to="/app">Return to workspace</Link>
+      <Link to="/app">{t("Return to workspace")}</Link>
     </StatePanel>
   );
 }
@@ -90,46 +95,50 @@ function TaskInboxEntry({
       </header>
       <dl className="task-inbox-facts">
         <div>
-          <dt>Owner</dt>
+          <dt>{t("Owner")}</dt>
           <dd>
             {item.ownerStatus === "ClaimedByYou"
-              ? "Claimed by you"
+              ? t("Claimed by you")
               : item.ownerStatus === "ClaimedByStaff"
-                ? "Claimed by another staff member"
-                : "Unclaimed"}
+                ? t("Claimed by another staff member")
+                : t("Unclaimed")}
           </dd>
         </div>
         <div>
-          <dt>Scope</dt>
+          <dt>{t("Scope")}</dt>
           <dd>{storeLabel}</dd>
         </div>
         <div>
-          <dt>Due</dt>
+          <dt>{t("Due")}</dt>
           <dd>
             <time dateTime={item.dueAt}>{item.dueAt}</time>
           </dd>
         </div>
         <div>
-          <dt>SLA</dt>
-          <dd>Policy unavailable</dd>
+          <dt>{t("SLA")}</dt>
+          <dd>{t("Policy unavailable")}</dd>
         </div>
         <div>
-          <dt>Source</dt>
-          <dd>{taskCodeLabel(item.sourceType)} · Display-safe reference unavailable</dd>
+          <dt>{t("Source")}</dt>
+          <dd>
+            {t("{sourceType} · Display-safe reference unavailable", {
+              sourceType: taskCodeLabel(item.sourceType),
+            })}
+          </dd>
         </div>
       </dl>
       <div className="task-inbox-card__actions">
         <button type="button" disabled aria-describedby="task-inbox-action-boundary">
-          Claim
+          {t("Claim")}
         </button>
         <button type="button" disabled aria-describedby="task-inbox-action-boundary">
-          Assign
+          {t("Assign")}
         </button>
         <button type="button" disabled aria-describedby="task-inbox-action-boundary">
-          Acknowledge
+          {t("Acknowledge")}
         </button>
         <button type="button" disabled aria-describedby="task-inbox-action-boundary">
-          Open source
+          {t("Open source")}
         </button>
       </div>
     </article>
@@ -150,14 +159,16 @@ export function TaskInboxScreen({
   const view = state.kind === "Ready" || state.kind === "Offline" ? state.view : null;
   const readOnly = state.kind !== "Ready";
   return (
-    <AppFrame title="Tasks" description="">
+    <AppFrame title={t("Tasks")} description="">
       <section className="task-inbox" aria-labelledby="task-inbox-heading">
         <header className="task-inbox-heading">
           <div>
-            <p className="bop-eyebrow">Tasks</p>
-            <h2 id="task-inbox-heading">{view?.storeLabel ?? "Task Inbox"}</h2>
+            <p className="bop-eyebrow">{t("Tasks")}</p>
+            <h2 id="task-inbox-heading">{view?.storeLabel ?? t("Task Inbox")}</h2>
             <p>
-              Task and source facts are scoped to the current Store; internal references are hidden.
+              {t(
+                "Task and source facts are scoped to the current Store; internal references are hidden.",
+              )}
             </p>
           </div>
           <div className="task-inbox-toolbar">
@@ -166,9 +177,9 @@ export function TaskInboxScreen({
               onClick={onRefresh}
               disabled={!online || state.kind === "Loading"}
             >
-              Refresh
+              {t("Refresh")}
             </button>
-            <Link to="/app">Workspace overview</Link>
+            <Link to="/app">{t("Workspace overview")}</Link>
           </div>
         </header>
 
@@ -179,35 +190,41 @@ export function TaskInboxScreen({
         {view ? (
           <>
             {state.kind === "Offline" ? (
-              <StatePanel heading="Offline read-only" tone="offline" status>
+              <StatePanel heading={t("Offline read-only")} tone="offline" status>
                 <p>
-                  The last authorized page remains visible for reference. Task actions are disabled.
+                  {t(
+                    "The last authorized page remains visible for reference. Task actions are disabled.",
+                  )}
                 </p>
               </StatePanel>
             ) : null}
             {readOnly && state.kind === "Loading" ? <TaskInboxStatePanel state="Loading" /> : null}
             <section className="task-inbox-limits" aria-labelledby="task-inbox-limits-heading">
-              <h3 id="task-inbox-limits-heading">Available query coverage</h3>
+              <h3 id="task-inbox-limits-heading">{t("Available query coverage")}</h3>
               <p>
-                This page shows one authorized Store queue, up to 50 records at a time. Filtering
-                controls are unavailable here. An empty page does not establish source-workflow
-                finality.
+                {t(
+                  "This page shows one authorized Store queue, up to 50 records at a time. Filtering controls are unavailable here. An empty page does not establish source-workflow finality.",
+                )}
               </p>
             </section>
             <section aria-labelledby="task-inbox-records-heading">
               <div className="task-inbox-records-heading">
                 <div>
-                  <h3 id="task-inbox-records-heading">Task records</h3>
+                  <h3 id="task-inbox-records-heading">{t("Task records")}</h3>
                   <p>
-                    {view.items.length} records on this page · observed {view.observedAt}
+                    {t("{length} records on this page · observed {observedAt}", {
+                      length: view.items.length,
+                      observedAt: view.observedAt,
+                    })}
                   </p>
                 </div>
               </div>
               {view.items.length === 0 ? (
-                <StatePanel heading="No Task records returned on this page" status>
+                <StatePanel heading={t("No Task records returned on this page")} status>
                   <p>
-                    The authorized query returned no visible Task records. No business outcome is
-                    inferred.
+                    {t(
+                      "The authorized query returned no visible Task records. No business outcome is inferred.",
+                    )}
                   </p>
                 </StatePanel>
               ) : (
@@ -224,11 +241,11 @@ export function TaskInboxScreen({
               )}
             </section>
             <aside className="task-inbox-actions-note" id="task-inbox-action-boundary">
-              <h3>Task actions unavailable</h3>
+              <h3>{t("Task actions unavailable")}</h3>
               <p>
-                Claim requires a current eligible Queue member and an authorized write endpoint.
-                Assignment, acknowledgement, source navigation, and resolution require their own
-                approved commands and source permissions. No Task or source state was changed.
+                {t(
+                  "Claim requires a current eligible Queue member and an authorized write endpoint. Assignment, acknowledgement, source navigation, and resolution require their own approved commands and source permissions. No Task or source state was changed.",
+                )}
               </p>
             </aside>
             <div className="task-inbox-pagination">
@@ -237,10 +254,10 @@ export function TaskInboxScreen({
                 onClick={onNext}
                 disabled={!online || readOnly || view.nextAfterTaskReference === null}
               >
-                Load next page
+                {t("Load next page")}
               </button>
               {view.nextAfterTaskReference === null ? (
-                <span>No continuation was returned for this page.</span>
+                <span>{t("No continuation was returned for this page.")}</span>
               ) : null}
             </div>
           </>

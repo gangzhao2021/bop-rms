@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createDiningOrderCloseClient,
@@ -58,8 +59,8 @@ export function DiningOrderCloseAction({
             : error.code === "NotReady"
               ? closeReasonTexts(error.reasons.length > 0 ? error.reasons : ["UNKNOWN"])
               : error.code === "PermissionDenied"
-                ? ["Your access doesn't allow closing orders. Ask an Owner or Store Manager."]
-                : ["The order changed meanwhile. Refresh it and try again."],
+                ? [t("Your access doesn't allow closing orders. Ask an Owner or Store Manager.")]
+                : [t("The order changed meanwhile. Refresh it and try again.")],
         );
         if (!unknown) onBusy(false);
       }
@@ -70,8 +71,9 @@ export function DiningOrderCloseAction({
   return (
     <div>
       <p>
-        Close this completed order. Payment and unresolved exceptions will be checked before
-        closing. The dining session stays open.
+        {t(
+          "Close this completed order. Payment and unresolved exceptions will be checked before closing. The dining session stays open.",
+        )}
       </p>
       <label>
         <input
@@ -80,7 +82,7 @@ export function DiningOrderCloseAction({
           disabled={state !== "Idle" || locked}
           onChange={(event) => setConfirmed(event.target.checked)}
         />
-        I confirm this order is complete
+        {t("I confirm this order is complete")}
       </label>
       {state !== "Denied" ? (
         <button
@@ -88,21 +90,21 @@ export function DiningOrderCloseAction({
           onClick={() => void submit()}
         >
           {state === "Unknown"
-            ? "Retry same close request"
+            ? t("Retry same close request")
             : state === "Submitting"
-              ? "Closing order…"
-              : "Close order"}
+              ? t("Closing order…")
+              : t("Close order")}
         </button>
       ) : null}
       {state === "Unknown" ? (
         <p role="status">
-          We couldn&apos;t reach the server to confirm whether the order was closed, even after
-          checking again. Check this device&apos;s connection, then retry: it reports what already
-          happened and nothing is done twice.
+          {t(
+            "We couldn't reach the server to confirm whether the order was closed, even after checking again. Check this device's connection, then retry: it reports what already happened and nothing is done twice.",
+          )}
         </p>
       ) : state === "Denied" ? (
         <div role="status">
-          <p>The order wasn&apos;t closed.</p>
+          <p>{t("The order wasn't closed.")}</p>
           {refusal.length > 0 ? (
             <ul>
               {refusal.map((text) => (

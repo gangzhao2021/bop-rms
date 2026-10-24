@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { SkipLinkProvidedContext } from "@bop-rms/ui";
 import {
   useEffect,
@@ -59,7 +60,11 @@ export type WorkspaceNavigationGroup =
   | "organization"
   | "integrations";
 
-const GROUP_LABELS: Readonly<Record<Exclude<WorkspaceNavigationGroup, "home">, string>> = {
+/**
+ * Group headings, and (from the server) each screen's label, are English keys shown through `t()`;
+ * `i18n.test.ts` checks every one has its Simplified Chinese wording.
+ */
+export const GROUP_LABELS: Readonly<Record<Exclude<WorkspaceNavigationGroup, "home">, string>> = {
   operations: "Operations",
   commerce: "Commerce",
   supply: "Supply",
@@ -160,7 +165,7 @@ export function workspaceNavigationSections(
   ];
   for (const group of GROUP_ORDER) {
     const members = placed.filter((entry) => entry.place[0] === group).map((entry) => entry.item);
-    if (members.length > 0) sections.push({ group, label: GROUP_LABELS[group], items: members });
+    if (members.length > 0) sections.push({ group, label: t(GROUP_LABELS[group]), items: members });
   }
   return sections;
 }
@@ -263,7 +268,9 @@ export function WorkspaceLayout({
       ? path === "/app"
         ? "Home"
         : null
-      : (items.find((item) => item.screenId === current)?.label ?? null);
+      : ((label) => (label === undefined ? null : t(label)))(
+          items.find((item) => item.screenId === current)?.label,
+        );
   // `copy` keeps the two renderings (sidebar, phone drawer) from repeating element ids.
   const links = (copy: "sidebar" | "drawer") => (
     <>
@@ -274,7 +281,7 @@ export function WorkspaceLayout({
             aria-current={path === "/app" ? "page" : undefined}
             onClick={closeCompactMenu}
           >
-            Home
+            {t("Home")}
           </Link>
         </li>
         {sections[0]?.items.map((item) => (
@@ -284,7 +291,7 @@ export function WorkspaceLayout({
               aria-current={item.screenId === current ? "page" : undefined}
               onClick={closeCompactMenu}
             >
-              {item.label}
+              {t(item.label)}
             </Link>
           </li>
         ))}
@@ -318,7 +325,7 @@ export function WorkspaceLayout({
                     aria-current={item.screenId === current ? "page" : undefined}
                     onClick={closeCompactMenu}
                   >
-                    {item.label}
+                    {t(item.label)}
                   </Link>
                 </li>
               ))}
@@ -336,9 +343,9 @@ export function WorkspaceLayout({
   return (
     <div className="workspace-layout" data-menu-open={drawerOpen ? "true" : undefined}>
       <a className="bop-skip-link" href="#main-content">
-        Skip to main content
+        {t("Skip to main content")}
       </a>
-      <nav className="workspace-sidebar" aria-label="Workspace">
+      <nav className="workspace-sidebar" aria-label={t("Workspace")}>
         <div className="workspace-sidebar__identity">
           <p className="workspace-sidebar__brand">
             <strong aria-label="BOP">BOP</strong>
@@ -354,15 +361,14 @@ export function WorkspaceLayout({
           onKeyDown={closeOnEscape}
         >
           <summary>
-            Menu
-            {currentLabel === null ? "" : " · " + currentLabel}
+            {t("Menu{value}", { value: currentLabel === null ? "" : " · " + currentLabel })}
           </summary>
           <div className="workspace-drawer">
             <div className="workspace-drawer__panel">
               <div className="workspace-drawer__head">
                 <p className="workspace-drawer__store">{storeLabel}</p>
                 <button type="button" onClick={closeCompactMenu}>
-                  Close menu
+                  {t("Close menu")}
                 </button>
               </div>
               {links("drawer")}

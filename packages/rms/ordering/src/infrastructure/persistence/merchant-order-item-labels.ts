@@ -8,11 +8,19 @@ export function createPostgresMerchantOrderItemLabels(options: {
   brandReference: string;
   storeReference: string;
   locale: string;
+  /**
+   * Owner 2026-10-24: the staff member's chosen language for item names (for example
+   * zh-Hans-CA), used where the item has a name in it; otherwise `locale` (the Store's).
+   */
+  preferredLocale?: string | null;
   authorize(tx: ConsumerTransaction, orderReference: string): Promise<boolean>;
 }) {
   const brand = parseOrderingReference(options.brandReference),
     store = parseOrderingReference(options.storeReference);
   if (!/^[a-z]{2}(?:-[A-Z]{2})?$/.test(options.locale)) return fail();
+  const preferred = options.preferredLocale ?? null;
+  if (preferred !== null && !/^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|\d{3})?$/.test(preferred))
+    return fail();
   return {
     async load(input: { transaction: ConsumerTransaction; orderReference: string }) {
       const order = parseOrderingReference(input.orderReference),
@@ -23,8 +31,8 @@ export function createPostgresMerchantOrderItemLabels(options: {
         [brand, store],
       );
       const result = await tx.query(
-        "SELECT i.order_item_id,i.order_batch_id,i.ordinal,i.transaction_snapshot_json->'catalog'->'localizedNames'->$4 AS display_name,s.submission_kind,a.batch_sequence FROM rms_ordering.order_item i JOIN rms_ordering.order_batch b ON b.brand_id=i.brand_id AND b.store_id=i.store_id AND b.order_id=i.order_id AND b.order_batch_id=i.order_batch_id JOIN rms_ordering.order_submission_record s ON s.brand_id=b.brand_id AND s.store_id=b.store_id AND s.order_id=b.order_id AND s.submission_id=b.submission_id LEFT JOIN rms_ordering.additional_dining_batch_record a ON a.brand_id=b.brand_id AND a.store_id=b.store_id AND a.order_id=b.order_id AND a.order_batch_id=b.order_batch_id AND a.submission_id=b.submission_id WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=$3 ORDER BY i.order_batch_id,i.ordinal LIMIT 10001",
-        [brand, store, order, options.locale],
+        "SELECT i.order_item_id,i.order_batch_id,i.ordinal,COALESCE(NULLIF(i.transaction_snapshot_json->'catalog'->'localizedNames'->>$5,''),i.transaction_snapshot_json->'catalog'->'localizedNames'->>$4) AS display_name,s.submission_kind,a.batch_sequence FROM rms_ordering.order_item i JOIN rms_ordering.order_batch b ON b.brand_id=i.brand_id AND b.store_id=i.store_id AND b.order_id=i.order_id AND b.order_batch_id=i.order_batch_id JOIN rms_ordering.order_submission_record s ON s.brand_id=b.brand_id AND s.store_id=b.store_id AND s.order_id=b.order_id AND s.submission_id=b.submission_id LEFT JOIN rms_ordering.additional_dining_batch_record a ON a.brand_id=b.brand_id AND a.store_id=b.store_id AND a.order_id=b.order_id AND a.order_batch_id=b.order_batch_id AND a.submission_id=b.submission_id WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=$3 ORDER BY i.order_batch_id,i.ordinal LIMIT 10001",
+        [brand, store, order, options.locale, preferred],
       );
       if (result.rows.length > 10000) return fail();
       const seen = new Set<string>(),

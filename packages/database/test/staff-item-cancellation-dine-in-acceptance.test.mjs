@@ -30,6 +30,7 @@ import { createStripeOrdinaryRefundAdapter } from "../../rms/payment/src/infrast
 import { createMerchantOrderStaffCancellation } from "../../../apps/api/src/merchant-order-staff-cancellation.ts";
 import { createMerchantOrderItemStaffCancellation } from "../../../apps/api/src/merchant-order-item-staff-cancellation.ts";
 import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
+import { withStaffContentLocale } from "../../../apps/api/src/staff-content-locale.ts";
 import { createMerchantDiningServeCommand } from "../../../apps/api/src/merchant-dining-serve-command.ts";
 import { createMerchantDiningServeReadyCommand } from "../../../apps/api/src/merchant-dining-serve-ready-command.ts";
 import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/merchant-dining-order-close-command.ts";
@@ -437,6 +438,10 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
         nextReference: fresh,
         lines: LINES.map((line, j) => ({
           ...line,
+          // Owner 2026-10-24: line A has a Chinese name, line B does not.
+          ...(j === 0
+            ? { localizedNames: { "en-CA": "Synthetic item 1", "zh-Hans-CA": "合成商品一" } }
+            : {}),
           cartLineReference: refs.cartLines[j],
           orderItemReference: refs.items[j],
           sellableReference: id(800 + j),
@@ -1101,6 +1106,17 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
 
       // ── Before: the round is accepted and both lines wait for the kitchen.
       const before = await progress();
+      // Owner 2026-10-24: a staff member who chose Chinese reads the items in Chinese where the
+      // frozen item has a Chinese name, else in the Store's language (restricted role, same read).
+      const chinese = await withStaffContentLocale("zh-Hans-CA", () => progress());
+      assert.deepEqual(
+        chinese.items.map((entry) => entry.displayName),
+        ["合成商品一", "Synthetic item 2"],
+      );
+      assert.deepEqual(
+        before.items.map((entry) => entry.displayName),
+        ["Synthetic item 1", "Synthetic item 2"],
+      );
       assert.equal(before.currentOrderVersion, 2);
       assert.equal(before.orderVersion, 2);
       assert.deepEqual(phases(before), [

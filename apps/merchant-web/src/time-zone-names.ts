@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /**
  * Staff choose and read a store's time zone by name and place ("Eastern Time (Toronto, Ottawa
  * and Montréal)"), never by its IANA identifier. The identifier stays the submitted/stored value;
@@ -10,29 +11,29 @@ interface CanadianZone {
 }
 
 const canadianZones: readonly CanadianZone[] = [
-  { ids: ["America/St_Johns"], place: "St. John’s, Newfoundland and Labrador" },
-  { ids: ["America/Halifax"], place: "Halifax, Nova Scotia and Prince Edward Island" },
-  { ids: ["America/Glace_Bay"], place: "Glace Bay, Nova Scotia" },
-  { ids: ["America/Moncton"], place: "Moncton, New Brunswick" },
-  { ids: ["America/Goose_Bay"], place: "Goose Bay, Labrador" },
-  { ids: ["America/Blanc-Sablon"], place: "Blanc-Sablon, Quebec" },
-  { ids: ["America/Toronto", "America/Montreal"], place: "Toronto, Ottawa and Montréal" },
-  { ids: ["America/Iqaluit"], place: "Iqaluit, Nunavut" },
-  { ids: ["America/Coral_Harbour", "America/Atikokan"], place: "Atikokan, Ontario" },
-  { ids: ["America/Winnipeg"], place: "Winnipeg, Manitoba" },
-  { ids: ["America/Rankin_Inlet"], place: "Rankin Inlet, Nunavut" },
-  { ids: ["America/Resolute"], place: "Resolute, Nunavut" },
-  { ids: ["America/Regina"], place: "Regina and Saskatoon, Saskatchewan" },
-  { ids: ["America/Swift_Current"], place: "Swift Current, Saskatchewan" },
-  { ids: ["America/Edmonton", "America/Yellowknife"], place: "Edmonton and Calgary, Alberta" },
-  { ids: ["America/Cambridge_Bay"], place: "Cambridge Bay, Nunavut" },
-  { ids: ["America/Inuvik"], place: "Inuvik, Northwest Territories" },
-  { ids: ["America/Vancouver"], place: "Vancouver, British Columbia" },
-  { ids: ["America/Creston"], place: "Creston, British Columbia" },
-  { ids: ["America/Dawson_Creek"], place: "Dawson Creek, British Columbia" },
-  { ids: ["America/Fort_Nelson"], place: "Fort Nelson, British Columbia" },
-  { ids: ["America/Whitehorse"], place: "Whitehorse, Yukon" },
-  { ids: ["America/Dawson"], place: "Dawson City, Yukon" },
+  { ids: ["America/St_Johns"], place: t("St. John’s, Newfoundland and Labrador") },
+  { ids: ["America/Halifax"], place: t("Halifax, Nova Scotia and Prince Edward Island") },
+  { ids: ["America/Glace_Bay"], place: t("Glace Bay, Nova Scotia") },
+  { ids: ["America/Moncton"], place: t("Moncton, New Brunswick") },
+  { ids: ["America/Goose_Bay"], place: t("Goose Bay, Labrador") },
+  { ids: ["America/Blanc-Sablon"], place: t("Blanc-Sablon, Quebec") },
+  { ids: ["America/Toronto", "America/Montreal"], place: t("Toronto, Ottawa and Montréal") },
+  { ids: ["America/Iqaluit"], place: t("Iqaluit, Nunavut") },
+  { ids: ["America/Coral_Harbour", "America/Atikokan"], place: t("Atikokan, Ontario") },
+  { ids: ["America/Winnipeg"], place: t("Winnipeg, Manitoba") },
+  { ids: ["America/Rankin_Inlet"], place: t("Rankin Inlet, Nunavut") },
+  { ids: ["America/Resolute"], place: t("Resolute, Nunavut") },
+  { ids: ["America/Regina"], place: t("Regina and Saskatoon, Saskatchewan") },
+  { ids: ["America/Swift_Current"], place: t("Swift Current, Saskatchewan") },
+  { ids: ["America/Edmonton", "America/Yellowknife"], place: t("Edmonton and Calgary, Alberta") },
+  { ids: ["America/Cambridge_Bay"], place: t("Cambridge Bay, Nunavut") },
+  { ids: ["America/Inuvik"], place: t("Inuvik, Northwest Territories") },
+  { ids: ["America/Vancouver"], place: t("Vancouver, British Columbia") },
+  { ids: ["America/Creston"], place: t("Creston, British Columbia") },
+  { ids: ["America/Dawson_Creek"], place: t("Dawson Creek, British Columbia") },
+  { ids: ["America/Fort_Nelson"], place: t("Fort Nelson, British Columbia") },
+  { ids: ["America/Whitehorse"], place: t("Whitehorse, Yukon") },
+  { ids: ["America/Dawson"], place: t("Dawson City, Yukon") },
 ];
 
 const canadianPlace = new Map(
@@ -52,7 +53,7 @@ function genericName(timeZone: string, at: Date): string | null {
 }
 
 /** Identifier spellings that are not how the place is written. */
-const placeSpelling: Readonly<Record<string, string>> = { DumontDUrville: "Dumont d’Urville" };
+const placeSpelling: Readonly<Record<string, string>> = { DumontDUrville: t("Dumont d’Urville") };
 
 /** "America/Indiana/Knox" → "Knox, Indiana"; "Africa/Abidjan" → "Abidjan". */
 function placeFromId(timeZone: string): string {

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { storeTime } from "./StoreTime.js";
@@ -24,7 +25,7 @@ import {
 /** WP-2423 Q18: the sign-in staff actually use here (the labelled test sign-in in the pilot). */
 export function StaffSignInLink({
   client,
-  label = "Sign in",
+  label = t("Sign in"),
 }: {
   readonly client?: StaffSessionClient;
   readonly label?: string;
@@ -36,13 +37,14 @@ export function StaffSignInLink({
     source.signInEntry().then(setEntry, () => setEntry("Unavailable"));
   }, [source]);
   useEffect(load, [load]);
-  if (entry === "Loading") return <p className="staff-session__hint">Finding the sign-in page…</p>;
+  if (entry === "Loading")
+    return <p className="staff-session__hint">{t("Finding the sign-in page…")}</p>;
   if (entry === "Unavailable")
     return (
       <p className="staff-session__hint" role="alert">
-        The sign-in page could not be reached.{" "}
+        {t("The sign-in page could not be reached.")}{" "}
         <button type="button" onClick={load}>
-          Try again
+          {t("Try again")}
         </button>
       </p>
     );
@@ -53,8 +55,8 @@ export function StaffSignInLink({
       </a>
       {entry.testOnly ? (
         <span className="staff-session__test-only">
-          <strong>TEST-ONLY</strong> internal pilot sign-in. A live store signs in with each staff
-          member’s own account.
+          <strong>{t("TEST-ONLY")}</strong>{" "}
+          {t("internal pilot sign-in. A live store signs in with each staff member’s own account.")}
         </span>
       ) : null}
     </p>
@@ -64,8 +66,8 @@ export function StaffSignInLink({
 /** WP-2423 Q18: shown wherever a staff page needs a Session and there is none. */
 export function StaffSignedOutPanel({
   client,
-  heading = "Sign in required",
-  message = "Sign in to open your Store workspace.",
+  heading = t("Sign in required"),
+  message = t("Sign in to open your Store workspace."),
 }: {
   readonly client?: StaffSessionClient;
   readonly heading?: string;
@@ -85,7 +87,7 @@ export function StaffSignedOutPanel({
  */
 export function StaffSwitchButton({
   client,
-  label = "Switch staff",
+  label = t("Switch staff"),
 }: {
   readonly client?: StaffSessionClient;
   readonly label?: string;
@@ -112,11 +114,11 @@ export function StaffSwitchButton({
           })();
         }}
       >
-        {state === "Working" ? "Signing out…" : label}
+        {state === "Working" ? t("Signing out…") : label}
       </button>
       {state === "Failed" ? (
         <p role="alert" className="staff-session__hint">
-          Sign-out did not finish. Check the connection and try again.
+          {t("Sign-out did not finish. Check the connection and try again.")}
         </p>
       ) : null}
     </div>
@@ -392,18 +394,20 @@ export function StaffSessionGuard({
           {/* An order about to be refunded stays in view here (filled by the refund warning). */}
           <div className="staff-session__urgent" ref={setSlot} />
           <h2 id="staff-session-ended" tabIndex={-1} ref={dialog}>
-            You’ve been signed out
+            {t("You’ve been signed out")}
           </h2>
           <p>
             {ended === "Idle"
-              ? `For security, this screen signs out after ${current?.idleTimeoutMinutes ?? 30} minutes without use.`
+              ? t("For security, this screen signs out after {value} minutes without use.", {
+                  value: current?.idleTimeoutMinutes ?? 30,
+                })
               : ended === "Absolute"
-                ? "A sign-in lasts at most 12 hours. Sign in again to keep working."
-                : "This sign-in has ended (signed out here or on another screen)."}
+                ? t("A sign-in lasts at most 12 hours. Sign in again to keep working.")
+                : t("This sign-in has ended (signed out here or on another screen).")}
           </p>
-          <StaffSignInLink client={source} label="Sign in again" />
+          <StaffSignInLink client={source} label={t("Sign in again")} />
           <button type="button" disabled={checking} onClick={() => void checkAgain()}>
-            {checking ? "Checking…" : "Check again"}
+            {checking ? t("Checking…") : t("Check again")}
           </button>
         </section>
       </div>
@@ -411,10 +415,12 @@ export function StaffSessionGuard({
   if (current === null || notice.kind === "None") return null;
   if (notice.kind === "Ended")
     return unconfirmed ? (
-      <section className="staff-session__notice" role="alert" aria-label="Sign-in check">
+      <section className="staff-session__notice" role="alert" aria-label={t("Sign-in check")}>
         <p>
-          <strong>Your sign-in may have ended.</strong> It could not be checked right now; check the
-          connection. If an action is refused, sign in again.
+          <strong>{t("Your sign-in may have ended.")}</strong>{" "}
+          {t(
+            "It could not be checked right now; check the connection. If an action is refused, sign in again.",
+          )}
         </p>
       </section>
     ) : null;
@@ -423,13 +429,16 @@ export function StaffSessionGuard({
     <section
       className="staff-session__notice"
       role="alert"
-      aria-label={notice.kind === "IdleWarning" ? "Signing out soon" : "Sign-in ending"}
+      aria-label={notice.kind === "IdleWarning" ? t("Signing out soon") : t("Sign-in ending")}
     >
       {notice.kind === "IdleWarning" ? (
         <>
           <p>
-            <strong>Still there?</strong> This screen signs out at {at} (in{" "}
-            {remaining(notice.at, current, now)}) because it hasn’t been used.
+            <strong>{t("Still there?")}</strong>{" "}
+            {t("This screen signs out at {at} (in {at2}) because it hasn’t been used.", {
+              at: at,
+              at2: remaining(notice.at, current, now),
+            })}
           </p>
           <button
             type="button"
@@ -441,15 +450,17 @@ export function StaffSessionGuard({
               void report(true).finally(() => setStaying(false));
             }}
           >
-            {staying ? "Staying signed in…" : "Stay signed in"}
+            {staying ? t("Staying signed in…") : t("Stay signed in")}
           </button>
         </>
       ) : (
         <>
           <p>
-            <strong>Sign in again at {at}.</strong> A sign-in lasts at most 12 hours, so this one
-            ends at {at} (in {remaining(notice.at, current, now)}). Finish what you’re doing;
-            staying active does not extend it.
+            <strong>{t("Sign in again at {at}.", { at: at })}</strong>{" "}
+            {t(
+              "A sign-in lasts at most 12 hours, so this one ends at {at} (in {at2}). Finish what you’re doing; staying active does not extend it.",
+              { at: at, at2: remaining(notice.at, current, now) },
+            )}
           </p>
           <StaffSwitchButton client={source} />
         </>

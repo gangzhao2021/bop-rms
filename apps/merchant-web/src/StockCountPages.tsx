@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StaffTime, StoreDate } from "./StoreTime.js";
@@ -20,35 +21,39 @@ import {
 
 /** WP-2423 / DEC-INV-STOCK-COUNT: Store stock counts — blind counting, review and posting. */
 const copy: Record<StockCountErrorCode | "Loading", string> = {
-  Loading: "Loading stock counts…",
-  PermissionDenied: "You do not have permission for this count action.",
-  NotFound: "This count does not exist for the selected Store.",
+  Loading: t("Loading stock counts…"),
+  PermissionDenied: t("You do not have permission for this count action."),
+  NotFound: t("This count does not exist for the selected Store."),
   // Only an actual concurrent change: someone saved another step of this count first.
-  Conflict:
+  Conflict: t(
     "Someone else changed this count meanwhile. Reload the page and check it before trying again.",
-  AlreadyOpen: "This location already has an open count. Finish or cancel it first.",
-  StockChanged:
+  ),
+  AlreadyOpen: t("This location already has an open count. Finish or cancel it first."),
+  StockChanged: t(
     "Stock moved on the highlighted lines after they were counted (sales, receipts or waste). Send the count back; the counter refreshes those lines and counts them again.",
-  Incomplete:
+  ),
+  Incomplete: t(
     "Every line needs a count before submitting, and every difference needs a reason before approval.",
-  NotIndependent: "The person who submitted the count cannot review or approve it.",
-  State: "This step is not possible in the count's current state.",
-  LineInvalid: "The highlighted count is not valid for the item's unit precision.",
-  Invalid: "The request is not valid.",
-  Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
-  Unavailable:
+  ),
+  NotIndependent: t("The person who submitted the count cannot review or approve it."),
+  State: t("This step is not possible in the count's current state."),
+  LineInvalid: t("The highlighted count is not valid for the item's unit precision."),
+  Invalid: t("The request is not valid."),
+  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Unavailable: t(
     "This could not be done right now and nothing was changed. Try again in a moment; if it keeps failing, keep your count sheet and tell the manager.",
+  ),
 };
 const countTypeText: Record<"Full" | "Cycle" | "Spot", string> = {
-  Cycle: "Cycle count",
-  Full: "Full count",
-  Spot: "Spot check",
+  Cycle: t("Cycle count"),
+  Full: t("Full count"),
+  Spot: t("Spot check"),
 };
 const statusText: Record<string, string> = {
   Draft: "Draft",
   Assigned: "Assigned",
   InProgress: "Counting",
-  Submitted: "Submitted for review",
+  Submitted: t("Submitted for review"),
   Approved: "Approved",
   Cancelled: "Cancelled",
   Posted: "Posted",
@@ -98,7 +103,7 @@ export function staffName(
   if (reference === null) return "—";
   return (
     [...view.staff, ...(view.people ?? [])].find((item) => item.actorReference === reference)
-      ?.label ?? "Staff member"
+      ?.label ?? t("Staff member")
   );
 }
 
@@ -123,45 +128,55 @@ export function StockShortageNotice({
   if (shortages.length === 0) return null;
   const name = (entry: StockShortageView) =>
     (view.items.find((item) => item.itemReference === entry.itemReference)?.name ?? "Item") +
-    (entry.lotCode === null ? "" : ` (lot ${entry.lotCode})`);
+    (entry.lotCode === null ? "" : t(" (lot {lotCode})", { lotCode: entry.lotCode }));
   const place = (entry: StockShortageView) =>
     view.locations.find((item) => item.locationReference === entry.locationReference)?.name ??
-    "its location";
+    t("its location");
   const short = shortages.filter((entry) => entry.shortQuantity !== "0");
   const used = shortages.filter((entry) => entry.usedBeyondCount !== "0");
   return (
     <section className="detail-section" aria-labelledby="stock-shortage-heading">
       {short.length > 0 ? (
         <>
-          <h3 id="stock-shortage-heading">Less in stock than open orders need</h3>
+          <h3 id="stock-shortage-heading">{t("Less in stock than open orders need")}</h3>
           <p>
-            These orders were taken before stock ran short (a count found less, or waste was
-            recorded) and keep their ingredients. New orders can&apos;t use these items until it is
-            fixed. For each order: get more and record the delivery under{" "}
-            <Link to="/operations/receiving/new">Receiving</Link>, make it with what you have and
-            count the item again afterwards, or cancel it (the guest is refunded).
+            {t(
+              "These orders were taken before stock ran short (a count found less, or waste was recorded) and keep their ingredients. New orders can't use these items until it is fixed. For each order: get more and record the delivery under",
+            )}{" "}
+            <Link to="/operations/receiving/new">{t("Receiving")}</Link>
+            {t(
+              ", make it with what you have and count the item again afterwards, or cancel it (the guest is refunded).",
+            )}
           </p>
           <ul>
             {short.map((entry) => (
               <li key={`${entry.itemReference}:${entry.locationReference}:${entry.lotCode ?? ""}`}>
-                <strong>{name(entry)}</strong> at {place(entry)}:{" "}
-                {quantityText(entry.onHand, entry.unitCode)} in stock,{" "}
-                {quantityText(entry.reserved, entry.unitCode)} held for open orders —{" "}
-                <strong>short by {quantityText(entry.shortQuantity, entry.unitCode)}</strong>.
+                <strong>{name(entry)}</strong>{" "}
+                {t("at {entry}: {onHand} in stock, {reserved} held for open orders —", {
+                  entry: place(entry),
+                  onHand: quantityText(entry.onHand, entry.unitCode),
+                  reserved: quantityText(entry.reserved, entry.unitCode),
+                })}{" "}
+                <strong>
+                  {t("short by {shortQuantity}", {
+                    shortQuantity: quantityText(entry.shortQuantity, entry.unitCode),
+                  })}
+                </strong>
+                .
                 {entry.orders.length > 0 ? (
                   <>
                     {" "}
-                    Held by:{" "}
+                    {t("Held by:")}{" "}
                     {entry.orders.map((order, index) => (
                       <span key={order.orderReference}>
                         {index > 0 ? ", " : ""}
                         <Link to={`/operations/orders/${order.orderReference}`}>
-                          Order {order.orderNumber}
+                          {t("Order {orderNumber}", { orderNumber: order.orderNumber })}
                         </Link>{" "}
-                        ({order.orderType === "DineIn" ? "dine-in" : "pickup"},{" "}
+                        ({order.orderType === "DineIn" ? "dine-in" : t("pickup")},{" "}
                         {quantityText(order.quantity, entry.unitCode)}
                         {order.ended
-                          ? ", already finished — release its ingredients on Orders"
+                          ? t(", already finished — release its ingredients on Orders")
                           : ""}
                         )
                       </span>
@@ -177,19 +192,23 @@ export function StockShortageNotice({
       {used.length > 0 ? (
         <>
           <h3 id={short.length > 0 ? undefined : "stock-shortage-heading"}>
-            Used more than was counted
+            {t("Used more than was counted")}
           </h3>
           <p>
-            The kitchen finished orders with more than the last count found, so the count missed
-            some stock or a delivery was not recorded. Count these items again to correct the stock.
+            {t(
+              "The kitchen finished orders with more than the last count found, so the count missed some stock or a delivery was not recorded. Count these items again to correct the stock.",
+            )}
           </p>
           <ul>
             {used.map((entry) => (
               <li
                 key={`used:${entry.itemReference}:${entry.locationReference}:${entry.lotCode ?? ""}`}
               >
-                <strong>{name(entry)}</strong> at {place(entry)}: used{" "}
-                {quantityText(entry.usedBeyondCount, entry.unitCode)} more than counted.
+                <strong>{name(entry)}</strong>{" "}
+                {t("at {entry}: used {usedBeyondCount} more than counted.", {
+                  entry: place(entry),
+                  usedBeyondCount: quantityText(entry.usedBeyondCount, entry.unitCode),
+                })}
               </li>
             ))}
           </ul>
@@ -202,7 +221,7 @@ export function StockShortageNotice({
 function Failure({ code }: { code: StockCountErrorCode | "Loading" }) {
   return (
     <StatePanel
-      heading={code === "PermissionDenied" ? noAccessHeading : "Stock counts"}
+      heading={code === "PermissionDenied" ? noAccessHeading : t("Stock counts")}
       tone={code === "Loading" ? "neutral" : "error"}
       status
     >
@@ -249,14 +268,15 @@ export function StockCountListPage({
     }
   };
   return (
-    <AppFrame title="Stock counts" description="">
+    <AppFrame title={t("Stock counts")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Stock counts</p>
-          <h2>Stock counts</h2>
+          <p className="bop-eyebrow">{t("Stock counts")}</p>
+          <h2>{t("Stock counts")}</h2>
           <p>
-            Count one storage location at a time, ideally while the Store is closed. Counters count
-            blind; a manager explains the differences and posts them. Source as of{" "}
+            {t(
+              "Count one storage location at a time, ideally while the Store is closed. Counters count blind; a manager explains the differences and posts them. Source as of",
+            )}{" "}
             <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
@@ -270,9 +290,9 @@ export function StockCountListPage({
             void create();
           }}
         >
-          <h3>Start a count</h3>
+          <h3>{t("Start a count")}</h3>
           <label>
-            Location
+            {t("Location")}
             <select value={location} onChange={(e) => setLocation(e.currentTarget.value)}>
               {view.locations.map((item) => (
                 <option key={item.locationReference} value={item.locationReference}>
@@ -282,18 +302,18 @@ export function StockCountListPage({
             </select>
           </label>
           <label>
-            Type
+            {t("Type")}
             <select
               value={countType}
               onChange={(e) => setCountType(e.currentTarget.value as "Full" | "Cycle" | "Spot")}
             >
-              <option value="Cycle">Cycle count (routine)</option>
-              <option value="Full">Full count (period end)</option>
-              <option value="Spot">Spot check</option>
+              <option value="Cycle">{t("Cycle count (routine)")}</option>
+              <option value="Full">{t("Full count (period end)")}</option>
+              <option value="Spot">{t("Spot check")}</option>
             </select>
           </label>
           <label>
-            Counted by
+            {t("Counted by")}
             <select value={assignee} onChange={(e) => setAssignee(e.currentTarget.value)}>
               {view.staff.map((item) => (
                 <option
@@ -305,28 +325,28 @@ export function StockCountListPage({
               ))}
             </select>
           </label>
-          <button disabled={busy || view.locations.length === 0}>Start count</button>
+          <button disabled={busy || view.locations.length === 0}>{t("Start count")}</button>
           {error ? (
-            <StatePanel heading="Not started" tone="error" status>
+            <StatePanel heading={t("Not started")} tone="error" status>
               <p>{copy[error]}</p>
             </StatePanel>
           ) : null}
         </form>
       ) : null}
       {view.counts.length === 0 ? (
-        <StatePanel heading="No counts yet" status>
-          <p>Counts appear here once started.</p>
+        <StatePanel heading={t("No counts yet")} status>
+          <p>{t("Counts appear here once started.")}</p>
         </StatePanel>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Started</th>
-              <th>Location</th>
-              <th>Type</th>
-              <th>Counted by</th>
-              <th>Progress</th>
-              <th>Status</th>
+              <th>{t("Started")}</th>
+              <th>{t("Location")}</th>
+              <th>{t("Type")}</th>
+              <th>{t("Counted by")}</th>
+              <th>{t("Progress")}</th>
+              <th>{t("Status")}</th>
             </tr>
           </thead>
           <tbody>
@@ -443,44 +463,56 @@ export function StockCountWorkbenchPage({
   // just started has none, so the refresh is not offered (it used to answer "not possible").
   const moved = new Set(counting ? (view.movedLineReferences ?? []) : []);
   return (
-    <AppFrame title={`Count · ${location}`} description="Stock count">
+    <AppFrame title={`Count · ${location}`} description={t("Stock count")}>
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Stock count · {countTypeText[count.countType]}</p>
-          <h2>Count · {location}</h2>
+          <p className="bop-eyebrow">
+            {t("Stock count · {value}", { value: countTypeText[count.countType] })}
+          </p>
+          <h2>{t("Count · {location}", { location: location })}</h2>
           <p>
-            {statusText[count.status]} · counted by {person(count.assigneeReference)} · {counted} of{" "}
-            {count.lines.length} lines counted
-            {count.submittedBy ? ` · submitted by ${person(count.submittedBy)}` : ""}
-            {count.approvedBy ? ` · approved by ${person(count.approvedBy)}` : ""}
+            {statusText[count.status]} {t("· counted by")} {person(count.assigneeReference)} ·{" "}
+            {counted} {t("of")} {count.lines.length} {t("lines counted")}
+            {count.submittedBy
+              ? t(" · submitted by {submittedBy}", { submittedBy: person(count.submittedBy) })
+              : ""}
+            {count.approvedBy
+              ? t(" · approved by {approvedBy}", { approvedBy: person(count.approvedBy) })
+              : ""}
           </p>
         </div>
-        <Link to="/operations/inventory/counts">All counts</Link>
+        <Link to="/operations/inventory/counts">{t("All counts")}</Link>
       </header>
       {error ? (
-        <StatePanel heading="Not recorded" tone="error" status>
+        <StatePanel heading={t("Not recorded")} tone="error" status>
           <p>{copy[error.code]}</p>
         </StatePanel>
       ) : null}
       {count.status === "Posted" ? <StockShortageNotice view={view} /> : null}
       {count.status === "Assigned" && isAssignee && view.permissions.mayCount ? (
         <button disabled={busy} onClick={() => void run([base("Start")])}>
-          Start counting
+          {t("Start counting")}
         </button>
       ) : null}
       {count.status === "Assigned" && !isAssignee ? (
-        <p>Waiting for {person(count.assigneeReference)} to start counting.</p>
+        <p>
+          {t("Waiting for {assigneeReference} to start counting.", {
+            assigneeReference: person(count.assigneeReference),
+          })}
+        </p>
       ) : null}
       <table>
         <thead>
           <tr>
-            <th>Item</th>
-            <th>Lot</th>
-            <th>Unit</th>
-            {count.lines.some((line) => line.expectedQuantity !== null) ? <th>Expected</th> : null}
-            <th>Counted</th>
-            {count.lines.some((line) => line.variance !== null) ? <th>Difference</th> : null}
-            {count.status !== "InProgress" ? <th>Reason</th> : null}
+            <th>{t("Item")}</th>
+            <th>{t("Lot")}</th>
+            <th>{t("Unit")}</th>
+            {count.lines.some((line) => line.expectedQuantity !== null) ? (
+              <th>{t("Expected")}</th>
+            ) : null}
+            <th>{t("Counted")}</th>
+            {count.lines.some((line) => line.variance !== null) ? <th>{t("Difference")}</th> : null}
+            {count.status !== "InProgress" ? <th>{t("Reason")}</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -495,8 +527,8 @@ export function StockCountWorkbenchPage({
                 style={flagged ? { outline: "2px solid #b42318" } : undefined}
               >
                 <td>
-                  {item?.name ?? "Item"}
-                  {moved.has(line.lineReference) ? " · stock moved" : ""}
+                  {item?.name ?? t("Item")}
+                  {moved.has(line.lineReference) ? t(" · stock moved") : ""}
                 </td>
                 <td>
                   {lot ? (
@@ -505,7 +537,7 @@ export function StockCountWorkbenchPage({
                       {lot.expiryDate ? (
                         <>
                           {" "}
-                          (exp. <StoreDate value={lot.expiryDate} />)
+                          {t("(exp.")} <StoreDate value={lot.expiryDate} />)
                         </>
                       ) : null}
                     </>
@@ -558,7 +590,7 @@ export function StockCountWorkbenchPage({
                             ]);
                         }}
                       >
-                        <option value="">Choose a reason</option>
+                        <option value="">{t("Choose a reason")}</option>
                         {view.varianceReasons.map((reason) => (
                           <option key={reason} value={reason}>
                             {reasonText(reason)}
@@ -580,25 +612,27 @@ export function StockCountWorkbenchPage({
       {counting ? (
         <p>
           <button disabled={busy} onClick={save}>
-            Save counts
+            {t("Save counts")}
           </button>{" "}
           <button
             disabled={busy || counted < count.lines.length}
             onClick={() => void run([base("Submit")])}
           >
-            Submit for review
+            {t("Submit for review")}
           </button>{" "}
           {moved.size > 0 ? (
             <button disabled={busy} onClick={() => void run([base("Refresh")])}>
-              Refresh lines where stock moved
+              {t("Refresh lines where stock moved")}
             </button>
           ) : null}
         </p>
       ) : null}
       {counting && moved.size > 0 ? (
         <p role="note">
-          Stock moved on {moved.size === 1 ? "1 line" : `${moved.size} lines`} since counting
-          started (sales, deliveries or waste). Refresh them and count them again.
+          {t(
+            "Stock moved on {value} since counting started (sales, deliveries or waste). Refresh them and count them again.",
+            { value: moved.size === 1 ? t("1 line") : t("{size} lines", { size: moved.size }) },
+          )}
         </p>
       ) : null}
       {reviewing ? (
@@ -620,19 +654,19 @@ export function StockCountWorkbenchPage({
               ])
             }
           >
-            Approve and post differences
+            {t("Approve and post differences")}
           </button>{" "}
           <button disabled={busy} onClick={() => void run([base("SendBack")])}>
-            Send back for recount
+            {t("Send back for recount")}
           </button>
         </p>
       ) : null}
       {count.status === "Submitted" && count.submittedBy === view.viewer ? (
-        <p>Submitted. Another manager reviews and posts the differences.</p>
+        <p>{t("Submitted. Another manager reviews and posts the differences.")}</p>
       ) : null}
       {["Draft", "Assigned", "InProgress"].includes(count.status) && view.permissions.mayCreate ? (
         <button disabled={busy} onClick={() => void run([base("Cancel")])}>
-          Cancel count
+          {t("Cancel count")}
         </button>
       ) : null}
     </AppFrame>

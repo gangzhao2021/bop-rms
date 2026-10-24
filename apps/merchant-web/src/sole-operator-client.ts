@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /**
  * WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): the Brand Owner's "sole operator" setting — whether
  * one Owner running the Brand alone may approve their own refunds — read and turned on or off.
@@ -14,10 +15,10 @@ export const soleOperatorReasons = {
 export type SoleOperatorReason =
   (typeof soleOperatorReasons.On)[number] | (typeof soleOperatorReasons.Off)[number];
 export const soleOperatorReasonLabel: Readonly<Record<SoleOperatorReason, string>> = {
-  OWNER_RUNS_STORE_ALONE: "I run this business on my own",
-  SECOND_APPROVER_AVAILABLE: "Someone else can now approve",
-  OWNER_CHOICE: "I want a second person to approve",
-  ENTERED_IN_ERROR: "Turned on by mistake",
+  OWNER_RUNS_STORE_ALONE: t("I run this business on my own"),
+  SECOND_APPROVER_AVAILABLE: t("Someone else can now approve"),
+  OWNER_CHOICE: t("I want a second person to approve"),
+  ENTERED_IN_ERROR: t("Turned on by mistake"),
 };
 export interface SoleOperatorView {
   readonly observedAt: string;
@@ -50,7 +51,7 @@ export type SoleOperatorFailure =
   | "OutcomeUnknown";
 export class SoleOperatorClientError extends Error {
   constructor(readonly code: SoleOperatorFailure) {
-    super("Sole operator setting could not be confirmed");
+    super(t("Sole operator setting could not be confirmed"));
     this.name = "SoleOperatorClientError";
   }
 }

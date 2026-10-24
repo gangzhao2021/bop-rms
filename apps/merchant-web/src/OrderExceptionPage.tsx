@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { ReconciliationFollowUpAction } from "./ReconciliationFollowUpAction.js";
 import { CompensationReconciliationAction } from "./CompensationReconciliationAction.js";
 import { UnmatchedCaptureRefundAction } from "./UnmatchedCaptureRefundAction.js";
@@ -11,20 +12,20 @@ import { Link } from "react-router";
 
 /** Staff labels for the exception kinds and states the projection carries. */
 export const exceptionKindLabel: Record<OrderExceptionItem["kind"], string> = {
-  DiningUnpaidBatch: "Unpaid dine-in round",
-  PaymentReconciliationDifference: "Payment reconciliation difference",
-  CaptureDeadlineExceeded: "Capture deadline exceeded",
-  PaidWithoutFulfillableOrder: "Paid without a fulfillable order",
+  DiningUnpaidBatch: t("Unpaid dine-in round"),
+  PaymentReconciliationDifference: t("Payment reconciliation difference"),
+  CaptureDeadlineExceeded: t("Capture deadline exceeded"),
+  PaidWithoutFulfillableOrder: t("Paid without a fulfillable order"),
 };
 const providerStateLabel: Record<OrderExceptionItem["providerState"], string> = {
   // Shown as "Payment provider status".
-  NotApplicable: "Not applicable",
+  NotApplicable: t("Not applicable"),
   Pending: "Pending",
   Unknown: "Unknown",
   Confirmed: "Confirmed",
 };
 const compensationLabel: Record<OrderExceptionItem["compensationStatus"], string> = {
-  NotRequested: "Not requested",
+  NotRequested: t("Not requested"),
   Pending: "Pending",
   Completed: "Completed",
 };
@@ -89,29 +90,29 @@ export function OrderExceptionScreen({
   return (
     <WorkspacePage
       className="order-exception-page"
-      title="Exceptions"
+      title={t("Exceptions")}
       meta={`${view.storeLabel} · Business date ${businessDateText(view.businessDate)}`}
       status={<Freshness status={view.freshnessStatus} at={view.projectedAt} />}
       actions={
         <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
-          Refresh
+          {t("Refresh")}
         </button>
       }
     >
       <>
         {readOnly ? (
-          <StatePanel heading="Data may be out of date" tone="offline" status>
-            <p>Refresh before taking an action.</p>
+          <StatePanel heading={t("Data may be out of date")} tone="offline" status>
+            <p>{t("Refresh before taking an action.")}</p>
           </StatePanel>
         ) : null}
         <div className="list-filters order-exception-filters">
           <label>
-            Type
+            {t("Type")}
             <select
               value={kindFilter}
               onChange={(event) => setKindFilter(event.currentTarget.value)}
             >
-              <option value="All">All</option>
+              <option value="All">{t("All")}</option>
               {(Object.keys(exceptionKindLabel) as OrderExceptionItem["kind"][]).map((kind) => (
                 <option key={kind} value={kind}>
                   {exceptionKindLabel[kind]}
@@ -120,51 +121,51 @@ export function OrderExceptionScreen({
             </select>
           </label>
           <label>
-            Severity
+            {t("Severity")}
             <select
               value={severityFilter}
               onChange={(event) => setSeverityFilter(event.currentTarget.value)}
             >
-              <option>All</option>
-              <option>High</option>
-              <option>Critical</option>
+              <option>{t("All")}</option>
+              <option>{t("High")}</option>
+              <option>{t("Critical")}</option>
             </select>
           </label>
           <label>
-            Status
+            {t("Status")}
             <select
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.currentTarget.value)}
             >
-              <option>All</option>
-              <option>Open</option>
-              <option>Acknowledged</option>
-              <option>Assigned</option>
-              <option>Resolved</option>
+              <option>{t("All")}</option>
+              <option>{t("Open")}</option>
+              <option>{t("Acknowledged")}</option>
+              <option>{t("Assigned")}</option>
+              <option>{t("Resolved")}</option>
             </select>
           </label>
           <label>
-            Owner
+            {t("Owner")}
             <select
               value={ownerFilter}
               onChange={(event) => setOwnerFilter(event.currentTarget.value)}
             >
-              <option>All</option>
-              <option>Unassigned</option>
-              <option>Assigned</option>
+              <option>{t("All")}</option>
+              <option>{t("Unassigned")}</option>
+              <option>{t("Assigned")}</option>
             </select>
           </label>
           <label>
-            Payment provider status
+            {t("Payment provider status")}
             <select
               value={providerFilter}
               onChange={(event) => setProviderFilter(event.currentTarget.value)}
             >
-              <option value="All">All</option>
-              <option value="NotApplicable">Not applicable</option>
-              <option value="Pending">Pending</option>
-              <option value="Unknown">Unknown</option>
-              <option value="Confirmed">Confirmed</option>
+              <option value="All">{t("All")}</option>
+              <option value="NotApplicable">{t("Not applicable")}</option>
+              <option value="Pending">{t("Pending")}</option>
+              <option value="Unknown">{t("Unknown")}</option>
+              <option value="Confirmed">{t("Confirmed")}</option>
             </select>
           </label>
           <label className="order-exception-overdue-filter">
@@ -173,7 +174,7 @@ export function OrderExceptionScreen({
               checked={overdueOnly}
               onChange={(event) => setOverdueOnly(event.currentTarget.checked)}
             />
-            Overdue only
+            {t("Overdue only")}
           </label>
           <button
             type="button"
@@ -187,23 +188,23 @@ export function OrderExceptionScreen({
               setOverdueOnly(false);
             }}
           >
-            Clear filters
+            {t("Clear filters")}
           </button>
         </div>
         {items.length === 0 ? (
           <StatePanel
             heading={
               view.items.length === 0
-                ? "No exceptions in this view"
-                : "No exceptions match these filters"
+                ? t("No exceptions in this view")
+                : t("No exceptions match these filters")
             }
             tone="neutral"
             status
           >
             <p>
               {view.items.length === 0
-                ? "There are no open exceptions for this Store."
-                : "No exception on this page matches the filters."}
+                ? t("There are no open exceptions for this Store.")
+                : t("No exception on this page matches the filters.")}
             </p>
           </StatePanel>
         ) : null}
@@ -230,11 +231,11 @@ export function OrderExceptionScreen({
           <div className="order-exception__older">
             <button type="button" disabled={older === "Loading"} onClick={onShowOlder}>
               {older === "Loading"
-                ? "Loading older resolved exceptions…"
-                : "Show older resolved exceptions"}
+                ? t("Loading older resolved exceptions…")
+                : t("Show older resolved exceptions")}
             </button>
             {older === "Failed" ? (
-              <p role="status">Older resolved exceptions could not be loaded. Try again.</p>
+              <p role="status">{t("Older resolved exceptions could not be loaded. Try again.")}</p>
             ) : null}
           </div>
         ) : null}
@@ -248,12 +249,14 @@ function totalsDifference(
   pair: { readonly storeMinor: string; readonly providerMinor: string | null },
 ): string | null {
   if (pair.providerMinor === null)
-    return `${label}: the payment provider's figure could not be read`;
+    return t("{label}: the payment provider's figure could not be read", { label: label });
   const gap = BigInt(pair.providerMinor) - BigInt(pair.storeMinor);
   if (gap === 0n) return null;
-  return `${label}: the payment provider has ${formatCad(
-    (gap < 0n ? -gap : gap).toString(),
-  )} ${gap > 0n ? "more" : "less"} than the store`;
+  return t("{label}: the payment provider has {value} {value2} than the store", {
+    label: label,
+    value: formatCad((gap < 0n ? -gap : gap).toString()),
+    value2: gap > 0n ? "more" : "less",
+  });
 }
 const settlementLink = (businessDate: string | null) =>
   businessDate === null
@@ -286,12 +289,12 @@ function OrderExceptionCard({
       <div>
         {refundedAwaitingCheck ? (
           <p className="bop-eyebrow order-exception__severity" data-severity="High">
-            {overdue ? "Refunded · check overdue since " : "Refunded · check by "}
+            {overdue ? t("Refunded · check overdue since ") : t("Refunded · check by ")}
             <SourceTime instant={item.dueAt} />
           </p>
         ) : (
           <p className="bop-eyebrow order-exception__severity" data-severity={item.severity}>
-            {item.severity} · {resolved ? "was due " : overdue ? "overdue since " : "due "}
+            {item.severity} · {resolved ? t("was due ") : overdue ? t("overdue since ") : t("due ")}
             <SourceTime instant={item.dueAt} />
           </p>
         )}
@@ -312,19 +315,20 @@ function OrderExceptionCard({
         {header(exceptionKindLabel[item.kind])}
         <dl>
           <div>
-            <dt>Created</dt>
+            <dt>{t("Created")}</dt>
             <dd>
               <SourceTime instant={item.createdAt} />
             </dd>
           </div>
           <div>
-            <dt>Owner</dt>
+            <dt>{t("Owner")}</dt>
             <dd>{item.ownerStatus}</dd>
           </div>
         </dl>
         <p role="note">
-          The details of this payment difference could not be loaded, so what to do next is not
-          shown. Refresh the page to try again.
+          {t(
+            "The details of this payment difference could not be loaded, so what to do next is not shown. Refresh the page to try again.",
+          )}
         </p>
       </>
     );
@@ -332,43 +336,43 @@ function OrderExceptionCard({
   if (payment && detail?.type === "BusinessDayTotals") {
     const day = detail.businessDate === null ? null : businessDateText(detail.businessDate);
     const differences = [
-      totalsDifference("Payments taken", detail.captured),
+      totalsDifference(t("Payments taken"), detail.captured),
       totalsDifference("Refunds", detail.refunded),
     ].filter((text): text is string => text !== null);
     return (
       <>
-        {header("Business day totals differ from the payment provider")}
+        {header(t("Business day totals differ from the payment provider"))}
         <dl>
           <div>
-            <dt>Business day</dt>
-            <dd>{day ?? "Shown in Settlement"}</dd>
+            <dt>{t("Business day")}</dt>
+            <dd>{day ?? t("Shown in Settlement")}</dd>
           </div>
           <div>
-            <dt>Found</dt>
+            <dt>{t("Found")}</dt>
             <dd>
               <SourceTime instant={detail.checkedAt} />
             </dd>
           </div>
           <div>
-            <dt>Payments taken (store / payment provider)</dt>
+            <dt>{t("Payments taken (store / payment provider)")}</dt>
             <dd>
               {formatCad(detail.captured.storeMinor)} /{" "}
               {detail.captured.providerMinor === null
-                ? "could not be read"
+                ? t("could not be read")
                 : formatCad(detail.captured.providerMinor)}
             </dd>
           </div>
           <div>
-            <dt>Refunds (store / payment provider)</dt>
+            <dt>{t("Refunds (store / payment provider)")}</dt>
             <dd>
               {formatCad(detail.refunded.storeMinor)} /{" "}
               {detail.refunded.providerMinor === null
-                ? "could not be read"
+                ? t("could not be read")
                 : formatCad(detail.refunded.providerMinor)}
             </dd>
           </div>
           <div>
-            <dt>Owner</dt>
+            <dt>{t("Owner")}</dt>
             <dd>{item.ownerStatus}</dd>
           </div>
         </dl>
@@ -381,19 +385,22 @@ function OrderExceptionCard({
         ) : null}
         {detail.resolvedAt !== null ? (
           <p role="note">
-            Resolved: the day was checked again <SourceTime instant={detail.resolvedAt} /> and now
-            matches the payment provider&apos;s statement. Nothing more to do; both checks stay in
-            the day&apos;s history.
+            {t("Resolved: the day was checked again")} <SourceTime instant={detail.resolvedAt} />{" "}
+            {t(
+              "and now matches the payment provider's statement. Nothing more to do; both checks stay in the day's history.",
+            )}
           </p>
         ) : (
           <p>
-            The store&apos;s totals for {day ?? "this business day"} do not match the payment
-            provider&apos;s statement. Settlement explains the difference and what to do.
+            {t(
+              "The store's totals for {value} do not match the payment provider's statement. Settlement explains the difference and what to do.",
+              { value: day ?? t("this business day") },
+            )}
           </p>
         )}
         <p>
           <Link to={settlementLink(detail.businessDate)}>
-            {day === null ? "Open Settlement" : `Open Settlement for ${day}`}
+            {day === null ? t("Open Settlement") : t("Open Settlement for {day}", { day: day })}
           </Link>
         </p>
         {csrf ? (
@@ -414,51 +421,52 @@ function OrderExceptionCard({
     <>
       {header(
         unmatched && detail?.type === "UnmatchedCharge"
-          ? "Charge that matches no order"
+          ? t("Charge that matches no order")
           : exceptionKindLabel[item.kind],
       )}
       <dl>
         <div>
-          <dt>Created</dt>
+          <dt>{t("Created")}</dt>
           <dd>
             <SourceTime instant={item.createdAt} />
           </dd>
         </div>
         <div>
-          <dt>Order</dt>
+          <dt>{t("Order")}</dt>
           <dd>
             {item.orderReference === null
-              ? "No matching order"
+              ? t("No matching order")
               : item.orderNumber !== null
-                ? `Order ${item.orderNumber}`
-                : "Linked order · order number not shown"}
+                ? t("Order {orderNumber}", { orderNumber: item.orderNumber })
+                : t("Linked order · order number not shown")}
           </dd>
         </div>
         <div>
-          <dt>Payment provider status</dt>
+          <dt>{t("Payment provider status")}</dt>
           <dd>{providerStateLabel[item.providerState]}</dd>
         </div>
         <div>
-          <dt>Compensation</dt>
+          <dt>{t("Compensation")}</dt>
           <dd>
             {refundedAwaitingCheck
               ? overdue
-                ? "Refunded — store check overdue"
-                : "Refunded — check by end of day"
+                ? t("Refunded — store check overdue")
+                : t("Refunded — check by end of day")
               : compensationLabel[item.compensationStatus]}
           </dd>
         </div>
         <div>
-          <dt>Owner</dt>
+          <dt>{t("Owner")}</dt>
           <dd>{item.ownerStatus}</dd>
         </div>
       </dl>
       {detail?.type === "Payment" && detail.resolvedAt !== null ? (
         // WP-2423 (2026-10-17): a later check of the same payment found it matching again.
         <p role="note">
-          Resolved: this payment was checked again <SourceTime instant={detail.resolvedAt} /> and
-          now matches the payment provider. Nothing more to do; both checks stay in the store&apos;s
-          history.
+          {t("Resolved: this payment was checked again")} <SourceTime instant={detail.resolvedAt} />{" "}
+          {t(
+            "and now matches the payment provider. Nothing more to do; both checks stay in the store's history.",
+          )}
         </p>
       ) : null}
       {csrf &&
@@ -486,13 +494,17 @@ function OrderExceptionCard({
       {resolved &&
       !(csrf && payment) &&
       !(detail?.type === "Payment" && detail.resolvedAt !== null) ? (
-        <p role="note">Resolved: nothing more to do. It stays in the store&apos;s history.</p>
+        <p role="note">{t("Resolved: nothing more to do. It stays in the store's history.")}</p>
       ) : null}
       {item.orderReference === null && !resolved ? (
         <p>
           {detail?.type === "UnmatchedCharge"
-            ? "The payment provider took this charge, but it matches no order or payment in this store. Review it below and refund it if no order was paid by it."
-            : "No order is linked to this payment difference. Review it with the payment provider's records."}
+            ? t(
+                "The payment provider took this charge, but it matches no order or payment in this store. Review it below and refund it if no order was paid by it.",
+              )
+            : t(
+                "No order is linked to this payment difference. Review it with the payment provider's records.",
+              )}
         </p>
       ) : null}
       {csrf && unmatched ? (
@@ -598,9 +610,9 @@ export function OrderExceptionPage({
   }, [client, generation, state]);
   if (state?.client !== client || state.generation !== generation)
     return (
-      <WorkspacePage className="order-exception-page" title="Exceptions">
-        <StatePanel heading="Loading exceptions" tone="neutral" status>
-          <p>Reading the Store's exceptions…</p>
+      <WorkspacePage className="order-exception-page" title={t("Exceptions")}>
+        <StatePanel heading={t("Loading exceptions")} tone="neutral" status>
+          <p>{t("Reading the Store's exceptions…")}</p>
         </StatePanel>
       </WorkspacePage>
     );
@@ -628,11 +640,11 @@ export function OrderExceptionPage({
       older={olderPage?.status ?? "Idle"}
     />
   ) : (
-    <WorkspacePage className="order-exception-page" title="Exceptions">
-      <StatePanel heading="Exceptions unavailable" tone="error" status>
-        <p>Exceptions could not be loaded. No action was sent.</p>
+    <WorkspacePage className="order-exception-page" title={t("Exceptions")}>
+      <StatePanel heading={t("Exceptions unavailable")} tone="error" status>
+        <p>{t("Exceptions could not be loaded. No action was sent.")}</p>
         <button ref={recoveryButton} onClick={refresh}>
-          Retry loading exceptions
+          {t("Retry loading exceptions")}
         </button>
       </StatePanel>
     </WorkspacePage>

@@ -4,6 +4,12 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPickupCodeController, type PickupCodeController } from "./pickup-code-controller.js";
 import { endSentence, formatClockTime } from "../journey/format.js";
 
+/**
+ * The pilot's configured pickup instruction (tooling/environment/pilot-api.mjs), shown in the
+ * guest's language; any other instruction a Store configures is shown as written.
+ */
+const standardPickupInstruction = "Show this pickup confirmation to staff at the pickup counter.";
+
 export function PickupCodePanel({
   orderReference,
   orderNumber,
@@ -197,7 +203,11 @@ export function PickupCodePanel({
             </p>
           ) : null}
           <h3>{state.view.storeDisplayName}</h3>
-          <p>{state.view.pickupInstruction}</p>
+          <p>
+            {state.view.pickupInstruction === standardPickupInstruction
+              ? t("Show this pickup confirmation to staff at the pickup counter.")
+              : state.view.pickupInstruction}
+          </p>
           {/* Screen readers hear the code one character at a time; the large code is visual only. */}
           <p className="sr-only">
             {t("Order {orderNumber}. Pickup code {value1}", {

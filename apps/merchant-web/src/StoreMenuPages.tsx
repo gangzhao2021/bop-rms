@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -36,38 +37,47 @@ import {
 
 /** WP-2423 / DEC-MENU-REVISION: Brand menus — edit, review, publish and revise. */
 const copy: Record<MenuErrorCode | "Loading", string> = {
-  Loading: "Loading menus…",
-  PermissionDenied: "You do not have permission for this menu action at Brand level.",
-  NotFound: "This menu does not exist for the Brand.",
-  Conflict: "The menu changed since you opened it. Refresh and check again.",
-  Frozen:
+  Loading: t("Loading menus…"),
+  PermissionDenied: t("You do not have permission for this menu action at Brand level."),
+  NotFound: t("This menu does not exist for the Brand."),
+  Conflict: t("The menu changed since you opened it. Refresh and check again."),
+  Frozen: t(
     "This version was submitted for review and can no longer change. Refresh, then withdraw it or start a revision to change it.",
-  NotRevisable: "Only a submitted or published version can be revised; keep editing this one.",
-  NotDiscardable:
+  ),
+  NotRevisable: t("Only a submitted or published version can be revised; keep editing this one."),
+  NotDiscardable: t(
     "Only a draft that is not in review, of a menu that has been published, can be discarded. Refresh and check again.",
-  ReviewBlocked:
+  ),
+  ReviewBlocked: t(
     "The review could not be prepared. Every item needs a published recipe whose ingredients all have current allergen declarations (see Allergens and Recipes), and the Brand allergen list must be approved.",
-  OptionPriceMissing:
+  ),
+  OptionPriceMissing: t(
     "Some options on this menu's items have no published price, so customers could not order them. Set and publish them under Option prices, then submit again.",
-  TaxNotCovered:
+  ),
+  TaxNotCovered: t(
     "Some items on this menu have no tax rate for one of its order types at this Store (see Tax review), so their price could not be quoted. Fix the product's tax class or the Store's tax configuration, then submit again.",
-  OptionRecipeMissing:
+  ),
+  OptionRecipeMissing: t(
     "Some options on this menu's items have no published recipe change (what they do to stock, kitchen and allergens). Set, review and publish them under Option recipes, then submit again.",
-  ApprovalRequired:
+  ),
+  ApprovalRequired: t(
     "Approval needs someone other than the person who submitted the menu, holding menu approval.",
-  Lifecycle: "This step is not possible in the menu's current state.",
-  Invalid:
+  ),
+  Lifecycle: t("This step is not possible in the menu's current state."),
+  Invalid: t(
     "The menu is not valid. Each section needs a distinct name, and an item may appear once per section.",
-  Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
-  Unavailable: "Menus are unavailable.",
-  SoleOperatorNotInEffect:
+  ),
+  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Unavailable: t("Menus are unavailable."),
+  SoleOperatorNotInEffect: t(
     "Someone else now holds menu approval, so they must approve this version. Refresh to see who.",
-  NeedsReverification: "Confirm it is you with your authenticator code, then approve again.",
+  ),
+  NeedsReverification: t("Confirm it is you with your authenticator code, then approve again."),
 };
 const stageText = {
-  Editing: "Draft — being edited",
-  InReview: "In review",
-  Approved: "Approved — ready to publish",
+  Editing: t("Draft — being edited"),
+  InReview: t("In review"),
+  Approved: t("Approved — ready to publish"),
   Published: "Published",
   Archived: "Archived",
 } as const;
@@ -99,14 +109,14 @@ function useMenuView<V>(
 }
 function Failure({ code }: { readonly code: MenuErrorCode | "Loading" }) {
   return (
-    <WorkspacePage title="Menus">
+    <WorkspacePage title={t("Menus")}>
       <StatePanel
         heading={
           code === "PermissionDenied"
             ? noAccessHeading
             : code === "Loading"
-              ? "Loading"
-              : "Unavailable"
+              ? t("Loading")
+              : t("Unavailable")
         }
         tone={code === "Loading" ? "neutral" : "error"}
         status
@@ -127,24 +137,25 @@ export function StoreMenuListPage({
   const view: MenuListView = state.view;
   return (
     <WorkspacePage
-      title="Menus"
+      title={t("Menus")}
       meta={
         <>
-          Source as of <SourceTime instant={view.sourceAsOf} />
+          {t("Source as of")} <SourceTime instant={view.sourceAsOf} />
         </>
       }
     >
       <p className="bop-muted">
-        A menu lists what customers can order, by section. Changes are reviewed by someone else
-        before they are published; a published menu is changed through a revision.
+        {t(
+          "A menu lists what customers can order, by section. Changes are reviewed by someone else before they are published; a published menu is changed through a revision.",
+        )}
       </p>
       <table>
         <thead>
           <tr>
-            <th>Menu</th>
-            <th>Current version</th>
-            <th>Items</th>
-            <th>Last published</th>
+            <th>{t("Menu")}</th>
+            <th>{t("Current version")}</th>
+            <th>{t("Items")}</th>
+            <th>{t("Last published")}</th>
           </tr>
         </thead>
         <tbody>
@@ -155,9 +166,9 @@ export function StoreMenuListPage({
                   {Object.values(menu.localizedNames)[0] ?? menu.internalCode}
                 </Link>
               </td>
-              <td data-label="Version">{stageText[menuStage(menu.publication)]}</td>
-              <td data-label="Items">{menu.placements}</td>
-              <td data-label="Last published">
+              <td data-label={t("Version")}>{stageText[menuStage(menu.publication)]}</td>
+              <td data-label={t("Items")}>{menu.placements}</td>
+              <td data-label={t("Last published")}>
                 {menu.latestRelease ? <StaffTime instant={menu.latestRelease.createdAt} /> : "—"}
               </td>
             </tr>
@@ -198,7 +209,9 @@ function CustomerPhoto({ photo }: { readonly photo: MenuCustomerPhoto }) {
     <figure className="menu-customer-view__photo">
       <img src={photo.url} alt={photo.altText} width={photo.width} height={photo.height} />
       <figcaption>
-        {photo.altText === "" ? "Photo not described." : `Photo description: ${photo.altText}`}
+        {photo.altText === ""
+          ? t("Photo not described.")
+          : t("Photo description: {altText}", { altText: photo.altText })}
       </figcaption>
     </figure>
   );
@@ -219,28 +232,28 @@ function MenuCustomerViewSection({
   return (
     <section className="detail-section menu-customer-view" aria-labelledby="menu-customer-view">
       <h3 id="menu-customer-view">
-        {published ? "What customers see" : "What customers will see"}
+        {published ? t("What customers see") : t("What customers will see")}
       </h3>
       <p>
-        Each item's description and photo exactly as fixed for review on{" "}
-        <StaffTime instant={view.frozenAt} />. Changes made to products after that appear only in a
-        new version.
+        {t("Each item's description and photo exactly as fixed for review on")}{" "}
+        <StaffTime instant={view.frozenAt} />
+        {t(". Changes made to products after that appear only in a new version.")}
       </p>
       {view.comparedWithPublishedAt !== null ? (
         <p className="menu-customer-view__summary">
-          Compared with the menu customers see now (published{" "}
+          {t("Compared with the menu customers see now (published")}{" "}
           <StaffTime instant={view.comparedWithPublishedAt} />
           ): {summary}
         </p>
       ) : published ? null : (
         <p className="menu-customer-view__summary">
-          Not published before: customers see all of this for the first time.
+          {t("Not published before: customers see all of this for the first time.")}
         </p>
       )}
       <ul className="menu-customer-view__items">
         {view.items.map((item) => {
           const changes = [
-            item.newOnMenu ? "New on the menu" : null,
+            item.newOnMenu ? t("New on the menu") : null,
             item.descriptionChange ? descriptionChangeText[item.descriptionChange] : null,
             item.photoChange ? photoChangeText[item.photoChange] : null,
           ].filter((change): change is string => change !== null);
@@ -253,30 +266,30 @@ function MenuCustomerViewSection({
               {item.photo ? (
                 <CustomerPhoto photo={item.photo} />
               ) : (
-                <p className="menu-customer-view__no-photo">No photo</p>
+                <p className="menu-customer-view__no-photo">{t("No photo")}</p>
               )}
               <div className="menu-customer-view__text">
                 <h4>{item.name}</h4>
                 <p className="menu-customer-view__section">{item.sectionName}</p>
                 {changes.length > 0 ? (
-                  <ul className="menu-customer-view__changes" aria-label="Changes">
+                  <ul className="menu-customer-view__changes" aria-label={t("Changes")}>
                     {changes.map((change) => (
                       <li key={change}>{change}</li>
                     ))}
                   </ul>
                 ) : null}
-                <p>{item.description ?? "No description."}</p>
+                <p>{item.description ?? t("No description.")}</p>
                 {item.before ? (
                   <div className="menu-customer-view__before">
-                    <p className="menu-customer-view__before-label">Customers see now:</p>
+                    <p className="menu-customer-view__before-label">{t("Customers see now:")}</p>
                     {item.descriptionChange ? (
-                      <p>{item.before.description ?? "No description."}</p>
+                      <p>{item.before.description ?? t("No description.")}</p>
                     ) : null}
                     {item.photoChange ? (
                       item.before.photo ? (
                         <CustomerPhoto photo={item.before.photo} />
                       ) : (
-                        <p>No photo.</p>
+                        <p>{t("No photo.")}</p>
                       )
                     ) : null}
                   </div>
@@ -288,8 +301,9 @@ function MenuCustomerViewSection({
       </ul>
       {view.removedFromMenu.length > 0 ? (
         <p>
-          Removed from the menu (customers no longer see them):{" "}
-          {view.removedFromMenu.map((item) => item.name).join(", ")}.
+          {t("Removed from the menu (customers no longer see them): {value}.", {
+            value: view.removedFromMenu.map((item) => item.name).join(", "),
+          })}
         </p>
       ) : null}
     </section>
@@ -433,14 +447,28 @@ function MenuBuilder({
       }
       setMessage({
         tone: "neutral",
-        text: `${offered} item${offered === 1 ? " is" : "s are"} now offered at this Store. Customers here see ${offered === 1 ? "it" : "them"} on the published menu.`,
+        text: t(
+          "{offered} item{value} now offered at this Store. Customers here see {value2} on the published menu.",
+          {
+            offered: offered,
+            value: offered === 1 ? " is" : "s are",
+            value2: offered === 1 ? "it" : "them",
+          },
+        ),
       });
     } catch {
       setMessage({
         tone: "error",
         text:
-          (offered > 0 ? `${offered} of ${hidden.length} items were offered. ` : "") +
-          "The rest could not be offered. Refresh and try again, or offer them under Item availability.",
+          (offered > 0
+            ? t("{offered} of {length} items were offered. ", {
+                offered: offered,
+                length: hidden.length,
+              })
+            : "") +
+          t(
+            "The rest could not be offered. Refresh and try again, or offer them under Item availability.",
+          ),
       });
     } finally {
       setBusy(false);
@@ -450,16 +478,23 @@ function MenuBuilder({
   };
   const publishedText =
     hidden.length === 0
-      ? "Published. Customers at this Store now see this menu."
-      : `Published. Customers at this Store see this menu, except ${hidden.length} item${hidden.length === 1 ? "" : "s"} not offered here yet: ${hiddenNames}.`;
+      ? t("Published. Customers at this Store now see this menu.")
+      : t(
+          "Published. Customers at this Store see this menu, except {length} item{value} not offered here yet: {hiddenNames}.",
+          {
+            length: hidden.length,
+            value: hidden.length === 1 ? "" : "s",
+            hiddenNames: hiddenNames,
+          },
+        );
   const publication = view.publication;
   const mayApproveHere =
     view.permissions.mayApprove && view.submittedBy !== null && view.submittedBy !== view.viewer;
   return (
-    <AppFrame title={menu.name} description="Menu">
+    <AppFrame title={menu.name} description={t("Menu")}>
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Menu · Brand</p>
+          <p className="bop-eyebrow">{t("Menu · Brand")}</p>
           <h2>{menu.name}</h2>
           <p>
             {stageText[stage]} · {channelText(menu.channelCodes)} ·{" "}
@@ -467,16 +502,16 @@ function MenuBuilder({
             {view.latestRelease ? (
               <>
                 {" "}
-                · last published <StaffTime instant={view.latestRelease.createdAt} />
+                {t("· last published")} <StaffTime instant={view.latestRelease.createdAt} />
               </>
             ) : null}
           </p>
         </div>
-        <Link to="/app/commerce/menus">Back to menus</Link>
+        <Link to="/app/commerce/menus">{t("Back to menus")}</Link>
       </header>
       {message ? (
         <StatePanel
-          heading={message.tone === "error" ? "Not done" : "Done"}
+          heading={message.tone === "error" ? t("Not done") : t("Done")}
           tone={message.tone}
           status
         >
@@ -484,32 +519,40 @@ function MenuBuilder({
         </StatePanel>
       ) : null}
       {hidden.length > 0 ? (
-        <StatePanel heading="Not offered at this Store" status>
+        <StatePanel heading={t("Not offered at this Store")} status>
           <p>
             {stage === "Published"
-              ? "Customers at this Store don't see these items on the published menu until they are offered here: "
-              : "When this menu is published, customers at this Store won't see these items until they are offered here: "}
+              ? t(
+                  "Customers at this Store don't see these items on the published menu until they are offered here: ",
+                )
+              : t(
+                  "When this menu is published, customers at this Store won't see these items until they are offered here: ",
+                )}
             {hiddenNames}.
           </p>
           <p>
             {mayOffer ? (
               <>
                 <button type="button" disabled={busy} onClick={() => void offerHidden()}>
-                  {`Offer ${hidden.length === 1 ? "this item" : `these ${hidden.length} items`} at this Store now`}
+                  {t("Offer {value} at this Store now", {
+                    value: hidden.length === 1 ? "this item" : `these ${hidden.length} items`,
+                  })}
                 </button>{" "}
               </>
             ) : (
-              "Someone who manages item availability can offer them. "
+              t("Someone who manages item availability can offer them. ")
             )}
-            <Link to="/app/commerce/availability">Item availability</Link>
+            <Link to="/app/commerce/availability">{t("Item availability")}</Link>
           </p>
         </StatePanel>
       ) : null}
       {unpriced.length > 0 ? (
-        <StatePanel heading="Missing prices" status>
+        <StatePanel heading={t("Missing prices")} status>
           <p>
-            These items have no price in the price book this Store uses; customers cannot be quoted
-            for them: {unpriced.map(label).join(", ")}.
+            {t(
+              "These items have no price in the price book this Store uses; customers cannot be quoted for them: {value}.",
+              { value: unpriced.map(label).join(", ") },
+            )}
           </p>
         </StatePanel>
       ) : null}
@@ -532,14 +575,14 @@ function MenuBuilder({
                 items: section.items,
               })),
             },
-            "Menu saved.",
+            t("Menu saved."),
           );
         }}
       >
         <fieldset disabled={!editable || busy}>
-          <legend>Menu</legend>
+          <legend>{t("Menu")}</legend>
           <label>
-            Menu name
+            {t("Menu name")}
             <input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} />
           </label>
         </fieldset>
@@ -550,9 +593,9 @@ function MenuBuilder({
           );
           return (
             <fieldset key={section.key} disabled={!editable || busy}>
-              <legend>Section {sectionIndex + 1}</legend>
+              <legend>{t("Section {value}", { value: sectionIndex + 1 })}</legend>
               <label>
-                Section name
+                {t("Section name")}
                 <input
                   value={section.name}
                   maxLength={80}
@@ -562,7 +605,7 @@ function MenuBuilder({
                 />
               </label>
               <label>
-                Chinese name (中文名称, optional)
+                {t("Chinese name (中文名称, optional)")}
                 <input
                   lang="zh-Hans"
                   value={section.nameZh}
@@ -576,10 +619,10 @@ function MenuBuilder({
               <table>
                 <thead>
                   <tr>
-                    <th>Item</th>
-                    <th>Price here</th>
-                    <th>Featured</th>
-                    {editable ? <th aria-label="Order" /> : null}
+                    <th>{t("Item")}</th>
+                    <th>{t("Price here")}</th>
+                    <th>{t("Featured")}</th>
+                    {editable ? <th aria-label={t("Order")} /> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -588,12 +631,12 @@ function MenuBuilder({
                       <td>{label(item.skuReference)}</td>
                       <td>
                         {priceText(sellables.get(item.skuReference)?.priceMinor ?? null) ??
-                          "No price"}
+                          t("No price")}
                       </td>
                       <td>
                         {!editable ? (
                           item.featured ? (
-                            "Featured"
+                            t("Featured")
                           ) : (
                             "—"
                           )
@@ -650,7 +693,7 @@ function MenuBuilder({
                               }))
                             }
                           >
-                            Remove
+                            {t("Remove")}
                           </button>
                         </td>
                       ) : null}
@@ -660,7 +703,7 @@ function MenuBuilder({
               </table>
               {editable && available.length > 0 ? (
                 <label>
-                  Add item
+                  {t("Add item")}
                   <select
                     value=""
                     onChange={(event) => {
@@ -672,7 +715,7 @@ function MenuBuilder({
                         }));
                     }}
                   >
-                    <option value="">Choose…</option>
+                    <option value="">{t("Choose…")}</option>
                     {available.map((item) => (
                       <option key={item.skuReference} value={item.skuReference}>
                         {`${item.productName} — ${item.sizeName}`}
@@ -687,7 +730,7 @@ function MenuBuilder({
                     type="button"
                     onClick={() => setSections((current) => move(current, sectionIndex, -1))}
                   >
-                    Move section up
+                    {t("Move section up")}
                   </button>{" "}
                   {section.items.length === 0 ? (
                     <button
@@ -696,7 +739,7 @@ function MenuBuilder({
                         setSections((current) => current.filter((s) => s.key !== section.key))
                       }
                     >
-                      Remove section
+                      {t("Remove section")}
                     </button>
                   ) : null}
                 </p>
@@ -722,10 +765,10 @@ function MenuBuilder({
                 ])
               }
             >
-              Add section
+              {t("Add section")}
             </button>{" "}
             <button type="submit" disabled={!valid || busy}>
-              {pending?.action === "SaveDraft" ? "Retry" : "Save menu"}
+              {pending?.action === "SaveDraft" ? t("Retry") : t("Save menu")}
             </button>
           </p>
         ) : null}
@@ -733,21 +776,27 @@ function MenuBuilder({
       {view.customerView ? (
         <MenuCustomerViewSection view={view.customerView} published={stage === "Published"} />
       ) : stage === "InReview" || stage === "Approved" ? (
-        <StatePanel heading="Customer view not shown" tone="error" status>
+        <StatePanel heading={t("Customer view not shown")} tone="error" status>
           <p>
-            What customers will see for this version could not be shown. Refresh before approving or
-            publishing.
+            {t(
+              "What customers will see for this version could not be shown. Refresh before approving or publishing.",
+            )}
           </p>
         </StatePanel>
       ) : null}
       <section className="detail-section" aria-labelledby="publication">
-        <h3 id="publication">Review and publication</h3>
+        <h3 id="publication">{t("Review and publication")}</h3>
         {stage === "Editing" ? (
           <>
             <p>
-              Submitting fixes this version and checks each item's recipe allergens against the
-              Brand allergen list; someone else then approves it.
-              {view.allergenRegistry ? "" : " The Brand allergen list must be approved first."}
+              {t(
+                "Submitting fixes this version and checks each item's recipe allergens against the Brand allergen list; someone else then approves it.{value}",
+                {
+                  value: view.allergenRegistry
+                    ? ""
+                    : t(" The Brand allergen list must be approved first."),
+                },
+              )}
             </p>
             {view.permissions.maySubmit ? (
               <button
@@ -760,11 +809,11 @@ function MenuBuilder({
                       operationReference: newOperationReference(),
                       menuReference: menu.menuReference,
                     },
-                    "Submitted for review.",
+                    t("Submitted for review."),
                   )
                 }
               >
-                {pending?.action === "Submit" ? "Retry submit" : "Submit for review"}
+                {pending?.action === "Submit" ? t("Retry submit") : t("Submit for review")}
               </button>
             ) : null}
           </>
@@ -788,22 +837,32 @@ function MenuBuilder({
                 )
               }
             >
-              {pending?.action === "Approve" ? "Retry approve" : "Approve"}
+              {pending?.action === "Approve" ? t("Retry approve") : t("Approve")}
             </button>
           ) : view.submittedBy === view.viewer && view.permissions.mayApprove ? (
             <SoleOperatorSelfApproval
               gate={view.soleOperator}
               csrf={csrf}
-              what="this menu version"
-              permissionName="menu approval"
+              what={t("this menu version")}
+              permissionName={t("menu approval")}
               busy={busy}
-              actionLabel={pending?.action === "Approve" ? "Retry approve" : "Approve on my own"}
+              actionLabel={
+                pending?.action === "Approve" ? t("Retry approve") : t("Approve on my own")
+              }
               summary={
                 <p>
-                  {menu.name} · {menu.sections.length} section
-                  {menu.sections.length === 1 ? "" : "s"},{" "}
-                  {menu.sections.reduce((count, section) => count + section.items.length, 0)} items.
-                  Once approved it can be published to customers.
+                  {t(
+                    "{name} · {length} section{value}, {value2} items. Once approved it can be published to customers.",
+                    {
+                      name: menu.name,
+                      length: menu.sections.length,
+                      value: menu.sections.length === 1 ? "" : "s",
+                      value2: menu.sections.reduce(
+                        (count, section) => count + section.items.length,
+                        0,
+                      ),
+                    },
+                  )}
                 </p>
               }
               onApprove={() =>
@@ -824,18 +883,26 @@ function MenuBuilder({
           ) : (
             <p>
               {view.submittedBy === view.viewer
-                ? "You submitted this version: someone else must approve it."
-                : "Waiting for approval by someone holding menu approval."}
+                ? t("You submitted this version: someone else must approve it.")
+                : t("Waiting for approval by someone holding menu approval.")}
             </p>
           )
         ) : null}
         {stage === "Approved" && publication && view.permissions.mayPublish ? (
           <>
             <p>
-              Publishing makes this version the menu customers order from, starting now
-              {hidden.length > 0
-                ? ` (customers at this Store see the ${hidden.length === 1 ? "item" : "items"} listed above only once offered here).`
-                : "."}
+              {t(
+                "Publishing makes this version the menu customers order from, starting now{value}",
+                {
+                  value:
+                    hidden.length > 0
+                      ? t(
+                          " (customers at this Store see the {value} listed above only once offered here).",
+                          { value: hidden.length === 1 ? "item" : "items" },
+                        )
+                      : ".",
+                },
+              )}
             </p>
             <button
               type="button"
@@ -854,7 +921,7 @@ function MenuBuilder({
                 )
               }
             >
-              {pending?.action === "Publish" ? "Retry publish" : "Publish"}
+              {pending?.action === "Publish" ? t("Retry publish") : t("Publish")}
             </button>
           </>
         ) : null}
@@ -875,7 +942,7 @@ function MenuBuilder({
                 )
               }
             >
-              {pending?.action === "Revise" ? "Retry" : revision.label}
+              {pending?.action === "Revise" ? t("Retry") : revision.label}
             </button>{" "}
             {revision.note}
           </p>
@@ -884,9 +951,9 @@ function MenuBuilder({
           confirmDiscard || pending?.action === "DiscardDraft" ? (
             <div role="group" aria-labelledby="discard-draft-question">
               <p id="discard-draft-question">
-                Discard this draft? The menu goes back to its published version and the changes in
-                this draft are set aside (they stay in the menu's history). Customers keep seeing
-                the published menu; nothing changes for them.
+                {t(
+                  "Discard this draft? The menu goes back to its published version and the changes in this draft are set aside (they stay in the menu's history). Customers keep seeing the published menu; nothing changes for them.",
+                )}
               </p>
               <p>
                 <button
@@ -900,11 +967,11 @@ function MenuBuilder({
                         menuReference: menu.menuReference,
                         expectedAggregateVersion: menu.aggregateVersion,
                       },
-                      "Draft discarded. The menu is back to its published version.",
+                      t("Draft discarded. The menu is back to its published version."),
                     ).then(() => setConfirmDiscard(false));
                   }}
                 >
-                  {pending?.action === "DiscardDraft" ? "Retry discard" : "Discard draft"}
+                  {pending?.action === "DiscardDraft" ? t("Retry discard") : t("Discard draft")}
                 </button>{" "}
                 <button
                   type="button"
@@ -914,16 +981,16 @@ function MenuBuilder({
                     if (pending?.action === "DiscardDraft") setPending(null);
                   }}
                 >
-                  Keep the draft
+                  {t("Keep the draft")}
                 </button>
               </p>
             </div>
           ) : (
             <p>
               <button type="button" disabled={busy} onClick={() => setConfirmDiscard(true)}>
-                Discard this draft
+                {t("Discard this draft")}
               </button>{" "}
-              Not making changes after all? Go back to the published menu.
+              {t("Not making changes after all? Go back to the published menu.")}
             </p>
           )
         ) : null}

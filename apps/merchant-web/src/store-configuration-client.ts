@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { parseStoreSetupFeeContexts } from "./store-setup-client.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 import {
@@ -330,9 +331,9 @@ export type StoreConfigurationDeclineReason = "NotRight" | "NotNeeded" | "TalkFi
 export const storeConfigurationDeclineReasonText: Readonly<
   Record<StoreConfigurationDeclineReason, string>
 > = Object.freeze({
-  NotRight: "Something in it is not right",
-  NotNeeded: "It is not needed",
-  TalkFirst: "Talk to me before changing this",
+  NotRight: t("Something in it is not right"),
+  NotNeeded: t("It is not needed"),
+  TalkFirst: t("Talk to me before changing this"),
 });
 export function parseStoreConfigurationView(raw: unknown, store: string): StoreConfigurationView {
   const extended =
@@ -473,29 +474,38 @@ export interface StoreHoursDraftCommand {
   readonly effectiveFrom: string;
 }
 /** WP-2423 (v15 D3): another person's change is still open; it is never replaced silently. */
-export const OPEN_CHANGE_BY_ANOTHER_MESSAGE =
-  "Someone else's change to this Store's configuration is still waiting. It must be approved and published, or withdrawn or declined, before another change can be saved. Ask an Owner.";
+export const OPEN_CHANGE_BY_ANOTHER_MESSAGE = t(
+  "Someone else's change to this Store's configuration is still waiting. It must be approved and published, or withdrawn or declined, before another change can be saved. Ask an Owner.",
+);
 /** WP-2423 (v15 D2/D3): the change was withdrawn or declined and takes no further step. */
-export const STORE_CONFIGURATION_WITHDRAWN_MESSAGE =
-  "This change was withdrawn or declined. Make a new change instead.";
+export const STORE_CONFIGURATION_WITHDRAWN_MESSAGE = t(
+  "This change was withdrawn or declined. Make a new change instead.",
+);
 /** WP-2423 (v15): only the person who made a change checks it and sends it for approval. */
-export const NOT_YOUR_CHANGE_MESSAGE =
-  "Only the person who made this change can check it or send it for approval. Ask them to, or, if you are an Owner, approve or decline it.";
+export const NOT_YOUR_CHANGE_MESSAGE = t(
+  "Only the person who made this change can check it or send it for approval. Ask them to, or, if you are an Owner, approve or decline it.",
+);
 /** WP-2423 DEC-SOLE-OPERATOR-APPROVAL: refusals of an approval, each with what to do next. */
-export const APPROVAL_NEEDS_ANOTHER_PERSON_MESSAGE =
-  "You made or sent this change, so someone else with Owner access must approve it, or approve it on your own as sole operator.";
+export const APPROVAL_NEEDS_ANOTHER_PERSON_MESSAGE = t(
+  "You made or sent this change, so someone else with Owner access must approve it, or approve it on your own as sole operator.",
+);
 /** WP-2423 (v15 2026-10-16): an approval given alone while sole operator was off. */
-export const SOLE_OPERATOR_APPROVAL_INVALID_MESSAGE =
-  "This change was approved by you alone while Sole operator was off, so it cannot be published. Withdraw it, then send a new change for approval.";
-export const SOLE_OPERATOR_OFF_MESSAGE =
-  "Sole operator is off, so another person with Owner access must approve this. If you run this business on your own, turn on Sole operator on the Approvals page, then approve again.";
-export const SOLE_OPERATOR_OTHERS_MESSAGE =
-  "Someone else also holds Owner access at this Store, so they must approve this change.";
-export const SOLE_OPERATOR_VERIFY_MESSAGE =
-  "Your verification is more than 15 minutes old, so the approval was not recorded. Verify again, then approve.";
+export const SOLE_OPERATOR_APPROVAL_INVALID_MESSAGE = t(
+  "This change was approved by you alone while Sole operator was off, so it cannot be published. Withdraw it, then send a new change for approval.",
+);
+export const SOLE_OPERATOR_OFF_MESSAGE = t(
+  "Sole operator is off, so another person with Owner access must approve this. If you run this business on your own, turn on Sole operator on the Approvals page, then approve again.",
+);
+export const SOLE_OPERATOR_OTHERS_MESSAGE = t(
+  "Someone else also holds Owner access at this Store, so they must approve this change.",
+);
+export const SOLE_OPERATOR_VERIFY_MESSAGE = t(
+  "Your verification is more than 15 minutes old, so the approval was not recorded. Verify again, then approve.",
+);
 /** WP-2423 (2026-10-16 v15): the hours saved are the hours already saved; nothing was written. */
-export const STORE_HOURS_NO_CHANGE_MESSAGE =
-  "Nothing changed — these opening hours and closures are already saved.";
+export const STORE_HOURS_NO_CHANGE_MESSAGE = t(
+  "Nothing changed — these opening hours and closures are already saved.",
+);
 /** Refusals after which the form and the open change stay on screen as they were. */
 export const storeConfigurationKeptRefusals: ReadonlySet<string> = new Set([
   STORE_HOURS_NO_CHANGE_MESSAGE,
@@ -557,8 +567,9 @@ export async function withdrawStoreConfiguration(
   });
 }
 /** WP-2423 Q4: Store setup holds saved changes the latest configuration does not include. */
-export const STORE_SETUP_UNPUBLISHED_MESSAGE =
-  "Store setup has changes that are not published yet. Ask the Owner to publish or finish them in Store setup first.";
+export const STORE_SETUP_UNPUBLISHED_MESSAGE = t(
+  "Store setup has changes that are not published yet. Ask the Owner to publish or finish them in Store setup first.",
+);
 export function createStoreConfigurationClient(fetcher: typeof fetch = fetch) {
   async function request(
     signal: AbortSignal,

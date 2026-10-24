@@ -1,3 +1,4 @@
+import { allergenName, contentName } from "./i18n/i18n.js";
 import {
   KitchenBoardClientError,
   parseKitchenBoardView,
@@ -66,9 +67,8 @@ function selectedOptions(value: unknown) {
       )
         return fail();
     }
-    const fallbackLocale = (keys as string[]).sort()[0];
-    const displayName =
-      names["en-CA"] ?? names.en ?? (fallbackLocale ? names[fallbackLocale] : undefined);
+    // Owner 2026-10-24: in the staff member's chosen language when the option has a name in it.
+    const displayName = contentName(names as Readonly<Record<string, string>>);
     if (typeof displayName !== "string" || !SAFE_TEXT.test(displayName)) return fail();
     return Object.freeze({ displayName, quantity: Number(option.quantity) });
   });
@@ -93,8 +93,9 @@ function allergens(value: unknown) {
   for (const entry of declared.items) {
     const allergen = closedRecord(entry, ["code", "name", "classification"]);
     if (typeof allergen.name !== "string" || !SAFE_TEXT.test(allergen.name)) return fail();
-    if (allergen.classification === "Contains") contains.push(allergen.name);
-    else if (allergen.classification === "CrossContactPossible") mayContain.push(allergen.name);
+    const shown = allergenName(String(allergen.code), allergen.name);
+    if (allergen.classification === "Contains") contains.push(shown);
+    else if (allergen.classification === "CrossContactPossible") mayContain.push(shown);
     else return fail();
   }
   // WP-2423 ⑪: forChoices — these are for exactly the options chosen on this item.
@@ -103,7 +104,7 @@ function allergens(value: unknown) {
 function item(value: unknown) {
   const raw = record(value),
     names = record(raw.localizedDisplayNames);
-  const displayName = names["en-CA"] ?? names["en"] ?? Object.values(names)[0];
+  const displayName = contentName(names as Readonly<Record<string, string>>);
   return parseKitchenWorkItemView({
     workItemReference: raw.workItemReference,
     ticketReference: raw.ticketReference,

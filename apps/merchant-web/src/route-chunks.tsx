@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import {
   Component,
@@ -167,16 +168,19 @@ export class PageChunkBoundary extends Component<
     if (error === null) return this.props.children;
     if (!(error instanceof PageChunkError)) throw error;
     return (
-      <StatePanel heading="This page didn't load" tone="offline">
+      <StatePanel heading={t("This page didn't load")} tone="offline">
         <p>
-          The connection may have dropped while the page was opening. Check the Wi-Fi, then try
-          again. Nothing you saved is affected.
+          {t(
+            "The connection may have dropped while the page was opening. Check the Wi-Fi, then try again. Nothing you saved is affected.",
+          )}
         </p>
         {stillOffline ? (
-          <p role="status">This device is still offline. Try again once the Wi-Fi is back.</p>
+          <p role="status">
+            {t("This device is still offline. Try again once the Wi-Fi is back.")}
+          </p>
         ) : null}
         <button type="button" onClick={this.retry}>
-          Try again
+          {t("Try again")}
         </button>
       </StatePanel>
     );

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import {
   defaultCommandOutcomeRecovery,
   withCommandOutcomeRecovery,
@@ -11,7 +12,7 @@ export interface DiningSessionCloseCommand {
 }
 export class DiningSessionCloseClientError extends Error {
   constructor(readonly code: "PermissionDenied" | "Conflict" | "Unavailable" | "OutcomeUnknown") {
-    super("Dining session closure could not be confirmed");
+    super(t("Dining session closure could not be confirmed"));
     this.name = "DiningSessionCloseClientError";
   }
 }

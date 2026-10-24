@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StaffTime, StoreTimeZoneContext, storeDate } from "./StoreTime.js";
@@ -20,38 +21,47 @@ import {
 
 /** WP-2423 / DEC-INV-WASTE: record waste as it happens; managers review high-value records. */
 const copy: Record<StoreWasteErrorCode | "Loading", string> = {
-  Loading: "Loading waste…",
-  PermissionDenied: "You do not have permission for this waste action.",
-  NotFound: "This waste record does not exist for the selected Store.",
-  Conflict: "This was already recorded. Refresh and check before trying again.",
-  NotEnoughStock:
+  Loading: t("Loading waste…"),
+  PermissionDenied: t("You do not have permission for this waste action."),
+  NotFound: t("This waste record does not exist for the selected Store."),
+  Conflict: t("This was already recorded. Refresh and check before trying again."),
+  NotEnoughStock: t(
     "The highlighted line asks for more than is in stock there. If the stock figure is wrong, count the item first.",
-  AlreadyReviewed: "This record has already been reviewed.",
-  NotIndependent: "The person who recorded the waste cannot review it.",
-  LineInvalid:
+  ),
+  AlreadyReviewed: t("This record has already been reviewed."),
+  NotIndependent: t("The person who recorded the waste cannot review it."),
+  LineInvalid: t(
     "The highlighted line is not valid: check item, location, lot, quantity precision and reason (a note is needed for Other).",
-  Invalid: "The waste record is not valid.",
-  Offline: "Offline. Nothing was confirmed; retry sends the same request again.",
-  Unavailable: "Waste is unavailable.",
+  ),
+  Invalid: t("The waste record is not valid."),
+  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Unavailable: t("Waste is unavailable."),
 };
 /**
  * DEC-INV-COUNT-SHORT amendment (2026-10-18): staff see what is physically there and what open
  * orders hold. Waste up to what is there is recordable; taking held stock leaves those orders short.
  */
 const stockText = (row: { readonly onHand: string; readonly reserved: string }) =>
-  `${availableQuantityText(row.onHand)} in stock` +
+  t("{onHand} in stock", { onHand: availableQuantityText(row.onHand) }) +
   (/^0(?:\.0+)?$/u.test(row.reserved)
     ? ""
-    : `, ${availableQuantityText(row.reserved)} held for open orders`);
+    : t(", {reserved} held for open orders", { reserved: availableQuantityText(row.reserved) }));
 const heldStockNote = (available: string) =>
   available.startsWith("-")
-    ? "Held for open orders — recording this waste makes the shortage bigger; receive stock or recount."
+    ? t(
+        "Held for open orders — recording this waste makes the shortage bigger; receive stock or recount.",
+      )
     : /^0(?:\.0+)?$/u.test(available)
-      ? "Held for open orders — recording this waste leaves those orders short; receive stock or recount."
-      : `Only ${availableQuantityText(available)} is not held for open orders — recording more leaves those orders short; receive stock or recount.`;
+      ? t(
+          "Held for open orders — recording this waste leaves those orders short; receive stock or recount.",
+        )
+      : t(
+          "Only {available} is not held for open orders — recording more leaves those orders short; receive stock or recount.",
+          { available: availableQuantityText(available) },
+        );
 const reasonText = (code: string) =>
   code === "KITCHEN_REMAKE_OPENED_BY_MISTAKE"
-    ? "Remake cancelled — opened by mistake"
+    ? t("Remake cancelled — opened by mistake")
     : code.charAt(0) + code.slice(1).toLowerCase().replaceAll("_", " ");
 type State =
   | { readonly kind: "Loading" | StoreWasteErrorCode }
@@ -85,7 +95,7 @@ function useWaste(
 function Failure({ code }: { code: StoreWasteErrorCode | "Loading" }) {
   return (
     <StatePanel
-      heading={code === "PermissionDenied" ? noAccessHeading : "Waste"}
+      heading={code === "PermissionDenied" ? noAccessHeading : t("Waste")}
       tone={code === "Loading" ? "neutral" : "error"}
       status
     >
@@ -99,7 +109,7 @@ const statusOf = (record: WasteRecordView) =>
       ? "Voided"
       : "Reviewed"
     : record.needsReview
-      ? "Needs review"
+      ? t("Needs review")
       : "Recorded";
 
 export function StoreWasteListPage({
@@ -114,19 +124,21 @@ export function StoreWasteListPage({
   const itemName = (reference: string) =>
     view.items.find((item) => item.itemReference === reference)?.name ?? "Item";
   return (
-    <AppFrame title="Waste" description="">
+    <AppFrame title={t("Waste")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Waste</p>
-          <h2>Waste</h2>
+          <p className="bop-eyebrow">{t("Waste")}</p>
+          <h2>{t("Waste")}</h2>
           <p>
-            Record waste when it happens; it leaves stock at once. Records worth $
-            {centsText(view.reviewThresholdMinor)} or more, or without a known cost, are reviewed by
-            a manager. Source as of <SourceTime instant={view.sourceAsOf} />
+            {t(
+              "Record waste when it happens; it leaves stock at once. Records worth ${reviewThresholdMinor} or more, or without a known cost, are reviewed by a manager. Source as of",
+              { reviewThresholdMinor: centsText(view.reviewThresholdMinor) },
+            )}{" "}
+            <SourceTime instant={view.sourceAsOf} />
           </p>
         </div>
         {view.permissions.mayRecord ? (
-          <Link to="/operations/inventory/waste/new">Record waste</Link>
+          <Link to="/operations/inventory/waste/new">{t("Record waste")}</Link>
         ) : null}
       </header>
       {view.permissions.mayRead || view.permissions.mayReview ? (
@@ -137,21 +149,21 @@ export function StoreWasteListPage({
               checked={needsReviewOnly}
               onChange={(event) => setNeedsReviewOnly(event.currentTarget.checked)}
             />{" "}
-            Only records waiting for review
+            {t("Only records waiting for review")}
           </label>
           {view.records.length === 0 ? (
-            <StatePanel heading="No waste records" status>
-              <p>Nothing to show.</p>
+            <StatePanel heading={t("No waste records")} status>
+              <p>{t("Nothing to show.")}</p>
             </StatePanel>
           ) : (
             <table>
               <thead>
                 <tr>
-                  <th>Recorded</th>
-                  <th>By</th>
-                  <th>What</th>
-                  <th>Value</th>
-                  <th>Status</th>
+                  <th>{t("Recorded")}</th>
+                  <th>{t("By")}</th>
+                  <th>{t("What")}</th>
+                  <th>{t("Value")}</th>
+                  <th>{t("Status")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -162,7 +174,7 @@ export function StoreWasteListPage({
                         <StaffTime instant={record.recordedAt} />
                       </Link>
                     </td>
-                    <td>{view.people[record.recordedBy] ?? "Staff member"}</td>
+                    <td>{view.people[record.recordedBy] ?? t("Staff member")}</td>
                     <td>
                       {[
                         ...record.lines.map(
@@ -176,11 +188,11 @@ export function StoreWasteListPage({
                               `${itemName(short.itemReference)} ${short.wastedQuantity} ${short.unitCode}`,
                           ),
                       ].join(", ")}
-                      {record.shortfalls?.length ? " · stock was short, count needed" : ""}
+                      {record.shortfalls?.length ? t(" · stock was short, count needed") : ""}
                     </td>
                     <td>
                       ${centsText(record.valueMinor)}
-                      {record.costUnknown ? " (cost unknown)" : ""}
+                      {record.costUnknown ? t(" (cost unknown)") : ""}
                     </td>
                     <td>{statusOf(record)}</td>
                   </tr>
@@ -190,7 +202,7 @@ export function StoreWasteListPage({
           )}
         </>
       ) : (
-        <p>Use “Record waste” to log what was thrown away.</p>
+        <p>{t("Use “Record waste” to log what was thrown away.")}</p>
       )}
     </AppFrame>
   );
@@ -312,17 +324,19 @@ export function StoreWasteFormPage({
     }
   };
   return (
-    <AppFrame title="Record waste" description="">
+    <AppFrame title={t("Record waste")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Record waste</p>
-          <h2>Record waste</h2>
-          <p>What was thrown away, where, and why. It leaves stock as soon as you record it.</p>
+          <p className="bop-eyebrow">{t("Record waste")}</p>
+          <h2>{t("Record waste")}</h2>
+          <p>
+            {t("What was thrown away, where, and why. It leaves stock as soon as you record it.")}
+          </p>
         </div>
-        <Link to="/operations/inventory/waste">Waste records</Link>
+        <Link to="/operations/inventory/waste">{t("Waste records")}</Link>
       </header>
       {view.stock.length === 0 ? (
-        <p>Nothing is in stock in this Store to record as waste.</p>
+        <p>{t("Nothing is in stock in this Store to record as waste.")}</p>
       ) : null}
       <form
         className="detail-section"
@@ -344,9 +358,9 @@ export function StoreWasteFormPage({
               aria-invalid={flagged}
               style={flagged ? { outline: "2px solid #b42318" } : undefined}
             >
-              <legend>Line {index + 1}</legend>
+              <legend>{t("Line {value}", { value: index + 1 })}</legend>
               <label>
-                Item
+                {t("Item")}
                 <select
                   value={line.itemReference}
                   onChange={(event) => {
@@ -367,7 +381,7 @@ export function StoreWasteFormPage({
                 </select>
               </label>
               <label>
-                Where
+                {t("Where")}
                 <select
                   value={line.locationReference}
                   onChange={(event) => {
@@ -385,7 +399,7 @@ export function StoreWasteFormPage({
               </label>
               {lots.some((row) => row.lotReference !== null) ? (
                 <label>
-                  Lot
+                  {t("Lot")}
                   <select
                     value={line.lotReference}
                     onChange={(event) => update(index, { lotReference: event.currentTarget.value })}
@@ -394,15 +408,19 @@ export function StoreWasteFormPage({
                       <option key={row.lotReference ?? "none"} value={row.lotReference ?? ""}>
                         {row.lotCode}
                         {row.expiryDate
-                          ? ` (exp. ${storeDate(row.expiryDate, timeZone)})`
-                          : ""} · {stockText(row)}
+                          ? t(" (exp. {expiryDate})", {
+                              expiryDate: storeDate(row.expiryDate, timeZone),
+                            })
+                          : ""}{" "}
+                        · {stockText(row)}
                       </option>
                     ))}
                   </select>
                 </label>
               ) : null}
               <label>
-                Quantity ({item?.unitCode}){selected ? ` — ${stockText(selected)}` : ""}
+                {t("Quantity (")}
+                {item?.unitCode}){selected ? ` — ${stockText(selected)}` : ""}
                 <input
                   required
                   inputMode="decimal"
@@ -414,13 +432,13 @@ export function StoreWasteFormPage({
                 <p role="note">{heldStockNote(selected.available)}</p>
               ) : null}
               <label>
-                Reason
+                {t("Reason")}
                 <select
                   required
                   value={line.reasonCode}
                   onChange={(event) => update(index, { reasonCode: event.currentTarget.value })}
                 >
-                  <option value="">Choose a reason</option>
+                  <option value="">{t("Choose a reason")}</option>
                   {view.reasons.map((reason) => (
                     <option key={reason} value={reason}>
                       {reasonText(reason)}
@@ -429,7 +447,7 @@ export function StoreWasteFormPage({
                 </select>
               </label>
               <label>
-                Note{line.reasonCode === "OTHER" ? "" : " (optional)"}
+                {t("Note{value}", { value: line.reasonCode === "OTHER" ? "" : t(" (optional)") })}
                 <input
                   maxLength={200}
                   value={line.note}
@@ -441,7 +459,7 @@ export function StoreWasteFormPage({
                   type="button"
                   onClick={() => setLines((current) => current.filter((_, i) => i !== index))}
                 >
-                  Remove line
+                  {t("Remove line")}
                 </button>
               ) : null}
             </fieldset>
@@ -452,11 +470,11 @@ export function StoreWasteFormPage({
           disabled={busy || view.stock.length === 0}
           onClick={() => setLines((current) => [...current, blank()])}
         >
-          Add line
+          {t("Add line")}
         </button>{" "}
-        <button disabled={busy || lines.length === 0}>Record waste</button>
+        <button disabled={busy || lines.length === 0}>{t("Record waste")}</button>
         {error ? (
-          <StatePanel heading="Not recorded" tone="error" status>
+          <StatePanel heading={t("Not recorded")} tone="error" status>
             <p>{copy[error.code]}</p>
           </StatePanel>
         ) : null}
@@ -482,7 +500,7 @@ export function StoreWasteDetailPage({
     view.items.find((item) => item.itemReference === reference)?.name ?? "Item";
   const placeName = (reference: string) =>
     view.locations.find((item) => item.locationReference === reference)?.name ?? "Location";
-  const person = (reference: string) => view.people[reference] ?? "Staff member";
+  const person = (reference: string) => view.people[reference] ?? t("Staff member");
   const review = async (decision: "Accepted" | "Voided", reasonCode: string) => {
     if (!client.command) return;
     setBusy(true);
@@ -505,31 +523,40 @@ export function StoreWasteDetailPage({
   const mayReview =
     view.permissions.mayReview && record.review === null && record.recordedBy !== view.viewer;
   return (
-    <AppFrame title="Waste record" description="">
+    <AppFrame title={t("Waste record")} description="">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">Waste record · {statusOf(record)}</p>
+          <p className="bop-eyebrow">
+            {t("Waste record · {record}", { record: statusOf(record) })}
+          </p>
           <h2>
-            Waste recorded <StaffTime instant={record.recordedAt} />
+            {t("Waste recorded")} <StaffTime instant={record.recordedAt} />
           </h2>
           <p>
-            By {person(record.recordedBy)} · value ${centsText(record.valueMinor)}
-            {record.costUnknown ? " (some costs unknown)" : ""}
-            {record.review
-              ? ` · ${record.review.decision === "Voided" ? "voided" : "reviewed"} by ${person(record.review.reviewedBy)} (${reasonText(record.review.reasonCode)})`
-              : ""}
+            {t("By {recordedBy} · value ${valueMinor}{value}{value2}", {
+              recordedBy: person(record.recordedBy),
+              valueMinor: centsText(record.valueMinor),
+              value: record.costUnknown ? t(" (some costs unknown)") : "",
+              value2: record.review
+                ? t(" · {value} by {reviewedBy} ({reasonCode})", {
+                    value: record.review.decision === "Voided" ? "voided" : "reviewed",
+                    reviewedBy: person(record.review.reviewedBy),
+                    reasonCode: reasonText(record.review.reasonCode),
+                  })
+                : "",
+            })}
           </p>
         </div>
-        <Link to="/operations/inventory/waste">Waste records</Link>
+        <Link to="/operations/inventory/waste">{t("Waste records")}</Link>
       </header>
       <table>
         <thead>
           <tr>
-            <th>Item</th>
-            <th>Where</th>
-            <th>Quantity</th>
-            <th>Reason</th>
-            <th>Value</th>
+            <th>{t("Item")}</th>
+            <th>{t("Where")}</th>
+            <th>{t("Quantity")}</th>
+            <th>{t("Reason")}</th>
+            <th>{t("Value")}</th>
           </tr>
         </thead>
         <tbody>
@@ -544,44 +571,58 @@ export function StoreWasteDetailPage({
                 {reasonText(line.reasonCode)}
                 {line.note ? ` — ${line.note}` : ""}
               </td>
-              <td>{line.unitCostMinor === null ? "unknown" : "$" + centsText(line.valueMinor)}</td>
+              <td>
+                {line.unitCostMinor === null ? t("unknown") : "$" + centsText(line.valueMinor)}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
       {record.shortfalls?.length ? (
-        <StatePanel heading="Stock was short — count these items" tone="error">
+        <StatePanel heading={t("Stock was short — count these items")} tone="error">
           <p>
-            A kitchen remake used more than stock showed as available. The food was thrown away;
-            only what was in stock was taken off. Count these items and correct the count.
+            {t(
+              "A kitchen remake used more than stock showed as available. The food was thrown away; only what was in stock was taken off. Count these items and correct the count.",
+            )}
           </p>
           <ul>
             {record.shortfalls.map((short) => (
               <li key={`${short.itemReference}|${short.locationReference}`}>
-                {itemName(short.itemReference)} ({placeName(short.locationReference)}): used{" "}
-                {short.wastedQuantity} {short.unitCode}, taken off stock {short.recordedQuantity}{" "}
-                {short.unitCode}, not in stock {short.missingQuantity} {short.unitCode}
+                {t(
+                  "{itemReference} ({locationReference}): used {wastedQuantity} {unitCode}, taken off stock {recordedQuantity} {unitCode2}, not in stock {missingQuantity} {unitCode3}",
+                  {
+                    itemReference: itemName(short.itemReference),
+                    locationReference: placeName(short.locationReference),
+                    wastedQuantity: short.wastedQuantity,
+                    unitCode: short.unitCode,
+                    recordedQuantity: short.recordedQuantity,
+                    unitCode2: short.unitCode,
+                    missingQuantity: short.missingQuantity,
+                    unitCode3: short.unitCode,
+                  },
+                )}
               </li>
             ))}
           </ul>
         </StatePanel>
       ) : null}
       {mayReview ? (
-        <StatePanel heading="Review">
+        <StatePanel heading={t("Review")}>
           <p>
-            Accept the record, or void it if the waste did not happen (the quantity returns to
-            stock).
+            {t(
+              "Accept the record, or void it if the waste did not happen (the quantity returns to stock).",
+            )}
           </p>
           <button disabled={busy} onClick={() => void review("Accepted", "REVIEWED_OK")}>
-            Accept
+            {t("Accept")}
           </button>{" "}
           <label>
-            Void reason
+            {t("Void reason")}
             <select
               value={voidReason}
               onChange={(event) => setVoidReason(event.currentTarget.value)}
             >
-              <option value="">Choose a reason</option>
+              <option value="">{t("Choose a reason")}</option>
               {view.voidReasons.map((reason) => (
                 <option key={reason} value={reason}>
                   {reasonText(reason)}
@@ -590,15 +631,15 @@ export function StoreWasteDetailPage({
             </select>
           </label>{" "}
           <button disabled={busy || !voidReason} onClick={() => void review("Voided", voidReason)}>
-            Void record
+            {t("Void record")}
           </button>
         </StatePanel>
       ) : null}
       {record.review === null && record.recordedBy === view.viewer && record.needsReview ? (
-        <p>Waiting for another manager to review.</p>
+        <p>{t("Waiting for another manager to review.")}</p>
       ) : null}
       {error ? (
-        <StatePanel heading="Not recorded" tone="error" status>
+        <StatePanel heading={t("Not recorded")} tone="error" status>
           <p>{copy[error]}</p>
         </StatePanel>
       ) : null}

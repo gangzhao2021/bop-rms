@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 export interface DiningServeCommand {
   readonly operationReference: string;
   readonly orderReference: string;
@@ -10,7 +11,7 @@ export interface DiningServeCommand {
 }
 export class DiningServeClientError extends Error {
   constructor(readonly code: "PermissionDenied" | "Conflict" | "Unavailable" | "OutcomeUnknown") {
-    super("Serving could not be confirmed");
+    super(t("Serving could not be confirmed"));
     this.name = "DiningServeClientError";
   }
 }

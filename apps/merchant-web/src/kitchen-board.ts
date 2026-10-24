@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 export type KitchenStatus = "Queued" | "Held" | "In Progress" | "Completed" | "Cancelled";
 
 export interface KitchenSelectedOption {
@@ -114,7 +115,7 @@ export class KitchenBoardClientError extends Error {
     readonly code:
       "PermissionDenied" | "NotFound" | "Offline" | "Conflict" | "CommandFailed" | "Unavailable",
   ) {
-    super("Kitchen Board is unavailable");
+    super(t("Kitchen Board is unavailable"));
     this.name = "KitchenBoardClientError";
   }
 }
@@ -480,14 +481,14 @@ export const unavailableKitchenBoardClient: KitchenBoardClient = Object.freeze({
 export function kitchenOrderText(
   label: Pick<KitchenOrderLabel, "orderNumber" | "orderType" | "tableLabel"> | null | undefined,
 ): string {
-  if (!label) return "Order details unavailable";
+  if (!label) return t("Order details unavailable");
   return (
     (label.orderType === "Pickup"
       ? "Pickup"
       : label.tableLabel
         ? "Table " + label.tableLabel
         : "Dine-in") +
-    " · Order " +
+    t(" · Order ") +
     label.orderNumber
   );
 }

@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createPickupHandoffClient,
@@ -15,9 +16,9 @@ import {
 const client = createPickupHandoffClient();
 /** WP-2423: what staff choose when a customer cannot show a still-valid pickup code. */
 const codeNotShownChoices: readonly (readonly [PickupCodeNotShownCause, string])[] = [
-  ["PhoneUnavailable", "Phone is dead, lost or left behind"],
-  ["CodeNotReceived", "Customer never got the pickup code"],
-  ["OrderPageLost", "Order page was closed or lost"],
+  ["PhoneUnavailable", t("Phone is dead, lost or left behind")],
+  ["CodeNotReceived", t("Customer never got the pickup code")],
+  ["OrderPageLost", t("Order page was closed or lost")],
 ];
 
 /**
@@ -32,19 +33,20 @@ export function PickupIdentityDetails({
   readonly onRetry: () => void;
 }) {
   if (details === null) return null;
-  if (details === "Loading") return <p role="status">Loading the name and phone on the order…</p>;
+  if (details === "Loading")
+    return <p role="status">{t("Loading the name and phone on the order…")}</p>;
   if (details.status === "Available")
     return (
-      <dl className="pickup-identity" aria-label="Details on the order">
+      <dl className="pickup-identity" aria-label={t("Details on the order")}>
         <div>
-          <dt>Name on the order</dt>
+          <dt>{t("Name on the order")}</dt>
           <dd>{details.name}</dd>
         </div>
         <div>
-          <dt>Phone ends in</dt>
+          <dt>{t("Phone ends in")}</dt>
           <dd>
             {details.phoneLast4 === null ? (
-              "No phone on the order"
+              t("No phone on the order")
             ) : (
               <>
                 <span aria-hidden="true">•••• </span>
@@ -58,22 +60,28 @@ export function PickupIdentityDetails({
   if (details.status === "Removed" || details.status === "NotGiven")
     return (
       <p role="status">
-        {details.status === "Removed"
-          ? "The customer's name and phone were deleted after the retention period."
-          : "The customer did not leave a name or phone for this order."}{" "}
-        Check the order number and ask the customer what they ordered. If you are not sure, ask a
-        manager before handing it over.
+        {t(
+          "{value} Check the order number and ask the customer what they ordered. If you are not sure, ask a manager before handing it over.",
+          {
+            value:
+              details.status === "Removed"
+                ? t("The customer's name and phone were deleted after the retention period.")
+                : t("The customer did not leave a name or phone for this order."),
+          },
+        )}
       </p>
     );
   if (details.status === "NotEligible")
     return (
-      <p role="status">This order changed. Close this and refresh the list before handing over.</p>
+      <p role="status">
+        {t("This order changed. Close this and refresh the list before handing over.")}
+      </p>
     );
   return (
     <p role="status">
-      The name and phone on the order can&apos;t be shown right now.{" "}
+      {t("The name and phone on the order can't be shown right now.")}{" "}
       <button type="button" onClick={onRetry}>
-        Try again
+        {t("Try again")}
       </button>
     </p>
   );
@@ -245,20 +253,20 @@ export function PickupHandoffForm({
         }}
       >
         {codeNotShown
-          ? "Guest can’t show the code"
+          ? t("Guest can’t show the code")
           : counter
-            ? "Hand over"
+            ? t("Hand over")
             : inPerson
-              ? "Hand over after checking in person"
-              : "Review pickup handoff"}
+              ? t("Hand over after checking in person")
+              : t("Review pickup handoff")}
       </button>
       {status === "Completed" || status === "InProgress" ? (
         <p ref={resultAnnouncement} role="status" tabIndex={-1}>
-          Handed over. The list is updating.
+          {t("Handed over. The list is updating.")}
         </p>
       ) : status === "Rejected" ? (
         <p ref={resultAnnouncement} role="status" tabIndex={-1}>
-          Handoff was not confirmed. Refresh the queue before another attempt.
+          {t("Handoff was not confirmed. Refresh the queue before another attempt.")}
         </p>
       ) : null}
       <dialog
@@ -275,47 +283,59 @@ export function PickupHandoffForm({
           if (locked) event.preventDefault();
         }}
       >
-        <h2 id={"handoff-" + item.fulfillmentReference}>Confirm pickup handoff</h2>
+        <h2 id={"handoff-" + item.fulfillmentReference}>{t("Confirm pickup handoff")}</h2>
         <p>
-          Order{" "}
-          {item.publicOrderNumber ??
-            item.execution?.publicOrderReference ??
-            "reference unavailable"}
+          {t("Order {value}", {
+            value:
+              item.publicOrderNumber ??
+              item.execution?.publicOrderReference ??
+              t("reference unavailable"),
+          })}
         </p>
         <ul>
           {lines.map((line, index) => (
             <li key={line.fulfillmentItemReference}>
-              {pickupItemLabel(line, index)}: {line.readyQuantity - line.handedOverQuantity} to hand
-              over
+              {t("{line}: {value} to hand over", {
+                line: pickupItemLabel(line, index),
+                value: line.readyQuantity - line.handedOverQuantity,
+              })}
             </li>
           ))}
         </ul>
-        <p>Match every item to the order ticket before handing it over.</p>
+        <p>{t("Match every item to the order ticket before handing it over.")}</p>
         {counter ? (
           <p>
-            This order was taken at the counter, so no pickup code was sent. Call the order number
-            and hand it over to the customer who answers.
+            {t(
+              "This order was taken at the counter, so no pickup code was sent. Call the order number and hand it over to the customer who answers.",
+            )}
           </p>
         ) : codeNotShown ? (
           <p>
-            The customer&apos;s pickup code is still valid. Use this only when they can&apos;t show
-            it. Choose why, then ask for the order number and check it with the name or the last
-            four digits of the phone on the order. Your name and the reason are kept with the
-            handover.
+            {t(
+              "The customer's pickup code is still valid. Use this only when they can't show it. Choose why, then ask for the order number and check it with the name or the last four digits of the phone on the order. Your name and the reason are kept with the handover.",
+            )}
           </p>
         ) : inPerson ? (
           <p>
-            {item.proofReadiness === "Expired"
-              ? "The customer's pickup code has expired."
-              : item.proofReadiness === "Locked"
-                ? "Too many wrong pickup codes were entered for this order, so code checks are locked."
-                : "No pickup code was sent for this order."}{" "}
-            Ask for the order number and check it with the name or the last four digits of the phone
-            on the order before handing over.
+            {t(
+              "{value} Ask for the order number and check it with the name or the last four digits of the phone on the order before handing over.",
+              {
+                value:
+                  item.proofReadiness === "Expired"
+                    ? t("The customer's pickup code has expired.")
+                    : item.proofReadiness === "Locked"
+                      ? t(
+                          "Too many wrong pickup codes were entered for this order, so code checks are locked.",
+                        )
+                      : t("No pickup code was sent for this order."),
+              },
+            )}
           </p>
         ) : null}
         {codeNotShown && !cause && status === "Idle" ? (
-          <p role="status">Choose why first. The name and phone on the order then show here.</p>
+          <p role="status">
+            {t("Choose why first. The name and phone on the order then show here.")}
+          </p>
         ) : null}
         {inPerson ? (
           <PickupIdentityDetails details={details} onRetry={() => loadDetails()} />
@@ -330,7 +350,7 @@ export function PickupHandoffForm({
           >
             {codeNotShown ? (
               <label>
-                Why the code can&apos;t be shown
+                {t("Why the code can't be shown")}
                 <select
                   value={cause}
                   onChange={(event) => {
@@ -339,7 +359,7 @@ export function PickupHandoffForm({
                     if (chosen && details === null) loadDetails(chosen);
                   }}
                 >
-                  <option value="">Choose why</option>
+                  <option value="">{t("Choose why")}</option>
                   {codeNotShownChoices.map(([value, label]) => (
                     <option key={value} value={value}>
                       {label}
@@ -350,38 +370,38 @@ export function PickupHandoffForm({
             ) : null}
             {inPerson ? (
               <label>
-                Checked in person
+                {t("Checked in person")}
                 <select
                   value={identityCheck}
                   onChange={(event) =>
                     setIdentityCheck(event.currentTarget.value as typeof identityCheck)
                   }
                 >
-                  <option value="">Select what you checked</option>
+                  <option value="">{t("Select what you checked")}</option>
                   <option value="OrderNumberAndName">
                     {counter
-                      ? "Order number called at the counter"
-                      : "Order number and name on the order"}
+                      ? t("Order number called at the counter")
+                      : t("Order number and name on the order")}
                   </option>
                   <option value="OrderNumberAndPhoneLast4" disabled={phoneUnavailable}>
-                    Order number and last four digits of the phone
+                    {t("Order number and last four digits of the phone")}
                   </option>
                 </select>
               </label>
             ) : null}
             <label>
-              Collected by
+              {t("Collected by")}
               <select
                 value={recipient}
                 onChange={(event) => setRecipient(event.currentTarget.value as typeof recipient)}
               >
-                <option value="">Choose who collected it</option>
-                <option value="Customer">The customer</option>
-                <option value="Delegate">Someone collecting for them</option>
+                <option value="">{t("Choose who collected it")}</option>
+                <option value="Customer">{t("The customer")}</option>
+                <option value="Delegate">{t("Someone collecting for them")}</option>
               </select>
             </label>
             <label>
-              Collector&rsquo;s initial
+              {t("Collector’s initial")}
               <input
                 value={mask}
                 maxLength={64}
@@ -391,8 +411,9 @@ export function PickupHandoffForm({
               />
             </label>
             <p>
-              Enter only an initial, such as S***, so the record shows who collected it. Do not
-              enter a full name, phone number or pickup code.
+              {t(
+                "Enter only an initial, such as S***, so the record shows who collected it. Do not enter a full name, phone number or pickup code.",
+              )}
             </p>
             <label>
               <input
@@ -400,7 +421,7 @@ export function PickupHandoffForm({
                 checked={confirmed}
                 onChange={(event) => setConfirmed(event.currentTarget.checked)}
               />
-              I matched this order, the person collecting it and every item shown
+              {t("I matched this order, the person collecting it and every item shown")}
             </label>
             <button
               type="submit"
@@ -414,28 +435,30 @@ export function PickupHandoffForm({
                 (codeNotShown && !cause)
               }
             >
-              Confirm and record handoff
+              {t("Confirm and record handoff")}
             </button>
           </form>
         ) : null}
-        {paused ? <p role="status">Paused until the connection returns.</p> : null}
+        {paused ? <p role="status">{t("Paused until the connection returns.")}</p> : null}
         <div role="status">
-          {status === "Pending" ? "Recording handoff…" : null}
+          {status === "Pending" ? t("Recording handoff…") : null}
           {status === "Unknown"
-            ? "The handover could not be confirmed. Do not hand anything over again; try confirming the same handover again."
+            ? t(
+                "The handover could not be confirmed. Do not hand anything over again; try confirming the same handover again.",
+              )
             : null}
           {status === "Rejected"
-            ? "Handoff was not confirmed. Close and refresh the queue before another attempt."
+            ? t("Handoff was not confirmed. Close and refresh the queue before another attempt.")
             : null}
-          {status === "Completed" || status === "InProgress" ? "Handed over." : null}
+          {status === "Completed" || status === "InProgress" ? t("Handed over.") : null}
         </div>
         {status === "Unknown" ? (
           <button disabled={paused} onClick={() => void submit(true)}>
-            Try confirming again
+            {t("Try confirming again")}
           </button>
         ) : null}
         <button disabled={locked} onClick={() => dialog.current?.close()}>
-          Close handoff confirmation
+          {t("Close handoff confirmation")}
         </button>
       </dialog>
     </>

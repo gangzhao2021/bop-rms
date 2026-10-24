@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /**
  * WP-2423 Q15/Q16 (DEC-RECEIPT-TAX-AND-PRIVACY): the Store's receipt registration numbers and privacy
  * notice link. The browser sends what the Owner typed and the version they saw; Store, actor and
@@ -37,7 +38,7 @@ export class StoreReceiptProfileClientError extends Error {
     readonly code:
       "PermissionDenied" | "Invalid" | "Conflict" | "NoChange" | "Unavailable" | "OutcomeUnknown",
   ) {
-    super("Receipt and privacy details are unavailable");
+    super(t("Receipt and privacy details are unavailable"));
     this.name = "StoreReceiptProfileClientError";
   }
 }
