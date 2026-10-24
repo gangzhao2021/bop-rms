@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { displayLocale, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -16,19 +16,19 @@ import { SourceTime } from "./StoreTime.js";
  * use them. Receipts already issued keep the name they were issued with.
  */
 export const provinceNames: Readonly<Record<string, string>> = {
-  AB: "Alberta",
+  AB: t("Alberta"),
   BC: t("British Columbia"),
-  MB: "Manitoba",
+  MB: t("Manitoba"),
   NB: t("New Brunswick"),
   NL: t("Newfoundland and Labrador"),
   NS: t("Nova Scotia"),
   NT: t("Northwest Territories"),
-  NU: "Nunavut",
-  ON: "Ontario",
+  NU: t("Nunavut"),
+  ON: t("Ontario"),
   PE: t("Prince Edward Island"),
-  QC: "Quebec",
-  SK: "Saskatchewan",
-  YT: "Yukon",
+  QC: t("Quebec"),
+  SK: t("Saskatchewan"),
+  YT: t("Yukon"),
 };
 
 export interface StorePublicProfileFields {
@@ -49,7 +49,7 @@ export function formatStorePhone(value: string | null): string {
 
 export function languageName(locale: string): string {
   try {
-    return new Intl.DisplayNames(["en-CA"], { type: "language" }).of(locale) ?? locale;
+    return new Intl.DisplayNames([displayLocale()], { type: "language" }).of(locale) ?? locale;
   } catch {
     return locale;
   }

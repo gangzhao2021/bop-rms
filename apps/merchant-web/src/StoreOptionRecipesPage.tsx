@@ -60,7 +60,7 @@ const statusText: Record<OptionRecipeStatus, string> = {
   NeedsReview: t("Waiting for reviews"),
   Rejected: t("Rejected — change and save again"),
   ReadyToPublish: t("Approved — ready to publish"),
-  Published: "Published",
+  Published: t("Published"),
   NeedsUpdate: t("A recipe changed — save again"),
 };
 const kindText: Record<OptionRecipeChangeKind, string> = {
@@ -455,7 +455,11 @@ export function StoreOptionRecipesPage({
                     <td data-label={t("Recipe change")}>
                       {row.change === null ? "—" : summary(row.change.content)}
                       {row.change !== null && row.change.lines.length > 0 ? (
-                        <ul aria-label={`Result per size for ${row.optionName}`}>
+                        <ul
+                          aria-label={t("Result per size for {optionName}", {
+                            optionName: row.optionName,
+                          })}
+                        >
                           {row.change.lines.map((line) => (
                             <li key={line.skuReference + ":" + line.quantity}>
                               {row.sizes.find((size) => size.skuReference === line.skuReference)
@@ -539,7 +543,9 @@ export function StoreOptionRecipesPage({
                   <SoleOperatorSelfApproval
                     gate={view.soleOperator}
                     csrf={csrf}
-                    what={`the ${kind === "Cost" ? "cost" : "food safety"} of this option change`}
+                    what={t("the {value} of this option change", {
+                      value: kind === "Cost" ? "cost" : "food safety",
+                    })}
                     permissionName={t("recipe review")}
                     yourPart={
                       change.byViewer
@@ -630,12 +636,13 @@ export function StoreOptionRecipesPage({
 export function ChangeHistory({ row }: { readonly row: OptionRecipeRow }) {
   const change = row.change;
   if (change === null) return null;
-  const kindName = (kind: "Cost" | "FoodSafety") => (kind === "Cost" ? "Cost" : t("Food safety"));
+  const kindName = (kind: "Cost" | "FoodSafety") =>
+    kind === "Cost" ? t("Cost") : t("Food safety");
   const missing = (["Cost", "FoodSafety"] as const).filter(
     (kind) => !change.reviews.some((review) => review.kind === kind),
   );
   return (
-    <ul aria-label={`Reviews for ${row.optionName}`}>
+    <ul aria-label={t("Reviews for {optionName}", { optionName: row.optionName })}>
       <li>
         {t("Saved by {authorLabel} on", { authorLabel: change.authorLabel })}{" "}
         <SourceTime instant={change.recordedAt} />

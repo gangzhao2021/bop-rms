@@ -61,10 +61,10 @@ const copy: Record<ProductErrorCode | "Loading", string> = {
 };
 const lifecycleText: Record<string, string> = {
   Draft: t("Not selling yet"),
-  Active: "Selling",
-  Suspended: "Paused",
-  Discontinued: "Discontinued",
-  Archived: "Archived",
+  Active: t("Selling"),
+  Suspended: t("Paused"),
+  Discontinued: t("Discontinued"),
+  Archived: t("Archived"),
 };
 type State<V> =
   { readonly kind: "Loading" | ProductErrorCode } | { readonly kind: "Found"; readonly view: V };
@@ -326,7 +326,7 @@ function ProductEditor({
       }
       setMessage({
         tone: "neutral",
-        text: command.action === "StartSelling" ? t("Selling started.") : "Saved.",
+        text: command.action === "StartSelling" ? t("Selling started.") : t("Saved."),
       });
       if (result.product) setLatest(result.product);
       reload();
@@ -567,7 +567,7 @@ function ProductEditor({
                 <tr key={size.key}>
                   <td>
                     <input
-                      aria-label={`Size ${index + 1} name`}
+                      aria-label={t("Size {value} name", { value: index + 1 })}
                       value={size.name}
                       maxLength={80}
                       onChange={(event) =>
@@ -582,7 +582,7 @@ function ProductEditor({
                   <td>
                     <input
                       lang="zh-Hans"
-                      aria-label={`Size ${index + 1} Chinese name`}
+                      aria-label={t("Size {value} Chinese name", { value: index + 1 })}
                       value={size.nameZh}
                       maxLength={80}
                       onChange={(event) =>
@@ -596,7 +596,7 @@ function ProductEditor({
                   </td>
                   <td>
                     <input
-                      aria-label={`Size ${index + 1} code`}
+                      aria-label={t("Size {value} code", { value: index + 1 })}
                       value={size.skuCode}
                       maxLength={64}
                       disabled={size.skuReference !== null}
@@ -793,7 +793,7 @@ function ProductOptionSetsFieldset({
             {choice.archived ? (
               <p>{t("This option set is archived; remove it from the product.")}</p>
             ) : null}
-            <ul aria-label={`Options from ${choice.name} on this product`}>
+            <ul aria-label={t("Options from {name} on this product", { name: choice.name })}>
               {choice.options.map((option) => (
                 <li key={option.optionReference}>
                   <label>
@@ -972,16 +972,16 @@ export function ProductCustomerMenuFieldset({
   const photoLabel = value.photo ? t("Replace photo") : t("Add photo");
   const altMissing = value.photo !== null && value.altText.trim() === "";
   const ids = {
-    description: `${id}-description`,
-    descriptionHelp: `${id}-description-help`,
-    descriptionCount: `${id}-description-count`,
-    descriptionError: `${id}-description-error`,
-    photo: `${id}-photo`,
-    photoHelp: `${id}-photo-help`,
-    photoError: `${id}-photo-error`,
-    alt: `${id}-alt`,
-    altHelp: `${id}-alt-help`,
-    altError: `${id}-alt-error`,
+    description: t("{id}-description", { id: id }),
+    descriptionHelp: t("{id}-description-help", { id: id }),
+    descriptionCount: t("{id}-description-count", { id: id }),
+    descriptionError: t("{id}-description-error", { id: id }),
+    photo: t("{id}-photo", { id: id }),
+    photoHelp: t("{id}-photo-help", { id: id }),
+    photoError: t("{id}-photo-error", { id: id }),
+    alt: t("{id}-alt", { id: id }),
+    altHelp: t("{id}-alt-help", { id: id }),
+    altError: t("{id}-alt-error", { id: id }),
   };
   const photoError = upload.kind === "Failed" ? upload : null;
   return (

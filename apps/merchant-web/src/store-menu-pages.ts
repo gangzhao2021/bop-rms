@@ -80,11 +80,20 @@ export function menuReviewProblemText(problem: MenuReviewProblem): string {
         : problem.optionName;
   switch (problem.missing) {
     case "Recipe":
-      return `${item} has no published recipe for this menu's Stores. Publish one under Recipes and assign it to this size, then submit again.`;
+      return t(
+        "{item} has no published recipe for this menu's Stores. Publish one under Recipes and assign it to this size, then submit again.",
+        { item: item },
+      );
     case "SubRecipe":
-      return `A recipe used in ${item} is not published. Publish it under Recipes, then submit again.`;
+      return t(
+        "A recipe used in {item} is not published. Publish it under Recipes, then submit again.",
+        { item: item },
+      );
     case "OptionRecipe":
-      return `${item}: the option ${option ?? "chosen"} has no published recipe change. Set, review and publish it under Option recipes, then submit again.`;
+      return t(
+        "{item}: the option {value} has no published recipe change. Set, review and publish it under Option recipes, then submit again.",
+        { item: item, value: option ?? "chosen" },
+      );
     case "AllergenDeclaration": {
       const ingredient =
         problem.ingredientName === null
@@ -98,7 +107,9 @@ export function menuReviewProblemText(problem: MenuReviewProblem): string {
       );
     }
     case "AllergenList":
-      return "The Brand allergen list this menu uses is not approved. Approve it under Allergens, then submit again.";
+      return t(
+        "The Brand allergen list this menu uses is not approved. Approve it under Allergens, then submit again.",
+      );
   }
 }
 export interface MenuPublicationStatus {
@@ -417,11 +428,11 @@ export const sectionCode = (name: string) =>
 /** WP-2423: plain names for a menu's sales channels and order types (never the internal codes). */
 const channelNames: Readonly<Record<string, string>> = {
   CUSTOMER_PWA: t("Customer ordering app"),
-  POS: "Counter",
+  POS: t("Counter"),
 };
 const orderTypeNames: Readonly<Record<string, string>> = {
-  DINE_IN: "Dine-in",
-  PICKUP: "Pickup",
+  DINE_IN: t("Dine-in"),
+  PICKUP: t("Pickup"),
 };
 const plainCode = (code: string) =>
   code.charAt(0) + code.slice(1).toLowerCase().replaceAll("_", " ");

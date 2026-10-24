@@ -250,7 +250,11 @@ export const taxClassificationMessages: Readonly<Record<TaxClassificationErrorCo
 /** The label of a name field: the Brand's default language is required, the other optional. */
 export function nameFieldLabel(fieldLocale: string, defaultLocale: string): string {
   const language =
-    fieldLocale === "fr-CA" ? "French" : fieldLocale === "en-CA" ? "English" : t("Other language");
+    fieldLocale === "fr-CA"
+      ? "French"
+      : fieldLocale === "en-CA"
+        ? t("English")
+        : t("Other language");
   return fieldLocale === defaultLocale
     ? t("{language} name", { language: language })
     : t("{language} name (optional)", { language: language });

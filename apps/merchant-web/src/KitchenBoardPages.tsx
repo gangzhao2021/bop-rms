@@ -74,7 +74,7 @@ export function kitchenTicketAge(
 }
 /** The waiting tier in words, so a ticket's urgency never rests on colour alone. */
 export function kitchenTicketTierText(tier: "ok" | "warning" | "late" | "done"): string | null {
-  return tier === "late" ? "Overdue" : tier === "warning" ? t("Running long") : null;
+  return tier === "late" ? t("Overdue") : tier === "warning" ? t("Running long") : null;
 }
 
 import { playKitchenChime } from "./alert-chime.js";
@@ -706,7 +706,7 @@ export function KitchenBoardStatePanel({
   readonly state: Exclude<LoadState<never>["kind"], "Found">;
 }) {
   const copy = {
-    Loading: ["Loading", t("Loading the kitchen queue…")],
+    Loading: [t("Loading"), t("Loading the kitchen queue…")],
     PermissionDenied: [noAccessHeading, pageAccessDeniedText],
     NotFound: [t("Work item unavailable"), t("This work item is not at the selected Store.")],
     Offline: [t("You’re offline"), t("Reconnect and refresh before taking an action.")],
@@ -910,7 +910,9 @@ function WorkCard({
               {item.selectedOptions.map((option, index) => (
                 <li key={`${option.displayName}:${index}`}>
                   <span>{option.displayName}</span>
-                  <span aria-label={`Quantity ${option.quantity}`}>× {option.quantity}</span>
+                  <span aria-label={t("Quantity {quantity}", { quantity: option.quantity })}>
+                    × {option.quantity}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -1126,8 +1128,8 @@ export function KitchenBoardScreen({
     else proceed();
   };
   const actionLabels: Record<KitchenAction, string> = {
-    AcceptKitchenWorkItem: "Accept",
-    StartKitchenWorkItem: "Start",
+    AcceptKitchenWorkItem: t("Accept"),
+    StartKitchenWorkItem: t("Start"),
     CompleteKitchenWorkItem: t("Complete quantity"),
     MarkKitchenOrderItemReady: t("Mark ready"),
   };
@@ -1227,10 +1229,10 @@ export function KitchenBoardScreen({
     const stationReference = item.execution?.stationReference;
     const key =
       stationReference !== undefined
-        ? `reference:${stationReference}`
+        ? t("reference:{stationReference}", { stationReference: stationReference })
         : item.stationLabel === null
           ? "unavailable"
-          : `label:${item.stationLabel}`;
+          : t("label:{stationLabel}", { stationLabel: item.stationLabel });
     const lane = stationLaneMap.get(key);
     if (lane) lane.items.push(item);
     else stationLaneMap.set(key, { key, stationLabel: item.stationLabel, items: [item] });
@@ -1668,7 +1670,7 @@ export function KitchenBoardScreen({
                 >
                   <header className="kitchen-station-lane__heading">
                     <h3>{stationName}</h3>
-                    <span aria-label={`${stationItems.length} active items`}>
+                    <span aria-label={t("{length} active items", { length: stationItems.length })}>
                       {stationItems.length}
                     </span>
                   </header>
@@ -1783,7 +1785,7 @@ export function KitchenWorkItemScreen({
   const milestones = [
     { label: t("Work item created"), at: view.item.createdAt },
     ...(view.item.execution?.acceptedAt
-      ? [{ label: "Accepted", at: view.item.execution.acceptedAt }]
+      ? [{ label: t("Accepted"), at: view.item.execution.acceptedAt }]
       : []),
     ...(view.item.execution?.readyAt
       ? [{ label: t("Order item marked ready"), at: view.item.execution.readyAt }]
@@ -1978,7 +1980,7 @@ function KitchenBoardContent(
     });
   };
   const load = useCallback(() => client.loadQueue().then(parseKitchenBoardView), [client]);
-  const state = useLoad(load, `queue:${revision}`, true);
+  const state = useLoad(load, t("queue:{revision}", { revision: revision }), true);
   const stale = state.kind === "Found" ? state.stale : undefined;
   const operatorStatus = state.kind === "Found" ? state.view.operatorStatus : null;
   const { onOperatorStatus } = props;

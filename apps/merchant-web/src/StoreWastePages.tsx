@@ -110,7 +110,7 @@ const statusOf = (record: WasteRecordView) =>
       : "Reviewed"
     : record.needsReview
       ? t("Needs review")
-      : "Recorded";
+      : t("Recorded");
 
 export function StoreWasteListPage({
   client = unavailableStoreWasteClient,

@@ -120,7 +120,9 @@ export function choiceRule(
   set: Pick<OptionSetRow, "kind" | "minimum" | "maximum" | "perOptionMaximum">,
 ) {
   const need =
-    set.minimum > 0 ? t(" (at least {minimum} required)", { minimum: set.minimum }) : " (optional)";
+    set.minimum > 0
+      ? t(" (at least {minimum} required)", { minimum: set.minimum })
+      : t(" (optional)");
   if (set.kind === "One")
     return set.minimum > 0 ? t("Choose 1 (required)") : t("Choose 1 (optional)");
   const total =

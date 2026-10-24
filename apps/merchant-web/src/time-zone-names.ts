@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { displayLocale, t } from "./i18n/i18n.js";
 /**
  * Staff choose and read a store's time zone by name and place ("Eastern Time (Toronto, Ottawa
  * and Montréal)"), never by its IANA identifier. The identifier stays the submitted/stored value;
@@ -42,7 +42,7 @@ const canadianPlace = new Map(
 
 function genericName(timeZone: string, at: Date): string | null {
   try {
-    const name = new Intl.DateTimeFormat("en-CA", { timeZone, timeZoneName: "longGeneric" })
+    const name = new Intl.DateTimeFormat(displayLocale(), { timeZone, timeZoneName: "longGeneric" })
       .formatToParts(at)
       .find((part) => part.type === "timeZoneName")?.value;
     // Zones without a common name fall back to an offset such as "GMT+03:00"; show the place only.

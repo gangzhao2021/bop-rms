@@ -78,8 +78,8 @@ const stageText = {
   Editing: t("Draft — being edited"),
   InReview: t("In review"),
   Approved: t("Approved — ready to publish"),
-  Published: "Published",
-  Archived: "Archived",
+  Published: t("Published"),
+  Archived: t("Archived"),
 } as const;
 type State<V> =
   { readonly kind: "Loading" | MenuErrorCode } | { readonly kind: "Found"; readonly view: V };
@@ -643,7 +643,9 @@ function MenuBuilder({
                         ) : (
                           <input
                             type="checkbox"
-                            aria-label={`Feature ${label(item.skuReference)}`}
+                            aria-label={t("Feature {skuReference}", {
+                              skuReference: label(item.skuReference),
+                            })}
                             checked={item.featured}
                             onChange={(event) =>
                               updateSection(section.key, (s) => ({
@@ -662,7 +664,9 @@ function MenuBuilder({
                         <td>
                           <button
                             type="button"
-                            aria-label={`Move ${label(item.skuReference)} up`}
+                            aria-label={t("Move {skuReference} up", {
+                              skuReference: label(item.skuReference),
+                            })}
                             onClick={() =>
                               updateSection(section.key, (s) => ({
                                 ...s,
@@ -674,7 +678,9 @@ function MenuBuilder({
                           </button>
                           <button
                             type="button"
-                            aria-label={`Move ${label(item.skuReference)} down`}
+                            aria-label={t("Move {skuReference} down", {
+                              skuReference: label(item.skuReference),
+                            })}
                             onClick={() =>
                               updateSection(section.key, (s) => ({
                                 ...s,

@@ -284,7 +284,7 @@ export function StoreDevicesView({
                           <button
                             type="button"
                             disabled={locked}
-                            aria-label={`Remove ${device.label}`}
+                            aria-label={t("Remove {label}", { label: device.label })}
                             onClick={() => onAsk({ kind: "Remove", device })}
                           >
                             {t("Remove")}
@@ -323,7 +323,7 @@ export function StoreDevicesView({
                             <button
                               type="button"
                               disabled={locked}
-                              aria-label={`Reset ${row.name}'s PIN`}
+                              aria-label={t("Reset {name}'s PIN", { name: row.name })}
                               onClick={() => onAsk({ kind: "Reset", person: row })}
                             >
                               {t("Reset PIN")}

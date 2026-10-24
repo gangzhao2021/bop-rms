@@ -44,7 +44,7 @@ export function HeldStockNotice({ order }: { readonly order: Order }) {
 
 type Outcome = "Idle" | "Pending" | "Released" | "NotReleasable" | "Started" | "Denied" | "Unknown";
 const outcomeText: Record<Exclude<Outcome, "Idle">, string> = {
-  Pending: "Releasing…",
+  Pending: t("Releasing…"),
   Released: t("Released. The ingredients are back in stock."),
   NotReleasable: t("Nothing was released: this order changed. The list is refreshed."),
   Started: t(

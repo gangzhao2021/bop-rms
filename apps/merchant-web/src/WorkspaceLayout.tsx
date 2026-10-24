@@ -171,7 +171,7 @@ export function workspaceNavigationSections(
 }
 
 /** Matches the stylesheet: at or below this width the sidebar becomes the Menu drawer. */
-const WIDER_THAN_PHONE = "(min-width: 48.0625rem)";
+const WIDER_THAN_PHONE = t("(min-width: 48.0625rem)");
 
 /** Which groups this device keeps open: a layout preference only, never business data. */
 const OPEN_GROUPS_KEY = "bop-rms.merchant.navigation.open-groups";
@@ -266,7 +266,7 @@ export function WorkspaceLayout({
   const currentLabel =
     current === null
       ? path === "/app"
-        ? "Home"
+        ? t("Home")
         : null
       : ((label) => (label === undefined ? null : t(label)))(
           items.find((item) => item.screenId === current)?.label,
@@ -298,7 +298,7 @@ export function WorkspaceLayout({
       </ul>
       {sections.slice(1).map((section) => {
         const open = openGroups.has(section.group);
-        const listId = `workspace-nav-${copy}-${section.group}`;
+        const listId = t("workspace-nav-{copy}-{group}", { copy: copy, group: section.group });
         return (
           <div
             key={section.group}

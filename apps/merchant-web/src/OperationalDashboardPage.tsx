@@ -18,11 +18,11 @@ type LoadState =
   | { readonly kind: "Found"; readonly view: OperationalDashboardView };
 
 const sourceLabels = {
-  merchant_order_queue_v1: "Orders",
-  payment_operations_v1: "Payments",
-  kitchen_operations_v1: "Kitchen",
-  fulfillment_operations_v1: "Fulfillment",
-  merchant_order_exception_v1: "Exceptions",
+  merchant_order_queue_v1: t("Orders"),
+  payment_operations_v1: t("Payments"),
+  kitchen_operations_v1: t("Kitchen"),
+  fulfillment_operations_v1: t("Fulfillment"),
+  merchant_order_exception_v1: t("Exceptions"),
 } as const;
 
 export function OperationalDashboardState({

@@ -8,7 +8,7 @@ import { t } from "./i18n/i18n.js";
  * Pos is the counter; Api a partner integration. Staff think of a pickup ordered that way as
  * "Online" and of a table's guests ordering as "Table QR code", so Web is never shown on its own.
  */
-export const orderTypeLabel = { DineIn: "Dine-in", Pickup: "Pickup" } as const;
+export const orderTypeLabel = { DineIn: t("Dine-in"), Pickup: t("Pickup") } as const;
 
 /**
  * The channel an order is listed and filtered under, as staff think of it. A table's Order takes
@@ -31,19 +31,19 @@ export function orderChannel(order: {
 export function orderChannelLabel(channel: string): string {
   switch (channel) {
     case "Staff":
-      return "Taken by staff";
+      return t("Taken by staff");
     case "Online":
     case "Web":
-      return "Online";
+      return t("Online");
     case "TableQr":
     case "Qr":
-      return "Table QR code";
+      return t("Table QR code");
     case "Pos":
-      return "Counter";
+      return t("Counter");
     case "Api":
-      return "Partner integration";
+      return t("Partner integration");
     default:
-      return "Other";
+      return t("Other");
   }
 }
 

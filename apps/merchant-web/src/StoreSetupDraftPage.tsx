@@ -64,7 +64,15 @@ const steps = [
   "Contacts",
   "Review",
 ] as const;
-const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const days = [
+  t("Monday"),
+  t("Tuesday"),
+  t("Wednesday"),
+  t("Thursday"),
+  t("Friday"),
+  t("Saturday"),
+  t("Sunday"),
+];
 const modes: readonly ServiceMode[] = ["DineIn", "Pickup", "Delivery"];
 export interface StoreSetupHourInput {
   readonly start: string;
@@ -298,7 +306,7 @@ const feeLabel = (chargeType: string) =>
     ? t("Service charge")
     : chargeType === "DeliveryFee"
       ? t("Delivery fee")
-      : "Tip";
+      : t("Tip");
 function SavedReference({ value }: { value: StoreSetupContent["addressReference"] }) {
   return <p>{value.state === "Configured" ? t("Already configured.") : t("Not configured.")}</p>;
 }
@@ -1340,7 +1348,7 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
         ? content.feeContexts.value
             .map(
               (v) =>
-                `${feeLabel(v.chargeType)}: ${v.state === "Enabled" ? "On" : v.state === "Disabled" ? "Off" : t("Not set")}`,
+                `${feeLabel(v.chargeType)}: ${v.state === "Enabled" ? "On" : v.state === "Disabled" ? t("Off") : t("Not set")}`,
             )
             .join(", ")
         : notSet(5),
@@ -1673,7 +1681,7 @@ export function StoreSetupReferenceEditor({
     </label>
   );
   return (
-    <section hidden={hidden} aria-label={`${kind} configuration`}>
+    <section hidden={hidden} aria-label={t("{kind} configuration", { kind: kind })}>
       <h4>{kind === "Address" ? t("Store address") : t("Store contact")}</h4>
       {error && (
         <p role="alert">
@@ -1711,7 +1719,7 @@ export function StoreSetupReferenceEditor({
         <>
           {field("countryCode", t("Country code"))}
           {field("regionCode", t("Province or region code"))}
-          {field("locality", "City")}
+          {field("locality", t("City"))}
           {field("postalCode", t("Postal code"))}
           {field("line1", t("Address line 1"))}
           {field("line2", t("Address line 2 (optional)"))}
@@ -2354,7 +2362,9 @@ export function StoreSetupFeeContextEditor({
           <label>
             {t("{chargeType} tax classification", { chargeType: feeLabel(entry.chargeType) })}
             <select
-              aria-label={`${feeLabel(entry.chargeType)} tax classification`}
+              aria-label={t("{chargeType} tax classification", {
+                chargeType: feeLabel(entry.chargeType),
+              })}
               disabled={
                 disabled ||
                 entry.state !== "Enabled" ||

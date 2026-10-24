@@ -227,7 +227,9 @@ export function Freshness({
       <span
         className="workspace-page__freshness"
         data-freshness={stale ? "Stale" : "Fresh"}
-        title={at === undefined ? undefined : `Last change ${storeTime(at, timeZone)}`}
+        title={
+          at === undefined ? undefined : t("Last change {time}", { time: storeTime(at, timeZone) })
+        }
       >
         {stale ? t("Data may be out of date · last checked ") : t("Last checked ")}
         <time dateTime={checkedAt}>{storeTime(checkedAt, timeZone)}</time>

@@ -592,11 +592,11 @@ export function orderPhaseLabel(
     return t("In progress");
   switch (order.currentPhase) {
     case null:
-      return "Status not loaded · refresh";
+      return t("Status not loaded · refresh");
     case "InProgress":
-      return "In progress";
+      return t("In progress");
     case "Fulfilled":
-      return order.orderType === "DineIn" ? "Served" : "Picked up";
+      return order.orderType === "DineIn" ? t("Served") : t("Picked up");
     default:
       return order.currentPhase;
   }
@@ -714,7 +714,10 @@ export function orderCountText(input: {
         })
       : t("{shown} of {total} orders match.", { shown: input.shown, total: input.total });
   if (input.morePages)
-    return `${orders(input.total)}${input.olderPage ? " (older)" : t(", newest first")}. Older orders are on the next page.`;
+    return t("{orders}{value}. Older orders are on the next page.", {
+      orders: orders(input.total),
+      value: input.olderPage ? t(" (older)") : t(", newest first"),
+    });
   return input.olderPage
     ? t("{total} (the oldest).", { total: orders(input.total) })
     : `${orders(input.total)}.`;
@@ -737,7 +740,7 @@ function roundSummary(order: QueuedOrder): string {
     cancelled > 0 ? t("{cancelled} cancelled", { cancelled: cancelled }) : null,
   ].filter((part) => part !== null);
   if (parts.length === 0) return "";
-  return (order.orderType === "DineIn" ? "Rounds: " : "") + parts.join(" · ");
+  return (order.orderType === "DineIn" ? t("Rounds: ") : "") + parts.join(" · ");
 }
 
 /** WP-2423 item 5: minutes before an unpaid round's cancellation when staff are warned urgently. */
@@ -1355,7 +1358,7 @@ export function CurrentOrderQueueRows({
                       ? t("Order")
                       : t("Round {sequence}{value}", {
                           sequence: batch.sequence,
-                          value: batch.sequence === 1 ? " · First round" : " · Added round",
+                          value: batch.sequence === 1 ? t(" · First round") : t(" · Added round"),
                         })}
                     {batch.staffRound !== null ? t(" · Entered by staff") : ""}
                   </h3>
@@ -1481,7 +1484,7 @@ export function CurrentOrderQueueRows({
                   ) : (
                     <p>
                       {"Acceptance: " +
-                        (batch.acceptanceStatus === "Accepted" ? "Accepted" : t("Not accepted"))}
+                        (batch.acceptanceStatus === "Accepted" ? t("Accepted") : t("Not accepted"))}
                     </p>
                   )}
                   {action?.(order, batch)}

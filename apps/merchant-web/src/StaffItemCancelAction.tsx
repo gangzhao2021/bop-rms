@@ -74,21 +74,31 @@ export function itemCancelPreviewText(order: Order, preview: ItemCancelPreview) 
 export function itemCancelFailureText(order: Order, failure: ItemCancelFailure) {
   switch (failure) {
     case "PreparationStarted":
-      return "The kitchen has started one of these items. Close to refresh; use a refund for items already started.";
+      return t(
+        "The kitchen has started one of these items. Close to refresh; use a refund for items already started.",
+      );
     case "VersionConflict":
-      return "This order changed since it was shown. Close to refresh it, then try again if needed.";
+      return t(
+        "This order changed since it was shown. Close to refresh it, then try again if needed.",
+      );
     case "LegacyStock":
       return order.orderType === "Pickup"
-        ? "This order's stock was reserved before per-item tracking, so its items cannot be cancelled one by one. Cancel the whole order instead."
-        : "This round's stock was reserved before per-item tracking, so its items cannot be cancelled one by one. Cancel the whole round instead.";
+        ? t(
+            "This order's stock was reserved before per-item tracking, so its items cannot be cancelled one by one. Cancel the whole order instead.",
+          )
+        : t(
+            "This round's stock was reserved before per-item tracking, so its items cannot be cancelled one by one. Cancel the whole round instead.",
+          );
     case "NotCancellable":
-      return "These items can no longer be cancelled. Close to refresh the order.";
+      return t("These items can no longer be cancelled. Close to refresh the order.");
     case "Denied":
-      return "This cancellation was refused. Only a store manager or owner can cancel paid items; refresh if your session changed.";
+      return t(
+        "This cancellation was refused. Only a store manager or owner can cancel paid items; refresh if your session changed.",
+      );
     case "FullSignInRequired":
       return FULL_SIGN_IN_REQUIRED_TEXT;
     case "Unknown":
-      return "Result unknown. Retry the same cancellation to recover its result.";
+      return t("Result unknown. Retry the same cancellation to recover its result.");
   }
 }
 
@@ -401,7 +411,7 @@ const refundCheckText: Record<
   Pending: t(
     "The refund hasn't gone through yet. If the payment provider or the internet is down, press Check refund again once it is back: the refund is sent then, never twice.",
   ),
-  Refunded: "Refunded.",
+  Refunded: t("Refunded."),
   Failed: t("The refund did not go through. Check this order's payment in Payments."),
   Denied: t("Only a store manager or owner can check this refund."),
   Unavailable: t("The refund status could not be checked. Try again."),

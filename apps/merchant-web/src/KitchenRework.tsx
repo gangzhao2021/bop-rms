@@ -265,7 +265,7 @@ export function KitchenRemakeLane({
     <section className="kitchen-station-lane kitchen-remake-lane" aria-label={t("Remakes")}>
       <header className="kitchen-station-lane__heading">
         <h3>{t("Remakes")}</h3>
-        <span aria-label={`${open.length} open remakes`}>{open.length}</span>
+        <span aria-label={t("{length} open remakes", { length: open.length })}>{open.length}</span>
       </header>
       <div className="kitchen-station-lane__items">
         {open.map((rework) => (
@@ -333,7 +333,10 @@ export function KitchenRemakeLane({
                   className="kitchen-remake-cancel"
                   disabled={readOnly}
                   onClick={() => onCancel(rework)}
-                  aria-label={`Cancel remake of ${rework.displayName}, ${orderText(rework.orderLabel)}`}
+                  aria-label={t("Cancel remake of {displayName}, {orderLabel}", {
+                    displayName: rework.displayName,
+                    orderLabel: orderText(rework.orderLabel),
+                  })}
                 >
                   {t("Cancel remake")}
                 </button>
@@ -531,7 +534,10 @@ export function KitchenRecentlyFinished({
               type="button"
               disabled={readOnly}
               onClick={() => onRemake(item)}
-              aria-label={`Remake ${item.displayName}, ${orderLabel(item)}`}
+              aria-label={t("Remake {displayName}, {item}", {
+                displayName: item.displayName,
+                item: orderLabel(item),
+              })}
             >
               {t("Remake")}
             </button>

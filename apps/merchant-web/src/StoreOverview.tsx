@@ -518,14 +518,14 @@ export function dayChecklist(
         done: v.text === "Matches the payment provider",
       })),
       "/app/operations/payment-reconciliation",
-      "Settlement",
+      t("Settlement"),
     ),
     ...item(
       "earlier-pickups",
       t("Pickups from earlier days: check whether they were collected, then close them"),
       readStatus(state.pickups, (p) => left(p.earlierDays)),
       "/operations/pickup",
-      "Pickup",
+      t("Pickup"),
     ),
     ...item(
       "tables-left-open",
@@ -534,7 +534,7 @@ export function dayChecklist(
         t.earlierDays === null ? { status: "Reading…", done: false } : left(t.earlierDays, t.more),
       ),
       "/operations/dining",
-      "Tables",
+      t("Tables"),
     ),
   ];
   const closing: ChecklistItem[] = [
@@ -543,28 +543,28 @@ export function dayChecklist(
       t("Every order made and served or handed over"),
       readStatus(state.orders, (o) => left(o.open, o.more)),
       "/operations/orders",
-      "Orders",
+      t("Orders"),
     ),
     ...item(
       "pickups",
       t("Pickups not collected: a manager marks them not collected"),
       readStatus(state.pickups, (p) => left(p.waiting + p.earlierDays, p.more)),
       "/operations/pickup",
-      "Pickup",
+      t("Pickup"),
     ),
     ...item(
       "tables",
       t("Tables closed once the guests have left"),
       readStatus(tables, (t) => left(t.open, t.more)),
       "/operations/dining",
-      "Tables",
+      t("Tables"),
     ),
     ...item(
       "exceptions",
       t("Exceptions handled or noted for tomorrow"),
       readStatus(state.exceptions, (e) => left(e.open)),
       "/operations/order-exceptions",
-      "Exceptions",
+      t("Exceptions"),
     ),
     ...(serviceHref === null
       ? []

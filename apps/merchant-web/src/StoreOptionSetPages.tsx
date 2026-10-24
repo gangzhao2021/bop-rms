@@ -277,7 +277,7 @@ function OptionSetEditor({
         void navigate("/app/commerce/option-sets");
         return;
       }
-      setMessage({ tone: "neutral", text: "Saved." });
+      setMessage({ tone: "neutral", text: t("Saved.") });
       if (result.optionSet) setLatest(result.optionSet);
       reload();
     } catch (error) {
@@ -490,7 +490,7 @@ function OptionSetEditor({
                 <tr key={row.key}>
                   <td>
                     <input
-                      aria-label={`Option ${index + 1} name`}
+                      aria-label={t("Option {value} name", { value: index + 1 })}
                       value={row.name}
                       maxLength={80}
                       placeholder={index === 0 ? t("Whole milk") : index === 1 ? t("Oat milk") : ""}
@@ -500,7 +500,7 @@ function OptionSetEditor({
                   <td data-label={t("Chinese name")}>
                     <input
                       lang="zh-Hans"
-                      aria-label={`Option ${index + 1} Chinese name`}
+                      aria-label={t("Option {value} Chinese name", { value: index + 1 })}
                       value={row.nameZh}
                       maxLength={80}
                       placeholder={index === 0 ? "全脂牛奶" : index === 1 ? "燕麦奶" : ""}
@@ -510,7 +510,7 @@ function OptionSetEditor({
                   <td data-label={t("Offered")}>
                     <input
                       type="checkbox"
-                      aria-label={`Offer ${row.name || `option ${index + 1}`}`}
+                      aria-label={t("Offer {value}", { value: row.name || `option ${index + 1}` })}
                       checked={row.offered}
                       onChange={(event) => update(row.key, { offered: event.target.checked })}
                     />
@@ -518,7 +518,9 @@ function OptionSetEditor({
                   <td data-label={t("Default")}>
                     <input
                       type="checkbox"
-                      aria-label={`${row.name || `Option ${index + 1}`} is chosen by default`}
+                      aria-label={t("{value} is chosen by default", {
+                        value: row.name || `Option ${index + 1}`,
+                      })}
                       checked={row.defaultChoice}
                       onChange={(event) => update(row.key, { defaultChoice: event.target.checked })}
                     />

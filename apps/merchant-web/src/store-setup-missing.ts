@@ -16,7 +16,7 @@ const live = t("step 8: Use the live Store’s settings");
 const feeNames: Readonly<Record<string, string>> = Object.freeze({
   ServiceCharge: t("Service charge"),
   DeliveryFee: t("Delivery fee"),
-  Tip: "Tip",
+  Tip: t("Tip"),
 });
 export function storeSetupMissingItems(
   content: StoreSetupContent,

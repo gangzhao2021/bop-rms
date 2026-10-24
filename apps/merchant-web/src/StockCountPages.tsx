@@ -50,13 +50,13 @@ const countTypeText: Record<"Full" | "Cycle" | "Spot", string> = {
   Spot: t("Spot check"),
 };
 const statusText: Record<string, string> = {
-  Draft: "Draft",
-  Assigned: "Assigned",
-  InProgress: "Counting",
+  Draft: t("Draft"),
+  Assigned: t("Assigned"),
+  InProgress: t("Counting"),
   Submitted: t("Submitted for review"),
-  Approved: "Approved",
-  Cancelled: "Cancelled",
-  Posted: "Posted",
+  Approved: t("Approved"),
+  Cancelled: t("Cancelled"),
+  Posted: t("Posted"),
 };
 const reasonText = (code: string) =>
   code.charAt(0) + code.slice(1).toLowerCase().replaceAll("_", " ");
@@ -463,7 +463,10 @@ export function StockCountWorkbenchPage({
   // just started has none, so the refresh is not offered (it used to answer "not possible").
   const moved = new Set(counting ? (view.movedLineReferences ?? []) : []);
   return (
-    <AppFrame title={`Count · ${location}`} description={t("Stock count")}>
+    <AppFrame
+      title={t("Count · {location}", { location: location })}
+      description={t("Stock count")}
+    >
       <header className="screen-heading">
         <div>
           <p className="bop-eyebrow">
@@ -552,7 +555,10 @@ export function StockCountWorkbenchPage({
                 <td>
                   {counting ? (
                     <input
-                      aria-label={`Counted ${item?.name ?? "item"}${lot ? " " + lot.lotCode : ""}`}
+                      aria-label={t("Counted {value}{value2}", {
+                        value: item?.name ?? "item",
+                        value2: lot ? " " + lot.lotCode : "",
+                      })}
                       inputMode="decimal"
                       placeholder={line.countedQuantity ?? ""}
                       value={entries[line.lineReference] ?? ""}
@@ -572,7 +578,7 @@ export function StockCountWorkbenchPage({
                   <td>
                     {reviewing && line.variance !== null && line.variance !== "0" ? (
                       <select
-                        aria-label={`Reason ${item?.name ?? "item"}`}
+                        aria-label={t("Reason {value}", { value: item?.name ?? "item" })}
                         value={line.varianceReasonCode ?? ""}
                         disabled={busy}
                         onChange={(event) => {

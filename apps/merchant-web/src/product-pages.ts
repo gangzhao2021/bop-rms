@@ -379,10 +379,10 @@ export const suggestProductCode = (name: string) =>
     .toUpperCase()
     .slice(0, 40);
 const orderTypeText: Readonly<Record<string, string>> = {
-  Pickup: "Pickup",
-  DineIn: "Dine-in",
-  Delivery: "Delivery",
-  Catering: "Catering",
+  Pickup: t("Pickup"),
+  DineIn: t("Dine-in"),
+  Delivery: t("Delivery"),
+  Catering: t("Catering"),
 };
 const treatmentText: Readonly<Record<string, string>> = {
   ZeroRated: "zero-rated",

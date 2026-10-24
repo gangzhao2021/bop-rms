@@ -59,12 +59,12 @@ export interface RoleAdministrationItemView {
 /** WP-2423: role values as staff read them, never the stored codes ("InReview"). */
 export const roleStatusLabels: Readonly<Record<RoleAdministrationItemView["status"], string>> =
   Object.freeze({
-    Draft: "Draft",
+    Draft: t("Draft"),
     InReview: t("Waiting for approval"),
     Approved: t("Approved, not yet active"),
-    Active: "Active",
-    Rejected: "Rejected",
-    Deactivated: "Deactivated",
+    Active: t("Active"),
+    Rejected: t("Rejected"),
+    Deactivated: t("Deactivated"),
   });
 export const roleScopeLabels: Readonly<Record<RoleAdministrationItemView["scope"], string>> =
   Object.freeze({ Brand: t("All stores in the brand"), Store: t("This store") });

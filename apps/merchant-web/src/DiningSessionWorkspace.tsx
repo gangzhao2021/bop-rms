@@ -63,7 +63,7 @@ export function tableFloorStatus(
   if (table.currentDiningSessionReference === null)
     return blocked
       ? { state: "Unavailable", label: t("Temporarily unavailable") }
-      : { state: "Available", label: "Available" };
+      : { state: "Available", label: t("Available") };
   const suffix = blocked ? t(" · Temporarily unavailable") : "";
   if (table.elapsedMinutes === null)
     return { state: "Seated", label: t("Seated{suffix}", { suffix: suffix }) };
@@ -736,7 +736,11 @@ export function DiningSessionWorkspace({
             visibleAreas.map((area) => {
               const areaTables = visibleTables.filter((table) => table.areaCode === area);
               return (
-                <section className="dining-area-lane" key={area} aria-label={`${area} area`}>
+                <section
+                  className="dining-area-lane"
+                  key={area}
+                  aria-label={t("{area} area", { area: area })}
+                >
                   <header>
                     <h2>{area}</h2>
                     <span>

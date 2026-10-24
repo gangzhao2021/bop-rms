@@ -341,7 +341,7 @@ export function StoreOptionPricesPage({
                   <td>{label}</td>
                   <td data-label={t("Price")}>
                     <input
-                      aria-label={`Price of ${label} on every product`}
+                      aria-label={t("Price of {label} on every product", { label: label })}
                       inputMode="decimal"
                       value={everywhere[label] ?? ""}
                       onChange={(event) =>
@@ -390,7 +390,10 @@ export function StoreOptionPricesPage({
                       <td data-label={t("New price")}>
                         {view.permissions.mayEdit ? (
                           <input
-                            aria-label={`New price of ${label} on ${product.name}`}
+                            aria-label={t("New price of {label} on {name}", {
+                              label: label,
+                              name: product.name,
+                            })}
                             inputMode="decimal"
                             placeholder={
                               shown(option) === null

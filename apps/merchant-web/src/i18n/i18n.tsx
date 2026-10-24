@@ -132,6 +132,16 @@ export function allergenName(code: string, name: string): string {
   return CHINESE_ALLERGEN_NAMES[code] ?? name;
 }
 
+/**
+ * Words the server sends from a fixed system catalog (built-in role names and descriptions,
+ * permission descriptions), in the chosen language. A Store's own text (a custom role name) has
+ * no entry and is shown as written. `i18n.test.ts` checks every catalog text has its wording.
+ */
+export function systemText(text: string): string {
+  if (current !== "zh-Hans") return text;
+  return zhHans[text] ?? text;
+}
+
 /** How a list of names is joined: "Milk, Soy" / "牛奶、大豆". */
 export function listSeparator(): string {
   return current === "zh-Hans" ? "、" : ", ";

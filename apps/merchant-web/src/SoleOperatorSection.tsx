@@ -248,7 +248,7 @@ export function SoleOperatorSection({
           verifiedUntil={verifiedUntil}
           onVerified={onVerified}
           loadServerStatus={false}
-          label={`Verify to turn it ${target === "On" ? "on" : "off"}`}
+          label={t("Verify to turn it {value}", { value: target === "On" ? t("on") : t("off") })}
           fetcher={fetcher}
         />
         <button

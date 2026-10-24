@@ -20,9 +20,9 @@ const itemPhaseText: Readonly<Record<string, string>> = {
   Accepted: t("Sent to the kitchen"),
   InProgress: t("Being made"),
   Ready: t("Ready to serve"),
-  Fulfilled: "Served",
+  Fulfilled: t("Served"),
   Rejected: t("Not accepted"),
-  Cancelled: "Cancelled",
+  Cancelled: t("Cancelled"),
 };
 const sessionPhaseText = {
   Active: t("Table open"),

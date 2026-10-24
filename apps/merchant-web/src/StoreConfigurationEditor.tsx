@@ -32,17 +32,17 @@ export function storeConfigurationStateLabel(
 ): string {
   switch (lifecycle) {
     case "Draft":
-      return "Draft, not yet sent for approval";
+      return t("Draft, not yet sent for approval");
     case "PendingApproval":
-      return "Waiting for approval";
+      return t("Waiting for approval");
     case "Approved":
-      return "Approved, waiting to be published";
+      return t("Approved, waiting to be published");
     case "Published":
-      return "Published";
+      return t("Published");
     case "Superseded":
-      return "Replaced by a newer version";
+      return t("Replaced by a newer version");
     case "Archived":
-      return "Archived";
+      return t("Archived");
   }
 }
 /** WP-2423 (v15 D2/D3): the change a new edit starts from — the latest one unless it was
@@ -459,7 +459,15 @@ export function StoreHoursDraftForm({
       ),
     });
   }
-  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const days = [
+    t("Monday"),
+    t("Tuesday"),
+    t("Wednesday"),
+    t("Thursday"),
+    t("Friday"),
+    t("Saturday"),
+    t("Sunday"),
+  ];
   const saved = JSON.stringify(draft) === JSON.stringify(view.latest);
   return (
     <form
@@ -474,7 +482,7 @@ export function StoreHoursDraftForm({
             (withdrawn
               ? withdrawn.kind === "Withdrawn"
                 ? t("Withdrawn by the person who made it")
-                : "Declined"
+                : t("Declined")
               : storeConfigurationStateLabel(view.latest.lifecycle))
           : view.current
             ? t("No pending change. Customers see the published hours.")

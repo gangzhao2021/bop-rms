@@ -61,12 +61,12 @@ const copy: Record<RecipeErrorCode | "Loading", string> = {
   Unavailable: t("Recipes are unavailable."),
 };
 const lifecycleText: Record<string, string> = {
-  Draft: "Draft",
-  Published: "Published",
-  Invalidated: "Invalidated",
-  Archived: "Archived",
+  Draft: t("Draft"),
+  Published: t("Published"),
+  Invalidated: t("Invalidated"),
+  Archived: t("Archived"),
 };
-const kindText = { Cost: "Cost", FoodSafety: t("Food safety") } as const;
+const kindText = { Cost: t("Cost"), FoodSafety: t("Food safety") } as const;
 
 type State<V> =
   { readonly kind: "Loading" | RecipeErrorCode } | { readonly kind: "Found"; readonly view: V };
@@ -819,7 +819,7 @@ function ReviewPanel({
               key={kind}
               gate={view.soleOperator}
               csrf={csrf}
-              what={`the ${kindText[kind].toLowerCase()} of this version`}
+              what={t("the {value} of this version", { value: kindText[kind].toLowerCase() })}
               permissionName={t("recipe review")}
               yourPart={
                 isAuthor
@@ -827,7 +827,7 @@ function ReviewPanel({
                   : `You already gave the ${kindText[kind === "Cost" ? "FoodSafety" : "Cost"].toLowerCase()} review`
               }
               busy={busy}
-              actionLabel={`Approve ${kindText[kind].toLowerCase()} on my own`}
+              actionLabel={t("Approve {value} on my own", { value: kindText[kind].toLowerCase() })}
               summary={
                 <p>
                   {t("{name} ({code}) — {value} review{value2}.{value3}", {

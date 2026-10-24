@@ -184,7 +184,7 @@ export function TaxClassificationsView({
                       <td data-label={t("Changes")}>
                         {editing && renaming ? (
                           <form
-                            aria-label={`Rename ${name}`}
+                            aria-label={t("Rename {name}", { name: name })}
                             onSubmit={(e) => {
                               e.preventDefault();
                               onChange({
@@ -198,7 +198,9 @@ export function TaxClassificationsView({
                             {nameFields(
                               renaming.names,
                               (names) => setRenaming({ ...renaming, names }),
-                              `rename-${entry.classificationReference}`,
+                              t("rename-{classificationReference}", {
+                                classificationReference: entry.classificationReference,
+                              }),
                             )}
                             <div className="card-actions">
                               <button
@@ -217,7 +219,7 @@ export function TaxClassificationsView({
                             <button
                               type="button"
                               disabled={busy}
-                              aria-label={`Rename ${name}`}
+                              aria-label={t("Rename {name}", { name: name })}
                               onClick={() =>
                                 setRenaming({
                                   reference: entry.classificationReference,
@@ -251,7 +253,7 @@ export function TaxClassificationsView({
                             <button
                               type="button"
                               disabled={busy}
-                              aria-label={`Retire ${name}`}
+                              aria-label={t("Retire {name}", { name: name })}
                               onClick={() => setRetiring(entry.classificationReference)}
                             >
                               {t("Retire")}

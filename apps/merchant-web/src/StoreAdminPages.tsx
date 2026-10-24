@@ -203,7 +203,10 @@ export function StoreListScreen({ view }: { readonly view: StoreListView }) {
 
 export function StoreDetailScreen({ view }: { readonly view: StoreDetailView }) {
   return (
-    <AppFrame title={view.name} description={`Store · ${view.lifecycle}`}>
+    <AppFrame
+      title={view.name}
+      description={t("Store · {lifecycle}", { lifecycle: view.lifecycle })}
+    >
       <header className="screen-heading">
         <div>
           <h2>{t("Store detail")}</h2>
@@ -240,9 +243,17 @@ export function StoreDetailScreen({ view }: { readonly view: StoreDetailView }) 
 }
 
 export function StoreHoursServiceScreen({ view }: { readonly view: StoreHoursServiceView }) {
-  const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const weekdays = [
+    t("Monday"),
+    t("Tuesday"),
+    t("Wednesday"),
+    t("Thursday"),
+    t("Friday"),
+    t("Saturday"),
+    t("Sunday"),
+  ];
   return (
-    <AppFrame title={`${view.name} hours & service`} description="">
+    <AppFrame title={t("{name} hours & service", { name: view.name })} description="">
       <header className="screen-heading">
         <div>
           <p className="bop-eyebrow">{t("Hours & ordering")}</p>
@@ -314,7 +325,7 @@ export function StoreHoursServiceScreen({ view }: { readonly view: StoreHoursSer
 
 export function StoreSetupScreen({ view }: { readonly view: StoreSetupView }) {
   return (
-    <AppFrame title={`${view.name} setup`} description="">
+    <AppFrame title={t("{name} setup", { name: view.name })} description="">
       <header className="screen-heading">
         <div>
           <h2>{t("Store setup")}</h2>

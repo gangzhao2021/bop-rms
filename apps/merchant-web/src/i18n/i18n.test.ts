@@ -14,6 +14,11 @@ import {
 } from "./i18n.js";
 import { zhHans } from "./zh-Hans.js";
 import { GROUP_LABELS } from "../WorkspaceLayout.js";
+import {
+  brandRoleTemplateProfiles,
+  storePermissionCatalog,
+  storeRoleTemplateProfiles,
+} from "../../../../packages/bop/permission/src/catalog/store-permission-catalog.js";
 
 afterEach(() => setLanguageForTest("en"));
 
@@ -69,6 +74,15 @@ it("Owner 2026-10-24: every staff text has its Simplified Chinese wording, with 
   );
   for (const match of navigation.matchAll(/label: "([^"]+)"/gu)) keys.add(match[1] as string);
   for (const label of Object.values(GROUP_LABELS)) keys.add(label);
+  // Built-in role names and descriptions and permission descriptions the server sends.
+  for (const entry of storePermissionCatalog()) keys.add(entry.description);
+  for (const profile of [
+    ...Object.values(storeRoleTemplateProfiles),
+    ...Object.values(brandRoleTemplateProfiles),
+  ]) {
+    keys.add(profile.displayName);
+    keys.add(profile.description);
+  }
   const missing = [...keys].filter((key) => !Object.hasOwn(zhHans, key));
   expect(missing).toEqual([]);
   const placeholders = (text: string) => new Set(text.match(/\{[A-Za-z][A-Za-z0-9]*\}/gu) ?? []);

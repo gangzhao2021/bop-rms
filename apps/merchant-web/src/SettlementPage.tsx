@@ -32,19 +32,19 @@ export const differenceReasonLabel: Record<string, string> = {
   TerminalConflict: t("Terminal conflict"),
 };
 const outcomeLabel: Record<SettlementOutcome, string> = {
-  Matched: "Matched",
-  Healed: "Healed",
-  Difference: "Difference",
-  Unresolved: "Unresolved",
+  Matched: t("Matched"),
+  Healed: t("Healed"),
+  Difference: t("Difference"),
+  Unresolved: t("Unresolved"),
   Unavailable: t("Provider unavailable"),
 };
 /** Payment states a Store Manager reads without the Provider's vocabulary. */
 export const paymentStatusLabel: Record<string, string> = {
   RequiresCustomerAction: t("Awaiting customer action"),
   RequiresPaymentMethod: t("Awaiting payment method"),
-  Processing: "Processing",
-  Captured: "Paid",
-  Canceled: "Cancelled",
+  Processing: t("Processing"),
+  Captured: t("Paid"),
+  Canceled: t("Cancelled"),
 };
 
 /** "12 matched · 1 unresolved · 1 difference": matched first, then only what is not zero. */
@@ -398,7 +398,9 @@ export function SettlementReport({
                 </p>
                 <table
                   className="settlement__statement"
-                  aria-label={`Provider statement for ${businessDateText(view.businessDate)}`}
+                  aria-label={t("Provider statement for {businessDate}", {
+                    businessDate: businessDateText(view.businessDate),
+                  })}
                 >
                   <thead>
                     <tr>

@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
 import { newOperationReference } from "./operation-reference.js";
@@ -43,10 +43,10 @@ const operationLabels: Record<RoleAdministrationOperation, string> = {
   Duplicate: t("Duplicate as custom role"),
   SaveDraft: t("Save draft"),
   Submit: t("Submit for approval"),
-  Approve: "Approve",
-  Reject: "Reject",
-  Activate: "Activate",
-  Deactivate: "Deactivate",
+  Approve: t("Approve"),
+  Reject: t("Reject"),
+  Activate: t("Activate"),
+  Deactivate: t("Deactivate"),
 };
 const reasonCodes: Record<RoleAdministrationOperation, string> = {
   Duplicate: "ROLE_CREATED",
@@ -115,7 +115,7 @@ function PermissionPicker({
                   onChange(next);
                 }}
               />{" "}
-              {entry.description}
+              {systemText(entry.description)}
               {entry.highRisk ? <strong> {t("· High risk")}</strong> : null}
             </label>
           ))}
@@ -426,7 +426,7 @@ export function RoleAdministrationScreen({
         roles.map((role) => (
           <section key={role.roleReference}>
             <StatePanel
-              heading={role.name}
+              heading={systemText(role.name)}
               tone={role.permissions.some((item) => item.highRisk) ? "offline" : "neutral"}
             >
               <p>
@@ -437,7 +437,7 @@ export function RoleAdministrationScreen({
                   version: role.version,
                 })}
               </p>
-              <p>{role.description}</p>
+              <p>{systemText(role.description)}</p>
               <p>
                 {t("{memberCount} active assignments · {length} permissions", {
                   memberCount: role.memberCount,

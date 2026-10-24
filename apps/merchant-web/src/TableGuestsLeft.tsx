@@ -42,27 +42,68 @@ export function guestsLeftRoundText(
   switch (round.state) {
     case "NotPaid":
       return round.cancelsAt !== null && Date.parse(round.cancelsAt) <= now
-        ? `${name}: not paid, no money was taken. It is being cancelled automatically now; check again in a minute.`
-        : `${name}: not paid, no money was taken. It will be cancelled now (otherwise automatically${round.cancelsAt === null ? "" : " at " + storeTime(round.cancelsAt, timeZone)}); nothing is refunded.`;
+        ? t(
+            "{name}: not paid, no money was taken. It is being cancelled automatically now; check again in a minute.",
+            { name: name },
+          )
+        : t(
+            "{name}: not paid, no money was taken. It will be cancelled now (otherwise automatically{value}); nothing is refunded.",
+            {
+              name: name,
+              value: round.cancelsAt === null ? "" : " at " + storeTime(round.cancelsAt, timeZone),
+            },
+          );
     case "PaymentInProgress":
       // WP-2423 abandoned payment: the guest started paying online and didn't finish.
-      return `${name}: the guest started paying online but hasn't finished. It will be cancelled now and their unfinished payment stopped, so they can't be charged for it. If it was in fact paid, it stays open and shows here again.`;
+      return t(
+        "{name}: the guest started paying online but hasn't finished. It will be cancelled now and their unfinished payment stopped, so they can't be charged for it. If it was in fact paid, it stays open and shows here again.",
+        { name: name },
+      );
     case "PaidNotSent":
       return machine
-        ? `${name}: paid ${cad(round.refund?.amountMinor ?? "0")} on the card machine but never sent to the kitchen. It will be cancelled; then refund it on the card machine and record that on the Orders page.`
-        : `${name}: paid ${cad(round.refund?.amountMinor ?? "0")} online but never sent to the kitchen. It will be cancelled and the guest refunded.`;
+        ? t(
+            "{name}: paid {value} on the card machine but never sent to the kitchen. It will be cancelled; then refund it on the card machine and record that on the Orders page.",
+            { name: name, value: cad(round.refund?.amountMinor ?? "0") },
+          )
+        : t(
+            "{name}: paid {value} online but never sent to the kitchen. It will be cancelled and the guest refunded.",
+            { name: name, value: cad(round.refund?.amountMinor ?? "0") },
+          );
     case "AlreadyRefunded":
-      return `${name}: never sent to the kitchen and already refunded in full. It will be closed; nothing more is refunded.`;
+      return t(
+        "{name}: never sent to the kitchen and already refunded in full. It will be closed; nothing more is refunded.",
+        { name: name },
+      );
     case "NotStarted":
       // Refunded in full item by item already: nothing is left to refund or record.
       if (round.refund !== null && BigInt(round.refund.amountMinor) === 0n)
-        return `${name}: ${items(round.openItemCount)} not started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.`;
+        return t(
+          "{name}: {openItemCount} not started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.",
+          { name: name, openItemCount: items(round.openItemCount) },
+        );
       return machine
-        ? `${name}: ${items(round.openItemCount)} not started in the kitchen. It will be cancelled; then refund ${cad(round.refund?.amountMinor ?? "0")} on the card machine and record that on the Orders page.`
-        : `${name}: ${items(round.openItemCount)} not started in the kitchen. It will be cancelled and ${cad(round.refund?.amountMinor ?? "0")} refunded to the guest.`;
+        ? t(
+            "{name}: {openItemCount} not started in the kitchen. It will be cancelled; then refund {value} on the card machine and record that on the Orders page.",
+            {
+              name: name,
+              openItemCount: items(round.openItemCount),
+              value: cad(round.refund?.amountMinor ?? "0"),
+            },
+          )
+        : t(
+            "{name}: {openItemCount} not started in the kitchen. It will be cancelled and {value} refunded to the guest.",
+            {
+              name: name,
+              openItemCount: items(round.openItemCount),
+              value: cad(round.refund?.amountMinor ?? "0"),
+            },
+          );
     case "PartlyStarted":
       return (
-        `${name}: ${items(round.cancellableItemReferences.length)} not started will be cancelled and ` +
+        t("{name}: {length} not started will be cancelled and ", {
+          name: name,
+          length: items(round.cancellableItemReferences.length),
+        }) +
         (partlyRefund === null
           ? "refunded"
           : t("{partlyRefund} refunded", { partlyRefund: cad(partlyRefund) })) +
@@ -71,14 +112,33 @@ export function guestsLeftRoundText(
     case "BeingMade":
       // Paid on the card machine, items not started yet cannot be cancelled one by one.
       return round.startedItemCount === round.openItemCount
-        ? `${name}: ${startedText(round.openItemCount, round.readyItemCount)}. Serve them, or mark them served on the Orders page.`
+        ? t("{name}: {openItemCount}. Serve them, or mark them served on the Orders page.", {
+            name: name,
+            openItemCount: startedText(round.openItemCount, round.readyItemCount),
+          })
         : round.readyItemCount === 0
-          ? `${name}: ${items(round.openItemCount)} already being made or paid on the card machine. Serve them, or mark them served on the Orders page.`
-          : `${name}: ${items(round.openItemCount - round.readyItemCount)} being made or paid on the card machine and ${String(round.readyItemCount)} ready to serve. Serve them, or mark them served on the Orders page.`;
+          ? t(
+              "{name}: {openItemCount} already being made or paid on the card machine. Serve them, or mark them served on the Orders page.",
+              { name: name, openItemCount: items(round.openItemCount) },
+            )
+          : t(
+              "{name}: {value} being made or paid on the card machine and {readyItemCount} ready to serve. Serve them, or mark them served on the Orders page.",
+              {
+                name: name,
+                value: items(round.openItemCount - round.readyItemCount),
+                readyItemCount: String(round.readyItemCount),
+              },
+            );
     case "RefundOnCardMachine":
-      return `${name}: cancelled. Refund ${cad(round.refund?.amountMinor ?? "0")} on the card machine and record it on the Orders page.`;
+      return t(
+        "{name}: cancelled. Refund {value} on the card machine and record it on the Orders page.",
+        { name: name, value: cad(round.refund?.amountMinor ?? "0") },
+      );
     case "Refunding":
-      return `${name}: cancelled. The guest's online refund is still being made; check again in a few minutes.`;
+      return t(
+        "{name}: cancelled. The guest's online refund is still being made; check again in a few minutes.",
+        { name: name },
+      );
   }
 }
 

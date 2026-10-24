@@ -65,15 +65,23 @@ export function switchMessageText(
 ): string {
   switch (message.kind) {
     case "Rejected":
-      return "That PIN didn't match. Try again. After 5 wrong tries the PIN locks for 15 minutes.";
+      return t(
+        "That PIN didn't match. Try again. After 5 wrong tries the PIN locks for 15 minutes.",
+      );
     case "Locked":
-      return `Too many wrong PINs. ${name}'s PIN is locked until ${storeClockTime(message.until, timeZone)}. Ask a manager to reset it, or sign in with your account.`;
+      return t(
+        "Too many wrong PINs. {name}'s PIN is locked until {until}. Ask a manager to reset it, or sign in with your account.",
+        { name: name, until: storeClockTime(message.until, timeZone) },
+      );
     case "Busy":
-      return `Too many tries on this tablet. Wait ${message.minutes} ${message.minutes === 1 ? "minute" : "minutes"}, or sign in with your account.`;
+      return t(
+        "Too many tries on this tablet. Wait {minutes} {value}, or sign in with your account.",
+        { minutes: message.minutes, value: message.minutes === 1 ? "minute" : "minutes" },
+      );
     case "Unavailable":
-      return "Couldn't check the PIN. Check the connection and try again.";
+      return t("Couldn't check the PIN. Check the connection and try again.");
     case "SigningIn":
-      return `Signing in ${name}…`;
+      return t("Signing in {name}…", { name: name });
   }
 }
 

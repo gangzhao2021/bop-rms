@@ -20,14 +20,14 @@ export const exceptionKindLabel: Record<OrderExceptionItem["kind"], string> = {
 const providerStateLabel: Record<OrderExceptionItem["providerState"], string> = {
   // Shown as "Payment provider status".
   NotApplicable: t("Not applicable"),
-  Pending: "Pending",
-  Unknown: "Unknown",
-  Confirmed: "Confirmed",
+  Pending: t("Pending"),
+  Unknown: t("Unknown"),
+  Confirmed: t("Confirmed"),
 };
 const compensationLabel: Record<OrderExceptionItem["compensationStatus"], string> = {
   NotRequested: t("Not requested"),
-  Pending: "Pending",
-  Completed: "Completed",
+  Pending: t("Pending"),
+  Completed: t("Completed"),
 };
 import { useEffect, useRef, useState, type Ref } from "react";
 

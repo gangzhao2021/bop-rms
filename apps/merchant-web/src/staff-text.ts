@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { displayLocale, t } from "./i18n/i18n.js";
 /**
  * Staff-facing words for values the sources carry as codes (WP-2423: staff text in their
  * language, never internal codes). Each helper falls back to a plain phrase, never the raw code.
@@ -7,7 +7,7 @@ import { t } from "./i18n/i18n.js";
 /** "fr-CA" as "French (Canada)"; an unrecognised tag stays as written by staff. */
 export function languageName(locale: string): string {
   try {
-    return new Intl.DisplayNames(["en"], { type: "language" }).of(locale) ?? locale;
+    return new Intl.DisplayNames([displayLocale()], { type: "language" }).of(locale) ?? locale;
   } catch {
     return locale;
   }
@@ -19,13 +19,13 @@ export const receiptFieldLabels: Readonly<Record<string, string>> = Object.freez
   Store: t("Store name and address"),
   OrderNumber: t("Order number"),
   IssuedAt: t("Date and time"),
-  Items: "Items",
-  Subtotal: "Subtotal",
-  Discount: "Discounts",
-  Fee: "Fees",
-  Tax: "Taxes",
-  Tip: "Tip",
-  Total: "Total",
+  Items: t("Items"),
+  Subtotal: t("Subtotal"),
+  Discount: t("Discounts"),
+  Fee: t("Fees"),
+  Tax: t("Taxes"),
+  Tip: t("Tip"),
+  Total: t("Total"),
   PaymentStatus: t("Payment status"),
   RefundedTotal: t("Amount refunded"),
 });
@@ -34,13 +34,13 @@ export const receiptFieldLabels: Readonly<Record<string, string>> = Object.freez
 export function receiptTemplateStateLabel(state: string): string {
   switch (state) {
     case "InReview":
-      return "Waiting for approval";
+      return t("Waiting for approval");
     case "Approved":
-      return "Approved, not yet published";
+      return t("Approved, not yet published");
     case "Published":
-      return "Published";
+      return t("Published");
     case "Draft":
-      return "Draft";
+      return t("Draft");
     default:
       return t("Status being updated");
   }

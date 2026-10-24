@@ -43,7 +43,7 @@ type State =
     };
 export function PickupStatePanel({ state }: { readonly state: Exclude<State["kind"], "Found"> }) {
   const copy = {
-    Loading: ["Loading", t("Loading pickups…")],
+    Loading: [t("Loading"), t("Loading pickups…")],
     PermissionDenied: [noAccessHeading, pageAccessDeniedText],
     NotFound: [t("Pickup unavailable"), t("This pickup is not at the selected Store.")],
     Offline: [t("You’re offline"), t("Reconnect and refresh before handing over a pickup.")],
@@ -194,7 +194,10 @@ function PickupCard({
         </p>
       ) : null}
       {contents.length > 0 ? (
-        <ul className="pickup-queue__items" aria-label={`Items in order ${orderLabel}`}>
+        <ul
+          className="pickup-queue__items"
+          aria-label={t("Items in order {orderLabel}", { orderLabel: orderLabel })}
+        >
           {contents.map((line, index) => (
             <li key={line.fulfillmentItemReference}>
               <span className="pickup-queue__item-quantity">{line.orderedQuantity} ×</span>{" "}

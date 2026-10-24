@@ -115,26 +115,26 @@ const endText = {
   RegistrationEvidence: t("its tax registration evidence expires"),
   ProfessionalEvidence: t("its professional review expires"),
 } as const;
-const orderTypeText: Record<string, string> = { Pickup: "Pickup", DineIn: "Dine-in" };
+const orderTypeText: Record<string, string> = { Pickup: t("Pickup"), DineIn: t("Dine-in") };
 const treatmentText: Record<string, string> = {
   ZeroRated: "zero-rated",
   Exempt: "tax-exempt",
   OutOfScope: t("not taxed"),
 };
 const provinceText: Readonly<Record<string, string>> = {
-  "CA-AB": "Alberta",
+  "CA-AB": t("Alberta"),
   "CA-BC": t("British Columbia"),
-  "CA-MB": "Manitoba",
+  "CA-MB": t("Manitoba"),
   "CA-NB": t("New Brunswick"),
   "CA-NL": t("Newfoundland and Labrador"),
   "CA-NS": t("Nova Scotia"),
   "CA-NT": t("Northwest Territories"),
-  "CA-NU": "Nunavut",
-  "CA-ON": "Ontario",
+  "CA-NU": t("Nunavut"),
+  "CA-ON": t("Ontario"),
   "CA-PE": t("Prince Edward Island"),
-  "CA-QC": "Quebec",
-  "CA-SK": "Saskatchewan",
-  "CA-YT": "Yukon",
+  "CA-QC": t("Quebec"),
+  "CA-SK": t("Saskatchewan"),
+  "CA-YT": t("Yukon"),
 };
 const currencyText: Readonly<Record<string, string>> = { CAD: t("Canadian dollars") };
 

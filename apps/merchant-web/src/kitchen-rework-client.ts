@@ -30,7 +30,7 @@ export const kitchenReworkCancelReasonLabels: Readonly<Record<KitchenReworkCance
 export const kitchenReworkReasonLabels: Readonly<Record<KitchenReworkReason, string>> =
   Object.freeze({
     WRONG_ITEM: t("Made wrong"),
-    DROPPED: "Dropped",
+    DROPPED: t("Dropped"),
     CUSTOMER_RETURNED: t("Guest sent it back"),
     QUALITY_ISSUE: t("Quality problem"),
     NOT_READY: t("Not ready yet — marked done by mistake"),

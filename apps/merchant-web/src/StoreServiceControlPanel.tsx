@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { currentLanguage, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { StoreConfigurationEditor } from "./StoreConfigurationEditor.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -20,6 +20,9 @@ import {
 /** "09:00:00" → "9:00 AM"; "23:59:59" → "11:59 PM". */
 export function serviceTime(value: string): string {
   const [hour = 0, minute = 0] = value.split(":").map(Number);
+  // Chinese: the 24-hour clock ("23:59"), as the customer side writes it.
+  if (currentLanguage() === "zh-Hans")
+    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
   const suffix = hour < 12 ? "AM" : "PM";
   return `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, "0")} ${suffix}`;
 }
@@ -45,7 +48,15 @@ export function ServiceHoursSummary({
   hours: ServiceHours;
   timeZone: string;
 }) {
-  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const days = [
+    t("Monday"),
+    t("Tuesday"),
+    t("Wednesday"),
+    t("Thursday"),
+    t("Friday"),
+    t("Saturday"),
+    t("Sunday"),
+  ];
   // WP-2423 Q4: hours in staff language — 9:00 AM, Dine-in, minutes; zero settings are left out.
   const describe = (interval: ServiceInterval) =>
     [

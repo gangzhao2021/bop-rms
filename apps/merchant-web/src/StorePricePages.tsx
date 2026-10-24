@@ -51,9 +51,9 @@ const copy: Record<PriceErrorCode | "Loading", string> = {
   Unavailable: t("Prices are unavailable."),
 };
 const lifecycleText: Record<string, string> = {
-  Draft: "Draft",
-  Published: "Published",
-  Archived: "Discarded",
+  Draft: t("Draft"),
+  Published: t("Published"),
+  Archived: t("Discarded"),
 };
 type State<V> =
   { readonly kind: "Loading" | PriceErrorCode } | { readonly kind: "Found"; readonly view: V };
@@ -123,7 +123,7 @@ const itemName = (sellable: PriceSellable | undefined, reference: string) =>
 /** A price book's state in staff words, with the Store's book named as in use here. */
 export function priceBookStatus(lifecycle: string, inUseHere: boolean): string {
   if (lifecycle === "Draft") return t("Draft, not published yet");
-  if (lifecycle === "Published") return inUseHere ? t("In use at this Store") : "Published";
+  if (lifecycle === "Published") return inUseHere ? t("In use at this Store") : t("Published");
   return lifecycleText[lifecycle] ?? "Discarded";
 }
 
@@ -642,7 +642,10 @@ function PriceBookEditor({
                       <>
                         <span aria-hidden="true">{currencyPrefix(view.currencyCode)}</span>
                         <input
-                          aria-label={`Price of ${item.productName} ${item.sizeName}`}
+                          aria-label={t("Price of {productName} {sizeName}", {
+                            productName: item.productName,
+                            sizeName: item.sizeName,
+                          })}
                           inputMode="decimal"
                           value={text}
                           aria-invalid={bad ? "true" : undefined}

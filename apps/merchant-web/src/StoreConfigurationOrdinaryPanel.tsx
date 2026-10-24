@@ -45,10 +45,10 @@ import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 const actionLabel: Record<string, string> = {
   Materialize: t("Create configuration from saved setup"),
   SaveDraft: t("Created from saved setup"),
-  Validate: "Checked",
+  Validate: t("Checked"),
   Submit: t("Sent for approval"),
-  Approve: "Approved",
-  Publish: "Published",
+  Approve: t("Approved"),
+  Publish: t("Published"),
 };
 const requestLabel: Record<string, string> = {
   Materialize: "create-from-setup",

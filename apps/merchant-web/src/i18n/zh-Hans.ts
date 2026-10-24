@@ -29,6 +29,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " (not offered by the Brand now)": "（品牌目前不提供）",
   " (not offered)": "（未提供）",
   " (not selling yet)": "（尚未售卖）",
+  " (older)": "（较早的）",
   " (optional)": "（可选）",
   " (required)": "（必填）",
   " (revision {familyRevision})": "（修订版 {familyRevision}）",
@@ -91,11 +92,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " with no end date": " 无结束日期",
   " {rest} min": " {rest} 分钟",
   " · Active work": " · 进行中的工作",
+  " · Added round": " · 追加轮次",
   " · Applied": " · 已应用",
   " · Current host": " · 当前主持人",
   " · Default": " · 默认",
   " · Default site": " · 默认地点",
   " · Entered by staff": " · 员工录入",
+  " · First round": " · 第一轮",
   " · Guests seated": " · 顾客已入座",
   " · High risk": " · 高风险",
   " · Holds stock": " · 存放库存",
@@ -138,6 +141,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "(cannot be changed later)": "（之后不能更改）",
   "(exp.": "（到期",
   "(it can be printed later), then take the order.": "（可稍后打印），然后再点单。",
+  "(min-width: 48.0625rem)": "(min-width: 48.0625rem)",
   "(requires tracking management permission)": "（需要跟踪管理权限）",
   "(requires unit management permission)": "（需要单位管理权限）",
   "+ {value} {unitCode} {to} per one chosen": "每选一份 + {value} {unitCode} {to}",
@@ -212,6 +216,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A dining session can't be started for table": "无法为此桌台开始堂食会话：",
   "A fee that is On may only apply to service modes this Store offers. Check step 5.":
     "开启的费用只能适用于本店提供的服务方式。请检查第 5 步。",
+  "A guest at this table is paying on their phone right now. Wait a minute, then send again.":
+    "这张桌台的一位顾客正在手机上付款。请等一分钟，再重新发送。",
   "A guest's online payment has no result yet. Check again in a few minutes.":
     "有顾客的在线付款尚无结果。请几分钟后再查看。",
   "A kitchen remake used more than stock showed as available. The food was thrown away; only what was in stock was taken off. Count these items and correct the count.":
@@ -240,6 +246,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A price you set yourself must be published by another person who may approve prices.":
     "你自己设置的价格需由另一位有价格审批权限的人发布。",
   "A recipe changed — save again": "有配方已变更 — 请再次保存",
+  "A recipe used in {item} is not published. Publish it under Recipes, then submit again.":
+    '{item}中使用的配方尚未发布。请在"配方"中发布，然后重新提交。',
   "A refund is still being made (online, or not yet recorded as refunded on the card machine). Record the card-machine refund on the Orders page, or check again in a few minutes.":
     "还有退款正在进行（在线退款，或尚未在刷卡机上记录退款）。请在订单页记录刷卡机退款，或几分钟后再查看。",
   "A refund of {pending} is on its way to the customer.": "一笔 {pending} 的退款正在退给顾客。",
@@ -275,6 +283,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "税前、不含小费约 {value}。发送订单时才会得到最终合计。",
   Accept: "接受",
   "Accept ": "接单 ",
+  "Accept a Kitchen work item": "接受后厨工作项",
+  "Accept a submitted order batch": "接受已提交的订单批次",
   "Accept or refund it by {decideBy}; otherwise it is refunded automatically.":
     "请在 {decideBy} 前接单或退款，否则会自动退款。",
   "Accept the record, or void it if the waste did not happen (the quantity returns to stock).":
@@ -289,6 +299,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Accepted (": "验收（",
   "Accepted value": "验收值",
   "Accepting ": "正在接单 ",
+  "Access stored media": "访问已存储的媒体",
   "Accessible digital receipt, using the standard receipt fields.":
     "无障碍电子收据，使用标准收据字段。",
   "Accessible receipt layout": "无障碍收据版式",
@@ -302,6 +313,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "操作未被接受。重试前请检查你的权限并重新查看跟进情况。",
   Actions: "操作",
   Activate: "启用",
+  "Activate a published feature control": "启用已发布的功能控制",
+  "Activate an Inventory Item": "启用库存品项",
+  "Activate an approved Store role version": "启用已批准的门店角色版本",
   "Activate stock-tracked inventory items (mass, volume or count) first.":
     "请先启用需跟踪库存的库存品项（重量、体积或个数）。",
   "Activate stock-tracked inventory items and set up stock locations first.":
@@ -333,6 +347,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Add your name": "添加你的名字",
   "Add your privacy notice link before going live. Checkout and receipts show none.":
     "上线前请添加你的隐私声明链接。结账页和收据目前不显示任何链接。",
+  "Add {name}": "添加{name}",
+  "Add, rename and retire the Brand's tax classifications": "添加、重命名和停用品牌的税类",
   "Added {label}.": "已添加 {label}。",
   "Additional check of {businessDate}": "{businessDate} 的补充核对",
   "Additional detail": "补充说明",
@@ -343,11 +359,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Address line 3 (optional)": "地址第 3 行（可选）",
   "Address, contact details and payment settings: the ones the Store runs with today were set when it was installed and cannot be carried over. Enter them in step 2 (address), step 7 (contact) and step 5 (payment), save each, choose “Use saved”, then save the setup draft. They can be the same as the name and contact shown to customers above.":
     '地址、联系方式和付款设置：门店目前使用的是安装时设置的，无法沿用。请在第 2 步（地址）、第 7 步（联系方式）和第 5 步（付款）中填写，分别保存，选择"使用已保存的"，然后保存设置草稿。它们可以与上方向顾客显示的名称和联系方式相同。',
+  "Adjust or void a posted goods receipt": "调整或作废已过账的收货单",
   "After you verify, choose Recover original payment save. If it shows the save did not go through, save again — your choices are kept.":
     '验证后，请选择"恢复原来的付款保存"。如果显示保存未成功，请再次保存 — 你的选择会保留。',
+  Alberta: "艾伯塔省",
   "Alerts appear only on this screen: no email or phone alerts are set up yet.":
     "提醒只显示在此屏幕：尚未设置邮件或电话提醒。",
   All: "全部",
+  "All Store permissions, including staff, roles, finance and refund approval":
+    "门店全部权限，包括员工、角色、财务和退款批准",
   "All areas": "所有区域",
   "All channels": "所有渠道",
   "All counts": "全部盘点",
@@ -392,6 +412,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Already configured.": "已配置。",
   "Already served or handed over": "已上桌或已交付",
   "Ambient (dry storage)": "常温（干货）",
+  "Amend an order under policy": "按政策修改订单",
   "Amount differs": "金额不一致",
   "Amount not known yet": "金额暂未知",
   "Amount per one chosen ({unitCode})": "每选一份的数量（{unitCode}）",
@@ -448,6 +469,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Approvals: "审批",
   "Approvals unavailable": "审批暂不可用",
   Approve: "批准",
+  "Approve a refund above the requester's limit": "批准超出申请人额度的退款",
+  "Approve a submitted Menu version": "批准已提交的菜单版本",
+  "Approve adjustments above threshold": "批准超过阈值的调整",
+  "Approve an Option Set": "批准选项组",
   "Approve and post differences": "批准并过账差异",
   "Approve and refund {amountMinor}": "批准并退款 {amountMinor}",
   "Approve and send refund": "批准并发送退款",
@@ -456,21 +481,33 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Approve configuration on my own": "自行批准配置",
   "Approve cost": "批准成本",
   "Approve cost on my own": "自行批准成本",
+  "Approve count variances above threshold": "批准超过阈值的盘点差异",
+  "Approve feature control changes": "批准功能控制更改",
   "Approve food safety": "批准食品安全",
   "Approve food safety on my own": "自行批准食品安全",
   "Approve hours on my own": "自行批准营业时间",
   "Approve my own refund of {amountMinor}": "自行批准我的退款 {amountMinor}",
   "Approve on my own": "自行批准",
+  "Approve or reject a Store role change": "批准或拒绝门店角色更改",
+  "Approve price book changes": "批准价目表更改",
   "Approve receipt template": "批准收据模板",
   "Approve receipt template on my own": "由我自行批准收据模板",
+  "Approve recipe versions (cost and food-safety review)": "批准配方版本（成本和食品安全审核）",
   "Approve reviewed configuration": "批准已审核的配置",
+  "Approve reviewed drafts": "批准已审核的草稿",
+  "Approve stock transfers": "批准库存调拨",
   "Approve the Brand allergen list before declaring ingredients.":
     "申报配料前，请先批准品牌过敏原清单。",
+  "Approve the Brand allergen registry": "批准品牌过敏原清单",
+  "Approve the Store live gate": "批准门店上线检查",
   "Approve the recorded allergen list": "批准已记录的过敏原清单",
   "Approve this list on my own": "由我自行批准这份清单",
+  "Approve waste above threshold": "批准超过阈值的报损",
   "Approve your own change": "批准你自己的更改",
   "Approve your own configuration": "批准你自己的配置",
   "Approve your own receipt template": "批准你自己的收据模板",
+  "Approve {value} on my own": "自行批准{value}",
+  Approved: "已批准",
   "Approved by you alone as sole operator. You can now publish it.":
     "已由你作为独立经营者单独批准。现在可以发布。",
   "Approved by {value}": "由 {value} 批准",
@@ -489,6 +526,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Approved, but the refund has not been sent yet. Retry sending: the same refund is reused and the customer is never refunded twice.":
     "已批准，但退款尚未发送。请重试发送：会沿用同一笔退款，顾客绝不会被重复退款。",
   "Approved, not yet active": "已批准，尚未生效",
+  "Approved, not yet published": "已批准，尚未发布",
+  "Approved, waiting to be published": "已批准，等待发布",
   "Approved. Refund {amountMinor} on the store's card machine to the card the customer paid with, then record it on the payment page with the slip reference. The refund counts on the day it is made on the machine.":
     "已批准。请在门店刷卡机上向顾客付款所用的卡退款 {amountMinor}，然后在付款页记录并填写签购单参考号。退款计入在刷卡机上办理当天。",
   "Approved. Sending the refund to the card provider…": "已批准。正在把退款发送给发卡方…",
@@ -496,8 +535,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已批准。支付方尚未确认；请再次发送以获取其回复。",
   "Approving…": "正在批准…",
   Archive: "归档",
+  "Archive a Menu release": "归档菜单版本",
   "Archive option set": "归档选项组",
   "Archive recipe": "归档配方",
+  "Archive releases": "归档版本",
   Archived: "已归档",
   "Archived sets cannot be added to products. Products already using it keep it until you remove it from them.":
     "已归档的选项组不能添加到商品。已在使用它的商品会保留它，直到你从中移除。",
@@ -516,6 +557,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请顾客读出订单页上的 6 位取餐码。取餐码匹配本身并不等于交付。",
   "Asked by": "申请人",
   Assign: "指派",
+  "Assign a Store task": "指派门店任务",
   "Assign payment difference": "指派付款差异",
   "Assign role (takes effect after another administrator approves)":
     "分配角色（需另一位管理员批准后生效）",
@@ -526,6 +568,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "At least ": "至少 ",
   "At this Store": "本门店",
   "Atikokan, Ontario": "阿蒂科肯，安大略省",
+  "Attach live-gate evidence": "附加上线检查证据",
   "Authored template fields": "已填写的模板字段",
   "Authoring integration required": "需要接入编辑功能",
   "Authorized Store": "已授权门店",
@@ -540,6 +583,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Awaiting payment method": "等待付款方式",
   Back: "返回",
   "Back in progress · Marked done too early": "重新制作 · 过早标记了完成",
+  "Back in stock": "恢复库存",
   "Back room": "后仓",
   "Back to Tables": "返回桌台",
   "Back to allergens": "返回过敏原",
@@ -569,6 +613,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Being remade": "重做中",
   "Blanc-Sablon, Quebec": "布朗萨布隆，魁北克省",
   "Block when stock would go negative": "库存将变为负数时阻止",
+  "Brand Owner": "品牌所有者",
   "Brand default": "品牌默认",
   "Brand or Store settings": "品牌或门店设置",
   "Brand settings": "品牌设置",
@@ -596,6 +641,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "By day": "按天",
   "By order type": "按订单类型",
   "By payment": "按付款方式",
+  "By the store-time hour the payment was taken{value}.": "按收款时的门店时间小时{value}。",
   "By {recordedBy} · value ${valueMinor}{value}{value2}":
     "由 {recordedBy} 记录 · 价值 ${valueMinor}{value}{value2}",
   "Cached summaries cannot authorize drill-down or export.": "缓存的汇总不能授权下钻或导出。",
@@ -605,6 +651,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Canadian dollars": "加元",
   "Canadian dollars ($)": "加元（$）",
   Cancel: "取消",
+  "Cancel a Store task": "取消门店任务",
+  "Cancel an order or batch under policy": "按政策取消订单或批次",
   "Cancel count": "取消盘点",
   "Cancel invitation": "取消邀请",
   "Cancel item and refund": "取消商品并退款",
@@ -619,6 +667,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Cancel order {orderNumber}": "取消订单 {orderNumber}",
   "Cancel remake": "取消重做",
   "Cancel remake of {displayName}": "取消重做 {displayName}",
+  "Cancel remake of {displayName}, {orderLabel}": "取消重做{displayName}，{orderLabel}",
   "Cancel round": "取消这一轮",
   "Cancel round and refund": "取消这一轮并退款",
   "Cancel round {roundNumber}": "取消第 {roundNumber} 轮",
@@ -658,7 +707,57 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "发卡方未确认刷卡付款（截止 {at}）· 请问顾客是否已被扣款；如未扣款，请取消这一轮（之后的扣款会自动退回）",
   "Card-machine payments could not be read.": "无法读取刷卡机付款。",
   "Case: {caseState}": "案件：{caseState}",
+  "Catalog category archive": "商品分类归档",
+  "Catalog category create": "商品分类创建",
+  "Catalog category export": "商品分类导出",
+  "Catalog category history read": "商品分类记录查看",
+  "Catalog category import": "商品分类导入",
+  "Catalog category read": "商品分类查看",
+  "Catalog category reorder": "商品分类排序",
+  "Catalog category restore": "商品分类恢复",
+  "Catalog category update": "商品分类更新",
+  "Catalog option set archive": "选项组归档",
+  "Catalog option set create": "选项组创建",
+  "Catalog option set export": "选项组导出",
+  "Catalog option set history read": "选项组记录查看",
+  "Catalog option set import": "选项组导入",
+  "Catalog option set read": "选项组查看",
+  "Catalog option set restore": "选项组恢复",
+  "Catalog option set update": "选项组更新",
+  "Catalog product approve": "商品批准",
+  "Catalog product archive": "商品归档",
+  "Catalog product availability manage": "商品供应管理",
+  "Catalog product create": "商品创建",
+  "Catalog product discontinue": "商品停售",
+  "Catalog product export": "商品导出",
+  "Catalog product history read": "商品记录查看",
+  "Catalog product identity update": "商品标识更新",
+  "Catalog product import": "商品导入",
+  "Catalog product publish": "商品发布",
+  "Catalog product read": "商品查看",
+  "Catalog product restore": "商品恢复",
+  "Catalog product resume": "商品重新上架",
+  "Catalog product submit": "商品提交",
+  "Catalog product suspend": "商品暂停",
+  "Catalog product update": "商品更新",
+  "Catalog product validate": "商品校验",
+  "Catalog sku activate": "规格启用",
+  "Catalog sku archive": "规格归档",
+  "Catalog sku availability manage": "规格供应管理",
+  "Catalog sku barcode manage": "规格条码管理",
+  "Catalog sku create": "规格创建",
+  "Catalog sku discontinue": "规格停售",
+  "Catalog sku export": "规格导出",
+  "Catalog sku history read": "规格记录查看",
+  "Catalog sku import": "规格导入",
+  "Catalog sku read": "规格查看",
+  "Catalog sku replace": "规格替换",
+  "Catalog sku restore": "规格恢复",
+  "Catalog sku resume": "规格重新上架",
+  "Catalog sku suspend": "规格暂停",
+  "Catalog sku update": "规格更新",
   "Catching up with new orders": "正在同步新订单",
+  Catering: "餐饮外送",
   Change: "更改",
   "Change not applied": "更改未生效",
   "Change recorded.": "已记录更改。",
@@ -704,6 +803,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Check the language, saved receipt presets and the start and end times. An earlier save remains protected.":
     "请检查语言、已保存的收据预设以及开始和结束时间。之前的保存仍受保护。",
   "Check the name and email.": "请检查名字和邮箱。",
+  "Check the slip reference and the paid-at time.": "请核对签购单参考号和付款时间。",
   "Check the slip reference: letters and numbers only, never the card number.":
     "请核对签购单参考号：只能是字母和数字，绝不能是卡号。",
   "Check the three payment channel settings.": "请检查三项付款渠道设置。",
@@ -770,14 +870,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Choose why": "选择原因",
   "Choose why first. The name and phone on the order then show here.":
     "请先选择原因，随后这里会显示订单上的名字和手机号。",
+  "Choose {name}": "选择{name}",
   "Choose {total}{need}": "选择 {total}{need}",
   "Choose “No order limits” when the Store accepts every order it receives; staff pause ordering from Hours & ordering when the kitchen is busy.":
     '当门店接受收到的每一笔订单时，请选择"不限制订单"；后厨忙时，员工可在"营业时间与点单"中暂停点单。',
   "Choose…": "选择…",
   "Choosing a tax classification needs permission to read Products and tax settings. Leave the service charge and delivery fee as Not set or Off; tips can still be turned on, and you can save the rest of this setup.":
     '选择税类需要读取商品和税务设置的权限。请将服务费和配送费保持为"未设置"或"关"；小费仍可开启，你也可以保存此设置的其余部分。',
+  City: "城市",
   "City or town": "城市或镇",
   Claim: "认领",
+  "Claim a Store task": "认领门店任务",
   "Claim requires a current eligible Queue member and an authorized write endpoint. Assignment, acknowledgement, source navigation, and resolution require their own approved commands and source permissions. No Task or source state was changed.":
     "认领需要当前符合条件的队列成员和已授权的写入端点。指派、确认、来源跳转和解决各自需要已批准的命令和来源权限。没有更改任何任务或来源状态。",
   Claimed: "已认领",
@@ -793,6 +896,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Clear search": "清除搜索",
   "Clear the filters or load another server page.": "清除筛选或加载服务器的另一页。",
   Close: "关闭",
+  "Close a dining session and release the table": "关闭堂食会话并释放桌台",
+  "Close a kitchen ticket left open from an earlier business day": "关闭较早营业日遗留的后厨票据",
+  "Close an order": "关闭订单",
   "Close as not collected": "作为未取餐关闭",
   "Close handoff confirmation": "关闭交付确认",
   "Close menu": "关闭菜单",
@@ -832,6 +938,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Compared with the menu customers see now (published": "与顾客现在看到的菜单比较（已发布",
   Compensation: "补偿",
   "Compensation reconciliation": "补偿对账",
+  "Complete a Store task": "完成门店任务",
   "Complete quantity": "完成数量",
   Completed: "已完成",
   Compliance: "合规",
@@ -894,11 +1001,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Continue to sign in": "继续登录",
   "Continue — {actionLabel}": "继续 — {actionLabel}",
   "Copy of {stableCode}{value}": "{stableCode}{value} 的副本",
+  "Correct a stock movement through a compensating movement": "通过冲销记录更正库存变动",
+  Cost: "成本",
   "Cost (cents per {unitCode}; empty if unknown)": "成本（每 {unitCode} 的分数；未知则留空）",
   "Cost review recorded.": "已记录成本审核。",
   "Could not be read": "无法读取",
   "Couldn't check for sent orders waiting for payment. Orders lists them too.":
     "无法检查已发送但待付款的订单。订单页也会列出它们。",
+  "Couldn't check the PIN. Check the connection and try again.": "无法核对 PIN。请检查网络后重试。",
   "Couldn't check the table's open rounds. Check the connection and try again.":
     "无法检查该桌未完成的轮次。请检查网络后重试。",
   "Couldn't check this table's orders. Check the connection and try again.":
@@ -918,11 +1028,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Counted by": "清点人",
   "Counted from {partOfList} only": "仅统计{partOfList}",
   "Counted until": "计算至",
+  "Counted {value}{value2}": "已清点 {value}{value2}",
+  Counter: "柜台",
   "Counter order": "柜台点单",
   "Counter order request failed": "柜台点单请求失败",
   "Counter order unavailable": "柜台点单暂不可用",
+  Counting: "清点中",
   "Country code": "国家代码",
   "Counts appear here once started.": "开始后，盘点会显示在这里。",
+  "Create a Store task": "创建门店任务",
   "Create a code for table {stableLabel}?": "为桌台 {stableLabel} 创建桌台码？",
   "Create a new configuration from the saved setup.": "根据已保存的设置创建新配置。",
   "Create a product for each item on your menu, with one size or several.":
@@ -931,8 +1045,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "为你售卖的每件商品，以及其中用到的批量预制品，各创建一个配方。",
   "Create a set for each choice customers make, for example Milk or Extra shot.":
     '为顾客的每一种选择创建一个选项组，例如"奶类"或"加浓缩"。',
+  "Create an order on behalf of a customer": "代顾客创建订单",
   "Create and activate stock-tracked inventory items first.":
     "请先创建并启用需跟踪库存的库存品项。",
+  "Create and assign stock counts": "创建并指派盘点",
+  "Create and edit recipe drafts": "创建和编辑配方草稿",
   "Create code": "创建桌台码",
   "Create configuration from saved setup": "根据已保存的设置创建配置",
   "Create draft": "创建草稿",
@@ -942,9 +1059,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Create item": "创建品项",
   "Create one on": "请先在",
   "Create option set": "创建选项组",
+  "Create or duplicate a Store role": "创建或复制门店角色",
   "Create override": "创建例外",
   "Create product": "创建商品",
+  "Create publishing drafts": "创建发布草稿",
   "Create the first ingredient or supply the Store stocks.": "创建门店存放的第一种配料或物料。",
+  "Create, rename, rezone and deactivate Storage Locations": "创建、重命名、调整区域和停用库位",
   Created: "已创建",
   "Created from saved setup": "根据已保存的设置创建",
   "Creating a new configuration from the saved setup replaces it; or withdraw it to stop it being approved.":
@@ -1019,12 +1139,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Day: "日",
   "Day totals": "当天合计",
   Deactivate: "停用",
+  "Deactivate a Store role": "停用门店角色",
+  Deactivated: "已停用",
   "Decide once the store is back online.": "请在门店恢复联网后处理。",
   "Decision time ended · refund pending": "处理时间已过 · 退款处理中",
   Declaration: "申报",
   "Declaration recorded. Recipes using this ingredient must be saved again to carry it.":
     "申报已记录。使用该配料的配方需重新保存才会带上它。",
   Declarations: "申报",
+  Declared: "已申报",
   "Declared allergens": "已申报的过敏原",
   "Declared — expires within 30 days": "已申报 — 30 天内到期",
   "Decline reason": "拒绝原因",
@@ -1041,6 +1164,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Declined, will not be published": "已拒绝，不会发布",
   Default: "默认",
   "Default for products without their own": "未设置税类的商品的默认值",
+  Delivery: "配送",
   "Delivery fee": "配送费",
   "Delivery temperature °C (optional)": "到货温度 °C（可选）",
   "Describe the photo before saving. Customers who use a screen reader hear this description.":
@@ -1071,7 +1195,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Discard this draft": "放弃此草稿",
   "Discard this draft? The menu goes back to its published version and the changes in this draft are set aside (they stay in the menu's history). Customers keep seeing the published menu; nothing changes for them.":
     "放弃此草稿？菜单会恢复为已发布的版本，此草稿中的更改会被搁置（保留在菜单记录中）。顾客仍看到已发布的菜单；对他们没有任何变化。",
+  Discarded: "已放弃",
+  Discontinued: "已停售",
   Discount: "折扣",
+  Discounts: "折扣",
   Dismiss: "忽略",
   "Display name shown to staff": "向员工显示的名称",
   "Display order": "显示顺序",
@@ -1081,6 +1208,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Done: "完成",
   Down: "下移",
   "Download CSV": "下载 CSV",
+  "Download the Store's sales reports as CSV files": "下载门店销售报表 CSV 文件",
+  "Download {value} as CSV": "下载{value} CSV",
   "Downloaded {fileName} with {value}. ": "已下载 {fileName}，包含{value}。",
   "Downloading reports needs the export permission.": "下载报表需要导出权限。",
   Draft: "草稿",
@@ -1092,6 +1221,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Draft timezone": "草稿时区",
   "Draft — being edited": "草稿 — 编辑中",
   "Draft, not published yet": "草稿，尚未发布",
+  "Draft, not yet sent for approval": "草稿，尚未提交审批",
+  Dropped: "已放弃",
   Due: "截止",
   "Dumont d’Urville": "迪蒙迪维尔",
   "Duplicate as custom role": "复制为自定义角色",
@@ -1115,11 +1246,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "之前的保存未提交。你可以保存新的草稿。",
   "Earlier save did not commit. You can save again.": "之前的保存未提交。你可以再次保存。",
   Edit: "编辑",
+  "Edit Menu drafts": "编辑菜单草稿",
+  "Edit Store feature control drafts": "编辑门店功能控制草稿",
+  "Edit Store profile, hours and service drafts": "编辑门店资料、营业时间和服务草稿",
+  "Edit and submit a Store role draft": "编辑并提交门店角色草稿",
+  "Edit and submit tax configuration": "编辑并提交税务配置",
   "Edit draft": "编辑草稿",
   "Edit in Store Setup": "在门店设置中编辑",
   "Edit inventory item": "编辑库存品项",
   "Edit operating hours": "编辑营业时间",
   "Edit option set": "编辑选项组",
+  "Edit price book drafts": "编辑价目表草稿",
   "Edit product": "编辑商品",
   "Edmonton and Calgary, Alberta": "埃德蒙顿和卡尔加里，艾伯塔省",
   "Eligibility is checked again when assigning.": "指派时会再次检查资格。",
@@ -1131,6 +1268,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Ends at (Store time, optional)": "结束时间（门店时间，可选）",
   "Ends next day": "次日结束",
   "Ends on the following day": "次日结束",
+  English: "英语",
   "Enter a 10-digit phone number, for example (416) 555-0100.":
     "请输入 10 位电话号码，例如 (416) 555-0100。",
   "Enter a Canadian postal code, for example K1A 0B1.": "请输入加拿大邮政编码，例如 K1A 0B1。",
@@ -1146,6 +1284,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请输入加拿大税务局签发的 15 位号码：9 位数字、RT、4 位数字（例如 123456789RT0001）。",
   "Enter the 16-character number from Revenu Québec: 10 digits, TQ, 4 digits (for example 1234567890TQ0001).":
     "请输入魁北克税务局签发的 16 位号码：10 位数字、TQ、4 位数字（例如 1234567890TQ0001）。",
+  "Enter the Merchant workspace for an assigned Store": "进入所分配门店的商户工作台",
   "Enter the city or town.": "请输入城市或镇。",
   "Enter the provincial number exactly as issued (letters, digits, hyphens).":
     "请按签发的原样输入省级号码（字母、数字、连字符）。",
@@ -1162,6 +1301,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Entered by staff · record the card-machine payment by {at}{soon} or it is cancelled":
     "员工录入 · 请在 {at}{soon} 前记录刷卡机付款，否则会被取消",
   "Entry code:": "入座码：",
+  "Escalate a Store task": "升级门店任务",
   "Every active ingredient has a current declaration.": "所有在用配料都有有效申报。",
   "Every check above has passed.": "上面的每项检查都已通过。",
   "Every check passed.": "每项检查都已通过。",
@@ -1187,6 +1327,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Exceptions could not be loaded. No action was sent.": "无法加载异常。未发送任何操作。",
   "Exceptions handled or noted for tomorrow": "异常已处理或已记录待明天处理",
   "Exceptions unavailable": "异常暂不可用",
+  "Execute an approved refund": "执行已批准的退款",
   Expected: "应有",
   "Expired · refund on card machine": "已过期 · 请在刷卡机上退款",
   "Expired · refunded": "已过期 · 已退款",
@@ -1194,6 +1335,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Expiry date": "到期日",
   "Expiry date{value}": "到期日{value}",
   "Expiry warning (days before){value}": "到期提醒（提前天数）{value}",
+  "Feature {skuReference}": "推荐{skuReference}",
   Featured: "推荐",
   "Fee amounts are not set here, and the tax classification has not been checked by a tax professional.":
     "此处不设置费用金额，税类也未经税务专业人士核对。",
@@ -1208,6 +1350,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Filter orders on this page": "筛选本页订单",
   "Filters{value}": "筛选{value}",
   "Finalize session closing": "完成关闭会话",
+  "Finalize uploaded media": "完成媒体上传",
   Find: "查找",
   "Find a table": "查找桌台",
   "Find an order": "查找订单",
@@ -1237,6 +1380,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Fort Nelson, British Columbia": "纳尔逊堡，不列颠哥伦比亚省",
   Found: "已找到",
   "Freshness and drill-down lineage": "时效与下钻来源",
+  Friday: "星期五",
   From: "从",
   "From Revenu Québec, e.g. 1234567890TQ0001. Leave empty outside Québec.":
     "魁北克税务局签发，例如 1234567890TQ0001。魁北克以外请留空。",
@@ -1250,6 +1394,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "加拿大税务局签发，例如 123456789RT0001。",
   "From the sub-recipe": "来自子配方",
   "From {businessDate}": "来自 {businessDate}",
+  "Front of House": "前台",
   "Frozen (freezer)": "冷冻（冷柜）",
   Fulfillment: "履约",
   "Full count": "全面盘点",
@@ -1269,6 +1414,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这张桌台现在有顾客。他们的手机将无法再用旧码：需要扫描新码并重新输入桌台的入座码。他们的订单和账单不受影响。",
   "Guests are seated at this table now. Their phones stop working with this table's code and there is no new code to scan: they ask a staff member to order or pay. Their orders and bill are not affected.":
     "这张桌台现在有顾客。他们的手机将无法再用这张桌台的码，且没有新码可扫：需要找员工点单或付款。他们的订单和账单不受影响。",
+  "Guests at this table have items in their shared cart that haven't been sent{value}. Ask them to send or remove those items on their phone, then send this order again.":
+    "这张桌台的顾客共享购物车中有尚未发送的商品{value}。请他们在手机上发送或移除这些商品，然后再发送此订单。",
   "Guests have left": "顾客已离开",
   "Guests left": "顾客已离开",
   "Guests may have left · open {open}{suffix}": "顾客可能已离开 · 已开台 {open}{suffix}",
@@ -1283,6 +1430,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Handed over": "已交付",
   "Handed over.": "已交付。",
   "Handed over. The list is updating.": "已交付。列表正在更新。",
+  "Handle payment and order exceptions": "处理付款和订单异常",
   "Handoff is not available on this device. Ask a manager.": "此设备不能进行交付。请找经理。",
   "Handoff was not confirmed. Close and refresh the queue before another attempt.":
     "交付未确认。请关闭并刷新队列后再尝试。",
@@ -1291,6 +1439,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Handover needed": "需要交接",
   "Handover was not recorded or sign-out was not confirmed. Retry before handing over.":
     "交接未记录或退出未确认。交接前请重试。",
+  Healed: "已自愈",
   Held: "暂停",
   "Held by:": "占用者：",
   "Held for open orders — recording this waste leaves those orders short; receive stock or recount.":
@@ -1379,10 +1528,31 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Internal test rates": "内部测试税率",
   "Interval {value}": "时段 {value}",
   "Inuvik, Northwest Territories": "伊努维克，西北地区",
+  Invalidated: "已失效",
+  "Inventory Manager": "库存经理",
+  "Inventory adjustment execute": "执行库存调整",
+  "Inventory count execute": "执行盘点",
   "Inventory item": "库存品项",
+  "Inventory item archive": "库存品项归档",
+  "Inventory item barcode manage": "库存品项条码管理",
+  "Inventory item create": "库存品项创建",
+  "Inventory item deactivate": "库存品项停用",
+  "Inventory item export": "库存品项导出",
+  "Inventory item history read": "库存品项记录查看",
+  "Inventory item import": "库存品项导入",
+  "Inventory item read": "库存品项查看",
+  "Inventory item reorder manage": "库存品项补货管理",
+  "Inventory item restore": "库存品项恢复",
+  "Inventory item tracking manage": "库存品项跟踪管理",
+  "Inventory item unit manage": "库存品项单位管理",
+  "Inventory item update": "库存品项更新",
   "Inventory items": "库存品项",
   "Inventory items are unavailable": "库存品项暂不可用",
   "Inventory items are unavailable.": "库存品项暂不可用。",
+  "Inventory items, receiving, counts, adjustments and waste": "库存品项、收货、盘点、调整和报损",
+  "Inventory movement read": "库存变动查看",
+  "Inventory transfer execute": "执行库存调拨",
+  "Inventory waste record": "记录报损",
   Invitation: "邀请",
   "Invitation expired": "邀请已过期",
   "Invitation sent again. They'll get a new temporary password; it expires in 7 days.":
@@ -1390,12 +1560,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Invitation sent. They'll get an email with a temporary password; it expires in 7 days.":
     "已发送邀请。对方会收到一封含临时密码的邮件；7 天后过期。",
   "Invite a staff member": "邀请员工",
+  "Invite, assign, suspend and remove Store staff": "邀请、分配、暂停和移除门店员工",
   Invited: "已邀请",
   "Invited (not signed in yet)": "已邀请（尚未登录）",
   "Invited · email not confirmed": "已邀请 · 邮箱未确认",
   "Invited · email sent": "已邀请 · 邮件已发送",
   "Invoice or delivery note number (optional)": "发票或送货单号（可选）",
   "Iqaluit, Nunavut": "伊卡卢伊特，努纳武特地区",
+  "Issue, print, replace and turn off table QR codes": "生成、打印、更换和关闭桌台二维码",
   "Issuer, Store, order number, issue time, items, subtotal, discount, fee, tax, tip, total, payment status and refunded total. Professional and legal review have not been evaluated.":
     "开票方、门店、单号、开票时间、商品、小计、折扣、费用、税、小费、合计、付款状态和已退款合计。尚未经过专业和法律审核。",
   "It could not be checked right now; check the connection. If an action is refused, sign in again.":
@@ -1440,6 +1612,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Items: "商品",
   "Items cancelled. The customer's refund has started.": "商品已取消。顾客的退款已开始。",
   "Items could not be read. Open the order to retry.": "无法读取商品。请打开订单重试。",
+  "Items in order {orderLabel}": "订单 {orderLabel} 中的商品",
   "Items in this order": "此订单中的商品",
   "Items ordered": "所点商品",
   "Items to cancel": "要取消的商品",
@@ -1473,6 +1646,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Kitchen display paused": "后厨屏已暂停",
   "Kitchen display sign-in not confirmed": "后厨屏登录未确认",
   "Kitchen display signed out": "后厨屏已退出",
+  "Kitchen display work items, remakes, kitchen exceptions and items sold out today":
+    "后厨屏工作项、重做、后厨异常以及今天售罄的商品",
   "Kitchen instructions": "后厨做法",
   "Kitchen is remaking {value} — wait for it before handing this order over.":
     "后厨正在重做{value} — 等它做好后再交付这笔订单。",
@@ -1488,6 +1663,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Language: "语言",
   "Last 7 days": "最近 7 天",
   "Last backup {lastSuccessfulBackupAt}": "最近备份 {lastSuccessfulBackupAt}",
+  "Last change {time}": "最近更改 {time}",
   "Last checked": "最近检查",
   "Last checked ": "最近检查 ",
   "Last checked {updatedAt}": "最近检查 {updatedAt}",
@@ -1593,10 +1769,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Make default": "设为默认",
   "Makes the product and every size not yet selling available to price and to place on menus. Customers see it once it is on a published menu with a price.":
     "让商品及其所有尚未售卖的规格可以定价并放入菜单。上架到已发布且有价格的菜单后，顾客才能看到。",
+  "Manage Brand-level configuration": "管理品牌层级配置",
+  "Manage digital receipt templates": "管理电子收据模板",
+  "Manage production batches": "管理生产批次",
+  "Manage promotions": "管理促销",
   "Manager override required": "需要经理授权",
+  Manitoba: "曼尼托巴省",
   "Manufacturer statement": "生产商声明",
   "Mark a table unavailable while it can't be seated.": "桌台暂时不能安排入座时，请标记为不可用。",
   "Mark an item sold out": "标记商品售罄",
+  "Mark an item sold out for the rest of today and back in stock":
+    "将商品标记为今天余下时间售罄以及恢复库存",
+  "Mark an order fulfilled": "将订单标记为已完成",
   "Mark not collected": "标记未取餐",
   "Mark ready": "标记做好",
   "Mark table available": "标记桌台可用",
@@ -1608,6 +1792,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "正在标记 {length} 项上桌。整桌可能需要一点时间。",
   "Match every item to the order ticket before handing it over.":
     "交付前请将每件商品与订单票据逐一核对。",
+  Matched: "已匹配",
   "Matches the day-end settlement: {settlementCollectedMinor} collected, {settlementRefundedMinor} refunded.":
     "与日结一致：已收 {settlementCollectedMinor}，已退 {settlementRefundedMinor}。",
   "Matches the payment provider": "与支付方一致",
@@ -1617,6 +1802,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Membership {membershipStatus} · Store assignment {storeAssignmentStatus}":
     "成员状态 {membershipStatus} · 门店分配 {storeAssignmentStatus}",
   Menu: "菜单",
+  "Menu Manager": "菜单经理",
   "Menu categories": "菜单分类",
   "Menu name": "菜单名称",
   "Menu saved.": "菜单已保存。",
@@ -1631,12 +1817,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Modifiers: "附加选项",
   "Modifiers may add allergens": "附加选项可能带来过敏原",
   "Moncton, New Brunswick": "蒙克顿，新不伦瑞克省",
+  Monday: "星期一",
   "More information needed": "需要更多信息",
   "More than two minutes have passed since it was marked done. Choose another reason to remake it.":
     "标记完成已超过两分钟。请选择其他原因来重做。",
   "Most in total (empty for no limit)": "最多总数（不限则留空）",
   "Most of one option": "单个选项最多",
   "Move section up": "上移分区",
+  "Move {skuReference} down": "下移{skuReference}",
+  "Move {skuReference} up": "上移{skuReference}",
   "My PIN": "我的 PIN",
   Name: "名称",
   "Name and contact shown to customers": "向顾客显示的名称和联系方式",
@@ -1670,6 +1859,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "New photo": "新照片",
   "New price": "新价格",
   "New price book": "新建价目表",
+  "New price of {label} on {name}": "{label}在{name}上的新价格",
   "New product": "新建商品",
   "New recipe": "新建配方",
   "New template draft": "新建模板草稿",
@@ -1695,6 +1885,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No allergen list": "无过敏原清单",
   "No allergen list is approved for the Brand. Proposed list ({jurisdictionCode}): {value}.":
     "品牌尚未批准过敏原清单。拟定清单（{jurisdictionCode}）：{value}。",
+  "No answer from the system. Record again — the same payment is never counted twice.":
+    "系统没有回应。请再次记录 — 同一笔付款绝不会重复计算。",
+  "No answer from the system. Send again — the same order is never created twice.":
+    "系统没有回应。请再次发送 — 同一笔订单绝不会重复创建。",
   "No authorized operational projection exists.": "没有已授权的运营投影。",
   "No backup recorded yet": "尚无备份记录",
   "No cached Task data is available. Reconnect to load the authorized queue.":
@@ -1942,10 +2136,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Nothing was thrown away, so the first dish's waste record is reversed and its ingredients go back to stock.":
     "没有丢弃任何东西，因此撤销第一份的损耗记录，配料退回库存。",
   "Nova Scotia": "新斯科舍省",
+  Nunavut: "努纳武特地区",
   "Oat milk": "燕麦奶",
   Off: "关",
   "Off. Refunds that need approval are approved by a second owner or finance member.":
     "已关闭。需要批准的退款由第二位店主或财务人员批准。",
+  "Offer at this Store": "在本店提供",
+  "Offer {value}": "提供{value}",
   "Offer {value} at this Store now": "现在在本店提供{value}",
   Offered: "提供",
   "Offered here": "本门店提供",
@@ -1984,6 +2181,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已开启但未生效：{named}也{value}本店的退款批准权限，因此需要第二个人。",
   "On, but you don't hold refund approval at this store, so it has no effect for you.":
     "已开启，但你没有本店的退款批准权限，因此对你无效。",
+  "One less {name}": "{name}减一份",
+  "One more {name}": "{name}加一份",
+  Online: "线上",
   "Online (card)": "线上（刷卡）",
   "Online or table QR code": "线上或桌台二维码",
   "Only a draft that is not in review, of a menu that has been published, can be discarded. Refresh and check again.":
@@ -2039,6 +2239,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Only {left} {name} left, {ordered} in this order. Remove {name2} and add {left2} back, then send again. Nothing was sent or charged.":
     "{name}只剩 {left} 份，此订单中有 {ordered} 份。请移除{name2}后加回 {left2} 份，再重新发送。未发送任何内容，也未收费。",
   "Only {who} can check it or send it for approval. ": "只有{who}可以核对或提交审批。",
+  Ontario: "安大略省",
   Open: "未解决",
   "Open Orders": "打开订单页",
   "Open Settlement": "打开结算",
@@ -2083,6 +2284,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Opening stock posted": "期初库存已过账",
   "Opens a copy to edit; it must be submitted for review and published again.":
     "打开一个副本进行编辑；它必须重新提交审核并发布。",
+  "Operate workflow transitions": "执行流程状态变更",
   "Operating hours draft": "营业时间草稿",
   "Operational Dashboard unavailable": "运营看板暂不可用",
   "Operational dashboard": "运营看板",
@@ -2106,8 +2308,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Option set": "选项组",
   "Option sets": "选项组",
   "Option sets are unavailable": "选项组暂不可用",
+  "Option {value} Chinese name": "选项 {value} 中文名称",
+  "Option {value} name": "选项 {value} 名称",
   Options: "选项",
   "Options are unavailable.": "选项暂不可用。",
+  "Options from {name} on this product": "此商品上来自{name}的选项",
   "Options offered": "提供的选项",
   "Options · Brand": "选项 · 品牌",
   Order: "订单",
@@ -2162,6 +2367,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     '桌台订单使用桌台码。请经理在"桌台二维码"页面创建一个，然后再点单。',
   "Orders for a table use its code. Create one on": "桌台订单使用桌台码。请在以下位置创建一个：",
   "Orders unavailable": "订单暂不可用",
+  "Orders, exceptions, refunds within limit, kitchen, pickup, stock and availability":
+    "订单、异常、额度内退款、后厨、取餐、库存和商品供应",
   Organization: "组织",
   "Original publication receipt": "原始发布回执",
   "Original review action confirmed from history; the current review is shown separately.":
@@ -2173,6 +2380,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Original submission did not commit. You may submit the saved draft again.":
     "原来的提交未提交。你可以再次提交已保存的草稿。",
   "Original template publication": "原始模板发布",
+  Other: "其他",
   "Other (explain in a note)": "其他（在备注中说明）",
   "Other amount": "其他金额",
   "Other language": "其他语言",
@@ -2180,6 +2388,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Other refunds": "其他退款",
   "Other time zones": "其他时区",
   "Out of service": "停用",
+  Overdue: "逾期",
   "Overdue only": "仅看逾期",
   "Overrides are overlap-validated. Pausing service never changes published hours or external configuration.":
     "例外会检查重叠。暂停服务绝不会更改已发布的营业时间或外部配置。",
@@ -2237,11 +2446,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Participant {value} · Joined {value2}": "参与者 {value} · 加入于 {value2}",
   "Participant {value} · Joined {value2}{value3}": "参与者 {value} · 加入于 {value2}{value3}",
   "Participants unavailable. Refresh to try again.": "参与者暂不可用。请刷新重试。",
+  "Partner integration": "合作方接入",
+  "Pause and resume online ordering for the Store": "暂停和恢复门店的线上点单",
   "Pause duration (minutes)": "暂停时长（分钟）",
   "Pause new service for a limited time. Existing paid orders and occupied dining tables remain active.":
     "在有限时间内暂停新的服务。已付款的订单和有客的堂食桌台保持不变。",
   "Pause service": "暂停服务",
   "Pause service safely": "安全地暂停服务",
+  Paused: "已暂停",
   "Paused until the connection returns.": "网络恢复前暂停。",
   Payment: "付款",
   "Payment configuration": "付款配置",
@@ -2296,6 +2508,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Photo preview, not described yet": "照片预览，尚未描述",
   "Photo removed": "照片已移除",
   "Photo replaced": "照片已更换",
+  "Picked up": "已取餐",
   Pickup: "自取",
   "Pickup Queue unavailable": "取餐队列暂不可用",
   "Pickup changed": "取餐已变更",
@@ -2306,9 +2519,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Pickup customer": "自取顾客",
   "Pickup for {name}": "{name} 的自取单",
   "Pickup handoff could not be confirmed": "取餐交付未能确认",
+  "Pickup hours are over, so the counter can't take a new order now. A paper order taken earlier can still be entered under Paper order.":
+    '自取时间已结束，柜台现在不能接新订单。之前记录的纸质订单仍可在"纸质订单"中录入。',
   "Pickup is unavailable": "取餐暂不可用",
   "Pickup pages": "取餐分页",
   "Pickup proof verification could not be confirmed": "取餐凭证核验未能确认",
+  "Pickup times have run out in the system, so no pickup order can be entered right now. Nothing was sent or charged. Take this order on paper and charge it on the card machine, then enter it under Paper order once pickup times are back. Tell a manager — Home shows the alert.":
+    '系统中的自取时段已用完，目前无法录入自取订单。未发送任何内容，也未收费。请用纸质记录订单并在刷卡机上收款，自取时段恢复后在"纸质订单"中录入。请告诉经理 — 首页会显示提醒。',
   "Pickup unavailable": "取餐暂不可用",
   "Pickups from earlier days": "较早营业日的取餐",
   "Pickups from earlier days: check whether they were collected, then close them":
@@ -2318,12 +2535,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Pickups waiting": "等待取餐",
   "Pilot: changes apply to the Brand's product directly, without a separate publication review; every change is recorded with its author.":
     "试点：更改直接应用到品牌的商品，不需要单独的发布审核；每次更改都会记录作者。",
+  "Place or release a lot quality hold": "设置或解除批次质量冻结",
   Placed: "下单时间",
   "Please wait before taking another action.": "请稍候再进行其他操作。",
   "Please wait.": "请稍候。",
   "Policy unavailable": "策略不可用",
+  "Post goods receipts (Store direct or PO-linked)": "过账收货单（门店直采或关联采购单）",
   "Post opening stock": "过账期初库存",
   "Post receipt": "过账收货",
+  "Post the audited opening stock initialization": "过账经审核的期初库存",
   "Postal code": "邮政编码",
   Posted: "已过账",
   "Posted. These quantities are the Store's opening stock.": "已过账。这些数量即为门店的期初库存。",
@@ -2342,6 +2562,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Price books used at this Store": "本店使用的价目表",
   "Price here": "本店价格",
   "Price now": "现价",
+  "Price of {label} on every product": "{label}在所有商品上的价格",
+  "Price of {productName} {sizeName}": "{productName} {sizeName} 的价格",
   Prices: "价格",
   "Prices are unavailable": "价格暂不可用",
   "Prices are unavailable.": "价格暂不可用。",
@@ -2361,6 +2583,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Print: "打印",
   "Print all codes": "打印所有桌台码",
   "Privacy notice link": "隐私声明链接",
+  Processing: "处理中",
   Product: "商品",
   "Product label": "产品标签",
   "Product publication action could not be confirmed": "商品发布操作未能确认",
@@ -2372,6 +2595,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Products are unavailable.": "商品暂不可用。",
   "Products that cannot be taxed": "无法计税的商品",
   "Products · Brand": "商品 · 品牌",
+  "Products, menus and prices, including approving another person's changes":
+    "商品、菜单和价格，包括批准他人的更改",
   "Professional and legal review are not evaluated.": "尚未经过专业和法律审核。",
   "Professional review valid until": "专业审核有效至",
   Profile: "资料",
@@ -2387,12 +2612,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Publication recorded.": "已记录发布。",
   Publish: "发布",
   "Publish Store configuration": "发布门店配置",
+  "Publish an Option Set release": "发布选项组版本",
   "Publish approved configuration": "发布已批准的配置",
+  "Publish feature control changes": "发布功能控制更改",
   "Publish kitchen instructions": "发布后厨做法",
   "Publish name and contact details": "发布名称和联系方式",
   "Publish on my own": "自行发布",
+  "Publish or schedule Store configuration": "发布或计划门店配置",
+  "Publish or schedule a Menu release": "发布或计划菜单版本",
   "Publish receipt template": "发布收据模板",
   "Publish recipe": "发布配方",
+  "Publish recipe versions": "发布配方版本",
+  "Publish releases": "发布版本",
   "Publish setup": "发布设置",
   "Publish {length} price{value}": "发布 {length} 个价格",
   Published: "已发布",
@@ -2434,6 +2665,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Quantity ({unit})": "数量（{unit}）",
   "Quantity served · {displayName} · round {batchSequence}":
     "上桌数量 · {displayName} · 第 {batchSequence} 轮",
+  "Quantity {quantity}": "数量 {quantity}",
+  Quebec: "魁北克省",
   Queue: "队列",
   Queued: "排队中",
   "Queued {queued} · in progress {inProgress} · completed {completed} · exceptions {exceptions}":
@@ -2445,6 +2678,35 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Rankin Inlet, Nunavut": "兰金因莱特，努纳武特地区",
   Rates: "税率",
   "Raw material": "原材料",
+  "Read Category audit": "查看商品分类审计记录",
+  "Read Inventory Item audit": "查看库存品项审计记录",
+  "Read Menu drafts and releases": "查看菜单草稿和版本",
+  "Read Option Set audit": "查看选项组审计记录",
+  "Read Product audit": "查看商品审计记录",
+  "Read SKU audit": "查看规格审计记录",
+  "Read Stock Sites and Storage Locations": "查看库存点和库位",
+  "Read Store profile, hours and service configuration": "查看门店资料、营业时间和服务配置",
+  "Read Store roles and their permissions": "查看门店角色及其权限",
+  "Read Store staff and assignments": "查看门店员工和分配",
+  "Read goods receipts": "查看收货单",
+  "Read on-hand, reserved and available stock": "查看现有、预留和可用库存",
+  "Read price books": "查看价目表",
+  "Read recipes and their ingredient requirements": "查看配方及其配料需求",
+  "Read registered product content": "查看已登记的商品内容",
+  "Read stock adjustments": "查看库存调整",
+  "Read stock counts": "查看盘点",
+  "Read stock transfers": "查看库存调拨",
+  "Read tables and their availability": "查看桌台及其可用状态",
+  "Read tax configuration": "查看税务配置",
+  "Read the Kitchen board and work items": "查看后厨看板和工作项",
+  "Read the Store order queue and order details": "查看门店订单队列和订单详情",
+  "Read the Store task inbox": "查看门店任务收件箱",
+  "Read the Store's day-end settlement and payment statement check":
+    "查看门店日结和支付方对账单核对",
+  "Read the Store's sales, item, hourly and tip reports": "查看门店的销售、商品、按小时和小费报表",
+  "Read the allergen registry and ingredient declarations": "查看过敏原清单和配料申报",
+  "Read the pickup queue": "查看取餐队列",
+  "Read waste records": "查看报损记录",
   "Read-only until reconnected": "重新联网前只读",
   "Reading current orders…": "正在读取当前订单…",
   "Reading current work…": "正在读取当前工作…",
@@ -2466,6 +2728,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Reason: "原因",
   "Reason (optional)": "原因（可选）",
   "Reason for turning it {value}": "{value}的原因",
+  "Reason {value}": "原因 {value}",
   "Reason: {value}": "原因：{value}",
   "Reason: {value} ·": "原因：{value} ·",
   "Reassign the {memberCount} staff holding this role before deactivating it.":
@@ -2499,6 +2762,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Recent changes": "最近更改",
   "Recently finished · {length}": "最近完成 · {length}",
   Recipe: "配方",
+  "Recipe Developer": "配方开发",
+  "Recipe Reviewer": "配方审核",
   "Recipe change": "配方更改",
   "Recipe · {code}{value}": "配方 · {code}{value}",
   "Recipe · {value}": "配方 · {value}",
@@ -2508,16 +2773,22 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Recipes are unavailable": "配方暂不可用",
   "Recipes are unavailable.": "配方暂不可用。",
   "Recipes · Brand": "配方 · 品牌",
+  "Recipes, menu and products, pricing, supply items and Brand staff roles":
+    "配方、菜单和商品、定价、物料以及品牌员工角色",
   "Reconciliation records could not be read.": "无法读取对账记录。",
   "Reconciliation with the payment provider": "与支付方对账",
   "Reconnect and refresh before handing over a pickup.": "请重新联网并刷新后再交付。",
   "Reconnect and refresh before taking an action.": "请重新联网并刷新后再操作。",
   "Reconnect to load your Store workspace.": "请重新联网以加载门店工作台。",
+  "Record a Store task failure": "记录门店任务失败",
   "Record a delivery": "记录收货",
   "Record card-machine payment": "记录刷卡机付款",
   "Record card-machine refund": "记录刷卡机退款",
+  "Record completed quantity and mark items ready": "记录完成数量并标记商品做好",
   "Record declaration": "记录申报",
   "Record deliveries and store purchases here as they arrive.": "在送货和门店采购到达时在此记录。",
+  "Record ingredient allergen declarations": "记录配料过敏原申报",
+  "Record items served": "记录已上桌的商品",
   "Record operations reconciliation": "记录运营对账",
   "Record the card machine refund": "记录刷卡机退款",
   "Record the payment by {at}. If it isn't paid by then the order is released and its items go back to stock.":
@@ -2544,6 +2815,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Recording handoff…": "正在记录交付…",
   "Recording served quantity…": "正在记录上桌数量…",
   "Recording…": "正在记录…",
+  "Recover a feature control after failure": "在功能控制失败后恢复",
   "Recover earlier template review action": "恢复之前的模板审核操作",
   "Recover earlier template submission": "恢复之前的模板提交",
   "Recover original configuration request": "恢复原来的配置请求",
@@ -2620,6 +2892,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Refunded · check overdue since ": "已退款 · 核对逾期自 ",
   "Refunded — check by end of day": "已退款 — 请在当天结束前核对",
   "Refunded — store check overdue": "已退款 — 门店核对已逾期",
+  "Refunded.": "已退款。",
   "Refunds (store / payment provider)": "退款（门店 / 支付方）",
   "Refunds ({refundCount})": "退款（{refundCount}）",
   "Refunds above $100 for an order, from an earlier business day or more than 24 hours after payment need an owner or finance member who did not ask for them. Approve in person: both of you confirm with your authenticator code, then the refund is sent.":
@@ -2631,6 +2904,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Refunds on this order would total more than $100": "这笔订单的退款总额将超过 $100",
   "Refunds the owner approved alone": "店主单独批准的退款",
   "Regina and Saskatoon, Saskatchewan": "里贾纳和萨斯卡通，萨斯喀彻温省",
+  "Register and remove the Store's shared tablets for staff PIN sign-in":
+    "登记和移除门店用于员工 PIN 登录的共享平板",
+  "Register product content": "登记商品内容",
   "Registration evidence valid until": "登记证明有效至",
   Reject: "拒绝",
   "Reject a change": "拒绝更改",
@@ -2642,12 +2918,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Release again": "再次释放",
   "Release held ingredients": "释放占用的配料",
   "Released. The ingredients are back in stock.": "已释放，配料已退回库存。",
+  "Releasing…": "正在释放…",
   Reload: "重新加载",
   "Reload configuration": "重新加载配置",
   "Reload the list": "重新加载列表",
   "Reload the saved configuration before reviewing this action.":
     "审核此操作前，请先重新加载已保存的配置。",
   Remake: "重做",
+  "Remake a finished dish or put a dish marked done by mistake back in progress":
+    "重做已完成的菜，或把误标为完成的菜改回制作中",
   "Remake cancelled": "重做已取消",
   "Remake cancelled — opened by mistake": "重做已取消 — 误开",
   "Remake done": "重做完成",
@@ -2657,6 +2936,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Remake sent to the kitchen": "重做已发送到后厨",
   "Remake updated": "重做已更新",
   "Remake {displayName}": "重做 {displayName}",
+  "Remake {displayName}, {item}": "重做{displayName}，{item}",
   "Remake · ": "重做 · ",
   Remakes: "重做",
   "Remakes could not be refreshed. The board keeps trying.": "重做信息无法刷新。看板会继续尝试。",
@@ -2674,13 +2954,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Remove section": "移除分区",
   "Remove step": "移除步骤",
   "Remove tablet": "移除平板",
+  "Remove {label}": "移除{label}",
   "Remove {label}?": "移除 {label}？",
   "Remove {name}": "移除 {name}",
   "Removed from the menu (customers no longer see them): {value}.":
     "已从菜单移除（顾客不再看到）：{value}。",
   Rename: "重命名",
+  "Rename {name}": "重命名{name}",
   "Renamed to {label}.": "已重命名为 {label}。",
+  "Renew an effective period": "续期生效时段",
   "Reopen for changes": "重新打开以修改",
+  "Reopen the Store live gate": "重新打开门店上线检查",
   Replace: "更换",
   "Replace an ingredient (same amount)": "替换一种配料（相同数量）",
   "Replace code": "更换桌台码",
@@ -2688,13 +2972,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Replace photo": "更换照片",
   "Replace the code for table {stableLabel}?": "更换桌台 {stableLabel} 的码？",
   "Replace with": "替换为",
+  "Replaced by a newer version": "已被新版本替换",
   "Replacing the entry code invalidates the previous code. Existing participants remain joined.":
     "更换入座码会让之前的码失效。已加入的参与者保持加入。",
   "Report period": "报表时段",
+  "Report, acknowledge and resolve Kitchen exceptions": "报告、确认和解决后厨异常",
   Reported: "已报告",
   "Reporting disabled": "报表已停用",
   Reports: "报表",
   "Reports unavailable": "报表暂不可用",
+  "Request an ordinary refund within policy": "按政策申请普通退款",
   "Request assignment": "申请分配",
   "Request refund of {amount}": "申请退款 {amount}",
   "Requested ·": "已申请 ·",
@@ -2706,6 +2993,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Requires the WP-2192 Store authoring Command": "需要 WP-2192 门店编辑命令",
   "Resend invitation": "重新发送邀请",
   "Reset PIN": "重置 PIN",
+  "Reset a staff member's PIN for the Store's shared tablets": "重置员工用于门店共享平板的 PIN",
+  "Reset {name}'s PIN": "重置{name}的 PIN",
   "Reset {name}'s PIN?": "重置 {name} 的 PIN？",
   "Reset — waiting for a new PIN": "已重置 — 等待新 PIN",
   "Resolute, Nunavut": "雷索卢特，努纳武特地区",
@@ -2717,6 +3006,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Resolved: this payment was checked again": "已解决：已重新核对这笔付款",
   Restore: "恢复",
   Result: "结果",
+  "Result per size for {optionName}": "{optionName}在各规格上的结果",
   "Result unknown. Approve again to retry the same approval — it will not refund twice.":
     "结果未知。请再次批准以重试同一批准 — 不会重复退款。",
   "Result unknown. Decline again with the same reason — it is recorded once.":
@@ -2743,6 +3033,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Resume {value}": "恢复{value}",
   Retire: "停用",
   "Retire for good": "永久停用",
+  "Retire {name}": "停用{name}",
   "Retire {retiringEntry} for good?": "永久停用 {retiringEntry}？",
   Retired: "已停用",
   "Retired {label}.": "已停用 {label}。",
@@ -2787,7 +3078,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Review current follow-up": "查看当前跟进",
   "Review draft": "核对草稿",
   "Review pickup handoff": "核对取餐交付",
+  "Review recipe cost and food safety before publication": "在发布前审核配方成本和食品安全",
   "Review unmatched charge": "核查未匹配的扣款",
+  "Reviews for {optionName}": "{optionName}的审核",
   "Reviews you cannot give as a second person": "你不能作为第二个人给出的审核",
   "Revise this recipe": "修订此配方",
   "Revise {name}": "修订 {name}",
@@ -2807,6 +3100,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Role name": "角色名称",
   "Role or permission": "角色或权限",
   Roles: "角色",
+  "Roll back to an earlier release": "回滚到较早的版本",
   "Round cancelled · not paid. It wasn't paid (cancelled when its payment time ended, or by a manager), so it never went to the kitchen and its items went back to stock. Nothing was charged for it in the system.{value}":
     "本轮已取消 · 未付款。它没有付款（付款时间结束时自动取消，或由经理取消），因此从未发送到后厨，商品已退回库存。系统中没有为它收取任何费用。{value}",
   "Round cancelled. It never went to the kitchen and nobody was charged.":
@@ -2824,6 +3118,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Round {sequence}: ": "第 {sequence} 轮：",
   "Round {sequence}{value}": "第 {sequence} 轮{value}",
   "Rounds {value}": "第 {value} 轮",
+  "Rounds: ": "轮次：",
   "Running long": "耗时较长",
   SKU: "SKU",
   SLA: "SLA",
@@ -2835,6 +3130,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sales, open orders and exceptions for the day are not available in this release. Use Orders, Kitchen, Pickup and Exceptions from the menu.":
     "本版本暂不提供当天的销售、未完成订单和异常汇总。请使用菜单中的订单、后厨、取餐和异常。",
   "Same price on every product": "所有商品同一价格",
+  Saskatchewan: "萨斯喀彻温省",
+  Saturday: "星期六",
   Save: "保存",
   "Save PIN": "保存 PIN",
   "Save a draft, then two reviewers check cost and food safety before it can be published.":
@@ -2898,6 +3195,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已保存 {locale} 模板，草稿 {revision}。{value}",
   "Saved, not on any product yet — customers cannot choose it until you add it to a product and publish a menu with that product.":
     "已保存，尚未用于任何商品 — 在你将它添加到商品并发布含该商品的菜单之前，顾客无法选择。",
+  "Saved.": "已保存。",
   "Saved. Receipts issued from now on show these details; receipts already issued are not changed.":
     "已保存。从现在起开出的收据会显示这些信息；已开出的收据不会更改。",
   "Saved. Two reviewers (cost and food safety) can now approve it.":
@@ -2912,6 +3210,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "仅保存这些规则不会开启刷卡付款：还需设置支付方账户，并批准和发布这些规则。",
   "Saving…": "正在保存…",
   Schedule: "时段",
+  "Schedule an effective period": "计划生效时段",
   "Schedule report": "计划报表",
   Scope: "范围",
   "Scope changed": "范围已变更",
@@ -2946,6 +3245,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Selected table details": "所选桌台详情",
   "Selection changed locally. Save the setup draft to keep it.":
     "已在本地更改所选。请保存设置草稿以保留它。",
+  Selling: "在售",
   "Selling started.": "已开始售卖。",
   "Semi-finished (prepared in store)": "半成品（店内制备）",
   "Send approved refund": "发送已批准的退款",
@@ -2980,6 +3280,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Serve ready items": "上桌已做好的商品",
   "Serve the first {length} of {length2} ready items":
     "先上桌 {length2} 项可上桌中的前 {length} 项",
+  Served: "已上桌",
   "Served or picked up": "已上桌或已取餐",
   Service: "服务",
   "Service change saved. Refreshing status…": "服务更改已保存。正在刷新状态…",
@@ -3066,6 +3367,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "目前无法重新登录，因此没有做任何更改。请几分钟后重试；如果一直如此，请告诉经理。",
   "Signing in isn't available right now. Staff who are already signed in can keep working, and a shared store tablet still switches staff with a PIN. Try again in a few minutes; if it keeps happening, tell your manager so they can contact BOP support.":
     "目前无法登录。已登录的员工可以继续工作，门店共享平板仍可用 PIN 换人。请几分钟后重试；如果一直如此，请告诉经理，让他们联系 BOP 支持。",
+  "Signing in {name}…": "正在为 {name} 登录…",
   "Signing out soon": "即将退出登录",
   "Signing out…": "正在退出…",
   "Since {raisedAt}": "自 {raisedAt} 起",
@@ -3073,6 +3375,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Size: "规格",
   "Size code": "规格代码",
   "Size name": "规格名称",
+  "Size {value} Chinese name": "规格 {value} 中文名称",
+  "Size {value} code": "规格 {value} 代码",
+  "Size {value} name": "规格 {value} 名称",
   Sizes: "规格",
   "Sizes selling": "在售规格",
   "Skip to main content": "跳到主要内容",
@@ -3080,7 +3385,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sold out": "售罄",
   "Sold out for the rest of today": "今天余下时间售罄",
   "Sold out to guests (stock)": "对顾客售罄（库存）",
+  "Sold out today": "今天售罄",
   "Sold out until brought back": "售罄，直到恢复供应",
+  "Sold out until further notice": "售罄直至另行通知",
   "Sold out until {until}": "售罄至 {until}",
   "Sole operator": "独立经营者",
   "Sole operator is not in effect for you now (it is off, or someone else also holds Owner access here), so another person with Owner access must approve this. Recover the request, then refresh.":
@@ -3193,6 +3500,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已保存的电子收据版式支持的标准字段。不显示任何真实的订单或付款信息。",
   "Standard receipt field preview": "标准收据字段预览",
   Start: "开始",
+  "Start a Kitchen work item": "开始后厨工作项",
   "Start a count": "开始盘点",
   "Start a new dining session for this party.": "为这桌客人开始新的堂食会话。",
   "Start a revision": "开始修订",
@@ -3208,6 +3516,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Start remake": "开始重做",
   "Start selling": "开始售卖",
   "Start {value}": "开始 {value}",
+  "Start, join, move and regenerate dining sessions": "开始、加入、移动和重新生成堂食会话",
   "Start, progress and completion times are not recorded on this screen yet.":
     "此屏幕尚未记录开始、进度和完成时间。",
   Started: "已开始",
@@ -3222,6 +3531,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Station {value}": "工位 {value}",
   Status: "状态",
   "Status being updated": "状态更新中",
+  "Status not loaded · refresh": "状态未加载 · 请刷新",
   "Stay signed in": "保持登录",
   "Staying signed in…": "正在保持登录…",
   "Step {value}": "步骤 {value}",
@@ -3259,8 +3569,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Stock moved on {value} since counting started (sales, deliveries or waste). Refresh them and count them again.":
     "自开始清点以来，{value}的库存有变动（销售、收货或报损）。请刷新后重新清点。",
   "Stock was short — count these items": "库存不足 — 请清点这些品项",
+  "Stop offering": "停止提供",
   "Stop using as default": "不再作为默认",
   Store: "门店",
+  "Store Manager": "门店经理",
   "Store address": "门店地址",
   "Store administration is unavailable": "门店管理暂不可用",
   "Store capabilities unavailable": "门店功能暂不可用",
@@ -3296,10 +3608,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Store system": "门店系统",
   "Store unavailable": "门店暂不可用",
   "Store workspace": "门店工作台",
+  "Store · {lifecycle}": "门店 · {lifecycle}",
   Stores: "门店",
   "Street address": "街道地址",
   "Sub-recipe": "子配方",
+  "Submit Store live-gate evidence": "提交门店上线检查证据",
+  "Submit a Menu version for review": "提交菜单版本审核",
+  "Submit an Option Set for review": "提交选项组审核",
   "Submit configuration for review": "提交配置审核",
+  "Submit drafts for review": "提交草稿审核",
   "Submit for approval": "提交审批",
   "Submit for review": "提交审核",
   "Submit saved draft": "提交已保存的草稿",
@@ -3315,6 +3632,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "提交会固定此版本，并对照品牌过敏原清单检查每件商品配方中的过敏原；之后由另一人批准。{value}",
   "Submitting…": "正在提交…",
   Subtotal: "小计",
+  Sunday: "星期日",
   Supplier: "供应商",
   "Supplier specification": "供应商规格书",
   Supply: "供应",
@@ -3333,6 +3651,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "系统正在更新 — 点单可能暂停几分钟。",
   "TEST-ONLY": "仅供测试",
   Table: "桌台",
+  "Table QR code": "桌台二维码",
   "Table QR code stops working in {value} day{value2}. Ask a manager to print a new one.":
     "桌台二维码将在 {value} 天后失效。请经理打印新的。",
   "Table QR codes": "桌台二维码",
@@ -3370,6 +3689,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Take order for table {stableLabel}": "为桌台 {stableLabel} 点单",
   "Taken at the counter — call the order number and hand it over.": "柜台下单 — 请叫单号后交付。",
   "Taken at the counter. {value}{value2}": "柜台下单。{value}{value2}",
+  "Taken by staff": "员工录入",
   "Taken on card machine": "刷卡机收款",
   "Takes effect: {value}": "生效时间：{value}",
   "Takes this version out of review and opens a copy to edit; it must be submitted for review again.":
@@ -3412,6 +3732,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Tax settings are the ones in force for this Store.": "税务设置是本店当前生效的设置。",
   "Tax · {label}": "税 · {label}",
   "Taxed for pickup and dine-in": "自取和堂食均征税",
+  Taxes: "税费",
   "Tell the author what to fix; they save a corrected change for review.":
     "告诉作者需要修正什么；他们会保存修正后的更改以待审核。",
   Temperature: "温度",
@@ -3423,6 +3744,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Terminal conflict": "终端冲突",
   "Test configuration (internal testing only)": "测试配置（仅限内部测试）",
   "Thanks. Your team now sees your name.": "谢谢。你的团队现在能看到你的名字了。",
+  "That PIN didn't match. Try again. After 5 wrong tries the PIN locks for 15 minutes.":
+    "PIN 不正确。请重试。输错 5 次后 PIN 会锁定 15 分钟。",
   "That PIN is too easy to guess. Choose a different one.": "这个 PIN 太容易被猜到。请换一个。",
   "That classification is no longer in the list. Reload to see the current list.":
     "该税类已不在列表中。请重新加载以查看当前列表。",
@@ -3447,6 +3770,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "That's not the email this invitation was sent to. Cancel this invitation and invite again with the new address.":
     "这不是此邀请发送到的邮箱。请取消此邀请，并用新地址重新邀请。",
   "The Brand (saved earlier)": "品牌（之前保存的）",
+  "The Brand allergen list this menu uses is not approved. Approve it under Allergens, then submit again.":
+    '此菜单使用的品牌过敏原清单尚未批准。请在"过敏原"中批准，然后重新提交。',
   "The Brand has no active items yet. Create products under Products.":
     '品牌还没有有效的商品。请在"商品"中创建商品。',
   "The Brand has no default classification now.": "品牌现在没有默认税类。",
@@ -3476,6 +3801,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "提醒监控未运行，因此门店系统、备份和证书的问题未被检查。请联系试点运维人员启动它。",
   "The alert monitor stopped reporting{value}. Problems are not being checked. Ask the pilot operator to restart it.":
     "提醒监控已停止报告{value}。问题未被检查。请联系试点运维人员重启它。",
+  "The amount changed. Charge the new total before recording it.":
+    "金额已变化。请先按新的合计收款，再记录。",
+  "The amount to charge is now {totalMinor}. Charge the difference, then record it.":
+    "现在应收 {totalMinor}。请补收差额，然后记录。",
   "The answer was lost. Retry the same cancellation; it will not be applied twice.":
     "回应丢失了。请重试同一取消；不会重复执行。",
   "The answer was lost. Retry the same close; it will not be recorded twice.":
@@ -3623,6 +3952,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你打开页面后商品已变更，或本店不提供。请刷新后核对。",
   "The kitchen finished orders with more than the last count found, so the count missed some stock or a delivery was not recorded. Count these items again to correct the stock.":
     "后厨完成的订单用量多于上次盘点数，说明盘点漏了部分库存，或有收货未记录。请重新清点这些品项以修正库存。",
+  "The kitchen has started one of these items. Close to refresh; use a refund for items already started.":
+    "后厨已开始制作其中一项。关闭以刷新；已开始制作的商品请改用退款。",
   "The kitchen has started — use a refund instead.": "后厨已开始制作 — 请改用退款。",
   "The kitchen hasn't finished recording this order yet. Check again in a minute.":
     "后厨尚未完成这笔订单的记录。请一分钟后再查看。",
@@ -3800,6 +4131,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The staff list has changed. Choose your name again.": "员工列表已变更。请重新选择你的名字。",
   "The staff member who asked": "提出申请的员工",
   "The staff or role state changed. Refresh and try again.": "员工或角色状态已变更。请刷新后重试。",
+  "The store is closed, so no new table orders can be taken now. A paper order taken earlier can still be entered under Paper order.":
+    '门店已打烊，现在不能接新的桌台订单。之前记录的纸质订单仍可在"纸质订单"中录入。',
   "The store name and contact details could not be loaded": "无法加载门店名称和联系方式",
   "The store's records are busy with orders and payments. Trying again in a few seconds…":
     "门店记录正忙于处理订单和付款。几秒后重试…",
@@ -3810,6 +4143,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The store's totals for {value} do not match the payment provider's statement. Settlement explains the difference and what to do.":
     "门店 {value} 的合计与支付方的对账单不一致。结算页会说明差异及处理方法。",
   "The submission was cancelled after payment.": "付款后提交已被取消。",
+  "The system couldn't place this order (a problem on our side, not with the order). Nothing was charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.":
+    '系统无法下这笔订单（是我们这边的问题，不是订单的问题）。没有收费。请再发送一次。如果仍然失败，请用纸质记录订单，在刷卡机上收款，之后在"纸质订单"中录入。首页会显示提醒。',
+  "The system couldn't send this round for {table} (a problem on our side, not with the order). Nothing was sent to the kitchen or charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.":
+    '系统无法为{table}发送这一轮（是我们这边的问题，不是订单的问题）。没有发送到后厨，也没有收费。请再发送一次。如果仍然失败，请用纸质记录订单，在刷卡机上收款，之后在"纸质订单"中录入。首页会显示提醒。',
   "The table request was not confirmed. Refresh and check current permissions.":
     "桌台请求未确认。请刷新并检查当前权限。",
   "The table wasn't closed yet:": "桌台尚未关闭：",
@@ -3825,6 +4162,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "票据在另一块屏幕上已变更。看板已刷新 — 请再核对一次。",
   "The time to pay this order ended at {at}. It is released and its items go back to stock. If you charged the card machine, refund it on the machine.":
     "这笔订单的付款时间已于 {at} 结束。订单已释放，商品退回库存。如果已在刷卡机上收款，请在刷卡机上退款。",
+  "The time to pay this order has ended and it was released. Refund the card machine payment and take the order again.":
+    "这笔订单的付款时间已结束，订单已释放。请在刷卡机上退款，然后重新点单。",
   "The time to pay this round ended at {at}. It was not sent to the kitchen and is cancelled automatically; nothing was charged in the system. If you charged the card machine, refund it on the machine.":
     "这一轮的付款时间已于 {at} 结束。它没有发送到后厨，会被自动取消；系统中未收取任何费用。如果已在刷卡机上收款，请在刷卡机上退款。",
   "The time zone is the Store's own time zone.": "时区是门店自己的时区。",
@@ -3854,6 +4193,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这些营业时间也是门店设置中的营业时间。保存它们不会更改那里的其他内容。",
   "These items are on this Store's menu but have no price in this book; it cannot be used here until they do:":
     "这些商品在本店菜单上，但在此价目表中没有价格；在定价之前不能在本店使用：",
+  "These items can no longer be cancelled. Close to refresh the order.":
+    "这些商品已无法取消。关闭以刷新订单。",
   "These items have no price in the price book this Store uses; customers cannot be quoted for them: {value}.":
     "这些商品在本店使用的价目表中没有价格；无法为顾客报价：{value}。",
   "These orders are from an earlier business day. Their numbers may repeat today's. If the customer collected the order, hand it over with the code or in person; if not, a manager closes it as not collected.":
@@ -3902,6 +4243,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "它已无法按原样接单（时间已过或有商品售罄）。请刷新订单查看如何处理。",
   "This cancellation was refused. Only a store manager or owner can cancel a paid order; refresh if your session changed.":
     "此取消被拒绝。只有门店经理或店主可以取消已付款的订单；如果你的登录有变化，请刷新。",
+  "This cancellation was refused. Only a store manager or owner can cancel paid items; refresh if your session changed.":
+    "此取消被拒绝。只有门店经理或店主可以取消已付款的商品；如果你的登录有变化，请刷新。",
   "This change was approved by you alone while Sole operator was off, so it cannot be published. Withdraw it, then send a new change for approval.":
     '此更改是在"独立经营者"关闭时由你单独批准的，因此不能发布。请撤回，然后重新提交更改审批。',
   "This change was withdrawn or declined. Make a new change instead.":
@@ -3959,27 +4302,41 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This option set is archived; remove it from the product.": "这个选项组已归档；请从商品中移除。",
   "This order can no longer be cancelled. Close to refresh it.": "这笔订单已无法取消。关闭以刷新。",
   "This order can no longer be closed. Refresh the queue.": "这笔订单已无法关闭。请刷新队列。",
+  "This order can no longer be paid (released or changed). Refund the card machine payment if you charged it.":
+    "这笔订单已无法付款（已释放或已变更）。如果已在刷卡机上收款，请退款。",
   "This order changed since it was shown. Close to refresh it, then cancel again if needed.":
     "显示后这笔订单已变更。关闭以刷新，如有需要再取消一次。",
+  "This order changed since it was shown. Close to refresh it, then try again if needed.":
+    "显示后这笔订单已变更。关闭以刷新，如有需要再试一次。",
   "This order changed since the list was loaded. The list is refreshing; accept again if it still waits.":
     "列表加载后这笔订单已变更。列表正在刷新；如果它仍在等待，请再次接单。",
   "This order changed while it was loading. Refresh to see the latest.":
     "加载期间这笔订单已变更。请刷新查看最新内容。",
   "This order changed. Close this and refresh the list before handing over.":
     "这笔订单已变更。请关闭此窗口并刷新列表后再交付。",
+  "This order could not be priced. Check the items and options and send again.":
+    "这笔订单无法定价。请检查商品和选项后重新发送。",
+  "This order didn't go through and nothing was charged. Send it again.":
+    "这笔订单没有成功，也没有收费。请重新发送。",
   "This order from an earlier day is finished, but ingredients are still set aside for it because the kitchen started it and never marked it done. Mark it done on the kitchen board.":
     "这笔较早营业日的订单已完成，但由于后厨开始制作后从未标记完成，仍为它保留着配料。请在后厨看板上标记完成。",
   "This order from an earlier day is finished, but ingredients are still set aside for it, so they cannot be sold. Release them to put them back into stock.":
     "这笔较早营业日的订单已完成，但仍为它保留着配料，因此不能售卖。请释放配料，退回库存。",
   "This order has no paid payment yet.": "这笔订单还没有已付款的付款。",
+  "This order is already paid. Check Orders before charging again.":
+    "这笔订单已付款。再次收款前请先查看订单页。",
   "This order is no longer waiting for a card-machine payment (paid or released). The list will update.":
     "这笔订单已不在等待刷卡机付款（已付款或已释放）。列表会更新。",
   "This order is not at the selected Store.": "这笔订单不属于所选门店。",
+  "This order is still being sent. Wait a moment, then send again to see it.":
+    "这笔订单仍在发送中。请稍等，再次发送以查看它。",
   "This order link is not valid.": "这个订单链接无效。",
   "This order was already accepted or closed. Refresh to see it.":
     "这笔订单已被接单或已关闭。请刷新查看。",
   "This order was taken at the counter, so no pickup code was sent. Call the order number and hand it over to the customer who answers.":
     "这笔订单是在柜台下单的，因此没有发送取餐码。请叫单号，交给应答的顾客。",
+  "This order's stock was reserved before per-item tracking, so its items cannot be cancelled one by one. Cancel the whole order instead.":
+    "这笔订单的库存是在按商品跟踪之前预留的，因此不能逐项取消。请改为取消整笔订单。",
   "This page could not be shown. Reload to try again. If you were in the middle of something, check it after reloading before doing it again.":
     "此页面无法显示。请重新加载重试。如果你正在操作中，重新加载后请先核对再重做。",
   "This page didn't load": "此页面没有加载出来",
@@ -4010,6 +4367,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This round can no longer be cancelled. Close to refresh it.": "这一轮已无法取消。关闭以刷新。",
   "This round is no longer waiting for a card-machine payment. The order list will update.":
     "这一轮已不在等待刷卡机付款。订单列表会更新。",
+  "This round's stock was reserved before per-item tracking, so its items cannot be cancelled one by one. Cancel the whole round instead.":
+    "这一轮的库存是在按商品跟踪之前预留的，因此不能逐项取消。请改为取消整轮。",
   "This screen signs out at {at} (in {at2}) because it hasn’t been used.":
     "此屏幕因无人使用，将在 {at}（{at2}后）退出登录。",
   "This screen's sign-in has ended; nothing was sent.": "此屏幕的登录已结束；未发送任何内容。",
@@ -4061,6 +4420,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This work item is not at the selected Store.": "这个工作项不属于所选门店。",
   "This {what} was already refunded in full; nothing more will be refunded.":
     "这{what}已全额退款；不会再退款。",
+  Thursday: "星期四",
   "Ticket closed": "票据已关闭",
   "Ticket not closed": "票据未关闭",
   "Time zone": "时区",
@@ -4090,6 +4450,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Today · {text}": "今天 · {text}",
   "Today's payments are checked against the payment provider after the business day ends. Look at the result when you open.":
     "营业日结束后，会将今天的付款与支付方核对。开店时请查看结果。",
+  "Too many tries on this tablet. Wait {minutes} {value}, or sign in with your account.":
+    "这台平板尝试次数太多。请等待 {minutes} 分钟，或用你的账号登录。",
+  "Too many wrong PINs. {name}'s PIN is locked until {until}. Ask a manager to reset it, or sign in with your account.":
+    "输错 PIN 次数太多。{name} 的 PIN 已锁定至 {until}。请经理重置，或用你的账号登录。",
   "Too many wrong codes for this order. Check the customer in person instead: the order number with the name or the last four digits of the phone on the order.":
     "这笔订单输错取餐码的次数太多。请改为当面核对：单号以及订单上的名字或手机号后四位。",
   "Too many wrong codes · check in person": "输错取餐码次数太多 · 请当面核对",
@@ -4109,12 +4473,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Tracking: "跟踪",
   "Tracking {value}": "跟踪{value}",
   "Transfer order host": "转让订单主持人",
+  "Transfer the dining host": "转让堂食主持人",
   "Transferring…": "正在转让…",
   "Try again": "重试",
   "Try closing again": "再次尝试关台",
   "Try confirming again": "再次尝试确认",
   "Try the check again": "再次核对",
   "Trying again automatically.": "正在自动重试。",
+  Tuesday: "星期二",
   "Turn off": "关闭",
   "Turn off code": "关闭桌台码",
   "Turn off sole operator": '关闭"独立经营者"',
@@ -4145,6 +4511,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Unnamed tax class{value}: {value2}": "未命名的税类{value}：{value2}",
   "Unpaid dine-in round": "未付款的堂食轮次",
   "Unpaid rounds": "未付款轮次",
+  Unresolved: "未解决",
   Up: "上移",
   "Up to {perOptionMaximum} of each, {total} in total{need}":
     "每项最多 {perOptionMaximum}，共 {total}{need}",
@@ -4153,6 +4520,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Updating availability…": "正在更新可用性…",
   "Updating dining session…": "正在更新堂食会话…",
   "Updating remake": "正在更新重做",
+  "Upload media": "上传媒体",
   "Uploading photo…": "正在上传照片…",
   Urgent: "紧急",
   "Use 120 characters or fewer.": "请不要超过 120 个字符。",
@@ -4176,6 +4544,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Use this recipe": "使用此配方",
   "Use this when a code is lost, stolen or copied. The old code stops working at once; only this table changes. If the sticker is only damaged, print it again instead.":
     "用于码丢失、被盗或被复制时。旧码会立即失效；只有这张桌台会变化。如果只是贴纸损坏，请改为重新打印。",
+  "Use up to 80 letters, spaces and punctuation.": "最多 80 个字母、空格和标点。",
   "Use your work email, your password and the code from your authenticator app.":
     "使用你的工作邮箱、密码以及验证器应用中的验证码。",
   "Use “Record waste” to log what was thrown away.": '使用"记录报损"登记丢弃的东西。',
@@ -4199,8 +4568,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Verify: "验证",
   "Verify for the owner's approval": "为店主批准进行验证",
   "Verify it's you": "验证身份",
+  "Verify pickup proof and record handoff": "核验取餐凭证并记录交付",
   "Verify to approve": "验证后批准",
   "Verify to approve on your own": "验证后自行批准",
+  "Verify to turn it {value}": "验证后{value}",
   Version: "版本",
   "Version {configurationVersion} declined. It can no longer be approved or published.{value}":
     "版本 {configurationVersion} 已拒绝。它不能再被批准或发布。{value}",
@@ -4218,6 +4589,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "由其他人提出的版本 {configurationVersion} 目前{value}。在它被批准并发布或被拒绝之前，不能创建新配置。拒绝会保留记录；提出者可以提出新的更改。",
   "Version {configurationVersion}: opening hours and dated closures as shown above. Once approved, publish it to change the hours customers see.":
     "版本 {configurationVersion}：营业时间和特定日期停业如上所示。批准后发布，才会更改顾客看到的营业时间。",
+  "View and accept orders, staff-entered orders, pickup handoff, waste records and items sold out today":
+    "查看和接受订单、员工录入的订单、取餐交付、报损记录以及今天售罄的商品",
   "View and manage": "查看与管理",
   "View charge details": "查看扣款详情",
   "View exceptions": "查看异常",
@@ -4279,6 +4652,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We couldn't sign you in. If you were invited, sign in with the email address the invitation was sent to; an invitation expires 7 days after it was sent. If it keeps happening, ask your manager.":
     "无法让你登录。如果你是受邀加入的，请用邀请发送到的邮箱登录；邀请在发送 7 天后过期。如果一直如此，请找经理。",
   "Website (optional)": "网站（可选）",
+  Wednesday: "星期三",
   "Weekly hours": "每周营业时间",
   "Weekly hours are not configured.": "未设置每周营业时间。",
   "Weekly times are in the store’s timezone chosen in step 2. Wait times are in whole minutes, up to 24 hours (1,440 minutes).":
@@ -4348,6 +4722,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Workspace overview": "工作台概览",
   "Write a receipt template and preview the standard fields it shows. Saving keeps it as a draft: customer receipts do not change until it is published and chosen for this store under Published receipt template in Store setup. Saving does not mean a tax or legal professional has checked it.":
     '编写收据模板并预览它显示的标准字段。保存后为草稿：只有发布并在"门店设置"的"已发布收据模板"中为本店选中后，顾客收据才会变化。保存不代表已经过税务或法律专业人士核对。',
+  "Write and revise recipe drafts": "编写和修订配方草稿",
   "Wrong item": "商品错误",
   Yes: "是",
   Yesterday: "昨天",
@@ -4477,6 +4852,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你当前的登录或门店权限不允许查看此队列。",
   "Your name": "你的名字",
   "Your name could not be read or saved": "无法读取或保存你的名字",
+  "Your name couldn't be saved. Check the connection and try again.":
+    "你的名字未能保存。请检查网络后重试。",
+  "Your name was already added. Ask a manager if it needs to change.":
+    "你的名字已经添加过。如需更改，请找经理。",
   "Your previous Store is unchanged. After you verify, switch again.":
     "你之前的门店不变。验证后请再次切换。",
   "Your prices waiting for approval": "你的价格在等待批准",
@@ -4484,10 +4863,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你的角色不能管理共享平板或员工 PIN。请找店主。",
   "Your role does not allow remakes. Ask a manager or kitchen lead.":
     "你的角色不允许重做。请联系经理或后厨主管。",
+  "Your session can't record payments. Sign in again or ask a manager.":
+    "你的登录不能记录付款。请重新登录或找经理。",
+  "Your session can't take counter orders. Sign in again or ask a manager.":
+    "你的登录不能进行柜台点单。请重新登录或找经理。",
   "Your session ended or does not allow this. Sign in again, then verify.":
     "你的登录已结束或不允许此操作。请重新登录后验证。",
   "Your session has ended. Sign in again, then approve.": "你的登录已结束。请重新登录后批准。",
   "Your session has ended. Sign in again, then decline.": "你的登录已结束。请重新登录后拒绝。",
+  "Your sign-in has ended or doesn't allow this. Sign in again, then add your name.":
+    "你的登录已结束或不允许此操作。请重新登录后添加名字。",
   "Your sign-in has ended or doesn't allow this. Sign in again, then set your PIN.":
     "你的登录已结束或不允许此操作。请重新登录后设置 PIN。",
   "Your sign-in may have ended.": "你的登录可能已结束。",
@@ -4504,6 +4889,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你的版本 {configurationVersion} 目前{value}。{value2}",
   "You’re offline": "你已离线",
   "You’ve been signed out": "你已退出登录",
+  Yukon: "育空地区",
   "a setting": "一项设置",
   "all Stores of the Brand": "品牌下所有门店",
   "all services": "所有服务",
@@ -4536,6 +4922,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   cost: "成本",
   "could not be read": "无法读取",
   "count the stock": "清点库存",
+  "counter-section-{sectionReference}": "counter-section-{sectionReference}",
   "declaration out of date — declare again under Allergens": '申报已过期 — 请在"过敏原"中重新申报',
   declined: "拒绝",
   "description changed": "描述已更改",
@@ -4574,6 +4961,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "its tax registration evidence expires": "其税务登记证明到期",
   "just now": "刚刚",
   "kept as saved": "保持已保存的值",
+  "label:{stationLabel}": "label:{stationLabel}",
   "last orders ": "最后点单 ",
   "leaves {machine} to refund on the card machine": "需在刷卡机上退款 {machine}",
   "lines counted": "行已清点",
@@ -4607,15 +4995,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   pickup: "取餐",
   "price approval": "价格审批",
   published: "发布",
+  "queue:{revision}": "queue:{revision}",
   "ready in ": "预计做好 ",
   "receipt layout": "收据版式",
   "recipe review": "配方审核",
   "reference unavailable": "参考号不可用",
+  "reference:{stationReference}": "reference:{stationReference}",
   refund: "笔退款",
   refunds: "笔退款",
   "refunds nothing more: what was paid has already been refunded": "不再退款：已付的款项已经退回",
   "refunds {online} to the guest online{value}{value2}": "在线向顾客退款 {online}{value}{value2}",
   rejected: "已拒绝",
+  "rename-{classificationReference}": "rename-{classificationReference}",
   "required receipt fields": "收据必备字段",
   round: "轮次",
   "round {sequence} at table {tableLabel}": "桌台 {tableLabel} 第 {sequence} 轮",
@@ -4641,6 +5032,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "the payment provider's figure could not be read": "无法读取支付方的数据",
   "the person who made it": "提出更改的人",
   "the same": "相同",
+  "the {value} of this option change": "此选项更改的{value}",
+  "the {value} of this version": "此版本的{value}",
   them: "它们",
   "these codes stop": "这些码将失效",
   "these opening hours": "这些营业时间",
@@ -4661,6 +5054,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   waiting: "等待中",
   "was due ": "截止 ",
   withdrawn: "撤回",
+  "workspace-nav-{copy}-{group}": "workspace-nav-{copy}-{group}",
   "yet: it has no table QR code, so guests can't join.": "：它没有桌台二维码，顾客无法加入。",
   "yet: it has no table QR code.": "：它没有桌台二维码。",
   you: "你",
@@ -4677,6 +5071,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已退款 {already}。请在刷卡机上退回剩余的 {refundMinor}。",
   "{already} was already refunded. The customer is refunded the remaining {refundMinor}.":
     "已退款 {already}。顾客会获得剩余 {refundMinor} 的退款。",
+  "{area} area": "{area}区",
   "{attentionCount} need{value} attention": "{attentionCount} 项需要处理",
   "{awaitingCount} orders are waiting to be accepted.": "有 {awaitingCount} 笔订单等待接单。",
   "{base} ({urgentRounds} paid {paidRoundUrgentMinutes}+ min ago)":
@@ -4733,15 +5128,35 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{freshness} · as of {asOfUtc}": "{freshness} · 截至 {asOfUtc}",
   "{from} → {to} (same amount)": "{from} → {to}（相同数量）",
   "{hours} h {rest} min": "{hours} 小时 {rest} 分钟",
+  "{id}-alt": "{id}-alt",
+  "{id}-alt-error": "{id}-alt-error",
+  "{id}-alt-help": "{id}-alt-help",
+  "{id}-description": "{id}-description",
+  "{id}-description-count": "{id}-description-count",
+  "{id}-description-error": "{id}-description-error",
+  "{id}-description-help": "{id}-description-help",
+  "{id}-photo": "{id}-photo",
+  "{id}-photo-error": "{id}-photo-error",
+  "{id}-photo-help": "{id}-photo-help",
   "{ingredient} in {where} has no current allergen declaration. Record or renew it under Allergens, then submit again.":
     '{where}中的{ingredient}没有有效的过敏原申报。请在"过敏原"中记录或续期，然后重新提交。',
   "{itemCount} items": "{itemCount} 项",
   "{itemReference} ({locationReference}): used {wastedQuantity} {unitCode}, taken off stock {recordedQuantity} {unitCode2}, not in stock {missingQuantity} {unitCode3}":
     "{itemReference}（{locationReference}）：用掉 {wastedQuantity} {unitCode}，从库存扣除 {recordedQuantity} {unitCode2}，库存中没有 {missingQuantity} {unitCode3}",
+  "{item} has no published recipe for this menu's Stores. Publish one under Recipes and assign it to this size, then submit again.":
+    '{item}在此菜单的门店中没有已发布的配方。请在"配方"中发布一个并分配给此规格，然后重新提交。',
+  "{item} is back in stock.": "{item}已恢复库存。",
+  "{item} is no longer offered at this Store.": "{item}在本店已不再提供。",
+  "{item} is now offered at this Store.": "{item}现在在本店提供。",
+  "{item} is sold out for today.": "{item}今天已售罄。",
+  "{item} is sold out until you bring it back.": "{item}已售罄，直到你恢复供应。",
   "{item} with {option}": "{item}加{option}",
+  "{item}: the option {value} has no published recipe change. Set, review and publish it under Option recipes, then submit again.":
+    '{item}：选项{value}没有已发布的配方更改。请在"选项配方"中设置、审核并发布，然后重新提交。',
   "{jurisdictionCode} list approved": "{jurisdictionCode} 清单已批准",
   "{jurisdictionCode} list of {length} allergens, recorded by you":
     "由你记录的 {jurisdictionCode} 清单，共 {length} 种过敏原",
+  "{kind} configuration": "{kind}配置",
   "{kind}: {value} by {reviewerLabel} on": "{kind}：{value}，由 {reviewerLabel} 于",
   "{label} in round {sequence}": "第 {sequence} 轮的{label}",
   "{label} is now the Brand default.": "{label} 现在是品牌默认税类。",
@@ -4756,10 +5171,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{label}: the payment provider's figure could not be read": "{label}：无法读取支付方的数据",
   "{language} name": "{language}名称",
   "{language} name (optional)": "{language}名称（可选）",
+  "{length} active items": "{length} 项进行中",
   "{length} online orders were paid while the store was offline. ":
     "门店离线期间有 {length} 笔线上订单已付款。",
   "{length} online payments were started by guests but not finished":
     "有 {length} 笔线上付款由顾客发起但未完成",
+  "{length} open remakes": "{length} 项未完成重做",
   "{length} opening period{value}": "{length} 个营业时段",
   "{length} option{value} on products have no published price and cannot be ordered yet.":
     "商品上有 {length} 个选项没有已发布的价格，暂时不能点。",
@@ -4808,13 +5225,44 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{name} can't be sold right now (sold out or off the menu). Remove it and send again. Nothing was sent or charged.":
     "{name}目前不能售卖（售罄或已下架）。请移除后重新发送。未发送任何内容，也未收费。",
   "{name} has no PIN to reset. The list is refreshed.": "{name} 没有可重置的 PIN。列表已刷新。",
+  "{name} hours & service": "{name}营业时间与服务",
   "{name} is no longer on this store's staff. The list is refreshed.":
     "{name} 已不是本店员工。列表已刷新。",
+  "{name} setup": "{name}设置",
   "{name} · {length} section{value}, {value2} items. Once approved it can be published to customers.":
     "{name} · {length} 个分区，{value2} 项商品。批准后可以发布给顾客。",
   "{name}'s PIN is reset. They sign in with their account and set a new one.":
     "{name} 的 PIN 已重置。对方需用账号登录并设置新的 PIN。",
+  "{name}: cancelled. Refund {value} on the card machine and record it on the Orders page.":
+    "{name}：已取消。请在刷卡机上退款 {value}，并在订单页记录。",
+  "{name}: cancelled. The guest's online refund is still being made; check again in a few minutes.":
+    "{name}：已取消。顾客的在线退款仍在处理中；请几分钟后再查看。",
+  "{name}: never sent to the kitchen and already refunded in full. It will be closed; nothing more is refunded.":
+    "{name}：从未发送到后厨，且已全额退款。它将被关闭；不会再退款。",
+  "{name}: not paid, no money was taken. It is being cancelled automatically now; check again in a minute.":
+    "{name}：未付款，没有收取任何费用。正在自动取消；请一分钟后再查看。",
+  "{name}: not paid, no money was taken. It will be cancelled now (otherwise automatically{value}); nothing is refunded.":
+    "{name}：未付款，没有收取任何费用。现在会被取消（否则会自动取消{value}）；不会退款。",
+  "{name}: paid {value} on the card machine but never sent to the kitchen. It will be cancelled; then refund it on the card machine and record that on the Orders page.":
+    "{name}：已用刷卡机付款 {value}，但从未发送到后厨。它将被取消；之后请在刷卡机上退款，并在订单页记录。",
+  "{name}: paid {value} online but never sent to the kitchen. It will be cancelled and the guest refunded.":
+    "{name}：已在线付款 {value}，但从未发送到后厨。它将被取消，并向顾客退款。",
+  "{name}: the guest started paying online but hasn't finished. It will be cancelled now and their unfinished payment stopped, so they can't be charged for it. If it was in fact paid, it stays open and shows here again.":
+    "{name}：顾客开始在线付款但尚未完成。现在会取消它并停止未完成的付款，顾客不会因此被扣款。如果实际已付款，它会保持未关闭并再次显示在这里。",
   "{name}: {before} becomes {after}": "{name}：{before} 变为 {after}",
+  "{name}: {length} not started will be cancelled and ": "{name}：{length} 项未开始的将被取消，并",
+  "{name}: {openItemCount} already being made or paid on the card machine. Serve them, or mark them served on the Orders page.":
+    "{name}：{openItemCount}已在制作或已用刷卡机付款。请上桌，或在订单页标记为已上桌。",
+  "{name}: {openItemCount} not started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.":
+    "{name}：{openItemCount}后厨尚未开始，已全额退款。它将被取消；没有剩余可退金额。",
+  "{name}: {openItemCount} not started in the kitchen. It will be cancelled and {value} refunded to the guest.":
+    "{name}：{openItemCount}后厨尚未开始。它将被取消，并向顾客退款 {value}。",
+  "{name}: {openItemCount} not started in the kitchen. It will be cancelled; then refund {value} on the card machine and record that on the Orders page.":
+    "{name}：{openItemCount}后厨尚未开始。它将被取消；之后请在刷卡机上退款 {value}，并在订单页记录。",
+  "{name}: {openItemCount}. Serve them, or mark them served on the Orders page.":
+    "{name}：{openItemCount}。请上桌，或在订单页标记为已上桌。",
+  "{name}: {value} being made or paid on the card machine and {readyItemCount} ready to serve. Serve them, or mark them served on the Orders page.":
+    "{name}：{value}在制作或已用刷卡机付款，{readyItemCount} 项可上桌。请上桌，或在订单页标记为已上桌。",
   "{notAccepted} not accepted": "未接单 {notAccepted}",
   "{n} open orders": "{n} 笔未完成订单",
   "{n}nd": "第 {n}",
@@ -4828,6 +5276,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{onHand} of {name} is in stock, but {reserved} is set aside for {openOrderCount} and one needs {required}":
     "{name}库存有 {onHand}，但 {reserved} 已为 {openOrderCount}预留，而一份需要 {required}",
   "{orders} awaiting acceptance": "{orders} 等待接单",
+  "{orders}{value}. Older orders are on the next page.": "{orders}{value}。较早的订单在下一页。",
   "{overdue} overdue": "逾期 {overdue}",
   "{partlyRefund} refunded": "已退款 {partlyRefund}",
   "{paymentCount} checked in {runCount} · last {completedAt} · {outcomes}":
@@ -4882,9 +5331,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{value} Current configuration refreshed.": "{value} 已刷新当前配置。",
   "{value} Tablets already set up keep working.": "{value}已设置的平板仍可继续使用。",
   "{value} being made and {ready} ready to serve": "{value}在制作，{ready} 项可上桌",
+  "{value} can't take an order now (marked unavailable, or its session is closing). Check the table on the Tables page.":
+    "{value}目前不能点单（被标记为不可用，或其会话正在关闭）。请在桌台页查看这张桌台。",
   "{value} h {value2} min": "{value} 小时 {value2} 分钟",
+  "{value} has no table QR code, so orders can't be taken for it yet. Nothing was sent or charged. {value2}":
+    "{value}没有桌台二维码，因此暂时不能为它点单。未发送任何内容，也未收费。{value2}",
   "{value} is before the store started using this system, so there is nothing to settle. The store's records begin on {firstBusinessDate}.":
     "{value} 早于门店开始使用本系统，因此无需结算。门店记录从 {firstBusinessDate} 开始。",
+  "{value} is chosen by default": "默认选择{value}",
   "{value} matching orders on this page": "本页有 {value} 笔符合的订单",
   "{value} review:": "{value}审核：",
   "{value} {value2} at the payment provider": "支付方处 {value} {value2}",

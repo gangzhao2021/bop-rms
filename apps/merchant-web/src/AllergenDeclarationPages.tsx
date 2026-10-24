@@ -47,7 +47,7 @@ const copy: Record<AllergenErrorCode | "Loading", string> = {
   Unavailable: t("Allergens are unavailable."),
 };
 const statusText: Record<DeclarationStatus, string> = {
-  Current: "Declared",
+  Current: t("Declared"),
   ExpiringSoon: t("Declared — expires within 30 days"),
   ItemChanged: t("Ingredient changed — declare again"),
   RegistryChanged: t("Allergen list changed — declare again"),

@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { listSeparator, systemText, t } from "./i18n/i18n.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StaffTime, StoreDate } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
@@ -51,8 +51,8 @@ type State =
 /** Membership in plain words (never the stored status code). */
 export function membershipText(status: string): string {
   if (status === "PendingActivation") return t("Invited (not signed in yet)");
-  if (status === "Active") return "Active";
-  if (status === "Suspended") return "Suspended";
+  if (status === "Active") return t("Active");
+  if (status === "Suspended") return t("Suspended");
   return status;
 }
 
@@ -512,7 +512,7 @@ function Member({
         <ul>
           {member.assignments.map((item) => (
             <li key={item.assignmentReference}>
-              <strong>{item.roleName}</strong>
+              <strong>{systemText(item.roleName)}</strong>
               {t("{value} · since", {
                 value:
                   item.scope === "Brand" ? t(" (all Stores of the Brand)") : t(" (this Store)"),
@@ -570,7 +570,7 @@ function Member({
         <ul>
           {member.pending.map((item) => (
             <li key={item.changeReference}>
-              <strong>{item.roleName}</strong>
+              <strong>{systemText(item.roleName)}</strong>
               {t("{value} · requested by {requestedBy} at", {
                 value: item.scope === "Brand" ? t(" (Brand)") : "",
                 requestedBy: item.requestedBy,
@@ -756,7 +756,9 @@ function Page({
           <section key={member.actorReference}>
             <StatePanel heading={member.label}>
               <p>
-                {member.assignments.map((item) => item.roleName).join(", ") || t("No active role")}
+                {member.assignments
+                  .map((item) => systemText(item.roleName))
+                  .join(listSeparator()) || t("No active role")}
                 {member.pending.length
                   ? t(" · {length} pending approval", { length: member.pending.length })
                   : ""}

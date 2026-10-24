@@ -23,9 +23,9 @@ export const channelLabel: Record<StoreReportChannel, string> = {
   CardMachine: t("Store card machine"),
 };
 export const orderTypeLabel: Record<StoreReportOrderType, string> = {
-  DineIn: "Dine-in",
-  Pickup: "Pickup",
-  Counter: "Counter",
+  DineIn: t("Dine-in"),
+  Pickup: t("Pickup"),
+  Counter: t("Counter"),
 };
 
 /** "2026-10-14" → the date `days` earlier/later, by calendar arithmetic in UTC (no time zone). */
@@ -158,7 +158,7 @@ function ReportSection({
             type="button"
             onClick={() => onDownload(report)}
             disabled={downloading !== null}
-            aria-label={`Download ${title.toLowerCase()} as CSV`}
+            aria-label={t("Download {value} as CSV", { value: title.toLowerCase() })}
           >
             {downloading === report ? t("Preparing…") : t("Download CSV")}
           </button>
@@ -378,7 +378,9 @@ export function StoreReports({
       <ReportSection
         id="store-reports-hours"
         title={t("Sales by hour")}
-        description={`By the store-time hour the payment was taken${view.days.length > 1 ? ", all days together" : ""}.`}
+        description={t("By the store-time hour the payment was taken{value}.", {
+          value: view.days.length > 1 ? ", all days together" : "",
+        })}
         report="hourly"
         onDownload={download}
         downloading={downloading}

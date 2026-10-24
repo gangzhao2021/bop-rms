@@ -46,7 +46,7 @@ const copy: Record<AvailabilityErrorCode | "Loading", string> = {
   Unavailable: t("Item availability is unavailable."),
 };
 const statusText = {
-  Available: "Available",
+  Available: t("Available"),
   SoldOut: t("Sold out"),
   Unavailable: t("Not available here"),
   NotOffered: t("Not offered at this Store"),
@@ -218,23 +218,23 @@ export function StoreAvailabilityPage({
         case "SoldOutToday":
           return button(
             "eod",
-            "Sold out today",
+            t("Sold out today"),
             soldOut("EndOfDay"),
-            `${label(item)} is sold out for today.`,
+            t("{item} is sold out for today.", { item: label(item) }),
           );
         case "SoldOutUntilBack":
           return button(
             "back",
-            "Sold out until further notice",
+            t("Sold out until further notice"),
             soldOut("UntilBack"),
-            `${label(item)} is sold out until you bring it back.`,
+            t("{item} is sold out until you bring it back.", { item: label(item) }),
           );
         case "BackInStock":
           return button(
             "instock",
-            "Back in stock",
+            t("Back in stock"),
             command("BackInStock"),
-            `${label(item)} is back in stock.`,
+            t("{item} is back in stock.", { item: label(item) }),
           );
         case "ManagerBringsBack":
           return (
@@ -247,16 +247,16 @@ export function StoreAvailabilityPage({
         case "Offer":
           return button(
             "offer",
-            "Offer at this Store",
+            t("Offer at this Store"),
             command("Offer"),
-            `${label(item)} is now offered at this Store.`,
+            t("{item} is now offered at this Store.", { item: label(item) }),
           );
         case "StopOffering":
           return button(
             "stop",
-            "Stop offering",
+            t("Stop offering"),
             command("StopOffering"),
-            `${label(item)} is no longer offered at this Store.`,
+            t("{item} is no longer offered at this Store.", { item: label(item) }),
           );
       }
     });

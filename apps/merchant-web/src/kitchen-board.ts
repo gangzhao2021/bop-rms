@@ -484,10 +484,10 @@ export function kitchenOrderText(
   if (!label) return t("Order details unavailable");
   return (
     (label.orderType === "Pickup"
-      ? "Pickup"
+      ? t("Pickup")
       : label.tableLabel
-        ? "Table " + label.tableLabel
-        : "Dine-in") +
+        ? t("Table {tableLabel}", { tableLabel: label.tableLabel })
+        : t("Dine-in")) +
     t(" · Order ") +
     label.orderNumber
   );

@@ -103,21 +103,34 @@ export function placeErrorText(
 ) {
   switch (error.code) {
     case "TableCartHasItems":
-      return `Guests at this table have items in their shared cart that haven't been sent${
-        error.pendingItems.length > 0
-          ? ` (${error.pendingItems.map((item) => `${item.quantity} × ${item.name}`).join(", ")})`
-          : ""
-      }. Ask them to send or remove those items on their phone, then send this order again.`;
+      return t(
+        "Guests at this table have items in their shared cart that haven't been sent{value}. Ask them to send or remove those items on their phone, then send this order again.",
+        {
+          value:
+            error.pendingItems.length > 0
+              ? ` (${error.pendingItems.map((item) => `${item.quantity} × ${item.name}`).join(", ")})`
+              : "",
+        },
+      );
     case "TableCheckoutInProgress":
-      return "A guest at this table is paying on their phone right now. Wait a minute, then send again.";
+      return t(
+        "A guest at this table is paying on their phone right now. Wait a minute, then send again.",
+      );
     case "TableUnavailable":
-      return `${table ?? "This table"} can't take an order now (marked unavailable, or its session is closing). Check the table on the Tables page.`;
+      return t(
+        "{value} can't take an order now (marked unavailable, or its session is closing). Check the table on the Tables page.",
+        { value: table ?? "This table" },
+      );
     case "TableHasNoQr":
-      return `${table ?? "This table"} has no table QR code, so orders can't be taken for it yet. Nothing was sent or charged. ${
-        canCreateTableCode
-          ? "Create one on Table QR codes (it can be printed later), then send the order again."
-          : "Ask a manager to create one on the Table QR codes page, then send the order again."
-      }`;
+      return t(
+        "{value} has no table QR code, so orders can't be taken for it yet. Nothing was sent or charged. {value2}",
+        {
+          value: table ?? "This table",
+          value2: canCreateTableCode
+            ? "Create one on Table QR codes (it can be printed later), then send the order again."
+            : "Ask a manager to create one on the Table QR codes page, then send the order again.",
+        },
+      );
     case "ItemUnavailable": {
       const line = error.lineIndex === null ? undefined : lines[error.lineIndex];
       // WP-2423: each item could be made on its own, but not together (they share an ingredient).
@@ -168,24 +181,35 @@ export function placeErrorText(
     }
     case "StoreNotTakingOrders":
       return table !== null
-        ? "The store is closed, so no new table orders can be taken now. A paper order taken earlier can still be entered under Paper order."
-        : "Pickup hours are over, so the counter can't take a new order now. A paper order taken earlier can still be entered under Paper order.";
+        ? t(
+            "The store is closed, so no new table orders can be taken now. A paper order taken earlier can still be entered under Paper order.",
+          )
+        : t(
+            "Pickup hours are over, so the counter can't take a new order now. A paper order taken earlier can still be entered under Paper order.",
+          );
     case "NotPriced":
-      return "This order could not be priced. Check the items and options and send again.";
+      return t("This order could not be priced. Check the items and options and send again.");
     case "NotFinished":
-      return "This order didn't go through and nothing was charged. Send it again.";
+      return t("This order didn't go through and nothing was charged. Send it again.");
     case "InProgress":
-      return "This order is still being sent. Wait a moment, then send again to see it.";
+      return t("This order is still being sent. Wait a moment, then send again to see it.");
     case "PermissionDenied":
-      return "Your session can't take counter orders. Sign in again or ask a manager.";
+      return t("Your session can't take counter orders. Sign in again or ask a manager.");
     case "OutcomeUnknown":
-      return "No answer from the system. Send again — the same order is never created twice.";
+      return t("No answer from the system. Send again — the same order is never created twice.");
     case "NoPickupTimes":
-      return "Pickup times have run out in the system, so no pickup order can be entered right now. Nothing was sent or charged. Take this order on paper and charge it on the card machine, then enter it under Paper order once pickup times are back. Tell a manager — Home shows the alert.";
+      return t(
+        "Pickup times have run out in the system, so no pickup order can be entered right now. Nothing was sent or charged. Take this order on paper and charge it on the card machine, then enter it under Paper order once pickup times are back. Tell a manager — Home shows the alert.",
+      );
     case "SystemProblem":
       return table !== null
-        ? `The system couldn't send this round for ${table} (a problem on our side, not with the order). Nothing was sent to the kitchen or charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.`
-        : "The system couldn't place this order (a problem on our side, not with the order). Nothing was charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.";
+        ? t(
+            "The system couldn't send this round for {table} (a problem on our side, not with the order). Nothing was sent to the kitchen or charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.",
+            { table: table },
+          )
+        : t(
+            "The system couldn't place this order (a problem on our side, not with the order). Nothing was charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.",
+          );
     default:
       // WP-2423: e.g. no order can be priced right now; Home shows the alert and what to do.
       return t(
@@ -587,7 +611,11 @@ export function StaffOrderEntryPage({
                   type="button"
                   onClick={() =>
                     document
-                      .getElementById(`counter-section-${section.sectionReference}`)
+                      .getElementById(
+                        t("counter-section-{sectionReference}", {
+                          sectionReference: section.sectionReference,
+                        }),
+                      )
                       ?.scrollIntoView({ block: "start" })
                   }
                 >
@@ -626,7 +654,7 @@ export function StaffOrderEntryPage({
                     <button
                       type="button"
                       disabled={!item.available || !ordering || item.priceMinor === null}
-                      aria-label={`Add ${item.name}`}
+                      aria-label={t("Add {name}", { name: item.name })}
                       onClick={() =>
                         setChoosing({ item, choices: defaultChoices(item), quantity: 1, note: "" })
                       }
@@ -658,7 +686,7 @@ export function StaffOrderEntryPage({
           {choosing !== null ? (
             <form
               className="counter-order__choose"
-              aria-label={`Choose ${choosing.item.name}`}
+              aria-label={t("Choose {name}", { name: choosing.item.name })}
               onSubmit={(event) => {
                 event.preventDefault();
                 if (!choicesComplete(choosing.item, choosing.choices)) return;
@@ -813,7 +841,7 @@ export function StaffOrderEntryPage({
                           type="button"
                           className="counter-order__step"
                           disabled={phase !== "Building" || line.quantity <= 1}
-                          aria-label={`One less ${line.item.name}`}
+                          aria-label={t("One less {name}", { name: line.item.name })}
                           onClick={() => setQuantity(line.quantity - 1)}
                         >
                           −
@@ -822,7 +850,7 @@ export function StaffOrderEntryPage({
                           type="button"
                           className="counter-order__step"
                           disabled={phase !== "Building" || line.quantity >= 99}
-                          aria-label={`One more ${line.item.name}`}
+                          aria-label={t("One more {name}", { name: line.item.name })}
                           onClick={() => setQuantity(line.quantity + 1)}
                         >
                           +
@@ -831,7 +859,7 @@ export function StaffOrderEntryPage({
                           type="button"
                           className="counter-order__remove"
                           disabled={phase !== "Building"}
-                          aria-label={`Remove ${line.item.name}`}
+                          aria-label={t("Remove {name}", { name: line.item.name })}
                           onClick={() =>
                             changeLines(lines.filter((other) => other.key !== line.key))
                           }

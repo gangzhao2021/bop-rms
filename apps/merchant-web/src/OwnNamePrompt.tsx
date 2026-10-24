@@ -78,15 +78,15 @@ export function ownNameFailureText(error: unknown): string {
   const code = error instanceof OwnNameError ? error.code : "Unavailable";
   switch (code) {
     case "Invalid":
-      return "Use up to 80 letters, spaces and punctuation.";
+      return t("Use up to 80 letters, spaces and punctuation.");
     case "Conflict":
-      return "Your name was already added. Ask a manager if it needs to change.";
+      return t("Your name was already added. Ask a manager if it needs to change.");
     case "PermissionDenied":
     case "NotFound":
-      return "Your sign-in has ended or doesn't allow this. Sign in again, then add your name.";
+      return t("Your sign-in has ended or doesn't allow this. Sign in again, then add your name.");
     case "Offline":
     case "Unavailable":
-      return "Your name couldn't be saved. Check the connection and try again.";
+      return t("Your name couldn't be saved. Check the connection and try again.");
   }
 }
 
