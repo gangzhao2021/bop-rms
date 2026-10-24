@@ -4,6 +4,7 @@ import process from "node:process";
 import { URL } from "node:url";
 import { CustomerPaymentResultHandler } from "../../apps/api/dist/customer-payment-result.js";
 import { createMerchantBffRouter } from "../../apps/api/dist/merchant-bff.js";
+import { staffContentLocaleMiddleware } from "../../apps/api/dist/staff-content-locale.js";
 import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
 import { CustomerPaymentIntentHandler } from "../../apps/api/dist/customer-payment-intent.js";
 import { CustomerPaymentHandoffHandler } from "../../apps/api/dist/customer-payment-handoff.js";
@@ -127,7 +128,8 @@ export async function startInternalCustomerServer({
     // WP-2423 DEC-COGNITO-STORE-STAFF: the TEST-ONLY staff sign-in page is not served when staff
     // sign in with their own Cognito account.
     if (merchant.staffSignInMode !== "cognito") installInternalStaffLogin(app, merchant);
-    app.use("/merchant", createMerchantBffRouter(merchant.bff));
+    // Owner 2026-10-24: item and option names on staff screens in the staff member's language.
+    app.use("/merchant", staffContentLocaleMiddleware(), createMerchantBffRouter(merchant.bff));
 
     app.post(
       "/api/v1/checkout-sessions/:checkout_session_id/payment-reconciliation",
