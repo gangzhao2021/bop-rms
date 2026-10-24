@@ -25,6 +25,7 @@ import {
 import type { CustomerCartRemovalCompositionOptions } from "./customer-cart-removal-composition.js";
 import {
   createCustomerCartReadPort,
+  readCartView,
   type CustomerCartDisplayQuery,
 } from "./customer-cart-read-composition.js";
 import type { CustomerCartPort, CustomerCartPortResult } from "./customer-cart.js";
@@ -85,11 +86,12 @@ export function createCustomerCartItemPort(options: {
   readonly fallback?: CustomerCartPort;
 }): CustomerCartPort {
   const unavailable = Object.freeze({ status: "Unavailable" } as const);
-  const read = (input: Add | Update) =>
-    options.query.read({
-      sessionCredential: input.guestCredential,
-      cartReference: input.cartReference,
-    });
+  const read = (input: Add | Update, displayLocale?: string | null) =>
+    readCartView(
+      options.query,
+      { sessionCredential: input.guestCredential, cartReference: input.cartReference },
+      displayLocale,
+    );
   async function failure(error: unknown, input: Add | Update): Promise<CustomerCartPortResult> {
     if (error instanceof CartCheckoutInProgressError)
       return { status: "CheckoutInProgress", heldUntil: error.heldUntil };
@@ -131,6 +133,7 @@ export function createCustomerCartItemPort(options: {
   async function execute(
     action: "Add" | "Update",
     value: Add | Update,
+    displayLocale?: string | null,
   ): Promise<CustomerCartPortResult> {
     let input: Add | Update;
     try {
@@ -180,7 +183,7 @@ export function createCustomerCartItemPort(options: {
       )
         return unavailable;
       parseOrderingReference(receipt.cartItemReference);
-      const view = await read(input);
+      const view = await read(input, displayLocale);
       if (
         view === null ||
         view.cart.cartReference !== receipt.cartReference ||
@@ -206,8 +209,9 @@ export function createCustomerCartItemPort(options: {
   }
   return Object.freeze({
     ...(options.fallback ?? createCustomerCartReadPort(options.query)),
-    addItem: (input: Add) => execute("Add", input),
-    updateItem: (input: Update) => execute("Update", input),
+    addItem: (input: Add, displayLocale?: string | null) => execute("Add", input, displayLocale),
+    updateItem: (input: Update, displayLocale?: string | null) =>
+      execute("Update", input, displayLocale),
   });
 }
 export function createCustomerCartItemComposition(

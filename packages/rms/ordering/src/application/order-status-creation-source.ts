@@ -8,6 +8,7 @@ import {
 } from "../domain/order-status-projection.js";
 import { parseOrderCreatedEnvelope } from "./order-created-event.js";
 import { orderCreatedSourceInput } from "./order-created-source.js";
+import { orderLocalizedName } from "../domain/order-item-option-lines.js";
 
 /** Original event snapshot; freshness/current phase are resolved separately under owner fences. */
 export function createOrderStatusCreationSource(input: {
@@ -69,7 +70,7 @@ export function createOrderStatusCreationSource(input: {
         .filter((item) => item.orderBatchReference === batch.orderBatchReference)
         .map((item) => ({
           orderItemReference: item.orderItemReference,
-          displayName: item.catalog.localizedNames[input.locale],
+          displayName: orderLocalizedName(item.catalog.localizedNames, input.locale),
           quantity: item.quantity,
           lineTotal: item.pricing.total,
         })),

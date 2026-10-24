@@ -1,4 +1,4 @@
-import { t } from "../i18n/i18n.js";
+import { t, useReloadOnLanguageChange } from "../i18n/i18n.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link, useParams } from "react-router";
 import {
@@ -484,6 +484,8 @@ export function ReceiptPage({
     controller.getState,
     controller.getState,
   );
+  // Owner 2026-10-23: item names come from the Store in the chosen language.
+  useReloadOnLanguageChange(() => void controller.load());
   useEffect(() => {
     void controller.load();
     const offline = () => controller.setOnline(false);

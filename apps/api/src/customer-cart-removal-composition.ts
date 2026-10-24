@@ -20,6 +20,7 @@ import {
 } from "@rms/ordering";
 import {
   createCustomerCartReadPort,
+  readCartView,
   type CustomerCartDisplayQuery,
 } from "./customer-cart-read-composition.js";
 import type { CustomerCartPort, CustomerCartPortResult } from "./customer-cart.js";
@@ -42,11 +43,12 @@ export function createCustomerCartRemovalPort(options: {
   readonly removal: { remove(input: unknown): Promise<PickupCartRemovalResult> };
 }): CustomerCartPort {
   const unavailable = Object.freeze({ status: "Unavailable" } as const);
-  const read = (input: RemovalInput) =>
-    options.query.read({
-      sessionCredential: input.guestCredential,
-      cartReference: input.cartReference,
-    });
+  const read = (input: RemovalInput, displayLocale?: string | null) =>
+    readCartView(
+      options.query,
+      { sessionCredential: input.guestCredential, cartReference: input.cartReference },
+      displayLocale,
+    );
   const failure = async (error: unknown, input: RemovalInput): Promise<CustomerCartPortResult> => {
     if (error instanceof CartCheckoutInProgressError)
       return { status: "CheckoutInProgress", heldUntil: error.heldUntil };
@@ -81,7 +83,10 @@ export function createCustomerCartRemovalPort(options: {
   };
   return Object.freeze({
     ...createCustomerCartReadPort(options.query),
-    async removeItem(input: RemovalInput): Promise<CustomerCartPortResult> {
+    async removeItem(
+      input: RemovalInput,
+      displayLocale?: string | null,
+    ): Promise<CustomerCartPortResult> {
       let receipt: PickupCartRemovalResult;
       try {
         receipt = await options.removal.remove({
@@ -105,7 +110,7 @@ export function createCustomerCartRemovalPort(options: {
           receipt.aggregateVersion < 1
         )
           return unavailable;
-        const view = await read(input);
+        const view = await read(input, displayLocale);
         if (
           view === null ||
           view.cart.cartReference !== receipt.cartReference ||

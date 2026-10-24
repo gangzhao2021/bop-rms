@@ -1,4 +1,4 @@
-import { dateLocale, t } from "../i18n/i18n.js";
+import { dateLocale, t, useReloadOnLanguageChange } from "../i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
@@ -371,6 +371,8 @@ export function DiningSessionPage({
       if (pending.current === controller) pending.current = null;
     }
   }, [client]);
+  // Owner 2026-10-23: item names come from the Store in the chosen language.
+  useReloadOnLanguageChange(() => void load());
   useEffect(() => {
     void load();
     return () => {

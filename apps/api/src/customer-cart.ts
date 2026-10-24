@@ -1,5 +1,6 @@
 import { CartError, CartReplacementPendingError } from "@rms/ordering";
 import { checkoutHoldRetrySeconds } from "./customer-checkout-hold.js";
+import { customerDisplayLocale } from "./customer-display-locale.js";
 import type { Request, RequestHandler, Response } from "express";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -120,11 +121,31 @@ export interface CustomerCartReplacementPort {
   }): Promise<unknown>;
 }
 
+/**
+ * The optional display-locale argument to pass on: none for the session's own locale, so a call
+ * in the session language is the same call as before.
+ */
+export function cartDisplayArguments(displayLocale?: string | null): [] | [string] {
+  return displayLocale == null ? [] : [displayLocale];
+}
+
+/**
+ * Owner 2026-10-23: every Cart view a port returns names its items and options in `displayLocale`
+ * (the guest's chosen language, from the optional `locale` query parameter) when given, else in
+ * the session's own locale; names missing in it fall back to the menu language.
+ */
 export interface CustomerCartPort {
-  createCart(input: CustomerCartMutationContext): Promise<CustomerCartPortResult>;
-  getCurrentCart(input: CustomerCartContext): Promise<CustomerCartPortResult>;
+  createCart(
+    input: CustomerCartMutationContext,
+    displayLocale?: string | null,
+  ): Promise<CustomerCartPortResult>;
+  getCurrentCart(
+    input: CustomerCartContext,
+    displayLocale?: string | null,
+  ): Promise<CustomerCartPortResult>;
   getCart(
     input: CustomerCartContext & { readonly cartReference: string },
+    displayLocale?: string | null,
   ): Promise<CustomerCartPortResult>;
   addItem(
     input: CustomerCartMutationContext & {
@@ -138,6 +159,7 @@ export interface CustomerCartPort {
       }[];
       readonly customerNote: string | null;
     },
+    displayLocale?: string | null,
   ): Promise<CustomerCartPortResult>;
   updateItem(
     input: CustomerCartMutationContext & {
@@ -151,6 +173,7 @@ export interface CustomerCartPort {
       }[];
       readonly customerNote: string | null;
     },
+    displayLocale?: string | null,
   ): Promise<CustomerCartPortResult>;
   removeItem(
     input: CustomerCartMutationContext & {
@@ -158,6 +181,7 @@ export interface CustomerCartPort {
       readonly cartItemReference: string;
       readonly expectedCartVersion: number;
     },
+    displayLocale?: string | null,
   ): Promise<CustomerCartPortResult>;
 }
 
@@ -636,6 +660,12 @@ export class CustomerCartHandler {
     });
   }
 
+  /** Only `locale` is read from the query; other query keys stay ignored as before. */
+  #displayLocale(request: Request): string | null {
+    const locale = request.query.locale;
+    return customerDisplayLocale(locale === undefined ? {} : { locale });
+  }
+
   #mutation(request: Request): CustomerCartMutationContext {
     sameOriginMutation(request, this.#allowedOrigin);
     return Object.freeze({
@@ -658,7 +688,11 @@ export class CustomerCartHandler {
       try {
         const input = this.#mutation(request);
         body(request, []);
-        await this.#invoke(response, this.#port.createCart(input), true);
+        await this.#invoke(
+          response,
+          this.#port.createCart(input, ...cartDisplayArguments(this.#displayLocale(request))),
+          true,
+        );
       } catch (error) {
         this.#requestError(response, error);
       }
@@ -742,7 +776,10 @@ export class CustomerCartHandler {
       responseControls(response);
       try {
         sameOriginRead(request);
-        const operation = this.#port.getCurrentCart(this.#context(request));
+        const operation = this.#port.getCurrentCart(
+          this.#context(request),
+          ...cartDisplayArguments(this.#displayLocale(request)),
+        );
         let result: CustomerCartPortResult;
         try {
           result = await operation;
@@ -771,10 +808,13 @@ export class CustomerCartHandler {
         sameOriginRead(request);
         await this.#invoke(
           response,
-          this.#port.getCart({
-            ...this.#context(request),
-            cartReference: scalar(request.params.cart_id, uuidV7),
-          }),
+          this.#port.getCart(
+            {
+              ...this.#context(request),
+              cartReference: scalar(request.params.cart_id, uuidV7),
+            },
+            ...cartDisplayArguments(this.#displayLocale(request)),
+          ),
         );
       } catch (error) {
         this.#requestError(response, error);
@@ -794,15 +834,18 @@ export class CustomerCartHandler {
         ]);
         await this.#invoke(
           response,
-          this.#port.addItem({
-            ...this.#mutation(request),
-            cartReference: scalar(request.params.cart_id, uuidV7),
-            expectedCartVersion: versionHeader(request),
-            sellableReference: scalar(raw.sellableReference, uuidV7),
-            quantity: positive(raw.quantity, 100),
-            optionSelections: selections(raw.optionSelections),
-            customerNote: note(raw.customerNote),
-          }),
+          this.#port.addItem(
+            {
+              ...this.#mutation(request),
+              cartReference: scalar(request.params.cart_id, uuidV7),
+              expectedCartVersion: versionHeader(request),
+              sellableReference: scalar(raw.sellableReference, uuidV7),
+              quantity: positive(raw.quantity, 100),
+              optionSelections: selections(raw.optionSelections),
+              customerNote: note(raw.customerNote),
+            },
+            ...cartDisplayArguments(this.#displayLocale(request)),
+          ),
         );
       } catch (error) {
         this.#requestError(response, error);
@@ -817,15 +860,18 @@ export class CustomerCartHandler {
         const raw = body(request, ["quantity", "optionSelections", "customerNote"]);
         await this.#invoke(
           response,
-          this.#port.updateItem({
-            ...this.#mutation(request),
-            cartReference: scalar(request.params.cart_id, uuidV7),
-            cartItemReference: scalar(request.params.cart_item_id, uuidV7),
-            expectedCartVersion: versionHeader(request),
-            quantity: positive(raw.quantity, 100),
-            optionSelections: selections(raw.optionSelections),
-            customerNote: note(raw.customerNote),
-          }),
+          this.#port.updateItem(
+            {
+              ...this.#mutation(request),
+              cartReference: scalar(request.params.cart_id, uuidV7),
+              cartItemReference: scalar(request.params.cart_item_id, uuidV7),
+              expectedCartVersion: versionHeader(request),
+              quantity: positive(raw.quantity, 100),
+              optionSelections: selections(raw.optionSelections),
+              customerNote: note(raw.customerNote),
+            },
+            ...cartDisplayArguments(this.#displayLocale(request)),
+          ),
         );
       } catch (error) {
         this.#requestError(response, error);
@@ -839,12 +885,15 @@ export class CustomerCartHandler {
       try {
         await this.#invoke(
           response,
-          this.#port.removeItem({
-            ...this.#mutation(request),
-            cartReference: scalar(request.params.cart_id, uuidV7),
-            cartItemReference: scalar(request.params.cart_item_id, uuidV7),
-            expectedCartVersion: versionHeader(request),
-          }),
+          this.#port.removeItem(
+            {
+              ...this.#mutation(request),
+              cartReference: scalar(request.params.cart_id, uuidV7),
+              cartItemReference: scalar(request.params.cart_item_id, uuidV7),
+              expectedCartVersion: versionHeader(request),
+            },
+            ...cartDisplayArguments(this.#displayLocale(request)),
+          ),
         );
       } catch (error) {
         this.#requestError(response, error);

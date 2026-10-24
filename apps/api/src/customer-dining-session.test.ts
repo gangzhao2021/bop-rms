@@ -208,3 +208,21 @@ it("WP-2423 Q26: tells the table which dish the kitchen is making again, and onl
   };
   expect(plain.session.rounds[0]?.items[0]).not.toHaveProperty("beingRemade");
 });
+
+it("Owner 2026-10-23: asks item names in the guest's chosen language and refuses a malformed one", async () => {
+  const f = await setup();
+  expect((await f.send({}, "?locale=zh-Hans-CA")).status).toBe(200);
+  expect(f.read).toHaveBeenLastCalledWith(
+    { sessionCredential: "s".repeat(43), csrfCredential: "c".repeat(43) },
+    "zh-Hans-CA",
+  );
+  await f.send();
+  expect(f.read).toHaveBeenLastCalledWith({
+    sessionCredential: "s".repeat(43),
+    csrfCredential: "c".repeat(43),
+  });
+  f.read.mockClear();
+  for (const query of ["?locale=zh_CN", "?locale=zh-Hans-CA&table=7"])
+    expect((await f.send({}, query)).status).toBe(400);
+  expect(f.read).not.toHaveBeenCalled();
+});

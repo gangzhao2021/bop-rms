@@ -9,11 +9,12 @@ import { id } from "../../../apps/api/test-support/customer-entry-composition-fi
 /** Actual Catalog/Recipe/Inventory persistence; commercial/publication approvals
  * are explicit synthetic inputs, never a claim of operator-authorized publication.
  */
-export async function prepareEntryPickupItems({ admin, role, run, scope, at }) {
+export async function prepareEntryPickupItems({ admin, role, run, scope, at, sellableNames }) {
   const catalogId = (n) =>
     n === 2 ? scope.brandReference : n === 20 ? scope.storeReference : id(70000 + n);
   await seedCartCatalog(admin, catalogId, at, {
     taxClassificationReference: syntheticDiningTaxClassification,
+    ...(sellableNames === undefined ? {} : { sellableNames }),
   });
   await admin.query("GRANT USAGE ON SCHEMA rms_catalog TO " + role);
   await admin.query(
@@ -99,7 +100,7 @@ export async function prepareEntryPickupItems({ admin, role, run, scope, at }) {
     },
   };
 }
-export async function exerciseEntryPickupItems({ base, pickup, admin }) {
+export async function exerciseEntryPickupItems({ base, pickup, admin, chineseName = "Latte" }) {
   const headers = {
     origin: "https://customer.invalid",
     "sec-fetch-site": "same-origin",
@@ -156,6 +157,30 @@ export async function exerciseEntryPickupItems({ base, pickup, admin }) {
   assert.equal(body.cart.version, pickup.cart.version + 1);
   assert.equal(body.cart.items[0].quantity, 2);
   assert.equal(body.cart.items[0].displayName, "Latte");
+  // Owner 2026-10-23: the guest who chose Chinese reads the Cart's names in Chinese, and an item
+  // without a Chinese name in the menu language (never an empty name); the session's locale and
+  // the Cart itself are unchanged.
+  for (const path of [
+    "/bff/customer/cart?locale=zh-Hans-CA",
+    "/api/v1/carts/" + pickup.cart.cartReference + "?locale=zh-Hans-CA",
+  ]) {
+    const chinese = await globalThis.fetch(base + path, {
+      headers: { ...headers, cookie: pickup.cookie },
+    });
+    assert.equal(chinese.status, 200, path);
+    const read = await chinese.json();
+    assert.equal(read.cart.version, body.cart.version);
+    assert.equal(read.cart.items[0].displayName, chineseName);
+  }
+  const english = await globalThis.fetch(base + "/bff/customer/cart", {
+    headers: { ...headers, cookie: pickup.cookie },
+  });
+  assert.equal((await english.json()).cart.items[0].displayName, "Latte");
+  const malformed = await globalThis.fetch(base + "/bff/customer/cart?locale=zh_CN", {
+    headers: { ...headers, cookie: pickup.cookie },
+  });
+  assert.equal(malformed.status, 400);
+  await malformed.text();
   const after = await facts();
   assert.equal(after.operations, before.operations + 1);
   assert.equal(after.audits, before.audits + 1);

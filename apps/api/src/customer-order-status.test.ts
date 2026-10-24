@@ -116,6 +116,22 @@ it("rejects foreign origins, missing metadata/CSRF, duplicate cookies and caller
   expect((await f.send({}, "?paid=true")).status).toBe(400);
   expect(f.read).not.toHaveBeenCalled();
 });
+it("Owner 2026-10-23: passes the guest's chosen language for item names; refuses a malformed one", async () => {
+  const f = await setup();
+  expect((await f.send({}, "?locale=zh-Hans-CA")).status).toBe(200);
+  expect(f.read).toHaveBeenLastCalledWith(
+    { sessionCredential: "s".repeat(43), csrfCredential: "c".repeat(43), orderReference: id(31) },
+    "zh-Hans-CA",
+  );
+  f.read.mockClear();
+  for (const query of [
+    "?locale=zh_CN",
+    "?locale=zh-Hans-CA&locale=en-CA",
+    "?locale=zh-Hans-CA&x=1",
+  ])
+    expect((await f.send({}, query)).status).toBe(400);
+  expect(f.read).not.toHaveBeenCalled();
+});
 it("rejects a different order or invalid money and bounds dependency errors", async () => {
   const f = await setup();
   f.read.mockResolvedValue({ ...f.result, order: { ...f.result.order, orderReference: id(99) } });

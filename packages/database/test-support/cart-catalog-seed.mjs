@@ -3,7 +3,12 @@ export async function seedCartCatalog(
   admin,
   id,
   at,
-  { taxClassificationReference = null, optionRules = [] } = {},
+  {
+    taxClassificationReference = null,
+    optionRules = [],
+    // Owner 2026-10-23: a published Chinese name is optional (the guest's language falls back).
+    sellableNames = { "en-CA": "Latte" },
+  } = {},
 ) {
   const digest = "sha256:" + "a".repeat(64);
   await admin.query(
@@ -48,8 +53,18 @@ export async function seedCartCatalog(
     [id(9), id(2), id(1), id(11)],
   );
   await admin.query(
-    `INSERT INTO rms_catalog.published_menu_projection_sellable (generation_id,brand_id,menu_id,section_id,placement_id,sellable_id,product_version_id,localized_names_json,presentation_role,sort_order,pinned,configured_availability,option_rules_json,allergen_disclosure_json) VALUES ($1,$2,$3,$4,$5,$6,$7,'{"en-CA":"Latte"}'::jsonb,'Standard',0,false,'Available',$8::jsonb,'{"registryVersionReference":"018f7300-0000-7000-8000-000000000019","items":[],"allergenFreeClaim":false,"assistanceCode":"ALLERGEN_ASSISTANCE_REQUIRED"}'::jsonb)`,
-    [id(9), id(2), id(1), id(11), id(12), id(13), id(14), JSON.stringify(optionRules)],
+    `INSERT INTO rms_catalog.published_menu_projection_sellable (generation_id,brand_id,menu_id,section_id,placement_id,sellable_id,product_version_id,localized_names_json,presentation_role,sort_order,pinned,configured_availability,option_rules_json,allergen_disclosure_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$9::jsonb,'Standard',0,false,'Available',$8::jsonb,'{"registryVersionReference":"018f7300-0000-7000-8000-000000000019","items":[],"allergenFreeClaim":false,"assistanceCode":"ALLERGEN_ASSISTANCE_REQUIRED"}'::jsonb)`,
+    [
+      id(9),
+      id(2),
+      id(1),
+      id(11),
+      id(12),
+      id(13),
+      id(14),
+      JSON.stringify(optionRules),
+      JSON.stringify(sellableNames),
+    ],
   );
   await admin.query(
     `INSERT INTO rms_catalog.published_menu_projection_checkpoint (consumer_name,brand_id,menu_id,active_generation_id,source_event_id,source_aggregate_version,projected_at) VALUES ('catalog.published-menu-projection',$1,$2,$3,$4,4,$5)`,

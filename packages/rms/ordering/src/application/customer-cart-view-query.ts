@@ -172,9 +172,26 @@ export function createCustomerCartViewQuery(ports: CustomerCartViewPorts) {
 export function createCustomerDiningCartViewQuery(ports: CustomerDiningCartViewPorts) {
   return createViewQuery({ ...ports, quotes: { loadLatest: async () => null } }, "DineIn");
 }
+const displayLocalePattern = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|\d{3})?$/u;
+/**
+ * Owner 2026-10-23: the locale a customer read shows item and option names in (the guest's chosen
+ * language), or null for the session's own locale. Names missing in it fall back to the menu
+ * language, so an item never shows without a name.
+ */
+export type CustomerDisplayLocale = string | null;
+function displayLocale(value: unknown): CustomerDisplayLocale {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !displayLocalePattern.test(value))
+    throw new CartError("CART_INPUT_INVALID");
+  return value;
+}
 function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
   return Object.freeze({
-    async read(input: unknown): Promise<CustomerCartDisplayView | null> {
+    async read(
+      input: unknown,
+      requestedDisplayLocale?: CustomerDisplayLocale,
+    ): Promise<CustomerCartDisplayView | null> {
+      const nameLocale = displayLocale(requestedDisplayLocale);
       let authorizationErrorCode: "CART_PERMISSION_DENIED" | "CART_INPUT_INVALID" | null = null;
       const read = async () => {
         try {
@@ -206,7 +223,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
             orderTypeCode: evidence.catalogOrderTypeCode,
             ruleEvidence: evidence.ruleEvidence,
             optionReferences: item.optionSelections.map((option) => option.optionReference),
-            locale: first.storeRequest.requestedLocale,
+            locale: nameLocale ?? first.storeRequest.requestedLocale,
           };
         });
         // Sequential: owner ports may share one caller transaction (no concurrent use of a client).

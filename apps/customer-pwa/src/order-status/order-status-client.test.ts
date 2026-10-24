@@ -1,3 +1,6 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { LanguageRoot } from "../i18n/i18n.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setCustomerCsrfCredential } from "../session/customer-transaction-context.js";
 import { createHttpOrderStatusClient } from "./order-status-client.js";
@@ -148,6 +151,23 @@ describe("customer order status HTTP client", () => {
       headers: { accept: "application/json", "x-csrf-token": "a".repeat(43) },
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it("Owner 2026-10-23: asks the order's item names in Chinese while Chinese is chosen", async () => {
+    setCustomerCsrfCredential("a".repeat(43));
+    const request = responder(payload());
+    try {
+      renderToStaticMarkup(
+        createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }),
+      );
+      await createHttpOrderStatusClient(request).load(id(1));
+    } finally {
+      renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+    }
+    expect(request).toHaveBeenCalledWith(
+      `/api/v1/orders/${id(1)}/status?locale=zh-Hans-CA`,
+      expect.anything(),
+    );
   });
 
   it.each(["-0", "01", "1e3", "1.0", "9223372036854775808", "-9223372036854775809", 2598])(

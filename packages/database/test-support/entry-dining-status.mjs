@@ -28,6 +28,7 @@ export async function exerciseEntryDiningStatus({
   oldCookie,
   orderType = "DineIn",
   amountMinor = "5650",
+  chineseName,
 }) {
   if (http) http.attach(result.terminalScope);
   const url = base + "/api/v1/orders/" + order.record.order.orderReference + "/status";
@@ -65,6 +66,24 @@ export async function exerciseEntryDiningStatus({
       .status,
     404,
   );
+  if (chineseName !== undefined) {
+    // Owner 2026-10-23: the item names in the guest's chosen language, chosen from the names
+    // frozen with the Order (the menu language where there is no Chinese name).
+    const chinese = await globalThis.fetch(url + "?locale=zh-Hans-CA", { headers });
+    assert.equal(chinese.status, 200);
+    const translated = (await chinese.json()).status;
+    assert.deepEqual(
+      translated.order.batches.flatMap((batch) => batch.items.map((item) => item.displayName)),
+      order.record.items.map(() => chineseName),
+    );
+    assert.equal(translated.order.orderReference, status.order.orderReference);
+    assert.ok(
+      status.order.batches.every((batch) =>
+        batch.items.every((item) => item.displayName === "Latte"),
+      ),
+    );
+    assert.equal((await globalThis.fetch(url + "?locale=zh-Hans-CA&x=1", { headers })).status, 400);
+  }
   const read = async () => {
     const response = await globalThis.fetch(url, { headers });
     assert.equal(response.status, 200);

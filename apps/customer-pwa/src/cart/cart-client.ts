@@ -5,6 +5,7 @@ import {
   setCustomerCsrfCredential,
 } from "../session/customer-transaction-context.js";
 import { browserRequestTimeoutMs } from "../network/bounded-fetch.js";
+import { withNameLocale } from "../i18n/i18n.js";
 
 const errorStatuses: Partial<Record<CartErrorCode, number>> = {
   cart_request_invalid: 400,
@@ -412,13 +413,13 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
     },
     loadCurrent: (signal?: AbortSignal) =>
       request(
-        "/bff/customer/cart",
+        withNameLocale("/bff/customer/cart"),
         { method: "GET", ...(signal === undefined ? {} : { signal }) },
         parseCurrent,
       ),
     async createCart(input) {
       const contextCurrent = captureCustomerCsrfContext();
-      const result = await request("/api/v1/carts", {
+      const result = await request(withNameLocale("/api/v1/carts"), {
         method: "POST",
         headers: createHeaders(input.operationReference),
         body: "{}",
@@ -429,17 +430,20 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
     },
     async addItem(input) {
       const contextCurrent = captureCustomerCsrfContext();
-      const result = await request(`/api/v1/carts/${input.cart.cart.cartReference}/items`, {
-        method: "POST",
-        headers: headers({
-          operationReference: input.operationReference,
-          version: input.cart.cart.version,
-        }),
-        body: JSON.stringify({
-          sellableReference: input.sellableReference,
-          ...input.draft,
-        }),
-      });
+      const result = await request(
+        withNameLocale(`/api/v1/carts/${input.cart.cart.cartReference}/items`),
+        {
+          method: "POST",
+          headers: headers({
+            operationReference: input.operationReference,
+            version: input.cart.cart.version,
+          }),
+          body: JSON.stringify({
+            sellableReference: input.sellableReference,
+            ...input.draft,
+          }),
+        },
+      );
       if (!contextCurrent()) throw new CartClientError("network_unknown");
       if (result === null) throw new CartClientError("cart_not_found");
       return result;
@@ -447,7 +451,9 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
     async updateItem(input) {
       const contextCurrent = captureCustomerCsrfContext();
       const result = await request(
-        `/api/v1/carts/${input.cart.cart.cartReference}/items/${input.cartItemReference}`,
+        withNameLocale(
+          `/api/v1/carts/${input.cart.cart.cartReference}/items/${input.cartItemReference}`,
+        ),
         {
           method: "PATCH",
           headers: headers({
@@ -464,7 +470,9 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
     async removeItem(input) {
       const contextCurrent = captureCustomerCsrfContext();
       const result = await request(
-        `/api/v1/carts/${input.cart.cart.cartReference}/items/${input.cartItemReference}`,
+        withNameLocale(
+          `/api/v1/carts/${input.cart.cart.cartReference}/items/${input.cartItemReference}`,
+        ),
         {
           method: "DELETE",
           headers: headers({

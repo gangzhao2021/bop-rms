@@ -399,3 +399,67 @@ it("WP-2423 (v15 3cd0f8dd M4/M5): states each refund once as new, and an ended v
   // The internal refund reference is never sent.
   expect(JSON.stringify(body)).not.toContain(id(40));
 });
+
+it("Owner 2026-10-23: names items and options in the guest's chosen language; the issued receipt is unchanged", async () => {
+  const test = await setup(true, null);
+  const original = test.chain.records[0];
+  if (original === undefined) throw new Error("fixture");
+  const line = {
+    ...original.snapshot.lines[0],
+    lineSubtotal: money(100n),
+    options: [{ displayName: "Oat milk", quantity: 1, amount: money(50n) }],
+  };
+  const chain = parseDigitalReceiptChain({
+    orderReference: test.chain.orderReference,
+    records: [{ ...original, snapshot: { ...original.snapshot, lines: [line] } }],
+  });
+  test.readView.mockImplementation(async () => ({
+    chain,
+    financial: null,
+    itemNames: new Map([[id(8), { displayName: "拿铁", options: ["燕麦奶"] }]]),
+  }));
+  interface Body {
+    receipt: {
+      records: {
+        snapshot: {
+          locale: string;
+          lines: { displayName: string; options?: { displayName: string }[] }[];
+        };
+      }[];
+    };
+  }
+  const response = await test.send({}, "?locale=zh-Hans-CA");
+  expect(response.status).toBe(200);
+  expect(test.readView).toHaveBeenLastCalledWith(
+    { sessionCredential: "s".repeat(43), csrfCredential: "c".repeat(43), orderReference: id(1) },
+    "zh-Hans-CA",
+  );
+  const snapshot = ((await response.json()) as Body).receipt.records[0]?.snapshot;
+  expect(snapshot?.lines[0]?.displayName).toBe("拿铁");
+  expect(snapshot?.lines[0]?.options?.[0]?.displayName).toBe("燕麦奶");
+  // The issued version's own locale is still stated; nothing was rewritten.
+  expect(snapshot?.locale).toBe("en-CA");
+  expect(chain.records[0]?.snapshot.lines[0]?.displayName).toBe("Synthetic item");
+  // A line without chosen names (or a mismatched option count) keeps the names it was issued with.
+  test.readView.mockImplementation(async () => ({
+    chain,
+    financial: null,
+    itemNames: new Map([[id(8), { displayName: "拿铁", options: [] }]]),
+  }));
+  const kept = ((await (await test.send({}, "?locale=zh-Hans-CA")).json()) as Body).receipt
+    .records[0]?.snapshot.lines[0];
+  expect(kept?.displayName).toBe("拿铁");
+  expect(kept?.options?.[0]?.displayName).toBe("Oat milk");
+  // No chosen language: the port is asked exactly as before.
+  await test.send();
+  expect(test.readView).toHaveBeenLastCalledWith({
+    sessionCredential: "s".repeat(43),
+    csrfCredential: "c".repeat(43),
+    orderReference: id(1),
+  });
+  for (const query of ["?locale=zh", "?locale=zh-Hans-CA&extra=1", "?locale=bad_locale"]) {
+    test.readView.mockClear();
+    const refused = await test.send({}, query);
+    expect(refused.status, query).toBe(query === "?locale=zh" ? 200 : 400);
+  }
+});

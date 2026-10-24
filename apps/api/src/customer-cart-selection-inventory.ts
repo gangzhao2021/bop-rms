@@ -17,7 +17,11 @@ import {
   type CustomerRecipeInventoryCoverageInput,
   type CustomerRecipeInventoryObservationInput,
 } from "./customer-recipe-inventory-observation.js";
-import type { CustomerCartPort, CustomerCartPortResult } from "./customer-cart.js";
+import {
+  cartDisplayArguments,
+  type CustomerCartPort,
+  type CustomerCartPortResult,
+} from "./customer-cart.js";
 
 type Catalog = PickupCartItemOptions["catalog"];
 type Context = Parameters<Catalog["validateSelection"]>[1];
@@ -155,12 +159,13 @@ export function withCartItemStockShortage(port: CustomerCartPort): CustomerCartP
       : result;
   };
   return Object.freeze({
-    createCart: (input) => port.createCart(input),
-    getCurrentCart: (input) => port.getCurrentCart(input),
-    getCart: (input) => port.getCart(input),
-    addItem: (input) => told(() => port.addItem(input)),
-    updateItem: (input) => told(() => port.updateItem(input)),
-    removeItem: (input) => port.removeItem(input),
+    createCart: (input, locale) => port.createCart(input, ...cartDisplayArguments(locale)),
+    getCurrentCart: (input, locale) => port.getCurrentCart(input, ...cartDisplayArguments(locale)),
+    getCart: (input, locale) => port.getCart(input, ...cartDisplayArguments(locale)),
+    addItem: (input, locale) => told(() => port.addItem(input, ...cartDisplayArguments(locale))),
+    updateItem: (input, locale) =>
+      told(() => port.updateItem(input, ...cartDisplayArguments(locale))),
+    removeItem: (input, locale) => port.removeItem(input, ...cartDisplayArguments(locale)),
   } satisfies CustomerCartPort);
 }
 

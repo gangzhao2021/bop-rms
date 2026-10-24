@@ -105,7 +105,12 @@ export function createCustomerOrderStatusRead(
   },
 ) {
   return Object.freeze({
-    async read(value: unknown) {
+    /**
+     * `displayLocale` (Owner 2026-10-23): the guest's chosen language. Item names are then chosen
+     * from the names frozen with each Order item (falling back to the session language); the
+     * status projection itself keeps the names it was built with.
+     */
+    async read(value: unknown, displayLocale?: string) {
       let credentials: { sessionCredential: string; csrfCredential: string };
       let orderReference: string;
       try {
@@ -594,6 +599,8 @@ export function createCustomerOrderStatusRead(
                 customerNote: string | null;
               }[]
             | null = null;
+          // Owner 2026-10-23: item names in the guest's chosen language, by Order item.
+          let chosenNames: Map<string, string> | null = null;
           if (await stillAuthorized()) {
             const shown = new Map(
               result.order.batches.flatMap((batch) =>
@@ -606,9 +613,15 @@ export function createCustomerOrderStatusRead(
                 transaction,
                 options.scope,
                 orderReference,
-                String(guest.locale),
+                displayLocale === undefined
+                  ? String(guest.locale)
+                  : [displayLocale, String(guest.locale)],
               );
               await transaction.query("RELEASE SAVEPOINT customer_order_item_prices", []);
+              if (displayLocale !== undefined)
+                chosenNames = new Map(
+                  prices.map((price) => [price.orderItemReference, price.displayName] as const),
+                );
               const matched = prices.filter((price) => shown.has(price.orderItemReference));
               if (
                 matched.length === shown.size &&
@@ -705,8 +718,23 @@ export function createCustomerOrderStatusRead(
           if (!(await stillAuthorized()))
             throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
           const checkedAt = now();
+          const names = chosenNames;
           return {
             ...result,
+            ...(names === null
+              ? {}
+              : {
+                  order: {
+                    ...result.order,
+                    batches: result.order.batches.map((batch) => ({
+                      ...batch,
+                      items: batch.items.map((item) => ({
+                        ...item,
+                        displayName: names.get(String(item.orderItemReference)) ?? item.displayName,
+                      })),
+                    })),
+                  },
+                }),
             sources: {
               checkedAt,
               ...(dining === null ? {} : { dining }),

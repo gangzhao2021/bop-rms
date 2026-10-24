@@ -68,7 +68,10 @@ export async function exercisePersistentProfileEntry({
   onPickupReady,
   acquire,
   diningInvitation = false,
+  // Owner 2026-10-23: whether the published Latte also has a Simplified Chinese name.
+  chineseNames = false,
 }) {
+  const chineseName = chineseNames ? "拿铁" : "Latte";
   const f = fixture(at);
   if (pickupOnly) {
     // The legacy fixture port has no foreground-CSRF derivation. Use the same
@@ -274,6 +277,7 @@ export async function exercisePersistentProfileEntry({
           run,
           scope: { ...scope, tenantReference: publicOptions.binding.tenantReference },
           at,
+          ...(chineseNames ? { sellableNames: { "en-CA": "Latte", "zh-Hans-CA": "拿铁" } } : {}),
         })
       : {}),
     ...(pickupQuote ? { cartQuote: pickupQuote.configuration } : {}),
@@ -523,6 +527,7 @@ export async function exercisePersistentProfileEntry({
         base: "http://127.0.0.1:" + address.port,
         pickup,
         admin,
+        chineseName,
       });
       const session = await new GuestSessionService({
         ...runtimeOptions.entry.session,
@@ -686,6 +691,7 @@ export async function exercisePersistentProfileEntry({
         oldCookie: added.oldCookie,
         orderType: "Pickup",
         amountMinor: "2260",
+        chineseName,
       });
       const handoff = await exerciseEntryPickupHandoff({
         admin,
@@ -717,6 +723,7 @@ export async function exercisePersistentProfileEntry({
         result: paymentResult,
         preparation: paymentPreparation,
         server: runtime.server,
+        chineseName,
       });
       if (process.env.BOP_ENTRY_BROWSER === "1")
         await verifyEntryDiningBrowser({

@@ -6,6 +6,7 @@ import { parseOrderSubmittedEnvelope } from "../../application/order-submitted-e
 import { parseOrderingReference, parseOrderingInstant } from "../../domain/cart.js";
 import { resolveOrderRevisionChain } from "../../domain/order-revision-chain.js";
 import { persistedOrderRevisionKindPolicy } from "../../domain/order-revision-kind.js";
+import { orderLocalizedName } from "../../domain/order-item-option-lines.js";
 import { orderRevisionOperationBoundSql } from "./order-revision-binding.js";
 import {
   decodeAdditionalDiningBatchSnapshot,
@@ -216,7 +217,7 @@ export function createPostgresOrderSubmittedHistorySource(options: {
           ...batch,
           items: batch.items.map((item) => ({
             orderItemReference: item.orderItemReference,
-            displayName: item.catalog.localizedNames[options.locale],
+            displayName: orderLocalizedName(item.catalog.localizedNames, options.locale),
             quantity: item.quantity,
             lineTotal: item.pricing.total,
           })),

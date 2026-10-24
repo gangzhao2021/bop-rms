@@ -8,6 +8,7 @@ import {
 } from "../../domain/order-item-snapshot-codec.js";
 import {
   orderItemOptionLines,
+  orderLocalizedName,
   type OrderItemOptionLine,
 } from "../../domain/order-item-option-lines.js";
 
@@ -126,6 +127,11 @@ export function createPostgresReceiptOrderSource(options: {
 export interface OrderItemPrice {
   readonly orderItemReference: string;
   readonly orderBatchReference: string;
+  /**
+   * The item's frozen catalog name in the first requested locale it has (Owner 2026-10-23: the
+   * guest's chosen language, then the session language), else any name it has.
+   */
+  readonly displayName: string;
   /** Unit price × quantity, before discount, fees and tax (the price printed beside the item). */
   readonly subtotal: { readonly amountMinor: bigint; readonly currencyCode: string };
   readonly tax: { readonly amountMinor: bigint; readonly currencyCode: string };
@@ -151,8 +157,11 @@ export async function listOrderItemPrices(
   tx: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
   orderReference: string,
-  /** The guest's language for option names (each option falls back to a name it has). */
-  locale = "",
+  /**
+   * The guest's languages for item and option names, most preferred first (each name falls back
+   * to a name it has).
+   */
+  locale: string | readonly string[] = "",
 ): Promise<readonly OrderItemPrice[]> {
   try {
     const brandReference = String(parseOrderingReference(scope.brandReference));
@@ -187,6 +196,7 @@ export async function listOrderItemPrices(
         return Object.freeze({
           orderItemReference: String(snapshot.orderItemReference),
           orderBatchReference: String(snapshot.orderBatchReference),
+          displayName: orderLocalizedName(snapshot.catalog.localizedNames, locale),
           subtotal: money(snapshot.pricing.subtotal),
           tax: money(snapshot.pricing.tax),
           total: money(snapshot.pricing.total),

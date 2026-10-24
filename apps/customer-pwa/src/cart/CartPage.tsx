@@ -1,4 +1,4 @@
-import { listSeparator } from "../i18n/i18n.js";
+import { listSeparator, useReloadOnLanguageChange } from "../i18n/i18n.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router";
 import { createBrowserCustomerCartClient } from "./cart-client.js";
@@ -496,6 +496,8 @@ export function CartPage({
     controller.getState,
     controller.getState,
   );
+  // Owner 2026-10-23: item names come from the Store in the chosen language.
+  useReloadOnLanguageChange(() => void controller.load());
   useEffect(() => {
     void controller.load();
     const offline = () => controller.setOnline(false);

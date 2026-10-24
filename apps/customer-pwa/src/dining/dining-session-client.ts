@@ -1,4 +1,5 @@
 import { boundedFetch } from "../network/bounded-fetch.js";
+import { withNameLocale } from "../i18n/i18n.js";
 import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
@@ -319,7 +320,7 @@ export function createHttpDiningSessionClient(
       if (csrf === null || !credential.test(csrf)) throw new DiningSessionClientError("not-joined");
       let response: Response;
       try {
-        response = await boundedFetch(request, "/api/v1/dine-in/session", {
+        response = await boundedFetch(request, withNameLocale("/api/v1/dine-in/session"), {
           method: "GET",
           credentials: "include",
           cache: "no-store",

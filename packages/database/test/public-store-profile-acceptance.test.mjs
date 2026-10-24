@@ -539,9 +539,15 @@ it("persists immutable scoped public profiles without treating saved evidence as
   });
 });
 
-it.each(["Dining", "Pickup"])(
-  "continues current-clock %s Entry through its owner workflow",
-  async (channel) => {
+// Owner 2026-10-23: the Pickup journey runs once with a published Chinese name for its item and
+// once without, so the guest's Chinese reads are proven with the name present and missing.
+it.each([
+  ["Dining", false],
+  ["Pickup", true],
+  ["Pickup", false],
+])(
+  "continues current-clock %s Entry through its owner workflow (Chinese name published: %s)",
+  async (channel, chineseNames) => {
     await withIsolatedDatabase({ caseId: "wp2402_current_entry" }, async (env) => {
       const client = new pg.Client(env.clientConfig);
       await client.connect();
@@ -750,6 +756,7 @@ it.each(["Dining", "Pickup"])(
           at,
           currentClock: true,
           pickupOnly: channel === "Pickup",
+          chineseNames,
           ...(pickupAuthorization
             ? {
                 onPickupReady: (pickupReady) =>

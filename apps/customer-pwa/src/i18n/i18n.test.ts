@@ -11,6 +11,7 @@ import {
   initialLanguage,
   menuLocale,
   t,
+  withNameLocale,
 } from "./i18n.js";
 import { zhHans } from "./zh-Hans.js";
 
@@ -104,4 +105,15 @@ it("renders the whole page in Chinese once Chinese is chosen, with a switch back
   expect(toggle).toContain('aria-label="Switch to English"');
   renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
   expect(t("Your cart")).toBe("Your cart");
+});
+
+it("Owner 2026-10-23: asks the Store's item names in Chinese only while Chinese is chosen", () => {
+  try {
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+    expect(withNameLocale("/bff/customer/cart")).toBe("/bff/customer/cart?locale=zh-Hans-CA");
+    expect(withNameLocale("/api/v1/x?a=1")).toBe("/api/v1/x?a=1&locale=zh-Hans-CA");
+  } finally {
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+  }
+  expect(withNameLocale("/bff/customer/cart")).toBe("/bff/customer/cart");
 });

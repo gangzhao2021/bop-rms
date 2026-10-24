@@ -15,6 +15,7 @@ import {
   createDigitalReceiptQueryService,
   createPostgresDigitalReceiptStore,
   DigitalReceiptError,
+  listOrderItemPrices,
   parseOrderingReference,
   type CartQueryTransactionRunner,
 } from "@rms/ordering";
@@ -23,6 +24,7 @@ import type { PersistentPublicStoreProfileOptions } from "./persistent-public-st
 import { readCustomerStoreContact, type CustomerStoreContact } from "./customer-store-contact.js";
 import { readCurrentStoreReceiptProfile } from "@rms/store";
 import { isGuestTableOrder } from "./customer-order-status-read.js";
+import type { CustomerReceiptItemNames } from "./customer-receipt.js";
 
 /** Side-effect-free receipt retrieval under the same current Guest transaction. */
 export function createCustomerReceiptRead(
@@ -37,7 +39,7 @@ export function createCustomerReceiptRead(
     };
   },
 ) {
-  async function readView(value: unknown, includeFinancial: boolean) {
+  async function readView(value: unknown, includeFinancial: boolean, displayLocale?: string) {
     let credentials: { sessionCredential: string; csrfCredential: string };
     let orderReference: string;
     try {
@@ -181,10 +183,37 @@ export function createCustomerReceiptRead(
           privacyNoticeUrl =
             (await readCurrentStoreReceiptProfile(transaction, options.scope))?.privacyNoticeUrl ??
             null;
+        // Owner 2026-10-23: the guest's chosen language for item and option names, chosen from the
+        // names frozen with each Order item (the issued receipt versions are left as issued). If
+        // they can't be read, the receipt keeps the names it was issued with.
+        let itemNames: Map<string, CustomerReceiptItemNames> | null = null;
+        if (includeFinancial && displayLocale !== undefined && (await stillAuthorized())) {
+          try {
+            await transaction.query("SAVEPOINT customer_receipt_item_names", []);
+            const prices = await listOrderItemPrices(transaction, options.scope, orderReference, [
+              displayLocale,
+              String(guest.locale),
+            ]);
+            await transaction.query("RELEASE SAVEPOINT customer_receipt_item_names", []);
+            itemNames = new Map(
+              prices.map((price) => [
+                price.orderItemReference,
+                Object.freeze({
+                  displayName: price.displayName,
+                  options: Object.freeze(price.options.map((option) => option.displayName)),
+                }),
+              ]),
+            );
+          } catch {
+            await transaction.query("ROLLBACK TO SAVEPOINT customer_receipt_item_names", []);
+            await transaction.query("RELEASE SAVEPOINT customer_receipt_item_names", []);
+          }
+        }
         if (!(await stillAuthorized()))
           throw new DigitalReceiptError("DIGITAL_RECEIPT_PERMISSION_DENIED");
         return {
           chain,
+          ...(itemNames === null ? {} : { itemNames }),
           financial,
           storeContact,
           privacyNoticeUrl,
@@ -201,6 +230,6 @@ export function createCustomerReceiptRead(
   }
   return Object.freeze({
     read: async (value: unknown) => (await readView(value, false)).chain,
-    readView: (value: unknown) => readView(value, true),
+    readView: (value: unknown, displayLocale?: string) => readView(value, true, displayLocale),
   });
 }

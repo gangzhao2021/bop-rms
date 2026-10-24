@@ -1,4 +1,5 @@
 import { parseOrderSubmittedEnvelope } from "./order-submitted-event.js";
+import { orderLocalizedName } from "../domain/order-item-option-lines.js";
 import { parseAdditionalDiningBatchSnapshot } from "../domain/additional-dining-batch.js";
 import { encodeAdditionalDiningBatchSnapshot } from "../domain/additional-dining-batch-codec.js";
 import {
@@ -69,7 +70,7 @@ export function createOrderStatusAdditionalSource(input: {
           submittedAt: batch.submittedAt,
           items: additional.items.map((item) => ({
             orderItemReference: item.orderItemReference,
-            displayName: item.catalog.localizedNames[input.locale],
+            displayName: orderLocalizedName(item.catalog.localizedNames, input.locale),
             quantity: item.quantity,
             lineTotal: item.pricing.total,
           })),

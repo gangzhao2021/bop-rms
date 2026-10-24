@@ -24,6 +24,7 @@ export async function exerciseCustomerReceiptRead({
   paymentScope,
   paymentFreshAfter,
   ordinaryRefundFixture,
+  chineseName,
 }) {
   const id = (n) => "0190ec06-0000-7000-8000-" + n.toString(16).padStart(12, "0");
   const at = new Date().toISOString(),
@@ -241,6 +242,25 @@ export async function exerciseCustomerReceiptRead({
       404,
     );
     assert.equal((await globalThis.fetch(url, { headers })).status, 200);
+    if (chineseName !== undefined) {
+      // Owner 2026-10-23: the receipt's item names in the guest's chosen language, chosen at read
+      // time from the names frozen with the Order; the issued receipt version is unchanged.
+      const chinese = await globalThis.fetch(url + "?locale=zh-Hans-CA", { headers });
+      assert.equal(chinese.status, 200);
+      const translated = parseReceiptView((await chinese.json()).receipt, orderReference);
+      assert.deepEqual(
+        translated.records[0].snapshot.lines.map((line) => line.displayName),
+        view.records[0].snapshot.lines.map(() => chineseName),
+      );
+      assert.ok(view.records[0].snapshot.lines.every((line) => line.displayName === "Latte"));
+      const stored = await admin.query(
+        "SELECT receipt_record_json->'snapshot'->'lines' AS lines FROM rms_ordering.digital_receipt_record WHERE order_id=$1",
+        [orderReference],
+      );
+      assert.ok(stored.rows.length > 0);
+      for (const row of stored.rows)
+        assert.ok(row.lines.every((line) => line.displayName === "Latte"));
+    }
     if (ordinaryRefundFixture) {
       await admin.query("GRANT INSERT ON rms_payment.ordinary_refund_request TO " + role);
       assert.equal((await ordinaryRefundFixture.commitRequest()).status, "Created");

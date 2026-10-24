@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { zhHans } from "./zh-Hans.js";
 
 /**
@@ -56,6 +56,16 @@ export function dateLocale(): string {
 /** The locale to ask the Store's menu in: Chinese when chosen, else the entry's own locale. */
 export function menuLocale(language: CustomerLanguage, entryLocale: string): string {
   return language === "zh-Hans" ? CHINESE_LOCALE : entryLocale;
+}
+
+/**
+ * The path of a customer read (cart, order status, receipt, table) asking its item and option
+ * names in the chosen language: Chinese adds `locale=zh-Hans-CA` (names without a Chinese name come
+ * back in the menu language); English asks nothing extra, so the session's own locale is used.
+ */
+export function withNameLocale(path: string): string {
+  if (current !== "zh-Hans") return path;
+  return `${path}${path.includes("?") ? "&" : "?"}locale=${CHINESE_LOCALE}`;
 }
 
 function storedLanguage(): CustomerLanguage | null {
@@ -117,6 +127,20 @@ export function LanguageRoot({
 
 export function useLanguage() {
   return useContext(LanguageContext);
+}
+
+/**
+ * Reads the page again after the guest switches language (not when it opens), so item and option
+ * names the server writes follow the new language (see {@link withNameLocale}).
+ */
+export function useReloadOnLanguageChange(reload: () => void): void {
+  const { language } = useLanguage();
+  const shown = useRef(language);
+  useEffect(() => {
+    if (shown.current === language) return;
+    shown.current = language;
+    reload();
+  }, [language, reload]);
 }
 
 /** "中文" / "English": switches the whole customer journey. */

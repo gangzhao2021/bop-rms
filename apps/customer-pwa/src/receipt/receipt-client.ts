@@ -1,4 +1,5 @@
 import { boundedFetch } from "../network/bounded-fetch.js";
+import { withNameLocale } from "../i18n/i18n.js";
 import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
@@ -28,7 +29,7 @@ export function createHttpReceiptClient(
       try {
         const response = await boundedFetch(
           request,
-          "/api/v1/orders/" + orderReference + "/receipt",
+          withNameLocale("/api/v1/orders/" + orderReference + "/receipt"),
           {
             method: "GET",
             credentials: "include",

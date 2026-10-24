@@ -1,4 +1,5 @@
 import { boundedFetch } from "../network/bounded-fetch.js";
+import { withNameLocale } from "../i18n/i18n.js";
 import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
@@ -169,13 +170,17 @@ export function createHttpOrderStatusClient(
       if (csrf === null || !credential.test(csrf))
         throw new OrderStatusClientError("permission_denied");
       try {
-        const response = await boundedFetch(request, `/api/v1/orders/${orderReference}/status`, {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-          redirect: "error",
-          headers: { accept: "application/json", "x-csrf-token": csrf },
-        });
+        const response = await boundedFetch(
+          request,
+          withNameLocale(`/api/v1/orders/${orderReference}/status`),
+          {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+            redirect: "error",
+            headers: { accept: "application/json", "x-csrf-token": csrf },
+          },
+        );
         if (!contextCurrent()) throw new OrderStatusClientError("permission_denied");
         if (response.status === 401 || response.status === 403)
           throw new OrderStatusClientError("permission_denied");

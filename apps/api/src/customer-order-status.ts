@@ -8,6 +8,7 @@ import type { RequestHandler, Response } from "express";
 import { storeContactJson } from "./customer-store-contact.js";
 import { customerFailureCode } from "./customer-failure-diagnostic.js";
 import { markRequestFailure } from "./request-correlation.js";
+import { customerDisplayLocale } from "./customer-display-locale.js";
 
 type SourcedStatus = Awaited<ReturnType<ReturnType<typeof createCustomerOrderStatusRead>["read"]>>;
 type CustomerStatusResponse = CustomerOrderStatusView & Partial<Pick<SourcedStatus, "sources">>;
@@ -45,7 +46,8 @@ function reject(response: Response, status: number) {
  * the guest who placed the Order, `received` answers from Ordering's own record meanwhile.
  */
 interface CustomerOrderStatusPort {
-  read(input: CustomerOrderStatusInput): Promise<CustomerStatusResponse>;
+  /** `displayLocale` (Owner 2026-10-23): the guest's chosen language for item names. */
+  read(input: CustomerOrderStatusInput, displayLocale?: string): Promise<CustomerStatusResponse>;
   received?(input: CustomerOrderStatusInput): Promise<CustomerOrderReceived | null>;
   /** WP-2423 (46940b76 L5): the Order is the current Order of the open table this guest joined. */
   tableOrder?(input: CustomerOrderStatusInput): Promise<boolean>;
@@ -61,13 +63,14 @@ export class CustomerOrderStatusHandler {
     return async (request, response) => {
       protect(response);
       let input: CustomerOrderStatusInput;
+      let displayLocale: string | null;
       try {
         if (
           (request.get("origin") !== undefined && request.get("origin") !== this.#origin) ||
-          request.get("sec-fetch-site") !== "same-origin" ||
-          Object.keys(request.query).length !== 0
+          request.get("sec-fetch-site") !== "same-origin"
         )
           throw new Error();
+        displayLocale = customerDisplayLocale(request.query);
         readClosedRecord(request.body ?? {}, []);
         const entries = (request.headers.cookie ?? "")
           .split(";")
@@ -95,7 +98,10 @@ export class CustomerOrderStatusHandler {
         return;
       }
       try {
-        const view = await this.#port.read(input);
+        const view =
+          displayLocale === null
+            ? await this.#port.read(input)
+            : await this.#port.read(input, displayLocale);
         if (view.order.orderReference !== input.orderReference)
           throw new Error("invalid order binding");
         // Explicit public-field serialization prevents owner metadata or credential leakage.

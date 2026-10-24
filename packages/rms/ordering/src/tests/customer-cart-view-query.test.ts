@@ -212,6 +212,27 @@ describe("safe Customer Cart display", () => {
       expect(json).not.toContain(value);
     expect(Object.isFrozen(result?.cart.items[0]?.configuration)).toBe(true);
   });
+  it("Owner 2026-10-23: names items in the guest's chosen language; the Store stays in the session's", async () => {
+    const f = fixture();
+    await f.query.read(request, "zh-Hans-CA");
+    expect(f.describeMany).toHaveBeenCalledWith([
+      expect.objectContaining({ locale: "zh-Hans-CA", sellableReference: id(9) }),
+    ]);
+    expect(f.getPublicStore).toHaveBeenCalledWith(
+      expect.objectContaining({ requestedLocale: "en-CA" }),
+    );
+    // No chosen language: the session's own locale, as before.
+    const g = fixture();
+    await g.query.read(request, null);
+    expect(g.describeMany).toHaveBeenCalledWith([expect.objectContaining({ locale: "en-CA" })]);
+    for (const invalid of ["zh_CN", "", "ZH-hans", 7]) {
+      const h = fixture();
+      await expect(h.query.read(request, invalid as string)).rejects.toMatchObject({
+        code: "CART_INPUT_INVALID",
+      });
+      expect(h.read).not.toHaveBeenCalled();
+    }
+  });
   it("WP-2423 Q27: reads a cart priced with the configured (v2) Quote", async () => {
     const f = fixture();
     f.loadLatest.mockResolvedValueOnce(

@@ -420,6 +420,8 @@ export interface CustomerDiningSessionDependencies {
       readonly diningSessionReference: string;
       readonly stillAuthorized: () => Promise<boolean>;
       readonly now: () => string;
+      /** Owner 2026-10-23: the guest's chosen language for item names (absent: the session's). */
+      readonly displayLocale?: string;
     },
   ): Promise<CustomerDiningSessionFacts>;
 }
@@ -442,8 +444,14 @@ function postgresDependencies(
       return { authorize: (input) => service.authorize({ ...credentials, ...input }) };
     },
     async facts(transaction, context) {
-      const { diningSessionReference, guestSessionReference, guest, stillAuthorized, now } =
-        context;
+      const {
+        diningSessionReference,
+        guestSessionReference,
+        guest,
+        stillAuthorized,
+        now,
+        displayLocale,
+      } = context;
       const tableLabel =
         (await listDiningSessionTableLabels(transaction, scope, [diningSessionReference])).get(
           diningSessionReference,
@@ -631,6 +639,8 @@ function postgresDependencies(
             }
           >
         | undefined;
+      // Owner 2026-10-23: item names in the guest's chosen language, by Order item.
+      let chosenNames: Map<string, string> | undefined;
       if (await stillAuthorized()) {
         const shown = new Map(
           status.order.batches.flatMap((batch) =>
@@ -639,8 +649,17 @@ function postgresDependencies(
         );
         try {
           await transaction.query("SAVEPOINT customer_dining_item_prices", []);
-          const found = await listOrderItemPrices(transaction, scope, orderReference);
+          const found = await listOrderItemPrices(
+            transaction,
+            scope,
+            orderReference,
+            displayLocale === undefined ? undefined : [displayLocale, String(guest.locale)],
+          );
           await transaction.query("RELEASE SAVEPOINT customer_dining_item_prices", []);
+          if (displayLocale !== undefined)
+            chosenNames = new Map(
+              found.map((price) => [price.orderItemReference, price.displayName] as const),
+            );
           const matched = found.filter((price) => shown.has(price.orderItemReference));
           if (
             matched.length === shown.size &&
@@ -712,7 +731,7 @@ function postgresDependencies(
             submittedAt: String(batch.submittedAt),
             items: batch.items.map((item) => ({
               orderItemReference: String(item.orderItemReference),
-              displayName: item.displayName,
+              displayName: chosenNames?.get(String(item.orderItemReference)) ?? item.displayName,
               quantity: item.quantity,
               lineTotal: item.lineTotal,
             })),
@@ -776,7 +795,8 @@ export function createCustomerDiningSessionRead(
   }) => CustomerDiningSessionDependencies,
 ) {
   return Object.freeze({
-    async read(value: unknown): Promise<CustomerDiningSessionView> {
+    /** `displayLocale` (Owner 2026-10-23): the guest's chosen language for item names. */
+    async read(value: unknown, displayLocale?: string): Promise<CustomerDiningSessionView> {
       let credentials: { sessionCredential: string; csrfCredential: string };
       try {
         const raw = readClosedRecord(value, ["sessionCredential", "csrfCredential"]);
@@ -823,6 +843,7 @@ export function createCustomerDiningSessionRead(
             guest: first.guest,
             stillAuthorized,
             now,
+            ...(displayLocale === undefined ? {} : { displayLocale }),
           });
           if (facts.diningSessionReference !== first.participant.diningSessionReference)
             return denied();

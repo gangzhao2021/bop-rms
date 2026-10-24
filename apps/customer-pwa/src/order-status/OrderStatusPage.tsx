@@ -1,4 +1,4 @@
-import { listSeparator } from "../i18n/i18n.js";
+import { listSeparator, useReloadOnLanguageChange } from "../i18n/i18n.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link, useParams } from "react-router";
 import {
@@ -1168,6 +1168,8 @@ export function OrderStatusPage({
   );
   // WP-2423 (46940b76 L5): whether this browser had a visit when the page opened.
   const [openedWithVisit] = useState(() => getCustomerCsrfCredential() !== null);
+  // Owner 2026-10-23: item names come from the Store in the chosen language.
+  useReloadOnLanguageChange(() => void controller.refresh());
   useEffect(() => {
     void controller.load();
     const offline = () => controller.setOnline(false);

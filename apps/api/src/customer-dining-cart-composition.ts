@@ -42,9 +42,11 @@ import { createCustomerCartItemPort } from "./customer-cart-item-composition.js"
 import { createCustomerCartRemovalPort } from "./customer-cart-removal-composition.js";
 import {
   createCustomerCartReadPort,
+  readCartView,
   type CustomerCartDisplayQuery,
 } from "./customer-cart-read-composition.js";
 import {
+  cartDisplayArguments,
   orderProcessingRetrySeconds,
   type CustomerCartPort,
   type CustomerCartPortResult,
@@ -211,6 +213,7 @@ export function createCustomerDiningCartPort(options: {
     ...createCustomerCartReadPort(options.query),
     async createCart(
       input: Parameters<CustomerCartPort["createCart"]>[0],
+      displayLocale?: string | null,
     ): Promise<CustomerCartPortResult> {
       let command: {
         readonly sessionCredential: string;
@@ -241,11 +244,13 @@ export function createCustomerDiningCartPort(options: {
       }
       // A failed current read cannot erase a possibly committed selection.
       try {
-        const view = await options.query.read(
+        const view = await readCartView(
+          options.query,
           Object.freeze({
             sessionCredential: command.sessionCredential,
             cartReference: receipt.cartReference,
           }),
+          displayLocale,
         );
         if (
           view === null ||
@@ -275,8 +280,8 @@ export function createCustomerDiningCartPort(options: {
   });
   if (options.items === undefined) return base;
   const query: CustomerCartDisplayQuery = {
-    async read(input) {
-      const view = await options.query.read(input);
+    async read(input, displayLocale) {
+      const view = await readCartView(options.query, input, displayLocale);
       if (view !== null && (view.schemaVersion !== 1 || view.cart.orderType !== "DineIn"))
         throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
       return view;
@@ -286,7 +291,10 @@ export function createCustomerDiningCartPort(options: {
   const items = createCustomerCartItemPort({ query, items: options.items, fallback: base });
   return Object.freeze({
     ...items,
-    async removeItem(input: Parameters<CustomerCartPort["removeItem"]>[0]) {
+    async removeItem(
+      input: Parameters<CustomerCartPort["removeItem"]>[0],
+      displayLocale?: string | null,
+    ) {
       try {
         const captured = Object.freeze(
           readClosedRecord(input, [
@@ -299,7 +307,7 @@ export function createCustomerDiningCartPort(options: {
             "expectedCartVersion",
           ]),
         );
-        return await removal.removeItem(captured as unknown as typeof input);
+        return await removal.removeItem(captured as unknown as typeof input, displayLocale);
       } catch {
         return unavailable;
       }
@@ -492,11 +500,19 @@ export function createCustomerCartChannelPort(options: {
     }
   }
   return Object.freeze<CustomerCartPort>({
-    getCurrentCart: (input) => dispatch(input, common, (port, raw) => port.getCurrentCart(raw)),
-    getCart: (input) =>
-      dispatch(input, [...common, "cartReference"], (port, raw) => port.getCart(raw)),
-    createCart: (input) => dispatch(input, mutation, (port, raw) => port.createCart(raw)),
-    addItem: (input) =>
+    getCurrentCart: (input, locale) =>
+      dispatch(input, common, (port, raw) =>
+        port.getCurrentCart(raw, ...cartDisplayArguments(locale)),
+      ),
+    getCart: (input, locale) =>
+      dispatch(input, [...common, "cartReference"], (port, raw) =>
+        port.getCart(raw, ...cartDisplayArguments(locale)),
+      ),
+    createCart: (input, locale) =>
+      dispatch(input, mutation, (port, raw) =>
+        port.createCart(raw, ...cartDisplayArguments(locale)),
+      ),
+    addItem: (input, locale) =>
       dispatch(
         input,
         [
@@ -508,9 +524,9 @@ export function createCustomerCartChannelPort(options: {
           "optionSelections",
           "customerNote",
         ],
-        (port, raw) => port.addItem(raw),
+        (port, raw) => port.addItem(raw, ...cartDisplayArguments(locale)),
       ),
-    updateItem: (input) =>
+    updateItem: (input, locale) =>
       dispatch(
         input,
         [
@@ -522,13 +538,13 @@ export function createCustomerCartChannelPort(options: {
           "optionSelections",
           "customerNote",
         ],
-        (port, raw) => port.updateItem(raw),
+        (port, raw) => port.updateItem(raw, ...cartDisplayArguments(locale)),
       ),
-    removeItem: (input) =>
+    removeItem: (input, locale) =>
       dispatch(
         input,
         [...mutation, "cartReference", "cartItemReference", "expectedCartVersion"],
-        (port, raw) => port.removeItem(raw),
+        (port, raw) => port.removeItem(raw, ...cartDisplayArguments(locale)),
       ),
   });
 }

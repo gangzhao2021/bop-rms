@@ -8,6 +8,7 @@ import {
 import type { RequestHandler, Response } from "express";
 import { customerFailureCode } from "./customer-failure-diagnostic.js";
 import { markRequestFailure } from "./request-correlation.js";
+import { customerDisplayLocale } from "./customer-display-locale.js";
 import { storeContactJson, type CustomerStoreContact } from "./customer-store-contact.js";
 
 export const customerReceiptRoute = "/api/v1/orders/:order_id/receipt";
@@ -16,10 +17,25 @@ export interface CustomerReceiptInput {
   readonly csrfCredential: string;
   readonly orderReference: string;
 }
+export interface CustomerReceiptItemNames {
+  readonly displayName: string;
+  /** The item's chosen options' names, in the order the receipt line lists them. */
+  readonly options: readonly string[];
+}
 interface ReceiptPort {
   read(input: CustomerReceiptInput): Promise<DigitalReceiptChain>;
-  readView?(input: CustomerReceiptInput): Promise<{
+  /** `displayLocale` (Owner 2026-10-23): the guest's chosen language for item names. */
+  readView?(
+    input: CustomerReceiptInput,
+    displayLocale?: string,
+  ): Promise<{
     chain: DigitalReceiptChain;
+    /**
+     * Owner 2026-10-23: each Order item's name and its options' names chosen from the names frozen
+     * at checkout in the requested language (falling back to the session language), by line
+     * reference; the issued receipt versions keep their own names.
+     */
+    itemNames?: ReadonlyMap<string, CustomerReceiptItemNames>;
     financial: CustomerReceiptFinancialView | null;
     /** WP-2423 Q10: the Store's published phone and address (absent when not published). */
     storeContact?: CustomerStoreContact | null;
@@ -99,13 +115,14 @@ export class CustomerReceiptHandler {
     return async (request, response) => {
       protect(response);
       let input: CustomerReceiptInput;
+      let displayLocale: string | null;
       try {
         if (
           (request.get("origin") !== undefined && request.get("origin") !== this.#origin) ||
-          request.get("sec-fetch-site") !== "same-origin" ||
-          Object.keys(request.query).length !== 0
+          request.get("sec-fetch-site") !== "same-origin"
         )
           throw new Error();
+        displayLocale = customerDisplayLocale(request.query);
         readClosedRecord(request.body ?? {}, []);
         const entries = (request.headers.cookie ?? "")
           .split(";")
@@ -133,7 +150,23 @@ export class CustomerReceiptHandler {
         return;
       }
       try {
-        const view = this.#port.readView ? await this.#port.readView(input) : null;
+        const view = this.#port.readView
+          ? displayLocale === null
+            ? await this.#port.readView(input)
+            : await this.#port.readView(input, displayLocale)
+          : null;
+        // A name for the guest's language when one was frozen with the item; else as issued.
+        const itemName = (lineReference: string, issued: string) =>
+          view?.itemNames?.get(lineReference)?.displayName ?? issued;
+        const optionName = (
+          lineReference: string,
+          index: number,
+          issued: string,
+          count: number,
+        ) => {
+          const names = view?.itemNames?.get(lineReference)?.options;
+          return names !== undefined && names.length === count ? (names[index] ?? issued) : issued;
+        };
         const chain = parseDigitalReceiptChain(view ? view.chain : await this.#port.read(input));
         if (chain.orderReference !== input.orderReference)
           throw new Error("invalid receipt binding");
@@ -177,7 +210,7 @@ export class CustomerReceiptHandler {
                 locale: snapshot.locale,
                 lines: snapshot.lines.map((line) => ({
                   lineReference: line.lineReference,
-                  displayName: line.displayName,
+                  displayName: itemName(line.lineReference, line.displayName),
                   quantity: line.quantity,
                   lineTotal: money(line.lineTotal),
                   // WP-2423 D5: the item's pre-tax price, on versions issued since it was frozen.
@@ -185,8 +218,13 @@ export class CustomerReceiptHandler {
                   // WP-2423: the chosen options and what each added (versions issued since then).
                   ...(line.options
                     ? {
-                        options: line.options.map((option) => ({
-                          displayName: option.displayName,
+                        options: line.options.map((option, index, all) => ({
+                          displayName: optionName(
+                            line.lineReference,
+                            index,
+                            option.displayName,
+                            all.length,
+                          ),
                           quantity: option.quantity,
                           amount: money(option.amount),
                         })),
@@ -206,7 +244,7 @@ export class CustomerReceiptHandler {
                         kind: refund.kind,
                         lines: refund.lines.map((item) => ({
                           lineReference: item.lineReference,
-                          displayName: item.displayName,
+                          displayName: itemName(item.lineReference, item.displayName),
                           quantity: item.quantity,
                           amount: money(item.amount),
                         })),

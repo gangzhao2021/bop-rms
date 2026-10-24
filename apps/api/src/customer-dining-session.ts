@@ -3,6 +3,7 @@ import { OrderStatusProjectionError } from "@rms/ordering";
 import type { RequestHandler, Response } from "express";
 import { customerFailureCode } from "./customer-failure-diagnostic.js";
 import { markRequestFailure } from "./request-correlation.js";
+import { customerDisplayLocale } from "./customer-display-locale.js";
 import type { CustomerDiningSessionView, CustomerMoney } from "./customer-dining-session-read.js";
 
 /** WP-2423 Q8 (CUST-DINE-IN-SESSION): the guest's own table; the browser never names a session. */
@@ -37,13 +38,17 @@ function money(value: CustomerMoney) {
   return { amountMinor: value.amountMinor.toString(), currencyCode: value.currencyCode };
 }
 
+interface DiningSessionPort {
+  /** `displayLocale` (Owner 2026-10-23): the guest's chosen language for item names. */
+  read(
+    input: CustomerDiningSessionInput,
+    displayLocale?: string,
+  ): Promise<CustomerDiningSessionView>;
+}
 export class CustomerDiningSessionHandler {
   readonly #origin: string;
-  readonly #port: { read(input: CustomerDiningSessionInput): Promise<CustomerDiningSessionView> };
-  constructor(options: {
-    allowedOrigin: string;
-    port: { read(input: CustomerDiningSessionInput): Promise<CustomerDiningSessionView> };
-  }) {
+  readonly #port: DiningSessionPort;
+  constructor(options: { allowedOrigin: string; port: DiningSessionPort }) {
     this.#origin = new URL(options.allowedOrigin).origin;
     this.#port = options.port;
   }
@@ -51,13 +56,14 @@ export class CustomerDiningSessionHandler {
     return async (request, response) => {
       protect(response);
       let input: CustomerDiningSessionInput;
+      let displayLocale: string | null;
       try {
         if (
           (request.get("origin") !== undefined && request.get("origin") !== this.#origin) ||
-          request.get("sec-fetch-site") !== "same-origin" ||
-          Object.keys(request.query).length !== 0
+          request.get("sec-fetch-site") !== "same-origin"
         )
           throw new Error();
+        displayLocale = customerDisplayLocale(request.query);
         readClosedRecord(request.body ?? {}, []);
         const entries = (request.headers.cookie ?? "")
           .split(";")
@@ -78,7 +84,10 @@ export class CustomerDiningSessionHandler {
         return;
       }
       try {
-        const view = await this.#port.read(input);
+        const view =
+          displayLocale === null
+            ? await this.#port.read(input)
+            : await this.#port.read(input, displayLocale);
         // Explicit public-field serialization: no owner references, guest identity or codes.
         const session = {
           tableLabel: view.tableLabel,

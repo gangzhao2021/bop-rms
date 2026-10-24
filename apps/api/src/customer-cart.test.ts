@@ -68,29 +68,34 @@ function view(overrides: Partial<CustomerCartView["cart"]> = {}): CustomerCartVi
 class FakePort implements CustomerCartPort {
   result: CustomerCartPortResult = { status: "Found", view: view() };
   calls: { name: string; input: unknown }[] = [];
+  displayLocales: (string | null | undefined)[] = [];
 
-  private called(name: string, input: unknown) {
+  private called(name: string, input: unknown, displayLocale?: string | null) {
     this.calls.push({ name, input });
+    this.displayLocales.push(displayLocale);
     return Promise.resolve(this.result);
   }
 
-  createCart(input: Parameters<CustomerCartPort["createCart"]>[0]) {
-    return this.called("create", input);
+  createCart(input: Parameters<CustomerCartPort["createCart"]>[0], displayLocale?: string | null) {
+    return this.called("create", input, displayLocale);
   }
-  getCurrentCart(input: Parameters<CustomerCartPort["getCurrentCart"]>[0]) {
-    return this.called("current", input);
+  getCurrentCart(
+    input: Parameters<CustomerCartPort["getCurrentCart"]>[0],
+    displayLocale?: string | null,
+  ) {
+    return this.called("current", input, displayLocale);
   }
-  getCart(input: Parameters<CustomerCartPort["getCart"]>[0]) {
-    return this.called("read", input);
+  getCart(input: Parameters<CustomerCartPort["getCart"]>[0], displayLocale?: string | null) {
+    return this.called("read", input, displayLocale);
   }
-  addItem(input: Parameters<CustomerCartPort["addItem"]>[0]) {
-    return this.called("add", input);
+  addItem(input: Parameters<CustomerCartPort["addItem"]>[0], displayLocale?: string | null) {
+    return this.called("add", input, displayLocale);
   }
-  updateItem(input: Parameters<CustomerCartPort["updateItem"]>[0]) {
-    return this.called("update", input);
+  updateItem(input: Parameters<CustomerCartPort["updateItem"]>[0], displayLocale?: string | null) {
+    return this.called("update", input, displayLocale);
   }
-  removeItem(input: Parameters<CustomerCartPort["removeItem"]>[0]) {
-    return this.called("remove", input);
+  removeItem(input: Parameters<CustomerCartPort["removeItem"]>[0], displayLocale?: string | null) {
+    return this.called("remove", input, displayLocale);
   }
 }
 
@@ -158,6 +163,27 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
       name: "current",
       input: { guestCredential: guest, requestedAt: at },
     });
+  });
+
+  it("Owner 2026-10-23: passes the guest's chosen language for item names on reads and edits", async () => {
+    await request("/bff/customer/cart?locale=zh-Hans-CA", { headers: headers() });
+    await request(`/api/v1/carts/${id(1)}?locale=zh-Hans-CA`, { headers: headers() });
+    await request(`/api/v1/carts/${id(1)}/items/${id(2)}?locale=zh-Hans-CA`, {
+      method: "DELETE",
+      headers: headers({ "if-match": '"3"' }),
+    });
+    await request("/bff/customer/cart", { headers: headers() });
+    expect(port.calls.map((call) => call.name)).toEqual(["current", "read", "remove", "current"]);
+    expect(port.displayLocales).toEqual(["zh-Hans-CA", "zh-Hans-CA", "zh-Hans-CA", undefined]);
+    port.calls = [];
+    for (const path of [
+      "/bff/customer/cart?locale=zh_CN",
+      "/bff/customer/cart?locale=a&locale=b",
+    ]) {
+      const response = await request(path, { headers: headers() });
+      expect(response.status, path).toBe(400);
+    }
+    expect(port.calls).toEqual([]);
   });
 
   it("creates or resumes one Cart from Cookie, CSRF and Idempotency context only", async () => {
