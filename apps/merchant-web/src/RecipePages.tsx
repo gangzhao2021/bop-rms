@@ -751,7 +751,7 @@ function ReviewPanel({
                 <>
                   {t("{decision} by {reviewerLabel} on", {
                     decision: review.decision,
-                    reviewerLabel: review.reviewerLabel,
+                    reviewerLabel: systemText(review.reviewerLabel),
                   })}{" "}
                   <SourceTime instant={review.reviewedAt} />
                   {review.comment ? ` — “${review.comment}”` : ""}
@@ -1103,7 +1103,8 @@ function RecipeEditor({
           <p>
             {lifecycleText[recipe.lifecycle]} {t("· yield")} {recipe.yieldQuantity}{" "}
             {unitText(recipe.yieldUnit)} {t("· standard cost $")}
-            {centsText(recipe.standardCostCents)} {t("· written by")} {recipe.authorLabel}
+            {centsText(recipe.standardCostCents)} {t("· written by")}{" "}
+            {systemText(recipe.authorLabel)}
           </p>
         </div>
         <Link to="/app/commerce/recipes">{t("All recipes")}</Link>

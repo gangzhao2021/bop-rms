@@ -839,7 +839,7 @@ export function StoreSetupDraftPage({
                           })
                         }
                       />
-                      {mode === "DineIn" ? t("Dine in") : mode}
+                      {mode === "DineIn" ? t("Dine in") : serviceModeText(mode)}
                     </label>
                   ))}
                 </fieldset>
@@ -936,7 +936,7 @@ export function StoreSetupDraftPage({
                                       })
                                     }
                                   />
-                                  {mode === "DineIn" ? t("Dine in") : mode}
+                                  {mode === "DineIn" ? t("Dine in") : serviceModeText(mode)}
                                 </label>
                               ))}
                             </fieldset>
@@ -1679,7 +1679,12 @@ export function StoreSetupReferenceEditor({
     </label>
   );
   return (
-    <section hidden={hidden} aria-label={t("{kind} configuration", { kind: kind })}>
+    <section
+      hidden={hidden}
+      aria-label={t("{kind} configuration", {
+        kind: kind === "Address" ? t("Address") : t("Contact"),
+      })}
+    >
       <h4>{kind === "Address" ? t("Store address") : t("Store contact")}</h4>
       {error && (
         <p role="alert">
@@ -1705,11 +1710,13 @@ export function StoreSetupReferenceEditor({
         <>
           <p role="status">
             {t("An earlier {value} save must be recovered before another save.", {
-              value: kind.toLowerCase(),
+              value: kind === "Address" ? t("address") : t("contact"),
             })}
           </p>
           <button type="button" disabled={disabled || busy} onClick={() => void action("Resolve")}>
-            {t("Recover original {value} save", { value: kind.toLowerCase() })}
+            {t("Recover original {value} save", {
+              value: kind === "Address" ? t("address") : t("contact"),
+            })}
           </button>
         </>
       )}
@@ -1731,14 +1738,16 @@ export function StoreSetupReferenceEditor({
         </>
       )}
       <button type="button" disabled={disabled || busy} onClick={() => void action("Refresh")}>
-        {t("Refresh saved {value}", { value: kind.toLowerCase() })}
+        {t("Refresh saved {value}", { value: kind === "Address" ? t("address") : t("contact") })}
       </button>
       <button
         type="button"
         disabled={disabled || busy || !ready || !!pending}
         onClick={() => void action("Save")}
       >
-        {t("Save {value} configuration", { value: kind.toLowerCase() })}
+        {t("Save {value} configuration", {
+          value: kind === "Address" ? t("address") : t("contact"),
+        })}
       </button>
       {selected && (
         <>
@@ -1759,7 +1768,7 @@ export function StoreSetupReferenceEditor({
               setNotice(t("Selection changed locally. Save the setup draft to keep it."));
             }}
           >
-            {t("Use saved {value}", { value: kind.toLowerCase() })}
+            {t("Use saved {value}", { value: kind === "Address" ? t("address") : t("contact") })}
           </button>
         </>
       )}
@@ -2438,7 +2447,7 @@ export function StoreSetupFeeContextEditor({
                       })
                     }
                   />
-                  {mode === "DineIn" ? t("Dine in") : mode}
+                  {mode === "DineIn" ? t("Dine in") : serviceModeText(mode)}
                 </label>
               ))}
             </fieldset>

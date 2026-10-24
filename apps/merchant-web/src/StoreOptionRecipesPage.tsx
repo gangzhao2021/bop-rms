@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -644,7 +644,7 @@ export function ChangeHistory({ row }: { readonly row: OptionRecipeRow }) {
   return (
     <ul aria-label={t("Reviews for {optionName}", { optionName: row.optionName })}>
       <li>
-        {t("Saved by {authorLabel} on", { authorLabel: change.authorLabel })}{" "}
+        {t("Saved by {authorLabel} on", { authorLabel: systemText(change.authorLabel) })}{" "}
         <SourceTime instant={change.recordedAt} />
       </li>
       {change.reviews.map((review) => (
@@ -652,7 +652,7 @@ export function ChangeHistory({ row }: { readonly row: OptionRecipeRow }) {
           {t("{kind}: {value} by {reviewerLabel} on", {
             kind: kindName(review.kind),
             value: review.decision === "Approved" ? t("approved") : t("rejected"),
-            reviewerLabel: review.reviewerLabel,
+            reviewerLabel: systemText(review.reviewerLabel),
           })}{" "}
           <SourceTime instant={review.reviewedAt} />
           {review.comment ? ` — ${review.comment}` : ""}

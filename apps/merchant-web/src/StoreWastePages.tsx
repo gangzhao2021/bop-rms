@@ -106,8 +106,8 @@ function Failure({ code }: { code: StoreWasteErrorCode | "Loading" }) {
 const statusOf = (record: WasteRecordView) =>
   record.review
     ? record.review.decision === "Voided"
-      ? "Voided"
-      : "Reviewed"
+      ? t("Voided")
+      : t("Reviewed")
     : record.needsReview
       ? t("Needs review")
       : t("Recorded");

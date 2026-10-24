@@ -919,6 +919,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Closed as not collected.": "已作为未取餐关闭。",
   "Closed days match the day-end settlement. Today is checked against it when the day closes.":
     "已关闭的营业日与日结一致。今天会在营业日结束时与日结核对。",
+  "Closed for business": "已打烊",
   "Closing order…": "正在关闭订单…",
   "Closing out": "结束轮次",
   "Closing out the rounds…": "正在结束各轮次…",
@@ -994,6 +995,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Confirmed: "已确认",
   "Confirmed refund: {amount} ·": "已确认退款：{amount} ·",
   "Connection lost": "网络已断开",
+  Contact: "联系方式",
   "Contact configuration": "联系方式配置",
   "Contact details": "联系方式",
   "Contact name": "联系人姓名",
@@ -2269,6 +2271,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "开台时间较长 — 如果顾客已离开，请经理或店主关台。",
   "Open for a long time — if the guests have left, select the table and close it.":
     "开台时间较长 — 如果顾客已离开，请选中桌台并关台。",
+  "Open for business": "营业中",
   "Open it and print at 100% scale.": "打开后按 100% 比例打印。",
   "Open less than a minute": "已开不到一分钟",
   "Open order": "打开订单",
@@ -3105,6 +3108,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Review pickup handoff": "核对取餐交付",
   "Review recipe cost and food safety before publication": "在发布前审核配方成本和食品安全",
   "Review unmatched charge": "核查未匹配的扣款",
+  Reviewed: "已复核",
   "Reviews for {optionName}": "{optionName}的审核",
   "Reviews you cannot give as a second person": "你不能作为第二个人给出的审核",
   "Revise this recipe": "修订此配方",
@@ -4922,6 +4926,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "You’ve been signed out": "你已退出登录",
   Yukon: "育空地区",
   "a setting": "一项设置",
+  address: "地址",
   "all Stores of the Brand": "品牌下所有门店",
   "all services": "所有服务",
   "all {onHand} of {name} is set aside for {openOrderCount}":
@@ -4950,6 +4955,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     '核对后自行发布（"独立经营者"已开启且你是唯一持有价格审批权限的人，因此需先用验证器验证码验证）',
   closed: "停业",
   configuration: "配置",
+  contact: "联系方式",
   cost: "成本",
   "could not be read": "无法读取",
   "count the stock": "清点库存",
@@ -5198,6 +5204,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{label} is removed. {signedOut} {value} signed out.":
     "{label} 已移除。{signedOut} {value}已退出登录。",
   "{label} was already removed. The list is refreshed.": "{label} 已被移除。列表已刷新。",
+  "{label} · Business date {businessDate}": "{label} · 营业日 {businessDate}",
   "{label}: set it in {where}": "{label}：请在{where}中设置",
   "{label}: the payment provider has {value} {value2} than the store":
     "{label}：支付方比门店{value} {value2}",

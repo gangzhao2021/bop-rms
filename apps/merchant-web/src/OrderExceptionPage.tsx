@@ -91,7 +91,10 @@ export function OrderExceptionScreen({
     <WorkspacePage
       className="order-exception-page"
       title={t("Exceptions")}
-      meta={`${view.storeLabel} · Business date ${businessDateText(view.businessDate)}`}
+      meta={t("{label} · Business date {businessDate}", {
+        label: view.storeLabel,
+        businessDate: businessDateText(view.businessDate),
+      })}
       status={<Freshness status={view.freshnessStatus} at={view.projectedAt} />}
       actions={
         <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>

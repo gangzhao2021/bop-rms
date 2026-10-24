@@ -82,7 +82,10 @@ export function MerchantShell({
     <WorkspacePage
       className="workspace-page--overview"
       title={scope.storeLabel}
-      meta={`${scope.brandLabel} · Business date ${businessDateText(businessDate)}`}
+      meta={t("{label} · Business date {businessDate}", {
+        label: scope.brandLabel,
+        businessDate: businessDateText(businessDate),
+      })}
       status={<Freshness status={ready.workspace.freshness} />}
       actions={
         multiStore ? (
@@ -143,7 +146,15 @@ export function MerchantShell({
             >
               <h3 id="live-store-status-heading">{t("Store status")}</h3>
               <p className="overview-status-value">
-                <span>{ready.workspace.storeStatus}</span>
+                <span>
+                  {ready.workspace.storeStatus === "Open"
+                    ? t("Open for business")
+                    : ready.workspace.storeStatus === "Closed"
+                      ? t("Closed for business")
+                      : ready.workspace.storeStatus === "Paused"
+                        ? t("Paused")
+                        : t("Unavailable")}
+                </span>
               </p>
               <p className="overview-status-date">
                 {t("Business date {businessDate}", {

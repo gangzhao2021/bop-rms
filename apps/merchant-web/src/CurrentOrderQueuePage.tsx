@@ -1,4 +1,4 @@
-import { displayLocale, t } from "./i18n/i18n.js";
+import { systemText, displayLocale, t } from "./i18n/i18n.js";
 import {
   AcceptanceHoldDecision,
   AcceptanceHoldNotice,
@@ -598,7 +598,7 @@ export function orderPhaseLabel(
     case "Fulfilled":
       return order.orderType === "DineIn" ? t("Served") : t("Picked up");
     default:
-      return order.currentPhase;
+      return systemText(order.currentPhase);
   }
 }
 // WP-2423 (DEC-ORDER-CHANNEL-LABEL): one channel mapping, shared with the Operational dashboard.
