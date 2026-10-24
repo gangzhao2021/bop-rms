@@ -754,7 +754,7 @@ function Page({
       ) : (
         view.staff.map((member) => (
           <section key={member.actorReference}>
-            <StatePanel heading={member.label}>
+            <StatePanel heading={systemText(member.label)}>
               <p>
                 {member.assignments
                   .map((item) => systemText(item.roleName))

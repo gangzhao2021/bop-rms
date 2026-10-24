@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import {
   useCallback,
@@ -316,7 +316,7 @@ export function StoreDevicesView({
                   <tbody>
                     {read.staffPins.map((row) => (
                       <tr key={row.staff}>
-                        <td>{row.name}</td>
+                        <td>{systemText(row.name)}</td>
                         <td data-label={t("Status")}>{staffPinStatusText(row, timeZone, now)}</td>
                         <td>
                           {row.state === "Set" ? (

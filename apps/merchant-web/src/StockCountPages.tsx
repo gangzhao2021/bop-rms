@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StaffTime, StoreDate } from "./StoreTime.js";
@@ -101,10 +101,10 @@ export function staffName(
   reference: string | null,
 ): string {
   if (reference === null) return "—";
-  return (
-    [...view.staff, ...(view.people ?? [])].find((item) => item.actorReference === reference)
-      ?.label ?? t("Staff member")
-  );
+  const label = [...view.staff, ...(view.people ?? [])].find(
+    (item) => item.actorReference === reference,
+  )?.label;
+  return label === undefined ? t("Staff member") : systemText(label);
 }
 
 const quantityText = (quantity: string, unitCode: string) => `${quantity} ${unitText(unitCode)}`;

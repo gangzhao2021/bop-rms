@@ -62,8 +62,8 @@ export function ServiceHoursSummary({
       serviceTime(interval.startLocalTime) +
         "–" +
         serviceTime(interval.endLocalTime) +
-        (interval.endsNextDay ? " (next day)" : ""),
-      interval.serviceModes.map(serviceModeLabel).join(", "),
+        (interval.endsNextDay ? t(" (next day)") : ""),
+      interval.serviceModes.map(serviceModeLabel).join(listSeparator()),
       ...(interval.orderCutoffSeconds > 0
         ? [t("last orders ") + serviceMinutes(interval.orderCutoffSeconds) + t(" before closing")]
         : []),
@@ -338,7 +338,7 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
                 <option value="All">{t("All services")}</option>
                 {view.enabledServiceModes.map((value) => (
                   <option key={value} value={value}>
-                    {value === "DineIn" ? t("Dine-in") : value}
+                    {serviceModeText(value)}
                   </option>
                 ))}
               </select>
