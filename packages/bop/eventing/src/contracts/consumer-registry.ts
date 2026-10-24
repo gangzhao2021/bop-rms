@@ -10,7 +10,7 @@ export class InvalidConsumerRegistryError extends Error {
   }
 }
 export class ConsumerRegistry {
-  readonly #items = new Map<string, ConsumerRegistration>();
+  readonly #items = new Map<string, Map<string, ConsumerRegistration>>();
   constructor(registrations: readonly ConsumerRegistration[]) {
     for (const item of registrations) {
       if (
@@ -35,16 +35,29 @@ export class ConsumerRegistry {
         new Set(item.schemaVersions).size !== item.schemaVersions.length
       )
         throw new InvalidConsumerRegistryError("CONSUMER_REGISTRY_INVALID");
-      if (this.#items.has(item.consumerName))
+      const variants =
+        this.#items.get(item.consumerName) ?? new Map<string, ConsumerRegistration>();
+      if (variants.has(item.eventType))
         throw new InvalidConsumerRegistryError("CONSUMER_REGISTRY_DUPLICATE");
-      this.#items.set(item.consumerName, Object.freeze({ ...item }));
+      const existing = variants.values().next().value as ConsumerRegistration | undefined;
+      if (
+        existing &&
+        (existing.ownerModule !== item.ownerModule ||
+          existing.consumerVersion !== item.consumerVersion ||
+          existing.tenantScope !== item.tenantScope ||
+          existing.ordering !== item.ordering ||
+          existing.replaySafe !== item.replaySafe)
+      )
+        throw new InvalidConsumerRegistryError("CONSUMER_REGISTRY_INVALID");
+      variants.set(item.eventType, Object.freeze({ ...item }));
+      this.#items.set(item.consumerName, variants);
     }
   }
   resolve(consumerName: string, envelope: DomainEventEnvelope) {
-    const registration = this.#items.get(consumerName);
-    if (!registration) return { errorCode: "CONSUMER_UNKNOWN" as const };
-    if (registration.eventType !== envelope.eventType)
-      return { errorCode: "EVENT_TYPE_UNSUPPORTED" as const };
+    const variants = this.#items.get(consumerName);
+    if (!variants) return { errorCode: "CONSUMER_UNKNOWN" as const };
+    const registration = variants.get(envelope.eventType);
+    if (!registration) return { errorCode: "EVENT_TYPE_UNSUPPORTED" as const };
     if (!registration.schemaVersions.includes(envelope.schemaVersion))
       return { errorCode: "EVENT_SCHEMA_VERSION_UNSUPPORTED" as const };
     return { registration };

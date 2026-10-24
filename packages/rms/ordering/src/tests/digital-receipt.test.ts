@@ -1,7 +1,18 @@
+import { createAdditionalReceiptSnapshot } from "../application/additional-receipt-snapshot.js";
+import { createRefundReceiptSnapshot } from "../application/refund-receipt-snapshot.js";
+import {
+  decodeDigitalReceiptRecord,
+  encodeDigitalReceiptRecord,
+} from "../domain/digital-receipt-codec.js";
 import type { GuestSession } from "@bop/identity";
 import { describe, expect, it } from "vitest";
 import { createDigitalReceiptQueryService } from "../application/digital-receipt-query-service.js";
-import { DigitalReceiptError, parseDigitalReceiptChain } from "../domain/digital-receipt.js";
+import {
+  DigitalReceiptError,
+  parseDigitalReceiptChain,
+  parseDigitalReceiptRecord,
+  parseDigitalReceiptSnapshot,
+} from "../domain/digital-receipt.js";
 
 const id = (n: number) => `018f8a00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-12T14:00:00.000Z";
@@ -181,4 +192,474 @@ describe("digital receipt chain", () => {
       }),
     ).resolves.toMatchObject({ orderReference: refs.order });
   });
+});
+
+describe("lossless receipt discounts and fees", () => {
+  const money = (amountMinor: bigint, currencyCode = "CAD") => ({ amountMinor, currencyCode });
+  it("preserves frozen discount and fee without changing the legacy snapshot shape", () => {
+    const old = snapshot();
+    expect(parseDigitalReceiptSnapshot(old)).toEqual(old);
+    expect(Object.hasOwn(parseDigitalReceiptSnapshot(old), "adjustments")).toBe(false);
+    const adjusted = snapshot({
+      adjustments: { discount: money(100n), fee: money(50n) },
+      total: money(1080n),
+    });
+    expect(parseDigitalReceiptSnapshot(adjusted)).toEqual(adjusted);
+  });
+  it.each([
+    { discount: money(100n) },
+    { discount: money(100n), fee: money(50n), extra: true },
+    { discount: money(1001n), fee: money(50n) },
+    { discount: money(100n, "USD"), fee: money(50n) },
+  ])("rejects incomplete, excessive or foreign-currency adjustments", (adjustments) => {
+    expect(() =>
+      parseDigitalReceiptSnapshot(snapshot({ adjustments, total: money(1080n) })),
+    ).toThrow(DigitalReceiptError);
+  });
+  it("does not allow a reissue to add adjustments to an old original", () => {
+    const value = chain();
+    const reissue = value.records[1];
+    if (!reissue) throw new Error("missing synthetic reissue");
+    reissue.snapshot = snapshot({ adjustments: { discount: money(0n), fee: money(0n) } });
+    expect(() => parseDigitalReceiptChain(value)).toThrow(DigitalReceiptError);
+  });
+});
+
+it("rejects a receipt amount that cannot be persisted as signed 64-bit minor units", () => {
+  expect(() =>
+    parseDigitalReceiptSnapshot(
+      snapshot({
+        subtotal: { amountMinor: 9223372036854775808n, currencyCode: "CAD" },
+        tax: { amountMinor: 0n, currencyCode: "CAD" },
+        total: { amountMinor: 9223372036854775808n, currencyCode: "CAD" },
+      }),
+    ),
+  ).toThrow(DigitalReceiptError);
+});
+
+describe("persisted receipt record encoding", () => {
+  it("round-trips original and reissue history without injecting adjustments", () => {
+    for (const record of parseDigitalReceiptChain(chain()).records) {
+      const encoded = encodeDigitalReceiptRecord(record);
+      expect(decodeDigitalReceiptRecord(encoded)).toEqual(record);
+      expect(encoded).not.toContain("adjustments");
+    }
+  });
+
+  it("preserves adjustments and amounts above the safe integer boundary", () => {
+    const amount = 9007199254740993n;
+    const original = chain().records[0];
+    const record = {
+      ...original,
+      snapshot: snapshot({
+        subtotal: { amountMinor: amount, currencyCode: "CAD" },
+        tax: { amountMinor: 0n, currencyCode: "CAD" },
+        adjustments: {
+          discount: { amountMinor: 1n, currencyCode: "CAD" },
+          fee: { amountMinor: 2n, currencyCode: "CAD" },
+        },
+        total: { amountMinor: amount + 1n, currencyCode: "CAD" },
+      }),
+    };
+    expect(decodeDigitalReceiptRecord(encodeDigitalReceiptRecord(record))).toEqual(record);
+  });
+
+  it("rejects numeric, noncanonical, negative and overflowing stored money", () => {
+    const encoded = encodeDigitalReceiptRecord(chain().records[0]);
+    for (const amount of ["1000", '"01000"', '"-1"', '"1e3"', '"9223372036854775808"']) {
+      expect(() =>
+        decodeDigitalReceiptRecord(
+          encoded.replace('"amountMinor":"1000"', '"amountMinor":' + amount),
+        ),
+      ).toThrow(DigitalReceiptError);
+    }
+    expect(() => decodeDigitalReceiptRecord(" ".repeat(1024 * 1024 + 1))).toThrow(
+      DigitalReceiptError,
+    );
+    expect(() => decodeDigitalReceiptRecord("{}")).toThrow(DigitalReceiptError);
+  });
+});
+
+it("denies a receipt from a different order even when the Guest and Store match", async () => {
+  const query = createDigitalReceiptQueryService({
+    authorization: {
+      authorizeGuest: async () => ({ guestSession: guest() }),
+      authorizeResume: async () => null,
+    },
+    receipts: { load: async () => parseDigitalReceiptChain(chain()) },
+  });
+  await expect(
+    query.getCustomer({
+      orderReference: id(999),
+      observedAt: at,
+      resumeGrantReference: null,
+    }),
+  ).rejects.toMatchObject({ code: "DIGITAL_RECEIPT_PERMISSION_DENIED" });
+});
+
+it("preserves the full Operating Entity legal-name bound", () => {
+  const name = "S".repeat(200);
+  expect(
+    parseDigitalReceiptSnapshot(snapshot({ operatingEntityDisplayName: name }))
+      .operatingEntityDisplayName,
+  ).toBe(name);
+  expect(() =>
+    parseDigitalReceiptSnapshot(snapshot({ operatingEntityDisplayName: name + "S" })),
+  ).toThrow(DigitalReceiptError);
+});
+
+function refundFinancial(confirmed = 0n, pending = 0n) {
+  return {
+    brandReference: refs.brand,
+    storeReference: refs.store,
+    orderReference: refs.order,
+    observedAt: "2026-08-12T15:00:00.000Z",
+    captured: { amountMinor: 1130n, currencyCode: "CAD" },
+    refunded: { amountMinor: confirmed, currencyCode: "CAD" },
+    pendingRefund: { amountMinor: pending, currencyCode: "CAD" },
+  };
+}
+it("appends refund status without replacing original commercial facts", () => {
+  const previous = chain().records[0];
+  const financial = refundFinancial(100n, 200n);
+  const result = createRefundReceiptSnapshot(previous, financial);
+  expect(result).toEqual({
+    ...snapshot(),
+    paymentStatus: "RefundPending",
+    refundedTotal: { amountMinor: 100n, currencyCode: "CAD" },
+  });
+  expect(previous?.snapshot.paymentStatus).toBe("Paid");
+  expect(result?.issuedAt).toBe(at);
+});
+it.each([
+  [0n, 200n, "RefundPending"],
+  [100n, 0n, "PartiallyRefunded"],
+  [1130n, 0n, "Refunded"],
+] as const)(
+  "derives refund state from confirmed %s and pending %s",
+  (confirmed, pending, status) => {
+    expect(
+      createRefundReceiptSnapshot(chain().records[0], refundFinancial(confirmed, pending))
+        ?.paymentStatus,
+    ).toBe(status);
+  },
+);
+it("does not append duplicate visible refund state", () => {
+  expect(createRefundReceiptSnapshot(chain().records[0], refundFinancial())).toBeNull();
+  const previous = {
+    ...chain().records[1],
+    snapshot: snapshot({ paymentStatus: "RefundPending" }),
+  };
+  expect(createRefundReceiptSnapshot(previous, refundFinancial(0n, 500n))).toBeNull();
+});
+it("rejects foreign scope, changed capture, over-refund and regression", () => {
+  const previous = {
+    ...chain().records[1],
+    kind: "Refund",
+    snapshot: snapshot({
+      paymentStatus: "PartiallyRefunded",
+      refundedTotal: { amountMinor: 100n, currencyCode: "CAD" },
+    }),
+  };
+  for (const financial of [
+    refundFinancial(99n),
+    refundFinancial(1131n),
+    refundFinancial(1130n, 1n),
+    { ...refundFinancial(100n), orderReference: id(99) },
+    { ...refundFinancial(100n), storeReference: id(99) },
+    { ...refundFinancial(100n), observedAt: at },
+    { ...refundFinancial(100n), captured: { amountMinor: 1200n, currencyCode: "CAD" } },
+    { ...refundFinancial(100n), pendingRefund: { amountMinor: -1n, currencyCode: "CAD" } },
+    { ...refundFinancial(100n), refunded: { amountMinor: 100n, currencyCode: "USD" } },
+  ])
+    expect(() => createRefundReceiptSnapshot(previous, financial)).toThrow();
+  expect(() =>
+    createRefundReceiptSnapshot({ ...previous, kind: "Void" }, refundFinancial(200n)),
+  ).toThrow();
+});
+
+describe("additional paid receipt snapshots", () => {
+  const original = () => {
+    const value = chain().records[0];
+    if (!value) throw new Error("missing fixture");
+    return value;
+  };
+  const additional = () => {
+    const old = snapshot();
+    return snapshot({
+      lines: [...old.lines, { ...old.lines[0], lineReference: id(70) }],
+      subtotal: { amountMinor: 2000n, currencyCode: "CAD" },
+      tax: { amountMinor: 260n, currencyCode: "CAD" },
+      total: { amountMinor: 2260n, currencyCode: "CAD" },
+    });
+  };
+  it("adds paid items without changing the original and treats replay as no change", () => {
+    const previous = original(),
+      current = additional();
+    expect(createAdditionalReceiptSnapshot(previous, current)?.total.amountMinor).toBe(2260n);
+    expect(previous.snapshot.total.amountMinor).toBe(1130n);
+    const correction = {
+      ...previous,
+      recordReference: id(71),
+      version: 2,
+      kind: "Correction",
+      previousRecordReference: previous.recordReference,
+      reasonCode: "ORDER_ADDITIONAL_PAYMENT_CAPTURED",
+      snapshot: current,
+    };
+    expect(
+      parseDigitalReceiptChain({ orderReference: refs.order, records: [previous, correction] })
+        .records,
+    ).toHaveLength(2);
+    expect(
+      createAdditionalReceiptSnapshot(correction, {
+        ...current,
+        issuedAt: "2026-08-12T14:01:00.000Z",
+      }),
+    ).toBeNull();
+  });
+  it("rejects rewriting or removing old items and cross-order or cross-issuer updates", () => {
+    const current = additional();
+    for (const candidate of [
+      { ...current, lines: [{ ...current.lines[0], displayName: "Changed" }, current.lines[1]] },
+      { ...current, lines: [current.lines[1]] },
+      { ...current, orderReference: id(90) },
+      { ...current, operatingEntityReference: id(91) },
+    ])
+      expect(() => createAdditionalReceiptSnapshot(original(), candidate)).toThrow(
+        DigitalReceiptError,
+      );
+  });
+  it("does not use additional issuance to change only refund state or revive a void", () => {
+    expect(() =>
+      createAdditionalReceiptSnapshot(
+        original(),
+        snapshot({
+          paymentStatus: "PartiallyRefunded",
+          refundedTotal: { amountMinor: 100n, currencyCode: "CAD" },
+        }),
+      ),
+    ).toThrow(DigitalReceiptError);
+    const previous = {
+      ...original(),
+      kind: "Void",
+      version: 2,
+      previousRecordReference: id(75),
+      reasonCode: "VOIDED",
+    };
+    expect(() => createAdditionalReceiptSnapshot(previous, additional())).toThrow(
+      DigitalReceiptError,
+    );
+  });
+});
+
+describe("item prices before tax (WP-2423 D5)", () => {
+  const money = (amountMinor: bigint) => ({ amountMinor, currencyCode: "CAD" });
+  const line = (n: number, subtotal: bigint, total: bigint) => ({
+    lineReference: id(n),
+    displayName: "Synthetic latte",
+    quantity: 1,
+    lineTotal: money(total),
+    lineSubtotal: money(subtotal),
+  });
+  const priced = () =>
+    snapshot({
+      lines: [line(7, 1000n, 1130n), line(8, 450n, 509n)],
+      subtotal: money(1450n),
+      tax: money(189n),
+      total: money(1639n),
+    });
+  it("keeps the frozen total and adds a pre-tax price that adds up to the subtotal", () => {
+    const parsed = parseDigitalReceiptSnapshot(priced());
+    expect(parsed.lines.map((entry) => entry.lineSubtotal?.amountMinor)).toEqual([1000n, 450n]);
+    expect(parsed.lines.map((entry) => entry.lineTotal.amountMinor)).toEqual([1130n, 509n]);
+    expect(
+      parsed.lines.reduce((sum, entry) => sum + (entry.lineSubtotal?.amountMinor ?? 0n), 0n) +
+        parsed.tax.amountMinor +
+        parsed.tip.amountMinor,
+    ).toBe(parsed.total.amountMinor);
+    const record = { ...chain().records[0], snapshot: priced() };
+    expect(decodeDigitalReceiptRecord(encodeDigitalReceiptRecord(record))).toEqual(
+      parseDigitalReceiptRecord(record),
+    );
+  });
+  it("still reads receipts issued before item prices were frozen, unchanged", () => {
+    const legacy = parseDigitalReceiptSnapshot(snapshot());
+    expect(legacy.lines[0]).not.toHaveProperty("lineSubtotal");
+  });
+  it("rejects item prices that don't add up to the subtotal or are on only some lines", () => {
+    const value = priced();
+    for (const candidate of [
+      { ...value, lines: [line(7, 1000n, 1130n), line(8, 449n, 509n)] },
+      {
+        ...value,
+        lines: [line(7, 1000n, 1130n), { ...line(8, 450n, 509n), lineSubtotal: undefined }],
+      },
+      {
+        ...value,
+        lines: [
+          line(7, 1000n, 1130n),
+          Object.fromEntries(
+            Object.entries(line(8, 450n, 509n)).filter(([key]) => key !== "lineSubtotal"),
+          ),
+        ],
+      },
+      {
+        ...value,
+        lines: [
+          { ...line(7, 1000n, 1130n), lineSubtotal: { amountMinor: 1000n, currencyCode: "USD" } },
+          line(8, 450n, 509n),
+        ],
+      },
+    ])
+      expect(() => parseDigitalReceiptSnapshot(candidate)).toThrow(DigitalReceiptError);
+  });
+  it("lets a later paid round add priced items to a receipt issued before prices were frozen", () => {
+    const previous = chain().records[0];
+    if (!previous) throw new Error("missing fixture");
+    const old = snapshot();
+    const current = snapshot({
+      lines: [
+        { ...old.lines[0], lineSubtotal: money(1000n) },
+        { ...old.lines[0], lineReference: id(70), lineSubtotal: money(1000n) },
+      ],
+      subtotal: money(2000n),
+      tax: money(260n),
+      total: money(2260n),
+    });
+    const next = createAdditionalReceiptSnapshot(previous, current);
+    expect(next?.lines.every((entry) => entry.lineSubtotal?.amountMinor === 1000n)).toBe(true);
+    // The old item's printed facts are never rewritten.
+    expect(() =>
+      createAdditionalReceiptSnapshot(previous, {
+        ...current,
+        lines: [{ ...current.lines[0], lineTotal: money(999n) }, current.lines[1]],
+      }),
+    ).toThrow(DigitalReceiptError);
+    // Same items, now priced: no new version is issued just to add prices.
+    expect(
+      createAdditionalReceiptSnapshot(previous, {
+        ...old,
+        lines: [{ ...old.lines[0], lineSubtotal: money(1000n) }],
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("chosen option lines (WP-2423)", () => {
+  const money = (amountMinor: bigint, currencyCode = "CAD") => ({ amountMinor, currencyCode });
+  const whipped = { displayName: "Whipped cream", quantity: 1, amount: money(50n) };
+  const withOptions = () =>
+    snapshot({
+      lines: [
+        {
+          lineReference: id(7),
+          displayName: "Hot chocolate",
+          quantity: 1,
+          lineTotal: money(452n),
+          lineSubtotal: money(400n),
+          options: [whipped, { displayName: "Oat milk", quantity: 1, amount: money(0n) }],
+        },
+      ],
+      subtotal: money(400n),
+      tax: money(52n),
+      total: money(452n),
+    });
+  it("records each option with what it added, inside the item price that adds up to the subtotal", () => {
+    const parsed = parseDigitalReceiptSnapshot(withOptions());
+    const [line] = parsed.lines;
+    expect(line?.options).toEqual([
+      whipped,
+      { displayName: "Oat milk", quantity: 1, amount: money(0n) },
+    ]);
+    expect(line?.lineSubtotal?.amountMinor).toBe(parsed.subtotal.amountMinor);
+    expect(Object.isFrozen(line?.options)).toBe(true);
+    const record = { ...chain().records[0], snapshot: withOptions() };
+    expect(decodeDigitalReceiptRecord(encodeDigitalReceiptRecord(record))).toEqual(
+      parseDigitalReceiptRecord(record),
+    );
+  });
+  it("reads receipts issued before options were recorded exactly as issued", () => {
+    const legacy = parseDigitalReceiptSnapshot(snapshot());
+    expect(legacy.lines[0]).not.toHaveProperty("options");
+  });
+  it("rejects options without an item price, above it, empty, or in another currency", () => {
+    const value = withOptions();
+    const base = value.lines[0] as Record<string, unknown>;
+    for (const line of [
+      Object.fromEntries(Object.entries(base).filter(([key]) => key !== "lineSubtotal")),
+      { ...base, options: [{ ...whipped, amount: money(401n) }] },
+      { ...base, options: [] },
+      { ...base, options: [{ ...whipped, amount: money(50n, "USD") }] },
+      { ...base, options: [{ ...whipped, quantity: 0 }] },
+      { ...base, options: [{ ...whipped, optionReference: id(99) }] },
+    ])
+      expect(() => parseDigitalReceiptSnapshot({ ...value, lines: [line] })).toThrow(
+        DigitalReceiptError,
+      );
+  });
+  it("lets a later paid round add option lines without rewriting an older version's items", () => {
+    const previous = chain().records[0];
+    if (!previous) throw new Error("missing fixture");
+    const old = snapshot();
+    const current = snapshot({
+      lines: [
+        { ...old.lines[0], lineSubtotal: money(1000n), options: [whipped] },
+        { ...old.lines[0], lineReference: id(70), lineSubtotal: money(1000n), options: [whipped] },
+      ],
+      subtotal: money(2000n),
+      tax: money(260n),
+      total: money(2260n),
+    });
+    expect(createAdditionalReceiptSnapshot(previous, current)?.lines[1]?.options).toEqual([
+      whipped,
+    ]);
+    const priced = { ...previous, snapshot: withOptions() };
+    // An item issued with its options can't lose or change them on a later version.
+    expect(() =>
+      createAdditionalReceiptSnapshot(priced, {
+        ...withOptions(),
+        lines: [
+          { ...withOptions().lines[0], options: [{ ...whipped, amount: money(40n) }] },
+          { ...withOptions().lines[0], lineReference: id(70) },
+        ],
+        subtotal: money(800n),
+        tax: money(104n),
+        total: money(904n),
+      }),
+    ).toThrow(DigitalReceiptError);
+  });
+});
+
+it("WP-2423 (v15 8c4480dd M1): a guest at the table reads its shared dine-in Order's receipt", async () => {
+  const other = {
+    ...guest(),
+    sessionReference: id(40),
+    publicTableReference: id(41),
+    channel: "DineIn",
+    diningState: "DiningBound",
+    diningSessionReference: id(42),
+    diningParticipantReference: id(43),
+  } as unknown as GuestSession;
+  const read = (session: GuestSession, tableOrder: boolean) =>
+    createDigitalReceiptQueryService({
+      authorization: {
+        authorizeGuest: async () =>
+          tableOrder ? { guestSession: session, tableOrder: true } : { guestSession: session },
+        authorizeResume: async () => null,
+      },
+      receipts: { load: async () => parseDigitalReceiptChain(chain()) },
+    }).getCustomer({ orderReference: refs.order, observedAt: at, resumeGrantReference: null });
+  // Without the caller's table check another guest is refused; with it the table's receipt opens.
+  await expect(read(other, false)).rejects.toMatchObject({
+    code: "DIGITAL_RECEIPT_PERMISSION_DENIED",
+  });
+  await expect(read(other, true)).resolves.toMatchObject({ orderReference: refs.order });
+  // Never for a guest who is not at a dine-in table, nor in another Store.
+  await expect(read(guest(), true)).rejects.toMatchObject({
+    code: "DIGITAL_RECEIPT_PERMISSION_DENIED",
+  });
+  await expect(
+    read({ ...other, storeReference: id(99) } as unknown as GuestSession, true),
+  ).rejects.toMatchObject({ code: "DIGITAL_RECEIPT_PERMISSION_DENIED" });
 });

@@ -1,4 +1,4 @@
-import { StatePanel } from "@bop-rms/ui";
+import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
@@ -51,6 +51,182 @@ export function SupplierState({ state }: { readonly state: Exclude<LoadState["ki
     <StatePanel heading={value[0]} tone={value[2]} status>
       <p>{value[1]}</p>
     </StatePanel>
+  );
+}
+
+function SupplierUnavailable() {
+  return (
+    <AppFrame
+      className="purchase-order-unavailable-shell"
+      title="Suppliers"
+      description="Procurement · Brand scope unavailable"
+    >
+      <div className="purchase-order-unavailable supplier-unavailable">
+        <p className="bop-eyebrow">SUP-SUPPLIER-LIST · PHASE 3</p>
+        <h2>Supplier workspace</h2>
+        <section
+          className="purchase-order-source-boundary"
+          role="status"
+          aria-label="Supplier projection unavailable"
+        >
+          <h3>Phase 3 · Supplier projection unavailable</h3>
+          <p>
+            No authorized Supplier projection is connected. No Supplier, contact, qualification,
+            Offering, open PO or performance facts are shown.
+          </p>
+        </section>
+        <h2>Supplier, qualification and performance</h2>
+        <section
+          aria-label="Supplier, qualification and performance status"
+          className="purchase-order-status-grid"
+        >
+          {["Identity", "Qualification", "Performance"].map((label) => (
+            <article className="purchase-order-status-card" key={label}>
+              <p>{label}</p>
+              <strong>Unavailable</strong>
+              <small>Authorized source not connected</small>
+            </article>
+          ))}
+        </section>
+        <h2>Search and filters</h2>
+        <fieldset className="purchase-order-filter-panel" aria-label="Search and filters" disabled>
+          <p>Unavailable until the scoped Supplier projection is connected.</p>
+          <label>
+            Name / Code / approved Contact ref
+            <input
+              aria-label="Supplier name, code or approved contact reference filter unavailable"
+              placeholder="Unavailable"
+            />
+          </label>
+          <label>
+            Status / Type / Qualification
+            <select
+              aria-label="Supplier status, type or qualification filters unavailable"
+              defaultValue=""
+            >
+              <option value="">Unavailable</option>
+            </select>
+          </label>
+          <label>
+            Performance flag / Has open PO
+            <select
+              aria-label="Supplier performance or open Purchase Order filters unavailable"
+              defaultValue=""
+            >
+              <option value="">Unavailable</option>
+            </select>
+          </label>
+        </fieldset>
+        <section className="purchase-order-empty-panel" aria-labelledby="supplier-empty-title">
+          <h3 id="supplier-empty-title">Suppliers unavailable</h3>
+          <p>
+            No authorized Supplier rows are available. Contact, qualification, Offering, open PO and
+            performance values remain unavailable.
+          </p>
+        </section>
+        <section className="purchase-order-fields-panel" aria-labelledby="supplier-fields-title">
+          <h3 id="supplier-fields-title">
+            Registered list fields when the authorized source is available
+          </h3>
+          <p>
+            Name / code / status / type / qualification / expiry · Offering and open PO counts ·
+            permission-trimmed performance summary
+          </p>
+        </section>
+        <p className="purchase-order-ownership-note">
+          Create, suspension/reactivation and archive are unavailable. Suppliers cannot be
+          physically deleted.
+        </p>
+      </div>
+    </AppFrame>
+  );
+}
+export function SupplierDetailUnavailable() {
+  return (
+    <AppFrame
+      className="purchase-order-unavailable-shell supplier-detail-review-shell"
+      title="Supplier"
+      description="Procurement · Brand scope unavailable"
+    >
+      <div className="purchase-order-unavailable supplier-detail-review">
+        <p className="bop-eyebrow">SUP-SUPPLIER-DETAIL · PHASE 3 · DESIGN REVIEW · NOT ACCEPTED</p>
+        <h2>Supplier detail</h2>
+        <section
+          className="purchase-order-source-boundary"
+          role="status"
+          aria-label="Supplier detail source unavailable"
+        >
+          <h3>PHASE 3 · SUPPLIER DETAIL SOURCE UNAVAILABLE</h3>
+          <p>
+            No authorized Supplier detail projection is connected. All values in this review are
+            unavailable.
+          </p>
+        </section>
+
+        <section
+          className="supplier-detail-review__profile"
+          aria-labelledby="supplier-profile-scope"
+        >
+          <h2 id="supplier-profile-scope">Profile scope</h2>
+          <div className="purchase-order-status-grid">
+            <article className="purchase-order-status-card">
+              <p>Supplier identity</p>
+              <strong>Unavailable</strong>
+              <small>Identity fields not loaded</small>
+            </article>
+            <article className="purchase-order-status-card">
+              <p>Qualification</p>
+              <strong>Unavailable</strong>
+              <small>Evidence not loaded</small>
+            </article>
+            <article className="purchase-order-status-card">
+              <p>Lifecycle</p>
+              <strong>Unavailable</strong>
+              <small>Commands not connected</small>
+            </article>
+          </div>
+        </section>
+
+        <section className="supplier-detail-review__contacts" aria-labelledby="supplier-contacts">
+          <h2 id="supplier-contacts">Contacts and addresses</h2>
+          <div className="supplier-detail-review__contact-card">
+            <p>Field permissions may restrict each value. Source unavailable.</p>
+            <dl>
+              <div>
+                <dt>Contact role · name · email · phone</dt>
+                <dd>Unavailable</dd>
+              </div>
+              <div>
+                <dt>Business / remittance address</dt>
+                <dd>Unavailable</dd>
+              </div>
+              <div>
+                <dt>Tax registration reference</dt>
+                <dd>Restricted</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        <section className="purchase-order-empty-panel supplier-detail-review__qualifications">
+          <h2>Qualifications and evidence</h2>
+          <p>
+            Type · jurisdiction · effective period · status. Certificate, issuer and evidence refs
+            unavailable.
+          </p>
+        </section>
+
+        <section className="purchase-order-fields-panel supplier-detail-review__summaries">
+          <h2>Authorized summaries and history</h2>
+          <p>Offerings · open POs · performance · history / Audit: Unavailable</p>
+        </section>
+
+        <p className="purchase-order-ownership-note">
+          Edit · review qualification · suspend · open Offering / PO / discrepancy: unavailable. No
+          physical delete; suspension preserves issued POs.
+        </p>
+      </div>
+    </AppFrame>
   );
 }
 export function SupplierList({ view }: { readonly view: SupplierView }) {
@@ -246,7 +422,13 @@ function SupplierPageLoader({
       active = false;
     };
   }, [client, supplierReference]);
-  return state.kind === "Found" ? (
+  return state.kind === "Unavailable" ? (
+    supplierReference === null ? (
+      <SupplierUnavailable />
+    ) : (
+      <SupplierDetailUnavailable />
+    )
+  ) : state.kind === "Found" ? (
     supplierReference === null ? (
       <SupplierList view={state.view} />
     ) : (

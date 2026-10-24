@@ -16,6 +16,9 @@ export function kitchenItemFixture() {
     createdAt: "2026-08-12T15:00:00.000Z",
     allergenCue: "ReviewRequired",
     exceptionStatus: "None",
+    selectedOptions: [{ displayName: "Extra mushrooms", quantity: 2 }],
+    orderLabel: { orderNumber: "14", orderType: "DineIn", tableLabel: "T4" },
+    customerNote: null,
   };
 }
 export function kitchenBoardFixture() {

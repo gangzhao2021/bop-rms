@@ -1,12 +1,20 @@
+import {
+  encodePickupHandoffRecord,
+  decodePickupHandoffRecord,
+} from "../application/pickup-handoff-record.js";
 import { describe, expect, it } from "vitest";
 import {
   PickupHandoffError,
   planCompletePickupHandoff,
+  parseCompletePickupHandoffCommand,
+  parsePickupInPersonVerificationRecord,
+  pickupHandoffAuditDetails,
   type CompletePickupHandoffCommand,
   type PickupHandoffReference,
   type PickupHandoffSource,
 } from "../contracts/pickup-handoff.js";
 import type { PickupProofVerificationRecord } from "../contracts/pickup-proof.js";
+import { planPickupNotCollected } from "../domain/pickup-not-collected.js";
 
 const id = (n: number) =>
   `018f3f7a-8b1c-7a11-8d01-${String(n).padStart(12, "0")}` as PickupHandoffReference;
@@ -250,5 +258,324 @@ describe("WP-1603 Complete Pickup Handoff", () => {
         ),
       "PICKUP_HANDOFF_NOT_READY",
     );
+  });
+});
+
+describe("WP-2402 handoff persistence boundary", () => {
+  it("recovers original full and partial effects with exact bigint versions", () => {
+    for (const request of [
+      command(),
+      command({ quantities: [{ fulfillmentItemReference: refs.item1, quantity: 1 }] }),
+    ]) {
+      const effect = planCompletePickupHandoff(source(), request);
+      const recovered = decodePickupHandoffRecord(encodePickupHandoffRecord(effect));
+      expect(recovered).toEqual(effect);
+      expect(Object.isFrozen(recovered.items)).toBe(true);
+      expect(Object.isFrozen(recovered.audit)).toBe(true);
+    }
+  });
+  it("rejects raw fields, accessor commands, prototype objects and untrusted proof authority", () => {
+    expect(() =>
+      parseCompletePickupHandoffCommand({ ...command(), rawProof: "synthetic-forbidden" }),
+    ).toThrow(PickupHandoffError);
+    const accessor = command();
+    let evaluated = false;
+    Object.defineProperty(accessor, "recipientDisplayMask", {
+      enumerable: true,
+      get: () => {
+        evaluated = true;
+        return "R***";
+      },
+    });
+    expect(() => parseCompletePickupHandoffCommand(accessor)).toThrow(PickupHandoffError);
+    expect(evaluated).toBe(false);
+    expect(() =>
+      parseCompletePickupHandoffCommand(Object.assign(Object.create(null), command())),
+    ).toThrow(PickupHandoffError);
+    expect(() =>
+      planCompletePickupHandoff(
+        source(),
+        command({
+          verification: verification({ grantsCompletionAuthority: true }),
+        }),
+      ),
+    ).toThrow(PickupHandoffError);
+    expect(() =>
+      parseCompletePickupHandoffCommand({
+        ...command(),
+        quantities: [
+          {
+            fulfillmentItemReference: refs.item1,
+            quantity: 1,
+            rawNote: "synthetic-forbidden",
+          },
+        ],
+      }),
+    ).toThrow(PickupHandoffError);
+  });
+  it("rejects sparse or accessor quantities and invalid calendar instants without invoking getters", () => {
+    const sparse = new Array(2);
+    sparse[1] = { fulfillmentItemReference: refs.item1, quantity: 1 };
+    expect(() => parseCompletePickupHandoffCommand({ ...command(), quantities: sparse })).toThrow(
+      PickupHandoffError,
+    );
+    const accessor = [{ fulfillmentItemReference: refs.item1, quantity: 1 }];
+    let evaluated = false;
+    Object.defineProperty(accessor, "0", {
+      enumerable: true,
+      get: () => {
+        evaluated = true;
+        return {};
+      },
+    });
+    expect(() => parseCompletePickupHandoffCommand({ ...command(), quantities: accessor })).toThrow(
+      PickupHandoffError,
+    );
+    expect(evaluated).toBe(false);
+    expect(() =>
+      parseCompletePickupHandoffCommand({ ...command(), handedOverAt: "2026-99-11T12:03:00.000Z" }),
+    ).toThrow(PickupHandoffError);
+  });
+  it("rejects inconsistent history versions, audit identity, quantity and recipient fields", () => {
+    const record = JSON.parse(
+      encodePickupHandoffRecord(planCompletePickupHandoff(source(), command())),
+    );
+    for (const change of [
+      { nextAggregateVersion: "7" },
+      { nextPhase: "InProgress" },
+      { audit: { ...record.effect.audit, actorReference: refs.device } },
+      { audit: { ...record.effect.audit, permission: "fulfillment.pickup.read" } },
+      { operation: { ...record.effect.operation, aggregateVersionAfter: "7" } },
+      { record: { ...record.effect.record, handedOverAt: "2026-08-11T12:04:00.000Z" } },
+      { record: { ...record.effect.record, recipientDisplayMask: "name@example.com" } },
+      { items: [{ ...record.effect.items[0], cumulativeHandedOverQuantity: 1 }] },
+      { items: [record.effect.items[0], record.effect.items[0]] },
+    ]) {
+      expect(() =>
+        decodePickupHandoffRecord(
+          JSON.stringify({ ...record, effect: { ...record.effect, ...change } }),
+        ),
+      ).toThrow(PickupHandoffError);
+    }
+    for (const key of ["aggregateVersionBefore", "aggregateVersionAfter"]) {
+      for (const value of [6, "06", "0", "-1", "6e0", "9223372036854775808", null]) {
+        expect(() =>
+          decodePickupHandoffRecord(
+            JSON.stringify({
+              ...record,
+              effect: {
+                ...record.effect,
+                operation: { ...record.effect.operation, [key]: value },
+              },
+            }),
+          ),
+        ).toThrow(PickupHandoffError);
+      }
+    }
+    for (const value of [
+      "{}",
+      "invalid",
+      JSON.stringify({ ...record, recordVersion: 2 }),
+      JSON.stringify({ ...record, extra: true }),
+    ])
+      expect(() => decodePickupHandoffRecord(value)).toThrow(PickupHandoffError);
+  });
+});
+
+describe("WP-2423 in-person handoff when the pickup proof expired or was never issued", () => {
+  const inPerson = (overrides: Record<string, unknown> = {}) => ({
+    verificationReference: id(30),
+    correlationReference: id(31),
+    fulfillmentReference: refs.fulfillment,
+    brandReference: refs.brand,
+    storeReference: refs.store,
+    verificationMethod: "InPerson" as const,
+    identityCheck: "OrderNumberAndName" as const,
+    reason: "ProofNotIssued" as const,
+    verifiedByActorReference: refs.actor,
+    verifiedAt: "2026-08-11T12:02:00.000Z",
+    ...overrides,
+  });
+  it("hands over after staff verify in person when no proof was issued", () => {
+    const effect = planCompletePickupHandoff(
+      source({ currentProofGeneration: null }),
+      command({ verification: inPerson() as never }),
+    );
+    expect(effect.nextPhase).toBe("Completed");
+    expect(effect.record.verificationMethod).toBe("InPerson");
+    expect(effect.record.verificationReference).toBe(id(30));
+    expect(decodePickupHandoffRecord(encodePickupHandoffRecord(effect))).toEqual(effect);
+  });
+  it("accepts an expired proof as the reason only when a proof exists", () => {
+    expect(
+      planCompletePickupHandoff(
+        source({ currentProofGeneration: 1 }),
+        command({ verification: inPerson({ reason: "ProofExpired" }) as never }),
+      ).record.verificationMethod,
+    ).toBe("InPerson");
+    code(
+      () =>
+        planCompletePickupHandoff(
+          source({ currentProofGeneration: 1 }),
+          command({ verification: inPerson({ reason: "ProofNotIssued" }) as never }),
+        ),
+      "PICKUP_HANDOFF_VERIFICATION_FAILED",
+    );
+    code(
+      () =>
+        planCompletePickupHandoff(
+          source({ currentProofGeneration: null }),
+          command({ verification: inPerson({ reason: "ProofExpired" }) as never }),
+        ),
+      "PICKUP_HANDOFF_VERIFICATION_FAILED",
+    );
+  });
+  it("requires the verifying staff member to hand over and a known identity check", () => {
+    code(
+      () =>
+        planCompletePickupHandoff(
+          source({ currentProofGeneration: null }),
+          command({ verification: inPerson({ verifiedByActorReference: id(40) }) as never }),
+        ),
+      "PICKUP_HANDOFF_VERIFICATION_FAILED",
+    );
+    code(
+      () =>
+        parseCompletePickupHandoffCommand(
+          command({ verification: inPerson({ identityCheck: "LooksFamiliar" }) as never }),
+        ),
+      "PICKUP_HANDOFF_VERIFICATION_FAILED",
+    );
+    code(
+      () =>
+        planCompletePickupHandoff(
+          source({ currentProofGeneration: null }),
+          command({ verification: verification() }),
+        ),
+      "PICKUP_HANDOFF_VERIFICATION_FAILED",
+    );
+  });
+});
+
+describe("WP-2423 in-person handoff when the customer cannot show a still-valid code", () => {
+  const record = (overrides: Record<string, unknown> = {}) => ({
+    verificationReference: id(30),
+    correlationReference: id(31),
+    fulfillmentReference: refs.fulfillment,
+    brandReference: refs.brand,
+    storeReference: refs.store,
+    verificationMethod: "InPerson" as const,
+    identityCheck: "OrderNumberAndPhoneLast4" as const,
+    reason: "CodeNotShown" as const,
+    codeNotShownCause: "PhoneUnavailable" as const,
+    verifiedByActorReference: refs.actor,
+    verifiedAt: "2026-08-11T12:02:00.000Z",
+    ...overrides,
+  });
+  it("hands over with a staff-chosen cause only while a proof exists", () => {
+    const effect = planCompletePickupHandoff(
+      source({ currentProofGeneration: 1 }),
+      command({ verification: record() as never }),
+    );
+    expect(effect.record.verificationMethod).toBe("InPerson");
+    expect(effect.audit.actorReference).toBe(refs.actor);
+    code(
+      () =>
+        planCompletePickupHandoff(
+          source({ currentProofGeneration: null }),
+          command({ verification: record() as never }),
+        ),
+      "PICKUP_HANDOFF_VERIFICATION_FAILED",
+    );
+  });
+  it("requires the cause exactly with CodeNotShown, from the fixed list", () => {
+    for (const cause of ["PhoneUnavailable", "CodeNotReceived", "OrderPageLost"] as const)
+      expect(
+        parsePickupInPersonVerificationRecord(record({ codeNotShownCause: cause }))
+          .codeNotShownCause,
+      ).toBe(cause);
+    const withoutCause: Record<string, unknown> = { ...record() };
+    delete withoutCause.codeNotShownCause;
+    for (const invalid of [
+      withoutCause,
+      record({ codeNotShownCause: "LooksFamiliar" }),
+      record({ codeNotShownCause: null }),
+      record({ codeNotShownCause: "Lost phone, name Sam" }),
+      record({ reason: "CodeLocked" }),
+      record({ reason: "ProofExpired", codeNotShownCause: undefined }),
+    ]) {
+      code(() => parsePickupInPersonVerificationRecord(invalid), "PICKUP_HANDOFF_INPUT_INVALID");
+      code(
+        () => parseCompletePickupHandoffCommand(command({ verification: invalid as never })),
+        "PICKUP_HANDOFF_VERIFICATION_FAILED",
+      );
+    }
+  });
+  it("still reads older in-person records that carry no cause, with the same shape", () => {
+    const older: Record<string, unknown> = { ...record({ reason: "CodeLocked" }) };
+    delete older.codeNotShownCause;
+    const parsed = parsePickupInPersonVerificationRecord(older);
+    expect(parsed).toEqual(older);
+    expect("codeNotShownCause" in parsed).toBe(false);
+  });
+  it("names the audit reason and cause of a handover without the code", () => {
+    expect(
+      pickupHandoffAuditDetails({
+        inPersonReason: "CodeNotShown",
+        codeNotShownCause: "OrderPageLost",
+      }),
+    ).toEqual({
+      reasonCode: "PICKUP_HANDOFF_CODE_NOT_SHOWN",
+      afterSummary: { action: "CompletePickupHandoff", codeNotShownCause: "OrderPageLost" },
+    });
+    for (const input of [
+      {},
+      { inPersonReason: null, codeNotShownCause: null },
+      { inPersonReason: "CodeLocked" as const, codeNotShownCause: null },
+    ])
+      expect(pickupHandoffAuditDetails(input)).toEqual({
+        reasonCode: "PICKUP_HANDOFF",
+        afterSummary: { action: "CompletePickupHandoff" },
+      });
+  });
+});
+
+describe("WP-2423 closing an uncollected pickup", () => {
+  const close = (overrides: Record<string, unknown> = {}) =>
+    planPickupNotCollected({
+      source: source({
+        currentProofGeneration: null,
+        lockedAt: "2026-08-11T14:00:00.000Z" as never,
+      }),
+      readyAt: "2026-08-11T12:00:00.000Z",
+      proofExpiresAt: null,
+      alreadyClosed: false,
+      expectedAggregateVersion: 5n,
+      actorReference: refs.actor,
+      notCollectedReference: id(50),
+      idempotencyReference: id(51),
+      correlationReference: id(52),
+      closedAt: "2026-08-11T13:30:00.000Z",
+      ...overrides,
+    } as never);
+  it("closes after the pickup hold when no valid code remains", () => {
+    expect(close()).toMatchObject({ reason: "NotCollected", aggregateVersionBefore: 5n });
+    expect(close({ proofExpiresAt: "2026-08-11T13:00:00.000Z" }).reason).toBe("NotCollected");
+  });
+  it("refuses before the hold ends, while a code is valid, twice, or after handoff", () => {
+    code(() => close({ closedAt: "2026-08-11T12:59:59.999Z" }), "PICKUP_HANDOFF_NOT_READY");
+    code(() => close({ proofExpiresAt: "2026-08-11T13:45:00.000Z" }), "PICKUP_HANDOFF_NOT_READY");
+    code(() => close({ alreadyClosed: true }), "PICKUP_HANDOFF_ALREADY_COMPLETED");
+    code(
+      () =>
+        close({
+          source: source({
+            canonicalPhase: "Completed",
+            lockedAt: "2026-08-11T14:00:00.000Z" as never,
+          }),
+        }),
+      "PICKUP_HANDOFF_ALREADY_COMPLETED",
+    );
+    code(() => close({ expectedAggregateVersion: 4n }), "PICKUP_HANDOFF_VERSION_CONFLICT");
   });
 });

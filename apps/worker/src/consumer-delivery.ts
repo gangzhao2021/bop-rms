@@ -2,6 +2,7 @@ import {
   consumeEventInTransaction,
   type ConsumerOutcome,
   type ConsumerRegistry,
+  type ConsumerRegistration,
   type ConsumerTransaction,
   ConsumerTransactionRollback,
   type DomainEventEnvelope,
@@ -51,6 +52,12 @@ export class ConsumerDeliveryWorker {
   constructor(
     private readonly dependencies: {
       readonly database: ConsumerDeliveryPort;
+      /** Trusted owner service entry; must authorize before Inbox duplicate recovery. */
+      readonly consume?: (
+        transaction: ConsumerTransaction,
+        registration: ConsumerRegistration,
+        envelope: DomainEventEnvelope,
+      ) => Promise<ConsumerOutcome>;
       readonly failureRecorder?: ConsumerFailureRecorder;
       readonly nowMs?: () => number;
       readonly registry: ConsumerRegistry;
@@ -108,8 +115,7 @@ export class ConsumerDeliveryWorker {
     try {
       const outcome = await this.dependencies.database.transaction(
         { brandId: envelope.tenantId, ...(envelope.storeId ? { storeId: envelope.storeId } : {}) },
-        async (transaction) =>
-          await consumeEventInTransaction(transaction, resolved.registration, envelope),
+        async (transaction) => await this.consume(transaction, resolved.registration, envelope),
       );
       this.record(consumerAlias, eventAlias, outcome, startedAt);
       return outcome;
@@ -131,8 +137,7 @@ export class ConsumerDeliveryWorker {
               brandId: envelope.tenantId,
               ...(envelope.storeId ? { storeId: envelope.storeId } : {}),
             },
-            async (transaction) =>
-              await consumeEventInTransaction(transaction, resolved.registration, envelope),
+            async (transaction) => await this.consume(transaction, resolved.registration, envelope),
           );
         } catch {
           outcome = {
@@ -156,6 +161,16 @@ export class ConsumerDeliveryWorker {
       this.record(consumerAlias, eventAlias, outcome, startedAt);
       return outcome;
     }
+  }
+
+  private consume(
+    transaction: ConsumerTransaction,
+    registration: ConsumerRegistration,
+    envelope: DomainEventEnvelope,
+  ): Promise<ConsumerOutcome> {
+    return this.dependencies.consume
+      ? this.dependencies.consume(transaction, registration, envelope)
+      : consumeEventInTransaction(transaction, registration, envelope);
   }
 
   private get nowMs(): () => number {

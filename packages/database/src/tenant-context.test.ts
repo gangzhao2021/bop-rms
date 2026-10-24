@@ -37,15 +37,12 @@ describe("transaction-local Tenant database context", () => {
       return "result";
     });
     expect(value).toBe("result");
+    // WP-2423 item 4: both scope settings in one bound statement (one round trip, not two).
     expect(client.trace).toEqual([
       { text: "BEGIN" },
       {
-        text: "SELECT set_config('bop.brand_id', $1, true)",
-        values: [BRAND],
-      },
-      {
-        text: "SELECT set_config('bop.store_id', $1, true)",
-        values: [""],
+        text: "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+        values: [BRAND, ""],
       },
       { text: "CALLBACK" },
       { text: "COMMIT" },
@@ -63,9 +60,9 @@ describe("transaction-local Tenant database context", () => {
       { brandId: BRAND, storeId: STORE },
       async () => undefined,
     );
-    expect(client.trace[2]).toEqual({
-      text: "SELECT set_config('bop.store_id', $1, true)",
-      values: [STORE],
+    expect(client.trace[1]).toEqual({
+      text: "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+      values: [BRAND, STORE],
     });
     expect(
       client.trace.some((item) => item.text.includes(BRAND) || item.text.includes(STORE)),
@@ -136,7 +133,10 @@ describe("transaction-local Tenant database context", () => {
       }),
     );
 
-    for (const failure of ["SELECT set_config('bop.brand_id', $1, true)", "COMMIT"]) {
+    for (const failure of [
+      "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+      "COMMIT",
+    ]) {
       const client = new FakeClient();
       client.failOn = failure;
       await expect(
@@ -151,6 +151,105 @@ describe("transaction-local Tenant database context", () => {
       expect(client.destroyed).toBe(true);
       expect(client.trace.some((item) => item.text === "ROLLBACK")).toBe(true);
     }
+  });
+  it("WP-2423 (v15 2026-10-17): reports a setup or COMMIT on a lost connection as 08006", async () => {
+    for (const failure of [
+      "BEGIN",
+      "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+      "COMMIT",
+    ]) {
+      const client = new FakeClient();
+      client.query = async (text: string, values?: readonly unknown[]) => {
+        client.trace.push({ text, ...(values === undefined ? {} : { values }) });
+        if (text === failure) throw new Error("Connection terminated unexpectedly");
+        return { rows: [], rowCount: 0 } as unknown as QueryResult;
+      };
+      await expect(
+        withTenantContextTransaction(pool(client), { brandId: BRAND }, async () => undefined),
+      ).rejects.toMatchObject({
+        code: "TENANT_DATABASE_TRANSACTION_FAILED",
+        diagnostic: { sqlState: "08006", constraint: null, table: null, closed: false },
+      });
+      expect(client.destroyed).toBe(true);
+    }
+    // A server-side SQLSTATE is kept as is; an unrecognised failure stays without one.
+    const timedOut = new FakeClient();
+    timedOut.query = async (text: string) => {
+      if (text === "COMMIT") throw Object.assign(new Error("private"), { code: "25P03" });
+      return { rows: [], rowCount: 0 } as unknown as QueryResult;
+    };
+    await expect(
+      withTenantContextTransaction(pool(timedOut), { brandId: BRAND }, async () => undefined),
+    ).rejects.toMatchObject({ diagnostic: { sqlState: "25P03" } });
+    const unknown = new FakeClient();
+    unknown.failOn = "COMMIT";
+    await expect(
+      withTenantContextTransaction(pool(unknown), { brandId: BRAND }, async () => undefined),
+    ).rejects.toMatchObject({ diagnostic: { sqlState: null } });
+  });
+  it("WP-2423 item 4: sends parameterless limits with BEGIN and refuses any other setup", async () => {
+    const client = new FakeClient();
+    const limits = "SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'";
+    await withTenantContextTransaction(
+      pool(client),
+      { brandId: BRAND, storeId: STORE },
+      async () => undefined,
+      "ReadWrite",
+      limits,
+    );
+    expect(client.trace.map((item) => item.text)).toEqual([
+      "BEGIN; " + limits,
+      "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+      "COMMIT",
+    ]);
+    const snapshot = new FakeClient();
+    await withTenantContextTransaction(
+      pool(snapshot),
+      { brandId: BRAND },
+      async () => undefined,
+      "Snapshot",
+      limits,
+    );
+    expect(snapshot.trace[0]?.text).toBe(
+      "BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY; " + limits,
+    );
+    // A failure after BEGIN in the same round trip rolls back and discards the connection.
+    const failing = new FakeClient();
+    failing.failOn = "BEGIN; " + limits;
+    await expect(
+      withTenantContextTransaction(
+        pool(failing),
+        { brandId: BRAND },
+        async () => undefined,
+        "ReadWrite",
+        limits,
+      ),
+    ).rejects.toMatchObject({ code: "TENANT_DATABASE_TRANSACTION_FAILED" });
+    expect(failing.trace.at(-1)?.text).toBe("ROLLBACK");
+    expect(failing.destroyed).toBe(true);
+    let acquisitions = 0;
+    const counting = {
+      connect: async () => {
+        acquisitions += 1;
+        return new FakeClient() as unknown as PoolClient;
+      },
+    };
+    for (const setup of [
+      "SET ROLE postgres",
+      "SET LOCAL statement_timeout = '5s'; RESET ALL",
+      "SET LOCAL bop.brand_id = '" + BRAND + "'",
+      "",
+    ])
+      await expect(
+        withTenantContextTransaction(
+          counting,
+          { brandId: BRAND },
+          async () => undefined,
+          "ReadWrite",
+          setup,
+        ),
+      ).rejects.toMatchObject({ code: "TENANT_DATABASE_SCOPE_INVALID" });
+    expect(acquisitions).toBe(0);
   });
   it("discards rollback failures and preserves even an undefined callback rejection", async () => {
     const client = new FakeClient();

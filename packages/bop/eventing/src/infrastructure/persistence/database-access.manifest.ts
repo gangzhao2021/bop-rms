@@ -142,6 +142,21 @@ const databaseAccessManifestInput = {
       readPattern: null,
       source: "packages/bop/eventing/src/infrastructure/messaging/retry-dead-letter.ts",
     },
+    {
+      id: "append-consumer-retry-expedite-action",
+      operation: "write",
+      mechanism: "raw-sql",
+      target: {
+        schema: "platform_eventing",
+        table: "consumer_retry_expedite_action",
+      },
+      principal: {
+        kind: "shared-infrastructure",
+        id: "eventing-infrastructure",
+      },
+      readPattern: null,
+      source: "packages/bop/eventing/src/infrastructure/messaging/retry-dead-letter.ts",
+    },
   ],
 } as const;
 

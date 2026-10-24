@@ -13,7 +13,7 @@
     "leastPrivilegePublish": true,
     "verifiedEmailSubscriptions": true,
     "customerPayload": false,
-    "roleDestinations": ["on-call-primary", "on-call-backup", "security-on-call"],
+    "roleDestinations": ["on_call_primary", "on_call_backup", "security_on_call"],
     "unknownOrDeliveryFailure": "fail-closed"
   },
   "costAndQuota": {

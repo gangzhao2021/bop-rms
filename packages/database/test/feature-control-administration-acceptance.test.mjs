@@ -1,3 +1,7 @@
+import {
+  exerciseFeatureControlAdministrationQuery,
+  exerciseFeatureControlInitialDraft,
+} from "../test-support/feature-control-administration-query.mjs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -69,6 +73,8 @@ async function prove(context) {
       0,
     );
     await admin.query("RESET ROLE");
+    await exerciseFeatureControlAdministrationQuery({ admin, context, role, id, at });
+    await exerciseFeatureControlInitialDraft({ admin, context, role, id, at });
   } finally {
     await admin.query("RESET ROLE").catch(() => undefined);
     await admin.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);

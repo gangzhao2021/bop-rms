@@ -1,4 +1,8 @@
-import type { GuestRawCredential, GuestSessionCookieDescriptor } from "@bop/identity";
+import {
+  serializeGuestSessionCookie,
+  type GuestRawCredential,
+  type GuestSessionCookieDescriptor,
+} from "@bop/identity";
 import type { RequestHandler, Response } from "express";
 
 const compactSegmentPattern = /^[A-Za-z0-9_-]+$/u;
@@ -39,8 +43,28 @@ export interface CustomerEntryEstablished {
   readonly cookie: GuestSessionCookieDescriptor;
 }
 
+/** WP-2423 Q4: the Store is closed or not taking this service now; no Session is issued. */
+export interface CustomerEntryNotAccepting {
+  readonly status: "NotAccepting";
+  readonly storeDisplayName: string;
+  readonly operatingState: "Closed" | "TemporarilyClosed" | "Open";
+  readonly todayHours: readonly {
+    readonly startLocalTime: string;
+    readonly endLocalTime: string;
+    readonly endsNextDay: boolean;
+  }[];
+}
+
+/** WP-2423 Q11: a genuine table code that staff replaced or turned off; no Session is issued. */
+export interface CustomerEntryQrRetired {
+  readonly status: "QrRetired";
+  readonly reason: "Replaced" | "TurnedOff";
+}
+
 export type CustomerEntryPortResult =
   | CustomerEntryEstablished
+  | CustomerEntryNotAccepting
+  | CustomerEntryQrRetired
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" };
 
@@ -48,16 +72,36 @@ export interface CustomerEntryPort {
   establish(input: Readonly<CustomerEntryPortInput>): Promise<CustomerEntryPortResult>;
 }
 
+export interface CustomerEntryRequestAdmission {
+  consume(
+    input: Readonly<{ remoteAddress: string | null; requestedAt: string }>,
+  ): Promise<
+    | { readonly status: "Allowed" }
+    | { readonly status: "RateLimited"; readonly retryAfterSeconds: number }
+    | { readonly status: "Unavailable" }
+  >;
+}
+
 export interface CustomerEntryHandlerOptions {
+  readonly requestAdmission?: CustomerEntryRequestAdmission;
   readonly allowedOrigin: string;
   readonly now?: () => string;
   readonly port: CustomerEntryPort;
   readonly uuidV7Factory: () => string;
 }
 
-type ErrorCode = "entry_request_invalid" | "entry_unavailable" | "entry_service_unavailable";
+type ErrorCode =
+  | "entry_request_invalid"
+  | "entry_unavailable"
+  | "entry_service_unavailable"
+  | "entry_rate_limited";
 
 const errorContracts = Object.freeze({
+  entry_rate_limited: Object.freeze({
+    messageKey: "customer.entry.rate_limited",
+    recovery: Object.freeze({ action: "RetryOrAskStaff", storeSelection: "Hidden" }),
+    status: 429,
+  }),
   entry_request_invalid: Object.freeze({
     messageKey: "customer.entry.request_invalid",
     recovery: Object.freeze({ action: "Rescan", storeSelection: "Hidden" }),
@@ -291,6 +335,8 @@ function parsePortResult(
 ):
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" }
+  | CustomerEntryQrRetired
+  | CustomerEntryNotAccepting
   | CustomerEntryEstablished {
   const statusRecord =
     typeof value === "object" && value !== null
@@ -307,11 +353,52 @@ function parsePortResult(
   if (status === "Established") {
     return Object.freeze({ status, ...parseEstablished(value, requestedAt) });
   }
+  if (status === "QrRetired") {
+    const raw = closedRecord(value, ["status", "reason"]);
+    if (raw.reason !== "Replaced" && raw.reason !== "TurnedOff")
+      throw new TypeError("invalid retired result");
+    return Object.freeze({ status: "QrRetired", reason: raw.reason });
+  }
+  if (status === "NotAccepting") {
+    const raw = closedRecord(value, ["status", "storeDisplayName", "operatingState", "todayHours"]);
+    const time = /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u;
+    if (
+      typeof raw.storeDisplayName !== "string" ||
+      !/^[^\p{Cc}\p{Cf}<>]{1,120}$/u.test(raw.storeDisplayName) ||
+      !["Closed", "TemporarilyClosed", "Open"].includes(String(raw.operatingState)) ||
+      !Array.isArray(raw.todayHours) ||
+      raw.todayHours.length > 12
+    )
+      throw new TypeError("invalid not-accepting result");
+    const todayHours = raw.todayHours.map((value: unknown) => {
+      const interval = closedRecord(value, ["startLocalTime", "endLocalTime", "endsNextDay"]);
+      if (
+        typeof interval.startLocalTime !== "string" ||
+        !time.test(interval.startLocalTime) ||
+        typeof interval.endLocalTime !== "string" ||
+        !time.test(interval.endLocalTime) ||
+        typeof interval.endsNextDay !== "boolean"
+      )
+        throw new TypeError("invalid hours");
+      return Object.freeze({
+        startLocalTime: interval.startLocalTime,
+        endLocalTime: interval.endLocalTime,
+        endsNextDay: interval.endsNextDay,
+      });
+    });
+    return Object.freeze({
+      status: "NotAccepting",
+      storeDisplayName: raw.storeDisplayName,
+      operatingState: raw.operatingState as CustomerEntryNotAccepting["operatingState"],
+      todayHours: Object.freeze(todayHours),
+    });
+  }
   throw new TypeError("unknown Customer-entry result");
 }
 
+/** WP-2423 Q10: persistent for the Session's absolute lifetime so a browser restart keeps the order. */
 function serializeCookie(credential: GuestRawCredential): string {
-  return `${expectedGuestSessionCookie.name}=${credential}; Path=/; Secure; HttpOnly; SameSite=Lax`;
+  return serializeGuestSessionCookie(credential);
 }
 
 export const unavailableCustomerEntryHandler: RequestHandler = (_request, response) => {
@@ -329,17 +416,20 @@ export class CustomerEntryHandler {
   readonly #now: () => string;
   readonly #port: CustomerEntryPort;
   readonly #uuidV7Factory: () => string;
+  readonly #requestAdmission: CustomerEntryRequestAdmission | undefined;
 
   constructor({
     allowedOrigin,
     now = () => new Date().toISOString(),
     port,
     uuidV7Factory,
+    requestAdmission,
   }: CustomerEntryHandlerOptions) {
     this.#allowedOrigin = parseOrigin(allowedOrigin);
     this.#now = now;
     this.#port = port;
     this.#uuidV7Factory = uuidV7Factory;
+    this.#requestAdmission = requestAdmission;
   }
 
   handler(): RequestHandler {
@@ -366,6 +456,29 @@ export class CustomerEntryHandler {
 
       try {
         const requestedAt = parseCanonicalInstant(this.#now());
+        const admission = await this.#requestAdmission?.consume(
+          Object.freeze({
+            remoteAddress: request.socket.remoteAddress ?? null,
+            requestedAt,
+          }),
+        );
+        if (admission?.status === "RateLimited") {
+          const decision = closedRecord(admission, ["status", "retryAfterSeconds"]);
+          if (
+            !Number.isSafeInteger(decision.retryAfterSeconds) ||
+            Number(decision.retryAfterSeconds) < 1 ||
+            Number(decision.retryAfterSeconds) > 86400
+          )
+            throw new TypeError("admission unavailable");
+          response.setHeader("Retry-After", String(decision.retryAfterSeconds));
+          sendError(response, "entry_rate_limited");
+          return;
+        }
+        if (admission?.status !== "Allowed") {
+          sendError(response, "entry_service_unavailable");
+          return;
+        }
+        closedRecord(admission, ["status"]);
         const entryRequestReference = parseUuidV7(this.#uuidV7Factory());
         const operationReference = parseUuidV7(this.#uuidV7Factory());
         if (entryRequestReference === operationReference) {
@@ -388,6 +501,34 @@ export class CustomerEntryHandler {
         }
         if (result.status === "EntryUnavailable") {
           sendError(response, "entry_unavailable");
+          return;
+        }
+        // WP-2423 Q11: a replaced or turned-off table code; the customer asks staff for help.
+        if (result.status === "QrRetired") {
+          response.status(410).json({
+            schemaVersion: 1,
+            code: "entry_qr_retired",
+            messageKey:
+              result.reason === "Replaced"
+                ? "customer.entry.qr_replaced"
+                : "customer.entry.qr_turned_off",
+            recovery: { action: "AskStaff", storeSelection: "Hidden" },
+          });
+          return;
+        }
+        // WP-2423 Q4: tell the customer the Store is not taking orders, and today's hours.
+        if (result.status === "NotAccepting") {
+          response.status(409).json({
+            schemaVersion: 1,
+            code: "entry_not_accepting",
+            messageKey: "customer.entry.not_accepting",
+            recovery: { action: "TryLaterOrAskStaff", storeSelection: "Hidden" },
+            store: {
+              storeDisplayName: result.storeDisplayName,
+              operatingState: result.operatingState,
+              todayHours: result.todayHours,
+            },
+          });
           return;
         }
         response.setHeader("Set-Cookie", serializeCookie(result.sessionCredential));

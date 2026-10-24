@@ -5,7 +5,11 @@ import {
   parseCatalogLocale,
   parseCatalogReference,
   parseLocalizedNames,
+  parseLocalizedPlainText,
+  productDescriptionMaximumLength,
+  productPhotoAltTextMaximumLength,
 } from "./product.js";
+import { parseMenuCategoryBindings, type MenuCategoryBinding } from "./menu-category-bindings.js";
 import { parsePublishingDigest } from "@bop/publishing";
 import type { PublishingDigest } from "@bop/publishing";
 import type { CatalogCode, CatalogInstant, CatalogReference } from "./product.js";
@@ -15,6 +19,11 @@ import {
 } from "./allergen-provenance.js";
 
 export interface PublishedOptionRule {
+  readonly semanticsVersion?: 2;
+  /** WP-2423 slice 4.5: the option set's name customers choose from (absent in older menus). */
+  readonly localizedNames?: Readonly<Record<string, string>>;
+  readonly activationOptionReferences?: readonly CatalogReference[];
+  readonly channelCodes?: readonly CatalogCode[];
   readonly bindingReference: CatalogReference;
   readonly optionSetVersionReference: CatalogReference;
   readonly minimumSelections: number;
@@ -27,8 +36,184 @@ export interface PublishedOptionRule {
     readonly maximumQuantity: number;
     readonly conflictOptionReferences: readonly CatalogReference[];
     readonly selectedByDefault: boolean;
+    readonly defaultQuantity?: number;
   }[];
 }
+/** One option a customer starts with, as Recipe and Inventory read a selection. */
+export interface PublishedDefaultOptionSelection {
+  readonly bindingReference: CatalogReference;
+  readonly optionReference: CatalogReference;
+  readonly quantity: number;
+}
+
+/**
+ * WP-2423 Q12: the choices an item starts with on a channel, as the customer menu presents it —
+ * each enabled option's default quantity (1 for a selected default on a rule published before
+ * option quantities), on rules offered on that channel whose activating option is itself one of
+ * those defaults (activation is acyclic, checked at publication). This is the item "as normally
+ * ordered", used to observe whether it can still be made from stock; it is not a customer choice.
+ */
+export function publishedDefaultOptionSelections(
+  rules: readonly PublishedOptionRule[],
+  channelCode: string,
+): readonly PublishedDefaultOptionSelection[] {
+  const offered = rules.filter(
+    (rule) =>
+      rule.semanticsVersion !== 2 || rule.channelCodes?.some((channel) => channel === channelCode),
+  );
+  const selected = new Map<string, PublishedDefaultOptionSelection>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const rule of offered) {
+      const activation = rule.activationOptionReferences ?? [];
+      if (activation.length > 0 && !activation.some((reference) => selected.has(reference)))
+        continue;
+      for (const option of rule.options) {
+        if (
+          selected.has(option.optionReference) ||
+          !rule.enabledOptionReferences.includes(option.optionReference)
+        )
+          continue;
+        const quantity =
+          rule.semanticsVersion === 2
+            ? (option.defaultQuantity ?? 0)
+            : option.selectedByDefault
+              ? 1
+              : 0;
+        if (quantity < 1) continue;
+        selected.set(
+          option.optionReference,
+          Object.freeze({
+            bindingReference: rule.bindingReference,
+            optionReference: option.optionReference,
+            quantity,
+          }),
+        );
+        changed = true;
+      }
+    }
+  }
+  return Object.freeze([...selected.values()]);
+}
+
+export type PublishedImageContentType = "image/jpeg" | "image/webp";
+export interface PublishedImageRendition {
+  readonly contentType: PublishedImageContentType;
+  readonly width: 320 | 640 | 1280;
+  readonly height: number;
+  /** Content-addressed public path: /media/images/<sha256>.jpg|webp */
+  readonly path: string;
+}
+/**
+ * WP-2423: the reviewed description and photo of a sellable (shared by all sizes of its Product).
+ * Present only when there is a description or a photo, so older snapshots keep their digest.
+ */
+export interface PublishedSellablePresentation {
+  readonly localizedDescriptions: Readonly<Record<string, string>>;
+  readonly photo: {
+    readonly imageReference: CatalogReference;
+    readonly localizedAltText: Readonly<Record<string, string>>;
+    readonly width: number;
+    readonly height: number;
+    readonly renditions: readonly PublishedImageRendition[];
+  } | null;
+}
+export const publishedImagePathPattern = /^\/media\/images\/[0-9a-f]{64}\.(?:jpg|webp)$/u;
+const renditionOrder: readonly (readonly [320 | 640 | 1280, PublishedImageContentType])[] = [
+  [320, "image/jpeg"],
+  [320, "image/webp"],
+  [640, "image/jpeg"],
+  [640, "image/webp"],
+  [1280, "image/jpeg"],
+  [1280, "image/webp"],
+];
+function record(value: unknown, keys: readonly string[]): Readonly<Record<string, unknown>> {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  )
+    return invalid();
+  const own = Reflect.ownKeys(value);
+  if (
+    own.length !== keys.length ||
+    own.some((key) => typeof key !== "string" || !keys.includes(key))
+  )
+    return invalid();
+  const result: Record<string, unknown> = {};
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return invalid();
+    result[key] = descriptor.value;
+  }
+  return result;
+}
+function positiveInteger(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 100000)
+    return invalid();
+  return value as number;
+}
+/** Strict: exact keys, six renditions in order (320/640/1280 × JPEG then WebP), public paths. */
+export function parsePublishedSellablePresentation(value: unknown): PublishedSellablePresentation {
+  const raw = record(value, ["localizedDescriptions", "photo"]);
+  const localizedDescriptions = parseLocalizedPlainText(
+    raw.localizedDescriptions,
+    productDescriptionMaximumLength,
+    { requiredLocale: null, allowEmpty: true },
+  );
+  let photo: PublishedSellablePresentation["photo"] = null;
+  if (raw.photo !== null) {
+    const rawPhoto = record(raw.photo, [
+      "imageReference",
+      "localizedAltText",
+      "width",
+      "height",
+      "renditions",
+    ]);
+    if (!Array.isArray(rawPhoto.renditions) || rawPhoto.renditions.length !== renditionOrder.length)
+      return invalid();
+    const renditions = Object.freeze(
+      renditionOrder.map(([width, contentType], index) => {
+        const item = record((rawPhoto.renditions as unknown[])[index], [
+          "contentType",
+          "width",
+          "height",
+          "path",
+        ]);
+        if (
+          item.contentType !== contentType ||
+          item.width !== width ||
+          typeof item.path !== "string" ||
+          !publishedImagePathPattern.test(item.path) ||
+          !item.path.endsWith(contentType === "image/jpeg" ? ".jpg" : ".webp")
+        )
+          return invalid();
+        return Object.freeze({
+          contentType,
+          width,
+          height: positiveInteger(item.height),
+          path: item.path,
+        });
+      }),
+    );
+    photo = Object.freeze({
+      imageReference: parseCatalogReference(rawPhoto.imageReference),
+      localizedAltText: parseLocalizedPlainText(
+        rawPhoto.localizedAltText,
+        productPhotoAltTextMaximumLength,
+        { requiredLocale: null, allowEmpty: false },
+      ),
+      width: positiveInteger(rawPhoto.width),
+      height: positiveInteger(rawPhoto.height),
+      renditions,
+    });
+  }
+  if (photo === null && Object.keys(localizedDescriptions).length === 0) return invalid();
+  return Object.freeze({ localizedDescriptions, photo });
+}
+
 export interface PublishedSellableSnapshot {
   readonly placementReference: CatalogReference;
   readonly sellableReference: CatalogReference;
@@ -40,6 +225,8 @@ export interface PublishedSellableSnapshot {
   readonly configuredAvailability: "Available" | "Unavailable";
   readonly optionRules: readonly PublishedOptionRule[];
   readonly allergenDisclosure: SellableAllergenDisclosure;
+  /** WP-2423: reviewed description and photo; absent when the item has neither. */
+  readonly presentation?: PublishedSellablePresentation;
 }
 export interface PublishedMenuSectionSnapshot {
   readonly sectionReference: CatalogReference;
@@ -115,6 +302,16 @@ function codes(value: unknown) {
   return parsed;
 }
 function optionRule(value: PublishedOptionRule, defaultLocale: string): PublishedOptionRule {
+  const quantity = value.semanticsVersion === 2;
+  if (value.semanticsVersion !== undefined && !quantity) invalid();
+  if (
+    !quantity &&
+    (value.activationOptionReferences !== undefined || value.channelCodes !== undefined)
+  )
+    invalid();
+  const activation = quantity ? references(value.activationOptionReferences) : [];
+  const channels = quantity ? codes(value.channelCodes) : [];
+  if (quantity && channels.length === 0) invalid();
   const minimumSelections = nonnegative(value.minimumSelections);
   const maximumSelections = nonnegative(value.maximumSelections);
   const enabledOptionReferences = references(value.enabledOptionReferences);
@@ -124,6 +321,17 @@ function optionRule(value: PublishedOptionRule, defaultLocale: string): Publishe
     value.options.map((option) => {
       const optionReference = parseCatalogReference(option.optionReference);
       const conflictOptionReferences = references(option.conflictOptionReferences);
+      const defaultQuantity = quantity
+        ? nonnegative(option.defaultQuantity)
+        : option.selectedByDefault
+          ? 1
+          : 0;
+      if (
+        (!quantity && option.defaultQuantity !== undefined) ||
+        defaultQuantity > option.maximumQuantity ||
+        option.selectedByDefault !== defaultQuantity > 0
+      )
+        invalid();
       if (
         !Number.isSafeInteger(option.maximumQuantity) ||
         option.maximumQuantity < 1 ||
@@ -138,25 +346,46 @@ function optionRule(value: PublishedOptionRule, defaultLocale: string): Publishe
         maximumQuantity: option.maximumQuantity,
         conflictOptionReferences,
         selectedByDefault: option.selectedByDefault,
+        ...(quantity ? { defaultQuantity } : {}),
       });
     }),
   );
   if (
     minimumSelections > maximumSelections ||
-    maximumSelections > enabledOptionReferences.length ||
+    maximumSelections >
+      (quantity
+        ? options.reduce((sum, option) => sum + option.maximumQuantity, 0)
+        : enabledOptionReferences.length) ||
+    (quantity &&
+      (maximumSelections > 99900 ||
+        options.reduce((sum, option) => sum + (option.defaultQuantity ?? 0), 0) <
+          minimumSelections ||
+        options.reduce((sum, option) => sum + (option.defaultQuantity ?? 0), 0) >
+          maximumSelections)) ||
     defaultOptionReferences.some((reference) => !enabledOptionReferences.includes(reference)) ||
     options.length !== enabledOptionReferences.length ||
     options.some(
       (option, index) =>
         option.optionReference !== enabledOptionReferences[index] ||
         option.selectedByDefault !== defaultOptionReferences.includes(option.optionReference) ||
-        option.conflictOptionReferences.some(
-          (reference) => !enabledOptionReferences.includes(reference),
-        ),
+        (!quantity &&
+          option.conflictOptionReferences.some(
+            (reference) => !enabledOptionReferences.includes(reference),
+          )),
     )
   )
     invalid();
   return Object.freeze({
+    ...(quantity
+      ? {
+          semanticsVersion: 2 as const,
+          activationOptionReferences: activation,
+          channelCodes: channels,
+        }
+      : {}),
+    ...(value.localizedNames === undefined
+      ? {}
+      : { localizedNames: parseLocalizedNames(value.localizedNames, defaultLocale) }),
     bindingReference: parseCatalogReference(value.bindingReference),
     optionSetVersionReference: parseCatalogReference(value.optionSetVersionReference),
     minimumSelections,
@@ -188,16 +417,80 @@ function sellable(value: PublishedSellableSnapshot, defaultLocale: string) {
     configuredAvailability: value.configuredAvailability,
     optionRules: Object.freeze(value.optionRules.map((rule) => optionRule(rule, defaultLocale))),
     allergenDisclosure: parseSellableAllergenDisclosure(value.allergenDisclosure, defaultLocale),
+    ...(Object.hasOwn(value, "presentation")
+      ? {
+          presentation: parsePublishedSellablePresentation(
+            Object.getOwnPropertyDescriptor(value, "presentation")?.value,
+          ),
+        }
+      : {}),
   });
 }
 
-export function parsePublishedMenuSnapshot(value: PublishedMenuSnapshot): PublishedMenuSnapshot {
+function validateChannelRules(
+  rules: readonly PublishedOptionRule[],
+  menuChannels: readonly CatalogCode[],
+): void {
+  const rich = rules.filter((rule) => rule.semanticsVersion === 2);
+  if (!rich.length) return;
+  if (
+    rich.some((rule) =>
+      rule.channelCodes?.some(
+        (channel) => menuChannels.length > 0 && !menuChannels.includes(channel),
+      ),
+    )
+  )
+    invalid();
+  const channels = menuChannels.length
+    ? menuChannels
+    : [...new Set(rich.flatMap((rule) => rule.channelCodes ?? []))];
+  for (const channel of channels) {
+    const selected = rules.filter(
+      (rule) => rule.semanticsVersion !== 2 || rule.channelCodes?.includes(channel),
+    );
+    const owner = new Map<string, number>();
+    selected.forEach((rule, index) =>
+      rule.options.forEach((option) => {
+        if (owner.has(option.optionReference)) invalid();
+        owner.set(option.optionReference, index);
+      }),
+    );
+    const edges = selected.map((rule, index) => {
+      const parents = (rule.activationOptionReferences ?? []).map((reference) => {
+        const parent = owner.get(reference);
+        if (parent === undefined || parent === index) return invalid();
+        return parent;
+      });
+      if (
+        rule.options.some((option) =>
+          option.conflictOptionReferences.some((reference) => !owner.has(reference)),
+        )
+      )
+        invalid();
+      return parents;
+    });
+    const visiting = new Set<number>(),
+      visited = new Set<number>();
+    const visit = (index: number): void => {
+      if (visiting.has(index)) invalid();
+      if (visited.has(index)) return;
+      visiting.add(index);
+      for (const parent of edges[index] ?? []) visit(parent);
+      visiting.delete(index);
+      visited.add(index);
+    };
+    selected.forEach((_rule, index) => visit(index));
+  }
+}
+
+export type ReviewedMenuContent = Omit<
+  PublishedMenuSnapshot,
+  "releaseReference" | "snapshotDigest" | "timeZone" | "effectiveFrom" | "effectiveUntil"
+> & { readonly categoryBindings?: readonly MenuCategoryBinding[] };
+
+export function parseReviewedMenuContent(value: ReviewedMenuContent): ReviewedMenuContent {
   const defaultLocale = parseCatalogLocale(value.defaultLocale);
-  const effectiveFrom = parseCatalogInstant(value.effectiveFrom);
-  const effectiveUntil =
-    value.effectiveUntil === null ? null : parseCatalogInstant(value.effectiveUntil);
-  if (effectiveUntil !== null && Date.parse(effectiveUntil) <= Date.parse(effectiveFrom)) invalid();
-  if (!Array.isArray(value.sections) || typeof value.timeZone !== "string") invalid();
+  if (!Array.isArray(value.sections)) invalid();
   const menuReference = parseCatalogReference(value.menuReference);
   const sections = Object.freeze(
     value.sections.map((section: PublishedMenuSectionSnapshot) => ({
@@ -221,21 +514,53 @@ export function parsePublishedMenuSnapshot(value: PublishedMenuSnapshot): Publis
     )
   )
     invalid();
+  const channelCodes = codes(value.channelCodes);
+  for (const section of sections)
+    for (const item of section.sellables) validateChannelRules(item.optionRules, channelCodes);
   return Object.freeze({
     brandReference: parseCatalogReference(value.brandReference),
     menuReference,
     menuVersionReference: parseCatalogReference(value.menuVersionReference),
-    releaseReference: parseCatalogReference(value.releaseReference),
-    snapshotDigest: parsePublishingDigest(value.snapshotDigest),
     defaultLocale,
     localizedNames: parseLocalizedNames(value.localizedNames, defaultLocale),
     storeReferences: references(value.storeReferences),
-    channelCodes: codes(value.channelCodes),
+    channelCodes,
     orderTypeCodes: codes(value.orderTypeCodes),
+    sections,
+    ...(Object.hasOwn(value, "categoryBindings")
+      ? {
+          categoryBindings: parseMenuCategoryBindings(
+            Object.getOwnPropertyDescriptor(value, "categoryBindings")?.value,
+            sections.map((section) => section.sectionReference),
+          ),
+        }
+      : {}),
+  });
+}
+
+export function parsePublishedMenuSnapshot(value: PublishedMenuSnapshot): PublishedMenuSnapshot {
+  const content = parseReviewedMenuContent(value);
+  const effectiveFrom = parseCatalogInstant(value.effectiveFrom);
+  const effectiveUntil =
+    value.effectiveUntil === null ? null : parseCatalogInstant(value.effectiveUntil);
+  if (effectiveUntil !== null && Date.parse(effectiveUntil) <= Date.parse(effectiveFrom)) invalid();
+  if (typeof value.timeZone !== "string") invalid();
+  return Object.freeze({
+    // Category bindings are internal review evidence, not Customer display fields.
+    brandReference: content.brandReference,
+    menuReference: content.menuReference,
+    menuVersionReference: content.menuVersionReference,
+    defaultLocale: content.defaultLocale,
+    localizedNames: content.localizedNames,
+    storeReferences: content.storeReferences,
+    channelCodes: content.channelCodes,
+    orderTypeCodes: content.orderTypeCodes,
+    sections: content.sections,
+    releaseReference: parseCatalogReference(value.releaseReference),
+    snapshotDigest: parsePublishingDigest(value.snapshotDigest),
     timeZone: value.timeZone,
     effectiveFrom,
     effectiveUntil,
-    sections,
   });
 }
 

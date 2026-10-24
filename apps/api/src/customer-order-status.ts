@@ -1,0 +1,434 @@
+import type {
+  createCustomerOrderStatusRead,
+  CustomerOrderReceived,
+} from "./customer-order-status-read.js";
+import { GuestSessionError, readClosedRecord } from "@bop/identity";
+import { OrderStatusProjectionError, type CustomerOrderStatusView } from "@rms/ordering";
+import type { RequestHandler, Response } from "express";
+import { storeContactJson } from "./customer-store-contact.js";
+import { customerFailureCode } from "./customer-failure-diagnostic.js";
+import { markRequestFailure } from "./request-correlation.js";
+import { customerDisplayLocale } from "./customer-display-locale.js";
+
+type SourcedStatus = Awaited<ReturnType<ReturnType<typeof createCustomerOrderStatusRead>["read"]>>;
+type CustomerStatusResponse = CustomerOrderStatusView & Partial<Pick<SourcedStatus, "sources">>;
+
+export const customerOrderStatusRoute = "/api/v1/orders/:order_id/status";
+export interface CustomerOrderStatusInput {
+  readonly sessionCredential: string;
+  readonly csrfCredential: string;
+  readonly orderReference: string;
+}
+const credential = /^[A-Za-z0-9_-]{43}$/u;
+const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+function protect(response: Response) {
+  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Referrer-Policy", "no-referrer");
+}
+function reject(response: Response, status: number) {
+  protect(response);
+  if (status === 503) response.setHeader("Retry-After", "5");
+  const code =
+    status === 400
+      ? "request_invalid"
+      : status === 404
+        ? "not_found"
+        : status === 422
+          ? "not_ready"
+          : "service_unavailable";
+  response.status(status).json({
+    schemaVersion: 1,
+    error: { code: "order_status_" + code, messageKey: "customer.order.status." + code },
+  });
+}
+/**
+ * WP-2423 (v15 2026-10-16): the status projection lags the Order by the outbox worker's cycle. For
+ * the guest who placed the Order, `received` answers from Ordering's own record meanwhile.
+ */
+interface CustomerOrderStatusPort {
+  /** `displayLocale` (Owner 2026-10-23): the guest's chosen language for item names. */
+  read(input: CustomerOrderStatusInput, displayLocale?: string): Promise<CustomerStatusResponse>;
+  received?(input: CustomerOrderStatusInput): Promise<CustomerOrderReceived | null>;
+  /** WP-2423 (46940b76 L5): the Order is the current Order of the open table this guest joined. */
+  tableOrder?(input: CustomerOrderStatusInput): Promise<boolean>;
+}
+export class CustomerOrderStatusHandler {
+  readonly #origin: string;
+  readonly #port: CustomerOrderStatusPort;
+  constructor(options: { allowedOrigin: string; port: CustomerOrderStatusPort }) {
+    this.#origin = new URL(options.allowedOrigin).origin;
+    this.#port = options.port;
+  }
+  handler(): RequestHandler {
+    return async (request, response) => {
+      protect(response);
+      let input: CustomerOrderStatusInput;
+      let displayLocale: string | null;
+      try {
+        if (
+          (request.get("origin") !== undefined && request.get("origin") !== this.#origin) ||
+          request.get("sec-fetch-site") !== "same-origin"
+        )
+          throw new Error();
+        displayLocale = customerDisplayLocale(request.query);
+        readClosedRecord(request.body ?? {}, []);
+        const entries = (request.headers.cookie ?? "")
+          .split(";")
+          .map((part) => part.trim().split("="))
+          .filter(([name]) => name === "__Host-bop-guest");
+        const csrf = request.headers["x-csrf-token"],
+          id = request.params.order_id;
+        if (
+          entries.length !== 1 ||
+          entries[0]?.length !== 2 ||
+          !credential.test(entries[0]?.[1] ?? "") ||
+          typeof csrf !== "string" ||
+          !credential.test(csrf) ||
+          typeof id !== "string" ||
+          !reference.test(id)
+        )
+          throw new Error();
+        input = {
+          sessionCredential: entries[0]?.[1] as string,
+          csrfCredential: csrf,
+          orderReference: id,
+        };
+      } catch {
+        reject(response, 400);
+        return;
+      }
+      try {
+        const view =
+          displayLocale === null
+            ? await this.#port.read(input)
+            : await this.#port.read(input, displayLocale);
+        if (view.order.orderReference !== input.orderReference)
+          throw new Error("invalid order binding");
+        // Explicit public-field serialization prevents owner metadata or credential leakage.
+        const order = view.order;
+        const status = {
+          projectionName: view.projectionName,
+          projectionVersion: view.projectionVersion,
+          sourceCheckpoint: view.sourceCheckpoint,
+          projectedAt: view.projectedAt,
+          freshnessStatus: view.freshnessStatus,
+          order: {
+            orderReference: order.orderReference,
+            orderNumber: order.orderNumber,
+            orderType: order.orderType,
+            canonicalPhase: order.canonicalPhase,
+            paymentStatus: order.paymentStatus,
+            kitchenStatus: order.kitchenStatus,
+            fulfillmentStatus: order.fulfillmentStatus,
+            fulfilledAt: order.fulfilledAt,
+            eta: order.eta,
+            submittedAt: order.submittedAt,
+            batches: order.batches.map((batch) => ({
+              orderBatchReference: batch.orderBatchReference,
+              submittedAt: batch.submittedAt,
+              items: batch.items.map((item) => {
+                if (
+                  typeof item.lineTotal.amountMinor !== "bigint" ||
+                  item.lineTotal.amountMinor < -(2n ** 63n) ||
+                  item.lineTotal.amountMinor > 2n ** 63n - 1n
+                )
+                  throw new Error("invalid amount");
+                return {
+                  orderItemReference: item.orderItemReference,
+                  displayName: item.displayName,
+                  quantity: item.quantity,
+                  lineTotal: {
+                    amountMinor: item.lineTotal.amountMinor.toString(),
+                    currencyCode: item.lineTotal.currencyCode,
+                  },
+                };
+              }),
+            })),
+          },
+        };
+        const sources = view.sources;
+        const publicSources =
+          sources === undefined
+            ? {}
+            : {
+                sources: {
+                  checkedAt: sources.checkedAt,
+                  ...(sources.dining === undefined
+                    ? {}
+                    : {
+                        dining: {
+                          items: sources.dining.items.map((item) => ({
+                            orderItemReference: item.orderItemReference,
+                            orderBatchReference: item.orderBatchReference,
+                            servedQuantity: item.servedQuantity,
+                          })),
+                        },
+                      }),
+                  kitchen:
+                    sources.kitchen === null
+                      ? null
+                      : {
+                          batches: sources.kitchen.batches.map((batch) => ({
+                            orderBatchReference: batch.orderBatchReference,
+                            status: batch.status,
+                            updatedAt: batch.updatedAt,
+                          })),
+                        },
+                  payments:
+                    sources.payments === null
+                      ? null
+                      : sources.payments.map((payment) => ({
+                          status: payment.status,
+                          occurredAt: payment.occurredAt,
+                          freshnessStatus: payment.freshnessStatus,
+                          amount:
+                            payment.amount === null
+                              ? null
+                              : {
+                                  amountMinor: payment.amount.amountMinor.toString(),
+                                  currencyCode: payment.amount.currencyCode,
+                                },
+                          // WP-2423 (v15 3cd0f8dd H1): a round paid on the Store's card machine.
+                          ...(payment.method === "CardMachine" &&
+                          typeof payment.orderBatchReference === "string"
+                            ? {
+                                method: "CardMachine",
+                                orderBatchReference: payment.orderBatchReference,
+                              }
+                            : {}),
+                        })),
+                  ...(sources.pickup === undefined
+                    ? {}
+                    : {
+                        pickup:
+                          sources.pickup === null
+                            ? null
+                            : { notCollectedAt: sources.pickup.notCollectedAt },
+                      }),
+                  ...(sources.unpaidCancellation === undefined
+                    ? {}
+                    : {
+                        unpaidCancellation:
+                          sources.unpaidCancellation === null
+                            ? null
+                            : { cancelledAt: sources.unpaidCancellation.cancelledAt },
+                      }),
+                  ...(sources.staffCancellations === undefined
+                    ? {}
+                    : {
+                        staffCancellations: sources.staffCancellations.map((cancellation) => ({
+                          orderBatchReference: cancellation.orderBatchReference,
+                          cancelledAt: cancellation.cancelledAt,
+                          reason: cancellation.reason,
+                          refundStatus: cancellation.refundStatus,
+                        })),
+                      }),
+                  ...(sources.itemCancellations === undefined
+                    ? {}
+                    : {
+                        // A refund the Provider failed is the Store's follow-up; to the customer
+                        // it stays pending until refunded.
+                        itemCancellations: sources.itemCancellations.map((cancellation) => ({
+                          orderBatchReference: cancellation.orderBatchReference,
+                          orderItemReferences: [...cancellation.orderItemReferences],
+                          cancelledAt: cancellation.cancelledAt,
+                          reason: cancellation.reason,
+                          refundStatus:
+                            cancellation.refundStatus === "Refunded" ? "Refunded" : "Pending",
+                          refundAmount: {
+                            amountMinor: cancellation.refundAmount.amountMinor.toString(),
+                            currencyCode: cancellation.refundAmount.currencyCode,
+                          },
+                        })),
+                      }),
+                  // WP-2423 Q26: items the kitchen is remaking (Order item and open portions).
+                  ...(sources.remakes === undefined
+                    ? {}
+                    : {
+                        remakes: sources.remakes.map((remake) => ({
+                          orderItemReference: remake.orderItemReference,
+                          quantity: remake.quantity,
+                        })),
+                      }),
+                  // WP-2423 (v15 3cd0f8dd M3): confirmed refunds, as the latest receipt states them.
+                  ...(sources.refunds === undefined
+                    ? {}
+                    : {
+                        refunds: {
+                          refunded: {
+                            amountMinor: sources.refunds.refunded.amountMinor.toString(),
+                            currencyCode: sources.refunds.refunded.currencyCode,
+                          },
+                          entries: sources.refunds.entries.map((entry) => ({
+                            kind: entry.kind,
+                            orderItemReferences: [...entry.orderItemReferences],
+                            total: {
+                              amountMinor: entry.total.amountMinor.toString(),
+                              currencyCode: entry.total.currencyCode,
+                            },
+                            tip: {
+                              amountMinor: entry.tip.amountMinor.toString(),
+                              currencyCode: entry.tip.currencyCode,
+                            },
+                          })),
+                        },
+                      }),
+                  // WP-2423 D5: each item's price before tax and its tax, from the frozen order.
+                  ...(sources.itemPrices === undefined
+                    ? {}
+                    : {
+                        itemPrices: sources.itemPrices.map((price) => ({
+                          orderItemReference: price.orderItemReference,
+                          subtotal: {
+                            amountMinor: price.subtotal.amountMinor.toString(),
+                            currencyCode: price.subtotal.currencyCode,
+                          },
+                          tax: {
+                            amountMinor: price.tax.amountMinor.toString(),
+                            currencyCode: price.tax.currencyCode,
+                          },
+                          // WP-2423: the chosen options (what each added) and the guest's note.
+                          ...(price.options !== undefined && price.options.length > 0
+                            ? {
+                                options: price.options.map((option) => ({
+                                  displayName: option.displayName,
+                                  quantity: option.quantity,
+                                  amount: {
+                                    amountMinor: option.amount.amountMinor.toString(),
+                                    currencyCode: option.amount.currencyCode,
+                                  },
+                                })),
+                              }
+                            : {}),
+                          ...(typeof price.customerNote === "string"
+                            ? { customerNote: price.customerNote }
+                            : {}),
+                        })),
+                      }),
+                  // WP-2423 (v15 aa3d9fac D2): each paid round's tip, so the total is what was paid.
+                  ...(sources.tips === undefined
+                    ? {}
+                    : {
+                        tips: sources.tips.map((tip) => ({
+                          orderBatchReference: tip.orderBatchReference,
+                          amount: {
+                            amountMinor: tip.amount.amountMinor.toString(),
+                            currencyCode: tip.amount.currencyCode,
+                          },
+                        })),
+                      }),
+                  // WP-2423 Q6: dine-in rounds whose payment failed (with when they are cancelled)
+                  // and rounds cancelled because their payment did not go through.
+                  ...(sources.batchPayments === undefined
+                    ? {}
+                    : {
+                        batchPayments: sources.batchPayments.map((payment) => ({
+                          orderBatchReference: payment.orderBatchReference,
+                          status: payment.status,
+                          cancelsAt: payment.cancelsAt,
+                        })),
+                      }),
+                  ...(sources.unpaidCancellations === undefined
+                    ? {}
+                    : {
+                        unpaidCancellations: sources.unpaidCancellations.map((cancellation) => ({
+                          orderBatchReference: cancellation.orderBatchReference,
+                          cancelledAt: cancellation.cancelledAt,
+                          byStore: cancellation.byStore,
+                        })),
+                      }),
+                  // WP-2423 Q9-G1: not accepted in time and refunded, or awaiting the Store after
+                  // an outage.
+                  ...(sources.storeAcceptance === undefined
+                    ? {}
+                    : {
+                        storeAcceptance:
+                          sources.storeAcceptance.state === "AwaitingStore"
+                            ? { state: "AwaitingStore" }
+                            : {
+                                state: "NotAccepted",
+                                closedAt: sources.storeAcceptance.closedAt,
+                                refundStatus: sources.storeAcceptance.refundStatus,
+                              },
+                      }),
+                  // WP-2423 Q10: the Store's published phone and address.
+                  ...(sources.storeContact === undefined
+                    ? {}
+                    : { storeContact: storeContactJson(sources.storeContact) }),
+                  // WP-2423 Q16: whether a contact is still held (never the contact itself) and
+                  // the Store's privacy notice link.
+                  ...(sources.contactDetails === undefined
+                    ? {}
+                    : { contactDetails: sources.contactDetails }),
+                  ...(sources.privacyNoticeUrl === undefined
+                    ? {}
+                    : { privacyNoticeUrl: sources.privacyNoticeUrl }),
+                },
+              };
+        response.status(200).json({ schemaVersion: 1, status: { ...status, ...publicSources } });
+      } catch (caught) {
+        let error: unknown = caught;
+        // The guest is authorized but the Order's status projection has not arrived yet: say the
+        // order was received (and keep checking) instead of "not found". Anything else, including
+        // an Order this guest did not place, is refused exactly as before.
+        if (
+          error instanceof OrderStatusProjectionError &&
+          error.code === "ORDER_STATUS_NOT_FOUND" &&
+          this.#port.received !== undefined
+        ) {
+          try {
+            const received = await this.#port.received(input);
+            if (received !== null && received.orderReference === input.orderReference) {
+              response.status(200).json({
+                schemaVersion: 1,
+                received: {
+                  orderReference: received.orderReference,
+                  orderNumber: received.orderNumber,
+                  orderType: received.orderType,
+                  submittedAt: received.submittedAt,
+                  checkedAt: received.checkedAt,
+                },
+              });
+              return;
+            }
+          } catch (receivedError) {
+            error = receivedError;
+          }
+        }
+        // WP-2423 (46940b76 L5): another guest at this guest's open table placed the Order; the
+        // page sends them to their table's view instead of "not found". Nothing else is revealed.
+        if (
+          error instanceof OrderStatusProjectionError &&
+          ["ORDER_STATUS_PERMISSION_DENIED", "ORDER_STATUS_NOT_FOUND"].includes(error.code) &&
+          this.#port.tableOrder !== undefined
+        ) {
+          try {
+            if (await this.#port.tableOrder(input)) {
+              response.status(404).json({
+                schemaVersion: 1,
+                error: {
+                  code: "order_status_table_order",
+                  messageKey: "customer.order.status.table_order",
+                },
+              });
+              return;
+            }
+          } catch (tableError) {
+            error = tableError;
+          }
+        }
+        const status =
+          error instanceof GuestSessionError
+            ? 404
+            : error instanceof OrderStatusProjectionError &&
+                ["ORDER_STATUS_PERMISSION_DENIED", "ORDER_STATUS_NOT_FOUND"].includes(error.code)
+              ? 404
+              : 503;
+        if (status === 503) markRequestFailure(request, customerFailureCode(error));
+        reject(response, status);
+      }
+    };
+  }
+}
+export const unavailableCustomerOrderStatusHandler: RequestHandler = (_request, response) =>
+  reject(response, 503);

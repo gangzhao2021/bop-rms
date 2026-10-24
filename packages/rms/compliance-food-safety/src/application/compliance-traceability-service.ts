@@ -333,10 +333,11 @@ export function createComplianceTraceabilityService(ports: ComplianceTraceabilit
       const existing = await prior(parsed.operationReference, intentDigest);
       if (existing !== null)
         return Object.freeze({ status: "AlreadyApplied" as const, ...existing });
-      const [latest, run] = await Promise.all([
-        ports.repository.loadEvidenceSet(evidenceSet.evidenceSetReference).catch(dependency),
-        loadRun(evidenceSet.runReference, evidenceSet.scope, parsed.observedAt),
-      ]);
+      // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
+      const latest = await ports.repository
+        .loadEvidenceSet(evidenceSet.evidenceSetReference)
+        .catch(dependency);
+      const run = await loadRun(evidenceSet.runReference, evidenceSet.scope, parsed.observedAt);
       if (latest !== null) return fail("COMPLIANCE_TRACEABILITY_VERSION_CONFLICT");
       await resolveCase(ports, evidenceSet.caseReference, evidenceSet.scope, false);
       if (!selectionsBelongToRun(evidenceSet, run))

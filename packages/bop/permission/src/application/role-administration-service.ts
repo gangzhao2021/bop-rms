@@ -32,6 +32,7 @@ export class RoleAdministrationServiceError extends Error {
       | "ROLE_ADMIN_MUTATION_INVALID"
       | "ROLE_ADMIN_PERMISSION_DENIED"
       | "ROLE_ADMIN_POLICY_CONFLICT"
+      | "ROLE_ADMIN_ROLE_IN_USE"
       | "ROLE_ADMIN_COMMIT_FAILED",
   ) {
     super(
@@ -39,9 +40,11 @@ export class RoleAdministrationServiceError extends Error {
         ? "role administration permission is denied"
         : code === "ROLE_ADMIN_POLICY_CONFLICT"
           ? "role policy version changed"
-          : code === "ROLE_ADMIN_COMMIT_FAILED"
-            ? "role administration commit failed"
-            : "role administration mutation is invalid",
+          : code === "ROLE_ADMIN_ROLE_IN_USE"
+            ? "role still has active assignments"
+            : code === "ROLE_ADMIN_COMMIT_FAILED"
+              ? "role administration commit failed"
+              : "role administration mutation is invalid",
     );
     this.name = "RoleAdministrationServiceError";
   }
@@ -76,22 +79,29 @@ function transition(
   current: RoleAdministrationVersionRecord,
   next: RoleAdministrationVersionRecord,
 ): void {
-  if (current.roleType === "System") invalid();
+  // System template roles keep their released content; they may only be duplicated into a Custom
+  // role, deactivated, or reactivated (WP-2423 / DEC-PERM-CATALOG).
+  if (current.roleType === "System" && !["Duplicate", "Activate", "Deactivate"].includes(operation))
+    invalid();
   const pair: Readonly<
     Record<
       Exclude<RoleAdministrationOperation, "Duplicate">,
-      readonly [
+      readonly (readonly [
         RoleAdministrationVersionRecord["lifecycle"],
         RoleAdministrationVersionRecord["lifecycle"],
-      ]
+      ])[]
     >
   > = {
-    SaveDraft: ["Draft", "Draft"],
-    Submit: ["Draft", "InReview"],
-    Approve: ["InReview", "Approved"],
-    Reject: ["InReview", "Rejected"],
-    Activate: ["Approved", "Active"],
-    Deactivate: ["Active", "Deactivated"],
+    SaveDraft: [["Draft", "Draft"]],
+    Submit: [["Draft", "InReview"]],
+    Approve: [["InReview", "Approved"]],
+    Reject: [["InReview", "Rejected"]],
+    // A deactivated role's approved content may be reactivated without changing it.
+    Activate: [
+      ["Approved", "Active"],
+      ["Deactivated", "Active"],
+    ],
+    Deactivate: [["Active", "Deactivated"]],
   };
   if (operation === "Duplicate") {
     if (
@@ -103,10 +113,9 @@ function transition(
       invalid();
     return;
   }
-  const expected = pair[operation];
   if (
-    current.lifecycle !== expected[0] ||
-    next.lifecycle !== expected[1] ||
+    current.roleType !== next.roleType ||
+    !pair[operation].some(([from, to]) => current.lifecycle === from && next.lifecycle === to) ||
     current.roleReference !== next.roleReference ||
     current.administrationReference !== next.administrationReference
   )
@@ -206,11 +215,14 @@ export async function executeRoleAdministration(
   if (!accepted(decision, action, current)) return invalid("ROLE_ADMIN_PERMISSION_DENIED");
   let activatePolicy = false;
   if (input.operation === "Activate" || input.operation === "Deactivate") {
+    // The approved content cannot change after approval, so it is revalidated against the policy
+    // current now and stamped with that version instead of requiring the drafting-time version.
     const policyVersion = await ports.policy.currentVersion(current.brandReference);
-    if (policyVersion !== current.sourcePolicyVersion || next.sourcePolicyVersion !== policyVersion)
-      return invalid("ROLE_ADMIN_POLICY_CONFLICT");
+    if (next.sourcePolicyVersion !== policyVersion) return invalid("ROLE_ADMIN_POLICY_CONFLICT");
     const affected = await ports.impact.countActiveAssignments(current.roleReference);
     if (!Number.isSafeInteger(affected) || affected < 0) return invalid();
+    // Deactivating a role still held by staff would silently remove their access.
+    if (input.operation === "Deactivate" && affected > 0) return invalid("ROLE_ADMIN_ROLE_IN_USE");
     assertRoleAdministrationActivatable(current, next, affected);
     activatePolicy = true;
   }

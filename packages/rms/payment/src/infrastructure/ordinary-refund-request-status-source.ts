@@ -1,0 +1,182 @@
+import type { ConsumerTransaction } from "@bop/eventing";
+import { exactPaymentObject, parsePaymentInstant } from "../application/payment-intent-creation.js";
+import { parsePaymentReference } from "../application/payment-provider-adapter.js";
+import { ordinaryRefundPaymentAmount } from "../application/ordinary-refund-request.js";
+import { createPostgresOrdinaryRefundRequestContextSource } from "./persistence/ordinary-refund-request-store.js";
+import {
+  createPostgresOrdinaryRefundClaimOutcomeReader,
+  createPostgresOrdinaryRefundPreparedReader,
+} from "./persistence/ordinary-refund-operation-store.js";
+import { createPostgresOrdinaryRefundRecoverySource } from "./ordinary-refund-recovery-source.js";
+import { createPostgresCardMachinePaymentStore } from "./persistence/card-machine-payment-store.js";
+
+type ContextOptions = Parameters<typeof createPostgresOrdinaryRefundRequestContextSource>[0];
+const fail = (): never => {
+  throw new Error("ORDINARY_REFUND_STATUS_UNAVAILABLE");
+};
+/** Read committed request/dispatch/observation facts. No execution grant or Provider I/O.
+ * Read-only: takes the Order's refund fence only (never the request-operation fence), so a caller
+ * may already hold that Order fence and read several requests in one transaction; see
+ * acquireOrdinaryRefundRequestFences for the canonical lock order. */
+export function createPostgresOrdinaryRefundRequestStatusSource(options: {
+  scope: ContextOptions["scope"];
+  providerAccountReference: string;
+  environment: "Test" | "Live";
+  authorize: ContextOptions["authorize"];
+}) {
+  const scope = {
+    tenantReference: String(parsePaymentReference(options.scope.tenantReference)),
+    brandReference: String(parsePaymentReference(options.scope.brandReference)),
+    storeReference: String(parsePaymentReference(options.scope.storeReference)),
+  };
+  const account = String(parsePaymentReference(options.providerAccountReference));
+  if (options.environment !== "Test" && options.environment !== "Live") return fail();
+  return async (tx: ConsumerTransaction, value: unknown) => {
+    const raw = exactPaymentObject(value, ["orderReference", "operationReference", "observedAt"]);
+    const query = {
+      orderReference: String(parsePaymentReference(raw.orderReference)),
+      operationReference: String(parsePaymentReference(raw.operationReference)),
+      observedAt: parsePaymentInstant(raw.observedAt),
+    };
+    const allowed = () => options.authorize(tx, { ...scope, ...query });
+    if ((await allowed()) !== true) return fail();
+    const context = await createPostgresOrdinaryRefundRequestContextSource({
+      scope,
+      fence: "OrderOnly",
+      authorize: allowed,
+    })(tx, query);
+    const request = context.existing;
+    if (!request) return fail();
+    const recover = createPostgresOrdinaryRefundRecoverySource({
+      scope,
+      providerAccountReference: account,
+      environment: options.environment,
+      authorize: allowed,
+    });
+    const read = createPostgresOrdinaryRefundClaimOutcomeReader({
+      scope,
+      authorize: allowed,
+      recover,
+    });
+    const readPrepared = createPostgresOrdinaryRefundPreparedReader({
+      scope,
+      providerAccountReference: account,
+      environment: options.environment,
+      authorize: allowed,
+    });
+    const cards = createPostgresCardMachinePaymentStore({
+      scope: { brandReference: scope.brandReference, storeReference: scope.storeReference },
+      authorize: async (_tx, input) =>
+        input.orderReference === request.orderReference && (await allowed()) === true,
+    });
+    const payments = [];
+    for (const payment of request.payments) {
+      const amountMinor = ordinaryRefundPaymentAmount(payment);
+      // WP-2423 item 4: a card-machine payment is refunded on the Store's machine and recorded;
+      // it is never prepared or sent to a Provider.
+      const card = await cards.loadByIntent(tx, payment.paymentIntentReference);
+      if (card !== null) {
+        if (
+          card.cardMachinePaymentReference !== payment.paymentTransactionReference ||
+          card.orderReference !== request.orderReference
+        )
+          return fail();
+        const recorded = await cards.loadRefundBySource(
+          tx,
+          "OrdinaryRefund",
+          request.requestReference,
+        );
+        const done = recorded !== null && recorded.recordedAt <= query.observedAt;
+        if (
+          done &&
+          (recorded.cardMachinePaymentReference !== card.cardMachinePaymentReference ||
+            recorded.amountMinor !== amountMinor)
+        )
+          return fail();
+        payments.push(
+          Object.freeze({
+            paymentAttemptReference: payment.paymentAttemptReference,
+            paymentIntentReference: payment.paymentIntentReference,
+            method: "CardMachine" as const,
+            executionOperationReference: null,
+            executionApprovalReference: null,
+            state: done ? ("Confirmed" as const) : ("NotDispatched" as const),
+            amountMinor: amountMinor.toString(),
+            confirmedMinor: (done ? amountMinor : 0n).toString(),
+            pendingMinor: (done ? 0n : amountMinor).toString(),
+            refundedOnCardMachineAt: done ? String(recorded.refundedAt) : null,
+            // WP-2423 item 4: the reference printed on the machine's refund slip (never a card
+            // number; validated when recorded), so staff can match the slip to the request.
+            cardMachineSlipReference: done ? recorded.slipReference : null,
+          }),
+        );
+        continue;
+      }
+      const prepared = await readPrepared(tx, {
+        orderReference: request.orderReference,
+        requestReference: request.requestReference,
+        paymentAttemptReference: payment.paymentAttemptReference,
+        observedAt: query.observedAt,
+      });
+      if (
+        prepared &&
+        (prepared.paymentIntentReference !== payment.paymentIntentReference ||
+          prepared.paymentTransactionReference !== payment.paymentTransactionReference ||
+          prepared.firstCaptureReference !== payment.firstCaptureReference ||
+          prepared.amountMinor !== amountMinor)
+      )
+        return fail();
+      const result = await read(tx, {
+        orderReference: request.orderReference,
+        requestReference: request.requestReference,
+        paymentAttemptReference: payment.paymentAttemptReference,
+        observedAt: query.observedAt,
+      });
+      if (
+        result &&
+        (!prepared || result.operation.operationReference !== prepared.operationReference)
+      )
+        return fail();
+      if (
+        result &&
+        (result.operation.paymentIntentReference !== payment.paymentIntentReference ||
+          result.operation.paymentTransactionReference !== payment.paymentTransactionReference ||
+          result.operation.firstCaptureReference !== payment.firstCaptureReference ||
+          result.operation.amountMinor !== amountMinor ||
+          result.operation.providerAccountReference !== account ||
+          result.operation.environment !== options.environment ||
+          result.position.confirmedMinor + result.position.pendingMinor !== amountMinor ||
+          result.position.releasedMinor !== 0n)
+      )
+        return fail();
+      payments.push(
+        Object.freeze({
+          paymentAttemptReference: payment.paymentAttemptReference,
+          paymentIntentReference: payment.paymentIntentReference,
+          method: "Online" as const,
+          executionOperationReference: prepared?.operationReference ?? null,
+          // WP-2423 Q5: the independent approval the prepared operation is bound to, if any.
+          executionApprovalReference: prepared?.approvalReference ?? null,
+          state:
+            result?.position.state ??
+            (prepared ? ("Prepared" as const) : ("NotDispatched" as const)),
+          amountMinor: amountMinor.toString(),
+          confirmedMinor: (result?.position.confirmedMinor ?? 0n).toString(),
+          pendingMinor: (result?.position.pendingMinor ?? amountMinor).toString(),
+          refundedOnCardMachineAt: null,
+          cardMachineSlipReference: null,
+        }),
+      );
+    }
+    if ((await allowed()) !== true) return fail();
+    return Object.freeze({
+      orderReference: request.orderReference,
+      requestReference: request.requestReference,
+      operationReference: request.operationReference,
+      observedAt: query.observedAt,
+      currencyCode: request.currencyCode,
+      amountMinor: request.amountMinor.toString(),
+      payments: Object.freeze(payments),
+    });
+  };
+}

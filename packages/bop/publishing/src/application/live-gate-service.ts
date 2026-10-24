@@ -160,6 +160,17 @@ export async function executeLiveGateMutation(
   )
     invalid();
   validateTransition(input.operation, current, next);
+  const actorReference = context.actor.actorReference;
+  if (
+    context.actor.actorType !== "User" ||
+    actorReference === null ||
+    (input.operation === "RequestReview" &&
+      String(next.submittedByReference) !== String(actorReference)) ||
+    (input.operation === "Approve" &&
+      (String(next.approvedByReference) !== String(actorReference) ||
+        next.submittedByReference !== current.submittedByReference))
+  )
+    invalid();
   const action = actionByOperation[input.operation];
   const decision = await ports.authorization.authorize({
     tenantContext: context,

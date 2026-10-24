@@ -1,6 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { DiscrepancyState, DiscrepancyWorkbench } from "./DiscrepancyPage.js";
+import {
+  DiscrepancyState,
+  DiscrepancyUnavailable,
+  DiscrepancyWorkbench,
+} from "./DiscrepancyPage.js";
 import { DiscrepancyClientError, parseDiscrepancyView } from "./discrepancy-page.js";
 const id = (n: number) => `018fac00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 function projection(masked = false) {
@@ -50,6 +54,22 @@ function projection(masked = false) {
   };
 }
 describe("Discrepancy page", () => {
+  it("renders the source-limited responsive workspace without case facts", () => {
+    const html = renderToStaticMarkup(<DiscrepancyUnavailable />);
+    for (const text of [
+      "PROC-DISCREPANCY",
+      "Receiving discrepancy workspace",
+      "Case, variance and resolution status",
+      "PO / receipt / supplier ref",
+      "Type / status / Stock Site",
+      "Owner / overdue",
+      "Discrepancies unavailable",
+      "Goods Receipt and Stock Ledger facts cannot be edited here",
+    ])
+      expect(html).toContain(text);
+    expect(html).toContain("disabled");
+    expect(html).not.toMatch(/Synthetic|Toronto Stock Site|\bCAD\b|Correction promised/u);
+  });
   it("strictly parses the named projection and rejects undeclared fields", () => {
     expect(parseDiscrepancyView(projection())).toMatchObject({
       screenId: "PROC-DISCREPANCY",

@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n.js";
 export interface CartMoney {
   readonly amountMinor: string;
   readonly currency: string;
@@ -72,10 +73,17 @@ export type CartErrorCode =
   | "cart_version_conflict"
   | "cart_idempotency_conflict"
   | "cart_selection_invalid"
+  | "cart_replacement_forbidden"
+  | "cart_replacement_unavailable"
   | "cart_expired"
   | "cart_abandoned"
   | "cart_rate_limited"
+  /** WP-2423: the table's last order is still being processed; retry shortly. */
+  | "cart_order_processing"
+  /** WP-2423: another guest at the table is checking out this cart; nothing was changed. */
+  | "cart_checkout_in_progress"
   | "cart_service_unavailable"
+  | "quote_operation_expired"
   | "network_unknown";
 
 export class CartClientError extends Error {
@@ -83,6 +91,8 @@ export class CartClientError extends Error {
   readonly currentVersion: number | null;
   readonly issueCodes: readonly string[];
   readonly retryAfterSeconds: number | null;
+  /** WP-2423 (`ITEM_SHORT`): how many of the item the store can make (0: none). */
+  readonly available: number | null;
 
   constructor(
     code: CartErrorCode,
@@ -90,6 +100,7 @@ export class CartClientError extends Error {
       readonly currentVersion?: number;
       readonly issueCodes?: readonly string[];
       readonly retryAfterSeconds?: number;
+      readonly available?: number;
     } = {},
   ) {
     super("The cart request could not be completed.");
@@ -98,5 +109,41 @@ export class CartClientError extends Error {
     this.currentVersion = details.currentVersion ?? null;
     this.issueCodes = Object.freeze([...(details.issueCodes ?? [])]);
     this.retryAfterSeconds = details.retryAfterSeconds ?? null;
+    this.available = details.available ?? null;
   }
+}
+
+/**
+ * WP-2423: what a guest is told while the table's last order is still being processed. A time is
+ * promised only when the wait is time-bounded (the server sent how long it lasts at most).
+ */
+export function orderProcessingMessage(retryAfterSeconds: number | null): string {
+  const base = t("Your table’s last order is still being processed.");
+  if (retryAfterSeconds === null)
+    return t("{base} Please try again shortly. If this keeps happening, ask a staff member.", {
+      base,
+    });
+  if (retryAfterSeconds <= 60) return t("{base} Try again in a moment.", { base });
+  const minutes = Math.ceil(retryAfterSeconds / 60);
+  return t("{base} Try again in about {minutes} minute{value1}.", {
+    base,
+    minutes,
+    value1: minutes === 1 ? "" : "s",
+  });
+}
+
+/**
+ * WP-2423 (DEC-DINING-ANY-PARTICIPANT-SUBMIT item 2): what a guest is told while another guest at
+ * the same table is checking out this cart. Nothing was changed; they can try again after the wait.
+ */
+export function checkoutInProgressMessage(retryAfterSeconds: number | null): string {
+  const base = t("Another guest at your table is paying for this order.");
+  if (retryAfterSeconds === null) return t("{base} Try again shortly.", { base });
+  if (retryAfterSeconds <= 60) return t("{base} Try again in a moment.", { base });
+  const minutes = Math.ceil(retryAfterSeconds / 60);
+  return t("{base} Try again in about {minutes} minute{value1}.", {
+    base,
+    minutes,
+    value1: minutes === 1 ? "" : "s",
+  });
 }

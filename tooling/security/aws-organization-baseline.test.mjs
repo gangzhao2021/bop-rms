@@ -25,6 +25,18 @@ describe("WP-2060 AWS organization baseline", () => {
   });
 
   it("defines the fail-closed production evidence contract", async () => {
+    const policy = JSON.parse(await readFile(policyPath, "utf8"));
+    expect(policy.authority).toBe("BOP-RMS Handoff 87.7.1 / WP-2060");
+    expect(policy.requiredHumanAndRootControls).toEqual([
+      "identity-center-short-lived-mfa",
+      "no-long-lived-iam-user-keys",
+      "member-root-credentials-removed-where-supported",
+      "management-root-no-access-keys",
+      "management-root-hardware-mfa",
+      "group-controlled-recovery-contacts",
+      "tested-emergency-procedure",
+      "time-bound-two-person-centrally-alerted-break-glass",
+    ]);
     const required = [
       "managementHasWorkloads",
       "productionSharesDevelopmentDataOrKeys",

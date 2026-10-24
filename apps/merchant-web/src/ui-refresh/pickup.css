@@ -1,0 +1,314 @@
+/* WP-2423 merchant UI refresh (2026-10-21): pickup. Loaded after styles.css so it refines the shared baseline. */
+/* Pickup (FUL-PICKUP-QUEUE), benchmarked on an order-ready / pickup counter screen: one compact
+   filter row, then large cards whose order number reads from across the counter, how long each
+   order has waited, what is in the bag, and the handover as the card's one primary action. */
+
+/* ---- Filters: one compact row ------------------------------------------------------------ */
+.workspace-page.pickup-queue .pickup-queue__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--bop-space-3) var(--bop-space-4);
+  margin-bottom: var(--bop-space-4);
+  padding: 0 0 var(--bop-space-4);
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+  border-radius: 0;
+  background: transparent;
+}
+.workspace-page.pickup-queue .pickup-queue__filters > label {
+  flex: 0 1 11rem;
+  min-width: 0;
+}
+.workspace-page.pickup-queue .pickup-queue__filters > label:first-child {
+  flex: 1 1 14rem;
+  max-width: 20rem;
+}
+.workspace-page.pickup-queue .pickup-queue__filters > label.pickup-completed-filter {
+  flex: 0 0 auto;
+  order: 5;
+  font-weight: 500;
+}
+.workspace-page.pickup-queue .pickup-queue__filters > button {
+  order: 6;
+  min-height: 44px;
+  padding: 0 var(--bop-space-2);
+  border-color: transparent;
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.workspace-page.pickup-queue .pickup-queue__filters > button:disabled {
+  color: var(--bop-color-text-muted);
+  text-decoration: none;
+}
+
+.pickup-queue__summary {
+  margin: 0 0 var(--bop-space-3);
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Cards ------------------------------------------------------------------------------ */
+.workspace-page .store-card-grid.pickup-queue__cards {
+  grid-template-columns: repeat(auto-fill, minmax(min(20rem, 100%), 1fr));
+  gap: var(--bop-space-3);
+  align-items: start;
+}
+.workspace-page .store-card.pickup-queue__card {
+  display: grid;
+  gap: var(--bop-space-3);
+  padding: var(--bop-space-4) var(--bop-space-5) var(--bop-space-5);
+  border-color: var(--bop-color-border-default);
+  border-top: 4px solid var(--bop-color-border-strong);
+}
+/* Waiting long: the top rule turns amber, then red; the wait itself is always said in words. */
+.workspace-page .store-card.pickup-queue__card[data-wait="warning"] {
+  border-top-color: var(--bop-color-warning);
+}
+.workspace-page .store-card.pickup-queue__card[data-wait="late"] {
+  border-top-color: var(--bop-color-danger);
+}
+.workspace-page .store-card.pickup-queue__card[data-completed="true"] {
+  border-top-color: var(--bop-color-border-default);
+  background: var(--bop-color-surface-raised);
+}
+.workspace-page .pickup-queue__card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--bop-space-3);
+  margin: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.workspace-page .pickup-queue__card .pickup-queue__phase {
+  margin: 0 0 var(--bop-space-1);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-page .store-card.pickup-queue__card h3.pickup-queue__number {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.1;
+}
+.pickup-queue__number-value {
+  display: block;
+  margin-top: 2px;
+  color: var(--bop-color-text-default);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.workspace-page .pickup-queue__card .pickup-queue__status {
+  flex: 0 0 auto;
+}
+
+.pickup-queue__items {
+  display: grid;
+  gap: var(--bop-space-1);
+  margin: 0;
+  padding: var(--bop-space-3) 0 0;
+  border-top: 1px solid var(--bop-color-border-default);
+  list-style: none;
+  font-size: 15px;
+  line-height: 1.35;
+}
+.pickup-queue__items li {
+  overflow-wrap: anywhere;
+}
+.pickup-queue__item-quantity {
+  display: inline-block;
+  min-width: 2.25em;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Facts: the pickup code row spans the card; shelf, packages and cues share one row. */
+.workspace-page .store-card.pickup-queue__card dl {
+  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+  gap: var(--bop-space-2) var(--bop-space-3);
+  margin: 0;
+  padding-top: var(--bop-space-3);
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.workspace-page .store-card.pickup-queue__card dt {
+  font-size: 12px;
+}
+.workspace-page .store-card.pickup-queue__card dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.workspace-page .pickup-queue__card .pickup-queue__counter,
+.workspace-page .pickup-queue__card .pickup-queue__earlier,
+.workspace-page .pickup-queue__card .pickup-queue__day {
+  margin: 0;
+  font-size: 14px;
+}
+.workspace-page .pickup-queue__card .pickup-queue__counter {
+  font-weight: 600;
+}
+.workspace-page .pickup-queue__card > p[role="status"] {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* Actions: the handover (or code check) is the card's primary, full-width black button. */
+.workspace-page .pickup-queue__card > .card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-2);
+  padding-top: var(--bop-space-1);
+}
+.workspace-page .pickup-queue__card > .card-actions > button {
+  min-height: 44px;
+}
+.workspace-page
+  .pickup-queue__card
+  > .card-actions
+  > button:first-child:not(.pickup-handoff__no-code) {
+  flex: 1 1 100%;
+  min-height: 52px;
+  border-color: var(--bop-color-brand-primary);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+.workspace-page
+  .pickup-queue__card
+  > .card-actions
+  > button:first-child:not(.pickup-handoff__no-code):hover:not(:disabled) {
+  background: #000000;
+}
+.workspace-page
+  .pickup-queue__card
+  > .card-actions
+  > button:first-child:not(.pickup-handoff__no-code):disabled {
+  border-color: var(--bop-color-border-default);
+  background: var(--bop-color-surface-raised);
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.workspace-page .pickup-queue__card > .card-actions > p {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 14px;
+}
+/* The open code check (and the handover that follows it) takes the card's full width. */
+.workspace-page .pickup-queue__card > .card-actions > section {
+  display: grid;
+  flex: 1 1 100%;
+  gap: var(--bop-space-3);
+  padding: var(--bop-space-3);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+}
+.workspace-page .pickup-queue__card > .card-actions > section p {
+  margin: 0;
+  font-size: 14px;
+}
+.workspace-page .pickup-queue__card > .card-actions > section form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--bop-space-2);
+}
+.workspace-page .pickup-queue__card > .card-actions > section form label {
+  display: grid;
+  flex: 1 1 10rem;
+  gap: var(--bop-space-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+.workspace-page .pickup-queue__card > .card-actions > section input {
+  min-height: 44px;
+  font-size: 20px;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-page .pickup-queue__card > .card-actions > section form button[type="submit"],
+.workspace-page
+  .pickup-queue__card
+  > .card-actions
+  > section
+  > button:not(.pickup-handoff__no-code) {
+  min-height: 44px;
+  border-color: var(--bop-color-brand-primary);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  font-weight: 600;
+}
+.workspace-page .pickup-queue__card > .card-actions > section form button[type="submit"]:disabled,
+.workspace-page
+  .pickup-queue__card
+  > .card-actions
+  > section
+  > button:not(.pickup-handoff__no-code):disabled {
+  border-color: var(--bop-color-border-default);
+  background: var(--bop-color-surface-raised);
+  color: var(--bop-color-text-muted);
+}
+
+/* ---- Empty and pages -------------------------------------------------------------------- */
+.pickup-queue__empty .bop-state-card {
+  margin: var(--bop-space-2) 0 0;
+  padding: var(--bop-space-8) var(--bop-space-5);
+  border: 1px dashed var(--bop-color-border-default);
+  text-align: center;
+}
+.pickup-queue__empty .bop-state-card h2 {
+  font-size: 17px;
+}
+.pickup-queue__empty .bop-state-card p {
+  max-width: 32rem;
+  margin: var(--bop-space-1) auto 0;
+  color: var(--bop-color-text-muted);
+}
+.pickup-queue .pickup-pagination {
+  justify-content: flex-end;
+  margin: var(--bop-space-4) 0 0;
+  padding-top: var(--bop-space-3);
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.pickup-queue .pickup-pagination button {
+  min-height: 44px;
+}
+
+@media (max-width: 48rem) {
+  .workspace-page.pickup-queue .pickup-queue__filters > label,
+  .workspace-page.pickup-queue .pickup-queue__filters > label:first-child {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+  .workspace-page.pickup-queue
+    .pickup-queue__filters
+    > label:not(:first-child):not(.pickup-completed-filter) {
+    flex: 1 1 calc(50% - var(--bop-space-4));
+  }
+  .workspace-page.pickup-queue .pickup-queue__filters > label.pickup-completed-filter {
+    flex: 1 1 auto;
+  }
+  .pickup-queue .pickup-pagination {
+    justify-content: stretch;
+  }
+  .pickup-queue .pickup-pagination button {
+    flex: 1 1 0;
+  }
+}
+.workspace-page .pickup-queue__card > .card-actions:empty {
+  display: none;
+}

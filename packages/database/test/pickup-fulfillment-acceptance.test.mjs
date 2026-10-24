@@ -1,3 +1,4 @@
+import { exercisePickupFulfillmentStore } from "../test-support/pickup-fulfillment-store.mjs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -154,6 +155,8 @@ async function prove(context) {
     await client.query(`GRANT SELECT ON rms_fulfillment.fulfillment TO ${role}`);
     assert.deepEqual(await scopedRows(client, role, id(3)), [{ fulfillment_id: id(100) }]);
     assert.deepEqual(await scopedRows(client, role, id(98)), []);
+    await client.query("RESET ROLE");
+    await exercisePickupFulfillmentStore(client);
   } finally {
     await client.query("RESET ROLE").catch(() => undefined);
     await client.query(`DROP OWNED BY ${role}`).catch(() => undefined);

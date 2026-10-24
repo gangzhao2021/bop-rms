@@ -31,4 +31,16 @@ describe("BOP Pilot Neutral tokens", () => {
     expect(css).toContain(".bop-skip-link");
     expect(css).not.toMatch(/https?:\/\//i);
   });
+  it("paints the skip link only while it has keyboard focus (2026-10-21 live check)", () => {
+    const rule = (selector: string) =>
+      new RegExp(`(?:^|\\n)${selector.replace(/\./gu, "\\.")} \\{([^}]*)\\}`, "u").exec(css)?.[1] ??
+      "";
+    expect(rule(".bop-skip-link")).toContain("clip-path: inset(50%);");
+    expect(rule(".bop-skip-link")).toContain("position: fixed;");
+    expect(rule(".bop-skip-link:focus-visible")).toContain("clip-path: none;");
+    expect(rule(".bop-skip-link:focus-visible")).toContain("transform: translateY(0);");
+  });
+  it("defines the shared spacing token consumed by both web surfaces", () => {
+    expect(css).toMatch(/--bop-space-5:\s*1\.25rem;/u);
+  });
 });

@@ -1,4 +1,8 @@
-import { assertGuestSessionUsable, createGuestSession } from "@bop/identity";
+import {
+  assertGuestSessionReceiptReadable,
+  assertGuestSessionUsable,
+  createGuestSession,
+} from "@bop/identity";
 import { parseOrderingInstant, parseOrderingReference } from "../domain/cart.js";
 import { DigitalReceiptError, parseDigitalReceiptChain } from "../domain/digital-receipt.js";
 import type { DigitalReceiptQueryPorts } from "./ports/digital-receipt-ports.js";
@@ -51,6 +55,7 @@ export function createDigitalReceiptQueryService(ports: DigitalReceiptQueryPorts
       let authorization:
         | {
             readonly guestSessionReference: string;
+            readonly tableOrder?: true;
             readonly brandReference: string;
             readonly storeReference: string;
           }
@@ -74,14 +79,22 @@ export function createDigitalReceiptQueryService(ports: DigitalReceiptQueryPorts
             observedAt: request.observedAt,
           });
           if (result) {
-            const session = assertGuestSessionUsable(
-              createGuestSession(result.guestSession),
-              request.observedAt,
-            );
+            // WP-2423 (v15 3cd0f8dd M5): an ended visit reads its own receipt, nothing else.
+            const session = (
+              result.endedVisit === true
+                ? assertGuestSessionReceiptReadable
+                : assertGuestSessionUsable
+            )(createGuestSession(result.guestSession), request.observedAt);
+            if (
+              result.tableOrder === true &&
+              (session.channel !== "DineIn" || session.diningSessionReference === null)
+            )
+              return fail("DIGITAL_RECEIPT_PERMISSION_DENIED");
             authorization = {
               guestSessionReference: parseOrderingReference(session.sessionReference),
               brandReference: parseOrderingReference(session.brandReference),
               storeReference: parseOrderingReference(session.storeReference),
+              ...(result.tableOrder === true ? { tableOrder: true as const } : {}),
             };
           }
         }
@@ -100,10 +113,12 @@ export function createDigitalReceiptQueryService(ports: DigitalReceiptQueryPorts
       }
       const first = chain.records[0]?.snapshot;
       if (
+        chain.orderReference !== request.orderReference ||
         !first ||
         first.brandReference !== authorization.brandReference ||
         first.storeReference !== authorization.storeReference ||
         (authorization.guestSessionReference !== "resume-grant" &&
+          authorization.tableOrder !== true &&
           first.guestSessionReference !== authorization.guestSessionReference)
       )
         return fail("DIGITAL_RECEIPT_PERMISSION_DENIED");

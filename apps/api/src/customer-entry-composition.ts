@@ -19,12 +19,37 @@ import {
   createStoreOperatingStatusService,
   type PublicStoreProfilePorts,
   type StoreOperatingStatusPorts,
+  type StoreOperatingStatus,
 } from "@rms/store";
 import type { CustomerEntryPort, CustomerEntryPortInput } from "./customer-entry.js";
 
 export interface CustomerEntryAdmissionInput extends Omit<CustomerEntryPortInput, "qrToken"> {
   readonly context: QrTableContext;
   readonly scope: Readonly<{ brandReference: string; storeReference: string }>;
+}
+
+export interface CustomerEntryOperatingReader {
+  readCurrent(input: {
+    brandReference: string;
+    storeReference: string;
+    publicStoreReference: string;
+    evaluatedAt: string;
+  }): Promise<
+    | (Pick<StoreOperatingStatus, "state" | "availableServiceModes"> & {
+        brandReference: string;
+        storeReference: string;
+        evaluatedAt: string;
+        /** WP-2423 Q4: today's published hours, when the reader provides them. */
+        todayHours?: readonly {
+          startLocalTime: string;
+          endLocalTime: string;
+          endsNextDay: boolean;
+        }[];
+        /** The Store's local time ("HH:MM:SS") at `evaluatedAt`, when the reader provides it. */
+        localTime?: string;
+      })
+    | null
+  >;
 }
 
 export interface CustomerEntryCompositionOptions {
@@ -41,7 +66,11 @@ export interface CustomerEntryCompositionOptions {
 const unavailable = Object.freeze({ status: "EntryUnavailable" } as const);
 
 export function createCustomerEntryComposition(
-  options: CustomerEntryCompositionOptions,
+  options:
+    | CustomerEntryCompositionOptions
+    | (Omit<CustomerEntryCompositionOptions, "operating"> & {
+        operatingReader: CustomerEntryOperatingReader;
+      }),
 ): CustomerEntryPort {
   return Object.freeze({
     async establish(input: CustomerEntryPortInput) {
@@ -93,21 +122,45 @@ export function createCustomerEntryComposition(
           },
         }).getPublicStore({ ...query, requestedLocale: qr.context.locale });
         if (profile.status !== "Available") return unavailable;
-        const operating = await createStoreOperatingStatusService({
-          ...options.operating,
-          resolution: {
-            async resolve(request) {
-              const resolved = await options.operating.resolution.resolve(request);
-              return resolved !== null && sameScope(resolved) ? resolved : null;
+        let operatingStatus: Pick<StoreOperatingStatus, "state" | "availableServiceModes">;
+        let todayHours: readonly {
+          startLocalTime: string;
+          endLocalTime: string;
+          endsNextDay: boolean;
+        }[] = [];
+        if ("operatingReader" in options) {
+          const current = await options.operatingReader.readCurrent({
+            ...scope,
+            publicStoreReference: query.publicStoreReference,
+            evaluatedAt: requestedAt,
+          });
+          if (!current || !sameScope(current) || current.evaluatedAt !== requestedAt)
+            return unavailable;
+          operatingStatus = current;
+          todayHours = current.todayHours ?? [];
+        } else {
+          const operating = await createStoreOperatingStatusService({
+            ...options.operating,
+            resolution: {
+              async resolve(request) {
+                const resolved = await options.operating.resolution.resolve(request);
+                return resolved !== null && sameScope(resolved) ? resolved : null;
+              },
             },
-          },
-        }).getStoreOperatingStatus(query);
+          }).getStoreOperatingStatus(query);
+          if (operating.status !== "Available") return unavailable;
+          operatingStatus = operating.operatingStatus;
+        }
         if (
-          operating.status !== "Available" ||
-          operating.operatingStatus.state !== "Open" ||
-          !operating.operatingStatus.availableServiceModes.includes(qr.context.channel)
+          operatingStatus.state !== "Open" ||
+          !operatingStatus.availableServiceModes.includes(qr.context.channel)
         )
-          return unavailable;
+          return Object.freeze({
+            status: "NotAccepting" as const,
+            storeDisplayName: profile.profile.storeDisplayName,
+            operatingState: operatingStatus.state,
+            todayHours,
+          });
 
         const admitted = parseGuestAdmissionEvidence(
           await options.admission.consume(
@@ -168,8 +221,8 @@ export function createCustomerEntryComposition(
           publicStoreReference: String(qr.context.publicStoreReference),
           publicTableReference: qr.context.publicTableReference,
           channel: qr.context.channel,
-          operatingState: operating.operatingStatus.state,
-          availableServiceModes: operating.operatingStatus.availableServiceModes,
+          operatingState: operatingStatus.state,
+          availableServiceModes: operatingStatus.availableServiceModes,
           locale: String(qr.context.locale),
           contextExpiresAt,
           sessionCredential: session.sessionCredential,

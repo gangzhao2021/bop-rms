@@ -1,3 +1,4 @@
+import { readClosedRecord } from "@bop/identity";
 import {
   createTenantContext,
   parseCanonicalInstant,
@@ -99,7 +100,9 @@ export interface PermissionDecision {
 }
 
 const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const actionPattern = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*){1,7}$/u;
+// DEC-PERM-CATALOG: identical to the database action grammar (see permissionActionPattern).
+const actionPattern =
+  /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:_[a-z0-9]+)*(?:-[a-z0-9]+)*){1,7}$/u;
 
 function uuid(value: unknown): string {
   if (typeof value !== "string" || !uuidV7Pattern.test(value))
@@ -131,7 +134,11 @@ export function revalidateTenantContext(value: TenantContext): TenantContext {
   try {
     if (!Object.isFrozen(value))
       throw new PermissionEvaluationContractError("PERMISSION_CONTEXT_INVALID");
-    return createTenantContext(value.actor, value.brand, value.store, value.resolvedAt);
+    const record = readClosedRecord(value, ["actor", "brand", "store", "scopeKind", "resolvedAt"]);
+    const context = createTenantContext(value.actor, value.brand, value.store, value.resolvedAt);
+    if (record.scopeKind !== context.scopeKind)
+      throw new PermissionEvaluationContractError("PERMISSION_CONTEXT_INVALID");
+    return context;
   } catch {
     throw new PermissionEvaluationContractError("PERMISSION_CONTEXT_INVALID");
   }

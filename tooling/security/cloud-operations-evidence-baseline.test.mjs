@@ -22,6 +22,11 @@ describe("WP-2065 cloud operations evidence baseline", () => {
     expect(alertTransport.leastPrivilegePublish).toBe(true);
     expect(alertTransport.verifiedEmailSubscriptions).toBe(true);
     expect(alertTransport.customerPayload).toBe(false);
+    expect(alertTransport.roleDestinations).toEqual([
+      "on_call_primary",
+      "on_call_backup",
+      "security_on_call",
+    ]);
     expect(alertTransport.unknownOrDeliveryFailure).toBe("fail-closed");
   });
 

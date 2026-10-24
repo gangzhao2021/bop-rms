@@ -21,6 +21,15 @@ export type StoreConfigurationAdministrationServiceErrorCode =
   | "STORE_CONFIGURATION_APPROVAL_INVALID"
   | "STORE_CONFIGURATION_PUBLISHING_INVALID"
   | "STORE_CONFIGURATION_LIVE_GATE_INVALID"
+  // WP-2423 (v15 D2/D3): another person's change that is not published is still open (approve,
+  // withdraw or decline it first); or this configuration was withdrawn or declined.
+  | "STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER"
+  | "STORE_CONFIGURATION_WITHDRAWN"
+  // WP-2423 (v15): only the person who made a change checks it and sends it for approval.
+  | "STORE_CONFIGURATION_NOT_YOUR_CHANGE"
+  // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the person who made or sent a change approves it only
+  // alone as sole operator, explicitly asked.
+  | "STORE_CONFIGURATION_SELF_APPROVAL"
   | "STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE";
 
 export class StoreConfigurationAdministrationServiceError extends Error {
@@ -58,7 +67,16 @@ function parseInput(value: unknown) {
   const keys = Reflect.ownKeys(value);
   if (
     keys.length !== fields.length ||
-    keys.some((key) => typeof key !== "string" || !fields.includes(key))
+    keys.some((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      return (
+        typeof key !== "string" ||
+        !fields.includes(key) ||
+        descriptor === undefined ||
+        !("value" in descriptor) ||
+        !descriptor.enumerable
+      );
+    })
   )
     return fail("STORE_CONFIGURATION_COMMAND_INVALID");
   const input = value as Record<string, unknown>;
@@ -85,6 +103,7 @@ function parseInput(value: unknown) {
   }
 }
 type Input = ReturnType<typeof parseInput>;
+export type StoreConfigurationAdministrationInput = Input;
 
 function same(
   left: StoreConfigurationVersion,
@@ -92,6 +111,11 @@ function same(
   ignored: readonly (keyof StoreConfigurationVersion)[],
 ): boolean {
   const skip = new Set(ignored);
+  if (
+    Object.keys(left).length !== Object.keys(right).length ||
+    Object.keys(right).some((key) => !Object.hasOwn(left, key))
+  )
+    return false;
   return (Object.keys(left) as (keyof StoreConfigurationVersion)[]).every(
     (key) => skip.has(key) || JSON.stringify(left[key]) === JSON.stringify(right[key]),
   );
@@ -103,10 +127,15 @@ export function createStoreConfigurationAdministrationService(
   async function execute(
     command: StoreConfigurationAdministrationCommand,
     raw: unknown,
-    validate: (input: Input, current: StoreConfigurationVersion | null) => Promise<void>,
+    validate: (
+      input: Input,
+      current: StoreConfigurationVersion | null,
+      withdrawn: boolean,
+    ) => Promise<void>,
   ) {
-    const input = parseInput(raw),
-      configuration = input.configuration;
+    let input = parseInput(raw);
+    const originalInput = input;
+    let configuration = input.configuration;
     if (
       !(await ports.authorization
         .authorize({
@@ -120,7 +149,19 @@ export function createStoreConfigurationAdministrationService(
         .catch(dependency))
     )
       return fail("STORE_CONFIGURATION_PERMISSION_DENIED");
-    const digest = ports.references.hashIntent(JSON.stringify({ command, ...input }));
+    // Server reception time is execution metadata, not a new business intent.
+    // Replay retains the original persisted Audit/operation and rechecks current permission.
+    const digest = ports.references.hashIntent(
+      JSON.stringify({
+        command,
+        operationReference: input.operationReference,
+        actorReference: input.actorReference,
+        purposeCode: input.purposeCode,
+        auditReference: input.auditReference,
+        expectedVersion: input.expectedVersion,
+        configuration: input.configuration,
+      }),
+    );
     const existing = await ports.repository
       .resolveOperation(input.operationReference)
       .catch(dependency);
@@ -134,7 +175,54 @@ export function createStoreConfigurationAdministrationService(
       .catch(dependency);
     if ((current?.configurationVersion ?? 0) !== input.expectedVersion)
       return fail("STORE_CONFIGURATION_VERSION_CONFLICT");
-    await validate(input, current);
+    // WP-2423 (v15 D2/D3): a change that is not published is never silently replaced by another
+    // person's new change, and a withdrawn or declined one takes no further step.
+    const open =
+      current !== null &&
+      (current.lifecycle === "Draft" ||
+        current.lifecycle === "PendingApproval" ||
+        current.lifecycle === "Approved");
+    const withdrawn =
+      open && ports.withdrawals !== undefined
+        ? await ports.withdrawals.isWithdrawn(current).catch(dependency)
+        : false;
+    if (command === "SaveDraft") {
+      if (open && !withdrawn && current.authoredByReference !== input.actorReference)
+        return fail("STORE_CONFIGURATION_OPEN_CHANGE_BY_ANOTHER");
+    } else if (withdrawn) return fail("STORE_CONFIGURATION_WITHDRAWN");
+    // WP-2423 (v15): another person never checks or sends someone else's change for approval
+    // (they approve, decline or ask its author); the database refuses it as well (2000_064).
+    if (
+      (command === "Validate" || command === "Submit") &&
+      current !== null &&
+      current.authoredByReference !== input.actorReference
+    )
+      return fail("STORE_CONFIGURATION_NOT_YOUR_CHANGE");
+    if (
+      configuration.setupBasis !== undefined &&
+      ["Submit", "Approve", "Publish"].includes(command) &&
+      ports.prepareFresh === undefined
+    )
+      return fail("STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE");
+    if (ports.prepareFresh !== undefined) {
+      const prepared = await ports
+        .prepareFresh(command, input, current)
+        .then(createStoreConfigurationVersion)
+        .catch(dependency);
+      const mutable: readonly (keyof StoreConfigurationVersion)[] =
+        command === "Submit"
+          ? ["lifecycle", "updatedAt"]
+          : command === "Approve"
+            ? ["lifecycle", "approvedByReference", "approvalEvidenceReference", "updatedAt"]
+            : command === "Publish"
+              ? ["lifecycle", "publicationReference", "liveGateEvidenceReference", "updatedAt"]
+              : ["updatedAt"];
+      if (!same(configuration, prepared, mutable))
+        return fail("STORE_CONFIGURATION_COMMAND_INVALID");
+      configuration = prepared;
+      input = Object.freeze({ ...input, configuration });
+    }
+    await validate(input, current, withdrawn);
     const operation: StoreConfigurationOperation = Object.freeze({
       command,
       operationReference: input.operationReference,
@@ -148,6 +236,7 @@ export function createStoreConfigurationAdministrationService(
       .commit({
         operation,
         expectedVersion: input.expectedVersion,
+        originalInput,
         audit: {
           actorReference: input.actorReference,
           auditReference: input.auditReference,
@@ -175,7 +264,16 @@ export function createStoreConfigurationAdministrationService(
   };
   return Object.freeze({
     saveDraft: (raw: unknown) =>
-      execute("SaveDraft", raw, async ({ configuration }, current) => {
+      execute("SaveDraft", raw, async ({ configuration }, current, withdrawn) => {
+        // A configuration from Store setup is followed by changes from Store setup. v15
+        // `8bd902e3` D2: a withdrawn or declined one decides nothing — the caller holds the
+        // published configuration and refuses an ordinary change over one from Store setup.
+        if (
+          current?.setupBasis !== undefined &&
+          configuration.setupBasis === undefined &&
+          !withdrawn
+        )
+          fail("STORE_CONFIGURATION_LIFECYCLE_CONFLICT");
         if (
           configuration.lifecycle !== "Draft" ||
           configuration.configurationVersion !== (current?.configurationVersion ?? 0) + 1 ||

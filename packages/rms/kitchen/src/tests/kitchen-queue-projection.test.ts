@@ -39,6 +39,7 @@ import {
   type KitchenQueueSourceFeed,
 } from "../contracts/kitchen-queue-projection.js";
 import { createKitchenQueueProjectionService } from "../application/kitchen-queue-projection-service.js";
+import { createKitchenQueueLifecycleProofBundle } from "../application/kitchen-queue-lifecycle-proof.js";
 import { parseKitchenWorkLifecycleEnvelope } from "../application/kitchen-work-lifecycle-events.js";
 import {
   buildKitchenQueueStoredGeneration,
@@ -2787,6 +2788,83 @@ describe("Kitchen queue Inbox, rebuild and negative boundaries", () => {
     ).rejects.toMatchObject({ code: "KITCHEN_QUEUE_VERSION_CONFLICT" });
   });
 
+  it("continues a later page from the generation a kitchen step just retired", async () => {
+    // A busy board reads several pages; a step between two page reads publishes a new generation.
+    // The later page comes from the first page's (now retired) generation: one consistent board.
+    const active = bundle();
+    const retired = parseKitchenQueueStoredGeneration(
+      generationValue(active.generation, { generationStatus: "Retired" }),
+    );
+    const filters = queryInput().filters;
+    const filterSortDigest = computeKitchenQueueFilterSortDigest(
+      { brandReference: id(2), storeReference: id(3), filters },
+      sha256,
+    );
+    const cursor = {
+      projectionGenerationReference: retired.projectionGenerationReference,
+      afterCreatedAt: "2026-08-08T15:00:00.000Z",
+      afterWorkItemReference: id(1),
+      filterSortDigest,
+    };
+    const read = (supersededAt: unknown) =>
+      ({
+        status: "Continued",
+        generation: retired,
+        rows: active.rows,
+        returnedCount: active.rows.length,
+        hasMore: false,
+        supersededAt,
+      }) as const;
+    const at = (observedAt: string, supersededAt: unknown) => {
+      const { ports } = harness({
+        listRead: read(supersededAt),
+        trustedAuthority: {
+          actorReference: id(80),
+          brandReference: id(2),
+          storeReference: id(3),
+          observedAt,
+        },
+      });
+      return createKitchenQueueProjectionService(ports).list(queryInput({ observedAt, cursor }));
+    };
+    const page = await at("2026-08-08T16:00:30.000Z", projectedAt);
+    expect(page.projectionGenerationReference).toBe(retired.projectionGenerationReference);
+    expect(page.items.map((item) => item.workItemReference)).toEqual(
+      active.rows.map((row) => row.workItemReference),
+    );
+    expect(page.nextCursor).toBeNull();
+    // Superseded over a minute ago: the board reads again from its first page.
+    await expect(at("2026-08-08T16:01:02.000Z", projectedAt)).rejects.toMatchObject({
+      code: "KITCHEN_QUEUE_VERSION_CONFLICT",
+    });
+    // Superseded before it was projected is not a real succession.
+    await expect(at("2026-08-08T16:00:30.000Z", createdAt)).rejects.toMatchObject({
+      code: "KITCHEN_QUEUE_VERSION_CONFLICT",
+    });
+    await expect(at("2026-08-08T16:00:30.000Z", "not-an-instant")).rejects.toMatchObject({
+      code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE",
+    });
+    // A first page is never served from a retired generation.
+    const { ports } = harness({ listRead: read(projectedAt) });
+    await expect(
+      createKitchenQueueProjectionService(ports).list(queryInput()),
+    ).rejects.toMatchObject({ code: "KITCHEN_QUEUE_VERSION_CONFLICT" });
+    // An Active generation reported as continued is refused.
+    const { ports: activePorts } = harness({
+      listRead: { ...read(projectedAt), generation: active.generation },
+    });
+    await expect(
+      createKitchenQueueProjectionService(activePorts).list(
+        queryInput({
+          cursor: {
+            ...cursor,
+            projectionGenerationReference: active.generation.projectionGenerationReference,
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE" });
+  });
+
   it("rejects Get rows paired with empty, future or cross-scope Active metadata", async () => {
     const active = bundle();
     const request = rebuildRequest();
@@ -3223,5 +3301,179 @@ describe("Kitchen queue Inbox, rebuild and negative boundaries", () => {
     expect(future.spies.loadByRebuildReference).not.toHaveBeenCalled();
     expect(future.spies.loadRebuild).not.toHaveBeenCalled();
     expect(future.spies.replaceActive).not.toHaveBeenCalled();
+  });
+});
+
+describe("Kitchen queue staff cancellation replay (WP-2423 Q6)", () => {
+  const cancelledAt = "2026-08-08T16:00:06.000Z";
+  interface Feed {
+    asOfUtc: string;
+    tickets: {
+      ticketAggregateVersion: bigint;
+      updatedAt: string;
+      items: Record<string, unknown>[];
+      proofBundle: {
+        ticketReference: string;
+        operationCount: number;
+        readyResultCount: number;
+        lifecycleProofSetDigest: string;
+        proofs: Record<string, unknown>[];
+      };
+    }[];
+  }
+  function withCancellation(
+    events: readonly KitchenWorkLifecycleEnvelope[],
+    overrides: Readonly<Record<string, unknown>> = {},
+  ): unknown {
+    const feed = lifecycleSourceFeed({ events, includeReady: true }) as Feed;
+    const ticket = feed.tickets[0];
+    const item = ticket?.items[0];
+    if (ticket === undefined || item === undefined) throw new Error("test feed is incomplete");
+    const expectedTicketVersion = ticket.ticketAggregateVersion;
+    const expectedWorkItemVersion = item.workItemVersion as bigint;
+    const proof: Record<string, unknown> = {
+      kind: "Cancellation",
+      brandReference: id(2),
+      storeReference: id(3),
+      ticketReference: id(10),
+      workItemReference: id(20),
+      orderItemReference: id(21),
+      operationReference: id(400),
+      cancellationOperationReference: id(401),
+      orderCancellationReference: id(402),
+      actionCode: "KITCHEN_WORK_CANCELLED",
+      purpose: "KitchenOrderCancellation",
+      reasonCode: "ORDER_CANCELLED_BEFORE_PREPARATION",
+      sourceChannel: "MERCHANT_WEB",
+      actor: { type: "User", actorReference: id(81) },
+      expectedTicketVersion,
+      committedTicketVersion: expectedTicketVersion + 1n,
+      expectedWorkItemVersion,
+      committedWorkItemVersion: expectedWorkItemVersion + 1n,
+      beforeStatus: item.status,
+      afterStatus: "Cancelled",
+      occurredAt: cancelledAt,
+      evidenceDigest: sha256("synthetic cancellation evidence"),
+      auditReference: id(403),
+      eventReference: id(404),
+      ...overrides,
+    };
+    proof.projectionProofDigest = sha256(JSON.stringify(normalizedProofValue(proof)));
+    const proofs = [...ticket.proofBundle.proofs, proof];
+    ticket.proofBundle = {
+      ...ticket.proofBundle,
+      operationCount: proofs.length,
+      lifecycleProofSetDigest: sha256(
+        JSON.stringify({
+          normalizedProjectionProofs: proofs.map((value) => ({
+            committedTicketVersion: String(value.committedTicketVersion),
+            operationReference: value.operationReference,
+            projectionProofDigest: value.projectionProofDigest,
+          })),
+        }),
+      ),
+      proofs,
+    };
+    ticket.ticketAggregateVersion = expectedTicketVersion + 1n;
+    ticket.updatedAt = cancelledAt;
+    ticket.items = [
+      {
+        ...item,
+        ticketAggregateVersion: expectedTicketVersion + 1n,
+        workItemVersion: expectedWorkItemVersion + 1n,
+        status: "Cancelled",
+      },
+    ];
+    feed.asOfUtc = cancelledAt;
+    return feed;
+  }
+
+  it("projects queued and accepted work cancelled by staff as Cancelled", () => {
+    for (const events of [[], [lifecycleEvent("KitchenWorkAccepted")]]) {
+      const rebuild = parseKitchenQueueLifecycleRebuildSourceFeed(withCancellation(events), sha256);
+      const item = rebuild.queueFeed.tickets[0]?.items[0];
+      expect(item).toMatchObject({
+        status: "Cancelled",
+        workItemVersion: BigInt(events.length + 2),
+        acceptedAt: events.length === 0 ? null : acceptedAt,
+        orderItemReadyAt: null,
+      });
+      expect(rebuild.proofBundles[0]).toMatchObject({
+        operationCount: events.length + 1,
+        readyResultCount: 0,
+      });
+      const rows = buildKitchenQueueRows({
+        generationReference: id(40),
+        feed: {
+          ...rebuild.queueFeed,
+          tickets: rebuild.queueFeed.tickets.map((ticket) =>
+            Object.fromEntries(Object.entries(ticket).filter(([key]) => key !== "updatedAt")),
+          ) as unknown as typeof rebuild.queueFeed.tickets,
+        },
+        sha256,
+      });
+      expect(rows.map((row) => row.status)).toEqual(["Cancelled"]);
+    }
+  });
+
+  it("refuses a cancellation after Start, out of order, or reusing observed identities", () => {
+    const accepted = lifecycleEvent("KitchenWorkAccepted");
+    const started = lifecycleEvent("KitchenWorkStarted");
+    for (const value of [
+      withCancellation([accepted, started]),
+      withCancellation([accepted], { beforeStatus: "Held" }),
+      withCancellation([accepted], { expectedWorkItemVersion: 1n, committedWorkItemVersion: 2n }),
+      withCancellation([accepted], { occurredAt: "2026-08-08T16:00:01.500Z" }),
+      withCancellation([accepted], { auditReference: id(400) }),
+      withCancellation([accepted], { orderCancellationReference: id(20) }),
+      withCancellation([accepted], { sourceChannel: "KDS_COMMAND" }),
+    ])
+      expectCode(
+        () => parseKitchenQueueLifecycleRebuildSourceFeed(value, sha256),
+        "KITCHEN_QUEUE_INPUT_INVALID",
+      );
+  });
+
+  it("builds a cancellation proof bundle from owner rows without lifecycle effects", () => {
+    const bundle = createKitchenQueueLifecycleProofBundle({
+      ticketReference: id(10),
+      effects: [],
+      validation: {
+        references: {},
+        digests: { sha256 },
+      } as unknown as Parameters<typeof createKitchenQueueLifecycleProofBundle>[0]["validation"],
+      cancellations: {
+        brandReference: id(2),
+        storeReference: id(3),
+        records: [
+          {
+            cancellationReference: id(400),
+            operationReference: id(401),
+            ticketReference: id(10),
+            workItemReference: id(20),
+            orderReference: id(11),
+            orderBatchReference: id(12),
+            orderItemReference: id(21),
+            beforeStatus: "Queued",
+            expectedTicketVersion: 1n,
+            resultTicketVersion: 2n,
+            expectedWorkItemVersion: 1n,
+            resultWorkItemVersion: 2n,
+            actorReference: id(81),
+            orderCancellationReference: id(402),
+            evidenceDigest: sha256("synthetic cancellation evidence"),
+            eventReference: id(404),
+            auditReference: id(403),
+            cancelledAt,
+          },
+        ],
+      },
+    });
+    expect(bundle).toMatchObject({ operationCount: 1, readyResultCount: 0 });
+    expect(bundle.proofs[0]).toMatchObject({
+      kind: "Cancellation",
+      committedTicketVersion: 2n,
+      afterStatus: "Cancelled",
+    });
   });
 });

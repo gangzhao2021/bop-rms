@@ -1,3 +1,4 @@
+import type { RecipePublicationEvidence } from "../../domain/publication-review.js";
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { PermissionDecision } from "@bop/permission";
 import type { TenantContext } from "@bop/tenant";
@@ -28,10 +29,13 @@ export interface RecipeOperationRecord {
   readonly action: RecipeAction;
   readonly operationReference: RecipeReference;
   readonly operationIntentHash: RecipeDigest;
+  readonly actorReference: RecipeReference;
+  readonly publicationEvidence: RecipePublicationEvidence | null;
   readonly aggregate: RecipeSnapshot;
   readonly event: RecipeEvent;
 }
 export interface RecipeAuthorizationEvidence {
+  readonly publicationEvidence: unknown;
   readonly tenantContext: TenantContext;
   readonly permission: PermissionDecision;
   readonly costReviewPermission: PermissionDecision | null;

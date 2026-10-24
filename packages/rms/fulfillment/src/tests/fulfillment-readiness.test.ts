@@ -1,3 +1,7 @@
+import {
+  encodeFulfillmentReadyRecord,
+  decodeFulfillmentReadyRecord,
+} from "../application/fulfillment-ready-record.js";
 import { createHash } from "node:crypto";
 
 import type { ConsumerTransaction } from "@bop/eventing";
@@ -263,5 +267,44 @@ describe("WP-1601 Fulfillment Ready intake", () => {
       { code: "FULFILLMENT_READINESS_DEPENDENCY_UNAVAILABLE" },
     );
     expect(f.audits).toBe(1);
+  });
+});
+
+describe("Fulfillment Ready original record", () => {
+  it("round-trips partial and all-items Ready effects with exact version types", async () => {
+    const f = fixture();
+    const first = await f.service.consume(f.tx, readyEvent());
+    const last = await f.service.consume(f.tx, readyEvent(id(11), id(34), id(35), 1));
+    for (const effect of [first.effect, last.effect]) {
+      const record = encodeFulfillmentReadyRecord(effect, sha);
+      expect(decodeFulfillmentReadyRecord(record, sha)).toEqual(effect);
+      expect(typeof JSON.parse(record).effect.operation.aggregateVersionBefore).toBe("string");
+    }
+  });
+  it.each(["0", "01", "-1", "1e0", "9223372036854775808", 2, null])(
+    "rejects invalid stored version %s",
+    async (value) => {
+      const f = fixture(),
+        applied = await f.service.consume(f.tx, readyEvent());
+      for (const key of ["aggregateVersionBefore", "aggregateVersionAfter"]) {
+        const record = JSON.parse(encodeFulfillmentReadyRecord(applied.effect, sha));
+        record.effect.operation[key] = value;
+        expect(() => decodeFulfillmentReadyRecord(JSON.stringify(record), sha)).toThrow();
+      }
+    },
+  );
+  it("rejects altered quantity and unsupported record envelope", async () => {
+    const f = fixture(),
+      applied = await f.service.consume(f.tx, readyEvent());
+    const record = JSON.parse(encodeFulfillmentReadyRecord(applied.effect, sha));
+    for (const bad of [
+      { ...record, recordVersion: 2 },
+      { ...record, extra: true },
+      {
+        ...record,
+        effect: { ...record.effect, result: { ...record.effect.result, readyQuantity: 1 } },
+      },
+    ])
+      expect(() => decodeFulfillmentReadyRecord(JSON.stringify(bad), sha)).toThrow();
   });
 });

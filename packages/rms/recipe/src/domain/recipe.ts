@@ -24,6 +24,12 @@ export interface IngredientRequirement {
   readonly unitCostMinorNumerator: string;
   readonly unitCostDenominator: string;
   readonly allergens: readonly AllergenEvidence[];
+  /**
+   * WP-2423 / DEC-ALLERGEN-DECLARATIONS: the ingredient allergen declaration `allergens` came from.
+   * Present on Inventory Item requirements saved since declarations exist; absent otherwise. A
+   * declaration with no allergens states the ingredient contains none of its registry's allergens.
+   */
+  readonly allergenDeclarationReference?: RecipeReference;
 }
 export interface PreparationStep {
   readonly stepReference: RecipeReference;
@@ -123,7 +129,13 @@ function plain(value: unknown, keys: readonly string[]): Record<string, unknown>
     Reflect.ownKeys(value).some((key) => typeof key !== "string" || !keys.includes(key))
   )
     return fail("RECIPE_INPUT_INVALID");
-  return value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor?.enumerable || !("value" in descriptor)) return fail("RECIPE_INPUT_INVALID");
+    result[key] = descriptor.value;
+  }
+  return result;
 }
 function allergen(value: unknown): AllergenEvidence {
   const raw = plain(value, ["allergenReference", "evidenceReference", "verified"]);
@@ -135,7 +147,12 @@ function allergen(value: unknown): AllergenEvidence {
   });
 }
 function ingredient(value: unknown): IngredientRequirement {
+  const declared =
+    value !== null &&
+    typeof value === "object" &&
+    Object.hasOwn(value, "allergenDeclarationReference");
   const raw = plain(value, [
+    ...(declared ? ["allergenDeclarationReference"] : []),
     "requirementReference",
     "sourceKind",
     "sourceReference",
@@ -161,6 +178,15 @@ function ingredient(value: unknown): IngredientRequirement {
   const allergens = raw.allergens.map(allergen);
   if (new Set(allergens.map((item) => item.allergenReference)).size !== allergens.length)
     return fail("RECIPE_INPUT_INVALID");
+  // A declared requirement takes every allergen from that one ingredient declaration.
+  if (
+    declared &&
+    (raw.sourceKind !== "InventoryItem" ||
+      allergens.some(
+        (item) => item.evidenceReference !== raw.allergenDeclarationReference || !item.verified,
+      ))
+  )
+    return fail("RECIPE_INPUT_INVALID");
   return Object.freeze({
     requirementReference: parseRecipeReference(raw.requirementReference),
     sourceKind: raw.sourceKind,
@@ -174,6 +200,11 @@ function ingredient(value: unknown): IngredientRequirement {
     unitCostMinorNumerator: natural(raw.unitCostMinorNumerator).toString(),
     unitCostDenominator: natural(raw.unitCostDenominator, true).toString(),
     allergens: Object.freeze(allergens),
+    ...(declared
+      ? {
+          allergenDeclarationReference: parseRecipeReference(raw.allergenDeclarationReference),
+        }
+      : {}),
   });
 }
 function step(value: unknown): PreparationStep {
@@ -329,12 +360,17 @@ export function validateRecipeGraph(
   availableInputs: readonly RecipeSnapshot[],
 ) {
   const root = createRecipeSnapshot(rootInput);
-  const available = new Map(
-    availableInputs.map((input) => {
-      const snapshot = createRecipeSnapshot(input);
-      return [snapshot.versionReference, snapshot] as const;
-    }),
-  );
+  const available = new Map<RecipeReference, RecipeSnapshot>();
+  for (const input of availableInputs) {
+    const snapshot = createRecipeSnapshot(input);
+    if (
+      snapshot.brandReference !== root.brandReference ||
+      snapshot.versionReference === root.versionReference ||
+      available.has(snapshot.versionReference)
+    )
+      return fail("RECIPE_GRAPH_UNRESOLVED");
+    available.set(snapshot.versionReference, snapshot);
+  }
   available.set(root.versionReference, root);
   const visiting = new Set<RecipeReference>();
   const visited = new Set<RecipeReference>();
@@ -356,4 +392,10 @@ export function validateRecipeGraph(
   };
   visit(root, 0);
   return true as const;
+}
+
+/** Public owning positive yield bound; existing snapshot parsing is unchanged. */
+export function parseRecipeYieldQuantityMicrounits(value: unknown): string {
+  if (typeof value !== "string" || value.length > 31) return fail("RECIPE_INPUT_INVALID");
+  return natural(value, true).toString();
 }

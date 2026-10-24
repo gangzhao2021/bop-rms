@@ -166,9 +166,13 @@ function hash(value: string) {
 function fixture(sameActor = false) {
   let aggregate: TaxConfigurationSnapshot | null = snapshot(false);
   const operations = new Map<string, TaxConfigOperationRecord>();
+  const events: string[] = [];
+  let allowed = true;
   const ports: TaxConfigPorts = {
     authorization: {
       async authorize(input) {
+        events.push("authorize");
+        if (!allowed) return null;
         return {
           tenantContext: context(),
           permission: {
@@ -233,9 +237,11 @@ function fixture(sameActor = false) {
     },
     repository: {
       async resolveOperation(reference) {
+        events.push("resolve");
         return operations.get(reference) ?? null;
       },
       async load(reference) {
+        events.push("load");
         return aggregate?.configurationReference === reference ? aggregate : null;
       },
       async create(input) {
@@ -244,13 +250,22 @@ function fixture(sameActor = false) {
         return input.record;
       },
       async commit(input) {
+        events.push("commit");
         aggregate = input.record.aggregate;
         operations.set(input.record.operationReference, input.record);
         return input.record;
       },
     },
   };
-  return { service: createTaxConfigService(ports), operation: () => operations.get(ids.operation) };
+  return {
+    service: createTaxConfigService(ports),
+    operation: () => operations.get(ids.operation),
+    events,
+    ports,
+    revoke: () => {
+      allowed = false;
+    },
+  };
 }
 
 describe("Tax Configuration administration service", () => {
@@ -303,4 +318,63 @@ describe("Tax Configuration administration service", () => {
       } as never),
     ).rejects.toMatchObject({ code: "TAX_CONFIG_INPUT_INVALID" });
   });
+});
+
+it("does not disclose an original Tax result after current management permission is revoked", async () => {
+  const target = fixture();
+  const input = {
+    action: "Publish" as const,
+    operationReference: ref(ids.operation),
+    expectedAggregateVersion: 1,
+    candidate: snapshot(true),
+    occurredAt: at,
+  };
+  await target.service.execute(input);
+  const original = target.operation();
+  target.events.length = 0;
+  target.revoke();
+  await expect(target.service.execute(input)).rejects.toMatchObject({
+    code: "TAX_CONFIG_PERMISSION_DENIED",
+  });
+  expect(target.events).toEqual(["authorize"]);
+  expect(target.operation()).toBe(original);
+});
+it("does not load a historical Tax result when current authorization is unavailable", async () => {
+  const target = fixture();
+  const input = {
+    action: "Publish" as const,
+    operationReference: ref(ids.operation),
+    expectedAggregateVersion: 1,
+    candidate: snapshot(true),
+    occurredAt: at,
+  };
+  await target.service.execute(input);
+  target.events.length = 0;
+  target.ports.authorization.authorize = async () => {
+    throw new Error("Synthetic authorization source unavailable");
+  };
+  await expect(target.service.execute(input)).rejects.toMatchObject({
+    code: "TAX_CONFIG_DEPENDENCY_UNAVAILABLE",
+  });
+  expect(target.events).toEqual([]);
+});
+
+it("does not inspect an original Tax result through a foreign candidate scope", async () => {
+  const target = fixture();
+  const input = {
+    action: "Publish" as const,
+    operationReference: ref(ids.operation),
+    expectedAggregateVersion: 1,
+    candidate: snapshot(true),
+    occurredAt: at,
+  };
+  await target.service.execute(input);
+  target.events.length = 0;
+  await expect(
+    target.service.execute({
+      ...input,
+      candidate: { ...snapshot(true), storeReference: ref(id(99)) },
+    }),
+  ).rejects.toMatchObject({ code: "TAX_CONFIG_PERMISSION_DENIED" });
+  expect(target.events).toEqual(["authorize"]);
 });

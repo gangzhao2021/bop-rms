@@ -294,6 +294,15 @@ export function validateProductOptionBinding(
   binding: ProductOptionBinding,
   optionSet: OptionSetAggregate,
 ): void {
+  if (assessProductOptionBindingDefaultQuantity(binding, optionSet) === "DefaultQuantityViolation")
+    return invalid();
+}
+/** Parsed owning references and bounds remain strict. Quantity contradiction is
+ * a necessary-condition result only; it does not qualify references or publication. */
+export function assessProductOptionBindingDefaultQuantity(
+  binding: ProductOptionBinding,
+  optionSet: OptionSetAggregate,
+): "DefaultQuantityViolation" | "NoDefaultQuantityViolation" {
   if (
     binding.optionSetReference !== optionSet.optionSetReference ||
     binding.optionSetVersionReference !== optionSet.draft.versionReference ||
@@ -314,20 +323,6 @@ export function validateProductOptionBinding(
     (maximum !== null && maximum < minimum)
   )
     return invalid();
-  const selected = binding.defaultSelections.reduce((sum, item) => sum + item.quantity, 0);
-  const enabledCapacity =
-    binding.enabledOptionReferences.length * optionSet.draft.perOptionMaximumQuantity;
-  if (
-    enabledCapacity < minimum ||
-    selected < minimum ||
-    (maximum !== null && selected > maximum) ||
-    (optionSet.draft.maximumTotalQuantity !== null &&
-      selected > optionSet.draft.maximumTotalQuantity) ||
-    binding.defaultSelections.some(
-      (item) => item.quantity > optionSet.draft.perOptionMaximumQuantity,
-    )
-  )
-    return invalid();
   const selectedReferences = new Set(binding.defaultSelections.map((item) => item.optionReference));
   for (const item of binding.defaultSelections) {
     const option = optionSet.draft.options.find(
@@ -335,9 +330,25 @@ export function validateProductOptionBinding(
     );
     if (
       option === undefined ||
+      option.lifecycle === "Inactive" ||
+      option.lifecycle === "Archived" ||
       !option.defaultEligible ||
       option.conflictOptionReferences.some((reference) => selectedReferences.has(reference))
     )
       return invalid();
   }
+  const selected = binding.defaultSelections.reduce((sum, item) => sum + BigInt(item.quantity), 0n);
+  const enabledCapacity =
+    BigInt(binding.enabledOptionReferences.length) *
+    BigInt(optionSet.draft.perOptionMaximumQuantity);
+  const violates =
+    enabledCapacity < BigInt(minimum) ||
+    selected < BigInt(minimum) ||
+    (maximum !== null && selected > BigInt(maximum)) ||
+    (optionSet.draft.maximumTotalQuantity !== null &&
+      selected > BigInt(optionSet.draft.maximumTotalQuantity)) ||
+    binding.defaultSelections.some(
+      (item) => item.quantity > optionSet.draft.perOptionMaximumQuantity,
+    );
+  return violates ? "DefaultQuantityViolation" : "NoDefaultQuantityViolation";
 }

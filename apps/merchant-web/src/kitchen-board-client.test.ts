@@ -1,0 +1,408 @@
+import { expect, it, vi } from "vitest";
+import { createKitchenBoardClient } from "./kitchen-board-client.js";
+import { parseKitchenBoardView, parseKitchenWorkItemDetailView } from "./kitchen-board.js";
+const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const at = "2026-09-19T12:00:00.000Z";
+const item = (n = 1) => ({
+  workItemReference: id(n),
+  ticketReference: id(2),
+  orderReference: id(3),
+  orderItemReference: id(4),
+  stationReference: id(5),
+  localizedDisplayNames: { "en-CA": "Synthetic rice" },
+  allergens: { status: "Unavailable" },
+  orderLabel: { orderNumber: "14", orderType: "DineIn", tableLabel: "T4" },
+  customerNote: null,
+  selectedOptions: [
+    {
+      optionReference: id(40),
+      quantity: 2,
+      localizedNames: { "en-CA": "Extra mushrooms" },
+    },
+  ],
+  status: "Queued",
+  requiredQuantity: 2,
+  completedQuantity: 0,
+  workItemCreatedAt: at,
+  acceptedAt: null,
+  orderItemReadyAt: null,
+  ticketAggregateVersion: "9007199254740993",
+  workItemVersion: "1",
+});
+const metadata = {
+  storeReference: id(99),
+  operatorStatus: "Unverified",
+  projectionName: "kitchen_work_queue_v1",
+  projectionVersion: 1,
+  projectionGenerationReference: id(6),
+  projectedAt: at,
+  partial: false,
+  stale: false,
+  freshnessStatus: "Fresh",
+};
+const response = (value: unknown, status = 200) =>
+  new Response(JSON.stringify(value), {
+    status,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+  });
+function setup() {
+  const fetcher = vi.fn<typeof fetch>();
+  const client = createKitchenBoardClient({
+    csrf: "a".repeat(43),
+    storeLabel: "Training Store",
+    storeReference: id(99),
+    fetcher,
+  });
+  return { client, fetcher };
+}
+it("uses private same-origin transport and preserves versions without fabricating missing facts", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(response({ ...metadata, items: [item()], nextCursor: null }));
+  const view = parseKitchenBoardView(await f.client.loadQueue());
+  expect(view.items[0]?.execution?.ticketVersion).toBe("9007199254740993");
+  expect(view.items[0]?.allergenCue).toBe("Unavailable");
+  expect(view.items[0]?.exceptionStatus).toBe("Unavailable");
+  expect(view.items[0]?.stationLabel).toBeNull();
+  expect(view.items[0]?.selectedOptions).toEqual([{ displayName: "Extra mushrooms", quantity: 2 }]);
+  expect(view.operatorStatus).toBe("Unverified");
+  expect(f.fetcher.mock.calls[0]?.[0]).toBe("/merchant/kitchen/query");
+  expect(f.fetcher.mock.calls[0]?.[1]).toMatchObject({
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    redirect: "error",
+    headers: { "X-BOP-CSRF": "a".repeat(43) },
+  });
+});
+it("applies exact Order and Ticket references only in the authorized query body", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(response({ ...metadata, items: [], nextCursor: null }));
+  await f.client.loadQueue({ kind: "Order", reference: id(3) });
+  expect(JSON.parse(String(f.fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
+    kind: "List",
+    filters: {
+      orderReference: id(3),
+      ticketReference: null,
+      workItemReference: null,
+    },
+  });
+  f.fetcher.mockResolvedValue(response({ ...metadata, items: [], nextCursor: null }));
+  await f.client.loadQueue({ kind: "Ticket", reference: id(2) });
+  expect(JSON.parse(String(f.fetcher.mock.calls[1]?.[1]?.body))).toMatchObject({
+    filters: { orderReference: null, ticketReference: id(2) },
+  });
+  await expect(
+    f.client.loadQueue({ kind: "Order", reference: "not-a-reference" }),
+  ).rejects.toThrow();
+  expect(f.fetcher).toHaveBeenCalledTimes(2);
+});
+it("reads matching detail and rejects mismatched reference", async () => {
+  const f = setup();
+  f.fetcher.mockImplementation(async () => response({ ...metadata, item: item() }));
+  const detail = parseKitchenWorkItemDetailView(await f.client.loadWorkItem(id(1)));
+  expect(detail.item.displayName).toBe("Synthetic rice");
+  expect(detail.item.selectedOptions).toEqual([{ displayName: "Extra mushrooms", quantity: 2 }]);
+  expect(JSON.stringify(detail.item)).not.toContain(id(40));
+  expect(detail.projectedAt).toBe(metadata.projectedAt);
+  expect(detail.operatorStatus).toBe("Unverified");
+  await expect(f.client.loadWorkItem(id(9))).rejects.toMatchObject({ code: "Unavailable" });
+});
+it("combines only pages from the same generation", async () => {
+  const f = setup();
+  const cursor = {
+    projectionGenerationReference: id(6),
+    afterCreatedAt: at,
+    afterWorkItemReference: id(1),
+  };
+  f.fetcher
+    .mockResolvedValueOnce(response({ ...metadata, items: [item()], nextCursor: cursor }))
+    .mockResolvedValueOnce(response({ ...metadata, items: [item(10)], nextCursor: null }));
+  expect(parseKitchenBoardView(await f.client.loadQueue()).items.length).toBe(2);
+  f.fetcher.mockReset();
+  f.fetcher.mockImplementation(async (_url, init) =>
+    JSON.parse(String(init?.body)).cursor === null
+      ? response({ ...metadata, items: [item()], nextCursor: cursor })
+      : response({
+          ...metadata,
+          projectionGenerationReference: id(99),
+          items: [item(10)],
+          nextCursor: null,
+        }),
+  );
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Conflict" });
+  // Re-read from the first page a bounded number of times, never a loop.
+  expect(f.fetcher).toHaveBeenCalledTimes(6);
+});
+it("re-reads the whole queue at once when a kitchen step lands between two pages", async () => {
+  const f = setup();
+  const cursor = (generation: number) => ({
+    projectionGenerationReference: id(generation),
+    afterCreatedAt: at,
+    afterWorkItemReference: id(1),
+  });
+  f.fetcher
+    // Page 1 of generation 6, then a step publishes generation 7: page 2 is refused (409).
+    .mockResolvedValueOnce(response({ ...metadata, items: [item()], nextCursor: cursor(6) }))
+    .mockResolvedValueOnce(response({ private: "not shown" }, 409))
+    // The fresh read starts from the first page of generation 7.
+    .mockResolvedValueOnce(
+      response({
+        ...metadata,
+        projectionGenerationReference: id(7),
+        items: [{ ...item(), acceptedAt: at, workItemVersion: "2" }],
+        nextCursor: cursor(7),
+      }),
+    )
+    .mockResolvedValueOnce(
+      response({
+        ...metadata,
+        projectionGenerationReference: id(7),
+        items: [item(10)],
+        nextCursor: null,
+      }),
+    );
+  const view = parseKitchenBoardView(await f.client.loadQueue());
+  expect(view.items.map((entry) => entry.execution?.acceptedAt ?? null)).toEqual([at, null]);
+  expect(f.fetcher).toHaveBeenCalledTimes(4);
+  const bodies = f.fetcher.mock.calls.map((call) => JSON.parse(String(call[1]?.body)));
+  expect(bodies[2].cursor).toBeNull();
+  expect(bodies[3].cursor.projectionGenerationReference).toBe(id(7));
+});
+it.each([
+  [403, "PermissionDenied"],
+  [404, "NotFound"],
+  [409, "Conflict"],
+  [503, "Unavailable"],
+] as const)("maps status %s without exposing response details", async (status, code) => {
+  const f = setup();
+  f.fetcher.mockImplementation(async () => response({ private: "not shown" }, status));
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code });
+});
+it("rejects unsafe versions, repeated rows, missing cache policy and incomplete coverage", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValueOnce(
+    response({
+      ...metadata,
+      items: [{ ...item(), ticketAggregateVersion: 9007199254740992 }],
+      nextCursor: null,
+    }),
+  );
+  await expect(f.client.loadQueue()).rejects.toThrow();
+  f.fetcher.mockResolvedValueOnce(
+    response({ ...metadata, items: [item(), item()], nextCursor: null }),
+  );
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
+  f.fetcher.mockResolvedValueOnce(
+    new Response("{}", { headers: { "Content-Type": "application/json" } }),
+  );
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
+  f.fetcher.mockResolvedValueOnce(
+    response({ ...metadata, partial: true, items: [], nextCursor: null }),
+  );
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
+});
+it("fails closed when the projection's modifier snapshot is missing or malformed", async () => {
+  const f = setup();
+  const missing = { ...item() };
+  Reflect.deleteProperty(missing, "selectedOptions");
+  f.fetcher.mockResolvedValueOnce(response({ ...metadata, items: [missing], nextCursor: null }));
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
+  f.fetcher.mockResolvedValueOnce(
+    response({
+      ...metadata,
+      items: [
+        {
+          ...item(),
+          selectedOptions: [
+            {
+              optionReference: id(40),
+              quantity: 0,
+              localizedNames: { "en-CA": "Extra mushrooms" },
+            },
+          ],
+        },
+      ],
+      nextCursor: null,
+    }),
+  );
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
+});
+it("treats failed network reads as offline and never replays automatically", async () => {
+  const f = setup();
+  f.fetcher.mockRejectedValue(new TypeError("network"));
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Offline" });
+  expect(f.fetcher).toHaveBeenCalledTimes(1);
+});
+
+it("bounds reads instead of silently truncating a larger queue", async () => {
+  const f = setup();
+  let page = 10;
+  f.fetcher.mockImplementation(async () => {
+    const current = page++;
+    return response({
+      ...metadata,
+      items: [item(current)],
+      nextCursor: {
+        projectionGenerationReference: id(6),
+        afterCreatedAt: at,
+        afterWorkItemReference: id(current),
+      },
+    });
+  });
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
+  expect(f.fetcher).toHaveBeenCalledTimes(4);
+});
+
+it("rejects a response for a different selected Store", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(
+    response({ ...metadata, storeReference: id(98), items: [item()], nextCursor: null }),
+  );
+  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "PermissionDenied" });
+});
+it("WP-2423 Q3: groups the menu's declared allergens and fails closed on malformed ones", async () => {
+  const f = setup();
+  const declared = {
+    ...item(),
+    allergens: {
+      status: "Declared",
+      items: [
+        { code: "MILK", name: "Milk", classification: "Contains" },
+        { code: "SESAME", name: "Sesame", classification: "CrossContactPossible" },
+      ],
+      forChoices: true,
+    },
+  };
+  f.fetcher.mockResolvedValueOnce(response({ ...metadata, items: [declared], nextCursor: null }));
+  const view = parseKitchenBoardView(await f.client.loadQueue());
+  // WP-2423 ⑪: forChoices — the disclosure is for exactly the options chosen on this item.
+  expect(view.items[0]?.allergens).toEqual({
+    status: "Declared",
+    contains: ["Milk"],
+    mayContain: ["Sesame"],
+    forChoices: true,
+  });
+  for (const allergens of [
+    undefined,
+    { status: "Declared", items: [] },
+    { status: "Declared", items: [], forChoices: "yes" },
+    {
+      status: "Declared",
+      items: [{ code: "MILK", name: "Milk", classification: "Unverified" }],
+      forChoices: false,
+    },
+    {
+      status: "Declared",
+      items: [{ code: "MILK", name: "", classification: "Contains" }],
+      forChoices: false,
+    },
+    { status: "Unavailable", items: [] },
+    { status: "AllergenFree" },
+  ]) {
+    f.fetcher.mockResolvedValueOnce(
+      response({ ...metadata, items: [{ ...item(), allergens }], nextCursor: null }),
+    );
+    await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
+  }
+});
+it("DEC-KITCHEN-STALE-TICKETS: carries each ticket's business day and whether this staff member may close earlier days", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(
+    response({
+      ...metadata,
+      canCloseEarlierDayTickets: true,
+      items: [
+        { ...item(), businessDate: "2026-09-14" },
+        { ...item(7), businessDate: null },
+      ],
+      nextCursor: null,
+    }),
+  );
+  const view = parseKitchenBoardView(await f.client.loadQueue());
+  expect(view.items.map((entry) => entry.businessDate)).toEqual(["2026-09-14", null]);
+  expect(view.canCloseEarlierDayTickets).toBe(true);
+  f.fetcher.mockResolvedValue(
+    response({ ...metadata, items: [{ ...item(), businessDate: "Sep 14" }], nextCursor: null }),
+  );
+  await expect(f.client.loadQueue()).rejects.toThrow();
+});
+it("WP-2423 v15: carries today's orders waiting for acceptance from the first page", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(
+    response({
+      ...metadata,
+      awaitingAcceptance: [{ orderNumber: "13", orderType: "Pickup", tableLabel: null }],
+      items: [item()],
+      nextCursor: null,
+    }),
+  );
+  const view = parseKitchenBoardView(await f.client.loadQueue());
+  // A server before the refund warning sends no deadline: none is assumed.
+  expect(view.awaitingAcceptance).toEqual([
+    {
+      orderNumber: "13",
+      orderType: "Pickup",
+      tableLabel: null,
+      enteredByStaff: false,
+      acceptBy: null,
+    },
+  ]);
+  f.fetcher.mockResolvedValue(response({ ...metadata, items: [item()], nextCursor: null }));
+  expect(
+    Object.hasOwn(parseKitchenBoardView(await f.client.loadQueue()), "awaitingAcceptance"),
+  ).toBe(false);
+});
+it("Warn before timeouts: reads a paid pickup's refund deadline with one small first page", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(
+    response({
+      ...metadata,
+      awaitingAcceptance: [
+        {
+          orderNumber: "9",
+          orderType: "Pickup",
+          tableLabel: null,
+          acceptBy: "2026-10-17T13:58:00.000Z",
+        },
+        { orderNumber: "7", orderType: "DineIn", tableLabel: "T4", acceptBy: null },
+      ],
+      items: [item()],
+      nextCursor: null,
+    }),
+  );
+  expect(await f.client.loadAwaitingAcceptance()).toEqual([
+    {
+      orderNumber: "9",
+      orderType: "Pickup",
+      tableLabel: null,
+      enteredByStaff: false,
+      acceptBy: "2026-10-17T13:58:00.000Z",
+    },
+    {
+      orderNumber: "7",
+      orderType: "DineIn",
+      tableLabel: "T4",
+      enteredByStaff: false,
+      acceptBy: null,
+    },
+  ]);
+  const body = JSON.parse(String(f.fetcher.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+  expect(body).toMatchObject({ kind: "List", cursor: null, limit: 1 });
+  // A dine-in round is never refunded for waiting: a deadline on one is refused.
+  f.fetcher.mockResolvedValue(
+    response({
+      ...metadata,
+      awaitingAcceptance: [
+        {
+          orderNumber: "7",
+          orderType: "DineIn",
+          tableLabel: "T4",
+          acceptBy: "2026-10-17T13:58:00.000Z",
+        },
+      ],
+      items: [],
+      nextCursor: null,
+    }),
+  );
+  await expect(f.client.loadAwaitingAcceptance()).rejects.toThrow();
+});

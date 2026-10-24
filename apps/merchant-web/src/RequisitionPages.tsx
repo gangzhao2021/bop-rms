@@ -1,4 +1,4 @@
-import { StatePanel } from "@bop-rms/ui";
+import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
@@ -47,6 +47,93 @@ export function RequisitionState({
     <StatePanel heading={item[0]} tone={item[2]} status>
       <p>{item[1]}</p>
     </StatePanel>
+  );
+}
+
+function RequisitionUnavailable() {
+  return (
+    <AppFrame
+      className="purchase-order-unavailable-shell"
+      title="Purchase requisitions"
+      description="Procurement · Brand scope unavailable"
+    >
+      <div className="purchase-order-unavailable requisition-unavailable">
+        <p className="bop-eyebrow">PROC-REQUISITION-LIST · PHASE 3</p>
+        <h2>Purchase Requisition workspace</h2>
+        <section
+          className="purchase-order-source-boundary"
+          role="status"
+          aria-label="Requisition projection unavailable"
+        >
+          <h3>Phase 3 · Requisition projection unavailable</h3>
+          <p>
+            No authorized Requisition projection is connected. No requester, Store, need, estimate,
+            approval or allocation facts are shown.
+          </p>
+        </section>
+        <h2>Request, approval and allocation</h2>
+        <section
+          aria-label="Request, approval and allocation status"
+          className="purchase-order-status-grid"
+        >
+          {["Request status", "Approval status", "PO allocation"].map((label) => (
+            <article className="purchase-order-status-card" key={label}>
+              <p>{label}</p>
+              <strong>Unavailable</strong>
+              <small>Authorized source not connected</small>
+            </article>
+          ))}
+        </section>
+        <h2>Search and filters</h2>
+        <fieldset className="purchase-order-filter-panel" aria-label="Search and filters" disabled>
+          <p>Unavailable until the scoped Requisition projection is connected.</p>
+          <label>
+            Reference / Item
+            <input
+              aria-label="Requisition reference or Item filter unavailable"
+              placeholder="Unavailable"
+            />
+          </label>
+          <label>
+            Status / Store / Requester
+            <select
+              aria-label="Requisition status, Store or Requester filters unavailable"
+              defaultValue=""
+            >
+              <option value="">Unavailable</option>
+            </select>
+          </label>
+          <label>
+            Urgency / Unallocated / Required date
+            <select
+              aria-label="Requisition urgency, allocation or date filters unavailable"
+              defaultValue=""
+            >
+              <option value="">Unavailable</option>
+            </select>
+          </label>
+        </fieldset>
+        <section className="purchase-order-empty-panel" aria-labelledby="requisition-empty-title">
+          <h3 id="requisition-empty-title">Purchase requisitions unavailable</h3>
+          <p>
+            No authorized Requisition rows are available. Request lines, estimate, approval and
+            allocation remain unavailable.
+          </p>
+        </section>
+        <section className="purchase-order-fields-panel" aria-labelledby="requisition-fields-title">
+          <h3 id="requisition-fields-title">
+            Registered list fields when the authorized source is available
+          </h3>
+          <p>
+            Reference · Requesting Store/entity · Status · Urgency · Requester/approver · Amount by
+            permission · Allocation
+          </p>
+        </section>
+        <p className="purchase-order-ownership-note">
+          Approval is internal work only. Only explicit PO Issue creates a Supplier commitment.
+        </p>
+      </div>
+    </AppFrame>
   );
 }
 export function RequisitionList({ view }: { readonly view: RequisitionView }) {
@@ -260,6 +347,8 @@ function Loader({
     ) : (
       <RequisitionDetail view={state.view} />
     )
+  ) : state.kind === "Unavailable" ? (
+    <RequisitionUnavailable />
   ) : (
     <RequisitionState state={state.kind} />
   );

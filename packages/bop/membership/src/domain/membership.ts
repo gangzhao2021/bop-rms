@@ -1,4 +1,10 @@
-import { createIdentityActor, type ActorReference, type IdentityActor } from "@bop/identity";
+import {
+  createIdentityActor,
+  parseCurrentWorkforceAccount,
+  type CurrentWorkforceAccount,
+  type ActorReference,
+  type IdentityActor,
+} from "@bop/identity";
 import { createStore, type BrandReference, type Store, type StoreReference } from "@bop/tenant";
 
 export const membershipErrorCodes = [
@@ -210,6 +216,62 @@ export interface StoreAssignment {
 }
 
 export function createMembership(value: unknown, actor: IdentityActor): Membership {
+  return membership(value, (expected) => assertActor(actor, expected));
+}
+/** A named reference in an independently approved enrollment is not an
+ * authenticated Actor. This constructor creates only the inert first Pending
+ * revision; the owning writer must hold the actual approval and relationship. */
+export function createApprovedPendingWorkforceMembership(
+  value: unknown,
+  approvedActorReference: unknown,
+): Membership {
+  const named = uuid(approvedActorReference, "MEMBERSHIP_ACTOR_INVALID") as ActorReference;
+  const result = membership(value, (expected) => {
+    if (expected !== named) throw new MembershipContractError("MEMBERSHIP_ACTOR_INVALID");
+    return named;
+  });
+  if (
+    result.lifecycle !== "PendingActivation" ||
+    result.version !== 1 ||
+    result.workforceRelationshipReference === null ||
+    result.effectiveUntil === null ||
+    result.createdAt !== result.updatedAt
+  )
+    throw new MembershipContractError("MEMBERSHIP_SHAPE_INVALID");
+  return result;
+}
+/** Account-based admission only for the one initial Active revision. General
+ * authenticated lifecycle operations continue through createMembership. */
+export function createInitialBrandMembership(
+  value: unknown,
+  accountInput: CurrentWorkforceAccount,
+  originalObservedAtInput: string,
+): Membership {
+  const account = parseCurrentWorkforceAccount(accountInput),
+    originalObservedAt = parseMembershipInstant(originalObservedAtInput);
+  if (originalObservedAt.startsWith("0000-") || String(account.observedAt) < originalObservedAt)
+    throw new MembershipContractError("MEMBERSHIP_ACTOR_INVALID");
+  const result = membership(value, (expected) => {
+    if (account.actorReference !== expected)
+      throw new MembershipContractError("MEMBERSHIP_ACTOR_INVALID");
+    return account.actorReference;
+  });
+  if (
+    result.lifecycle !== "Active" ||
+    result.version !== 1 ||
+    result.createdAt !== originalObservedAt ||
+    result.updatedAt !== originalObservedAt ||
+    result.effectiveFrom !== originalObservedAt ||
+    result.effectiveUntil === null ||
+    result.effectiveUntil <= originalObservedAt
+  )
+    throw new MembershipContractError("MEMBERSHIP_SHAPE_INVALID");
+  return result;
+}
+function membership(
+  value: unknown,
+  actorReference: (expected: unknown) => ActorReference,
+): Membership {
   const r = closed(
     value,
     [
@@ -244,7 +306,7 @@ export function createMembership(value: unknown, actor: IdentityActor): Membersh
     throw new MembershipContractError("MEMBERSHIP_SHAPE_INVALID");
   return Object.freeze({
     membershipReference: parseMembershipReference(r.membershipReference),
-    actorReference: assertActor(actor, r.actorReference),
+    actorReference: actorReference(r.actorReference),
     brandReference: uuid(r.brandReference, "MEMBERSHIP_SHAPE_INVALID") as BrandReference,
     workforceRelationshipReference: relationship,
     lifecycle,

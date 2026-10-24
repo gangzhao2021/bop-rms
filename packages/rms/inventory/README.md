@@ -1,5 +1,9 @@
 # `inventory`
 
+## Current persistence scope
+
+The [accepted Inventory addendum](../../../docs/adr/ADR-0031-migration-catalog-namespace-bootstrap-ownership.md#accepted-inventory-namespace-addendum--2026-09-11) authorizes namespace 1900 / `rms_inventory` for the scoped pilot persistence. The current [manifest](./src/module.manifest.ts) and [WP-2402](../../../docs/spec/work-packages/WP-2402.md) identify implemented owner adapters and recorded reservation/cancellation evidence. Count, transfer and full stock-workbench acceptance remain separate. The injected-port descriptions below retain the original component WP's scope; they no longer assert that the entire module lacks a schema.
+
 ## Identity and responsibility
 
 - Module: `@rms/inventory`; RMS Inventory Domain; WP-2120–2135; Inventory Engineering Owner.
@@ -37,10 +41,7 @@ Receipt, Event and Audit to one atomic repository commit. Corrections append com
 
 Inventory Item is the configuration aggregate; Stock Ledger remains the quantity source of truth.
 Quantities use exact signed decimal strings plus Unit and conversion snapshot, never binary floating
-point. All writes authorize before reads and use injected Ledger / idempotency / Audit ports. No
-schema, migration, Provider, external service, customer PII, health data, secret, opening balance or
-live Store fact is implemented here. Count persistence, snapshot freezing and aggregate + Ledger
-posting remain atomic injected ports because Section 50 assigns no Inventory schema.
+point. All writes authorize before reads and use injected Ledger / idempotency / Audit ports. The original component slice creates no schema, migration, Provider, external service, customer PII, health data, secret, opening balance or live Store fact. Its Count/Receipt ports require atomic commit; later accepted scoped owner persistence is described above. Section 50's original Inventory namespace omission has been superseded by the accepted addendum.
 
 ## Verification
 

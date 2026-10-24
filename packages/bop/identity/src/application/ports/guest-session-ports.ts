@@ -8,6 +8,7 @@ import type {
   GuestSelectorHash,
   GuestSession,
   GuestSessionRecord,
+  GuestSessionReference,
   GuestSessionRevocationReason,
 } from "../../contracts/guest-session.js";
 import type { CanonicalInstant } from "../../contracts/identity-actor.js";
@@ -22,6 +23,8 @@ export interface GuestEntryAdmissionPort {
 
 export interface GuestDiningAdmissionPort {
   consume(command: {
+    /** Exact current ContextOnly Guest whose Dining Join issued the admission. */
+    readonly guestSessionReference: GuestSessionReference;
     readonly admissionReference: GuestDiningAdmissionReference;
     readonly operationReference: GuestOperationReference;
     readonly requestedAt: CanonicalInstant;
@@ -34,6 +37,8 @@ export interface GuestSessionBindingPort {
 
 export interface GuestSessionCredentialPort {
   generateCredential(purpose: "Session" | "Csrf"): GuestRawCredential;
+  /** Server-only, purpose-separated CSRF recovery; never derived from stored selectors. */
+  deriveForegroundCsrf?(sessionCredential: GuestRawCredential): GuestRawCredential;
   generateSessionReference(): string;
   hashCredential(purpose: "Session" | "Csrf", credential: GuestRawCredential): GuestSelectorHash;
   hashOperationIntent(intent: string): GuestSelectorHash;

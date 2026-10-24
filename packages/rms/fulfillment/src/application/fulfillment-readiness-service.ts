@@ -139,7 +139,7 @@ function digest(ports: FulfillmentReadinessPorts, value: string): ReadinessDiges
   }
 }
 
-function semanticBinding(effect: FulfillmentReadyEffect): string {
+export function createFulfillmentReadySemanticBinding(effect: FulfillmentReadyEffect): string {
   return canonicalReadinessValue({
     fulfillmentReference: effect.result.fulfillmentReference,
     fulfillmentItemReference: effect.result.fulfillmentItemReference,
@@ -224,7 +224,10 @@ function verifyEventEffect(
     ) !== effect.effectDigest
   )
     return dependency();
-  if (digest(ports, semanticBinding(effect)) !== effect.operation.semanticBindingDigest)
+  if (
+    digest(ports, createFulfillmentReadySemanticBinding(effect)) !==
+    effect.operation.semanticBindingDigest
+  )
     return dependency();
   if (
     effect.operation.brandReference !== sourceEvent.tenantId ||

@@ -1,9 +1,11 @@
+import { CartError, CartReplacementPendingError } from "@rms/ordering";
 import { createServer, type Server } from "node:http";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import {
   CustomerCartHandler,
   type CustomerCartPort,
+  type CustomerCartReplacementPort,
   type CustomerCartPortResult,
   type CustomerCartView,
 } from "./customer-cart.js";
@@ -66,33 +68,39 @@ function view(overrides: Partial<CustomerCartView["cart"]> = {}): CustomerCartVi
 class FakePort implements CustomerCartPort {
   result: CustomerCartPortResult = { status: "Found", view: view() };
   calls: { name: string; input: unknown }[] = [];
+  displayLocales: (string | null | undefined)[] = [];
 
-  private called(name: string, input: unknown) {
+  private called(name: string, input: unknown, displayLocale?: string | null) {
     this.calls.push({ name, input });
+    this.displayLocales.push(displayLocale);
     return Promise.resolve(this.result);
   }
 
-  createCart(input: Parameters<CustomerCartPort["createCart"]>[0]) {
-    return this.called("create", input);
+  createCart(input: Parameters<CustomerCartPort["createCart"]>[0], displayLocale?: string | null) {
+    return this.called("create", input, displayLocale);
   }
-  getCurrentCart(input: Parameters<CustomerCartPort["getCurrentCart"]>[0]) {
-    return this.called("current", input);
+  getCurrentCart(
+    input: Parameters<CustomerCartPort["getCurrentCart"]>[0],
+    displayLocale?: string | null,
+  ) {
+    return this.called("current", input, displayLocale);
   }
-  getCart(input: Parameters<CustomerCartPort["getCart"]>[0]) {
-    return this.called("read", input);
+  getCart(input: Parameters<CustomerCartPort["getCart"]>[0], displayLocale?: string | null) {
+    return this.called("read", input, displayLocale);
   }
-  addItem(input: Parameters<CustomerCartPort["addItem"]>[0]) {
-    return this.called("add", input);
+  addItem(input: Parameters<CustomerCartPort["addItem"]>[0], displayLocale?: string | null) {
+    return this.called("add", input, displayLocale);
   }
-  updateItem(input: Parameters<CustomerCartPort["updateItem"]>[0]) {
-    return this.called("update", input);
+  updateItem(input: Parameters<CustomerCartPort["updateItem"]>[0], displayLocale?: string | null) {
+    return this.called("update", input, displayLocale);
   }
-  removeItem(input: Parameters<CustomerCartPort["removeItem"]>[0]) {
-    return this.called("remove", input);
+  removeItem(input: Parameters<CustomerCartPort["removeItem"]>[0], displayLocale?: string | null) {
+    return this.called("remove", input, displayLocale);
   }
 }
 
 let port: FakePort;
+let replacement: CustomerCartReplacementPort | undefined;
 
 function headers(extra: Record<string, string> = {}) {
   return {
@@ -108,7 +116,12 @@ function headers(extra: Record<string, string> = {}) {
 }
 
 async function request(path: string, init?: RequestInit) {
-  const handler = new CustomerCartHandler({ allowedOrigin: origin, now: () => at, port });
+  const handler = new CustomerCartHandler({
+    allowedOrigin: origin,
+    now: () => at,
+    port,
+    ...(replacement === undefined ? {} : { replacement }),
+  });
   const server = createServer(createApp({ customerCart: handler }));
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -119,6 +132,7 @@ async function request(path: string, init?: RequestInit) {
 
 beforeEach(() => {
   port = new FakePort();
+  replacement = undefined;
 });
 
 afterEach(async () => {
@@ -149,6 +163,27 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
       name: "current",
       input: { guestCredential: guest, requestedAt: at },
     });
+  });
+
+  it("Owner 2026-10-23: passes the guest's chosen language for item names on reads and edits", async () => {
+    await request("/bff/customer/cart?locale=zh-Hans-CA", { headers: headers() });
+    await request(`/api/v1/carts/${id(1)}?locale=zh-Hans-CA`, { headers: headers() });
+    await request(`/api/v1/carts/${id(1)}/items/${id(2)}?locale=zh-Hans-CA`, {
+      method: "DELETE",
+      headers: headers({ "if-match": '"3"' }),
+    });
+    await request("/bff/customer/cart", { headers: headers() });
+    expect(port.calls.map((call) => call.name)).toEqual(["current", "read", "remove", "current"]);
+    expect(port.displayLocales).toEqual(["zh-Hans-CA", "zh-Hans-CA", "zh-Hans-CA", undefined]);
+    port.calls = [];
+    for (const path of [
+      "/bff/customer/cart?locale=zh_CN",
+      "/bff/customer/cart?locale=a&locale=b",
+    ]) {
+      const response = await request(path, { headers: headers() });
+      expect(response.status, path).toBe(400);
+    }
+    expect(port.calls).toEqual([]);
   });
 
   it("creates or resumes one Cart from Cookie, CSRF and Idempotency context only", async () => {
@@ -270,7 +305,6 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
 
   it.each([
     [{ status: "SessionExpired" }, 401, "cart_session_expired"],
-    [{ status: "NotFound" }, 404, "cart_not_found"],
     [{ status: "IdempotencyConflict" }, 409, "cart_idempotency_conflict"],
     [{ status: "LifecycleExpired" }, 409, "cart_expired"],
     [{ status: "LifecycleAbandoned" }, 409, "cart_abandoned"],
@@ -281,12 +315,52 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
       "cart_selection_invalid",
     ],
     [{ status: "RateLimited", retryAfterSeconds: 7 }, 429, "cart_rate_limited"],
+    // WP-2423: briefly unavailable (table Cart expiry still being recorded) with a retry hint.
+    [{ status: "RetryLater", retryAfterSeconds: 5 }, 503, "cart_service_unavailable"],
+    [{ status: "OrderProcessing", retryAfterSeconds: 10 }, 409, "cart_order_processing"],
+    [{ status: "OrderProcessing", retryAfterSeconds: null }, 409, "cart_order_processing"],
+    // DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest is paying; wait until their hold ends.
+    [
+      { status: "CheckoutInProgress", heldUntil: "2026-08-02T20:04:30.000Z" },
+      409,
+      "cart_checkout_in_progress",
+    ],
   ] as const)("maps safe application outcome %o", async (result, status, errorCode) => {
     port.result = result;
     const response = await request("/bff/customer/cart", { headers: headers() });
     expect(response.status).toBe(status);
     expect(await response.json()).toMatchObject({ error: { code: errorCode } });
     if (status === 429) expect(response.headers.get("retry-after")).toBe("7");
+    if (status === 503) expect(response.headers.get("retry-after")).toBe("5");
+    if (errorCode === "cart_checkout_in_progress")
+      expect(response.headers.get("retry-after")).toBe("270");
+    if (errorCode === "cart_order_processing")
+      expect(response.headers.get("retry-after")).toBe(
+        "retryAfterSeconds" in result && result.retryAfterSeconds !== null ? "10" : null,
+      );
+  });
+
+  it("WP-2423: tells the guest how many of an item the stock can make (ITEM_SHORT)", async () => {
+    port.result = { status: "SelectionInvalid", issueCodes: ["ITEM_SHORT"], available: 2 };
+    const response = await request("/bff/customer/cart", { headers: headers() });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: { code: "cart_selection_invalid", issueCodes: ["ITEM_SHORT"], available: 2 },
+    });
+    port.result = { status: "SelectionInvalid", issueCodes: ["ITEM_SHORT"], available: -1 };
+    expect((await request("/bff/customer/cart", { headers: headers() })).status).toBe(503);
+  });
+
+  it("WP-2423: answers a guest without an active Cart with an explicit empty Cart", async () => {
+    port.result = { status: "NotFound" };
+    const response = await request("/bff/customer/cart", { headers: headers() });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(await response.json()).toEqual({ schemaVersion: 1, cart: null });
+    // A named Cart that doesn't exist is still not found.
+    const named = await request(`/api/v1/carts/${id(1)}`, { headers: headers() });
+    expect(named.status).toBe(404);
+    expect(await named.json()).toMatchObject({ error: { code: "cart_not_found" } });
   });
 
   it("maps a thrown or malformed dependency result to safe unavailable", async () => {
@@ -301,5 +375,124 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     const thrown = await request("/bff/customer/cart", { headers: headers() });
     expect(thrown.status).toBe(503);
     expect(JSON.stringify(await thrown.json())).not.toContain("private dependency detail");
+  });
+});
+
+describe("WP-2402 explicit Dining Cart replacement transport", () => {
+  const path = `/api/v1/carts/${id(1)}/replacement`;
+  const receipt = {
+    operationReference: id(20),
+    previousCartReference: id(1),
+    cartReference: id(30),
+    occurredAt: at,
+    expiresAt: "2026-08-03T20:00:00.000Z",
+  };
+  const mutation = (extra: Record<string, string> = {}, body = "{}") => ({
+    method: "POST",
+    headers: headers({ "if-match": '"3"', ...extra }),
+    body,
+  });
+  it("projects a stable historical receipt and preserves retry identity", async () => {
+    const calls: unknown[] = [];
+    replacement = {
+      replace: async (input) => {
+        calls.push(input);
+        return receipt;
+      },
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await request(path, mutation());
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ schemaVersion: 1, ...receipt });
+      expect(response.headers.get("location")).toBe(`/api/v1/carts/${id(30)}`);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("etag")).toBeNull();
+    }
+    expect(calls).toEqual(
+      Array.from({ length: 2 }, () => ({
+        sessionCredential: guest,
+        csrfCredential: csrf,
+        operationReference: id(20),
+        previousCartReference: id(1),
+        expectedCartVersion: 3,
+      })),
+    );
+    expect(port.calls).toEqual([]);
+  });
+  it.each([
+    [{ origin: "https://foreign.example.test" }, "{}", 400],
+    [{ "x-csrf-token": "bad" }, "{}", 400],
+    [{ cookie: "" }, "{}", 401],
+    [{ "if-match": 'W/"3"' }, "{}", 400],
+    [{ "idempotency-key": "bad" }, "{}", 400],
+    [{}, '{"participantReference":"injected"}', 400],
+  ] as const)(
+    "rejects invalid admission before invoking replacement %j",
+    async (extra, body, status) => {
+      let called = false;
+      replacement = {
+        replace: async () => {
+          called = true;
+          return receipt;
+        },
+      };
+      const response = await request(path, mutation(extra, body));
+      expect(response.status).toBe(status);
+      expect(called).toBe(false);
+    },
+  );
+  it("keeps unconfigured replacement unavailable", async () => {
+    expect((await request(path, mutation())).status).toBe(503);
+  });
+  it.each([
+    ["CART_REPLACEMENT_FORBIDDEN", 403],
+    ["CART_PERMISSION_DENIED", 401],
+    ["CART_VERSION_CONFLICT", 409],
+    ["CART_IDEMPOTENCY_CONFLICT", 409],
+    ["CART_LIFECYCLE_UNAVAILABLE", 409],
+    ["CART_DEPENDENCY_UNAVAILABLE", 503],
+  ] as const)("bounds owner error %s", async (code, status) => {
+    replacement = {
+      replace: async () => {
+        throw new CartError(code);
+      },
+    };
+    const response = await request(path, mutation());
+    expect(response.status).toBe(status);
+    expect(JSON.stringify(await response.json())).not.toContain(guest);
+  });
+  it("WP-2423: a replacement held back by the table's last checkout asks to retry shortly", async () => {
+    replacement = {
+      replace: async () => {
+        throw new CartReplacementPendingError(new Date(Date.parse(at) + 90_500).toISOString());
+      },
+    };
+    const response = await request(path, mutation());
+    expect(response.status).toBe(409);
+    // The actual remaining time of the bounded wait, rounded up.
+    expect(response.headers.get("retry-after")).toBe("91");
+    expect(await response.json()).toMatchObject({ error: { code: "cart_order_processing" } });
+    // A wait with no known end promises no time.
+    replacement = {
+      replace: async () => {
+        throw new CartReplacementPendingError(null);
+      },
+    };
+    const unbounded = await request(path, mutation());
+    expect(unbounded.status).toBe(409);
+    expect(unbounded.headers.get("retry-after")).toBeNull();
+    await unbounded.text();
+  });
+  it.each([
+    { ...receipt, guestSessionReference: id(40) },
+    { ...receipt, operationReference: id(99) },
+    { ...receipt, previousCartReference: id(99) },
+    { ...receipt, cartReference: id(1) },
+    { ...receipt, expiresAt: at },
+  ])("rejects malformed receipt without leaking it", async (result) => {
+    replacement = { replace: async () => result };
+    const response = await request(path, mutation());
+    expect(response.status).toBe(503);
+    expect(JSON.stringify(await response.json())).not.toContain(id(40));
   });
 });

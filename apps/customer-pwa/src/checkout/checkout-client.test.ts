@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CustomerCartClient } from "../cart/cart-client.js";
 import { CartClientError, type CartView } from "../cart/types.js";
-import { setCustomerCsrfCredential } from "../session/customer-transaction-context.js";
+import {
+  getCustomerCsrfCredential,
+  setCustomerCsrfCredential,
+} from "../session/customer-transaction-context.js";
 import {
   createCheckoutClient,
   createCheckoutController,
@@ -74,6 +77,8 @@ const publicQuote = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   setCustomerCsrfCredential(null);
   vi.unstubAllGlobals();
 });
@@ -127,7 +132,7 @@ describe("WP-1703 Checkout transport", () => {
     const client = createCheckoutClient({} as CustomerCartClient);
 
     await expect(client.quote(cart, id(9))).rejects.toMatchObject({
-      code: "cart_service_unavailable",
+      code: "network_unknown",
     });
   });
 
@@ -240,6 +245,39 @@ describe("WP-1703 Checkout state", () => {
     });
   });
 
+  it.each([
+    ["cart_checkout_in_progress", "checkout-in-progress"],
+    ["cart_order_processing", "order-processing"],
+  ] as const)(
+    "WP-2423: shows %s with its wait and prices again with a new operation on retry",
+    async (code, status) => {
+      const keys: string[] = [];
+      let fail = true;
+      const client: CheckoutClient = {
+        loadCart: async () => cart,
+        async quote(_cart, key) {
+          keys.push(key);
+          if (fail) throw new CartClientError(code, { retryAfterSeconds: 30 });
+          return quote;
+        },
+      };
+      let n = 9;
+      const controller = createCheckoutController(client, () => id(n++));
+      await controller.load();
+      await controller.quote();
+      expect(controller.getState()).toEqual({
+        status,
+        cart,
+        retryAfterSeconds: 30,
+        canRetry: true,
+      });
+      fail = false;
+      await controller.retry();
+      expect(keys).toEqual([id(9), id(10)]);
+      expect(controller.getState()).toEqual({ status: "ready", cart, quote });
+    },
+  );
+
   it("never calls or auto-replays Quote while offline", async () => {
     let calls = 0;
     const client: CheckoutClient = {
@@ -255,6 +293,683 @@ describe("WP-1703 Checkout state", () => {
     await controller.quote();
     controller.setOnline(true);
     expect(calls).toBe(0);
-    expect(controller.getState()).toMatchObject({ status: "offline" });
+    expect(controller.getState()).toMatchObject({ status: "ready", quote: null });
+  });
+});
+
+describe("bounded foreground Quote responses", () => {
+  const original = "c".repeat(43);
+  const replacement = "d".repeat(43);
+  const client = () => createCheckoutClient({} as CustomerCartClient);
+  const success = () => new Response(JSON.stringify(publicQuote), { status: 201 });
+  const error = (code: string, status: number) =>
+    new Response(
+      JSON.stringify({ schemaVersion: 1, error: { code, messageKey: "customer.quote.synthetic" } }),
+      { status },
+    );
+  function pendingResponse() {
+    let resolve: (response: Response) => void = () => undefined;
+    const promise = new Promise<Response>((yes) => {
+      resolve = yes;
+    });
+    return { promise, resolve };
+  }
+  it.each(["headers", "body"])("bounds stalled %s even when abort is ignored", async (stage) => {
+    vi.useFakeTimers();
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ cancel });
+    const fetch = vi.fn(async () =>
+      stage === "headers" ? new Promise<Response>(() => undefined) : new Response(body),
+    );
+    vi.stubGlobal("fetch", fetch);
+    setCustomerCsrfCredential(original);
+    const result = client().quote(cart, id(9));
+    const rejected = expect(result).rejects.toMatchObject({ code: "network_unknown" });
+    await vi.advanceTimersByTimeAsync(15000);
+    await rejected;
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        mode: "cors",
+        cache: "no-store",
+        credentials: "same-origin",
+        redirect: "error",
+        referrerPolicy: "no-referrer",
+      }),
+    );
+    if (stage === "body") {
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(body.locked).toBe(false);
+    }
+  });
+  it("shares one deadline across delayed headers and body", async () => {
+    vi.useFakeTimers();
+    const pending = pendingResponse();
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ cancel });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => pending.promise),
+    );
+    setCustomerCsrfCredential(original);
+    const result = client().quote(cart, id(9));
+    const rejected = expect(result).rejects.toMatchObject({ code: "network_unknown" });
+    await vi.advanceTimersByTimeAsync(14000);
+    pending.resolve(new Response(body));
+    await vi.advanceTimersByTimeAsync(1000);
+    await rejected;
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(body.locked).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("cancels a late successful body without parsing or replaying it", async () => {
+    vi.useFakeTimers();
+    const pending = pendingResponse();
+    const fetch = vi.fn(() => pending.promise);
+    vi.stubGlobal("fetch", fetch);
+    setCustomerCsrfCredential(original);
+    const result = client().quote(cart, id(9));
+    const rejected = expect(result).rejects.toMatchObject({ code: "network_unknown" });
+    await vi.advanceTimersByTimeAsync(15000);
+    await rejected;
+    const response = success();
+    const cancel = vi.spyOn(response.body as ReadableStream<Uint8Array>, "cancel");
+    pending.resolve(response);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(response.body?.locked).toBe(false);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(getCustomerCsrfCredential()).toBe(original);
+  });
+  it.each(["json", "utf8", "oversize", "interrupted", "redirect"])(
+    "keeps %s output uncertain",
+    async (mode) => {
+      const bytes =
+        mode === "oversize"
+          ? new Uint8Array(16 * 1024 * 1024 + 1)
+          : mode === "utf8"
+            ? new Uint8Array([0xc3, 0x28])
+            : new TextEncoder().encode("{");
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (mode === "interrupted") controller.error(new Error("synthetic stream failure"));
+          else {
+            controller.enqueue(bytes);
+            controller.close();
+          }
+        },
+      });
+      const response = new Response(body);
+      if (mode === "redirect") Object.defineProperty(response, "redirected", { value: true });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => response),
+      );
+      setCustomerCsrfCredential(original);
+      await expect(client().quote(cart, id(9))).rejects.toMatchObject({ code: "network_unknown" });
+      expect(body.locked).toBe(false);
+      expect(getCustomerCsrfCredential()).toBe(original);
+    },
+  );
+  it.each([
+    ["quote_version_conflict", 409, "cart_version_conflict"],
+    ["quote_idempotency_conflict", 409, "cart_idempotency_conflict"],
+    ["quote_configuration_invalid", 422, "cart_selection_invalid"],
+    ["quote_request_invalid", 400, "cart_request_invalid"],
+  ] as const)("retains matching %s rejection", async (code, status, mapped) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => error(code, status)),
+    );
+    setCustomerCsrfCredential(original);
+    await expect(client().quote(cart, id(9))).rejects.toMatchObject({ code: mapped });
+  });
+  it.each([
+    ["cart_checkout_in_progress", "120", 120],
+    ["cart_checkout_in_progress", null, null],
+    ["cart_order_processing", "45", 45],
+    ["cart_order_processing", "7200", null],
+  ] as const)(
+    "WP-2423: maps %s (Retry-After %s) to a definitive refusal with its wait",
+    async (code, header, seconds) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          async () =>
+            new Response(
+              JSON.stringify({
+                schemaVersion: 1,
+                error: { code, messageKey: "customer.cart.synthetic" },
+              }),
+              { status: 409, headers: header === null ? {} : { "retry-after": header } },
+            ),
+        ),
+      );
+      setCustomerCsrfCredential(original);
+      await expect(client().quote(cart, id(9))).rejects.toMatchObject({
+        code,
+        retryAfterSeconds: seconds,
+      });
+    },
+  );
+  it.each([
+    ["cart_checkout_in_progress", 503],
+    ["quote_version_conflict", 503],
+    ["quote_configuration_invalid", 400],
+    ["quote_service_unavailable", 503],
+    ["quote_not_found", 404],
+    ["unrecognized", 422],
+  ] as const)("keeps unmatched or unavailable %s uncertain", async (code, status) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => error(code, status)),
+    );
+    setCustomerCsrfCredential(original);
+    await expect(client().quote(cart, id(9))).rejects.toMatchObject({ code: "network_unknown" });
+  });
+  it.each(["success", "rejection", "same-value", "reset-and-reinstall"])(
+    "isolates superseded %s replies",
+    async (mode) => {
+      const pending = pendingResponse();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() => pending.promise),
+      );
+      setCustomerCsrfCredential(original);
+      const result = client().quote(cart, id(9));
+      const rejected = expect(result).rejects.toMatchObject({ code: "network_unknown" });
+      if (mode === "reset-and-reinstall") setCustomerCsrfCredential(null);
+      const next = mode === "same-value" || mode === "reset-and-reinstall" ? original : replacement;
+      setCustomerCsrfCredential(next);
+      pending.resolve(mode === "rejection" ? error("quote_version_conflict", 409) : success());
+      await rejected;
+      expect(getCustomerCsrfCredential()).toBe(next);
+    },
+  );
+  it("rejects replacement during body consumption and releases the reader", async () => {
+    vi.useFakeTimers();
+    let finish: () => void = () => undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        finish = () => {
+          controller.enqueue(new TextEncoder().encode(JSON.stringify(publicQuote)));
+          controller.close();
+        };
+      },
+    });
+    const acquire = vi.spyOn(body, "getReader");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body)),
+    );
+    setCustomerCsrfCredential(original);
+    const result = client().quote(cart, id(9));
+    const rejected = expect(result).rejects.toMatchObject({ code: "network_unknown" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(acquire).toHaveBeenCalledOnce();
+    setCustomerCsrfCredential(replacement);
+    finish();
+    await rejected;
+    expect(body.locked).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("checks the final Quote delivery boundary after body parsing", async () => {
+    const parse = JSON.parse;
+    vi.spyOn(JSON, "parse").mockImplementation((text, reviver) => {
+      const value = parse(text, reviver);
+      queueMicrotask(() =>
+        queueMicrotask(() => queueMicrotask(() => setCustomerCsrfCredential(replacement))),
+      );
+      return value;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => success()),
+    );
+    setCustomerCsrfCredential(original);
+    await expect(client().quote(cart, id(9))).rejects.toMatchObject({ code: "network_unknown" });
+    expect(getCustomerCsrfCredential()).toBe(replacement);
+  });
+  it("validates against the requested Cart version despite caller mutation", async () => {
+    const pending = pendingResponse();
+    const fetch = vi.fn(() => pending.promise);
+    vi.stubGlobal("fetch", fetch);
+    setCustomerCsrfCredential(original);
+    const mutable = { ...cart, cart: { ...cart.cart } };
+    const result = client().quote(mutable, id(9));
+    mutable.cart.version = 99;
+    mutable.cart.cartReference = id(90);
+    pending.resolve(success());
+    expect(await result).toEqual(quote);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/carts/" + id(1) + "/quote",
+      expect.objectContaining({ body: JSON.stringify({ cartVersion: 3 }) }),
+    );
+  });
+  it("keeps unknown server results retryable under the original controller key", async () => {
+    let recover = false;
+    const fetch = vi.fn(async () =>
+      recover ? success() : error("quote_service_unavailable", 503),
+    );
+    vi.stubGlobal("fetch", fetch);
+    setCustomerCsrfCredential(original);
+    const keys = vi.fn(() => id(9));
+    const controller = createCheckoutController(
+      createCheckoutClient({ loadCurrent: async () => cart } as CustomerCartClient),
+      keys,
+    );
+    await controller.load();
+    await controller.quote();
+    expect(controller.getState()).toMatchObject({ status: "outcome-unknown", canRetry: true });
+    recover = true;
+    await controller.retry();
+    expect(controller.getState()).toMatchObject({ status: "ready", quote });
+    expect(keys).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    for (const attempt of [1, 2])
+      expect(fetch).toHaveBeenNthCalledWith(
+        attempt,
+        expect.any(String),
+        expect.objectContaining({ headers: expect.objectContaining({ "idempotency-key": id(9) }) }),
+      );
+  });
+});
+
+it.each([202, 206])("does not treat HTTP%s as a completed Quote", async (status) => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify(publicQuote), { status })),
+  );
+  setCustomerCsrfCredential("c".repeat(43));
+  await expect(
+    createCheckoutClient({} as CustomerCartClient).quote(cart, id(9)),
+  ).rejects.toMatchObject({ code: "network_unknown" });
+});
+it.each([{ cartReference: "invalid" }, { version: 0 }])(
+  "rejects malformed Cart identity/version before transport",
+  async (change) => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    setCustomerCsrfCredential("c".repeat(43));
+    await expect(
+      createCheckoutClient({} as CustomerCartClient).quote(
+        { ...cart, cart: { ...cart.cart, ...change } },
+        id(9),
+      ),
+    ).rejects.toMatchObject({ code: "cart_request_invalid" });
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);
+
+describe("foreground Checkout intent continuity", () => {
+  function deferred<T>() {
+    let resolve: (value: T) => void = () => undefined;
+    const promise = new Promise<T>((yes) => {
+      resolve = yes;
+    });
+    return { promise, resolve };
+  }
+  function setup() {
+    let recover = false;
+    const loadCart = vi.fn(async () => cart);
+    const send = vi.fn<CheckoutClient["quote"]>(async () => {
+      if (!recover) throw new CartClientError("network_unknown");
+      return quote;
+    });
+    const keys = vi.fn(() => id(9));
+    const controller = createCheckoutController({ loadCart, quote: send }, keys);
+    return {
+      controller,
+      loadCart,
+      send,
+      keys,
+      recover: () => {
+        recover = true;
+      },
+    };
+  }
+  it("keeps the original Cart/version and key after unknown outcome and refresh", async () => {
+    const f = setup();
+    const initial = {
+      ...cart,
+      cart: { ...cart.cart, items: cart.cart.items.map((item) => ({ ...item })) },
+    };
+    f.loadCart.mockResolvedValueOnce(initial);
+    await f.controller.load();
+    await f.controller.quote();
+    initial.cart.version = 99;
+    const initialItem = initial.cart.items[0];
+    if (initialItem === undefined) throw new Error("synthetic item missing");
+    initialItem.quantity = 99;
+    f.loadCart.mockResolvedValue({
+      ...cart,
+      cart: { ...cart.cart, cartReference: id(90), version: 4 },
+    });
+    await f.controller.load();
+    expect(f.controller.getState()).toMatchObject({
+      status: "outcome-unknown",
+      cart: { cart: { cartReference: id(1), version: 3 } },
+    });
+    f.recover();
+    await f.controller.retry();
+    expect(f.keys).toHaveBeenCalledOnce();
+    expect(f.send).toHaveBeenCalledTimes(2);
+    for (const call of f.send.mock.calls) {
+      expect(call[0].cart.version).toBe(3);
+      expect(call[0].cart.items[0]?.quantity).toBe(1);
+      expect(Object.isFrozen(call[0].cart.items[0])).toBe(true);
+      expect(call[1]).toBe(id(9));
+    }
+  });
+  it.each([
+    "cart_version_conflict",
+    "cart_idempotency_conflict",
+    "cart_request_invalid",
+    "cart_session_expired",
+    "cart_service_unavailable",
+  ] as const)("retains unknown history after later %s", async (code) => {
+    const f = setup();
+    await f.controller.load();
+    await f.controller.quote();
+    f.send.mockRejectedValueOnce(new CartClientError(code));
+    await f.controller.retry();
+    expect(f.controller.getState()).toMatchObject({ status: "outcome-unknown", canRetry: true });
+    expect(f.loadCart).toHaveBeenCalledOnce();
+    f.recover();
+    await f.controller.retry();
+    expect(f.keys).toHaveBeenCalledOnce();
+    expect(f.controller.getState()).toMatchObject({ status: "ready", quote });
+  });
+  it("does not replace a pending Quote through a concurrent load", async () => {
+    const f = setup();
+    const gate = deferred<CheckoutQuote>();
+    f.send.mockImplementationOnce(() => gate.promise);
+    await f.controller.load();
+    const active = f.controller.quote();
+    await f.controller.load();
+    expect(f.loadCart).toHaveBeenCalledOnce();
+    expect(f.controller.getState()).toMatchObject({ status: "pending" });
+    gate.resolve(quote);
+    await active;
+    expect(f.controller.getState()).toMatchObject({ status: "ready", quote });
+  });
+  it("discards a load started before a newer Quote finishes", async () => {
+    const f = setup();
+    f.recover();
+    await f.controller.load();
+    const gate = deferred<CartView>();
+    f.loadCart.mockImplementationOnce(() => gate.promise);
+    const stale = f.controller.load();
+    await f.controller.quote();
+    gate.resolve({ ...cart, cart: { ...cart.cart, version: 8 } });
+    await stale;
+    expect(f.controller.getState()).toMatchObject({
+      status: "ready",
+      quote,
+      cart: { cart: { version: 3 } },
+    });
+  });
+  it("lets only the latest overlapping load publish", async () => {
+    const f = setup();
+    const first = deferred<CartView>();
+    const second = deferred<CartView>();
+    f.loadCart
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+    const older = f.controller.load();
+    const newer = f.controller.load();
+    second.resolve({ ...cart, cart: { ...cart.cart, version: 4 } });
+    await newer;
+    first.resolve(cart);
+    await older;
+    expect(f.controller.getState()).toMatchObject({
+      status: "ready",
+      cart: { cart: { version: 4 } },
+    });
+  });
+  it("keeps failed refresh from discarding unknown intent", async () => {
+    const f = setup();
+    await f.controller.load();
+    await f.controller.quote();
+    f.loadCart.mockRejectedValueOnce(new CartClientError("cart_session_expired"));
+    await f.controller.load();
+    expect(f.controller.getState()).toMatchObject({ status: "outcome-unknown", canRetry: true });
+    f.recover();
+    await f.controller.retry();
+    expect(f.keys).toHaveBeenCalledOnce();
+  });
+  it("blocks retry in a replacement Session context without clearing its credential", async () => {
+    const f = setup();
+    setCustomerCsrfCredential("c".repeat(43));
+    await f.controller.load();
+    await f.controller.quote();
+    setCustomerCsrfCredential("d".repeat(43));
+    await f.controller.retry();
+    expect(f.send).toHaveBeenCalledOnce();
+    expect(f.keys).toHaveBeenCalledOnce();
+    expect(f.controller.getState()).toMatchObject({
+      status: "outcome-unknown",
+      cart: null,
+      canRetry: false,
+    });
+    expect(getCustomerCsrfCredential()).toBe("d".repeat(43));
+  });
+  it("does not publish a loaded Cart after its Session context changes", async () => {
+    const f = setup();
+    const gate = deferred<CartView>();
+    f.loadCart.mockImplementationOnce(() => gate.promise);
+    const load = f.controller.load();
+    setCustomerCsrfCredential("d".repeat(43));
+    gate.resolve(cart);
+    await load;
+    expect(f.controller.getState()).toMatchObject({ status: "unavailable", cart: null });
+  });
+  it("retains a pending plan across offline/reconnect without automatic replay", async () => {
+    const f = setup();
+    await f.controller.load();
+    await f.controller.quote();
+    f.controller.setOnline(false);
+    await f.controller.retry();
+    expect(f.controller.getState()).toMatchObject({ status: "offline", canRetry: true });
+    expect(f.send).toHaveBeenCalledOnce();
+    f.controller.setOnline(true);
+    expect(f.send).toHaveBeenCalledOnce();
+    expect(f.controller.getState()).toMatchObject({ status: "outcome-unknown", canRetry: true });
+    f.recover();
+    await f.controller.retry();
+    expect(f.keys).toHaveBeenCalledOnce();
+  });
+  it("allocates no key offline and a retry with no pending plan sends nothing", async () => {
+    const f = setup();
+    await f.controller.load();
+    f.controller.setOnline(false);
+    await f.controller.quote();
+    expect(f.keys).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled();
+    f.controller.setOnline(true);
+    await f.controller.retry();
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.controller.getState()).toMatchObject({ status: "ready", quote: null });
+  });
+  it("does not infer an empty Cart after an interrupted initial load", async () => {
+    const f = setup();
+    const gate = deferred<CartView>();
+    f.loadCart.mockImplementationOnce(() => gate.promise);
+    const active = f.controller.load();
+    f.controller.setOnline(false);
+    f.controller.setOnline(true);
+    gate.resolve(cart);
+    await active;
+    expect(f.controller.getState()).toMatchObject({ status: "unavailable", cart: null });
+  });
+  it("installs the command flight before notifying reentrant subscribers", async () => {
+    const f = setup();
+    const gate = deferred<CheckoutQuote>();
+    f.send.mockImplementationOnce(() => gate.promise);
+    await f.controller.load();
+    let nested: Promise<void> | undefined;
+    const unsubscribe = f.controller.subscribe(() => {
+      if (f.controller.getState().status === "pending") nested = f.controller.quote();
+    });
+    const active = f.controller.quote();
+    expect(nested).toBe(active);
+    expect(f.send).toHaveBeenCalledOnce();
+    gate.resolve(quote);
+    await active;
+    unsubscribe();
+  });
+  it("keeps an in-flight confirmed result read-only after going offline", async () => {
+    const f = setup();
+    const gate = deferred<CheckoutQuote>();
+    f.send.mockImplementationOnce(() => gate.promise);
+    await f.controller.load();
+    const active = f.controller.quote();
+    f.controller.setOnline(false);
+    gate.resolve(quote);
+    await active;
+    expect(f.controller.getState()).toMatchObject({ status: "offline", canRetry: false });
+    f.controller.setOnline(true);
+    expect(f.controller.getState()).toMatchObject({ status: "ready", quote: null });
+    expect(f.send).toHaveBeenCalledOnce();
+  });
+  it("encodes the actual creation instant in a default UUIDv7 operation", async () => {
+    vi.useFakeTimers();
+    const instant = Date.parse("2026-09-09T12:00:00.000Z");
+    vi.setSystemTime(instant);
+    const send = vi.fn<CheckoutClient["quote"]>(async () => quote);
+    const controller = createCheckoutController({ loadCart: async () => cart, quote: send });
+    await controller.load();
+    await controller.quote();
+    expect(send).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+      ),
+    );
+    const recorded = send.mock.calls[0]?.[1] ?? "";
+    expect(parseInt(recorded.replaceAll("-", "").slice(0, 12), 16)).toBe(instant);
+  });
+});
+
+describe("durable original Quote expiry receipt", () => {
+  const expired = (
+    operationReference = id(90),
+    cartReference = cart.cart.cartReference,
+    cartVersion = cart.cart.version,
+  ) => ({
+    schemaVersion: 1,
+    error: { code: "quote_operation_expired", messageKey: "customer.quote.operation_expired" },
+    resolution: { operationReference, cartReference, cartVersion },
+  });
+  it("accepts only the complete matching receipt under current Session context", async () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify(expired()), { status: 410 })),
+    );
+    await expect(
+      createCheckoutClient({} as CustomerCartClient).quote(cart, id(90)),
+    ).rejects.toMatchObject({ code: "quote_operation_expired" });
+  });
+  it.each(["operation", "cart", "version", "extra", "code", "status", "body"])(
+    "retains uncertainty for %s mismatch",
+    async (kind) => {
+      setCustomerCsrfCredential("c".repeat(43));
+      const body =
+        kind === "operation"
+          ? expired(id(99))
+          : kind === "cart"
+            ? expired(id(90), id(99))
+            : kind === "version"
+              ? expired(id(90), cart.cart.cartReference, 4)
+              : kind === "extra"
+                ? { ...expired(), extra: true }
+                : kind === "code"
+                  ? {
+                      ...expired(),
+                      error: {
+                        code: "quote_configuration_invalid",
+                        messageKey: "customer.quote.configuration_invalid",
+                      },
+                    }
+                  : expired();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(kind === "body" ? "{" : JSON.stringify(body), {
+            status: kind === "status" ? 422 : 410,
+          }),
+        ),
+      );
+      await expect(
+        createCheckoutClient({} as CustomerCartClient).quote(cart, id(90)),
+      ).rejects.toMatchObject({ code: "network_unknown" });
+    },
+  );
+  it("releases the original unknown key only after terminal proof and refreshes before explicit pricing", async () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    const newer = { ...cart, cart: { ...cart.cart, version: 4 } };
+    const loadCart = vi.fn().mockResolvedValueOnce(cart).mockResolvedValue(newer);
+    const quoteCall = vi
+      .fn()
+      .mockRejectedValueOnce(new CartClientError("network_unknown"))
+      .mockRejectedValueOnce(new CartClientError("quote_operation_expired"))
+      .mockResolvedValue({ ...quote, cartVersion: 4 });
+    const keys = vi.fn().mockReturnValueOnce(id(90)).mockReturnValue(id(91));
+    const controller = createCheckoutController({ loadCart, quote: quoteCall }, keys);
+    await controller.load();
+    await controller.quote();
+    await controller.retry();
+    expect(controller.getState()).toMatchObject({
+      status: "quote-expired",
+      cart: newer,
+      canRetry: false,
+    });
+    expect(keys).toHaveBeenCalledOnce();
+    expect(quoteCall).toHaveBeenCalledTimes(2);
+    expect(quoteCall.mock.calls[0]?.[1]).toBe(id(90));
+    expect(quoteCall.mock.calls[1]?.[1]).toBe(id(90));
+    await controller.retry();
+    expect(quoteCall).toHaveBeenCalledTimes(2);
+    await controller.quote();
+    expect(quoteCall.mock.calls[2]).toEqual([newer, id(91)]);
+    expect(controller.getState().status).toBe("ready");
+  });
+  it("keeps a late expiry receipt from a replaced Session unknown", async () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    const quoteCall = vi.fn(async () => {
+      setCustomerCsrfCredential("d".repeat(43));
+      throw new CartClientError("quote_operation_expired");
+    });
+    const loadCart = vi.fn(async () => cart);
+    const controller = createCheckoutController({ loadCart, quote: quoteCall }, () => id(90));
+    await controller.load();
+    await controller.quote();
+    expect(controller.getState()).toMatchObject({
+      status: "outcome-unknown",
+      cart: null,
+      canRetry: false,
+    });
+    expect(loadCart).toHaveBeenCalledOnce();
+  });
+  it("does not replay a released operation after Cart refresh fails", async () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    const loadCart = vi
+      .fn()
+      .mockResolvedValueOnce(cart)
+      .mockRejectedValue(new Error("synthetic unavailable read"));
+    const quoteCall = vi.fn().mockRejectedValue(new CartClientError("quote_operation_expired"));
+    const controller = createCheckoutController({ loadCart, quote: quoteCall }, () => id(90));
+    await controller.load();
+    await controller.quote();
+    await controller.retry();
+    expect(controller.getState()).toMatchObject({
+      status: "unavailable",
+      cart: null,
+      canRetry: false,
+    });
+    expect(quoteCall).toHaveBeenCalledOnce();
   });
 });

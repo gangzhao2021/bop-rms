@@ -4,8 +4,7 @@ import { complianceDashboardFixture } from "./compliance-dashboard.fixtures.js";
 import type { ComplianceDashboardClient } from "./compliance-dashboard-page.js";
 import { KITCHEN_REFS, kitchenBoardFixture, kitchenItemFixture } from "./kitchen-board.fixtures.js";
 import { KitchenBoardClientError, type KitchenBoardClient } from "./kitchen-board.js";
-import { orderDetailFixture, orderQueueFixture } from "./order-queue.fixtures.js";
-import { OrderQueueClientError, type OrderQueueClient } from "./order-queue.js";
+import { localMerchantFetch } from "./current-order-queue.fixtures.js";
 import {
   parseMerchantWorkspace,
   type MerchantWorkspaceClient,
@@ -52,25 +51,23 @@ const localCatalogMenuClient: CatalogMenuClient = Object.freeze({
   },
 });
 
-const localOrderQueueClient: OrderQueueClient = Object.freeze({
-  async loadQueue() {
-    return orderQueueFixture();
-  },
-  async loadDetail(orderReference: string) {
-    const fixture = orderDetailFixture();
-    if (orderReference !== fixture.order.orderReference)
-      throw new OrderQueueClientError("NotFound");
-    return fixture;
-  },
-});
-
 const localKitchenBoardClient: KitchenBoardClient = Object.freeze({
   async loadQueue() {
     return kitchenBoardFixture();
   },
   async loadWorkItem(reference: string) {
     if (reference !== KITCHEN_REFS.work) throw new KitchenBoardClientError("NotFound");
-    return kitchenItemFixture();
+    const board = kitchenBoardFixture();
+    return {
+      screenId: "KIT-WORK-ITEM" as const,
+      projectionName: "kitchen_work_queue_v1" as const,
+      projectionVersion: 1 as const,
+      storeLabel: board.storeLabel,
+      projectedAt: board.projectedAt,
+      freshnessStatus: board.freshnessStatus,
+      operatorStatus: board.operatorStatus,
+      item: kitchenItemFixture(),
+    };
   },
 });
 
@@ -152,13 +149,13 @@ export const localMerchantWorkspace: MerchantWorkspaceSnapshot = parseMerchantWo
       screenId: "CAT-MENU-LIST",
       label: "Menus",
       href: "/app/commerce/menus",
-      permission: "catalog.read",
+      permission: "catalog.menu.read",
     },
     {
       screenId: "OPS-ORDER-QUEUE",
       label: "Orders",
       href: "/operations/orders",
-      permission: "ordering.read",
+      permission: "ordering.operate",
     },
     {
       screenId: "KIT-KITCHEN-QUEUE",
@@ -185,7 +182,9 @@ export interface MerchantDemoClients {
   readonly Overview: ComponentType;
   readonly storeAdmin: StoreAdminClient;
   readonly catalogMenu: CatalogMenuClient;
-  readonly orderQueue: OrderQueueClient;
+  /** WP-2423 P5: transport for the pilot order pages; serves fixtures, fails everything else closed. */
+  readonly merchantFetch: typeof fetch;
+  readonly demoStore: { readonly storeLabel: string; readonly timeZone: string };
   readonly kitchenBoard: KitchenBoardClient;
   readonly complianceDashboard: ComplianceDashboardClient;
   readonly supportCase: SupportCasePageClient;
@@ -198,7 +197,8 @@ export const enabledMerchantDemoClients: MerchantDemoClients = Object.freeze({
   Overview: ShowcaseOverview,
   storeAdmin: localStoreAdminClient,
   catalogMenu: localCatalogMenuClient,
-  orderQueue: localOrderQueueClient,
+  merchantFetch: localMerchantFetch,
+  demoStore: { storeLabel: "Synthetic Training Store", timeZone: "America/Toronto" },
   kitchenBoard: localKitchenBoardClient,
   complianceDashboard: localComplianceDashboardClient,
   supportCase: localSupportCasePageClient,

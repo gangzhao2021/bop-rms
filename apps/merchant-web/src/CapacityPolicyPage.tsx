@@ -10,6 +10,7 @@ import {
   type CapacityPolicyProjectionClient,
   type CapacityPolicyView,
 } from "./capacity-policy-pages.js";
+import { timeZoneLabel } from "./time-zone-names.js";
 
 type State =
   | { readonly kind: "Loading" | CapacityPolicyClientErrorCode }
@@ -173,7 +174,8 @@ export function CapacityPolicyScreen({ view }: { readonly view: CapacityPolicyVi
             <div>
               <dt>Effective period</dt>
               <dd>
-                {view.effectiveFrom} → {view.effectiveUntil ?? "Open-ended"} · {view.timeZone}
+                {view.effectiveFrom} → {view.effectiveUntil ?? "Open-ended"} ·{" "}
+                {timeZoneLabel(view.timeZone)}
               </dd>
             </div>
             <div>

@@ -1,7 +1,11 @@
+import { FULL_SIGN_IN_REQUIRED, responseNeedsFullSignIn } from "./full-sign-in.js";
+
 export interface MerchantStoreOption {
   readonly brandLabel: string;
   readonly storeLabel: string;
   readonly storeReference: string;
+  /** WP-2423: the selected Store's IANA time zone, when the server provides it. */
+  readonly timeZone?: string;
 }
 
 export interface MerchantWorkspaceSnapshot {
@@ -18,14 +22,43 @@ export interface MerchantWorkspaceSnapshot {
 export interface MerchantNavigationItem {
   readonly screenId:
     | "HOME-OVERVIEW"
+    | "TASK-INBOX"
+    | "APPROVAL-INBOX"
+    | "STORE-SETUP"
+    | "STORE-HOURS-SERVICE"
     | "ORG-STORE-LIST"
+    | "ORG-BRAND-DETAIL"
+    | "TAX-CONFIG"
     | "CAT-MENU-LIST"
+    | "CAT-AVAILABILITY"
+    | "CAT-PRODUCT-LIST"
+    | "CAT-OPTIONSET-LIST"
     | "OPS-ORDER-QUEUE"
+    | "OPS-ORDER-ENTRY"
     | "OPS-ORDER-EXCEPTION"
+    | "PAY-RECONCILIATION"
+    | "RPT-OPS-DASHBOARD"
     | "KIT-KITCHEN-QUEUE"
     | "FUL-PICKUP-QUEUE"
+    | "DIN-FLOOR-BOARD"
+    | "DIN-TABLE-LIST"
     | "DEV-KDS-PROFILE"
-    | "IAM-ROLE-LIST";
+    | "IAM-ROLE-LIST"
+    | "IAM-USER-LIST"
+    | "IAM-SESSION-LIST"
+    | "INV-ITEM-LIST"
+    | "INV-LOCATION-LIST"
+    | "INV-OPENING-COUNT"
+    | "INV-RECEIPT-LIST"
+    | "RECIPE-LIST"
+    | "PRICE-BOOK-LIST"
+    | "PRICE-OPTION-LIST"
+    | "RECIPE-OPTION-LIST"
+    | "TAX-STORE-REVIEW"
+    | "CAT-TAX-CLASSIFICATION-LIST"
+    | "CMP-ALLERGEN-REVIEW"
+    | "INV-COUNT-LIST"
+    | "INV-WASTE-RECORD";
   readonly label: string;
   readonly href: string;
   readonly permission: string;
@@ -42,14 +75,52 @@ const SAFE_LABEL = /^[^\p{Cc}\p{Cf}]{1,100}$/u;
 const REQUEST_TIMEOUT_MS = 15_000;
 const NAVIGATION = Object.freeze({
   "HOME-OVERVIEW": ["/app", "merchant.access"],
+  "TASK-INBOX": ["/app/tasks", "workflow.operate"],
+  // WP-2423 Q5: refunds awaiting an Owner/Finance approval (Section 88 APPROVAL-INBOX).
+  "APPROVAL-INBOX": ["/app/approvals", "workflow.operate"],
   "ORG-STORE-LIST": ["/app/organization/stores", "organization.store.read"],
-  "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.read"],
-  "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.read"],
+  "CAT-PRODUCT-LIST": ["/app/commerce/products", "catalog.manage"],
+  "CAT-OPTIONSET-LIST": ["/app/commerce/option-sets", "catalog.option_set.read"],
+  "CAT-MENU-LIST": ["/app/commerce/menus", "catalog.menu.read"],
+  "CAT-AVAILABILITY": ["/app/commerce/availability", "catalog.sku.read"],
+  "TAX-CONFIG": ["/app/commerce/tax", "pricing.tax-config.manage"],
+  "OPS-ORDER-QUEUE": ["/operations/orders", "ordering.operate"],
+  // WP-2423 Q7: staff take a pickup order at the counter (Section 88 OPS-ORDER-ENTRY).
+  "OPS-ORDER-ENTRY": ["/operations/order-entry", "ordering.order.create_staff"],
   "OPS-ORDER-EXCEPTION": ["/operations/order-exceptions", "operations.order-exception.manage"],
+  // WP-2423 P1: day-end settlement (Section 88 PAY-RECONCILIATION) under its own read permission
+  // (catalog v17, Owner "单独加权限（推荐）"), apart from exception handling.
+  "PAY-RECONCILIATION": ["/app/operations/payment-reconciliation", "payment.settlement.read"],
+  // WP-2423 Q14: sales, item, hourly and tip reports with CSV export (Section 88 RPT-OPS-DASHBOARD).
+  "RPT-OPS-DASHBOARD": ["/app/reports/operations", "reporting.sales.read"],
   "KIT-KITCHEN-QUEUE": ["/operations/kitchen", "kitchen.operate"],
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],
+  // WP-2423 Q8: the dining tables board (Section 88 DIN-FLOOR-BOARD).
+  "DIN-FLOOR-BOARD": ["/operations/dining", "dining.operate"],
+  // WP-2423 Q11: print, replace and turn off table QR codes (Section 88 DIN-TABLE-LIST).
+  "DIN-TABLE-LIST": ["/app/operations/tables", "dining.table.qr.manage"],
   "DEV-KDS-PROFILE": ["/app/integrations/kds-profiles", "integration.manage"],
-  "IAM-ROLE-LIST": ["/app/organization/roles", "identity.manage"],
+  "IAM-ROLE-LIST": ["/app/organization/roles", "identity.role.read"],
+  "IAM-USER-LIST": ["/app/organization/users", "organization.staff.read"],
+  // WP-2423 (design "A"): shared tablets for staff PINs and PIN resets.
+  "IAM-SESSION-LIST": ["/app/organization/sessions", "identity.store_device.manage"],
+  "INV-ITEM-LIST": ["/app/supply/items", "inventory.item.read"],
+  "INV-LOCATION-LIST": ["/app/supply/locations", "inventory.location.read"],
+  "INV-OPENING-COUNT": ["/app/supply/opening-count", "inventory.count.read"],
+  "INV-RECEIPT-LIST": ["/operations/receiving", "inventory.receipt.read"],
+  "RECIPE-LIST": ["/app/commerce/recipes", "recipe.read"],
+  "PRICE-BOOK-LIST": ["/app/commerce/pricing", "pricing.price_book.read"],
+  "PRICE-OPTION-LIST": ["/app/commerce/option-prices", "pricing.price_book.read"],
+  "RECIPE-OPTION-LIST": ["/app/commerce/option-recipes", "recipe.read"],
+  "TAX-STORE-REVIEW": ["/app/commerce/tax-review", "pricing.tax_config.read"],
+  // WP-2423 Store setup: the Brand Owner's tax classifications.
+  "CAT-TAX-CLASSIFICATION-LIST": [
+    "/app/commerce/tax-classifications",
+    "catalog.tax-classification.manage",
+  ],
+  "CMP-ALLERGEN-REVIEW": ["/app/compliance/allergens", "catalog.allergen.read"],
+  "INV-COUNT-LIST": ["/operations/inventory/counts", "inventory.count.read"],
+  "INV-WASTE-RECORD": ["/operations/inventory/waste", "inventory.waste.record"],
 } as const);
 
 function record(value: unknown, keys: readonly string[]): Readonly<Record<string, unknown>> {
@@ -74,7 +145,15 @@ function record(value: unknown, keys: readonly string[]): Readonly<Record<string
 }
 
 function storeOption(value: unknown): MerchantStoreOption {
-  const input = record(value, ["brandLabel", "storeLabel", "storeReference"]);
+  const zoned = value !== null && typeof value === "object" && Object.hasOwn(value, "timeZone");
+  const input = record(
+    value,
+    zoned
+      ? ["brandLabel", "storeLabel", "storeReference", "timeZone"]
+      : ["brandLabel", "storeLabel", "storeReference"],
+  );
+  if (zoned && (typeof input.timeZone !== "string" || !validTimeZone(input.timeZone)))
+    throw new Error("MERCHANT_WORKSPACE_INVALID");
   if (
     typeof input.brandLabel !== "string" ||
     !SAFE_LABEL.test(input.brandLabel) ||
@@ -88,14 +167,73 @@ function storeOption(value: unknown): MerchantStoreOption {
     brandLabel: input.brandLabel,
     storeLabel: input.storeLabel,
     storeReference: input.storeReference,
+    ...(zoned ? { timeZone: input.timeZone as string } : {}),
   });
 }
+function validTimeZone(value: string) {
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: value });
+    return /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+){0,2}$/u.test(value);
+  } catch {
+    return false;
+  }
+}
 
-function navigationItem(value: unknown): MerchantNavigationItem {
+function navigationItem(value: unknown, selectedStoreReference: string): MerchantNavigationItem {
   const input = record(value, ["screenId", "label", "href", "permission"]);
-  if (typeof input.screenId !== "string" || !(input.screenId in NAVIGATION))
+  if (input.screenId === "ORG-BRAND-DETAIL") {
+    const prefix = "/app/organization/brands/";
+    if (
+      typeof input.label !== "string" ||
+      !SAFE_LABEL.test(input.label) ||
+      typeof input.href !== "string" ||
+      !input.href.startsWith(prefix) ||
+      !UUID_V7.test(input.href.slice(prefix.length)) ||
+      input.permission !== "organization.manage"
+    )
+      throw new Error("MERCHANT_WORKSPACE_INVALID");
+    return Object.freeze({
+      screenId: "ORG-BRAND-DETAIL",
+      label: input.label,
+      href: input.href,
+      permission: "organization.manage",
+    });
+  }
+  if (input.screenId === "STORE-HOURS-SERVICE") {
+    const href = "/app/organization/stores/" + selectedStoreReference + "/service";
+    if (
+      typeof input.label !== "string" ||
+      !SAFE_LABEL.test(input.label) ||
+      input.href !== href ||
+      input.permission !== "store.service.read"
+    )
+      throw new Error("MERCHANT_WORKSPACE_INVALID");
+    return Object.freeze({
+      screenId: "STORE-HOURS-SERVICE",
+      label: input.label,
+      href,
+      permission: "store.service.read",
+    });
+  }
+  if (input.screenId === "STORE-SETUP") {
+    const href = "/app/organization/stores/" + selectedStoreReference + "/setup";
+    if (
+      typeof input.label !== "string" ||
+      !SAFE_LABEL.test(input.label) ||
+      input.href !== href ||
+      input.permission !== "organization.manage"
+    )
+      throw new Error("MERCHANT_WORKSPACE_INVALID");
+    return Object.freeze({
+      screenId: "STORE-SETUP",
+      label: input.label,
+      href,
+      permission: "organization.manage",
+    });
+  }
+  if (typeof input.screenId !== "string" || !Object.hasOwn(NAVIGATION, input.screenId))
     throw new Error("MERCHANT_WORKSPACE_INVALID");
-  const screenId = input.screenId as MerchantNavigationItem["screenId"];
+  const screenId = input.screenId as keyof typeof NAVIGATION;
   const expected = NAVIGATION[screenId];
   if (
     typeof input.label !== "string" ||
@@ -140,12 +278,14 @@ export function parseMerchantWorkspace(value: unknown): MerchantWorkspaceSnapsho
     (input.freshness !== "Current" && input.freshness !== "Stale") ||
     input.dashboardAvailability !== "UnavailableUntilWP1905" ||
     !Array.isArray(input.navigation) ||
-    input.navigation.length > 20
+    input.navigation.length > 40
   )
     throw new Error("MERCHANT_WORKSPACE_INVALID");
   const selectedScope = storeOption(input.selectedScope);
   const authorizedStores = Object.freeze(input.authorizedStores.map(storeOption));
-  const navigation = Object.freeze(input.navigation.map(navigationItem));
+  const navigation = Object.freeze(
+    input.navigation.map((value) => navigationItem(value, selectedScope.storeReference)),
+  );
   if (
     new Set(authorizedStores.map((item) => item.storeReference)).size !== authorizedStores.length ||
     !authorizedStores.some((item) => item.storeReference === selectedScope.storeReference) ||
@@ -162,6 +302,15 @@ export function parseMerchantWorkspace(value: unknown): MerchantWorkspaceSnapsho
     dashboardAvailability: "UnavailableUntilWP1905",
     navigation,
   });
+}
+
+/** A Store switch refused because the person signed in with a PIN that is not yet confirmed. */
+export class MerchantStoreSwitchError extends Error {
+  readonly code = FULL_SIGN_IN_REQUIRED;
+  constructor() {
+    super("MERCHANT_STORE_SWITCH_FULL_SIGN_IN_REQUIRED");
+    this.name = "MerchantStoreSwitchError";
+  }
 }
 
 export interface MerchantWorkspaceClient {
@@ -219,6 +368,7 @@ export function createMerchantWorkspaceClient(
         },
         body: JSON.stringify({ targetStoreReference }),
       });
+      if (await responseNeedsFullSignIn(response)) throw new MerchantStoreSwitchError();
       if (!response.ok) throw new Error("MERCHANT_STORE_SWITCH_DENIED");
       const input = record(await response.json(), ["workspace"]);
       const workspace = parseMerchantWorkspace(input.workspace);

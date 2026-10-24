@@ -65,7 +65,10 @@ checkpoint/freshness explicitly.
 authorizes and leases an exact Store run, compares approved internal facts with normalized Provider
 retrieval or settlement evidence, retains Unknown, delegates eligible terminal truth to WP-1305 and
 atomically records immutable checks/Open exceptions. Its query service authorizes before bounded
-safe list reads. Provider retrieval uses an independent causation reference and never invents a
+safe list reads. Complete results are validated before persistence and replay, including
+run/scope/candidate/exception bindings, counts and observation times. The local pilot
+currently runs exception projection recovery only; the reconciliation execution
+repository and runtime assembly remain unfinished under WP-2402. Provider retrieval uses an independent causation reference and never invents a
 webhook receipt/Event.
 
 `createPaymentTerminalCaptureWatchdogService` owns the contract-first

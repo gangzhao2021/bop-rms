@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createMerchantWorkspaceClient, parseMerchantWorkspace } from "./merchant-workspace.js";
 
 const storeReference = "018f7f9a-ad3e-7a11-8d01-000000000003";
+const brandReference = "018f7f9a-ad3e-7a11-8d01-000000000002";
 const workspace = Object.freeze({
   screenId: "HOME-OVERVIEW",
   selectedScope: Object.freeze({
@@ -37,6 +38,84 @@ const workspace = Object.freeze({
 });
 
 describe("Merchant workspace client boundary", () => {
+  it("accepts one canonical Brand detail entry without extending the selected scope", () => {
+    const item = {
+      screenId: "ORG-BRAND-DETAIL",
+      label: "Brand administration",
+      href: "/app/organization/brands/" + brandReference,
+      permission: "organization.manage",
+    };
+    const parsed = parseMerchantWorkspace({
+      ...workspace,
+      navigation: [...workspace.navigation, item],
+    });
+    expect(parsed.navigation).toEqual([...workspace.navigation, item]);
+    expect(parsed.selectedScope).toEqual(workspace.selectedScope);
+    expect(Object.keys(parsed.selectedScope)).toEqual([
+      "brandLabel",
+      "storeLabel",
+      "storeReference",
+    ]);
+    expect(Object.isFrozen(parsed.navigation.at(-1))).toBe(true);
+    expect(() => parseMerchantWorkspace({ ...workspace, navigation: [item, { ...item }] })).toThrow(
+      "MERCHANT_WORKSPACE_INVALID",
+    );
+  });
+
+  it("rejects Brand route, permission, label and open-field substitutions", () => {
+    const item = {
+      screenId: "ORG-BRAND-DETAIL",
+      label: "Synthetic Brand",
+      href: "/app/organization/brands/" + brandReference,
+      permission: "organization.manage",
+    };
+    for (const change of [
+      { href: "/app/organization/stores/" + brandReference },
+      { href: "https://example.test" + item.href },
+      { href: item.href + "?mode=edit" },
+      { href: item.href + "#detail" },
+      { href: item.href + "/" },
+      { href: "/app/organization/brands/../" + brandReference },
+      { href: "/app/organization/brands/%30" + brandReference.slice(1) },
+      { href: "/app/organization/brands/" + brandReference.toUpperCase() },
+      { href: "/app/organization/brands/" + brandReference.replace("-7a11-", "-4a11-") },
+      { href: "/app/organization/brands/" },
+      { permission: "organization.store.read" },
+      { permission: "merchant.access" },
+      { label: "Brand\nsecret" },
+      { label: "Brand\u200b" },
+      { label: "x".repeat(101) },
+      { label: "" },
+      { brandReference },
+    ]) {
+      expect(() =>
+        parseMerchantWorkspace({ ...workspace, navigation: [{ ...item, ...change }] }),
+      ).toThrow("MERCHANT_WORKSPACE_INVALID");
+    }
+  });
+
+  it("refuses Brand navigation accessors without evaluating them", () => {
+    const read = vi.fn(() => "/app/organization/brands/" + brandReference);
+    const item = {
+      screenId: "ORG-BRAND-DETAIL",
+      label: "Brand administration",
+      href: "/app/organization/brands/" + brandReference,
+      permission: "organization.manage",
+    };
+    Object.defineProperty(item, "href", { enumerable: true, get: read });
+    expect(() => parseMerchantWorkspace({ ...workspace, navigation: [item] })).toThrow(
+      "MERCHANT_WORKSPACE_INVALID",
+    );
+    expect(read).not.toHaveBeenCalled();
+    expect(() =>
+      parseMerchantWorkspace({
+        ...workspace,
+        navigation: [Object.create({ inherited: true }, Object.getOwnPropertyDescriptors(item))],
+      }),
+    ).toThrow("MERCHANT_WORKSPACE_INVALID");
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it("parses only a closed HOME-OVERVIEW snapshot with selected authorized Store", () => {
     expect(parseMerchantWorkspace(workspace)).toEqual(workspace);
     expect(() => parseMerchantWorkspace({ ...workspace, extra: true })).toThrow(
@@ -63,9 +142,65 @@ describe("Merchant workspace client boundary", () => {
     ).toThrow("MERCHANT_WORKSPACE_INVALID");
   });
 
+  it("accepts only the canonical permission-bound Task Inbox navigation entry", () => {
+    const taskNavigation = {
+      screenId: "TASK-INBOX",
+      label: "Tasks",
+      href: "/app/tasks",
+      permission: "workflow.operate",
+    } as const;
+    expect(
+      parseMerchantWorkspace({
+        ...workspace,
+        navigation: [...workspace.navigation, taskNavigation],
+      }).navigation,
+    ).toContainEqual(taskNavigation);
+    expect(() =>
+      parseMerchantWorkspace({
+        ...workspace,
+        navigation: [...workspace.navigation, { ...taskNavigation, href: "/app" }],
+      }),
+    ).toThrow("MERCHANT_WORKSPACE_INVALID");
+  });
+
+  it("admits only canonical Product navigation and rejects route/permission substitution", () => {
+    const item = {
+      screenId: "CAT-PRODUCT-LIST",
+      label: "Products",
+      href: "/app/commerce/products",
+      permission: "catalog.manage",
+    };
+    expect(parseMerchantWorkspace({ ...workspace, navigation: [item] }).navigation).toEqual([item]);
+    for (const change of [
+      { href: "/operations/products" },
+      { permission: "catalog.read" },
+      { permission: "catalog.product.manage" },
+      { extra: true },
+      { screenId: "constructor", href: undefined, permission: undefined },
+    ])
+      expect(() =>
+        parseMerchantWorkspace({ ...workspace, navigation: [{ ...item, ...change }] }),
+      ).toThrow("MERCHANT_WORKSPACE_INVALID");
+  });
   it("treats closed authentication denial as signed out and leaks no error body", async () => {
     const request = vi.fn(async () => new Response('{"error":"provider-detail"}', { status: 403 }));
     await expect(createMerchantWorkspaceClient(request).bootstrap()).resolves.toBeNull();
+  });
+
+  it("WP-2423: a PIN sign-in refusal is told apart from any other refused Store switch", async () => {
+    const csrf = "C".repeat(43);
+    const refused = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ error: "full_sign_in_required" }, { status: 403 }))
+      .mockResolvedValueOnce(Response.json({ error: "forbidden" }, { status: 403 }));
+    const client = createMerchantWorkspaceClient(refused);
+    await expect(client.switchStore(csrf, storeReference)).rejects.toMatchObject({
+      code: "FullSignInRequired",
+    });
+    await expect(client.switchStore(csrf, storeReference)).rejects.toThrow(
+      "MERCHANT_STORE_SWITCH_DENIED",
+    );
+    expect(refused).toHaveBeenCalledTimes(2);
   });
 
   it("posts only the selected reference with in-memory CSRF and requires fresh selected scope", async () => {
@@ -108,4 +243,94 @@ describe("Merchant workspace client boundary", () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
+});
+
+it("admits canonical Option navigation and refuses Product route or permission substitution", () => {
+  const item = {
+    screenId: "CAT-OPTIONSET-LIST",
+    label: "Option sets",
+    href: "/app/commerce/option-sets",
+    permission: "catalog.option_set.read",
+  };
+  expect(parseMerchantWorkspace({ ...workspace, navigation: [item] }).navigation).toEqual([item]);
+  for (const change of [
+    { href: "/app/commerce/products" },
+    { permission: "catalog.manage" },
+    { screenId: "CAT-OPTION-SET-LIST" },
+    { extra: true },
+  ]) {
+    expect(() =>
+      parseMerchantWorkspace({ ...workspace, navigation: [{ ...item, ...change }] }),
+    ).toThrow("MERCHANT_WORKSPACE_INVALID");
+  }
+});
+
+it("anchors Store Setup navigation to selected Store and canonical organization permission", () => {
+  const item = {
+    screenId: "STORE-SETUP",
+    label: "Store setup",
+    href: "/app/organization/stores/" + storeReference + "/setup",
+    permission: "organization.manage",
+  };
+  expect(parseMerchantWorkspace({ ...workspace, navigation: [item] }).navigation).toEqual([item]);
+  for (const change of [
+    { href: "/app/organization/stores/018f7f9a-ad3e-7a11-8d01-000000000099/setup" },
+    { href: item.href + "?actor=x" },
+    { permission: "merchant.access" },
+  ])
+    expect(() =>
+      parseMerchantWorkspace({ ...workspace, navigation: [{ ...item, ...change }] }),
+    ).toThrow("MERCHANT_WORKSPACE_INVALID");
+});
+
+it("admits Tax navigation only at its exact permission and canonical route", () => {
+  const entry = {
+    screenId: "TAX-CONFIG",
+    label: "Tax",
+    href: "/app/commerce/tax",
+    permission: "pricing.tax-config.manage",
+  };
+  expect(parseMerchantWorkspace({ ...workspace, navigation: [entry] }).navigation).toEqual([entry]);
+  for (const wrong of [
+    { ...entry, permission: "pricing.price-book.manage" },
+    { ...entry, href: "/app/commerce/tax-rules" },
+  ])
+    expect(() => parseMerchantWorkspace({ ...workspace, navigation: [wrong] })).toThrow(
+      "MERCHANT_WORKSPACE_INVALID",
+    );
+});
+
+it("WP-2423 Q8: admits the dining tables board only at its route and dining permission", () => {
+  const entry = {
+    screenId: "DIN-FLOOR-BOARD",
+    label: "Tables",
+    href: "/operations/dining",
+    permission: "dining.operate",
+  };
+  expect(parseMerchantWorkspace({ ...workspace, navigation: [entry] }).navigation).toEqual([entry]);
+  for (const wrong of [
+    { ...entry, permission: "ordering.operate" },
+    { ...entry, href: "/operations/dining?table=1" },
+  ])
+    expect(() => parseMerchantWorkspace({ ...workspace, navigation: [wrong] })).toThrow(
+      "MERCHANT_WORKSPACE_INVALID",
+    );
+});
+
+it("WP-2423 Q4: anchors Hours & ordering to the selected Store at its read permission", () => {
+  const item = {
+    screenId: "STORE-HOURS-SERVICE",
+    label: "Hours & ordering",
+    href: "/app/organization/stores/" + storeReference + "/service",
+    permission: "store.service.read",
+  };
+  expect(parseMerchantWorkspace({ ...workspace, navigation: [item] }).navigation).toEqual([item]);
+  for (const change of [
+    { href: "/app/organization/stores/018f7f9a-ad3e-7a11-8d01-000000000099/service" },
+    { href: item.href + "?store=x" },
+    { permission: "store.service.pause" },
+  ])
+    expect(() =>
+      parseMerchantWorkspace({ ...workspace, navigation: [{ ...item, ...change }] }),
+    ).toThrow("MERCHANT_WORKSPACE_INVALID");
 });

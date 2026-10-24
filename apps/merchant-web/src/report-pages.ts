@@ -1,3 +1,4 @@
+import { createContractParsers } from "./contract-parsers.js";
 export type ReportPageErrorCode =
   | "PermissionDenied"
   | "NotFound"
@@ -101,10 +102,8 @@ export interface ReportBuilderClient {
   load(reportReference: string): Promise<unknown>;
 }
 
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const code = /^[A-Z][A-Z0-9_.:-]{0,63}$/u;
 const safeText = /^[^<>{}$\p{Cc}\p{Cf}]{1,160}$/u;
-const instantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const fail = (): never => {
   throw new ReportPageError("Unavailable");
 };
@@ -124,21 +123,11 @@ const object = (value: unknown, fields: readonly string[]) => {
     fail();
   return value as Record<string, unknown>;
 };
-const reference = (value: unknown) =>
-  typeof value === "string" && uuid.test(value) ? value : fail();
+const { reference, instant, oneOf, bool } = createContractParsers(fail);
 const coded = (value: unknown) => (typeof value === "string" && code.test(value) ? value : fail());
 const text = (value: unknown) =>
   typeof value === "string" && value.trim() === value && safeText.test(value) ? value : fail();
-const instant = (value: unknown) =>
-  typeof value === "string" &&
-  instantPattern.test(value) &&
-  new Date(Date.parse(value)).toISOString() === value
-    ? value
-    : fail();
 const nullableInstant = (value: unknown) => (value === null ? null : instant(value));
-const oneOf = <T extends string>(value: unknown, values: readonly T[]) =>
-  typeof value === "string" && values.includes(value as T) ? (value as T) : fail();
-const bool = (value: unknown) => (typeof value === "boolean" ? value : fail());
 const positive = (value: unknown) =>
   Number.isSafeInteger(value) && (value as number) > 0 ? (value as number) : fail();
 const count = (value: unknown) =>
