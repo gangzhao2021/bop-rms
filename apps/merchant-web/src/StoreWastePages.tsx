@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StaffTime, StoreTimeZoneContext, storeDate } from "./StoreTime.js";
@@ -375,7 +375,7 @@ export function StoreWasteFormPage({
                 >
                   {stockItems.map((option) => (
                     <option key={option.itemReference} value={option.itemReference}>
-                      {option.name} ({option.unitCode})
+                      {option.name} ({systemText(option.unitCode)})
                     </option>
                   ))}
                 </select>
@@ -420,7 +420,7 @@ export function StoreWasteFormPage({
               ) : null}
               <label>
                 {t("Quantity (")}
-                {item?.unitCode}){selected ? ` — ${stockText(selected)}` : ""}
+                {systemText(item?.unitCode)}){selected ? ` — ${stockText(selected)}` : ""}
                 <input
                   required
                   inputMode="decimal"
@@ -565,7 +565,7 @@ export function StoreWasteDetailPage({
               <td>{itemName(line.itemReference)}</td>
               <td>{placeName(line.locationReference)}</td>
               <td>
-                {line.quantity} {line.unitCode}
+                {line.quantity} {systemText(line.unitCode)}
               </td>
               <td>
                 {reasonText(line.reasonCode)}

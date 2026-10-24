@@ -1,4 +1,4 @@
-import { currentLanguage, t } from "./i18n/i18n.js";
+import { serviceModeText, listSeparator, currentLanguage, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { StoreConfigurationEditor } from "./StoreConfigurationEditor.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -34,8 +34,7 @@ const exceptionKindLabel = (kind: string) =>
       : kind === "Holiday"
         ? "Holiday"
         : kind;
-const serviceModeLabel = (mode: string) =>
-  mode === "DineIn" ? "Dine-in" : mode === "Pickup" ? "Pickup" : mode;
+const serviceModeLabel = (mode: string) => serviceModeText(mode);
 const serviceMinutes = (seconds: number) => {
   const minutes = Math.round(seconds / 60);
   return minutes === 1 ? t("1 minute") : t("{minutes} minutes", { minutes: minutes });
@@ -356,7 +355,9 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
                   <li key={item.closureReference}>
                     <span>
                       {t("{value} — until {value2}", {
-                        value: item.serviceModes?.join(", ") ?? t("All services"),
+                        value:
+                          item.serviceModes?.map(serviceModeText).join(listSeparator()) ??
+                          t("All services"),
                         value2: new Intl.DateTimeFormat(undefined, {
                           timeZone: view.timeZone,
                           dateStyle: "medium",
@@ -370,7 +371,9 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
                       onClick={() => resume(item.closureReference)}
                     >
                       {t("Resume {value}", {
-                        value: item.serviceModes?.join(", ") ?? t("all services"),
+                        value:
+                          item.serviceModes?.map(serviceModeText).join(listSeparator()) ??
+                          t("all services"),
                       })}
                     </button>
                   </li>

@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { listSeparator, t } from "./i18n/i18n.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 /** WP-2423 / DEC-RECIPE-AUTHORING: RECIPE-LIST / RECIPE-EDITOR view contract and same-origin client. */
 export type RecipeErrorCode =
@@ -106,8 +106,12 @@ export function allergenText(value: {
 }): string {
   if (!value.contains.length && !value.mayContain.length) return t("No priority allergens");
   return [
-    value.contains.length ? "Contains " + value.contains.join(", ") : null,
-    value.mayContain.length ? t("May contain ") + value.mayContain.join(", ") : null,
+    value.contains.length
+      ? t("Contains {value}", { value: value.contains.join(listSeparator()) })
+      : null,
+    value.mayContain.length
+      ? t("May contain {value}", { value: value.mayContain.join(listSeparator()) })
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");

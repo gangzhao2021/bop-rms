@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -169,7 +169,7 @@ function LocationRow({
   return (
     <li>
       <strong>{location.name}</strong> · {location.code} · {zoneLabel(location.temperatureZone)} ·{" "}
-      {location.lifecycle}
+      {systemText(location.lifecycle)}
       {location.isDefault ? t(" · Default") : ""}
       {location.holdsStock ? t(" · Holds stock") : ""}{" "}
       {mayManage && !editing ? (

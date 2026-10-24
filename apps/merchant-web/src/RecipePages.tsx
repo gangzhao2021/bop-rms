@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -1117,11 +1117,11 @@ function RecipeEditor({
               {index > 0 ? ", " : ""}
               {member.recipeReference === recipe.recipeReference ? (
                 <strong>
-                  {member.revision} ({member.lifecycle})
+                  {member.revision} ({systemText(member.lifecycle)})
                 </strong>
               ) : (
                 <Link to={`/app/commerce/recipes/${member.recipeReference}/edit`}>
-                  {member.revision} ({member.lifecycle})
+                  {member.revision} ({systemText(member.lifecycle)})
                 </Link>
               )}
             </span>

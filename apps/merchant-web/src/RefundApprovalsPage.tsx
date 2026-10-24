@@ -65,7 +65,7 @@ export function ApprovalFailureNotice({
 }
 
 const person = (entry: RefundApprovalEntry) =>
-  entry.requestedByYou ? "You" : (entry.requesterName ?? t("The staff member who asked"));
+  entry.requestedByYou ? t("You") : (entry.requesterName ?? t("The staff member who asked"));
 
 /** One refund awaiting approval: who asked, why, and the in-person approval that sends it. */
 function ApprovalCard({
@@ -300,7 +300,7 @@ function ApprovalCard({
         </div>
         {entry.note !== null ? (
           <div>
-            <dt>{t("Note from {value}", { value: who === "You" ? t("you") : who })}</dt>
+            <dt>{t("Note from {value}", { value: who === t("You") ? t("you") : who })}</dt>
             <dd>{entry.note}</dd>
           </div>
         ) : null}
@@ -491,7 +491,7 @@ function ApprovalCard({
             {t("Declined")} <SourceTime instant={outcome.declinedAt} />
             {t(
               ". Nothing was refunded and the request no longer counts toward this order; {value} can see why.",
-              { value: who === "You" ? t("you") : who },
+              { value: who === t("You") ? t("you") : who },
             )}
           </p>
           <button type="button" onClick={onChanged}>

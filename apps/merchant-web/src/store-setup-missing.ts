@@ -27,7 +27,7 @@ export function storeSetupMissingItems(
   const add = (condition: boolean, label: string, where: string) => {
     if (condition) missing.push(Object.freeze({ label, where }));
   };
-  add(unset(content.source), t("Brand or Store settings"), step(1, "Identity"));
+  add(unset(content.source), t("Brand or Store settings"), step(1, t("Identity")));
   add(unset(content.timeZone), t("Time zone"), step(2, t("Address and timezone")));
   add(
     unset(content.businessDayStartLocalTime),
@@ -36,7 +36,7 @@ export function storeSetupMissingItems(
   );
   add(unset(content.addressReference), "Address", step(2, t("Address and timezone")));
   add(unset(content.enabledServiceModes), t("Service modes"), step(3, t("Service modes")));
-  add(unset(content.weeklySchedule), t("Weekly hours"), step(4, "Hours"));
+  add(unset(content.weeklySchedule), t("Weekly hours"), step(4, t("Hours")));
   if (content.feeContexts?.state === "Configured")
     for (const fee of content.feeContexts.value)
       add(
@@ -51,8 +51,8 @@ export function storeSetupMissingItems(
     step(5, t("Tax and payment")),
   );
   add(unset(content.receiptReference), t("Receipt template"), step(5, t("Tax and payment")));
-  add(unset(content.capacityConfigurationReference), t("Order limits"), step(6, "Capacity"));
-  add(unset(content.contactReference), t("Contact details"), step(7, "Contacts"));
+  add(unset(content.capacityConfigurationReference), t("Order limits"), step(6, t("Capacity")));
+  add(unset(content.contactReference), t("Contact details"), step(7, t("Contacts")));
   add(unset(content.taxConfigurationReference), t("Tax settings"), live);
   add(unset(content.brandBaseVersionReference), t("Brand settings"), live);
   add(unset(content.exceptions), t("Holidays and special hours"), live);

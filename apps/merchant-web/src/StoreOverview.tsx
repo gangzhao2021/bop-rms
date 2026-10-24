@@ -1,4 +1,4 @@
-import { countOf, t } from "./i18n/i18n.js";
+import { systemText, countOf, t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link } from "react-router";
@@ -453,8 +453,8 @@ function readStatus<T>(
 // A lower bound says so in words ("At least 3 left"), never as "3+".
 const left = (n: number, more = false) =>
   n === 0
-    ? { status: "Done", done: true }
-    : { status: `${more ? t("At least ") : ""}${n} left`, done: false };
+    ? { status: t("Done"), done: true }
+    : { status: more ? t("At least {n} left", { n }) : t("{n} left", { n }), done: false };
 /**
  * WP-2423 (3cd0f8dd M6): what staff check when they open and close the Store, each line from the
  * same reads as "Right now" (and the last closed day's settlement). Lines whose screen the staff
@@ -609,7 +609,7 @@ function ChecklistList({
           <li key={entry.key} data-done={entry.done ? "true" : undefined}>
             <span className="overview-checklist__text">{entry.text}</span>
             {entry.status === null ? null : (
-              <strong className="overview-checklist__status">{entry.status}</strong>
+              <strong className="overview-checklist__status">{systemText(entry.status)}</strong>
             )}
             {entry.href === undefined ? null : (
               <Link to={entry.href}>

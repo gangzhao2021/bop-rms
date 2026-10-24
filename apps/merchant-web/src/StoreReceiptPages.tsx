@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StaffTime } from "./StoreTime.js";
@@ -302,7 +302,7 @@ export function StoreReceiptFormPage({
                 >
                   {view.items.map((option) => (
                     <option key={option.itemReference} value={option.itemReference}>
-                      {option.name} ({option.unitCode})
+                      {option.name} ({systemText(option.unitCode)})
                     </option>
                   ))}
                 </select>
@@ -348,7 +348,7 @@ export function StoreReceiptFormPage({
               ) : null}
               <label>
                 {t("Accepted (")}
-                {item?.unitCode})
+                {systemText(item?.unitCode)})
                 <input
                   inputMode="decimal"
                   value={line.accepted}
@@ -389,7 +389,7 @@ export function StoreReceiptFormPage({
                 </label>
               ) : null}
               <label>
-                {t("Unit cost per")} {item?.unitCode} ($)
+                {t("Unit cost per")} {systemText(item?.unitCode)} ($)
                 <input
                   required
                   inputMode="decimal"
@@ -531,7 +531,7 @@ export function StoreReceiptDetailPage({
               <td>{locations.get(line.locationReference)?.name ?? line.locationReference}</td>
               <td>{[line.lotCode, line.expiryDate].filter(Boolean).join(" · ")}</td>
               <td>
-                {line.acceptedQuantity} {items.get(line.itemReference)?.unitCode}
+                {line.acceptedQuantity} {systemText(items.get(line.itemReference)?.unitCode)}
               </td>
               <td>{line.rejectedQuantity}</td>
               <td>{line.damagedQuantity}</td>

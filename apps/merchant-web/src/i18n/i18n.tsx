@@ -137,9 +137,20 @@ export function allergenName(code: string, name: string): string {
  * permission descriptions), in the chosen language. A Store's own text (a custom role name) has
  * no entry and is shown as written. `i18n.test.ts` checks every catalog text has its wording.
  */
-export function systemText(text: string): string {
-  if (current !== "zh-Hans") return text;
-  return zhHans[text] ?? text;
+export function systemText<T extends string | undefined>(text: T): T {
+  if (current !== "zh-Hans" || text === undefined) return text;
+  return (zhHans[text] ?? text) as T;
+}
+
+/** A service mode (order type) in staff words: "Dine-in" / "堂食". */
+export function serviceModeText(mode: string): string {
+  return mode === "DineIn"
+    ? t("Dine-in")
+    : mode === "Pickup"
+      ? t("Pickup")
+      : mode === "Delivery"
+        ? t("Delivery")
+        : mode;
 }
 
 /** How a list of names is joined: "Milk, Soy" / "牛奶、大豆". */

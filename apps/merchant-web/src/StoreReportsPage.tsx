@@ -89,15 +89,15 @@ function Table({
 function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
   const lines: [string, string, boolean?][] = [
     [t("Gross sales"), money(summary.grossSalesMinor)],
-    ["Discounts", "−" + money(summary.discountsMinor)],
+    [t("Discounts"), "−" + money(summary.discountsMinor)],
     [t("Net sales"), money(summary.netSalesMinor), true],
   ];
   if (summary.serviceChargesMinor !== "0")
     lines.push([t("Service charges"), money(summary.serviceChargesMinor)]);
   for (const tax of summary.taxes)
     lines.push([t("Tax · {label}", { label: tax.label }), money(tax.amountMinor)]);
-  if (summary.taxes.length !== 1) lines.push(["Tax", money(summary.taxMinor)]);
-  lines.push(["Tips", money(summary.tipsMinor)]);
+  if (summary.taxes.length !== 1) lines.push([t("Tax"), money(summary.taxMinor)]);
+  lines.push([t("Tips"), money(summary.tipsMinor)]);
   if (summary.unmatchedMinor !== "0")
     lines.push([t("Paid but not matched to items"), money(summary.unmatchedMinor)]);
   lines.push([t("Total collected"), money(summary.collectedMinor), true]);
@@ -290,7 +290,7 @@ export function StoreReports({
         <h4>{t("By payment")}</h4>
         <Table
           label={t("Sales by payment")}
-          columns={["Payment", "Payments", "Collected", "Tips", "Refunds", "Net"]}
+          columns={[t("Payment"), t("Payments"), t("Collected"), t("Tips"), t("Refunds"), t("Net")]}
           empty={t("No payments in this period.")}
           rows={view.byChannel
             .filter((entry) => entry.paymentCount > 0 || entry.refundCount > 0)
@@ -306,7 +306,15 @@ export function StoreReports({
         <h4>{t("By order type")}</h4>
         <Table
           label={t("Sales by order type")}
-          columns={["Order type", "Orders", "Net sales", "Tax", "Tips", "Refunds", "Net collected"]}
+          columns={[
+            t("Order type"),
+            t("Orders"),
+            t("Net sales"),
+            t("Tax"),
+            t("Tips"),
+            t("Refunds"),
+            t("Net collected"),
+          ]}
           empty={t("No orders in this period.")}
           rows={view.byOrderType
             .filter((entry) => entry.paymentCount > 0 || entry.refundCount > 0)
@@ -325,7 +333,15 @@ export function StoreReports({
             <h4>{t("By day")}</h4>
             <Table
               label={t("Sales by day")}
-              columns={["Day", "Payments", "Net sales", "Tax", "Tips", "Refunds", "Net collected"]}
+              columns={[
+                t("Day"),
+                t("Payments"),
+                t("Net sales"),
+                t("Tax"),
+                t("Tips"),
+                t("Refunds"),
+                t("Net collected"),
+              ]}
               empty={t("No days.")}
               rows={view.days.map((day) => [
                 businessDateText(day.businessDate) + (day.status === "Open" ? t(" (so far)") : ""),
@@ -353,14 +369,14 @@ export function StoreReports({
         <Table
           label={t("Item sales")}
           columns={[
-            "Item",
-            "Sold",
-            "Gross sales",
-            "Discounts",
-            "Net sales",
-            "Refunded",
-            "Refunds",
-            "Net after refunds",
+            t("Item"),
+            t("Sold"),
+            t("Gross sales"),
+            t("Discounts"),
+            t("Net sales"),
+            t("Refunded"),
+            t("Refunds"),
+            t("Net after refunds"),
           ]}
           empty={t("No items sold or refunded in this period.")}
           rows={view.items.map((row) => [
@@ -387,7 +403,7 @@ export function StoreReports({
       >
         <Table
           label={t("Sales by hour")}
-          columns={["Hour", "Payments", "Net sales", "Tax", "Tips", "Collected"]}
+          columns={[t("Hour"), t("Payments"), t("Net sales"), t("Tax"), t("Tips"), t("Collected")]}
           empty={t("No payments in this period.")}
           rows={view.hours.map((row) => [
             row.hour,
@@ -411,7 +427,7 @@ export function StoreReports({
       >
         <Table
           label={t("Tips by day and payment")}
-          columns={["Day", "Payment", "Tips", "Refunded", "Net tips"]}
+          columns={[t("Day"), t("Payment"), t("Tips"), t("Refunded"), t("Net tips")]}
           empty={t("No tips in this period.")}
           rows={view.tips.flatMap((day) =>
             day.channels

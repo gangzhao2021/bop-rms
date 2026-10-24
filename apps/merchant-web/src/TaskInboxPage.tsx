@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -86,11 +86,11 @@ function TaskInboxEntry({
         <div>
           <p className="bop-eyebrow">{taskCodeLabel(item.taskType)}</p>
           <h3 id={`task-heading-${position}`}>
-            {item.severity} · {item.priority}
+            {systemText(item.severity)} · {item.priority}
           </h3>
         </div>
         <span className="task-inbox-status" data-status={item.status}>
-          {item.status}
+          {systemText(item.status)}
         </span>
       </header>
       <dl className="task-inbox-facts">

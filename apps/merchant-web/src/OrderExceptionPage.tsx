@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { ReconciliationFollowUpAction } from "./ReconciliationFollowUpAction.js";
 import { CompensationReconciliationAction } from "./CompensationReconciliationAction.js";
 import { UnmatchedCaptureRefundAction } from "./UnmatchedCaptureRefundAction.js";
@@ -294,7 +294,8 @@ function OrderExceptionCard({
           </p>
         ) : (
           <p className="bop-eyebrow order-exception__severity" data-severity={item.severity}>
-            {item.severity} · {resolved ? t("was due ") : overdue ? t("overdue since ") : t("due ")}
+            {systemText(item.severity)} ·{" "}
+            {resolved ? t("was due ") : overdue ? t("overdue since ") : t("due ")}
             <SourceTime instant={item.dueAt} />
           </p>
         )}
@@ -302,7 +303,7 @@ function OrderExceptionCard({
       </div>
       <div className="order-exception__state">
         <strong className="order-exception__status" data-status={item.status}>
-          {item.status}
+          {systemText(item.status)}
         </strong>
         {openFor === null ? null : <span className="order-exception__open-for">{openFor}</span>}
       </div>
@@ -322,7 +323,7 @@ function OrderExceptionCard({
           </div>
           <div>
             <dt>{t("Owner")}</dt>
-            <dd>{item.ownerStatus}</dd>
+            <dd>{systemText(item.ownerStatus)}</dd>
           </div>
         </dl>
         <p role="note">
@@ -373,7 +374,7 @@ function OrderExceptionCard({
           </div>
           <div>
             <dt>{t("Owner")}</dt>
-            <dd>{item.ownerStatus}</dd>
+            <dd>{systemText(item.ownerStatus)}</dd>
           </div>
         </dl>
         {differences.length > 0 ? (
@@ -457,7 +458,7 @@ function OrderExceptionCard({
         </div>
         <div>
           <dt>{t("Owner")}</dt>
-          <dd>{item.ownerStatus}</dd>
+          <dd>{systemText(item.ownerStatus)}</dd>
         </div>
       </dl>
       {detail?.type === "Payment" && detail.resolvedAt !== null ? (

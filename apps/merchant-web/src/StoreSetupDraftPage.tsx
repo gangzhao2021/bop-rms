@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { serviceModeText, t } from "./i18n/i18n.js";
 import { StoreConfigurationOrdinaryPanel } from "./StoreConfigurationOrdinaryPanel.js";
 import type { StoreConfigurationSnapshot } from "./store-configuration-client.js";
 import { createStoreConfigurationOrdinaryClient } from "./store-configuration-ordinary-client.js";
@@ -55,14 +55,14 @@ import { serviceOperationReference, type ServiceMode } from "./service-control-c
 import { languageName } from "./staff-text.js";
 import { timeZoneChoices, timeZoneLabel } from "./time-zone-names.js";
 const steps = [
-  "Identity",
+  t("Identity"),
   t("Address and timezone"),
   t("Service modes"),
-  "Hours",
+  t("Hours"),
   t("Tax and payment"),
-  "Capacity",
-  "Contacts",
-  "Review",
+  t("Capacity"),
+  t("Contacts"),
+  t("Review"),
 ] as const;
 const days = [
   t("Monday"),
@@ -1324,9 +1324,7 @@ function storeReview(content: StoreSetupContent): readonly (readonly [string, st
     [
       t("Service modes"),
       content.enabledServiceModes.state === "Configured"
-        ? content.enabledServiceModes.value
-            .map((mode) => (mode === "DineIn" ? t("Dine in") : mode))
-            .join(", ")
+        ? content.enabledServiceModes.value.map(serviceModeText).join(", ")
         : notSet(3),
     ],
     [
@@ -2507,9 +2505,7 @@ function intervalText(interval: ScheduleInterval, detailed: boolean): string {
     interval.endsNextDay ? t(" (next day)") : ""
   }`;
   if (!detailed) return times;
-  const services = interval.serviceModes
-    .map((mode) => (mode === "DineIn" ? t("Dine in") : mode))
-    .join(", ");
+  const services = interval.serviceModes.map(serviceModeText).join(", ");
   return t(
     "{times} ({services}; last orders {orderCutoffSeconds} min before closing; preparation {leadTimeSeconds} min)",
     {

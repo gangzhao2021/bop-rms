@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -193,7 +193,7 @@ export function SoleOperatorSection({
         <div>
           <dt>{t("Sole operator")}</dt>
           <dd>
-            <strong>{view.state}</strong>
+            <strong>{systemText(view.state)}</strong>
             {view.version > 0 ? t(" · setting change {version}", { version: view.version }) : ""}
           </dd>
         </div>

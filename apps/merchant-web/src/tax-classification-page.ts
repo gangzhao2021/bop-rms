@@ -251,7 +251,7 @@ export const taxClassificationMessages: Readonly<Record<TaxClassificationErrorCo
 export function nameFieldLabel(fieldLocale: string, defaultLocale: string): string {
   const language =
     fieldLocale === "fr-CA"
-      ? "French"
+      ? t("French")
       : fieldLocale === "en-CA"
         ? t("English")
         : t("Other language");

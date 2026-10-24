@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -198,7 +198,7 @@ function Editor({
                     >
                       {view.items.map((option) => (
                         <option key={option.itemReference} value={option.itemReference}>
-                          {option.name} ({option.unitCode})
+                          {option.name} ({systemText(option.unitCode)})
                         </option>
                       ))}
                     </select>
@@ -261,7 +261,7 @@ function Editor({
                   ) : (
                     line.quantity
                   )}{" "}
-                  {item?.unitCode}
+                  {systemText(item?.unitCode)}
                 </td>
                 <td>
                   {draft ? (

@@ -235,8 +235,8 @@ export function TaxClassificationsView({
                                 disabled={busy}
                                 aria-label={
                                   entry.isDefault
-                                    ? `Stop using ${name} as the default`
-                                    : `Make ${name} the default`
+                                    ? t("Stop using {name} as the default", { name })
+                                    : t("Make {name} the default", { name })
                                 }
                                 onClick={() =>
                                   onChange({

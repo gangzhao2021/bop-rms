@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -220,14 +220,14 @@ export function SupplyItemListPage({
                   <Link to={`/app/supply/items/${item.itemReference}`}>{item.name}</Link>
                 </td>
                 <td>{item.internalCode}</td>
-                <td>{item.unitCode}</td>
+                <td>{systemText(item.unitCode)}</td>
                 <td>
                   {item.stockTracked
                     ? (lotModes.find(([mode]) => mode === item.lotTracking)?.[1] ??
                       item.lotTracking)
                     : t("Not stock tracked")}
                 </td>
-                <td>{item.lifecycle}</td>
+                <td>{systemText(item.lifecycle)}</td>
               </tr>
             ))}
           </tbody>
@@ -302,7 +302,8 @@ export function SupplyItemDetailPage({
           <p className="bop-eyebrow">{t("Inventory item")}</p>
           <h2>{item.name}</h2>
           <p>
-            {item.internalCode} · {item.itemType} · <strong>{item.lifecycle}</strong>{" "}
+            {item.internalCode} · {systemText(item.itemType)} ·{" "}
+            <strong>{systemText(item.lifecycle)}</strong>{" "}
             {t("· version {version}", { version: item.version })}
           </p>
         </div>
@@ -432,7 +433,7 @@ function ItemForm({
     >
       {editing ? (
         <p>
-          {item.internalCode} · {item.itemType}
+          {item.internalCode} · {systemText(item.itemType)}
         </p>
       ) : (
         <>
@@ -480,7 +481,7 @@ function ItemForm({
         >
           {view.units.map((unit) => (
             <option key={unit.unitCode} value={unit.unitCode}>
-              {unit.label} ({unit.unitCode})
+              {unit.label} ({systemText(unit.unitCode)})
             </option>
           ))}
         </select>

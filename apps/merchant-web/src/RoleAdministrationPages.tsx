@@ -376,7 +376,7 @@ export function RoleAdministrationScreen({
     <AppFrame
       title={editor ? t("Role editor") : t("Roles")}
       description={[
-        editor ? "Edit a role and its permissions" : "Roles and permissions",
+        editor ? t("Edit a role and its permissions") : t("Roles and permissions"),
         view.freshness === "Stale" ? "may be out of date" : null,
         view.completeness === "Partial" ? "some roles not shown" : null,
       ]

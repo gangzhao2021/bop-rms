@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { listSeparator, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { kitchenActionNotice, kitchenStepText, useKitchenActions } from "./use-kitchen-actions.js";
 import { useKitchenClock } from "./kitchen-clock.js";
@@ -529,9 +529,11 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
         none
           ? t("No menu allergens declared")
           : [
-              allergens.contains.length > 0 ? "Contains " + allergens.contains.join(", ") : "",
+              allergens.contains.length > 0
+                ? t("Contains {value}", { value: allergens.contains.join(listSeparator()) })
+                : "",
               allergens.mayContain.length > 0
-                ? t("May contain ") + allergens.mayContain.join(", ")
+                ? t("May contain {value}", { value: allergens.mayContain.join(listSeparator()) })
                 : "",
             ]
               .filter(Boolean)

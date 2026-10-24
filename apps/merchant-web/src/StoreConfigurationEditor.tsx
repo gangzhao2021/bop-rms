@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { serviceModeText, t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { timeZoneLabel } from "./time-zone-names.js";
@@ -137,8 +137,7 @@ export function storeConfigurationOpenChange(
   if (view.viewerActorReference === undefined) return "Unknown";
   return latest.authoredByReference === view.viewerActorReference ? "Yours" : "SomeoneElse";
 }
-const serviceModeLabel = (mode: ServiceMode) =>
-  mode === "DineIn" ? "Dine-in" : mode === "Pickup" ? "Pickup" : "Delivery";
+const serviceModeLabel = (mode: ServiceMode) => serviceModeText(mode);
 const newInterval = (modes: readonly ServiceMode[]): ServiceInterval => ({
   startLocalTime: "09:00:00",
   endLocalTime: "17:00:00",

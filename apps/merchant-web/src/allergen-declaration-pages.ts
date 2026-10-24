@@ -1,4 +1,4 @@
-import { allergenName as chineseAllergenName, t } from "./i18n/i18n.js";
+import { listSeparator, allergenName as chineseAllergenName, t } from "./i18n/i18n.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 /** WP-2423 / DEC-ALLERGEN-DECLARATIONS: CMP-ALLERGEN-REVIEW view contract and same-origin client. */
 export type AllergenErrorCode =
@@ -188,8 +188,8 @@ export function declarationSummary(
   const may = names("CrossContactPossible");
   if (!contains.length && !may.length) return t("No priority allergens");
   return [
-    contains.length ? "Contains " + contains.join(", ") : null,
-    may.length ? t("May contain ") + may.join(", ") : null,
+    contains.length ? t("Contains {value}", { value: contains.join(listSeparator()) }) : null,
+    may.length ? t("May contain {value}", { value: may.join(listSeparator()) }) : null,
   ]
     .filter(Boolean)
     .join(" · ");

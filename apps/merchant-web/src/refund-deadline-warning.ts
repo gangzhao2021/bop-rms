@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 /**
  * WP-2423 pilot rule "Warn before timeouts" (2026-10-17): a paid pickup order nobody accepts is
  * closed and refunded in full when its acceptance window ends (30 minutes after payment, or the
@@ -35,8 +36,14 @@ export function refundWarningTier(leftMs: number): RefundWarningTier | null {
 
 /** Plain staff wording, e.g. "Order 9 will be refunded automatically in 2 min unless someone accepts it." */
 export function refundWarningText(orderNumber: string, leftMs: number): string {
-  const when = leftMs <= 60_000 ? "in less than a minute" : `in ${Math.ceil(leftMs / 60_000)} min`;
-  return `Order ${orderNumber} will be refunded automatically ${when} unless someone accepts it.`;
+  const when =
+    leftMs <= 60_000
+      ? t("in less than a minute")
+      : t("in {value} min", { value: Math.ceil(leftMs / 60_000) });
+  return t("Order {orderNumber} will be refunded automatically {when} unless someone accepts it.", {
+    orderNumber: orderNumber,
+    when: when,
+  });
 }
 
 /**
@@ -57,8 +64,14 @@ export function refundCountdownUnsure(
 
 /** Plain wording when the countdown may be out of date: it never tells staff an order still waits. */
 export function refundWarningUnsureText(orderNumber: string, leftMs: number): string {
-  const when = leftMs <= 60_000 ? "in less than a minute" : `in ${Math.ceil(leftMs / 60_000)} min`;
-  return `Order ${orderNumber} may already have been accepted. If not, it will be refunded automatically ${when}.`;
+  const when =
+    leftMs <= 60_000
+      ? t("in less than a minute")
+      : t("in {value} min", { value: Math.ceil(leftMs / 60_000) });
+  return t(
+    "Order {orderNumber} may already have been accepted. If not, it will be refunded automatically {when}.",
+    { orderNumber: orderNumber, when: when },
+  );
 }
 
 /** Orders inside their last five minutes, soonest first. */

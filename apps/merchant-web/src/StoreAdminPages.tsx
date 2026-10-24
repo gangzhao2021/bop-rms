@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { systemText, t } from "./i18n/i18n.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
@@ -157,7 +157,7 @@ export function StoreListScreen({ view }: { readonly view: StoreListView }) {
                   <p className="bop-eyebrow">{store.code}</p>
                   <h3>{store.name}</h3>
                 </div>
-                <strong>{store.lifecycle}</strong>
+                <strong>{systemText(store.lifecycle)}</strong>
               </header>
               <dl>
                 <div>
@@ -340,7 +340,7 @@ export function StoreSetupScreen({ view }: { readonly view: StoreSetupView }) {
             <span>{index + 1}</span>
             <div>
               <strong>{STORE_SETUP_STEPS[index]}</strong>
-              <p>{item.status}</p>
+              <p>{systemText(item.status)}</p>
             </div>
           </li>
         ))}

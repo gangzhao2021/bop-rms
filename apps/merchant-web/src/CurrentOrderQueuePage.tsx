@@ -1350,7 +1350,11 @@ export function CurrentOrderQueueRows({
               {order.batches.map((batch) => (
                 <section
                   key={batch.orderBatchReference}
-                  aria-label={order.orderType === "Pickup" ? t("Order") : "Round " + batch.sequence}
+                  aria-label={
+                    order.orderType === "Pickup"
+                      ? t("Order")
+                      : t("Round {sequence}", { sequence: batch.sequence })
+                  }
                 >
                   <h3>
                     {/* v15 1fc58e90 ⑧: a pickup order has one batch, so it reads as the order. */}
@@ -1419,7 +1423,7 @@ export function CurrentOrderQueueRows({
                                 {
                                   value:
                                     batch.staffCancellation.refundStatus === "Refunded"
-                                      ? "Refunded"
+                                      ? t("Refunded")
                                       : "Refunding",
                                   value2: orderMoney({
                                     amountMinor: batch.staffCancellation.refundAmountMinor,
@@ -1483,8 +1487,10 @@ export function CurrentOrderQueueRows({
                     </p>
                   ) : (
                     <p>
-                      {"Acceptance: " +
-                        (batch.acceptanceStatus === "Accepted" ? t("Accepted") : t("Not accepted"))}
+                      {t("Acceptance: {value}", {
+                        value:
+                          batch.acceptanceStatus === "Accepted" ? t("Accepted") : t("Not accepted"),
+                      })}
                     </p>
                   )}
                   {action?.(order, batch)}
@@ -1772,7 +1778,7 @@ export function CurrentOrderQueuePage({
         single
           ? detail === undefined
             ? t("Order")
-            : `Order ${detail.order.orderNumber}`
+            : t("Order {orderNumber}", { orderNumber: detail.order.orderNumber })
           : t("Orders")
       }
       meta={storeLabel}
