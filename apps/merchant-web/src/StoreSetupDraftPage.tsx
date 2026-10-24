@@ -1308,7 +1308,8 @@ export function StoreSetupDraftPage({
   );
 }
 /** WP-2423: what is still missing says where to set it (step names as on screen). */
-const notSet = (step: number) => `Not set yet (step ${step}, ${steps[step - 1]})`;
+const notSet = (step: number) =>
+  t("Not set yet (step {step}, {name})", { step, name: steps[step - 1] ?? "" });
 function storeReview(content: StoreSetupContent): readonly (readonly [string, string])[] {
   return [
     [

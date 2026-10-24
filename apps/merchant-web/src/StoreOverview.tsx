@@ -446,8 +446,8 @@ function readStatus<T>(
   value: (v: T) => { readonly status: string; readonly done: boolean },
 ): { readonly status: string; readonly done: boolean } | null {
   if (read.kind === "Hidden") return null;
-  if (read.kind === "Loading") return { status: "Reading…", done: false };
-  if (read.kind === "Unavailable") return { status: "Could not be read", done: false };
+  if (read.kind === "Loading") return { status: t("Reading…"), done: false };
+  if (read.kind === "Unavailable") return { status: t("Could not be read"), done: false };
   return value(read.value);
 }
 // A lower bound says so in words ("At least 3 left"), never as "3+".
@@ -530,8 +530,10 @@ export function dayChecklist(
     ...item(
       "tables-left-open",
       t("Tables still open from before"),
-      readStatus(tables, (t) =>
-        t.earlierDays === null ? { status: "Reading…", done: false } : left(t.earlierDays, t.more),
+      readStatus(tables, (summary) =>
+        summary.earlierDays === null
+          ? { status: t("Reading…"), done: false }
+          : left(summary.earlierDays, summary.more),
       ),
       "/operations/dining",
       t("Tables"),

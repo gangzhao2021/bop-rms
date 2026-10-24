@@ -904,7 +904,7 @@ const presentationProblemText = (problem: PresentationProblem, field: "descripti
         : t("Keep the photo description to {altText} characters.", {
             altText: presentationLimits.altText,
           })
-      : "Use plain words only: no links and none of these characters: < > { }";
+      : t("Use plain words only: no links and none of these characters: < > { }");
 
 type PhotoUploadState =
   | { readonly kind: "Idle" }

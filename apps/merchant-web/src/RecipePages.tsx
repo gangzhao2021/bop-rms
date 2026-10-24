@@ -823,8 +823,10 @@ function ReviewPanel({
               permissionName={t("recipe review")}
               yourPart={
                 isAuthor
-                  ? "You wrote this version"
-                  : `You already gave the ${kindText[kind === "Cost" ? "FoodSafety" : "Cost"].toLowerCase()} review`
+                  ? t("You wrote this version")
+                  : kind === "Cost"
+                    ? t("You already gave the food safety review")
+                    : t("You already gave the cost review")
               }
               busy={busy}
               actionLabel={t("Approve {value} on my own", { value: kindText[kind].toLowerCase() })}

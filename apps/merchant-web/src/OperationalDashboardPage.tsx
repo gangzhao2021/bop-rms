@@ -167,7 +167,7 @@ export function OperationalDashboard({ view }: { readonly view: OperationalDashb
         <label>
           {t("Order type")}
           <input
-            value={view.orderType === "All" ? "All types" : orderTypeLabel[view.orderType]}
+            value={view.orderType === "All" ? t("All types") : orderTypeLabel[view.orderType]}
             readOnly
           />
         </label>

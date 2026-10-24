@@ -549,8 +549,10 @@ export function StoreOptionRecipesPage({
                     permissionName={t("recipe review")}
                     yourPart={
                       change.byViewer
-                        ? "You saved this change"
-                        : `You already gave the ${kind === "Cost" ? "food safety" : "cost"} review`
+                        ? t("You saved this change")
+                        : kind === "Cost"
+                          ? t("You already gave the food safety review")
+                          : t("You already gave the cost review")
                     }
                     busy={busy}
                     actionLabel={

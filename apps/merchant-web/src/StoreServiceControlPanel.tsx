@@ -1,4 +1,4 @@
-import { serviceModeText, listSeparator, currentLanguage, t } from "./i18n/i18n.js";
+import { serviceModeText, listSeparator, currentLanguage, systemText, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { StoreConfigurationEditor } from "./StoreConfigurationEditor.js";
 import { WorkspacePage } from "./WorkspacePage.js";
@@ -296,7 +296,7 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
           <p role="status">{t("Offline read-only. Reconnect before changing service.")}</p>
         )}
         <p role="status" aria-live="polite">
-          {message}
+          {systemText(message)}
         </p>
         <button type="button" onClick={() => void load()} disabled={busy || !online || uncertain}>
           {t("Refresh service status")}

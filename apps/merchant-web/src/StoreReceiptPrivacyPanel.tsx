@@ -70,8 +70,9 @@ export function receiptPrivacyFieldErrors(fields: Fields): Partial<Record<keyof 
       ok = false;
     }
     if (!ok)
-      errors.privacyNoticeUrl =
-        "Enter the full web address of your privacy notice, starting with https://";
+      errors.privacyNoticeUrl = t(
+        "Enter the full web address of your privacy notice, starting with https://",
+      );
   }
   return errors;
 }

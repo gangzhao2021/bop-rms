@@ -580,8 +580,10 @@ export function StaffOrderEntryPage({
       title={pageTitle}
       meta={
         tableMode
-          ? `${storeLabel} · Dine-in · added to the table's order · paid on the store's card machine`
-          : `${storeLabel} · Pickup · paid on the store's card machine`
+          ? t("{store} · Dine-in · added to the table's order · paid on the store's card machine", {
+              store: storeLabel,
+            })
+          : t("{store} · Pickup · paid on the store's card machine", { store: storeLabel })
       }
       className="counter-order"
     >

@@ -20,7 +20,9 @@ import {
  */
 export const PIN_ELEVATION_EXPLANATION = Object.freeze({
   /** TEST-ONLY sign-in (internal test): the authenticator code is entered on this page. */
-  code: "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, refunds, price changes and staff changes can go ahead on this PIN sign-in until the time shown.",
+  code: t(
+    "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, refunds, price changes and staff changes can go ahead on this PIN sign-in until the time shown.",
+  ),
   /** DEC-COGNITO-STORE-STAFF: the staff member signs in again in a small window. */
   signIn: t(
     "Confirm it is you by signing in again with your password and authenticator app. After you verify, refunds, price changes and staff changes can go ahead on this PIN sign-in until the time shown.",

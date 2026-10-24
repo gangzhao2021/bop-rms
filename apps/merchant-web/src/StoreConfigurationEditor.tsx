@@ -1,4 +1,4 @@
-import { serviceModeText, t } from "./i18n/i18n.js";
+import { serviceModeText, systemText, t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { timeZoneLabel } from "./time-zone-names.js";
@@ -382,7 +382,7 @@ export function StoreConfigurationEditor({ store, csrf }: { store: string; csrf:
         )}
       </p>
       {!online && <p role="status">{t("Offline read-only.")}</p>}
-      <p role="status">{message}</p>
+      <p role="status">{systemText(message)}</p>
       <button type="button" disabled={disabled} onClick={() => void load()}>
         {view ? t("Reload configuration") : t("Edit operating hours")}
       </button>

@@ -805,6 +805,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Check the language, saved receipt presets and the start and end times. An earlier save remains protected.":
     "请检查语言、已保存的收据预设以及开始和结束时间。之前的保存仍受保护。",
   "Check the name and email.": "请检查名字和邮箱。",
+  "Check the names: each needs up to 120 characters and cannot contain links or the characters < > { } [ ].":
+    "请检查名称：每个最多 120 个字符，且不能包含链接或字符 < > { } [ ]。",
   "Check the slip reference and the paid-at time.": "请核对签购单参考号和付款时间。",
   "Check the slip reference: letters and numbers only, never the card number.":
     "请核对签购单参考号：只能是字母和数字，绝不能是卡号。",
@@ -957,7 +959,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Configuration created from the saved setup.": "已根据已保存的设置创建配置。",
   "Configuration loaded.": "配置已加载。",
   "Configuration published.": "配置已发布。",
-  "Configuration request unavailable.": "配置请求暂不可用。",
+  "Configuration request unavailable.": "暂时无法提交配置请求。",
+  "Configuration response unavailable.": "暂时无法读取配置结果。",
   "Configuration saved. Choose it below, then save the setup draft to keep that selection.":
     "配置已保存。请在下方选择它，然后保存设置草稿以保留所选。",
   "Configuration sent for approval.": "配置已提交审批。",
@@ -1004,6 +1007,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Contains {value}": "含有 {value}",
   "Contains: {value}": "含有：{value}",
   "Continue draft": "继续编辑草稿",
+  "Continue draft {code}": "继续编辑草稿 {code}",
   "Continue the {value} count ({lineCount} lines)": "继续 {value} 盘点（{lineCount} 行）",
   "Continue to sign in": "继续登录",
   "Continue — {actionLabel}": "继续 — {actionLabel}",
@@ -1295,6 +1299,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请输入魁北克税务局签发的 16 位号码：10 位数字、TQ、4 位数字（例如 1234567890TQ0001）。",
   "Enter the Merchant workspace for an assigned Store": "进入所分配门店的商户工作台",
   "Enter the city or town.": "请输入城市或镇。",
+  "Enter the full web address of your privacy notice, starting with https://":
+    "请输入隐私声明的完整网址，以 https:// 开头",
   "Enter the provincial number exactly as issued (letters, digits, hyphens).":
     "请按签发的原样输入省级号码（字母、数字、连字符）。",
   "Enter the six-digit code from your authenticator app.": "请输入验证器应用中的六位验证码。",
@@ -2091,6 +2097,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not set": "未设置",
   "Not set up": "未设置",
   "Not set yet": "尚未设置",
+  "Not set yet (step {step}, {name})": "尚未设置（第 {step} 步，{name}）",
   "Not set yet (use the live Store's settings below)": "尚未设置（使用下方当前门店的设置）",
   "Not set — customers cannot choose it": "未设置 — 顾客不能选择",
   "Not settled yet. The settlement run for this day has not completed.":
@@ -2284,6 +2291,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Open this table's order": "打开这张桌台的订单",
   "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, approvals and refunds can go ahead for 15 minutes.":
     "打开你的验证器应用，输入本店显示的六位验证码。验证码每 30 秒变化一次。验证后，15 分钟内可以进行审批和退款。",
+  "Open your authenticator app and enter the six-digit code shown for this store. Codes change every 30 seconds. After you verify, refunds, price changes and staff changes can go ahead on this PIN sign-in until the time shown.":
+    "打开你的身份验证器应用，输入这家门店显示的六位验证码。验证码每 30 秒更新一次。验证后，在显示的时间之前，这次 PIN 登录可以进行退款、改价和员工变更。",
   "Open {days} {value}": "已开 {days} 天",
   "Open {minutes} min": "已开 {minutes} 分钟",
   "Open {open} {value} a week": "每周营业 {open} {value}",
@@ -2519,6 +2528,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "处理中 {pending} · 已做好 {ready} · 进行中 {inProgress} · 已完成 {completed} · 异常 {exceptions}",
   "Permission denied": "没有权限",
   "Permission denied. An earlier save remains protected.": "没有权限。之前的保存仍受保护。",
+  "Permission denied. Check your session and Store access.": "没有权限。请检查登录状态和门店权限。",
+  "Permission denied. Only the person who made it, or an Owner, can do this.":
+    "没有权限。只有提交人或店主可以执行此操作。",
+  "Permission denied. Someone other than the person who made this change, with approval access, must approve it.":
+    "没有权限。需要由提交人以外、有审批权限的人批准。",
   "Permission groups": "权限分组",
   "Permission-trimmed Store configuration": "按权限裁剪的门店配置",
   "Permission-trimmed controls": "按权限裁剪的控件",
@@ -3105,6 +3119,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Review confirmed refund": "核对已确认的退款",
   "Review current follow-up": "查看当前跟进",
   "Review draft": "核对草稿",
+  "Review draft {code}": "查看草稿 {code}",
   "Review pickup handoff": "核对取餐交付",
   "Review recipe cost and food safety before publication": "在发布前审核配方成本和食品安全",
   "Review unmatched charge": "核查未匹配的扣款",
@@ -3507,6 +3522,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Source: "来源",
   "Source as of": "数据截至",
   "Source changed": "来源已变更",
+  "Source changed. Refresh before trying again.": "内容已被更改。请刷新后再试。",
   "Special hours": "特殊营业时间",
   "Spot check": "抽查",
   "St. John’s, Newfoundland and Labrador": "圣约翰斯，纽芬兰与拉布拉多省",
@@ -4564,7 +4580,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请使用员工认得出的名称。之后可以重命名；商品和费用会继续使用它。",
   "Use at this Store": "在本店使用",
   "Use letters and spaces only.": "只能使用字母和空格。",
+  "Use letters, digits and ordinary punctuation only (no # * _ < >).":
+    "只能使用字母、数字和普通标点（不能用 # * _ < >）。",
   "Use letters, spaces and punctuation only.": "只能使用字母、空格和标点。",
+  "Use plain words only: no links and none of these characters: < > { }":
+    "请只使用普通文字：不要包含链接，也不要使用这些字符：< > { }",
   "Use published receipt template": "使用已发布的收据模板",
   "Use saved payment configuration": "使用已保存的付款配置",
   "Use saved {value}": "使用已保存的{value}",
@@ -4757,6 +4777,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Write a receipt template and preview the standard fields it shows. Saving keeps it as a draft: customer receipts do not change until it is published and chosen for this store under Published receipt template in Store setup. Saving does not mean a tax or legal professional has checked it.":
     '编写收据模板并预览它显示的标准字段。保存后为草稿：只有发布并在"门店设置"的"已发布收据模板"中为本店选中后，顾客收据才会变化。保存不代表已经过税务或法律专业人士核对。',
   "Write and revise recipe drafts": "编写和修订配方草稿",
+  "Write the unit as “Unit 4” or “Suite 4” (no # * _ < >).":
+    "单元号请写成“Unit 4”或“Suite 4”（不能用 # * _ < >）。",
   "Wrong item": "商品错误",
   Yes: "是",
   Yesterday: "昨天",
@@ -4764,6 +4786,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Yield: "产出",
   "Yield unit": "产出单位",
   You: "你",
+  "You already gave the cost review": "你已经做过成本审核",
+  "You already gave the food safety review": "你已经做过食品安全审核",
   "You and {who} must both confirm with an authenticator code again, then approve.":
     "你和{who}都需要再次用验证器验证码确认，然后批准。",
   "You are editing your own change (version {configurationVersion}, {value}). Saving again replaces it; it then needs to be sent and approved again.":
@@ -4837,6 +4861,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你独自经营这家店（独立经营者），因此确认身份后可以发布你自己的新价格。",
   "You saved these changes or already gave one of their reviews, so another person who holds recipe review gives the remaining review — unless Sole operator is on and you are the only one who holds it.":
     '你保存了这些更改或已给出其中一项审核，因此由另一位持有配方审核权限的人给出剩余的审核 — 除非"独立经营者"已开启且你是唯一持有该权限的人。',
+  "You saved this change": "这项更改是你保存的",
   "You signed in with a PIN. Confirm it's you with your authenticator app, or sign in with your account, to change your PIN.":
     "你是用 PIN 登录的。要更改 PIN，请用验证器应用确认身份，或用你的账号登录。",
   "You signed in with a PIN. Confirm it's you with your authenticator app, or sign in with your account, to do this.":
@@ -4848,6 +4873,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "此模板由你编写或提交，因此需要另一位有店主权限的人批准。",
   "You wrote or sent this template, so another person with Owner access must approve it. Whether you may approve it on your own could not be checked; refresh to try again.":
     "此模板由你编写或提交，因此需要另一位有店主权限的人批准。无法检查你是否可以自行批准；请刷新重试。",
+  "You wrote this version": "这个版本是你写的",
   "You wrote this version; two other reviewers decide.": "这个版本由你编写；由另外两位审核人决定。",
   "You're offline. Check the connection and try again; nothing was changed.":
     "你已离线。请检查网络后重试；没有任何更改。",
@@ -5351,6 +5377,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{state} · submitted draft {draftRevision}. {value}":
     "{state} · 已提交草稿 {draftRevision}。{value}",
   "{status} · as of {value}": "{status} · 截至 {value}",
+  "{store} · Dine-in · added to the table's order · paid on the store's card machine":
+    "{store} · 堂食 · 加到该桌的订单 · 在门店刷卡机付款",
+  "{store} · Pickup · paid on the store's card machine": "{store} · 自取 · 在门店刷卡机付款",
   "{subject} has a new round that is not accepted yet — accept it on Orders.":
     "{subject}有新的一轮尚未接单 — 请在订单页接单。",
   "{subject} is not accepted yet — accept it on Orders.": "{subject}尚未接单 — 请在订单页接单。",

@@ -235,8 +235,9 @@ export function createTaxClassificationClient(
 export const taxClassificationMessages: Readonly<Record<TaxClassificationErrorCode, string>> =
   Object.freeze({
     PermissionDenied: t("Only the Brand Owner can add or change tax classifications."),
-    Invalid:
+    Invalid: t(
       "Check the names: each needs up to 120 characters and cannot contain links or the characters < > { } [ ].",
+    ),
     NotFound: t("That classification is no longer in the list. Reload to see the current list."),
     NameTaken: t("Another classification in use already has that name. Choose a different name."),
     Retired: t(

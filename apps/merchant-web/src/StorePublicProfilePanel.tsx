@@ -83,15 +83,16 @@ export function storePublicProfileFieldErrors(
     if (value === "") errors["name-" + locale] = t("Enter the store name customers will see.");
     else if (value.length > 120) errors["name-" + locale] = t("Use 120 characters or fewer.");
     else if (markup.test(value))
-      errors["name-" + locale] =
-        "Use letters, digits and ordinary punctuation only (no # * _ < >).";
+      errors["name-" + locale] = t(
+        "Use letters, digits and ordinary punctuation only (no # * _ < >).",
+      );
   }
   fields.addressLines.forEach((line, index) => {
     const value = line.trim();
     if (index === 0 && value === "") errors["line-0"] = t("Enter the street address.");
     else if (value.length > 160) errors["line-" + index] = t("Use 160 characters or fewer.");
     else if (markup.test(value))
-      errors["line-" + index] = "Write the unit as “Unit 4” or “Suite 4” (no # * _ < >).";
+      errors["line-" + index] = t("Write the unit as “Unit 4” or “Suite 4” (no # * _ < >).");
   });
   if (fields.locality.trim() === "") errors.locality = t("Enter the city or town.");
   else if (markup.test(fields.locality)) errors.locality = t("Use letters and spaces only.");

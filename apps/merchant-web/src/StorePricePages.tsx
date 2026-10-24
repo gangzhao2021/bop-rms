@@ -416,7 +416,11 @@ export function StorePriceList({
                 (view.permissions.mayEdit || view.permissions.mayApprove) ? (
                   <Link
                     to={`/app/commerce/pricing/${book.priceBookReference}`}
-                    aria-label={`${view.permissions.mayEdit ? "Continue draft" : "Review draft"} ${book.stableCode}`}
+                    aria-label={
+                      view.permissions.mayEdit
+                        ? t("Continue draft {code}", { code: book.stableCode })
+                        : t("Review draft {code}", { code: book.stableCode })
+                    }
                   >
                     {view.permissions.mayEdit ? t("Continue draft") : t("Review draft")}
                   </Link>
