@@ -261,6 +261,13 @@ test("@production a manager closes out a table whose guests left: rounds cancell
   );
 
   await guests.getByRole("checkbox", { name: "The guests at table T2 have left" }).check();
+  // Owner 2026-10-25: a danger action is red words without a fill (the lighter red is AA on
+  // white only); checked with the button enabled, since axe skips disabled controls.
+  await expect(confirm).toBeEnabled();
+  await expect(confirm).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(confirm).toHaveCSS("color", "rgb(220, 53, 69)");
+  const enabledAxe = await new AxeBuilder({ page }).withRules(["color-contrast"]).analyze();
+  expect(enabledAxe.violations).toEqual([]);
   await confirm.click();
   // The lost answer: retry resends the same operation; nothing is done twice.
   const retry = guests.getByRole("button", { name: "Try again", exact: true });

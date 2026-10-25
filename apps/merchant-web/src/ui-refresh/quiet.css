@@ -251,3 +251,19 @@
 .workspace-page > button:not(:disabled, [type="submit"]) {
   background: var(--bop-color-surface-canvas);
 }
+
+/* Danger actions: red words with no fill (the lighter red is AA on white only, 4.53:1; on the
+   grey fill it is 4.15:1). Danger buttons sit on white cards and dialogs. */
+.workspace-content [data-variant="destructive"]:not(:disabled),
+.availability-menu--more .availability-menu__items button:not(:disabled),
+.order-cancel-dialog [data-variant="destructive"]:not(:disabled),
+.store-devices__confirm [data-variant="destructive"]:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+  color: var(--bop-color-danger);
+  font-weight: 600;
+}
+.workspace-content [data-variant="destructive"]:not(:disabled):hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
