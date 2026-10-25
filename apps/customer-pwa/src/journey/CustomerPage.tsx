@@ -60,22 +60,20 @@ export function CustomerPage({
       className={`customer-page customer-page--${step}${className ? ` ${className}` : ""}`}
       title={store?.storeName ?? fallbackTitle ?? t("Order")}
       description={description}
+      // Figma v1 (2026-10-25): English / 中文 sits beside the Store's name, above the journey bar.
+      headerStatus={<LanguageSwitch />}
       navigationLabel={t("Customer journey")}
-      navigation={[
-        ...links.map((link) =>
-          link.step === step ? (
-            <span key={link.step} aria-current="page">
-              {link.label}
-            </span>
-          ) : (
-            <Link key={link.step} to={link.href}>
-              {link.label}
-            </Link>
-          ),
+      navigation={links.map((link) =>
+        link.step === step ? (
+          <span key={link.step} aria-current="page">
+            {link.label}
+          </span>
+        ) : (
+          <Link key={link.step} to={link.href}>
+            {link.label}
+          </Link>
         ),
-        // Owner 2026-10-23: English / Simplified Chinese on every customer page.
-        <LanguageSwitch key="language" />,
-      ]}
+      )}
     >
       {children}
     </AppFrame>

@@ -95,7 +95,7 @@ describe("CUST-ORDER-STATUS screen contract", () => {
     expect(html).toContain("Your pickup code appears here as soon as your order is ready.");
     expect(html).not.toContain("Show pickup code");
     expect(html).toContain("View receipt and support");
-    expect(html).not.toContain("Ready for pickup");
+    expect(html).not.toContain('order-progress-heading">Ready for pickup<');
   });
 
   it("tells a paid guest the kitchen hasn't started yet, in their words", () => {
@@ -122,6 +122,59 @@ describe("CUST-ORDER-STATUS screen contract", () => {
     expect(html).toContain("<dt>Kitchen status</dt><dd>Not started yet</dd>");
     expect(html).toContain("Payment received $25.98");
     expect(findInternalText([staticText(html)])).toEqual([]);
+  });
+
+  it("Figma v1: shows a pickup order's steps, each saying in words whether it is done or now", () => {
+    const state = readyState();
+    if (state.status !== "ready") throw new Error("fixture");
+    const step = (html: string, label: string) =>
+      new RegExp(
+        `order-status__step--(\\w+)"><span class="order-status__step-label">${label}</span><span class="order-status__step-state">(\\w*)<`,
+        "u",
+      )
+        .exec(html)
+        ?.slice(1);
+    const paid = {
+      checkedAt: "2026-08-11T14:00:00.000Z",
+      payments: [
+        {
+          status: "Succeeded" as const,
+          occurredAt: "2026-08-11T13:56:00.000Z",
+          amount: { amountMinor: 2598n, currencyCode: "CAD" },
+          freshnessStatus: "Fresh" as const,
+        },
+      ],
+    };
+    const making = render({
+      ...state,
+      view: {
+        ...state.view,
+        order: { ...state.view.order, canonicalPhase: "In Progress" },
+        sources: { ...paid, kitchen: null },
+      },
+    });
+    expect(making).toContain('aria-label="Order progress"');
+    expect(step(making, "Payment received")).toEqual(["done", "Done"]);
+    expect(step(making, "Accepted by the store")).toEqual(["done", "Done"]);
+    expect(step(making, "Being made")).toEqual(["current", "Now"]);
+    expect(step(making, "Ready for pickup")).toEqual(["upcoming", ""]);
+    expect(step(making, "Picked up")).toEqual(["upcoming", ""]);
+    const collected = render({
+      ...state,
+      view: {
+        ...state.view,
+        order: { ...state.view.order, canonicalPhase: "Fulfilled", fulfillmentStatus: "Completed" },
+        sources: { ...paid, kitchen: null },
+      },
+    });
+    expect(step(collected, "Picked up")).toEqual(["done", "Done"]);
+    expect(collected).not.toContain(">Now<");
+    // A cancelled order has no steps to follow.
+    const cancelled = render({
+      ...state,
+      view: { ...state.view, order: { ...state.view.order, canonicalPhase: "Cancelled" } },
+    });
+    expect(cancelled).not.toContain("Order progress");
   });
 
   it("leaves the kitchen row out once a not-started order was cancelled", () => {
@@ -232,7 +285,7 @@ describe("independently sourced customer updates", () => {
     expect(html).toContain("Payment received $25.98");
     expect(html).toContain("This payment update may be out of date");
     expect(html).not.toContain("Paid ");
-    expect(html).not.toContain("Ready for pickup");
+    expect(html).not.toContain('order-progress-heading">Ready for pickup<');
   });
 });
 
@@ -352,7 +405,7 @@ it("does not treat a ready Pickup kitchen as collection", () => {
       },
     },
   });
-  expect(html).toContain("Ready for pickup");
+  expect(html).toContain('order-progress-heading">Ready for pickup<');
   expect(html).toContain("Checking your pickup code");
   expect(html).not.toContain("Order collected");
 });
@@ -540,7 +593,7 @@ it("WP-2423: a pickup closed as not collected reads as not collected even though
   expect(html).toContain("Not collected");
   expect(html).toContain("Contact the store about your order or a refund.");
   expect(html).not.toContain("Order cancelled");
-  expect(html).not.toContain("Ready for pickup");
+  expect(html).not.toContain('order-progress-heading">Ready for pickup<');
   expect(html).not.toContain("pickup code");
   expect(isOrderSettled(view)).toBe(true);
   expect(findInternalText([staticText(html)])).toEqual([]);

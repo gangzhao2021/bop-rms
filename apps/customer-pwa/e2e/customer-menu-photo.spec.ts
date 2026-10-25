@@ -210,8 +210,8 @@ test("CUST-MENU shows the published photo and description on the card and detail
   const media = photoCard.locator(".menu-card__media");
   await expect(media).toBeVisible();
   const before = { media: await media.boundingBox(), card: await photoCard.boundingBox() };
-  expect(before.media?.width).toBe(96);
-  expect(before.media?.height).toBe(96);
+  expect(before.media?.width).toBe(88);
+  expect(before.media?.height).toBe(88);
   release();
   const image = media.locator("img");
   await expect
@@ -225,9 +225,9 @@ test("CUST-MENU shows the published photo and description on the card and detail
   await expect(image).toHaveAttribute("decoding", "async");
   await expect(image).toHaveAttribute("width", "1280");
   await expect(image).toHaveAttribute("height", "960");
-  await expect(image).toHaveAttribute("sizes", "96px");
+  await expect(image).toHaveAttribute("sizes", "88px");
   await expect(media).toHaveAttribute("aria-hidden", "true");
-  // Chromium prefers the WebP source at 320w for a 96px box.
+  // Chromium prefers the WebP source at 320w for an 88px box (Figma v1).
   expect(requested).toContain(`/media/images/${hash("b")}.webp`);
   expect(requested.some((path) => path.includes(hash("e")) || path.includes(hash("f")))).toBe(
     false,

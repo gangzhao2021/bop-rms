@@ -179,9 +179,9 @@ export function SessionPaymentResultPage({
         </p>
       </PageHeading>
       <ol className="checkout-progress" aria-label={t("Checkout progress")}>
-        <li>{t("1 Review")}</li>
-        <li>{t("2 Pay")}</li>
-        <li aria-current="step">{t("3 Done")}</li>
+        <li>{t("Review")}</li>
+        <li>{t("Pay")}</li>
+        <li aria-current="step">{t("Done")}</li>
       </ol>
       <section className="payment-result-page__card" aria-labelledby="payment-result-heading">
         <span className="payment-result-page__badge" data-tone={badgeTone}>

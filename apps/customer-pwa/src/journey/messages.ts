@@ -408,13 +408,13 @@ export const checkoutText = Object.freeze({
     return t("Checkout progress");
   },
   get progressReview() {
-    return t("1 Review");
+    return t("Review");
   },
   get progressPay() {
-    return t("2 Pay");
+    return t("Pay");
   },
   get progressDone() {
-    return t("3 Done");
+    return t("Done");
   },
   get loadingHeading() {
     return t("Loading checkout");
@@ -648,6 +648,28 @@ export const orderStatusText = Object.freeze({
   get pageHeading() {
     return t("Track your order");
   },
+  /** Figma v1: a pickup order's steps, and whether each is done or happening now. */
+  timeline: Object.freeze({
+    get label() {
+      return t("Order progress");
+    },
+    get steps() {
+      return [
+        // The order page says "Payment received", never "Paid" (it would read as the amount).
+        t("Payment received"),
+        t("Accepted by the store"),
+        t("Being made"),
+        t("Ready for pickup"),
+        t("Picked up"),
+      ] as const;
+    },
+    get done() {
+      return t("Done");
+    },
+    get now() {
+      return t("Now");
+    },
+  }),
   /** Why the store cancelled, keyed by the server's reason code. */
   cancelReason: Object.freeze({
     get CustomerRequest() {

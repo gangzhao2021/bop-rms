@@ -27,11 +27,13 @@
 }
 .customer-page .bop-shell__header {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   min-height: 3.5rem;
-  align-content: center;
+  align-items: center;
   justify-items: start;
-  gap: 0.125rem;
-  padding: 1rem var(--customer-edge) 0.75rem;
+  column-gap: var(--bop-space-3);
+  row-gap: 0.125rem;
+  padding: 0.875rem var(--customer-edge) 0.375rem;
   border-bottom: 0;
   text-align: start;
 }
@@ -39,15 +41,50 @@
   display: none;
 }
 .customer-page .bop-shell__header h1 {
-  font-size: 1.1875rem;
-  font-weight: 650;
-  line-height: 1.25;
+  grid-column: 1;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.5rem;
   letter-spacing: -0.01em;
   overflow-wrap: anywhere;
 }
 .customer-page .bop-shell__header p {
+  grid-column: 1;
   font-family: inherit;
   font-size: 0.8125rem;
+  line-height: 1.125rem;
+}
+/* Figma v1: English / 中文 is a small outlined control beside the Store's name. */
+.customer-page .bop-shell__header-status {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  margin: 0;
+}
+.customer-page .language-switch {
+  position: relative;
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-canvas);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.125rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* The visible box stays small; the tap area is still 44 px tall. */
+.customer-page .language-switch::before {
+  content: "";
+  position: absolute;
+  inset: -0.375rem -0.25rem;
+}
+.customer-page .language-switch:hover {
+  border-color: var(--bop-color-border-strong);
 }
 /* The journey bar stays reachable while the guest scrolls. */
 .customer-page .bop-shell__nav {
@@ -69,32 +106,14 @@
   display: inline-flex;
   min-height: 44px;
   align-items: center;
-  margin-right: 1.25rem;
+  margin-right: 1.5rem;
   padding: 0 0.125rem;
   border-bottom: 2px solid transparent;
   color: var(--bop-color-text-muted);
   font-size: 0.9375rem;
-  font-weight: 500;
+  font-weight: 400;
   text-decoration: none;
   white-space: nowrap;
-}
-/* Owner 2026-10-23: English / 中文, at the end of the journey bar. */
-.customer-page .bop-shell__nav > .language-switch {
-  display: inline-flex;
-  min-height: 44px;
-  align-items: center;
-  margin-left: auto;
-  padding: 0 0.125rem;
-  border: 0;
-  background: none;
-  color: var(--bop-color-text-default);
-  font: inherit;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-  white-space: nowrap;
-  cursor: pointer;
 }
 .customer-page .bop-shell__nav > [aria-current="page"] {
   border-bottom-color: var(--bop-color-text-default);
@@ -437,27 +456,42 @@
 .menu-navigation {
   margin: 0;
 }
+/* Figma v1: browsing starts with a full-width search field that opens the search page. */
+.menu-page-intro--browse {
+  display: block;
+}
+.menu-page-intro--browse .menu-navigation {
+  width: 100%;
+}
 .menu-navigation__search {
-  display: inline-flex;
-  min-height: 44px;
+  display: flex;
+  min-height: 46px;
   align-items: center;
   gap: var(--bop-space-2);
-  padding: 0 var(--bop-space-4);
-  border: 1px solid var(--bop-color-border-strong);
+  padding: 0 var(--bop-space-3);
+  border: 1px solid transparent;
   border-radius: var(--bop-radius-control);
-  color: var(--bop-color-text-default);
-  background: var(--bop-color-surface-default);
-  font-weight: 600;
+  color: var(--bop-color-text-muted);
+  background: var(--bop-color-surface-raised);
+  font-size: 0.9375rem;
+  font-weight: 400;
   text-decoration: none;
+}
+.customer-page .bop-shell__main .menu-navigation__search {
+  text-decoration: none;
+}
+.menu-navigation__search:hover {
+  border-color: var(--bop-color-border-strong);
 }
 .menu-navigation__search::before {
   content: "";
+  flex: 0 0 auto;
   width: 0.75rem;
   height: 0.75rem;
   border: 2px solid currentColor;
   border-radius: 50%;
   box-shadow:
-    4px 4px 0 -2px var(--bop-color-surface-default),
+    4px 4px 0 -2px var(--bop-color-surface-raised),
     5px 5px 0 -1px currentColor;
 }
 .menu-navigation__links a {
@@ -474,7 +508,7 @@
   top: var(--customer-nav-height);
   z-index: 10;
   display: flex;
-  gap: var(--bop-space-6);
+  gap: var(--bop-space-5);
   margin: 0;
   padding: 0;
   overflow-x: auto;
@@ -490,26 +524,28 @@
   border-bottom: 2px solid transparent;
   color: var(--bop-color-text-muted);
   font-size: 0.9375rem;
-  font-weight: 600;
+  font-weight: 400;
   white-space: nowrap;
 }
 .customer-page .bop-shell__main .menu-sections a {
   text-decoration: none;
 }
 .menu-sections a[aria-current="true"] {
-  border-bottom-color: var(--bop-color-text-default);
+  border-bottom-color: var(--bop-color-brand-primary);
   color: var(--bop-color-text-default);
+  font-weight: 600;
 }
 .menu-content {
   min-width: 0;
 }
 .menu-section {
-  margin-top: var(--bop-space-8);
+  margin-top: var(--bop-space-5);
 }
 .customer-page .menu-section h3 {
-  margin: 0 0 var(--bop-space-3);
-  font-size: 1.25rem;
-  font-weight: 650;
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.5rem;
   letter-spacing: -0.01em;
   /* Clear of the journey bar and the section bar when reached from the section bar. */
   scroll-margin-top: calc(var(--customer-nav-height) + 4rem);
@@ -559,9 +595,9 @@
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
-  font-size: 1.0625rem;
-  font-weight: 650;
-  line-height: 1.3;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.375rem;
   overflow-wrap: anywhere;
 }
 /* Two whole lines at most; the item page has the full text. */
@@ -572,8 +608,8 @@
   -webkit-line-clamp: 2;
   line-clamp: 2;
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
-  line-height: 1.45;
+  font-size: 0.8125rem;
+  line-height: 1.125rem;
   overflow-wrap: anywhere;
 }
 .menu-card__sizes,
@@ -599,25 +635,25 @@
   line-height: 1.5;
   text-transform: uppercase;
 }
-/* The price sits at the foot of every card, so prices line up across a row. */
+/* Figma v1: name, description, price, then allergens. */
 .menu-card__aside {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0 var(--bop-space-3);
-  margin-top: auto;
-  padding-top: var(--bop-space-2);
 }
 .menu-card__price {
   font-size: 0.9375rem;
   font-variant-numeric: tabular-nums;
-  font-weight: 650;
+  font-weight: 400;
+  line-height: 1.375rem;
 }
 .menu-card__price--pending {
   color: var(--bop-color-text-muted);
   font-size: 0.8125rem;
   font-weight: 500;
 }
+/* Sold out reads faded, but "Sold out" itself keeps full contrast. */
 .menu-card--sold-out h4,
 .menu-card--sold-out .menu-card__price {
   color: var(--bop-color-text-muted);
@@ -627,10 +663,10 @@
   display: block;
   flex: 0 0 auto;
   align-self: flex-start;
-  width: 96px;
+  width: 88px;
   aspect-ratio: 1 / 1;
   overflow: hidden;
-  border-radius: var(--bop-radius-control);
+  border-radius: var(--bop-radius-card);
   background: var(--bop-color-surface-raised);
 }
 .menu-card__media img,
@@ -807,59 +843,51 @@
   font-weight: 650;
   text-decoration: none;
 }
-/* Phones: a bar along the bottom with the count, the action and the subtotal. */
+/* Phones (Figma v1): a white bar along the bottom, what is in the cart on the left and one black
+   "View cart" action on the right. */
 .menu-cart-bar {
   position: fixed;
   inset-inline: 0;
   bottom: 0;
   z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: var(--bop-space-3);
   padding: var(--bop-space-3) var(--customer-gutter)
-    calc(var(--bop-space-3) + env(safe-area-inset-bottom, 0px));
+    calc(var(--bop-space-5) + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--bop-color-border-default);
   background: var(--bop-color-surface-canvas);
 }
-.menu-cart-bar__link {
+.menu-cart-bar__summary {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+.menu-cart-bar__count {
+  color: var(--bop-color-text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.125rem;
+}
+.menu-cart-bar__total {
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1.375rem;
+}
+.customer-page .menu-cart-bar__link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 7.5rem;
+  min-height: 48px;
   align-items: center;
-  gap: var(--bop-space-3);
-  width: min(100%, 36rem);
-  min-height: 52px;
-  margin: 0 auto;
-  padding: 0 var(--bop-space-4);
+  justify-content: center;
+  padding: 0 var(--bop-space-6);
   border-radius: var(--bop-radius-control);
   color: var(--bop-color-on-primary);
   background: var(--bop-color-brand-primary);
-  font-weight: 650;
+  font-weight: 600;
   text-decoration: none;
-}
-/* "Subtotal before tax" over the amount: short, and never read as the amount to pay. */
-.menu-cart-bar__total {
-  display: grid;
-  justify-items: end;
-  line-height: 1.2;
-}
-.menu-cart-bar__caption {
-  font-size: 0.6875rem;
-  font-weight: 500;
-  opacity: 0.85;
-}
-.menu-cart-bar__label {
-  text-align: center;
-}
-.menu-cart-bar__count {
-  display: inline-flex;
-  min-width: 1.75rem;
-  height: 1.75rem;
-  align-items: center;
-  justify-content: center;
-  padding: 0 0.5rem;
-  border: 1px solid var(--bop-color-on-primary);
-  border-radius: var(--bop-radius-control);
-  font-variant-numeric: tabular-nums;
-}
-.menu-cart-bar__total {
-  font-variant-numeric: tabular-nums;
 }
 
 /* Search */
@@ -927,9 +955,16 @@
   min-height: 44px;
   align-items: center;
   margin-bottom: var(--bop-space-2);
-  color: inherit;
-  font-weight: 600;
+  color: var(--bop-color-text-muted);
+  font-size: 0.8125rem;
+  font-weight: 400;
   text-decoration: none;
+}
+.customer-page .bop-shell__main .sellable-detail__back {
+  text-decoration: none;
+}
+.sellable-detail__back:hover {
+  color: var(--bop-color-text-default);
 }
 .customer-page .sellable-detail {
   max-width: 44rem;
@@ -956,14 +991,14 @@
 }
 .customer-page .sellable-detail__heading h2 {
   margin: 0;
-  font-size: 1.75rem;
-  font-weight: 650;
-  line-height: 1.2;
-  letter-spacing: -0.015em;
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 2rem;
+  letter-spacing: -0.0125rem;
 }
 .sellable-detail__price {
   margin: 0;
-  font-size: 1.0625rem;
+  font-size: 0.9375rem;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -979,10 +1014,10 @@
 }
 .sellable-detail__description {
   max-width: 40rem;
-  margin: var(--bop-space-3) 0 0;
+  margin: var(--bop-space-2) 0 0;
   color: var(--bop-color-text-muted);
   font-size: 0.9375rem;
-  line-height: 1.55;
+  line-height: 1.375rem;
   overflow-wrap: anywhere;
 }
 .menu-allergens {
@@ -1015,7 +1050,7 @@
 }
 .sellable-configurator fieldset {
   display: grid;
-  gap: 0;
+  gap: var(--bop-space-2);
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -1026,29 +1061,42 @@
   width: 100%;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--bop-space-3);
-  margin-bottom: var(--bop-space-1);
-  padding: 0 0 var(--bop-space-2);
-  border-bottom: 1px solid var(--bop-color-border-strong);
+  gap: var(--bop-space-2);
+  margin-bottom: var(--bop-space-2);
+  padding: 0;
 }
 .configure-group__name {
-  font-size: 1rem;
-  font-weight: 650;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.5rem;
 }
 .configure-group__rule {
   color: var(--bop-color-text-muted);
   font-size: 0.8125rem;
-  font-weight: 500;
+  font-weight: 400;
+  white-space: nowrap;
 }
-/* One row per choice; the whole row is the tap target. */
+/* Figma v1 choice row: one 52 px outlined row per choice, the whole row is the tap target; the
+   chosen row has a heavier outline as well as its checked mark. */
 .configure-option {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--bop-space-1) var(--bop-space-3);
   min-height: 52px;
-  border-bottom: 1px solid var(--bop-color-border-default);
+  padding: 0 var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-canvas);
   cursor: pointer;
+}
+.configure-option:has(input:checked) {
+  padding: 0 calc(var(--bop-space-4) - 1px);
+  border: 2px solid var(--bop-color-border-strong);
+}
+.configure-option:has(input:disabled:not(:checked)) {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
 }
 .configure-option--row {
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1056,17 +1104,19 @@
 }
 .configure-option__choice {
   display: flex;
-  min-height: 52px;
+  min-height: 50px;
   align-items: center;
   gap: var(--bop-space-3);
   cursor: pointer;
 }
 .configure-option__name {
+  font-size: 0.9375rem;
+  line-height: 1.375rem;
   overflow-wrap: anywhere;
 }
 .configure-option__price {
   color: var(--bop-color-text-muted);
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   font-variant-numeric: tabular-nums;
   text-align: end;
   white-space: nowrap;
@@ -1094,7 +1144,7 @@
   box-sizing: border-box;
   min-height: 44px;
   padding: var(--bop-space-2) var(--bop-space-3);
-  border: 1px solid #c8c8c8;
+  border: 1px solid var(--bop-color-border-strong);
   border-radius: var(--bop-radius-control);
   font: inherit;
 }
@@ -1107,7 +1157,8 @@
   gap: var(--bop-space-1);
 }
 .configure-note label {
-  font-weight: 650;
+  font-size: 0.8125rem;
+  font-weight: 600;
 }
 .sellable-configurator textarea {
   width: 100%;
@@ -1595,6 +1646,153 @@
   margin-bottom: var(--bop-space-2);
 }
 
+/*
+ * Figma v1 checkout (2026-10-25): flat sections between hairlines with small uppercase labels,
+ * numbered steps, an even tip row with the chosen tip in black, and the totals on a raised block.
+ */
+.checkout-progress {
+  counter-reset: checkout-step;
+  gap: var(--bop-space-2);
+  margin-top: var(--bop-space-3);
+}
+.checkout-progress li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  counter-increment: checkout-step;
+}
+.checkout-progress li::before {
+  content: counter(checkout-step);
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: 50%;
+  color: var(--bop-color-text-muted);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.checkout-progress li[aria-current="step"]::before {
+  border-color: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  background: var(--bop-color-brand-primary);
+}
+.customer-page.checkout-page .customer-heading {
+  margin-bottom: 0;
+}
+.customer-page.checkout-page .checkout-progress {
+  padding-bottom: var(--bop-space-5);
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.customer-page.checkout-page .checkout-summary,
+.customer-page.checkout-page .checkout-tip,
+.customer-page.checkout-page
+  .checkout-layout__main
+  > section[aria-labelledby="checkout-details-heading"] {
+  padding: var(--bop-space-5) 0;
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+  border-radius: 0;
+  background: var(--bop-color-surface-canvas);
+}
+.customer-page.checkout-page .checkout-details-form:not(fieldset) {
+  padding: 0;
+  border: 0;
+  background: var(--bop-color-surface-canvas);
+}
+.customer-page.checkout-page .checkout-summary h2,
+.customer-page.checkout-page .checkout-tip h2,
+.customer-page.checkout-page #checkout-details-heading {
+  margin: 0 0 var(--bop-space-2);
+  color: var(--bop-color-text-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.125rem;
+  text-transform: uppercase;
+}
+.customer-page.checkout-page .checkout-items li {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0 var(--bop-space-1);
+  padding: var(--bop-space-1) 0;
+  border-bottom: 0;
+}
+.customer-page.checkout-page .checkout-items__quantity {
+  color: inherit;
+}
+/* Sections meet at their hairlines; no extra gaps between them. */
+.customer-page.checkout-page .checkout-layout,
+.customer-page.checkout-page .checkout-layout__aside,
+.customer-page.checkout-page .checkout-layout__main {
+  row-gap: 0;
+}
+.customer-page.checkout-page .checkout-items__name {
+  font-weight: 400;
+}
+.customer-page.checkout-page .checkout-edit-link {
+  margin-top: var(--bop-space-2);
+  font-size: 0.8125rem;
+}
+.customer-page.checkout-page .checkout-details-form legend {
+  margin-bottom: var(--bop-space-1);
+  font-size: 0.9375rem;
+}
+.customer-page.checkout-page .checkout-details-form label:not(:has(input[type="checkbox"])) {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.customer-page.checkout-page .checkout-details-form input:not([type="checkbox"]),
+.customer-page.checkout-page .checkout-details-form select,
+.customer-page.checkout-page .checkout-tip input:not(.sr-only) {
+  border-color: var(--bop-color-border-strong);
+  font-size: 0.9375rem;
+  font-weight: 400;
+}
+.customer-page.checkout-page .checkout-tip__choices button {
+  min-height: 44px;
+  border-color: var(--bop-color-border-default);
+  font-size: 0.8125rem;
+  line-height: 1.125rem;
+}
+.customer-page.checkout-page .checkout-tip__choices button[aria-pressed="true"] {
+  border-color: var(--bop-color-brand-primary);
+}
+.customer-page.checkout-page .checkout-tip__choices button:disabled:not([aria-pressed="true"]) {
+  background: var(--bop-color-surface-canvas);
+}
+.customer-page.checkout-page .checkout-totals {
+  margin-inline: calc(-1 * var(--customer-gutter));
+  padding: var(--bop-space-5) var(--customer-gutter);
+  border-bottom: 0;
+  background: var(--bop-color-surface-raised);
+}
+.customer-page.checkout-page .checkout-totals dl div {
+  padding: var(--bop-space-1) 0;
+  font-size: 0.9375rem;
+}
+.customer-page.checkout-page .checkout-totals__total {
+  margin-top: 0;
+  padding-top: var(--bop-space-1) !important;
+  border-top: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+.customer-page.checkout-page .checkout-totals__validity {
+  margin-top: var(--bop-space-2);
+  font-size: 0.8125rem;
+}
+@media (min-width: 64rem) {
+  /* Wide screens: the totals block sits in the right column at its own width. */
+  .customer-page.checkout-page .checkout-totals {
+    margin-inline: 0;
+    padding-inline: var(--bop-space-5);
+    border-radius: var(--bop-radius-card);
+  }
+}
+
 /* ---------- Payment ---------- */
 .payment-page__amount h2 {
   margin: 0;
@@ -1714,10 +1912,86 @@
 }
 
 /* ---------- Order status ---------- */
-.order-status__summary h2 {
-  margin: 0 0 var(--bop-space-1);
-  font-size: 1.5rem;
-  font-weight: 650;
+.customer-page .order-status__summary h2 {
+  margin: 0 0 var(--bop-space-2);
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 2.5rem;
+  letter-spacing: -0.02em;
+}
+/* Figma v1: the order page reads as one column of sections between hairlines, not cards. */
+.customer-page.order-status .order-status__summary,
+.customer-page.order-status .order-status__batch,
+.customer-page.order-status .pickup-code,
+.customer-page.order-status .order-status__actions {
+  padding: var(--bop-space-5) 0;
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+  border-radius: 0;
+  background: var(--bop-color-surface-canvas);
+}
+.customer-page.order-status .order-status__summary .bop-eyebrow {
+  margin-bottom: var(--bop-space-2);
+  color: var(--bop-color-text-muted);
+  font-size: 0.8125rem;
+}
+/* Figma v1: the pickup timeline. A line joins the dots; each step also says "Done" or "Now". */
+.order-status__timeline {
+  margin: var(--bop-space-5) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.order-status__step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--bop-space-3);
+  min-height: 38px;
+  color: var(--bop-color-text-muted);
+}
+.order-status__step::before {
+  content: "";
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--bop-color-border-strong);
+  border-radius: 50%;
+  background: var(--bop-color-surface-canvas);
+}
+.order-status__step + .order-status__step::after {
+  content: "";
+  position: absolute;
+  top: -13px;
+  left: 5px;
+  width: 2px;
+  height: 14px;
+  background: var(--bop-color-border-default);
+}
+.order-status__step--done,
+.order-status__step--current {
+  color: var(--bop-color-text-default);
+}
+.order-status__step--done::before {
+  border-color: var(--bop-color-brand-primary);
+  background: var(--bop-color-brand-primary);
+}
+.order-status__step--current::before {
+  border: 3px solid var(--bop-color-brand-primary);
+}
+.order-status__step--current .order-status__step-label {
+  font-weight: 600;
+}
+.order-status__step--upcoming::before {
+  border-color: var(--bop-color-text-muted);
+}
+.order-status__step-label {
+  font-size: 0.9375rem;
+  line-height: 1.375rem;
+}
+.order-status__step-state {
+  color: var(--bop-color-text-muted);
+  font-size: 0.8125rem;
 }
 .order-status__summary > p {
   color: var(--bop-color-text-muted);

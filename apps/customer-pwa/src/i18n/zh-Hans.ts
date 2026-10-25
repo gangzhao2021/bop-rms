@@ -11,9 +11,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " · new on this version": " · 本版本新增",
   "(opens a map in a new tab)": "（在新标签页打开地图）",
   "(opens in a new tab)": "（在新标签页打开）",
-  "1 Review": "1 核对",
-  "2 Pay": "2 付款",
-  "3 Done": "3 完成",
   "A refund on this order was updated.": "这笔订单的退款已更新。",
   "A refund was made to your original payment.": "已退款到你原来的付款方式。",
   "A required choice is missing for this item.": "这件商品缺少一项必选内容。",
@@ -1033,13 +1030,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "plus tax": "另加税",
   "registration no.": "登记号",
   "until {value1}": "营业至 {value1}",
+  "{amount} before tax": "税前 {amount}",
   "{base} Please try again shortly. If this keeps happening, ask a staff member.":
     "{base}请稍后再试。如果一直这样，请询问店员。",
   "{base} Try again in a moment.": "{base}请稍后再试。",
   "{base} Try again in about {minutes} minute{value1}.": "{base}请约 {minutes} 分钟后再试。",
   "{base} Try again shortly.": "{base}请稍后再试。",
   "{count} items": "{count} 件商品",
-  "{count} items in cart": "购物车里有 {count} 件商品",
   "{item} quantity": "{item} 的数量",
   "{name} allows at most {value1}.": "{name} 最多可选 {value1} 份。",
   "{name} conflicts with another selected choice.": "{name} 与另一个已选项冲突。",
@@ -1093,4 +1090,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你已离线，店员没有收到通知。请直接向店员示意。",
   "We couldn’t reach the staff. Try again, or wave to a staff member.":
     "没能通知到店员。请重试，或直接向店员示意。",
+  // Figma v1: the step number is drawn by the list itself.
+  Pay: "付款",
+  Review: "核对",
+  // Figma v1: the pickup order's steps on the order page.
+  "Accepted by the store": "门店已接单",
+  "Being made": "制作中",
+  Now: "进行中",
+  "Order progress": "订单进度",
+  "Payment received": "已收款",
+  "Picked up": "已取餐",
 });

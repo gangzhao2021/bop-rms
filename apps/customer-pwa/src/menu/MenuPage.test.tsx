@@ -147,10 +147,10 @@ describe("WP-2423 menu descriptions and photos", () => {
     expect(withPhoto).toContain(photographed.description);
     expect(withPhoto).toContain('<span class="menu-card__media" aria-hidden="true"><picture>');
     expect(withPhoto).toContain(
-      `<source type="image/webp" srcSet="/media/images/${hash("b")}.webp 320w, /media/images/${hash("d")}.webp 640w" sizes="96px"/>`,
+      `<source type="image/webp" srcSet="/media/images/${hash("b")}.webp 320w, /media/images/${hash("d")}.webp 640w" sizes="88px"/>`,
     );
     expect(withPhoto).toMatch(
-      /<img alt="" decoding="async" height="960" loading="lazy" sizes="96px"/u,
+      /<img alt="" decoding="async" height="960" loading="lazy" sizes="88px"/u,
     );
     expect(withPhoto).toContain(`src="/media/images/${hash("a")}.jpg"`);
     expect(withPhoto).toContain(

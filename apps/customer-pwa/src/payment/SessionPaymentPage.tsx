@@ -211,9 +211,9 @@ function PreparedSessionPaymentPage({
         {demo ? <p>{t("Internal testing only. No real money is charged.")}</p> : null}
       </PageHeading>
       <ol className="checkout-progress" aria-label={t("Checkout progress")}>
-        <li>{t("1 Review")}</li>
-        <li aria-current="step">{t("2 Pay")}</li>
-        <li>{t("3 Done")}</li>
+        <li>{t("Review")}</li>
+        <li aria-current="step">{t("Pay")}</li>
+        <li>{t("Done")}</li>
       </ol>
       {status === "loading" ? <p role="status">{t("Loading checkout…")}</p> : null}
       {status === "unavailable" ? (

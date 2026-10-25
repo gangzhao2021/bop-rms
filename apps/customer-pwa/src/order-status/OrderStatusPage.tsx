@@ -599,6 +599,45 @@ export function refundLines(view: OrderStatusView, withItemCancellations = false
     );
 }
 
+/**
+ * Figma v1 (2026-10-25): a pickup order's steps from payment to collection. Each step says in words
+ * whether it is done or happening now; the dots only repeat that.
+ */
+function PickupTimeline({
+  stage,
+  collected,
+}: {
+  readonly stage: "Submitted" | "Accepted" | "Preparing" | "Ready";
+  readonly collected: boolean;
+}) {
+  // How many steps are done; the next one is happening now, except right after the store accepts
+  // (nothing is being made yet) and once the order is collected.
+  const done = collected
+    ? 5
+    : stage === "Ready"
+      ? 3
+      : stage === "Preparing" || stage === "Accepted"
+        ? 2
+        : 1;
+  const current = collected || stage === "Accepted" ? -1 : done;
+  const text = orderStatusText.timeline;
+  return (
+    <ol className="order-status__timeline" aria-label={text.label}>
+      {text.steps.map((label, index) => {
+        const state = index < done ? "done" : index === current ? "current" : "upcoming";
+        return (
+          <li key={label} className={`order-status__step order-status__step--${state}`}>
+            <span className="order-status__step-label">{label}</span>
+            <span className="order-status__step-state">
+              {state === "done" ? text.done : state === "current" ? text.now : ""}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 function StatusContent({
   view,
   pickupController,
@@ -825,6 +864,17 @@ function StatusContent({
         <p className="bop-eyebrow">{orderStatusText.orderEyebrow(view.order.orderNumber)}</p>
         <h2 id="order-progress-heading">{progressHeading}</h2>
         <p>{progressMessage}</p>
+        {/* Only once the payment is confirmed: before that the page is about paying. */}
+        {pickup &&
+        (paid !== null || complete) &&
+        !storeCancelled &&
+        !notAccepted &&
+        !unpaidPickupCancelled &&
+        !notCollected &&
+        view.order.canonicalPhase !== "Cancelled" &&
+        view.order.canonicalPhase !== "Rejected" ? (
+          <PickupTimeline stage={stage} collected={complete} />
+        ) : null}
         {storeCancelled ? (
           <p className="order-status__refund">{staffRefundText(storeCancelled)}</p>
         ) : null}

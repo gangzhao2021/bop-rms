@@ -398,13 +398,15 @@ export function MenuScreen({
           {mode === "detail" ? (
             <h2 className="sr-only">{title}</h2>
           ) : (
-            <div className="menu-page-intro">
+            <div className={`menu-page-intro menu-page-intro--${mode}`}>
+              {/* Figma v1: browsing shows the search field first; the journey bar already says
+                  "Menu", so its heading is for assistive technology only. */}
               {browseFound ? (
-                <h2 ref={headingRef} tabIndex={-1}>
+                <h2 className="sr-only" ref={headingRef} tabIndex={-1}>
                   {title}
                 </h2>
               ) : (
-                <h2>{title}</h2>
+                <h2 className={mode === "browse" ? "sr-only" : undefined}>{title}</h2>
               )}
               <nav className="menu-navigation" aria-label={t("Menu")}>
                 {mode === "search" ? (
@@ -412,12 +414,8 @@ export function MenuScreen({
                     <Link to="/menu">{t("← Back to menu")}</Link>
                   </div>
                 ) : (
-                  <Link
-                    aria-label={t("Search menu")}
-                    className="menu-navigation__search"
-                    to="/menu/search"
-                  >
-                    {t("Search")}
+                  <Link className="menu-navigation__search" to="/menu/search">
+                    {t("Search menu")}
                   </Link>
                 )}
               </nav>
@@ -537,24 +535,17 @@ function MenuCart({
       </aside>
       {summary.count === 0 ? null : (
         <div className="menu-cart-bar">
-          <Link className="menu-cart-bar__link" to="/cart">
-            <span
-              className="menu-cart-bar__count"
-              aria-label={t("{count} items in cart", { count: summary.count })}
-            >
-              {summary.count}
-            </span>
-            <span className="menu-cart-bar__label">{t("View cart")}</span>
-            {summary.subtotal === null ? (
-              <span className="menu-cart-bar__total" aria-hidden="true">
-                {items}
-              </span>
-            ) : (
+          {/* Figma v1: what is in the cart on the left, one black action on the right. */}
+          <p className="menu-cart-bar__summary">
+            <span className="menu-cart-bar__count">{items}</span>
+            {summary.subtotal === null ? null : (
               <span className="menu-cart-bar__total">
-                <span className="menu-cart-bar__caption">{t("Subtotal before tax")}</span>{" "}
-                {summary.subtotal}
+                {t("{amount} before tax", { amount: summary.subtotal })}
               </span>
             )}
+          </p>
+          <Link className="menu-cart-bar__link" to="/cart">
+            {t("View cart")}
           </Link>
         </div>
       )}
@@ -865,7 +856,6 @@ function MenuItemCard({
               {sectionName}
             </span>
           ) : null}
-          {allergens === null ? null : <span className="menu-card__allergens">{allergens}</span>}
           <span className="menu-card__aside">
             <span
               className={`menu-card__price${price === null ? " menu-card__price--pending" : ""}`}
@@ -874,6 +864,7 @@ function MenuItemCard({
             </span>
             {soldOut ? <span className="menu-sold-out">{t("Sold out")}</span> : null}
           </span>
+          {allergens === null ? null : <span className="menu-card__allergens">{allergens}</span>}
         </span>
         {photo === null ? null : (
           <MenuPhotoPicture
@@ -881,7 +872,7 @@ function MenuItemCard({
             decorative
             onError={photoFailed}
             photo={photo}
-            sizes="96px"
+            sizes="88px"
             widths={[320, 640]}
           />
         )}

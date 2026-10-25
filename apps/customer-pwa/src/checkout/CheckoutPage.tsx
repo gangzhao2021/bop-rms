@@ -335,7 +335,10 @@ export function CheckoutPage({
           {state.status === "pending" ? <p role="status">{checkoutText.calculatingTotal}</p> : null}
           {quote ? (
             <section className="checkout-summary checkout-totals" aria-labelledby="quote-heading">
-              <h2 id="quote-heading">{commonText.total}</h2>
+              {/* Figma v1: the totals block speaks for itself; its heading is for screen readers. */}
+              <h2 id="quote-heading" className="sr-only">
+                {commonText.total}
+              </h2>
               <dl>
                 <div>
                   <dt>{commonText.subtotal}</dt>
