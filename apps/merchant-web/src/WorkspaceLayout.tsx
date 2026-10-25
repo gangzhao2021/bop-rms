@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { LanguageSwitch, t } from "./i18n/i18n.js";
 import { SkipLinkProvidedContext } from "@bop-rms/ui";
 import {
   useEffect,
@@ -352,6 +352,8 @@ export function WorkspaceLayout({
           </p>
           <p className="workspace-sidebar__store">{storeLabel}</p>
         </div>
+        {/* Owner 2026-10-25: always in view beside the Store name, on every width. */}
+        <LanguageSwitch className="workspace-sidebar__language" />
         <div className="workspace-sidebar__links">{links("sidebar")}</div>
         <details
           className="workspace-sidebar__compact"

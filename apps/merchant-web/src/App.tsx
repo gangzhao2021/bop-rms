@@ -1,4 +1,4 @@
-import { LanguageSwitch, t } from "./i18n/i18n.js";
+import { t } from "./i18n/i18n.js";
 import { CurrentOrderDetailRoute, CurrentOrderQueuePage } from "./CurrentOrderQueuePage.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import {
@@ -682,7 +682,6 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           demo === null ? (
             <>
               <StaffSwitchButton />
-              <LanguageSwitch className="workspace-sidebar__language" />
               <StaffPinControls
                 csrf={state.csrf}
                 timeZone={state.workspace.selectedScope.timeZone}

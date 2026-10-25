@@ -9429,6 +9429,17 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin-left: auto;
   align-self: center;
 }
+.workspace-sidebar__language {
+  margin: 0 8px 16px;
+  min-height: 36px;
+  font-size: 13px;
+}
+@media (max-width: 64rem) {
+  .workspace-sidebar__language {
+    margin: 0;
+    flex: none;
+  }
+}
 .staff-switch__language {
   justify-self: start;
 }
