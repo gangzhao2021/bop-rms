@@ -160,6 +160,21 @@ async function pilotHome(
       },
     }),
   );
+  // WP-2423 Q35/Q28: the navigation counts (refunds waiting for approval, guests waiting for staff).
+  await page.route("**/merchant/payments/refunds/approvals", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        observedAt: new Date().toISOString(),
+        canApprove: true,
+        soleOperator: null,
+        entries: [],
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/staff-calls/count", (route) =>
+    route.fulfill({ headers, json: { open: 0 } }),
+  );
   // The "Right now" summaries, empty: this spec is about the store system card.
   await page.route("**/merchant/orders*", (route) =>
     route.fulfill({ headers, json: { items: [], nextAfterOrderReference: null } }),
