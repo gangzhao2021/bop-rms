@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRefundApprovalClient } from "./refund-approval-client.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
+import { createDiningSessionClient } from "./dining-session-client.js";
 
 /** WP-2423 Q35: how often the waiting refund approvals are read while a page is visible. */
 export const APPROVALS_WAITING_REFRESH_MS = 60_000;
@@ -60,5 +61,48 @@ export function useApprovalsWaiting(
       controller?.abort();
     };
   }, [client, enabled, live]);
+  return waiting;
+}
+
+/** WP-2423 Q28: how often the guests waiting for staff are counted while a page is visible. */
+export const STAFF_CALLS_WAITING_REFRESH_MS = 30_000;
+
+/**
+ * WP-2423 Q28 DEC-DINING-STAFF-CALL: how many guests at the selected Store asked staff to come to
+ * their table and wait, counted on every page for staff with the Tables page. `null` until read,
+ * when not permitted, or when the read fails.
+ */
+export function useStaffCallsWaiting(csrf: string | null, enabled: boolean): number | null {
+  const live = useStaffSessionLive();
+  const [waiting, setWaiting] = useState<number | null>(null);
+  useEffect(() => {
+    if (!enabled || csrf === null || !live || typeof window === "undefined") {
+      setWaiting(null);
+      return;
+    }
+    const client = createDiningSessionClient();
+    let controller: AbortController | null = null;
+    const read = () => {
+      controller?.abort();
+      const current = new AbortController();
+      controller = current;
+      client
+        .staffCallCount(csrf, current.signal)
+        .then((open) => {
+          if (!current.signal.aborted) setWaiting(open);
+        })
+        .catch(() => {
+          if (!current.signal.aborted) setWaiting(null);
+        });
+    };
+    read();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") read();
+    }, STAFF_CALLS_WAITING_REFRESH_MS);
+    return () => {
+      window.clearInterval(timer);
+      controller?.abort();
+    };
+  }, [csrf, enabled, live]);
   return waiting;
 }

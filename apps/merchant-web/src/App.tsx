@@ -675,6 +675,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
   const workspaceFrame = (content: ReactNode) =>
     state.kind === "Ready" ? (
       <WorkspaceLayout
+        csrf={demo === null ? state.csrf : null}
         items={state.workspace.navigation}
         path={pathname}
         storeLabel={state.workspace.selectedScope.storeLabel}

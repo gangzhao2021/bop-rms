@@ -83,6 +83,17 @@ export interface StaffDiningTable {
    * session from the Tables page (absent when the staff member may not close sessions).
    */
   session?: StaffDiningTableSession | null;
+  /**
+   * WP-2423 Q28 DEC-DINING-STAFF-CALL: a guest at the table asked staff to come over and nobody
+   * answered yet. Null when nobody is waiting (and from an older server).
+   */
+  staffCall?: StaffDiningCall | null;
+}
+export type StaffDiningCallReason = "Question" | "TableNeeds" | "OrderProblem";
+export interface StaffDiningCall {
+  readonly callReference: string;
+  readonly reason: StaffDiningCallReason;
+  readonly calledAt: string;
 }
 export interface StaffDiningTableSession {
   readonly phase: "Active" | "Closing";
@@ -279,6 +290,25 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
             orderReference: facts.orderReference === null ? null : ref(facts.orderReference),
           });
         }
+        // WP-2423 Q28: an open call only at a table with an open session.
+        const callValue: unknown = r.staffCall;
+        let staffCall: StaffDiningCall | null = null;
+        if (callValue !== undefined && callValue !== null) {
+          const call = obj(callValue);
+          if (
+            currentDiningSessionReference === null ||
+            Object.keys(call).length !== 3 ||
+            !["Question", "TableNeeds", "OrderProblem"].includes(String(call.reason)) ||
+            typeof call.calledAt !== "string" ||
+            !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(call.calledAt)
+          )
+            return fail();
+          staffCall = Object.freeze({
+            callReference: ref(call.callReference),
+            reason: call.reason as StaffDiningCallReason,
+            calledAt: call.calledAt,
+          });
+        }
         return {
           tableReference: reference,
           stableLabel: label(r.stableLabel),
@@ -294,6 +324,7 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           guestRoundsAwaitingPayment: Object.freeze(guestAwaiting),
           roundsAwaitingAcceptance: Object.freeze(acceptanceAwaiting),
           session,
+          staffCall,
         } as StaffDiningTable;
       });
       const next = data.nextAfterTableReference === null ? null : ref(data.nextAfterTableReference);
@@ -451,6 +482,39 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           }
         },
       };
+    },
+    /** WP-2423 Q28: how many guests at this Store are waiting for staff (navigation count). */
+    async staffCallCount(csrf: string, signal?: AbortSignal) {
+      const data = await send("/merchant/dining/staff-calls/count", "{}", csrf, signal);
+      if (
+        Object.keys(data).length !== 1 ||
+        typeof data.open !== "number" ||
+        !Number.isSafeInteger(data.open) ||
+        data.open < 0
+      )
+        return fail();
+      return data.open;
+    },
+    /** WP-2423 Q28: staff went to the table; repeat the same operation only to recover. */
+    async answerStaffCall(csrf: string, operationReference: string, callReference: string) {
+      const data = await send(
+        "/merchant/dining/staff-calls/answer",
+        JSON.stringify({
+          operationReference: ref(operationReference),
+          callReference: ref(callReference),
+        }),
+        csrf,
+        undefined,
+        true,
+      );
+      if (
+        Object.keys(data).length !== 1 ||
+        (data.status !== "Answered" &&
+          data.status !== "AlreadyClosed" &&
+          data.status !== "NotFound")
+      )
+        throw new DiningSessionClientError("Unknown");
+      return data.status;
     },
   };
 }

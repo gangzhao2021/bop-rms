@@ -110,6 +110,17 @@ async function enterTable(page: Page, onSession: () => { status: number; json: u
     const { status, json } = onSession();
     return route.fulfill({ status, headers: { "cache-control": "no-store" }, json });
   });
+  // WP-2423 Q28 DEC-DINING-STAFF-CALL: nobody at this table has asked for staff.
+  await page.route("**/api/v1/dine-in/staff-call", (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { "cache-control": "no-store" },
+      json: {
+        schemaVersion: 1,
+        staffCall: { open: null, recentlyClosed: null, nextCallAt: null },
+      },
+    }),
+  );
   // WP-2423 DEC-DINING-GUEST-INVITATION: this guest is not the table's host (no invite control).
   await page.route("**/api/v1/dine-in/invitation", (route) =>
     route.fulfill({

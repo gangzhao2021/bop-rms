@@ -9537,3 +9537,46 @@ tr[data-drop-target="true"] {
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
+/* WP-2423 Q28 DEC-DINING-STAFF-CALL: guests waiting for staff, above the tables. */
+.dining-staff-calls {
+  margin-block: var(--bop-space-3);
+  padding: var(--bop-space-3) var(--bop-space-4);
+  border: 2px solid var(--bop-color-warning);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-raised);
+}
+.dining-staff-calls h2 {
+  margin: 0 0 var(--bop-space-2);
+  font-size: 20px;
+}
+.dining-staff-calls ul {
+  display: grid;
+  gap: var(--bop-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dining-staff-calls li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bop-space-2);
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.dining-staff-calls li[data-tier="urgent"] {
+  color: var(--bop-color-danger);
+  font-weight: 600;
+}
+.dining-staff-calls button {
+  min-height: 44px;
+  min-width: 7rem;
+  padding: 0 16px;
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  font: inherit;
+  font-weight: 600;
+}

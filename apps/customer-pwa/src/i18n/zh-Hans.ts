@@ -1071,4 +1071,26 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Offline: "离线",
   "Show this pickup confirmation to staff at the pickup counter.":
     "请在取餐柜台向店员出示这个取餐确认。",
+  "A question": "有问题想问",
+  "Something for the table (water, cutlery, napkins)": "桌上需要东西（水、餐具、纸巾）",
+  "A problem with my order": "我点的菜有问题",
+  "Staff have been asked to come to your table": "已请店员到你的桌边",
+  "Asked at {time} · {reason}": "{time} 呼叫 · {reason}",
+  "Everyone at your table sees this. Someone will come over as soon as they can.":
+    "同桌的人都能看到这条，店员会尽快过来。",
+  "Sending…": "正在发送…",
+  "No longer needed": "不需要了",
+  "Need a staff member?": "需要店员吗？",
+  "A staff member saw your request at {time}.": "店员已在 {time} 看到你的请求。",
+  "Your request was withdrawn.": "你的请求已撤回。",
+  "You’ve asked several times. You can ask again at {time}, or wave to a staff member.":
+    "你已经呼叫了好几次，{time} 后可以再呼叫，也可以直接向店员示意。",
+  "What do you need?": "需要什么？",
+  "Please don’t share allergies here; tell the staff member when they arrive.":
+    "过敏信息请不要通过这里告知，店员到了请当面说明。",
+  "Ask staff to come to the table": "请店员过来",
+  "You’re offline, so staff weren’t told. Please wave to a staff member.":
+    "你已离线，店员没有收到通知。请直接向店员示意。",
+  "We couldn’t reach the staff. Try again, or wave to a staff member.":
+    "没能通知到店员。请重试，或直接向店员示意。",
 });

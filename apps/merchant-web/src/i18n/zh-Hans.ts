@@ -3543,6 +3543,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{count} to approve": "{count} 项待批准",
   "{count} approved, not sent yet": "{count} 项已批准、尚未发出",
   "Review approvals": "去审批",
+  "Something for the table": "桌上需要东西",
+  "A problem with their order": "所点的菜有问题",
+  "A question": "有问题想问",
+  "Guest asked for staff just now · {reason}": "客人刚刚请店员过去 · {reason}",
+  "Guest asked for staff {minutes} min ago · {reason}":
+    "客人 {minutes} 分钟前请店员过去 · {reason}",
+  "Table {table}: marked as handled.": "{table} 号桌：已标记为处理。",
+  "Table {table}: not confirmed. Check the connection and try again.":
+    "{table} 号桌：未确认。请检查网络后重试。",
+  "Guests asking for staff": "请店员过去的桌",
+  "Table {table}": "{table} 号桌",
+  Handled: "已处理",
   "Sound off": "声音关",
   "Sound on": "声音开",
   Source: "来源",

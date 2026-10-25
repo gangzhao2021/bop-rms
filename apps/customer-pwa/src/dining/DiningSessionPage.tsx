@@ -15,6 +15,8 @@ import {
   type DiningSessionView,
 } from "./dining-session-client.js";
 import { DiningInvitationPanel } from "./DiningInvitationPanel.js";
+import { DiningStaffCallPanel } from "./DiningStaffCallPanel.js";
+import type { DiningStaffCallClient } from "./dining-staff-call-client.js";
 import type { DiningInvitationClient } from "./dining-invitation-client.js";
 
 /**
@@ -333,11 +335,14 @@ export function DiningSessionPage({
   store,
   client: provided,
   invitationClient,
+  staffCallClient,
 }: {
   readonly store?: CustomerStoreContext | undefined;
   readonly client?: DiningSessionClient | undefined;
   /** WP-2423 DEC-DINING-GUEST-INVITATION (tests inject; the page uses HTTP by default). */
   readonly invitationClient?: DiningInvitationClient | undefined;
+  /** WP-2423 Q28 DEC-DINING-STAFF-CALL (tests inject; the page uses HTTP by default). */
+  readonly staffCallClient?: DiningStaffCallClient | undefined;
 }) {
   const [client] = useState(() => provided ?? createHttpDiningSessionClient());
   const [state, setState] = useState<DiningSessionState>({ status: "loading" });
@@ -407,6 +412,13 @@ export function DiningSessionPage({
           <DiningInvitationPanel client={invitationClient} />
         ) : null
       }
+      staffCall={
+        // WP-2423 Q28: shown with the table, including while a refresh fails (staff may still be
+        // reachable); the panel itself says when they are not.
+        state.status === "ready" || (state.status === "unavailable" && state.view !== null) ? (
+          <DiningStaffCallPanel client={staffCallClient} />
+        ) : null
+      }
     />
   );
 }
@@ -416,12 +428,15 @@ export function DiningSessionScreen({
   store,
   onRefresh,
   invitation = null,
+  staffCall = null,
 }: {
   readonly state: DiningSessionState;
   readonly store?: CustomerStoreContext | undefined;
   readonly onRefresh: () => void;
   /** WP-2423 DEC-DINING-GUEST-INVITATION: the host's "Invite someone at your table". */
   readonly invitation?: ReactNode;
+  /** WP-2423 Q28 DEC-DINING-STAFF-CALL: "Need a staff member?". */
+  readonly staffCall?: ReactNode;
 }) {
   const view = state.status === "ready" || state.status === "unavailable" ? state.view : null;
   const active = isDiningSessionActive(view);
@@ -477,6 +492,7 @@ export function DiningSessionScreen({
           </button>
         </section>
       ) : null}
+      {staffCall}
       {invitation}
       {view && view.rounds.length === 0 ? (
         <section className="order-status__card">

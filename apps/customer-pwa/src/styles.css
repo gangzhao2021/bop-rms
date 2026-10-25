@@ -2416,3 +2416,35 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+/* WP-2423 Q28 DEC-DINING-STAFF-CALL: "Need a staff member?" on the table page. */
+.dining-staff-call__reasons {
+  display: grid;
+  gap: var(--bop-space-2);
+  margin: var(--bop-space-3) 0;
+  padding: 0;
+  border: 0;
+}
+.dining-staff-call__reasons legend {
+  margin-bottom: var(--bop-space-2);
+  font-weight: 600;
+}
+.dining-staff-call__reasons label {
+  display: flex;
+  align-items: center;
+  gap: var(--bop-space-2);
+  min-height: 44px;
+  padding: 0 var(--bop-space-3);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  overflow-wrap: anywhere;
+}
+.dining-staff-call__reasons input {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+}
+.dining-staff-call__failed {
+  margin-top: var(--bop-space-3);
+  color: var(--bop-color-danger);
+  font-weight: 600;
+}

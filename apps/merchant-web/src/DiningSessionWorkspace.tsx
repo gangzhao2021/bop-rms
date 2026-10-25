@@ -14,6 +14,7 @@ import {
 } from "./dining-session-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { storeTime } from "./StoreTime.js";
+import { newOperationReference } from "./operation-reference.js";
 import { TableSessionClose } from "./TableSessionClose.js";
 import {
   browserOffline,
@@ -256,6 +257,40 @@ export function paidRoundAcceptanceNotice(
   };
 }
 
+/** WP-2423 Q28 DEC-DINING-STAFF-CALL: what the guest asked for, in staff words. */
+export function staffCallReasonText(reason: "Question" | "TableNeeds" | "OrderProblem"): string {
+  return reason === "TableNeeds"
+    ? t("Something for the table")
+    : reason === "OrderProblem"
+      ? t("A problem with their order")
+      : t("A question");
+}
+
+/**
+ * WP-2423 Q28: a guest at the table asked staff to come over. A warning at first, urgent once
+ * they have waited 5 minutes. Null when nobody is waiting.
+ */
+export function staffCallNotice(
+  table: StaffDiningTable,
+  now: number,
+): { readonly tier: "warning" | "urgent"; readonly text: string } | null {
+  const call = table.staffCall;
+  if (call === undefined || call === null) return null;
+  const minutes = Math.max(0, Math.floor((now - Date.parse(call.calledAt)) / 60_000));
+  return {
+    tier: minutes >= 5 ? "urgent" : "warning",
+    text:
+      minutes === 0
+        ? t("Guest asked for staff just now · {reason}", {
+            reason: staffCallReasonText(call.reason),
+          })
+        : t("Guest asked for staff {minutes} min ago · {reason}", {
+            minutes: String(minutes),
+            reason: staffCallReasonText(call.reason),
+          }),
+  };
+}
+
 /**
  * What a table tile flags for staff, in the order they act on it: a paid round waiting for
  * acceptance, a staff round or guest round waiting for payment (warn before timeouts), a table
@@ -269,6 +304,9 @@ export function tableAttentionNotices(
   canCloseSessions: boolean,
 ): { readonly tier: PaidRoundWaitTier | "warning" | "urgent" | null; readonly text: string }[] {
   const notices: { tier: PaidRoundWaitTier | "warning" | "urgent" | null; text: string }[] = [];
+  // WP-2423 Q28: a guest asked staff to come over (first: someone is waiting at the table).
+  const call = staffCallNotice(table, now);
+  if (call !== null) notices.push(call);
   for (const notice of [
     paidRoundAcceptanceNotice(table, now),
     staffRoundPaymentNotice(table, now, timeZone),
@@ -359,12 +397,45 @@ export function DiningSessionWorkspace({
   // WP-2423 item 5: while any staff round waits for payment, the clock ticks and the tables are
   // re-read in the background, so the warning counts down and clears once the payment is recorded.
   const [now, setNow] = useState(() => Date.now());
+  // WP-2423 Q28: any seated table may ask for staff at any moment, so the page keeps reading while
+  // a table is open, not only while a round waits.
   const awaitingPayment = tables.some(
     (table) =>
+      table.currentDiningSessionReference !== null ||
       table.staffRoundsAwaitingPayment.length > 0 ||
       table.guestRoundsAwaitingPayment.length > 0 ||
       table.roundsAwaitingAcceptance.length > 0,
   );
+  // WP-2423 Q28: answering a guest's call for staff ("I'm on my way" / handled).
+  const [answering, setAnswering] = useState<string | null>(null);
+  const [callMessage, setCallMessage] = useState("");
+  const answerOperations = useRef(new Map<string, string>());
+  const answerCall = async (table: StaffDiningTable) => {
+    const call = table.staffCall;
+    if (call === null || call === undefined || answering !== null) return;
+    const operation = answerOperations.current.get(call.callReference) ?? newOperationReference();
+    answerOperations.current.set(call.callReference, operation);
+    setAnswering(call.callReference);
+    setCallMessage("");
+    try {
+      await createDiningSessionClient().answerStaffCall(csrf, operation, call.callReference);
+      answerOperations.current.delete(call.callReference);
+      setTables((current) =>
+        current.map((entry) =>
+          entry.tableReference === table.tableReference ? { ...entry, staffCall: null } : entry,
+        ),
+      );
+      setCallMessage(t("Table {table}: marked as handled.", { table: table.stableLabel }));
+    } catch {
+      setCallMessage(
+        t("Table {table}: not confirmed. Check the connection and try again.", {
+          table: table.stableLabel,
+        }),
+      );
+    } finally {
+      setAnswering(null);
+    }
+  };
   /** `background`: an automatic retry; the selected table and any shown entry code stay. */
   const load = async (more = false, background = false) => {
     if ((pending.current && !pending.current.signal.aborted) || state === "Unknown" || hostLocked)
@@ -722,6 +793,40 @@ export function DiningSessionWorkspace({
         </div>
       </section>
       {stale ? <StaleReadNotice stale={stale} /> : null}
+      {tables.some((table) => table.staffCall) ? (
+        // WP-2423 Q28 DEC-DINING-STAFF-CALL: guests waiting for staff, oldest first.
+        <section className="dining-staff-calls" role="alert" aria-labelledby="dining-staff-calls">
+          <h2 id="dining-staff-calls">{t("Guests asking for staff")}</h2>
+          <ul>
+            {[...tables]
+              .filter((table) => table.staffCall)
+              .sort(
+                (a, b) =>
+                  Date.parse(a.staffCall?.calledAt ?? "") - Date.parse(b.staffCall?.calledAt ?? ""),
+              )
+              .map((table) => {
+                const notice = staffCallNotice(table, now);
+                return (
+                  <li key={table.tableReference} data-tier={notice?.tier}>
+                    <span>
+                      <strong>{t("Table {table}", { table: table.stableLabel })}</strong>
+                      {" · "}
+                      {notice?.text}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={answering !== null || stale !== null}
+                      onClick={() => void answerCall(table)}
+                    >
+                      {answering === table.staffCall?.callReference ? t("Saving…") : t("Handled")}
+                    </button>
+                  </li>
+                );
+              })}
+          </ul>
+        </section>
+      ) : null}
+      {callMessage ? <p role="status">{callMessage}</p> : null}
       <div className="dining-floor-layout">
         <section className="dining-floor-board" aria-label={t("Dining tables by area")}>
           {visibleAreas.length === 0 ? (

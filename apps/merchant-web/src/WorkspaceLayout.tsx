@@ -1,5 +1,5 @@
 import { LanguageSwitch, t } from "./i18n/i18n.js";
-import { useApprovalsWaiting } from "./approvals-waiting.js";
+import { useApprovalsWaiting, useStaffCallsWaiting } from "./approvals-waiting.js";
 import { SkipLinkProvidedContext } from "@bop-rms/ui";
 import {
   useEffect,
@@ -208,7 +208,10 @@ export function WorkspaceLayout({
   storeLabel,
   children,
   footer = null,
+  csrf = null,
 }: {
+  /** WP-2423 Q28: the session's CSRF token, to count guests waiting for staff. */
+  readonly csrf?: string | null;
   readonly items: readonly MerchantNavigationItem[];
   readonly path: string;
   readonly storeLabel: string;
@@ -220,8 +223,14 @@ export function WorkspaceLayout({
   const sections = workspaceNavigationSections(items);
   // WP-2423 Q35: refunds waiting for an approver are counted beside "Approvals" on every page.
   const approvals = useApprovalsWaiting(items.some((item) => item.screenId === "APPROVAL-INBOX"));
+  // WP-2423 Q28: guests waiting for staff are counted beside "Tables" on every page.
+  const staffCalls = useStaffCallsWaiting(
+    csrf,
+    items.some((item) => item.screenId === "DIN-FLOOR-BOARD"),
+  );
   const badges: Partial<Record<string, number>> = {
     "APPROVAL-INBOX": approvals === null ? 0 : approvals.awaiting + approvals.approvedNotSent,
+    "DIN-FLOOR-BOARD": staffCalls ?? 0,
   };
   const badge = (screenId: string) => {
     const count = badges[screenId] ?? 0;
