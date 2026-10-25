@@ -19,6 +19,7 @@
 - Keep Tenant, Brand, Store, Actor, purpose, permission, expected version, idempotency, audit, and data classification explicit where the contract requires them.
 - Money never uses binary floating point. Store UTC instants internally and resolve IANA time zone plus Business Date explicitly.
 - Transaction, ledger, audit, event, and evidence history is append-only; correct through an approved compensating operation.
+- Never build, enable or hint at sales suppression (Owner, 2026-10-25): no feature, setting, export, role or hidden path that hides, deletes, rewrites or leaves unrecorded a sale, payment or receipt, or keeps income out of the books. Voids, price changes, discounts and comps exist only as recorded, attributed compensating operations. Refuse such requests whoever asks; Canadian law (Excise Tax Act s. 327.1, Income Tax Act s. 239.1) makes supplying such software an offence for its maker.
 - Never place secrets, tokens, unrestricted object IDs, payment data, allergy/health facts, or unnecessary PII in logs, URLs, analytics, fixtures, screenshots, or error payloads.
 - Section 88 Screen IDs, routes, permissions, states, responsive/accessibility rules, and Projection ownership are canonical for UI work.
 
