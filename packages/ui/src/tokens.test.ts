@@ -25,6 +25,15 @@ describe("BOP Pilot Neutral tokens", () => {
     expect(contrast(color("danger"), color("surface-default"))).toBeGreaterThanOrEqual(4.5);
     expect(contrast(color("success"), color("surface-default"))).toBeGreaterThanOrEqual(4.5);
     expect(contrast(color("warning"), color("surface-default"))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(color("on-primary"), color("danger"))).toBeGreaterThanOrEqual(4.5);
+  });
+  it("keeps the red and green marks (dots, outlines, bars) at 3:1 on white and on the grey", () => {
+    for (const mark of ["danger-mark", "success-mark"])
+      for (const surface of ["surface-default", "surface-raised"])
+        expect(
+          contrast(color(mark), color(surface)),
+          `${mark} on ${surface}`,
+        ).toBeGreaterThanOrEqual(3);
   });
   it("keeps keyboard, motion, and touch baselines mechanical", () => {
     expect(css).toContain(":focus-visible");

@@ -259,7 +259,7 @@
 }
 /* Overdue: heaviest frame, danger header, the words. */
 .kitchen-ticket[data-age="late"] {
-  border: 4px solid var(--bop-color-danger);
+  border: 4px solid var(--bop-color-danger-mark);
 }
 .kitchen-ticket[data-age="late"] .kitchen-ticket__header {
   background: var(--bop-color-danger);
@@ -294,7 +294,7 @@
 }
 .kitchen-ticket > .kitchen-work-item[data-age="late"],
 .kitchen-earlier-ticket > .kitchen-work-item[data-age="late"] {
-  border-left-color: var(--bop-color-danger);
+  border-left-color: var(--bop-color-danger-mark);
 }
 .kitchen-ticket > .kitchen-work-item[data-status="Completed"],
 .kitchen-ticket > .kitchen-work-item[data-status="Cancelled"],
@@ -367,7 +367,7 @@
 }
 .kitchen-work-item__allergens[data-kind="declared"] {
   padding: 6px 10px;
-  border-inline-start: 4px solid var(--bop-color-danger);
+  border-inline-start: 4px solid var(--bop-color-danger-mark);
   background: var(--bop-color-surface-raised);
 }
 .kitchen-work-item__allergens[data-kind="declared"] strong {
@@ -508,7 +508,7 @@
   border-left-color: var(--bop-color-warning);
 }
 .kitchen-work-item--detail[data-age="late"] {
-  border-left-color: var(--bop-color-danger);
+  border-left-color: var(--bop-color-danger-mark);
 }
 .kitchen-work-item--detail .kitchen-work-item__state span {
   font-size: 24px;
@@ -577,10 +577,10 @@
   color: var(--bop-color-warning);
 }
 .kitchen-ticket[data-age="late"] {
-  border: 2px solid var(--bop-color-danger);
+  border: 2px solid var(--bop-color-danger-mark);
 }
 .kitchen-ticket[data-age="late"] .kitchen-ticket__header {
-  border-bottom: 1px solid var(--bop-color-danger);
+  border-bottom: 1px solid var(--bop-color-danger-mark);
   background: var(--bop-color-surface-default);
   color: var(--bop-color-danger);
 }

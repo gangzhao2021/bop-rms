@@ -317,10 +317,10 @@
 .configure-issues,
 .configure-status--error,
 .cart-state--error {
-  border-inline-start-color: var(--bop-color-danger);
+  border-inline-start-color: var(--bop-color-danger-mark);
 }
 .configure-status--success {
-  border-inline-start-color: var(--bop-color-success);
+  border-inline-start-color: var(--bop-color-success-mark);
 }
 .entry-closed {
   color: var(--bop-color-text-muted);
@@ -419,7 +419,7 @@
   font: inherit;
 }
 .dining-admission [aria-invalid="true"] {
-  border-color: var(--bop-color-danger);
+  border-color: var(--bop-color-danger-mark);
 }
 .dining-admission h2 {
   margin: 0 0 var(--bop-space-2);
@@ -1843,11 +1843,11 @@
   text-transform: uppercase;
 }
 .payment-result-page__badge[data-tone="success"] {
-  border-color: var(--bop-color-success);
+  border-color: var(--bop-color-success-mark);
   color: var(--bop-color-success);
 }
 .payment-result-page__badge[data-tone="danger"] {
-  border-color: var(--bop-color-danger);
+  border-color: var(--bop-color-danger-mark);
   color: var(--bop-color-danger);
 }
 .payment-result-page__badge[data-tone="warning"] {
@@ -2787,7 +2787,7 @@
   height: 8px;
   margin-inline-end: var(--bop-space-2);
   border-radius: 50%;
-  background: var(--bop-color-danger);
+  background: var(--bop-color-danger-mark);
   vertical-align: 0.1em;
 }
 .menu-state--warning h2,
@@ -2831,7 +2831,7 @@
   border-color: var(--bop-color-text-default);
 }
 .customer-page :is(input, select, textarea)[aria-invalid="true"] {
-  border-color: var(--bop-color-danger);
+  border-color: var(--bop-color-danger-mark);
 }
 /* Tags: words only. */
 .menu-badge {
@@ -2859,10 +2859,10 @@
   background: var(--bop-color-text-muted);
 }
 .payment-result-page__badge[data-tone="success"]::before {
-  background: var(--bop-color-success);
+  background: var(--bop-color-success-mark);
 }
 .payment-result-page__badge[data-tone="danger"]::before {
-  background: var(--bop-color-danger);
+  background: var(--bop-color-danger-mark);
 }
 .payment-result-page__badge[data-tone="warning"]::before {
   background: var(--bop-color-warning);
@@ -2905,4 +2905,42 @@
 /* Steps not reached yet: a grey disc instead of a ring. */
 .checkout-progress li:not([aria-current="step"])::before {
   background: var(--bop-color-surface-raised);
+}
+
+/*
+ * Owner 2026-10-25 ("先这样吧"): status words are dark text after a dot in the tone's mark
+ * colour; red text stays for error messages only.
+ */
+.menu-sold-out,
+.menu-available,
+.configure-sold-out,
+.store-strip__label--open,
+.store-strip__label--closed,
+.store-strip__label--paused,
+.pickup-code__ready .bop-eyebrow {
+  color: var(--bop-color-text-default);
+}
+.menu-sold-out::before,
+.menu-available::before,
+.configure-sold-out::before,
+.store-strip__label--open::before,
+.store-strip__label--closed::before,
+.store-strip__label--paused::before,
+.pickup-code__ready .bop-eyebrow::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 6px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.1em;
+}
+.menu-available::before,
+.store-strip__label--open::before,
+.pickup-code__ready .bop-eyebrow::before {
+  background: var(--bop-color-success-mark);
+}
+.store-strip__label--paused::before {
+  background: var(--bop-color-warning);
 }

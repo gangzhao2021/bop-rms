@@ -380,7 +380,7 @@
 .counter-order__ticket [role="alert"] {
   margin: 0;
   padding: var(--bop-space-2) var(--bop-space-3);
-  border-inline-start: 4px solid var(--bop-color-danger);
+  border-inline-start: 4px solid var(--bop-color-danger-mark);
   background: var(--bop-color-surface-raised);
   font-size: 14px;
   font-weight: 600;

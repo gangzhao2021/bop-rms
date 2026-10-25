@@ -265,7 +265,7 @@ test("@production a manager closes out a table whose guests left: rounds cancell
   // white only); checked with the button enabled, since axe skips disabled controls.
   await expect(confirm).toBeEnabled();
   await expect(confirm).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(confirm).toHaveCSS("color", "rgb(220, 53, 69)");
+  await expect(confirm).toHaveCSS("color", "rgb(191, 85, 82)");
   const enabledAxe = await new AxeBuilder({ page }).withRules(["color-contrast"]).analyze();
   expect(enabledAxe.violations).toEqual([]);
   await confirm.click();

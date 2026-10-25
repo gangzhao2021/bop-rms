@@ -852,7 +852,7 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
     // Owner 2026-10-25 "fewer lines": only waiting too long draws an edge, in its tone.
     ["Synthetic queued", "Queued", "1 min", "ok", "rgba(0, 0, 0, 0)"],
     ["Synthetic in progress", "In progress", "9 min", "warning", "rgb(138, 90, 0)"],
-    ["Synthetic held", "Held", "20 min", "late", "rgb(220, 53, 69)"],
+    ["Synthetic held", "Held", "20 min", "late", "rgb(214, 110, 106)"],
     ["Synthetic completed", "Completed", "30 min", "late", "rgba(0, 0, 0, 0)"],
     ["Synthetic cancelled", "Cancelled", "Done", "ok", "rgba(0, 0, 0, 0)"],
   ] as const;
@@ -874,7 +874,8 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
     // label.
     const active = card("Synthetic in progress").locator(".kitchen-work-item__state strong");
     await expect(active).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-    await expect(active).toHaveCSS("color", "rgb(29, 78, 216)");
+    // Owner 2026-10-25: tag words are dark; the dot carries the tone.
+    await expect(active).toHaveCSS("color", "rgb(23, 23, 23)");
     await expectNoHorizontalOverflow(page);
     await page.screenshot({
       path: `test-results/kitchen-status-tiers-${width}.png`,

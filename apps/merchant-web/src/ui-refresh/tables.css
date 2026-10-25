@@ -446,7 +446,7 @@
 .workspace-page.dining-floor .dining-staff-calls {
   margin-block: 0 var(--bop-space-5);
   padding: var(--bop-space-5);
-  border: 2px solid var(--bop-color-danger);
+  border: 2px solid var(--bop-color-danger-mark);
   border-radius: var(--bop-radius-card);
   background: var(--bop-color-surface-default);
 }
@@ -476,7 +476,7 @@
   background: var(--bop-color-warning);
 }
 .workspace-page.dining-floor .dining-staff-calls li[data-tier="urgent"] > span::before {
-  background: var(--bop-color-danger);
+  background: var(--bop-color-danger-mark);
 }
 .workspace-page.dining-floor .dining-staff-calls button {
   flex: none;

@@ -233,7 +233,7 @@
   width: 6px;
   height: 11px;
   margin: 0 10px 2px 2px;
-  border: solid var(--bop-color-success);
+  border: solid var(--bop-color-success-mark);
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }

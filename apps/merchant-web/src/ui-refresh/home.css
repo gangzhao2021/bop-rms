@@ -123,7 +123,7 @@
   width: 6px;
   height: 11px;
   margin: -3px 2px 0;
-  border: solid var(--bop-color-success);
+  border: solid var(--bop-color-success-mark);
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }

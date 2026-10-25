@@ -172,7 +172,7 @@
 .command-error,
 .stale-warning {
   padding: var(--bop-space-3) var(--bop-space-4);
-  border-left: 6px solid var(--bop-color-danger);
+  border-left: 6px solid var(--bop-color-danger-mark);
   background: var(--bop-color-surface-default);
 }
 .stale-warning {
@@ -1755,7 +1755,7 @@
   border-left-color: var(--bop-color-warning);
 }
 .kitchen-work-item[data-age="late"] {
-  border-left-color: var(--bop-color-danger);
+  border-left-color: var(--bop-color-danger-mark);
 }
 .kitchen-work-item[data-status="Completed"],
 .kitchen-work-item[data-status="Cancelled"] {
@@ -5138,7 +5138,7 @@
   background: var(--bop-color-surface-default);
 }
 .setup-steps li[data-status="Blocked"] {
-  border-left-color: var(--bop-color-danger);
+  border-left-color: var(--bop-color-danger-mark);
 }
 .setup-steps li > span {
   font-family: var(--bop-font-mono);
@@ -6069,7 +6069,7 @@
   resize: vertical;
 }
 .product-customer-menu [aria-invalid="true"] {
-  border-color: var(--bop-color-danger);
+  border-color: var(--bop-color-danger-mark);
 }
 .product-customer-menu__help,
 .product-customer-menu__count {
@@ -6480,7 +6480,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 .store-setup-draft-page [role="alert"] {
   margin-block: var(--bop-space-4);
   padding: var(--bop-space-3);
-  border-left: 3px solid var(--bop-color-danger);
+  border-left: 3px solid var(--bop-color-danger-mark);
 }
 @media (max-width: 640px) {
   .store-setup-steps ol {
@@ -6501,7 +6501,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   opacity: 0.7;
 }
 .store-setup-step-content [aria-invalid="true"] {
-  border-color: var(--bop-color-danger);
+  border-color: var(--bop-color-danger-mark);
 }
 .store-setup-step-content ul {
   display: grid;
@@ -7424,7 +7424,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .order-workbench-phase[data-phase="Ready"],
 .order-workbench-phase[data-phase="Fulfilled"] {
-  border-color: var(--bop-color-success);
+  border-color: var(--bop-color-success-mark);
   color: var(--bop-color-success);
 }
 .order-workbench-phase[data-phase="AwaitingPayment"],
@@ -7496,7 +7496,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   font-weight: 600;
 }
 .order-cancel-dialog [data-variant="destructive"]:not(:disabled) {
-  border-color: var(--bop-color-danger);
+  border-color: var(--bop-color-danger-mark);
   color: var(--bop-color-danger);
 }
 /* WP-2423 Q6 step 2: cancelling single items before the kitchen starts them. */
@@ -7613,7 +7613,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 /* WP-2423 (2026-10-16 v15): ingredients of an ended order returned to stock. */
 .order-queue-released {
-  border-color: var(--bop-color-success);
+  border-color: var(--bop-color-success-mark);
 }
 /* WP-2423 Q9-G1: orders paid while the store was offline, waiting for a decision. */
 .order-hold-notice {
@@ -8228,7 +8228,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .refund-deadline-warning[data-tier="urgent"],
 .refund-deadline-warning[data-tier="final"] {
-  border-left-color: var(--bop-color-danger);
+  border-left-color: var(--bop-color-danger-mark);
 }
 .refund-deadline-warning ul {
   flex: 1 1 18rem;
@@ -8277,7 +8277,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .staff-session__urgent .refund-deadline-warning[data-tier="urgent"],
 .staff-session__urgent .refund-deadline-warning[data-tier="final"] {
-  border-left-color: var(--bop-color-danger);
+  border-left-color: var(--bop-color-danger-mark);
 }
 .staff-session__dialog h2 {
   margin: 0;
@@ -8534,7 +8534,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 .pickup-queue__locked {
   margin: 0;
   padding: 8px 10px;
-  border-inline-start: 4px solid var(--bop-color-danger);
+  border-inline-start: 4px solid var(--bop-color-danger-mark);
   background: var(--bop-color-surface-raised);
   font-weight: 600;
 }
@@ -8551,7 +8551,7 @@ body:has(.product-complete-draft) .bop-shell__header,
 .pickup-queue__handed-over {
   margin: 0;
   padding: 8px 10px;
-  border-inline-start: 4px solid var(--bop-color-success);
+  border-inline-start: 4px solid var(--bop-color-success-mark);
   background: var(--bop-color-surface-raised);
   font-weight: 600;
 }
@@ -9055,11 +9055,11 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .staff-switch__message {
   padding: 12px 16px;
-  border-left: 4px solid var(--bop-color-danger);
+  border-left: 4px solid var(--bop-color-danger-mark);
   background: var(--bop-color-surface-raised);
 }
 .staff-switch__message[data-kind="SigningIn"] {
-  border-left-color: var(--bop-color-success);
+  border-left-color: var(--bop-color-success-mark);
 }
 .staff-switch__keypad {
   display: grid;
@@ -9313,7 +9313,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0;
 }
 .store-devices__confirm [data-variant="destructive"]:not(:disabled) {
-  border-color: var(--bop-color-danger);
+  border-color: var(--bop-color-danger-mark);
   color: var(--bop-color-danger);
 }
 
@@ -9340,7 +9340,7 @@ body:has(.product-complete-draft) .bop-shell__header,
   font-weight: 500;
 }
 .workspace-page .overview-card--alerts-critical {
-  border-color: var(--bop-color-danger);
+  border-color: var(--bop-color-danger-mark);
   border-left-width: 4px;
 }
 .workspace-page .overview-card--alerts-warning {

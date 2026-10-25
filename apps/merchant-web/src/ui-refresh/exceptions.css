@@ -76,7 +76,7 @@
   display: none;
 }
 .order-exception-page .store-card.order-exception__card[data-overdue="true"] {
-  border-inline-start-color: var(--bop-color-danger);
+  border-inline-start-color: var(--bop-color-danger-mark);
 }
 .order-exception-page .store-card.order-exception__card[data-status="Resolved"] {
   background: var(--bop-color-surface-default);

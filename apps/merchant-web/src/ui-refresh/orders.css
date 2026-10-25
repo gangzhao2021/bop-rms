@@ -27,7 +27,7 @@
   border-inline-start-color: var(--bop-color-warning);
 }
 .orders-page .order-queue-released {
-  border-inline-start-color: var(--bop-color-success);
+  border-inline-start-color: var(--bop-color-success-mark);
 }
 
 /* Filters: one compact toolbar. Sticky on wider screens so the search stays in reach while the
@@ -237,11 +237,11 @@
   color: var(--bop-color-warning);
 }
 .orders-page .order-workbench-phase[data-tone="danger"] {
-  border-color: var(--bop-color-danger);
+  border-color: var(--bop-color-danger-mark);
   color: var(--bop-color-danger);
 }
 .orders-page .order-workbench-phase[data-tone="ready"] {
-  border-color: var(--bop-color-success);
+  border-color: var(--bop-color-success-mark);
   color: var(--bop-color-success);
 }
 .orders-page .order-workbench-phase[data-tone="muted"] {

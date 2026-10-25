@@ -14,10 +14,14 @@
   --bop-color-border-strong: #171717;
   --bop-color-focus: #1d4ed8;
   --bop-color-on-focus: #ffffff;
-  /* Owner 2026-10-25: a lighter red and green, still AA on white (4.52:1, 4.53:1). */
-  --bop-color-success: #21874f;
+  /* Owner 2026-10-25 ("先这样吧"): muted red and green, two roles each. The text colours are AA
+     on white (success 4.79:1, danger 4.53:1, white on danger 4.53:1); the "-mark" colours are for
+     dots, outlines and bars only (3:1 or more on white and on the raised grey). */
+  --bop-color-success: #3e8049;
+  --bop-color-success-mark: #4e9a5c;
   --bop-color-warning: #8a5a00;
-  --bop-color-danger: #dc3545;
+  --bop-color-danger: #bf5552;
+  --bop-color-danger-mark: #d66e6a;
   --bop-color-info: #1d4ed8;
   --bop-space-1: 0.25rem;
   --bop-space-2: 0.5rem;
@@ -266,7 +270,7 @@ button {
 /* A field with an error keeps a red outline: the one border a form still needs. */
 :where(.bop-shell__main)
   :where(input, select, textarea):where([aria-invalid="true"], :user-invalid) {
-  border-color: var(--bop-color-danger);
+  border-color: var(--bop-color-danger-mark);
 }
 /* A field inside a table cell fills the cell. */
 :where(.bop-shell__main)
@@ -374,7 +378,7 @@ button {
   height: 8px;
   margin-inline-end: var(--bop-space-2);
   border-radius: 50%;
-  background: var(--bop-color-danger);
+  background: var(--bop-color-danger-mark);
   vertical-align: 0.1em;
 }
 .bop-state-card[data-tone="offline"] h2 {

@@ -94,7 +94,7 @@
   background: var(--bop-color-surface-canvas);
 }
 .workspace-content :is(input, select, textarea)[aria-invalid="true"] {
-  border: 1px solid var(--bop-color-danger);
+  border: 1px solid var(--bop-color-danger-mark);
 }
 .workspace-page .overview-attention__action {
   background: var(--bop-color-surface-raised);
@@ -125,8 +125,8 @@
   border-radius: 50%;
   background: currentColor;
 }
-.kitchen-work-item__state strong[data-status="In Progress"] {
-  color: var(--bop-color-info);
+.kitchen-work-item__state strong[data-status="In Progress"]::before {
+  background: var(--bop-color-info);
 }
 
 /* Notices: no coloured side bar; a rounded fill, the tone carried by the words. */
@@ -266,4 +266,100 @@
 .workspace-content [data-variant="destructive"]:not(:disabled):hover {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+/*
+ * Owner 2026-10-25 ("先这样吧"): red and green have two roles. Text in the tone colour stays only
+ * for count badges, danger buttons, a late ticket's minutes and field error messages. Every
+ * status word is dark text after a dot in the tone's mark colour.
+ */
+:is(
+  .orders-page .order-workbench-phase,
+  .overview-attention__state,
+  .system-alert__badge,
+  .pickup-queue__phase,
+  .order-exception__severity,
+  .staff-pin__result[data-tone="done"],
+  .order-queue-released
+) {
+  color: var(--bop-color-text-default);
+}
+/* The phase and attention tags already draw a dot; it takes the tone's mark colour. */
+.orders-page .order-workbench-phase::before,
+.overview-attention__state::before {
+  background: var(--tag-dot, var(--bop-color-text-muted));
+}
+.orders-page .order-workbench-phase:is([data-tone="danger"], [data-tone="cancelled"]),
+.overview-attention__state--danger {
+  --tag-dot: var(--bop-color-danger-mark);
+}
+.orders-page .order-workbench-phase:is([data-tone="ready"], [data-tone="done"]) {
+  --tag-dot: var(--bop-color-success-mark);
+}
+.orders-page .order-workbench-phase[data-tone="warning"],
+.overview-attention__state--warning {
+  --tag-dot: var(--bop-color-warning);
+}
+.orders-page .order-workbench-phase[data-tone="neutral"] {
+  --tag-dot: var(--bop-color-info);
+}
+/* Words that had no dot get one: urgent and late facts, failed checks, allergens, done results. */
+:is(
+  .system-alert--critical .system-alert__badge,
+  .workspace-page .overview-card--alerts-critical header h3,
+  .pickup-queue__phase[data-wait="late"],
+  .order-exception__severity[data-severity="Critical"],
+  .order-exception-page .order-exception__card[data-overdue="true"] .order-exception__open-for,
+  .orders-page .order-workbench-age[data-tone="danger"],
+  .order-accept-by:is([data-tier="urgent"], [data-tier="lapsed"]),
+  .workspace-page.dining-floor .dining-table-tile__notice.order-accept-by[data-tier="urgent"],
+  .workspace-page.dining-floor .dining-staff-calls li[data-tier="urgent"],
+  .workspace-page .settlement__reconciliation > p[data-reconciled="false"],
+  .kitchen-work-item__cue[data-kind="allergen"][data-value="ReviewRequired"],
+  .kitchen-work-item__allergens[data-kind="declared"]
+) {
+  color: var(--bop-color-text-default);
+}
+:is(
+  .system-alert--critical .system-alert__badge,
+  .workspace-page .overview-card--alerts-critical header h3,
+  .pickup-queue__phase[data-wait="late"],
+  .order-exception__severity[data-severity="Critical"],
+  .orders-page .order-workbench-age[data-tone="danger"],
+  .order-accept-by:is([data-tier="urgent"], [data-tier="lapsed"]),
+  .workspace-page.dining-floor .dining-table-tile__notice.order-accept-by[data-tier="urgent"],
+  .workspace-page .settlement__reconciliation > p[data-reconciled="false"],
+  .kitchen-work-item__cue[data-kind="allergen"][data-value="ReviewRequired"]
+)::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-inline-end: 6px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.15em;
+}
+.kitchen-work-item__allergens strong,
+.kitchen-work-item__allergens[data-kind="declared"] strong {
+  color: var(--bop-color-text-default);
+}
+.staff-pin__result[data-tone="done"]::before,
+.orders-page .order-queue-released::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-inline-end: 6px;
+  border-radius: 50%;
+  background: var(--bop-color-success-mark);
+  vertical-align: 0.15em;
+}
+/* A late ticket: the outline in the mark colour, its minutes stay red (on white). */
+.kitchen-ticket[data-age="late"] .kitchen-ticket__header {
+  color: var(--bop-color-text-default);
+}
+.kitchen-ticket[data-age="late"] .kitchen-ticket__timer,
+.kitchen-ticket[data-age="late"] .kitchen-ticket__tier {
+  color: var(--bop-color-danger);
 }
