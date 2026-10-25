@@ -320,7 +320,7 @@ export function StockCountListPage({
                   key={item.actorReference}
                   value={item.actorReference === view.viewer ? "" : item.actorReference}
                 >
-                  {item.label}
+                  {systemText(item.label)}
                 </option>
               ))}
             </select>
