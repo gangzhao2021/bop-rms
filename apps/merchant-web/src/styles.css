@@ -1507,6 +1507,62 @@
   background: var(--bop-color-brand-primary);
   color: var(--bop-color-on-primary);
 }
+/* WP-2423 Q33: new work is announced across the board until a cook says they saw it. */
+.kitchen-arrivals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bop-space-3);
+  margin-block: var(--bop-space-3);
+  padding: var(--bop-space-4);
+  border: 3px solid var(--bop-color-warning);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-raised);
+  color: var(--bop-color-text-default);
+}
+.kitchen-arrivals h3 {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.2;
+}
+.kitchen-arrivals p {
+  margin: 4px 0 0;
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+.kitchen-arrivals button {
+  min-height: 56px;
+  min-width: 8rem;
+  padding: 0 24px;
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  font: inherit;
+  font-size: 20px;
+  font-weight: 600;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .kitchen-arrivals {
+    animation: kitchen-arrivals-pulse 1.2s ease-in-out infinite alternate;
+  }
+}
+@keyframes kitchen-arrivals-pulse {
+  from {
+    outline: 0 solid transparent;
+  }
+  to {
+    outline: 6px solid var(--bop-color-warning);
+  }
+}
+.kitchen-sound-reminder {
+  margin: var(--bop-space-2) 0 0;
+  padding: var(--bop-space-2) var(--bop-space-3);
+  border: 1px solid var(--bop-color-warning);
+  border-radius: var(--bop-radius-control);
+  font-size: 15px;
+}
 .kitchen-board-lock .bop-state-card,
 .kitchen-work-item-screen > .bop-state-card,
 .kitchen-board-workspace > .bop-state-card {

@@ -24,6 +24,7 @@ import {
   kitchenLateMinutes,
   kitchenWarningMinutes,
   newQueuedReferences,
+  unansweredArrivals,
   playKitchenChime,
   groupKitchenItemsByOrder,
   kitchenOrderLabel,
@@ -448,6 +449,64 @@ describe("WP-2423 M3 kitchen display", () => {
     expect(on).toContain('aria-pressed="true"');
     expect(on).toContain(">Sound on</button>");
     expect(on).not.toContain("Auto-refresh");
+  });
+  it("WP-2423 Q33: keeps new work announced until it is seen or no longer waiting", () => {
+    const first = kitchenItemFixture();
+    const second = {
+      ...kitchenItemFixture(),
+      workItemReference: "018f0f58-767a-7f3b-a1d0-000000000451",
+    };
+    const view = parseKitchenBoardView({ ...kitchenBoardFixture(), items: [first, second] });
+    const announced = unansweredArrivals([], [first.workItemReference], view);
+    expect(announced).toEqual([first.workItemReference]);
+    // Unchanged reads keep the same list, so the board does not re-render for nothing.
+    expect(unansweredArrivals(announced, [], view)).toBe(announced);
+    expect(unansweredArrivals(announced, [second.workItemReference], view)).toEqual([
+      first.workItemReference,
+      second.workItemReference,
+    ]);
+    // Accepted on another screen: the announcement ends without anyone pressing Seen.
+    const accepted = parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [{ ...first, status: "In Progress" }, second],
+    });
+    expect(unansweredArrivals(announced, [], accepted)).toEqual([]);
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={view}
+          soundOn={false}
+          onSoundToggle={() => undefined}
+          arrivals={[first.workItemReference]}
+          onArrivalsSeen={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("New order to accept");
+    const [shown] = view.items;
+    if (shown === undefined) throw new Error("fixture has no items");
+    expect(html).toContain(kitchenOrderLabel(shown));
+    expect(html).toContain(">Seen</button>");
+    expect(html).toContain("Sound is off. New orders will not ring on this screen.");
+    const resuming = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={view}
+          soundOn={false}
+          soundResumes
+          onSoundToggle={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+    expect(resuming).toContain("Sound turns back on at your next tap on this screen.");
+    expect(resuming).not.toContain('role="alert"');
+    const on = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen view={view} soundOn onSoundToggle={() => undefined} />
+      </MemoryRouter>,
+    );
+    expect(on).not.toContain("kitchen-sound-reminder");
   });
   it("plays nothing where audio is unavailable", () => {
     expect(() => playKitchenChime()).not.toThrow();

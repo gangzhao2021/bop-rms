@@ -3515,6 +3515,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Something on this order still needs attention. Check the order on the Orders page.":
     "这笔订单还有需要处理的事项。请在订单页查看该订单。",
   "Something went wrong": "出错了",
+  "Sound turns back on at your next tap on this screen.": "声音会在你下次点这块屏幕时重新打开。",
+  "Sound is off. New orders will not ring on this screen.":
+    "声音已关闭，新订单在这块屏幕上不会响铃。",
+  "New order to accept": "有新订单待接单",
+  "{count} new orders to accept": "有 {count} 个新订单待接单",
+  Seen: "看到了",
   "Sound off": "声音关",
   "Sound on": "声音开",
   Source: "来源",

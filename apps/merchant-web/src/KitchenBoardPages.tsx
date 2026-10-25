@@ -561,6 +561,82 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
   );
 }
 
+/** WP-2423 Q33: how often an unanswered new-work announcement rings again. */
+export const kitchenArrivalRepeatMs = 20_000;
+
+/**
+ * WP-2423 Q33: the announced arrivals after a read: the ones still waiting to be accepted, plus
+ * the newly arrived ones.
+ */
+export function unansweredArrivals(
+  current: readonly string[],
+  arrived: readonly string[],
+  view: KitchenBoardView,
+): readonly string[] {
+  const queued = new Set(
+    view.items.filter((item) => item.status === "Queued").map((item) => item.workItemReference),
+  );
+  const next = [...current, ...arrived].filter((reference) => queued.has(reference));
+  return next.length === current.length && next.every((ref, i) => ref === current[i])
+    ? current
+    : [...new Set(next)];
+}
+
+const KITCHEN_SOUND_KEY = "bop.kitchen.sound";
+function storedKitchenSound(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(KITCHEN_SOUND_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+function storeKitchenSound(on: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(KITCHEN_SOUND_KEY, on ? "on" : "off");
+  } catch {
+    // Private browsing: the choice holds until this page reloads.
+  }
+}
+
+/** WP-2423 Q33: new work, announced across the board until a cook says they saw it. */
+export function KitchenArrivals({
+  view,
+  arrivals,
+  onSeen,
+}: {
+  readonly view: KitchenBoardView;
+  readonly arrivals: readonly string[];
+  readonly onSeen?: (() => void) | undefined;
+}) {
+  if (arrivals.length === 0) return null;
+  const wanted = new Set(arrivals);
+  const orders = [
+    ...new Set(
+      view.items
+        .filter((item) => wanted.has(item.workItemReference))
+        .map((item) => kitchenOrderLabel(item)),
+    ),
+  ];
+  if (orders.length === 0) return null;
+  return (
+    <section className="kitchen-arrivals" role="alert" aria-labelledby="kitchen-arrivals-heading">
+      <div>
+        <h3 id="kitchen-arrivals-heading">
+          {orders.length === 1
+            ? t("New order to accept")
+            : t("{count} new orders to accept", { count: orders.length })}
+        </h3>
+        <p>{orders.join(listSeparator())}</p>
+      </div>
+      {onSeen ? (
+        <button type="button" onClick={onSeen}>
+          {t("Seen")}
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
 /** The queued work item references that were not in the previous read. */
 export function newQueuedReferences(
   previous: KitchenBoardView | null,
@@ -1032,7 +1108,10 @@ export function KitchenBoardScreen({
   actionsBlocked = true,
   navigation,
   soundOn,
+  soundResumes = false,
   onSoundToggle,
+  arrivals = [],
+  onArrivalsSeen,
   autoRefresh = false,
   stale,
   checkedAt,
@@ -1080,6 +1159,11 @@ export function KitchenBoardScreen({
   /** New-ticket chime; off until the operator turns it on (browsers need that gesture). */
   readonly soundOn?: boolean | undefined;
   readonly onSoundToggle?: (() => void) | undefined;
+  /** WP-2423 Q33: sound was on before this page loaded; it returns at the next tap. */
+  readonly soundResumes?: boolean | undefined;
+  /** WP-2423 Q33: work that arrived since the cook last said they saw new work. */
+  readonly arrivals?: readonly string[] | undefined;
+  readonly onArrivalsSeen?: (() => void) | undefined;
   /** Whether the board re-reads itself; shown so the operator knows nothing is stuck. */
   readonly autoRefresh?: boolean;
   /** IDR-0039: the last re-read failed; the board shows the last loaded work, read-only. */
@@ -1460,6 +1544,14 @@ export function KitchenBoardScreen({
             </button>
           </div>
         </header>
+        {onSoundToggle && !soundOn ? (
+          <p className="kitchen-sound-reminder" role="status">
+            {soundResumes
+              ? t("Sound turns back on at your next tap on this screen.")
+              : t("Sound is off. New orders will not ring on this screen.")}
+          </p>
+        ) : null}
+        <KitchenArrivals view={view} arrivals={arrivals} onSeen={onArrivalsSeen} />
         {notices}
         <button
           className="kitchen-filter-toggle"
@@ -1964,23 +2056,46 @@ function KitchenBoardContent(
     setRevision((value) => value + 1);
   };
   const [soundOn, setSoundOn] = useState(false);
+  // WP-2423 Q33: this display remembers that the cook wanted sound. Browsers only allow audio
+  // after a tap, so after a reload the sound comes back at the next tap anywhere on the board.
+  const [soundResumes, setSoundResumes] = useState(() => storedKitchenSound());
   const audio = useRef<AudioContext | null>(null);
+  const startAudio = () => {
+    // Created inside the operator's tap so the browser allows it to play later.
+    try {
+      const Audio = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
+      audio.current ??= Audio ? new Audio() : null;
+      void audio.current?.resume().catch(() => undefined);
+    } catch {
+      audio.current = null;
+    }
+  };
   const toggleSound = () => {
+    setSoundResumes(false);
     setSoundOn((value) => {
       const next = !value;
+      storeKitchenSound(next);
       if (next) {
-        // Created inside the operator's tap so the browser allows it to play later.
-        try {
-          const Audio = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
-          audio.current ??= Audio ? new Audio() : null;
-          if (audio.current) playKitchenChime(audio.current);
-        } catch {
-          audio.current = null;
-        }
+        startAudio();
+        if (audio.current) playKitchenChime(audio.current);
       }
       return next;
     });
   };
+  useEffect(() => {
+    if (!soundResumes || typeof document === "undefined") return;
+    const resume = () => {
+      startAudio();
+      setSoundResumes(false);
+      setSoundOn(true);
+    };
+    document.addEventListener("pointerdown", resume, { once: true, capture: true });
+    document.addEventListener("keydown", resume, { once: true, capture: true });
+    return () => {
+      document.removeEventListener("pointerdown", resume, { capture: true });
+      document.removeEventListener("keydown", resume, { capture: true });
+    };
+  }, [soundResumes]);
   const load = useCallback(() => client.loadQueue().then(parseKitchenBoardView), [client]);
   const state = useLoad(load, t("queue:{revision}", { revision: revision }), true);
   const stale = state.kind === "Found" ? state.stale : undefined;
@@ -2043,13 +2158,25 @@ function KitchenBoardContent(
   // IDR-0039: after a failed read, keep trying with backoff (and at once when the network returns).
   useStaleRetry(retryAttempts(state), () => setRevision((value) => value + 1));
   // M3: chime once for work that arrived since the previous read, when the operator asked for it.
+  // WP-2423 Q33: new work also stays announced on screen until a cook says they saw it, or until
+  // it is no longer waiting to be accepted; the chime repeats while it is unanswered.
   const previousView = useRef<KitchenBoardView | null>(null);
+  const [arrivals, setArrivals] = useState<readonly string[]>([]);
   useEffect(() => {
     if (state.kind !== "Found") return;
     const arrived = newQueuedReferences(previousView.current, state.view);
     previousView.current = state.view;
+    setArrivals((current) => unansweredArrivals(current, arrived, state.view));
     if (soundOn && arrived.length > 0 && audio.current) playKitchenChime(audio.current);
   }, [soundOn, state]);
+  const waiting = arrivals.length > 0;
+  useEffect(() => {
+    if (!waiting || !soundOn || typeof window === "undefined") return;
+    const timer = window.setInterval(() => {
+      if (audio.current) playKitchenChime(audio.current);
+    }, kitchenArrivalRepeatMs);
+    return () => window.clearInterval(timer);
+  }, [waiting, soundOn]);
   const runAction = (item: KitchenBoardItem, action: KitchenAction) => {
     // Never send while offline or stale; nothing is queued for later (IDR-0039).
     if (stale !== undefined || browserOffline()) return;
@@ -2144,7 +2271,10 @@ function KitchenBoardContent(
           headerStatus={headerStatus}
           workspaceFrame={workspaceFrame}
           soundOn={soundOn}
+          soundResumes={soundResumes}
           onSoundToggle={toggleSound}
+          arrivals={arrivals}
+          onArrivalsSeen={() => setArrivals([])}
           autoRefresh
           stale={stale}
           checkedAt={state.loadedAt}
