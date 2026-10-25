@@ -209,7 +209,8 @@ test("@production exception filters and clear remain keyboard operable", async (
   await page.keyboard.press("Enter");
   await expect(type).toHaveValue("All");
   await expect(severity).toHaveValue("All");
-  await expect(status).toHaveValue("All");
+  // Owner 2026-10-25: the list opens (and clears back) on what is not resolved yet.
+  await expect(status).toHaveValue("NotResolved");
   await expect(owner).toHaveValue("All");
   await expect(provider).toHaveValue("All");
   await expect(overdue).not.toBeChecked();
@@ -854,6 +855,7 @@ test("@production WP-2423 a business day's totals difference resolved on re-chec
     });
   });
   await page.goto("/operations/order-exceptions");
+  await page.getByRole("combobox", { name: "Status", exact: true }).selectOption("All"); // resolved cases are one choice away
   const card = page.locator("article").filter({
     has: page.getByRole("heading", {
       name: "Business day totals differ from the payment provider",
@@ -966,6 +968,7 @@ test("@production WP-2423 a single payment's difference resolved by its re-check
     }),
   );
   await page.goto("/operations/order-exceptions");
+  await page.getByRole("combobox", { name: "Status", exact: true }).selectOption("All"); // resolved cases are one choice away
   const resolved = page.locator("article").filter({ hasText: "Order 41" });
   const open = page.locator("article").filter({ hasText: "Order 42" });
   await expect(resolved.getByText(/^Resolved: this payment was checked again/)).toBeVisible();
@@ -1091,6 +1094,9 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
   await expect(card("41")).toBeHidden();
   await page.getByRole("checkbox", { name: "Overdue only" }).uncheck();
 
+  // Resolved cases are history behind the status filter (Owner 2026-10-25).
+  await expect(card("39")).toBeHidden();
+  await page.getByRole("combobox", { name: "Status", exact: true }).selectOption("All"); // resolved cases are one choice away
   await expect(card("39")).toBeVisible();
   // A resolved case is history: no review action, no overdue wording.
   await expect(card("39").getByRole("button")).toHaveCount(0);

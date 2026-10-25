@@ -1,3 +1,4 @@
+import { PageIntro } from "./PageIntro.js";
 import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -276,6 +277,8 @@ export function StorePriceList({
   const navigate = useNavigate();
   const [code, setCode] = useState("");
   const [copyFrom, setCopyFrom] = useState<string | null | undefined>(undefined);
+  // Owner 2026-10-25: discarded (test) books are hidden unless asked for.
+  const [showDiscarded, setShowDiscarded] = useState(false);
   const { send, busy, pending, message } = useCommand(client, (result) => {
     const book = (result as { priceBookReference?: string }).priceBookReference;
     if (book) void navigate(`/app/commerce/pricing/${book}`);
@@ -291,20 +294,28 @@ export function StorePriceList({
         <div>
           <p className="bop-eyebrow">{t("Prices · Brand")}</p>
           <h2>{t("Prices")}</h2>
-          <p>
-            {t(
-              "A price book holds a price for each size. A published book never changes: to change prices, start a new book (usually a copy of the current one), {value}, then use it at this Store. Source as of",
-              {
-                value:
-                  view.soleOperator?.status === "Effective"
-                    ? t(
-                        "check it and publish it yourself (Sole operator is on and you are the only person who holds price approval, so you verify with your authenticator code first)",
-                      )
-                    : t("have someone else who holds price approval publish it"),
-              },
-            )}{" "}
-            <SourceTime instant={view.sourceAsOf} />
-          </p>
+          <PageIntro
+            summary={t("To change prices, start a new price book and publish it.")}
+            aside={
+              <>
+                {t("Updated")} <SourceTime instant={view.sourceAsOf} />
+              </>
+            }
+          >
+            <p>
+              {t(
+                "A price book holds a price for each size. A published book never changes: to change prices, start a new book (usually a copy of the current one), {value}, then use it at this Store.",
+                {
+                  value:
+                    view.soleOperator?.status === "Effective"
+                      ? t(
+                          "check it and publish it yourself (Sole operator is on and you are the only person who holds price approval, so you verify with your authenticator code first)",
+                        )
+                      : t("have someone else who holds price approval publish it"),
+                },
+              )}
+            </p>
+          </PageIntro>
         </div>
       </header>
       <section className="detail-section" aria-labelledby="store-prices">
@@ -381,6 +392,18 @@ export function StorePriceList({
           </button>
         </form>
       ) : null}
+      {view.books.some((book) => book.lifecycle === "Archived") ? (
+        <label>
+          <input
+            type="checkbox"
+            checked={showDiscarded}
+            onChange={(event) => setShowDiscarded(event.currentTarget.checked)}
+          />
+          {t("Show discarded price books ({count})", {
+            count: view.books.filter((book) => book.lifecycle === "Archived").length,
+          })}
+        </label>
+      ) : null}
       <table>
         <thead>
           <tr>
@@ -394,40 +417,42 @@ export function StorePriceList({
           </tr>
         </thead>
         <tbody>
-          {view.books.map((book) => (
-            <tr key={book.priceBookReference}>
-              <td>
-                <Link to={`/app/commerce/pricing/${book.priceBookReference}`}>
-                  {book.stableCode}
-                </Link>
-              </td>
-              <td>
-                {priceBookStatus(
-                  book.lifecycle,
-                  book.priceBookReference === current?.priceBookReference,
-                )}
-              </td>
-              <td>{book.entries}</td>
-              <td>
-                <SourceTime instant={book.updatedAt} />
-              </td>
-              <td>
-                {book.lifecycle === "Draft" &&
-                (view.permissions.mayEdit || view.permissions.mayApprove) ? (
-                  <Link
-                    to={`/app/commerce/pricing/${book.priceBookReference}`}
-                    aria-label={
-                      view.permissions.mayEdit
-                        ? t("Continue draft {code}", { code: book.stableCode })
-                        : t("Review draft {code}", { code: book.stableCode })
-                    }
-                  >
-                    {view.permissions.mayEdit ? t("Continue draft") : t("Review draft")}
+          {view.books
+            .filter((book) => showDiscarded || book.lifecycle !== "Archived")
+            .map((book) => (
+              <tr key={book.priceBookReference}>
+                <td>
+                  <Link to={`/app/commerce/pricing/${book.priceBookReference}`}>
+                    {book.stableCode}
                   </Link>
-                ) : null}
-              </td>
-            </tr>
-          ))}
+                </td>
+                <td>
+                  {priceBookStatus(
+                    book.lifecycle,
+                    book.priceBookReference === current?.priceBookReference,
+                  )}
+                </td>
+                <td>{book.entries}</td>
+                <td>
+                  <SourceTime instant={book.updatedAt} />
+                </td>
+                <td>
+                  {book.lifecycle === "Draft" &&
+                  (view.permissions.mayEdit || view.permissions.mayApprove) ? (
+                    <Link
+                      to={`/app/commerce/pricing/${book.priceBookReference}`}
+                      aria-label={
+                        view.permissions.mayEdit
+                          ? t("Continue draft {code}", { code: book.stableCode })
+                          : t("Review draft {code}", { code: book.stableCode })
+                      }
+                    >
+                      {view.permissions.mayEdit ? t("Continue draft") : t("Review draft")}
+                    </Link>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
         </tbody>
       </table>
       {view.assignmentHistory.length > 0 ? (

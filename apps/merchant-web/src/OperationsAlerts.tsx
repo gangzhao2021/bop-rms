@@ -301,11 +301,15 @@ export function OperationsAlertsCard({
                       </span>
                       <strong>{item.title}</strong>
                     </p>
-                    <p>{item.summary}</p>
+                    {/* Owner 2026-10-25: what to do stays in view; the background is on request. */}
                     <p>
                       <span className="system-alert__label">{t("What to do:")} </span>
                       {item.action}
                     </p>
+                    <details className="system-alert__more">
+                      <summary>{t("More about this")}</summary>
+                      <p>{item.summary}</p>
+                    </details>
                     <p className="system-alert__since">
                       {t("Since {raisedAt}", { raisedAt: at(item.raisedAt) })}
                     </p>

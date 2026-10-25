@@ -239,8 +239,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "新价格由另一位有价格审批权限的人发布后生效。",
   "A new version was started from this one; edit it and submit it for review.":
     "已从此版本开始一个新版本；请编辑后提交审核。",
-  "A price book holds a price for each size. A published book never changes: to change prices, start a new book (usually a copy of the current one), {value}, then use it at this Store. Source as of":
-    "价目表为每个规格设定一个价格。已发布的价目表永不更改：要改价，请新建一个价目表（通常复制当前的），{value}，然后在本店使用。数据截至",
+  "A price book holds a price for each size. A published book never changes: to change prices, start a new book (usually a copy of the current one), {value}, then use it at this Store.":
+    "价目表为每个规格设定一个价格。已发布的价目表永不更改：要改价，请新建一个价目表（通常复制当前的），{value}，然后在本店使用。",
   "A price is not valid. Enter an amount such as 0.75, or 0 for no charge.":
     "价格无效。请输入例如 0.75 的金额，不收费请输入 0。",
   "A price you set yourself must be published by another person who may approve prices.":
@@ -2627,8 +2627,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Product publication action could not be confirmed": "商品发布操作未能确认",
   "Product save could not be confirmed": "商品保存未能确认",
   Products: "商品",
-  "Products and their sizes are shared by every Store of the Brand. A size is what a customer orders; prices, menus and recipes refer to it. Source as of":
-    "商品及其规格由品牌下所有门店共用。规格就是顾客点的东西；价格、菜单和配方都引用它。数据截至",
+  "Products and their sizes are shared by every Store of the Brand. A size is what a customer orders; prices, menus and recipes refer to it.":
+    "商品及其规格由品牌下所有门店共用。规格就是顾客点的东西；价格、菜单和配方都引用它。",
   "Products are unavailable": "商品暂不可用",
   "Products are unavailable.": "商品暂不可用。",
   "Products that cannot be taxed": "无法计税的商品",
@@ -5542,4 +5542,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Why approval?": "为什么需要批准？",
   "Sole operator (approving your own refunds) is set in":
     "独立经营者（自己批准自己的退款）在此设置：",
+  // Owner 2026-10-25: lists open on what needs work.
+  "All days on this page": "本页所有日期",
+  "Not resolved yet": "未解决",
+  "Show discarded price books ({count})": "显示已丢弃的价目表（{count}）",
+  // Owner 2026-10-25: one-line page intros; the detail behind "More about this".
+  "More about this": "了解更多",
+  "Shared by every Store of the Brand.": "品牌下所有门店共用。",
+  "This sign-in cannot change tickets.": "当前登录身份不能更改票据。",
+  "To change prices, start a new price book and publish it.": "要改价，请新建一个价目表并发布。",
+  "Mark a size sold out when it runs out.": "某个规格卖完时，把它标为售罄。",
+  "What customers can order at this Store right now.": "顾客此刻在本店可以点什么。",
+  // Owner 2026-10-25: Item availability menus.
+  "Mark sold out": "标为售罄",
+  "More for {item}": "{item}的更多操作",
+  More: "更多",
 });

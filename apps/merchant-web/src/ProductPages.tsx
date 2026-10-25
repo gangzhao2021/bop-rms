@@ -1,3 +1,4 @@
+import { PageIntro } from "./PageIntro.js";
 import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -124,15 +125,25 @@ export function ProductListPage({
         <div>
           <p className="bop-eyebrow">{t("Products · Brand")}</p>
           <h2>{t("Products")}</h2>
-          <p>
-            {t(
-              "Products and their sizes are shared by every Store of the Brand. A size is what a customer orders; prices, menus and recipes refer to it. Source as of",
-            )}{" "}
-            <SourceTime instant={view.sourceAsOf} />
-          </p>
+          <PageIntro
+            summary={t("Shared by every Store of the Brand.")}
+            aside={
+              <>
+                {t("Updated")} <SourceTime instant={view.sourceAsOf} />
+              </>
+            }
+          >
+            <p>
+              {t(
+                "Products and their sizes are shared by every Store of the Brand. A size is what a customer orders; prices, menus and recipes refer to it.",
+              )}
+            </p>
+          </PageIntro>
         </div>
         {view.permissions.mayCreate ? (
-          <Link to="/app/commerce/products/new">{t("New product")}</Link>
+          <Link className="primary-action-link" to="/app/commerce/products/new">
+            {t("New product")}
+          </Link>
         ) : null}
       </header>
       {view.products.length === 0 ? (
@@ -159,7 +170,7 @@ export function ProductListPage({
                     {product.name}
                   </Link>
                 </td>
-                <td>{product.internalCode}</td>
+                <td className="product-code">{product.internalCode}</td>
                 <td>{productTypeText[product.productType] ?? product.productType}</td>
                 <td>{lifecycleText[product.lifecycle] ?? product.lifecycle}</td>
                 <td>

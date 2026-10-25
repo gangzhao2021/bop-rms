@@ -98,7 +98,9 @@ export function StoreOptionSetListPage({
           </p>
         </div>
         {view.permissions.mayEdit ? (
-          <Link to="/app/commerce/option-sets/new">{t("New option set")}</Link>
+          <Link className="primary-action-link" to="/app/commerce/option-sets/new">
+            {t("New option set")}
+          </Link>
         ) : null}
       </header>
       {current.length === 0 ? (

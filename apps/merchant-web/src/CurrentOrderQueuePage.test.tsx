@@ -139,6 +139,34 @@ it("filters only by exact public order number and fields present on the current 
   ).toHaveLength(0);
 });
 
+it("Owner 2026-10-25: Today keeps the business day and earlier orders that still need staff", () => {
+  const base = currentOrderQueueFixture().items[0];
+  if (base === undefined) throw new Error("fixture");
+  // Only the facts the filter reads; the rest is the fixture's order.
+  const order = (n: string, listed: string, held = false) => ({
+    ...base,
+    orderNumber: n,
+    listedBusinessDate: listed,
+    heldStock: held ? { state: "Open" } : null,
+    batches: base.batches.map((batch) => ({ ...batch, canRequestAcceptance: false })),
+  });
+  const items = [
+    order("T-1", "2026-10-25"),
+    order("Y-1", "2026-10-24"),
+    order("Y-2", "2026-10-24", true),
+  ];
+  const all = { orderNumber: "", type: "All", channel: "All", phase: "All" };
+  const today = { ...all, day: "Today" as const, today: "2026-10-25" };
+  const shown = (filters: Parameters<typeof filterCurrentOrderItems>[1]) =>
+    filterCurrentOrderItems(items as never, filters).map((item) => item.orderNumber);
+  expect(shown({ ...all, day: "All", today: "2026-10-25" })).toEqual(["T-1", "Y-1", "Y-2"]);
+  expect(shown(today)).toEqual(["T-1", "Y-2"]);
+  // An exact order number finds the order on any day.
+  expect(shown({ ...today, orderNumber: "y-1" })).toEqual(["Y-1"]);
+  // While the business day is not known yet, nothing is hidden.
+  expect(shown({ ...today, today: null })).toHaveLength(3);
+});
+
 it("labels a cancelled additional Batch distinctly from unaccepted work", () => {
   const id = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
   const view = parseCurrentOrderQueue({
@@ -522,7 +550,8 @@ it("WP-2423 UI refresh: a row reads the order's age, status tone and amount take
     batches: [{ ...waiting.batches[0], acceptanceStatus: "Accepted", canRequestAcceptance: false }],
   });
   expect(orderAgeText(finished, at)).toBeNull();
-  expect(orderStatusTone(finished, at)).toBe("muted");
+  expect(orderStatusTone(finished, at)).toBe("done");
+  expect(orderStatusTone({ ...finished, currentPhase: "Cancelled" }, at)).toBe("cancelled");
   expect(orderAmountTaken(one({ ...waiting, paidOnline: null }))).toBeNull();
   const html = renderToStaticMarkup(
     <CurrentOrderQueueRows

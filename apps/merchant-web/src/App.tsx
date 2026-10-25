@@ -797,7 +797,11 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     {/* WP-2423 Q15/Q16: receipt registrations and the privacy notice link. */}
                     <StoreReceiptPrivacyPanel csrf={state.csrf} />
                     {/* Owner 2026-10-25: moved here from Approvals; hidden for other roles. */}
-                    <StoreSoleOperatorPanel csrf={state.csrf} />
+                    {state.workspace.navigation.some(
+                      (item) => item.screenId === "APPROVAL-INBOX",
+                    ) ? (
+                      <StoreSoleOperatorPanel csrf={state.csrf} />
+                    ) : null}
                   </StoreSetupDraftPage>
                 ) : (
                   <StatePanel heading={t("Store setup unavailable")} status>

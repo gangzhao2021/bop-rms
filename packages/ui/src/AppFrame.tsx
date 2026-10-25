@@ -6,6 +6,12 @@ import { useUiText } from "./UiText.js";
  * then leaves its own out instead of offering two.
  */
 export const SkipLinkProvidedContext = createContext(false);
+/**
+ * True inside an app's own workspace frame (sidebar, page header). The frame then keeps its title
+ * as the page's heading for assistive technology but draws no second top bar (Owner 2026-10-25:
+ * "one workspace frame and header everywhere").
+ */
+export const WorkspaceFrameContext = createContext(false);
 
 export interface AppFrameProps {
   children: ReactNode;
@@ -29,6 +35,7 @@ export function AppFrame({
   title,
 }: AppFrameProps) {
   const skipLinkProvided = useContext(SkipLinkProvidedContext);
+  const inWorkspace = useContext(WorkspaceFrameContext);
   const text = useUiText();
   return (
     <div
@@ -40,22 +47,34 @@ export function AppFrame({
           {text.skipToMainContent}
         </a>
       )}
-      <header className="bop-shell__header">
-        <strong aria-label="BOP">BOP</strong>
-        <h1>{title}</h1>
-        {mobileBrandTitle ? (
-          <span className="bop-shell__header-mobile-title" aria-hidden="true">
-            {mobileBrandTitle}
-          </span>
-        ) : null}
-        <p>{description}</p>
-        {headerStatus === undefined ? null : (
-          <div className="bop-shell__header-status">{headerStatus}</div>
-        )}
-        {text.headerExtra === undefined ? null : (
-          <div className="bop-shell__header-extra">{text.headerExtra}</div>
-        )}
-      </header>
+      {inWorkspace ? (
+        <header className="bop-shell__header bop-shell__header--in-workspace">
+          <h1>{title}</h1>
+        </header>
+      ) : null}
+      {inWorkspace && headerStatus !== undefined ? (
+        <div className="bop-shell__header-status bop-shell__header-status--in-workspace">
+          {headerStatus}
+        </div>
+      ) : null}
+      {inWorkspace ? null : (
+        <header className="bop-shell__header">
+          <strong aria-label="BOP">BOP</strong>
+          <h1>{title}</h1>
+          {mobileBrandTitle ? (
+            <span className="bop-shell__header-mobile-title" aria-hidden="true">
+              {mobileBrandTitle}
+            </span>
+          ) : null}
+          <p>{description}</p>
+          {headerStatus === undefined ? null : (
+            <div className="bop-shell__header-status">{headerStatus}</div>
+          )}
+          {text.headerExtra === undefined ? null : (
+            <div className="bop-shell__header-extra">{text.headerExtra}</div>
+          )}
+        </header>
+      )}
       {navigation ? (
         <nav className="bop-shell__nav" aria-label={navigationLabel ?? text.primaryNavigation}>
           {navigation}

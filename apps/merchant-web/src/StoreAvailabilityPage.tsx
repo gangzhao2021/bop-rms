@@ -1,3 +1,4 @@
+import { PageIntro } from "./PageIntro.js";
 import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -52,6 +53,19 @@ const statusText = {
   NotOffered: t("Not offered at this Store"),
   Varies: t("Available for some order types"),
 } as const;
+
+/** The items of each product together, in the order the products first appear. */
+export function groupByProduct<T extends { readonly productName: string }>(
+  items: readonly T[],
+): readonly { readonly productName: string; readonly items: readonly T[] }[] {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const group = groups.get(item.productName);
+    if (group) group.push(item);
+    else groups.set(item.productName, [item]);
+  }
+  return [...groups].map(([productName, grouped]) => ({ productName, items: grouped }));
+}
 
 export function StoreAvailabilityPage({
   client = unavailableAvailabilityClient,
@@ -213,7 +227,8 @@ export function StoreAvailabilityPage({
         {text}
       </button>
     );
-    const buttons = availabilityActions(item, permissions).map((action) => {
+    const kinds = availabilityActions(item, permissions);
+    const buttons = kinds.map((action) => {
       switch (action) {
         case "SoldOutToday":
           return button(
@@ -260,28 +275,58 @@ export function StoreAvailabilityPage({
           );
       }
     });
-    return buttons;
+    // Owner 2026-10-25: one "Mark sold out" menu per size and "Stop offering" under "More",
+    // instead of three equal buttons on every row.
+    const pick = (wanted: readonly string[]) =>
+      buttons.filter((_, index) => wanted.includes(kinds[index] ?? ""));
+    const soldOutMenu = pick(["SoldOutToday", "SoldOutUntilBack"]);
+    const more = pick(["StopOffering"]);
+    const direct = pick(["BackInStock", "ManagerBringsBack", "Offer"]);
+    return (
+      <div className="availability-actions">
+        {direct}
+        {soldOutMenu.length === 0 ? null : (
+          <details className="availability-menu">
+            <summary>{t("Mark sold out")}</summary>
+            <div className="availability-menu__items">{soldOutMenu}</div>
+          </details>
+        )}
+        {more.length === 0 ? null : (
+          <details className="availability-menu availability-menu--more">
+            <summary aria-label={t("More for {item}", { item: label(item) })}>{t("More")}</summary>
+            <div className="availability-menu__items">{more}</div>
+          </details>
+        )}
+      </div>
+    );
   };
   return (
     <AppFrame {...frame}>
       <header className="screen-heading">
         <div>
           <h2>{t("Item availability")}</h2>
-          {floorOnly ? (
-            <p>
-              {t(
-                "Ran out of something? Mark it sold out and customers can no longer order it. It comes back by itself when today's business day ends, or when you mark it back in stock.",
-              )}{" "}
-              <CheckedTime instant={view.sourceAsOf} timeZone={view.timeZone} />
-            </p>
-          ) : (
-            <p>
-              {t(
-                "Customers can order an item on a published menu only where it is offered and not sold out; ingredient stock is checked again when they order.",
-              )}{" "}
-              <CheckedTime instant={view.sourceAsOf} timeZone={view.timeZone} />
-            </p>
-          )}
+          <PageIntro
+            summary={
+              floorOnly
+                ? t("Mark a size sold out when it runs out.")
+                : t("What customers can order at this Store right now.")
+            }
+            aside={<CheckedTime instant={view.sourceAsOf} timeZone={view.timeZone} />}
+          >
+            {floorOnly ? (
+              <p>
+                {t(
+                  "Ran out of something? Mark it sold out and customers can no longer order it. It comes back by itself when today's business day ends, or when you mark it back in stock.",
+                )}
+              </p>
+            ) : (
+              <p>
+                {t(
+                  "Customers can order an item on a published menu only where it is offered and not sold out; ingredient stock is checked again when they order.",
+                )}
+              </p>
+            )}
+          </PageIntro>
         </div>
       </header>
       {message ? (
@@ -310,38 +355,49 @@ export function StoreAvailabilityPage({
               <th aria-label={t("Actions")} />
             </tr>
           </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.skuReference}>
-                <td>{label(item)}</td>
-                <td data-label={t("Status")}>
-                  {item.status === "SoldOut"
-                    ? soldOutText(item.soldOutUntil, view.timeZone)
-                    : item.stockSoldOut != null &&
-                        (item.status === "Available" || item.status === "Varies")
-                      ? t("Sold out to guests (stock)")
-                      : statusText[item.status]}
-                  {item.stockSoldOut != null &&
-                  (item.status === "Available" || item.status === "Varies") ? (
-                    <p className="availability-note">
-                      {stockSoldOutText(item.stockSoldOut)}{" "}
-                      {stockHeldByOrders(item.stockSoldOut) ? (
-                        <Link to="/operations/orders">{t("See Orders")}</Link>
-                      ) : (
-                        // v15 aa3d9fac D3: stock comes back by recording the delivery or
-                        // correcting the count (there is no separate stock overview screen).
-                        <>
-                          <Link to="/operations/receiving">{t("Record a delivery")}</Link> {t("or")}{" "}
-                          <Link to="/operations/inventory/counts">{t("count the stock")}</Link>
-                        </>
-                      )}
-                    </p>
-                  ) : null}
-                </td>
-                <td>{actions(item)}</td>
-              </tr>
-            ))}
-          </tbody>
+          {/* Owner 2026-10-25: one group per product, its sizes under it. */}
+          {groupByProduct(items).map((group) => (
+            <tbody key={group.productName}>
+              {group.items.length > 1 ? (
+                <tr className="availability-product">
+                  <th colSpan={3} scope="colgroup">
+                    {group.productName}
+                  </th>
+                </tr>
+              ) : null}
+              {group.items.map((item) => (
+                <tr key={item.skuReference}>
+                  <td>{group.items.length > 1 ? item.sizeName : label(item)}</td>
+                  <td data-label={t("Status")}>
+                    {item.status === "SoldOut"
+                      ? soldOutText(item.soldOutUntil, view.timeZone)
+                      : item.stockSoldOut != null &&
+                          (item.status === "Available" || item.status === "Varies")
+                        ? t("Sold out to guests (stock)")
+                        : statusText[item.status]}
+                    {item.stockSoldOut != null &&
+                    (item.status === "Available" || item.status === "Varies") ? (
+                      <p className="availability-note">
+                        {stockSoldOutText(item.stockSoldOut)}{" "}
+                        {stockHeldByOrders(item.stockSoldOut) ? (
+                          <Link to="/operations/orders">{t("See Orders")}</Link>
+                        ) : (
+                          // v15 aa3d9fac D3: stock comes back by recording the delivery or
+                          // correcting the count (there is no separate stock overview screen).
+                          <>
+                            <Link to="/operations/receiving">{t("Record a delivery")}</Link>{" "}
+                            {t("or")}{" "}
+                            <Link to="/operations/inventory/counts">{t("count the stock")}</Link>
+                          </>
+                        )}
+                      </p>
+                    ) : null}
+                  </td>
+                  <td>{actions(item)}</td>
+                </tr>
+              ))}
+            </tbody>
+          ))}
         </table>
       )}
     </AppFrame>

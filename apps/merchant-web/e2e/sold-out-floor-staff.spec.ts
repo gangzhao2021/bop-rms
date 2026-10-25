@@ -155,7 +155,9 @@ test("@production Kitchen marks an item sold out for today from the board and br
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("link", { name: "Mark an item sold out" }).click();
   await expect(page).toHaveURL(/\/app\/commerce\/availability$/u);
-  await expect(page.getByText(/Ran out of something\? Mark it sold out/u)).toBeVisible();
+  // Owner 2026-10-25: one line on the page; the explanation is under "More about this".
+  await expect(page.getByText("Mark a size sold out when it runs out.")).toBeVisible();
+  await expect(page.getByText(/Ran out of something\? Mark it sold out/u)).toBeAttached();
   // Only items sold here; no offering and no "until further notice" for floor staff.
   await expect(page.getByRole("row", { name: /Catering tray/u })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Sold out until further notice" })).toHaveCount(0);
@@ -177,6 +179,11 @@ test("@production Kitchen marks an item sold out for today from the board and br
   await expectNoInternalText(page);
   await expectLayout(page, "sold-out-kitchen");
 
+  // Owner 2026-10-25: the two sold-out choices sit in one "Mark sold out" menu per size.
+  await page
+    .getByRole("row", { name: /Oat latte/u })
+    .getByText("Mark sold out")
+    .click();
   await page
     .getByRole("row", { name: /Oat latte/u })
     .getByRole("button", { name: "Sold out today" })
@@ -215,6 +222,11 @@ test("@production Front of House reaches sold-out marking from the workspace nav
   await expect(page.locator("main")).not.toContainText("· Store");
   await expect(page.getByRole("columnheader", { name: /code/iu })).toHaveCount(0);
   await expectLayout(page, "sold-out-front-of-house");
+  // Owner 2026-10-25: the two sold-out choices sit in one "Mark sold out" menu per size.
+  await page
+    .getByRole("row", { name: /Banana bread/u })
+    .getByText("Mark sold out")
+    .click();
   await page
     .getByRole("row", { name: /Banana bread/u })
     .getByRole("button", { name: "Sold out today" })
@@ -265,7 +277,9 @@ test("@production the kitchen display marks an item sold out for today in its ow
   await expect(page.getByRole("link", { name: "Orders", exact: true })).toHaveCount(0);
   await kitchenNav.getByRole("link", { name: "Mark an item sold out" }).click();
   await expect(page).toHaveURL(/\/app\/commerce\/availability\?from=kitchen$/u);
-  await expect(page.getByText(/Ran out of something\? Mark it sold out/u)).toBeVisible();
+  // Owner 2026-10-25: one line on the page; the explanation is under "More about this".
+  await expect(page.getByText("Mark a size sold out when it runs out.")).toBeVisible();
+  await expect(page.getByText(/Ran out of something\? Mark it sold out/u)).toBeAttached();
   // The kitchen display's header stays: the Store's name and the handover.
   await expect(page.getByRole("heading", { name: scope.storeLabel, level: 1 })).toBeVisible();
   await expect(
@@ -285,6 +299,11 @@ test("@production the kitchen display marks an item sold out for today in its ow
     page.getByRole("button", { name: /Offer at this Store|Stop offering/u }),
   ).toHaveCount(0);
   await expectLayout(page, "sold-out-kitchen-display");
+  // Owner 2026-10-25: the two sold-out choices sit in one "Mark sold out" menu per size.
+  await page
+    .getByRole("row", { name: /Banana bread/u })
+    .getByText("Mark sold out")
+    .click();
   await page
     .getByRole("row", { name: /Banana bread/u })
     .getByRole("button", { name: "Sold out today" })

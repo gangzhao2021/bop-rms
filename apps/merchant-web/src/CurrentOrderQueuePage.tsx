@@ -103,6 +103,12 @@ interface CurrentOrderFilters {
   readonly type: string;
   readonly channel: string;
   readonly phase: string;
+  /**
+   * Owner 2026-10-25: "Today" shows the Store's current business day, plus earlier orders that
+   * still need staff (held stock, a round to accept); omitted or "All": every loaded day.
+   */
+  readonly day?: "Today" | "All";
+  readonly today?: string | null;
 }
 export function filterCurrentOrderItems(
   items: CurrentOrderQueue["items"],
@@ -112,6 +118,12 @@ export function filterCurrentOrderItems(
   return items.filter(
     (order) =>
       (!orderNumber || order.orderNumber.toLocaleLowerCase() === orderNumber) &&
+      (filters.day !== "Today" ||
+        filters.today == null ||
+        orderNumber !== "" ||
+        order.listedBusinessDate === filters.today ||
+        order.heldStock !== null ||
+        isAwaitingAcceptance(order)) &&
       (filters.type === "All" || order.orderType === filters.type) &&
       (filters.channel === "All" || orderChannel(order) === filters.channel) &&
       (filters.phase === "All" ||
@@ -642,7 +654,7 @@ export function orderAgeText(order: QueuedOrder, now: number): string | null {
 export function orderStatusTone(
   order: QueuedOrder,
   now: number | undefined,
-): "danger" | "warning" | "ready" | "muted" | "neutral" {
+): "danger" | "warning" | "ready" | "done" | "cancelled" | "neutral" {
   if (order.unfulfillable !== null || order.pickupNotCollected) return "danger";
   if (order.acceptanceHold !== null) return "warning";
   if (isAwaitingAcceptance(order)) {
@@ -650,12 +662,9 @@ export function orderStatusTone(
     return tier === "urgent" || tier === "lapsed" ? "danger" : "warning";
   }
   if (order.awaitingPayment || order.currentPhase === null) return "warning";
-  if (
-    order.currentPhase === "Fulfilled" ||
-    order.currentPhase === "Cancelled" ||
-    order.currentPhase === "Rejected"
-  )
-    return "muted";
+  // Owner 2026-10-25: finished and cancelled orders no longer share one grey tag.
+  if (order.currentPhase === "Fulfilled") return "done";
+  if (order.currentPhase === "Cancelled" || order.currentPhase === "Rejected") return "cancelled";
   const label = orderPhaseLabel(order);
   return label === "Ready" || label === "Ready for pickup" ? "ready" : "neutral";
 }
@@ -1653,11 +1662,20 @@ export function CurrentOrderQueuePage({
   const [typeFilter, setTypeFilter] = useState("All");
   const [channelFilter, setChannelFilter] = useState("All");
   const [phaseFilter, setPhaseFilter] = useState("All");
+  const [dayFilter, setDayFilter] = useState<"Today" | "All">("Today");
   const [now, setNow] = useState(() => Date.now());
   const [stale, setStale] = useState(false);
   /** WP-2423 (2026-10-16 v15): the last held-stock release, confirmed until the page changes. */
   const [released, setReleased] = useState<string | null>(null);
-  const today = useStoreBusinessDay()?.businessDate ?? null;
+  const businessDay = useStoreBusinessDay()?.businessDate ?? null;
+  // Owner 2026-10-25: "Today" applies once the page has an order of the Store's business day;
+  // before the first order of the day every loaded day stays in view.
+  const today =
+    businessDay !== null &&
+    state.kind === "Ready" &&
+    state.view.items.some((order) => order.listedBusinessDate === businessDay)
+      ? businessDay
+      : null;
   // A confirmation belongs to the page it was given on.
   useEffect(() => setReleased(null), [after]);
   // WP-2423: opened list orders and the refund totals read for them outlive a refresh.
@@ -1822,8 +1840,10 @@ export function CurrentOrderQueuePage({
       type: typeFilter,
       channel: channelFilter,
       phase: phaseFilter,
+      day: dayFilter,
+      today,
     });
-  }, [channelFilter, orderNumberSearch, phaseFilter, state, typeFilter]);
+  }, [channelFilter, orderNumberSearch, phaseFilter, state, typeFilter, dayFilter, today]);
   const visibleOrderReferences = useMemo(
     () => new Set(filteredOrders.map((order) => order.orderReference)),
     [filteredOrders],
@@ -1832,12 +1852,14 @@ export function CurrentOrderQueuePage({
     orderNumberSearch !== "" ||
     typeFilter !== "All" ||
     channelFilter !== "All" ||
-    phaseFilter !== "All";
+    phaseFilter !== "All" ||
+    dayFilter !== "Today";
   const clearOrderFilters = () => {
     setOrderNumberSearch("");
     setTypeFilter("All");
     setChannelFilter("All");
     setPhaseFilter("All");
+    setDayFilter("Today");
   };
   const single = orderReference !== undefined;
   const detail = state.kind === "Ready" ? state.detail : undefined;
@@ -1936,6 +1958,25 @@ export function CurrentOrderQueuePage({
             {single ? null : (
               // Figma v1: the statuses staff switch between most, with how many are on this page.
               <div className="order-status-filters" role="group" aria-label={t("Show orders")}>
+                {today === null ? null : (
+                  <>
+                    <button
+                      type="button"
+                      aria-pressed={dayFilter === "Today"}
+                      onClick={() => setDayFilter("Today")}
+                    >
+                      {t("Today")}
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={dayFilter === "All"}
+                      onClick={() => setDayFilter("All")}
+                    >
+                      {t("All days on this page")}
+                    </button>
+                    <span className="order-status-filters__divider" aria-hidden="true" />
+                  </>
+                )}
                 {(
                   [
                     ["All", t("All")],
@@ -1960,6 +2001,8 @@ export function CurrentOrderQueuePage({
                             type: typeFilter,
                             channel: channelFilter,
                             phase,
+                            day: dayFilter,
+                            today,
                           }).length
                         }`}
                   </button>
@@ -2154,7 +2197,7 @@ export function CurrentOrderQueuePage({
                                   order,
                                   order.businessDate === null
                                     ? null
-                                    : businessDateLabel(order.businessDate, today),
+                                    : businessDateLabel(order.businessDate, businessDay),
                                 ),
                               );
                             reload(after);

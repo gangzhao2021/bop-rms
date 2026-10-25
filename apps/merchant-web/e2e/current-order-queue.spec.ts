@@ -777,7 +777,9 @@ test("@production WP-2423 v15: earlier-day orders still holding stock are listed
     await page.screenshot({ path: `test-results/orders-held-stock-${width}.png`, fullPage: true });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
-  // The page itself is intact: its orders and the next page are there.
+  // The page itself is intact: its orders and the next page are there (yesterday's orders are
+  // under "All days on this page"; Orders opens on today, Owner 2026-10-25).
+  await page.getByRole("button", { name: "All days on this page" }).click();
   await expect(page.getByRole("heading", { name: "B-50", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Next page" })).toBeVisible();
   await page.getByRole("button", { name: "Release held ingredients" }).click();

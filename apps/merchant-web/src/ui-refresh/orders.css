@@ -564,3 +564,17 @@
     padding: 0;
   }
 }
+.orders-page .order-status-filters__divider {
+  width: var(--bop-space-3);
+}
+/* Owner 2026-10-25: each state reads differently — being made (blue), ready and handed over
+   (green), cancelled (red); the words always say it. */
+.orders-page .order-workbench-phase[data-tone="neutral"] {
+  color: var(--bop-color-info);
+}
+.orders-page .order-workbench-phase[data-tone="done"] {
+  color: var(--bop-color-success);
+}
+.orders-page .order-workbench-phase[data-tone="cancelled"] {
+  color: var(--bop-color-danger);
+}

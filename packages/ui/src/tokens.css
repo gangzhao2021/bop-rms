@@ -130,6 +130,22 @@ button {
   margin: 0 auto;
   padding: clamp(1rem, 4vw, 2rem);
 }
+/* Inside an app's workspace frame: the title stays the page heading for screen readers only, and
+   the page uses the workspace's column instead of a narrower centred one. */
+.bop-shell__header--in-workspace {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.bop-shell__header-status--in-workspace {
+  padding: var(--bop-space-3) clamp(1rem, 3vw, 2rem) 0;
+}
 /* Base content styles for shared pages. Zero specificity: any page class overrides them; being
    unlayered they still apply over the CSS reset. */
 :where(.bop-shell__main) :where(h2) {

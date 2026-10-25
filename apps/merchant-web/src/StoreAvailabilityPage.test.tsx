@@ -2,7 +2,7 @@ import { renderToStaticMarkup as renderStatic } from "react-dom/server";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
-import { StoreAvailabilityPage } from "./StoreAvailabilityPage.js";
+import { groupByProduct, StoreAvailabilityPage } from "./StoreAvailabilityPage.js";
 import { KitchenDisplayHeaderControls, kitchenHandoverOffered } from "./KitchenBoardPages.js";
 import {
   availabilityActions,
@@ -190,4 +190,16 @@ describe("WP-2423 (2026-10-16) why guests see an offered item sold out from stoc
       }),
     ).toThrow();
   });
+});
+
+it("Owner 2026-10-25: groups sizes under their product, in the order products first appear", () => {
+  const item = (productName: string, sizeName: string) => ({ productName, sizeName });
+  expect(
+    groupByProduct([item("Latte", "Small"), item("Muffin", "Muffin"), item("Latte", "Large")]).map(
+      (group) => [group.productName, group.items.map((entry) => entry.sizeName)],
+    ),
+  ).toEqual([
+    ["Latte", ["Small", "Large"]],
+    ["Muffin", ["Muffin"]],
+  ]);
 });

@@ -110,6 +110,9 @@ test("@production Orders after midnight stay under the Store's business day", as
   );
   await page.goto("/operations/orders");
   const days = page.locator(".order-workbench-day");
+  // Owner 2026-10-25: Orders opens on today; every loaded day is one choice away.
+  await expect(days).toHaveText(["Today · Wed, Oct 14"]);
+  await page.getByRole("button", { name: "All days on this page" }).click();
   await expect(days).toHaveText(["Today · Wed, Oct 14", "Yesterday · Tue, Oct 13"]);
   expect(reads.length).toBeGreaterThan(0);
   const afterMidnight = page.locator("details.order-workbench-entry").first();

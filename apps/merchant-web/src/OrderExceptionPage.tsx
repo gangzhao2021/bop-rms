@@ -65,7 +65,8 @@ export function OrderExceptionScreen({
 }) {
   const [kindFilter, setKindFilter] = useState("All");
   const [severityFilter, setSeverityFilter] = useState("All");
-  const [statusFilter, setStatusFilter] = useState("All");
+  // Owner 2026-10-25: open work first; resolved exceptions are one choice away.
+  const [statusFilter, setStatusFilter] = useState("NotResolved");
   const [ownerFilter, setOwnerFilter] = useState("All");
   const [providerFilter, setProviderFilter] = useState("All");
   const [overdueOnly, setOverdueOnly] = useState(false);
@@ -74,7 +75,10 @@ export function OrderExceptionScreen({
     (item) =>
       (kindFilter === "All" || item.kind === kindFilter) &&
       (severityFilter === "All" || item.severity === severityFilter) &&
-      (statusFilter === "All" || item.status === statusFilter) &&
+      (statusFilter === "All" ||
+        (statusFilter === "NotResolved"
+          ? item.status !== "Resolved"
+          : item.status === statusFilter)) &&
       (ownerFilter === "All" || item.ownerStatus === ownerFilter) &&
       (providerFilter === "All" || item.providerState === providerFilter) &&
       (!overdueOnly || isExceptionOverdue(item, view.projectedAt)),
@@ -82,7 +86,7 @@ export function OrderExceptionScreen({
   const hasFilters =
     kindFilter !== "All" ||
     severityFilter !== "All" ||
-    statusFilter !== "All" ||
+    statusFilter !== "NotResolved" ||
     ownerFilter !== "All" ||
     providerFilter !== "All" ||
     overdueOnly;
@@ -140,11 +144,12 @@ export function OrderExceptionScreen({
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.currentTarget.value)}
             >
-              <option>{t("All")}</option>
-              <option>{t("Open")}</option>
-              <option>{t("Acknowledged")}</option>
-              <option>{t("Assigned")}</option>
-              <option>{t("Resolved")}</option>
+              <option value="NotResolved">{t("Not resolved yet")}</option>
+              <option value="Open">{t("Open")}</option>
+              <option value="Acknowledged">{t("Acknowledged")}</option>
+              <option value="Assigned">{t("Assigned")}</option>
+              <option value="Resolved">{t("Resolved")}</option>
+              <option value="All">{t("All")}</option>
             </select>
           </label>
           <label>
@@ -185,7 +190,7 @@ export function OrderExceptionScreen({
             onClick={() => {
               setKindFilter("All");
               setSeverityFilter("All");
-              setStatusFilter("All");
+              setStatusFilter("NotResolved");
               setOwnerFilter("All");
               setProviderFilter("All");
               setOverdueOnly(false);

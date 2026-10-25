@@ -131,7 +131,9 @@ export function RecipeListPage({
           </p>
         </div>
         {view.permissions.mayEdit ? (
-          <Link to="/app/commerce/recipes/new/edit">{t("New recipe")}</Link>
+          <Link className="primary-action-link" to="/app/commerce/recipes/new/edit">
+            {t("New recipe")}
+          </Link>
         ) : null}
       </header>
       {view.recipes.length === 0 ? (

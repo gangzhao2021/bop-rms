@@ -99,7 +99,9 @@ export function StoreReceiptListPage({
           </p>
         </div>
         {view.permissions.mayReceive ? (
-          <Link to="/operations/receiving/new">{t("Receive goods")}</Link>
+          <Link className="primary-action-link" to="/operations/receiving/new">
+            {t("Receive goods")}
+          </Link>
         ) : null}
       </header>
       {view.receipts.length === 0 ? (

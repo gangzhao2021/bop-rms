@@ -1,6 +1,6 @@
 import { LanguageSwitch, t } from "./i18n/i18n.js";
 import { useApprovalsWaiting, useStaffCallsWaiting } from "./approvals-waiting.js";
-import { SkipLinkProvidedContext } from "@bop-rms/ui";
+import { SkipLinkProvidedContext, WorkspaceFrameContext } from "@bop-rms/ui";
 import {
   useEffect,
   useState,
@@ -420,7 +420,9 @@ export function WorkspaceLayout({
         {footer === null ? null : <div className="workspace-sidebar__footer">{footer}</div>}
       </nav>
       <div className="workspace-content" inert={drawerOpen}>
-        <SkipLinkProvidedContext.Provider value={true}>{children}</SkipLinkProvidedContext.Provider>
+        <SkipLinkProvidedContext.Provider value={true}>
+          <WorkspaceFrameContext.Provider value={true}>{children}</WorkspaceFrameContext.Provider>
+        </SkipLinkProvidedContext.Provider>
       </div>
     </div>
   );

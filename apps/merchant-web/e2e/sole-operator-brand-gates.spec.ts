@@ -257,6 +257,8 @@ test("@production the price list shows drafts in Store time and discarding a dra
   await expect(row).toContainText("Oct 15, 2026, 12:30 PM");
   await expect(page.getByText(/UTC/u)).toHaveCount(0);
   // Sole operator is on: the page does not tell the owner to have someone else publish.
+  // Owner 2026-10-25: the explanation is under "More about this".
+  await page.getByText("More about this").click();
   await expect(page.getByText(/check it and publish it yourself/u)).toBeVisible();
   await expect(page.getByText(/have someone else/u)).toHaveCount(0);
   await expectNoInternalText(page);

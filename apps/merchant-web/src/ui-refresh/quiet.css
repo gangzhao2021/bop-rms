@@ -184,3 +184,67 @@
 .workspace-page.dining-floor .dining-table-tile[data-session="linked"] {
   box-shadow: none;
 }
+
+/* Owner 2026-10-25: pages built on the shared frame (Products, Prices, Item availability,
+   Receiving, ...) use the same column and left edge as every other workspace page. */
+.workspace-content .bop-shell__main:not(.workspace-page) {
+  width: 100%;
+  max-width: 90rem;
+  margin: 0;
+  padding: 24px clamp(16px, 3vw, 32px) 48px;
+}
+
+/* Owner 2026-10-25: a page's main action ("New product", "Receive goods") is a button, not an
+   underlined link. */
+.bop-shell__main a.primary-action-link {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--bop-space-5);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* Owner 2026-10-25: one-line page intros with the detail on request. */
+.bop-shell__main .page-intro {
+  margin: var(--bop-space-1) 0 0;
+}
+.bop-shell__main .page-intro__summary {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+}
+.bop-shell__main .page-intro__aside {
+  font-size: 13px;
+}
+.bop-shell__main .page-intro__more summary {
+  min-height: 32px;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.bop-shell__main .page-intro__more p {
+  max-width: 44rem;
+  margin: var(--bop-space-1) 0 0;
+  color: var(--bop-color-text-muted);
+}
+/* A page's main list is a white panel on the grey page (its controls then read as grey fills). */
+.workspace-content .bop-shell__main > table,
+.workspace-content .bop-shell__main > section > table {
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+@media (max-width: 40rem) {
+  .workspace-content .bop-shell__main > table tr,
+  .workspace-content .bop-shell__main > section > table tr {
+    padding-inline: var(--bop-space-4);
+  }
+}

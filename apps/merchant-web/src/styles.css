@@ -44,8 +44,8 @@
 
 .bop-eyebrow {
   color: var(--bop-color-text-muted);
-  font-family: var(--bop-font-mono);
-  font-size: 0.8rem;
+  font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0.04em;
 }
 

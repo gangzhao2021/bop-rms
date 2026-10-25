@@ -154,3 +154,53 @@
   display: grid;
   gap: var(--bop-space-1);
 }
+
+/* Owner 2026-10-25: Item availability — a product heading over its sizes; per size one direct
+   action, a "Mark sold out" menu and a "More" menu. */
+.availability-product th {
+  padding-top: var(--bop-space-5);
+  color: var(--bop-color-text-default);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.availability-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: var(--bop-space-2);
+}
+.availability-menu > summary {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: var(--bop-space-1);
+  padding: 0 var(--bop-space-4);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-raised);
+  font-size: 14px;
+  font-weight: 500;
+  list-style: none;
+  cursor: pointer;
+}
+.availability-menu > summary::-webkit-details-marker {
+  display: none;
+}
+.availability-menu > summary::after {
+  content: "▾";
+  font-size: 11px;
+}
+.availability-menu[open] > summary {
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+}
+.availability-menu__items {
+  display: grid;
+  gap: var(--bop-space-1);
+  margin-top: var(--bop-space-1);
+}
+.availability-menu--more .availability-menu__items button {
+  color: var(--bop-color-danger);
+}

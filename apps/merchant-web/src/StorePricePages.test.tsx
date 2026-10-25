@@ -192,7 +192,9 @@ describe("WP-2423 price book list", () => {
     expect(html).toContain(`href="/app/commerce/pricing/${ref(20)}"`);
     expect(html).toContain(`aria-label="Continue draft PRICES-Q19-TEST"`);
     expect(text).toContain("PRICES-20261001 In use at this Store 4");
-    expect(text).toContain("PRICES-OLD Discarded 0");
+    // Owner 2026-10-25: a discarded book is hidden until asked for, and the page says how many.
+    expect(text).not.toContain("PRICES-OLD Discarded 0");
+    expect(text).toContain("Show discarded price books (1)");
     // Only drafts offer to be continued; only published books can be copied.
     expect(html.match(/Continue draft/gu)).toHaveLength(2);
     expect(html).not.toContain("Copy of PRICES-Q19-TEST");

@@ -1,3 +1,4 @@
+import { PageIntro } from "./PageIntro.js";
 import { listSeparator, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { kitchenActionNotice, kitchenStepText, useKitchenActions } from "./use-kitchen-actions.js";
@@ -469,11 +470,13 @@ function KitchenBoardLock({
     return (
       <div className="kitchen-board-lock">
         <StatePanel heading={t("View only on this screen")} tone="neutral" status>
-          <p>
-            {t(
-              "You are signed in for the counter or office, so this screen cannot change tickets. To work tickets on this device, start the kitchen display: this signs you out here, then choose “Start kitchen display” for yourself.",
-            )}
-          </p>
+          <PageIntro summary={t("This sign-in cannot change tickets.")}>
+            <p>
+              {t(
+                "You are signed in for the counter or office, so this screen cannot change tickets. To work tickets on this device, start the kitchen display: this signs you out here, then choose “Start kitchen display” for yourself.",
+              )}
+            </p>
+          </PageIntro>
           <StaffSwitchButton label={t("Start kitchen display here")} />
         </StatePanel>
       </div>
