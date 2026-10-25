@@ -573,7 +573,11 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   expect(queryUrls.length).toBeGreaterThan(0);
   for (const url of queryUrls) expect(url).not.toMatch(/01909985-/u);
   expect(
-    await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
+    // Only the display's own sound preference (WP-2423 Q33) stays on the device, never orders.
+    await page.evaluate(() => ({
+      local: Object.keys(localStorage).filter((key) => key !== "bop.kitchen.sound").length,
+      session: sessionStorage.length,
+    })),
   ).toEqual({ local: 0, session: 0 });
   showOrders = true;
   await page.reload();
@@ -1112,7 +1116,11 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   await expect(page.getByRole("button", { name: "Mark ready", exact: true })).toHaveCount(0);
   expect(new Set(commands.slice(1).map((command) => command.idempotencyKey)).size).toBe(4);
   expect(
-    await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
+    // Only the display's own sound preference (WP-2423 Q33) stays on the device, never orders.
+    await page.evaluate(() => ({
+      local: Object.keys(localStorage).filter((key) => key !== "bop.kitchen.sound").length,
+      session: sessionStorage.length,
+    })),
   ).toEqual({ local: 0, session: 0 });
 });
 

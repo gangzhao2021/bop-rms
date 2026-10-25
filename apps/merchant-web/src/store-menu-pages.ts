@@ -568,3 +568,111 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
     command: (command) => post("/merchant/commerce/menus/command", command),
   };
 }
+
+/** WP-2423 Q31: the editable part of a menu draft, as kept on this device until it is saved. */
+export interface MenuDraftContent {
+  readonly name: string;
+  readonly sections: readonly {
+    readonly sectionReference: string | null;
+    readonly code: string | null;
+    readonly name: string;
+    readonly nameZh: string;
+    readonly items: readonly { readonly skuReference: string; readonly featured: boolean }[];
+  }[];
+}
+export interface StoredMenuDraft extends MenuDraftContent {
+  /** The menu version the changes were made on; they are offered back only on that version. */
+  readonly aggregateVersion: number;
+  readonly keptAt: string;
+}
+
+const menuDraftKey = (menuReference: string) => `bop.menu-draft.${menuReference}`;
+
+/** The same text for the same menu content, so a draft can be compared with what is saved. */
+export function menuDraftFingerprint(content: MenuDraftContent): string {
+  return JSON.stringify({
+    name: content.name,
+    sections: content.sections.map((section) => ({
+      sectionReference: section.sectionReference,
+      code: section.code,
+      name: section.name,
+      nameZh: section.nameZh,
+      items: section.items.map((item) => [item.skuReference, item.featured]),
+    })),
+  });
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+export function parseStoredMenuDraft(value: unknown): StoredMenuDraft | null {
+  if (typeof value !== "object" || value === null) return null;
+  const draft = value as Record<string, unknown>;
+  if (
+    !isString(draft.name) ||
+    !isString(draft.keptAt) ||
+    !Number.isSafeInteger(draft.aggregateVersion) ||
+    !Array.isArray(draft.sections)
+  )
+    return null;
+  const sections: StoredMenuDraft["sections"][number][] = [];
+  for (const entry of draft.sections as unknown[]) {
+    if (typeof entry !== "object" || entry === null) return null;
+    const section = entry as Record<string, unknown>;
+    if (
+      !(section.sectionReference === null || isString(section.sectionReference)) ||
+      !(section.code === null || isString(section.code)) ||
+      !isString(section.name) ||
+      !isString(section.nameZh) ||
+      !Array.isArray(section.items)
+    )
+      return null;
+    const items: { skuReference: string; featured: boolean }[] = [];
+    for (const raw of section.items as unknown[]) {
+      if (typeof raw !== "object" || raw === null) return null;
+      const item = raw as Record<string, unknown>;
+      if (!isString(item.skuReference) || typeof item.featured !== "boolean") return null;
+      items.push({ skuReference: item.skuReference, featured: item.featured });
+    }
+    sections.push({
+      sectionReference: section.sectionReference,
+      code: section.code,
+      name: section.name,
+      nameZh: section.nameZh,
+      items,
+    });
+  }
+  return {
+    name: draft.name,
+    keptAt: draft.keptAt,
+    aggregateVersion: draft.aggregateVersion as number,
+    sections,
+  };
+}
+
+/** Unsaved menu changes kept on this device (menu names and items only, never customer data). */
+export const menuDraftStore = {
+  read(menuReference: string): StoredMenuDraft | null {
+    try {
+      const raw = globalThis.localStorage?.getItem(menuDraftKey(menuReference));
+      return raw ? parseStoredMenuDraft(JSON.parse(raw)) : null;
+    } catch {
+      return null;
+    }
+  },
+  write(menuReference: string, draft: StoredMenuDraft): void {
+    try {
+      globalThis.localStorage?.setItem(menuDraftKey(menuReference), JSON.stringify(draft));
+    } catch {
+      // Storage full or blocked: the leave warning still protects the changes on this page.
+    }
+  },
+  clear(menuReference: string): void {
+    try {
+      globalThis.localStorage?.removeItem(menuDraftKey(menuReference));
+    } catch {
+      // Nothing kept.
+    }
+  },
+};

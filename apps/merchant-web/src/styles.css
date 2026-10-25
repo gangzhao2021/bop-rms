@@ -9488,3 +9488,35 @@ body:has(.product-complete-draft) .bop-shell__header,
 .staff-switch__language {
   justify-self: start;
 }
+/* WP-2423 Q32: drag a menu section or item by its handle; the Move buttons stay for keyboards. */
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  margin-right: var(--bop-space-2);
+  border-radius: var(--bop-radius-control);
+  color: var(--bop-color-text-muted);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.menu-builder-section[data-drop-target="true"],
+tr[data-drop-target="true"] {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.menu-builder-order {
+  white-space: nowrap;
+}
+.menu-builder-order button {
+  min-width: 36px;
+  min-height: 36px;
+}
+.menu-builder-unsaved {
+  color: var(--bop-color-text-muted);
+}

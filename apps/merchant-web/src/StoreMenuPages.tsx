@@ -7,6 +7,7 @@ import type { AvailabilityClient } from "./store-availability-page.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
+import { moveTo, useDragReorder } from "./reorder.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
 import {
   MenuPageError,
@@ -33,6 +34,10 @@ import {
   type MenuCustomerPhoto,
   type MenuCustomerView,
   type MenuListView,
+  menuDraftFingerprint,
+  menuDraftStore,
+  type MenuDraftContent,
+  type StoredMenuDraft,
 } from "./store-menu-pages.js";
 
 /** WP-2423 / DEC-MENU-REVISION: Brand menus — edit, review, publish and revise. */
@@ -321,6 +326,23 @@ interface EditableSection {
 }
 let sectionKey = 0;
 
+/** WP-2423 Q31: what the server holds for this menu, in the shape the editor compares. */
+function savedMenuContent(menu: MenuBuilderView["menu"]): MenuDraftContent {
+  return {
+    name: menu.name,
+    sections: menu.sections.map((section) => ({
+      sectionReference: section.sectionReference,
+      code: section.code,
+      name: section.name,
+      nameZh: section.nameZh ?? "",
+      items: section.items.map((item) => ({
+        skuReference: item.skuReference,
+        featured: item.featured,
+      })),
+    })),
+  };
+}
+
 function MenuBuilder({
   client,
   menuReference,
@@ -340,11 +362,22 @@ function MenuBuilder({
   const [busy, setBusy] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
+  // WP-2423 Q31: unsaved changes kept on this device, offered back when the page is opened again.
+  const [kept, setKept] = useState<StoredMenuDraft | "Outdated" | null>(null);
   useEffect(() => {
     if (state.kind !== "Found") return;
     const menu = state.view.menu;
     if (loadedVersion === menu.aggregateVersion) return;
     setLoadedVersion(menu.aggregateVersion);
+    const stored = menuDraftStore.read(menuReference);
+    setKept(
+      stored === null ||
+        menuDraftFingerprint(stored) === menuDraftFingerprint(savedMenuContent(menu))
+        ? null
+        : stored.aggregateVersion === menu.aggregateVersion
+          ? stored
+          : "Outdated",
+    );
     setName(menu.name);
     setSections(
       menu.sections.map((section) => ({
@@ -359,12 +392,72 @@ function MenuBuilder({
         })),
       })),
     );
-  }, [state, loadedVersion]);
+  }, [state, loadedVersion, menuReference]);
+  const found = state.kind === "Found" ? state.view : null;
+  const editing =
+    found !== null &&
+    loadedVersion === found.menu.aggregateVersion &&
+    menuStage(found.publication) === "Editing" &&
+    found.permissions.mayEdit;
+  const current = menuDraftFingerprint({ name, sections });
+  const dirty =
+    editing && found !== null && current !== menuDraftFingerprint(savedMenuContent(found.menu));
+  const keptPending = kept !== null;
+  useEffect(() => {
+    // Until the cook decides about changes kept earlier, nothing overwrites them.
+    if (!editing || keptPending || found === null) return;
+    if (dirty)
+      menuDraftStore.write(menuReference, {
+        name,
+        sections,
+        aggregateVersion: found.menu.aggregateVersion,
+        keptAt: new Date().toISOString(),
+      });
+    else menuDraftStore.clear(menuReference);
+  }, [editing, keptPending, dirty, current, found, menuReference, name, sections]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+  const drag = useDragReorder((list, from, to) => {
+    if (list === "sections") setSections((current) => [...moveTo(current, from, to)]);
+    else updateSectionItems(list, (items) => [...moveTo(items, from, to)]);
+  });
+  const updateSectionItems = (
+    key: string,
+    change: (items: EditableSection["items"]) => EditableSection["items"],
+  ) =>
+    setSections((current) =>
+      current.map((section) =>
+        section.key === key ? { ...section, items: change(section.items) } : section,
+      ),
+    );
   if (state.kind !== "Found") return <Failure code={state.kind} />;
   const view: MenuBuilderView = state.view;
   const menu = view.menu;
   const stage = menuStage(view.publication);
   const editable = stage === "Editing" && view.permissions.mayEdit;
+  const restoreKept = () => {
+    if (kept === null || kept === "Outdated") return;
+    setName(kept.name);
+    setSections(
+      kept.sections.map((section) => ({
+        key: "s" + ++sectionKey,
+        sectionReference: section.sectionReference,
+        code: section.code,
+        name: section.name,
+        nameZh: section.nameZh,
+        items: section.items.map((item) => ({ ...item })),
+      })),
+    );
+    setKept(null);
+  };
+  const dropKept = () => {
+    menuDraftStore.clear(menuReference);
+    setKept(null);
+  };
   const revision = menuRevisionAction(stage, view.latestRelease !== null);
   const discardable = mayDiscardDraft(view);
   const sellables = new Map(view.sellables.map((item) => [item.skuReference, item]));
@@ -383,6 +476,11 @@ function MenuBuilder({
     setPending(command);
     try {
       await client.command(command);
+      // WP-2423 Q31: once saved or discarded on the server, nothing is kept on this device.
+      if (command.action === "SaveDraft" || command.action === "DiscardDraft") {
+        menuDraftStore.clear(menuReference);
+        setKept(null);
+      }
       setPending(null);
       setMessage({ tone: "neutral", text: done });
       setLoadedVersion(null);
@@ -412,13 +510,6 @@ function MenuBuilder({
     setSections((current) =>
       current.map((section) => (section.key === key ? change(section) : section)),
     );
-  const move = <T,>(list: T[], index: number, delta: number) => {
-    const next = [...list];
-    const target = index + delta;
-    if (target < 0 || target >= next.length) return list;
-    [next[index], next[target]] = [next[target] as T, next[index] as T];
-    return next;
-  };
   // WP-2423 (v15 2026-10-16): items on this menu that customers at this Store cannot see because
   // they are not offered here yet (Item availability). Publishing never claims they are shown.
   const hidden = itemsNotOfferedHere(view);
@@ -518,6 +609,34 @@ function MenuBuilder({
           <p>{message.text}</p>
         </StatePanel>
       ) : null}
+      {kept !== null && editable ? (
+        <StatePanel heading={t("Unsaved changes on this device")} status>
+          {kept === "Outdated" ? (
+            <p>
+              {t(
+                "Changes made earlier on this device were not brought back, because the menu has been saved since. Check the menu below and make them again if they are still needed.",
+              )}
+            </p>
+          ) : (
+            <p>
+              {t("Changes to this menu made on this device were not saved. Last change:")}{" "}
+              <StaffTime instant={kept.keptAt} />
+            </p>
+          )}
+          <p>
+            {kept === "Outdated" ? null : (
+              <>
+                <button type="button" onClick={restoreKept}>
+                  {t("Bring back unsaved changes")}
+                </button>{" "}
+              </>
+            )}
+            <button type="button" onClick={dropKept}>
+              {kept === "Outdated" ? t("OK") : t("Discard them")}
+            </button>
+          </p>
+        </StatePanel>
+      ) : null}
       {hidden.length > 0 ? (
         <StatePanel heading={t("Not offered at this Store")} status>
           <p>
@@ -592,8 +711,25 @@ function MenuBuilder({
               item.active && !section.items.some((i) => i.skuReference === item.skuReference),
           );
           return (
-            <fieldset key={section.key} disabled={!editable || busy}>
-              <legend>{t("Section {value}", { value: sectionIndex + 1 })}</legend>
+            <fieldset
+              key={section.key}
+              ref={drag.row("sections", sectionIndex)}
+              className="menu-builder-section"
+              disabled={!editable || busy}
+            >
+              <legend>
+                {editable ? (
+                  <span
+                    className="drag-handle"
+                    aria-hidden="true"
+                    title={t("Drag to move this section")}
+                    {...drag.handle("sections", sectionIndex)}
+                  >
+                    ⠿
+                  </span>
+                ) : null}
+                {t("Section {value}", { value: sectionIndex + 1 })}
+              </legend>
               <label>
                 {t("Section name")}
                 <input
@@ -627,8 +763,20 @@ function MenuBuilder({
                 </thead>
                 <tbody>
                   {section.items.map((item, index) => (
-                    <tr key={item.skuReference}>
-                      <td>{label(item.skuReference)}</td>
+                    <tr key={item.skuReference} ref={drag.row(section.key, index)}>
+                      <td>
+                        {editable ? (
+                          <span
+                            className="drag-handle"
+                            aria-hidden="true"
+                            title={t("Drag to move this item")}
+                            {...drag.handle(section.key, index)}
+                          >
+                            ⠿
+                          </span>
+                        ) : null}
+                        {label(item.skuReference)}
+                      </td>
                       <td>
                         {priceText(sellables.get(item.skuReference)?.priceMinor ?? null) ??
                           t("No price")}
@@ -661,35 +809,38 @@ function MenuBuilder({
                         )}
                       </td>
                       {editable ? (
-                        <td>
-                          <button
-                            type="button"
-                            aria-label={t("Move {skuReference} up", {
-                              skuReference: label(item.skuReference),
-                            })}
-                            onClick={() =>
-                              updateSection(section.key, (s) => ({
-                                ...s,
-                                items: move(s.items, index, -1),
-                              }))
-                            }
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={t("Move {skuReference} down", {
-                              skuReference: label(item.skuReference),
-                            })}
-                            onClick={() =>
-                              updateSection(section.key, (s) => ({
-                                ...s,
-                                items: move(s.items, index, 1),
-                              }))
-                            }
-                          >
-                            ↓
-                          </button>
+                        <td className="menu-builder-order">
+                          {(
+                            [
+                              ["first", "⤒", t("Move {skuReference} to the top"), 0],
+                              ["up", "↑", t("Move {skuReference} up"), index - 1],
+                              ["down", "↓", t("Move {skuReference} down"), index + 1],
+                              [
+                                "last",
+                                "⤓",
+                                t("Move {skuReference} to the bottom"),
+                                section.items.length - 1,
+                              ],
+                            ] as const
+                          ).map(([key, symbol, text, to]) => (
+                            <button
+                              key={key}
+                              type="button"
+                              disabled={
+                                key === "first" || key === "up"
+                                  ? index === 0
+                                  : index === section.items.length - 1
+                              }
+                              aria-label={text.replace("{skuReference}", label(item.skuReference))}
+                              onClick={() =>
+                                updateSectionItems(section.key, (items) => [
+                                  ...moveTo(items, index, to),
+                                ])
+                              }
+                            >
+                              {symbol}
+                            </button>
+                          ))}
                           <button
                             type="button"
                             onClick={() =>
@@ -732,12 +883,29 @@ function MenuBuilder({
               ) : null}
               {editable ? (
                 <p>
-                  <button
-                    type="button"
-                    onClick={() => setSections((current) => move(current, sectionIndex, -1))}
-                  >
-                    {t("Move section up")}
-                  </button>{" "}
+                  {(
+                    [
+                      ["first", t("Move section to the top"), 0],
+                      ["up", t("Move section up"), sectionIndex - 1],
+                      ["down", t("Move section down"), sectionIndex + 1],
+                      ["last", t("Move section to the bottom"), sections.length - 1],
+                    ] as const
+                  ).map(([key, text, to]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      disabled={
+                        key === "first" || key === "up"
+                          ? sectionIndex === 0
+                          : sectionIndex === sections.length - 1
+                      }
+                      onClick={() =>
+                        setSections((current) => [...moveTo(current, sectionIndex, to)])
+                      }
+                    >
+                      {text}
+                    </button>
+                  ))}{" "}
                   {section.items.length === 0 ? (
                     <button
                       type="button"
@@ -776,6 +944,12 @@ function MenuBuilder({
             <button type="submit" disabled={!valid || busy}>
               {pending?.action === "SaveDraft" ? t("Retry") : t("Save menu")}
             </button>
+            {dirty ? (
+              <span className="menu-builder-unsaved" role="status">
+                {" "}
+                {t("Unsaved changes — kept on this device until you save.")}
+              </span>
+            ) : null}
           </p>
         ) : null}
       </form>

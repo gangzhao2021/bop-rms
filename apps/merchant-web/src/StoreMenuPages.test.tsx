@@ -5,6 +5,9 @@ import {
   customerViewChangeSummary,
   itemsNotOfferedHere,
   mayDiscardDraft,
+  menuDraftFingerprint,
+  menuDraftStore,
+  parseStoredMenuDraft,
   MenuPageError,
   menuReviewProblemText,
   orderTypeText,
@@ -23,6 +26,54 @@ const status = (state: string) => ({
   snapshotDigest: "d",
   changedAt: "2026-10-08T00:00:00.000Z",
 });
+describe("WP-2423 Q31 unsaved menu changes kept on this device", () => {
+  const content = {
+    name: "Breakfast",
+    sections: [
+      {
+        sectionReference: "a",
+        code: "COFFEE",
+        name: "Coffee",
+        nameZh: "咖啡",
+        items: [
+          { skuReference: "latte-small", featured: true },
+          { skuReference: "mocha", featured: false },
+        ],
+      },
+    ],
+  };
+  it("compares content only, so the order of items counts and editor keys do not", () => {
+    const withKeys = {
+      ...content,
+      sections: content.sections.map((section) => ({ ...section, key: "s9" })),
+    };
+    expect(menuDraftFingerprint(withKeys)).toBe(menuDraftFingerprint(content));
+    const [coffee] = content.sections;
+    if (coffee === undefined) throw new Error("fixture has no section");
+    const reordered = {
+      ...content,
+      sections: [{ ...coffee, items: [...coffee.items].reverse() }],
+    };
+    expect(menuDraftFingerprint(reordered)).not.toBe(menuDraftFingerprint(content));
+  });
+  it("reads back only a well-formed kept draft", () => {
+    const kept = { ...content, aggregateVersion: 4, keptAt: "2026-10-25T08:00:00.000Z" };
+    expect(parseStoredMenuDraft(JSON.parse(JSON.stringify(kept)))).toEqual(kept);
+    expect(parseStoredMenuDraft({ ...kept, aggregateVersion: "4" })).toBeNull();
+    expect(
+      parseStoredMenuDraft({ ...kept, sections: [{ ...content.sections[0], items: [{}] }] }),
+    ).toBeNull();
+    expect(parseStoredMenuDraft(null)).toBeNull();
+  });
+  it("keeps nothing and fails quietly where the device has no storage", () => {
+    expect(menuDraftStore.read("m")).toBeNull();
+    expect(() => {
+      menuDraftStore.write("m", { ...content, aggregateVersion: 1, keptAt: "x" });
+      menuDraftStore.clear("m");
+    }).not.toThrow();
+  });
+});
+
 describe("WP-2423 menu page helpers", () => {
   it("names channels and order types in plain words", () => {
     expect(channelText(["CUSTOMER_PWA"])).toBe("Customer ordering app");
