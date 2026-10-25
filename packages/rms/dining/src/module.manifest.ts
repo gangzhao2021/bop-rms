@@ -60,6 +60,8 @@ const moduleManifestInput =
         "dining_host_transfer_operation",
         "dining_table_qr_issue",
         "dining_guest_invitation_operation",
+        "dining_staff_call",
+        "dining_staff_call_closure",
       ],
     },
     ownedJobs: [],

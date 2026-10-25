@@ -2769,6 +2769,18 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_dining" &&
           module.manifest.ownedDatabase?.tables?.includes("dining_exception_task") &&
           moduleRelative === "src/infrastructure/persistence/dining-exception-task-store.ts";
+        // WP-2423 DEC-DINING-STAFF-CALL: exact scoped guest call for staff and its closure.
+        const acceptedDiningStaffCallAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          [
+            "dining_table",
+            "dining_session",
+            "dining_participant",
+            "dining_staff_call",
+            "dining_staff_call_closure",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/dining-staff-call-store.ts";
         // WP-2423 DEC-DINING-GUEST-INVITATION: exact scoped Host invitation (next join code) store.
         const acceptedDiningGuestInvitationAsset =
           module.packageName === "@rms/dining" &&
@@ -3712,6 +3724,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningClosingAsset &&
           !acceptedDiningHostTransferAsset &&
           !acceptedDiningGuestInvitationAsset &&
+          !acceptedDiningStaffCallAsset &&
           !acceptedDiningMoveAsset &&
           !acceptedDiningMovedJoinAsset &&
           !acceptedDiningAdmissionConsumptionAsset &&

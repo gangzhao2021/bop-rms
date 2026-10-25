@@ -3344,6 +3344,42 @@
     },
     {
       "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_staff_call",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q28 DEC-DINING-STAFF-CALL, 2026-10-25): a seated guest asks staff to come to the table from their own phone, choosing a reason (no free text); this append-only record names the Session, the participant, the reason and the time, and its recent rows bound calls to one open call and 6 per Session per 30 minutes"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_staff_call",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q28 DEC-DINING-STAFF-CALL, 2026-10-25): a seated guest asks staff to come to the table from their own phone, choosing a reason (no free text); this append-only record names the Session, the participant, the reason and the time, and its recent rows bound calls to one open call and 6 per Session per 30 minutes"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_staff_call_closure",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q28 DEC-DINING-STAFF-CALL, 2026-10-25): staff answer a guest's call for staff, or a guest at the table withdraws it; this append-only record names the call, how it closed, the staff member who answered (or the participant who withdrew) and the time"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_staff_call_closure",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (WP-2423 Q28 DEC-DINING-STAFF-CALL, 2026-10-25): staff answer a guest's call for staff, or a guest at the table withdraws it; this append-only record names the call, how it closed, the staff member who answered (or the participant who withdrew) and the time"
+    },
+    {
+      "type": "table",
       "schema": "rms_fulfillment",
       "object": "capacity_slot",
       "column": null,

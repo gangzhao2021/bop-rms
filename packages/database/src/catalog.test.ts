@@ -736,6 +736,7 @@ describe("migration catalog", () => {
       "2000_092_create_notification_delivery_feedback",
       "2000_093_create_order_recovery_authorization",
       "2000_094_create_cognito_store_staff_sign_in",
+      "2000_095_create_dining_staff_call",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
