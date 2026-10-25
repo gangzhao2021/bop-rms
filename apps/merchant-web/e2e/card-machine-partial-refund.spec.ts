@@ -398,13 +398,12 @@ test("@production an owner approves a card-machine refund and is told to make it
   await page.goto("/app/approvals");
   const card = page.getByRole("listitem").filter({ hasText: "T4-2" });
   const approve = card.getByRole("button", { name: "Approve card machine refund of $124.30" });
-  await expect(approve).toBeDisabled();
-  await card.getByRole("button", { name: "Verify to approve" }).click();
+  // Owner 2026-10-25: Approve asks for the code when needed, then goes ahead.
+  await approve.click();
   const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
   await dialog.getByLabel("Six-digit code").fill("123456");
   await dialog.getByRole("button", { name: "Verify" }).click();
   await expect(dialog).toBeHidden();
-  await approve.click();
   await expect(card).toContainText(
     "Approved — refund it on the store's card machine, then record it",
   );

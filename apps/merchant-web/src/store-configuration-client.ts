@@ -494,7 +494,7 @@ export const SOLE_OPERATOR_APPROVAL_INVALID_MESSAGE = t(
   "This change was approved by you alone while Sole operator was off, so it cannot be published. Withdraw it, then send a new change for approval.",
 );
 export const SOLE_OPERATOR_OFF_MESSAGE = t(
-  "Sole operator is off, so another person with Owner access must approve this. If you run this business on your own, turn on Sole operator on the Approvals page, then approve again.",
+  "Sole operator is off, so another person with Owner access must approve this. If you run this business on your own, turn on Sole operator in Store setup, then approve again.",
 );
 export const SOLE_OPERATOR_OTHERS_MESSAGE = t(
   "Someone else also holds Owner access at this Store, so they must approve this change.",

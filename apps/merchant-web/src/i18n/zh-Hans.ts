@@ -3309,7 +3309,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sent for approval. Another person with approval access must approve it before it is published.":
     "已提交审批。发布前需由另一位有审批权限的人批准。",
   "Sent for approval. Another person with approval access must approve it. If you run the Store alone, turn on sole operator in Approvals to approve it yourself.":
-    '已提交审批。需由另一位有审批权限的人批准。如果你独自经营门店，请在审批页开启"独立经营者"以自行批准。',
+    '已提交审批。需由另一位有审批权限的人批准。如果你独自经营门店，请在门店设置中开启"独立经营者"以自行批准。',
   "Sent for approval. You are the sole operator: you can approve it yourself below, then publish it.":
     "已提交审批。你是独立经营者：可以在下方自行批准，然后发布。",
   "Sent to customer": "已发送给顾客",
@@ -3439,12 +3439,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     '"独立经营者"目前对你不生效（已关闭，或这里还有其他人拥有店主权限），因此需由另一位有店主权限的人批准。请恢复请求，然后刷新。',
   "Sole operator is not in effect for you now, so another person with Owner access must approve this.":
     '"独立经营者"目前对你不生效，因此需由另一位有店主权限的人批准。',
-  "Sole operator is off, so another person with Owner access must approve this template. If you run the business on your own, the brand owner can turn on Sole operator on the Approvals page. Recover the request, then refresh.":
-    '"独立经营者"已关闭，因此需要另一位有店主权限的人批准此模板。如果你独自经营，品牌所有者可以在审批页开启"独立经营者"。请恢复请求，然后刷新。',
-  "Sole operator is off, so another person with Owner access must approve this. If you run this business on your own, turn on Sole operator on the Approvals page, then approve again.":
-    '"独立经营者"已关闭，因此需由另一位有店主权限的人批准。如果你独自经营，请在审批页开启"独立经营者"，然后再次批准。',
-  "Sole operator is off, so another person with Owner access must approve this. Recover the request. If you run this business on your own, turn on Sole operator on the Approvals page, then approve again.":
-    '"独立经营者"已关闭，因此需由另一位有店主权限的人批准。请恢复请求。如果你独自经营，请在审批页开启"独立经营者"，然后再次批准。',
+  "Sole operator is off, so another person with Owner access must approve this template. If you run the business on your own, the brand owner can turn on Sole operator in Store setup. Recover the request, then refresh.":
+    '"独立经营者"已关闭，因此需要另一位有店主权限的人批准此模板。如果你独自经营，品牌所有者可以在门店设置中开启"独立经营者"。请恢复请求，然后刷新。',
+  "Sole operator is off, so another person with Owner access must approve this. If you run this business on your own, turn on Sole operator in Store setup, then approve again.":
+    '"独立经营者"已关闭，因此需由另一位有店主权限的人批准。如果你独自经营，请在门店设置中开启"独立经营者"，然后再次批准。',
+  "Sole operator is off, so another person with Owner access must approve this. Recover the request. If you run this business on your own, turn on Sole operator in Store setup, then approve again.":
+    '"独立经营者"已关闭，因此需由另一位有店主权限的人批准。请恢复请求。如果你独自经营，请在门店设置中开启"独立经营者"，然后再次批准。',
   "Sole operator is on and you are the only person who holds price approval, so you may publish your own draft after checking it and verifying it is you.":
     '"独立经营者"已开启且你是唯一持有价格审批权限的人，因此核对并验证身份后可以发布你自己的草稿。',
   "Sole operator is on, but {gate} also {value} {permissionName}, so they must approve this.":
@@ -3490,8 +3490,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "本店还有其他人持有退款批准权限，因此需要由其批准你的申请。",
   "Someone else now also holds recipe review, so another person must review. Refresh to see who.":
     "现在另有一人也持有配方审核权限，因此需要由另一个人审核。请刷新查看是谁。",
-  "Someone else now also holds refund approval at this store, so they must approve this refund. See Sole operator on this page.":
-    '现在本店另有一人也持有退款批准权限，因此需要由其批准这笔退款。见本页的"独立经营者"。',
+  "Someone else now also holds refund approval at this store, so they must approve this refund. See Sole operator in Store setup.":
+    '现在本店另有一人也持有退款批准权限，因此需要由其批准这笔退款。见门店设置中的"独立经营者"。',
   "Someone else now holds allergen list approval, so they must approve this list. Refresh to see who.":
     "现在由另一位人员持有过敏原清单审批权限，需由其批准这份清单。请刷新查看是谁。",
   "Someone else now holds menu approval, so they must approve this version. Refresh to see who.":
@@ -5490,8 +5490,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{who}'s verification": "{who}的验证",
   "{yourPart} and you are the only person who holds {permissionName} (sole operator), so you may approve it yourself. Check it first:":
     "{yourPart}，而你是唯一持有{permissionName}的人（独立经营者），因此可以自行批准。请先核对：",
-  "{yourPart}, so someone else who holds {permissionName} must approve it.{value}If you run this business on your own, the brand owner can turn on Sole operator on the Approvals page.":
-    '{yourPart}，因此需要由另一位持有{permissionName}的人批准。{value}如果你独自经营，品牌所有者可以在审批页开启"独立经营者"。',
+  "{yourPart}, so someone else who holds {permissionName} must approve it.{value}If you run this business on your own, the brand owner can turn on Sole operator in Store setup.":
+    '{yourPart}，因此需要由另一位持有{permissionName}的人批准。{value}如果你独自经营，品牌所有者可以在门店设置中开启"独立经营者"。',
   "· High risk": "· 高风险",
   "· Note: {note}": "· 备注：{note}",
   "· awaiting approval by another manager": "· 等待另一位经理批准",
@@ -5524,4 +5524,22 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Orders waiting to be accepted": "等待接单的订单",
   // Figma v1: Orders status filters.
   "Show orders": "显示订单",
+  // Owner 2026-10-25: Approvals.
+  "Waiting {count} min": "已等待 {count} 分钟",
+  "Waiting {count} h": "已等待 {count} 小时",
+  "Waiting {count} days": "已等待 {count} 天",
+  "Refund {amountMinor}": "退款 {amountMinor}",
+  "Paid with": "付款方式",
+  "Online card": "线上刷卡",
+  "Still refundable": "仍可退",
+  "Items on the order": "订单商品",
+  "{who} has confirmed it is them; approve before": "{who}已确认身份，请在此时间前批准：",
+  "{who} needs to confirm it is them again (authenticator code on their own screen) before you can approve.":
+    "{who}需要先在自己的屏幕上再次输入验证器代码确认身份，你才能批准。",
+  "Withdraw…": "撤回…",
+  "Decline…": "拒绝…",
+  "Large or late refunds need a second person.": "大额或逾期的退款需要另一人批准。",
+  "Why approval?": "为什么需要批准？",
+  "Sole operator (approving your own refunds) is set in":
+    "独立经营者（自己批准自己的退款）在此设置：",
 });

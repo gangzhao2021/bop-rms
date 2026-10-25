@@ -86,7 +86,7 @@ export function SoleOperatorSelfApproval({
     return (
       <p>
         {t(
-          "{yourPart}, so someone else who holds {permissionName} must approve it.{value}If you run this business on your own, the brand owner can turn on Sole operator on the Approvals page.",
+          "{yourPart}, so someone else who holds {permissionName} must approve it.{value}If you run this business on your own, the brand owner can turn on Sole operator in Store setup.",
           {
             yourPart: yourPart,
             permissionName: permissionName,

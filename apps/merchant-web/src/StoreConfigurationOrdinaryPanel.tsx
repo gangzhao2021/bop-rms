@@ -268,7 +268,7 @@ const messages: Record<StoreSetupClientError["code"], string> = {
     "Your verification is more than 15 minutes old, so the approval was not recorded. Recover the request, verify again, then approve.",
   ),
   SoleOperatorOff: t(
-    "Sole operator is off, so another person with Owner access must approve this. Recover the request. If you run this business on your own, turn on Sole operator on the Approvals page, then approve again.",
+    "Sole operator is off, so another person with Owner access must approve this. Recover the request. If you run this business on your own, turn on Sole operator in Store setup, then approve again.",
   ),
   NotYourChange: t(
     "Only the person who made this configuration can check it or send it for approval, so nothing was recorded. Recover the request; ask them to, or approve or decline it.",

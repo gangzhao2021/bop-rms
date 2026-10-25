@@ -1407,7 +1407,7 @@ export function ReceiptTemplateDraftEditor({
                     )
                   : error === "SoleOperatorOff"
                     ? t(
-                        "Sole operator is off, so another person with Owner access must approve this template. If you run the business on your own, the brand owner can turn on Sole operator on the Approvals page. Recover the request, then refresh.",
+                        "Sole operator is off, so another person with Owner access must approve this template. If you run the business on your own, the brand owner can turn on Sole operator in Store setup. Recover the request, then refresh.",
                       )
                     : error === "SoleOperatorNotInEffect"
                       ? t(

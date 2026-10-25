@@ -269,3 +269,25 @@ export function SoleOperatorSection({
     </section>
   );
 }
+
+/**
+ * Owner 2026-10-25: the sole-operator setting sits with the Store's settings (Store setup), not on
+ * the Approvals list. The panel keeps its own verification for the person signed in.
+ */
+export function StoreSoleOperatorPanel({
+  csrf,
+  fetcher,
+}: {
+  readonly csrf: string;
+  readonly fetcher?: typeof fetch | undefined;
+}) {
+  const [verifiedUntil, setVerifiedUntil] = useState<string | null>(null);
+  return (
+    <SoleOperatorSection
+      csrf={csrf}
+      fetcher={fetcher}
+      verifiedUntil={verifiedUntil}
+      onVerified={setVerifiedUntil}
+    />
+  );
+}

@@ -81,6 +81,8 @@ export function StepUpVerification({
   hint = true,
   channel,
   openWindow,
+  mode = "inline",
+  openRef,
 }: {
   readonly purpose: StepUpPurpose;
   readonly csrf: string;
@@ -105,6 +107,12 @@ export function StepUpVerification({
   readonly channel?: ChannelFactory | null | undefined;
   /** Test seam: where the sign-in window is opened. */
   readonly openWindow?: StepUpWindow | undefined;
+  /**
+   * Owner 2026-10-25: "dialog" renders only the dialog, opened through `openRef` by the action
+   * that needs a verification (no separate "Verify" button or status line on the page).
+   */
+  readonly mode?: "inline" | "dialog";
+  readonly openRef?: { current: (() => void) | null } | undefined;
 }) {
   const client = useRef(createRefundApprovalClient(fetcher ?? fetch));
   const dialog = useRef<HTMLDialogElement>(null);
@@ -238,6 +246,7 @@ export function StepUpVerification({
         if (found === "Code") setTimeout(() => input.current?.focus(), 0);
       });
   };
+  if (openRef) openRef.current = open;
   const startSignIn = () => {
     setMessage("");
     setWaiting(true);
@@ -248,7 +257,7 @@ export function StepUpVerification({
   const signIn = method === "SignIn";
   return (
     <div className="step-up-verification">
-      {current || hint ? (
+      {mode === "inline" && (current || hint) ? (
         <p role="status">
           {current ? (
             <>
@@ -261,7 +270,7 @@ export function StepUpVerification({
           )}
         </p>
       ) : null}
-      {current ? null : (
+      {current || mode === "dialog" ? null : (
         <button type="button" onClick={open}>
           {label}
         </button>

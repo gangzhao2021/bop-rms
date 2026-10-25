@@ -486,6 +486,17 @@ test("@production approving a refund confirms it is the owner by signing in agai
       },
     }),
   );
+  // Owner 2026-10-25: Approve asks to confirm first and then approves; here the requester's
+  // check has run out, so the approval is answered with what is still missing.
+  const approvals: string[] = [];
+  await context.route("**/merchant/payments/refunds/approve", (route) => {
+    approvals.push(route.request().postData() ?? "");
+    return route.fulfill({
+      status: 409,
+      headers,
+      json: { error: "needs_reverification", party: "Requester" },
+    });
+  });
   let validUntil: string | null = null;
   const codes: string[] = [];
   await context.route("**/merchant/identity/step-up", (route) => {
@@ -512,7 +523,7 @@ test("@production approving a refund confirms it is the owner by signing in agai
 
   await page.goto("/app/approvals");
   const card = page.getByRole("listitem").filter({ hasText: "Order A-0042" });
-  await card.getByRole("button", { name: "Verify to approve" }).click();
+  await card.getByRole("button", { name: "Approve and refund $125.00" }).click();
   const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
   await expect(dialog).toContainText(
     "Confirm it is you by signing in again with your password and authenticator app. After you verify, approvals and refunds can go ahead for 15 minutes.",
@@ -529,7 +540,9 @@ test("@production approving a refund confirms it is the owner by signing in agai
   expect(starts[0]?.searchParams.get("purpose")).toBe("RefundApproval");
   expect(starts[0]?.searchParams.get("returnTo")).toBe("/app/approvals");
   await expect(dialog).toBeHidden();
-  await expect(card).toContainText("Verified until");
+  // Signed in again: the approval went ahead at once (and was told the requester must re-check).
+  await expect.poll(() => approvals.length).toBe(1);
+  await expect(card.getByRole("alert")).toContainText("must confirm it is them again");
   await expect(card.getByRole("button", { name: "Approve and refund $125.00" })).toBeEnabled();
   expect(codes).toEqual([]);
 });

@@ -58,6 +58,10 @@ const StoreReceiptPrivacyPanel = lazyPage(
   () => import("./StoreReceiptPrivacyPanel.js"),
   "StoreReceiptPrivacyPanel",
 );
+const StoreSoleOperatorPanel = lazyPage(
+  () => import("./SoleOperatorSection.js"),
+  "StoreSoleOperatorPanel",
+);
 const StorePublicProfilePanel = lazyPage(
   () => import("./StorePublicProfilePanel.js"),
   "StorePublicProfilePanel",
@@ -792,6 +796,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     <StorePublicProfilePanel csrf={state.csrf} />
                     {/* WP-2423 Q15/Q16: receipt registrations and the privacy notice link. */}
                     <StoreReceiptPrivacyPanel csrf={state.csrf} />
+                    {/* Owner 2026-10-25: moved here from Approvals; hidden for other roles. */}
+                    <StoreSoleOperatorPanel csrf={state.csrf} />
                   </StoreSetupDraftPage>
                 ) : (
                   <StatePanel heading={t("Store setup unavailable")} status>
@@ -1970,6 +1976,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   csrf={state.csrf}
                   storeLabel={state.workspace.selectedScope.storeLabel}
+                  storeReference={state.workspace.selectedScope.storeReference}
                 />
               ) : (
                 <WorkspacePage title={t("Approvals")}>

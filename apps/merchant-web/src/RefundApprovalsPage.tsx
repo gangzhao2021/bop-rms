@@ -21,7 +21,7 @@ import {
 import { formatCad } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { createOrdinaryRefundClient } from "./ordinary-refund-client.js";
-import { SoleOperatorSection } from "./SoleOperatorSection.js";
+import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { needsFullSignIn } from "./full-sign-in.js";
 import type { SoleOperatorStatus } from "./refund-approval-client.js";
@@ -64,6 +64,61 @@ export function ApprovalFailureNotice({
   return outcome.kind === "Failed" ? <p role="alert">{outcome.message}</p> : null;
 }
 
+/**
+ * Owner 2026-10-25: what the approver needs to decide, from the order itself (the order detail
+ * Orders already reads): what was paid, what is still refundable and the items. Null while it is
+ * read or when it cannot be (the card then shows the request alone).
+ */
+interface OrderFacts {
+  readonly paidMinor: bigint | null;
+  readonly refundableMinor: bigint | null;
+  readonly items: readonly string[];
+}
+function useOrderFacts(orderReference: string, fetcher?: typeof fetch): OrderFacts | null {
+  const [facts, setFacts] = useState<OrderFacts | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void createCurrentOrderQueueClient(fetcher ?? fetch)
+      .loadDetail(orderReference, controller.signal)
+      .then((detail) => {
+        if (controller.signal.aborted) return;
+        const online = detail.order.paidOnline;
+        const machine = detail.order.counter?.paidOnCardMachine ?? null;
+        const paidMinor =
+          online !== null
+            ? BigInt(online.amountMinor)
+            : machine !== null
+              ? BigInt(machine.amountMinor)
+              : null;
+        const refundedMinor =
+          online !== null && detail.paymentPosition !== null
+            ? BigInt(detail.paymentPosition.refundedMinor) +
+              BigInt(detail.paymentPosition.refundPendingMinor)
+            : machine !== null
+              ? BigInt(machine.refundedMinor)
+              : null;
+        setFacts({
+          paidMinor,
+          refundableMinor:
+            paidMinor === null || refundedMinor === null ? null : paidMinor - refundedMinor,
+          items: detail.lines.items.map((item) => `${item.quantity} × ${item.name}`),
+        });
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [orderReference, fetcher]);
+  return facts;
+}
+
+/** How long a request has waited, in the largest whole unit that reads naturally. */
+export function waitingText(requestedAt: string, now: number): string {
+  const minutes = Math.max(0, Math.floor((now - Date.parse(requestedAt)) / 60_000));
+  if (minutes < 60) return t("Waiting {count} min", { count: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return t("Waiting {count} h", { count: hours });
+  return t("Waiting {count} days", { count: Math.floor(hours / 24) });
+}
+
 const person = (entry: RefundApprovalEntry) =>
   entry.requestedByYou ? t("You") : (entry.requesterName ?? t("The staff member who asked"));
 
@@ -97,6 +152,11 @@ function ApprovalCard({
     : entry.requesterVerifiedUntil;
   const approverVerifiedUntil = viewerVerifiedUntil;
   const refunds = useRef(createOrdinaryRefundClient(fetcher ?? fetch));
+  const facts = useOrderFacts(entry.orderReference, fetcher);
+  // Owner 2026-10-25: the action asks for the code only when it is needed, then goes ahead.
+  const openVerification = useRef<(() => void) | null>(null);
+  const afterVerify = useRef<"approve" | "decline" | null>(null);
+  const [declining, setDeclining] = useState(false);
   const polling = useRef<AbortController | null>(null);
   useEffect(() => () => polling.current?.abort(), []);
   /** After approval: read the request's progress until it is refunded (or give up quietly). */
@@ -248,7 +308,7 @@ function ApprovalCard({
                   )
             : code === "SoleOperatorNotInEffect"
               ? t(
-                  "Someone else now also holds refund approval at this store, so they must approve this refund. See Sole operator on this page.",
+                  "Someone else now also holds refund approval at this store, so they must approve this refund. See Sole operator in Store setup.",
                 )
               : code === "SamePerson"
                 ? t("You asked for this refund. Another owner or finance member must approve it.")
@@ -287,23 +347,22 @@ function ApprovalCard({
   const paymentPage = paymentDetail + "/refund";
   return (
     <li className="refund-approval-card">
-      <h3>
-        {t("Order {orderNumber} · {amountMinor}", {
-          orderNumber: entry.orderNumber,
-          amountMinor: formatCad(entry.amountMinor),
-        })}
-      </h3>
+      <header className="refund-approval-card__header">
+        <h3>
+          {t("Refund {amountMinor}", { amountMinor: formatCad(entry.amountMinor) })} ·{" "}
+          <Link to={"/operations/orders/" + entry.orderReference}>
+            {t("Order {orderNumber}", { orderNumber: entry.orderNumber })}
+          </Link>
+        </h3>
+        <p className="refund-approval-card__waiting">
+          {waitingText(entry.requestedAt, Date.now())}
+        </p>
+      </header>
       <dl>
         <div>
           <dt>{t("Reason")}</dt>
           <dd>{describeRefundReason(entry.reasonCode)}</dd>
         </div>
-        {entry.note !== null ? (
-          <div>
-            <dt>{t("Note from {value}", { value: who === t("You") ? t("you") : who })}</dt>
-            <dd>{entry.note}</dd>
-          </div>
-        ) : null}
         <div>
           <dt>{t("Asked by")}</dt>
           <dd>
@@ -311,17 +370,39 @@ function ApprovalCard({
           </dd>
         </div>
         <div>
+          <dt>{t("Paid with")}</dt>
+          <dd>{onMachine ? t("Store card machine") : t("Online card")}</dd>
+        </div>
+        {facts?.paidMinor == null ? null : (
+          <div>
+            <dt>{t("Paid")}</dt>
+            <dd>{formatCad(facts.paidMinor.toString())}</dd>
+          </div>
+        )}
+        {facts?.refundableMinor == null ? null : (
+          <div>
+            <dt>{t("Still refundable")}</dt>
+            <dd>{formatCad(facts.refundableMinor.toString())}</dd>
+          </div>
+        )}
+        {facts === null || facts.items.length === 0 ? null : (
+          <div>
+            <dt>{t("Items on the order")}</dt>
+            <dd>{facts.items.join(", ")}</dd>
+          </div>
+        )}
+        {entry.note !== null ? (
+          <div>
+            <dt>{t("Note from {value}", { value: who === t("You") ? t("you") : who })}</dt>
+            <dd>{entry.note}</dd>
+          </div>
+        ) : null}
+        <div>
           <dt>{t("Why approval is needed")}</dt>
           <dd>
-            {entry.escalationReasons.length === 0 ? (
-              t("Approved request still being sent")
-            ) : (
-              <ul>
-                {entry.escalationReasons.map((reason) => (
-                  <li key={reason}>{escalationReasonLabel[reason]}</li>
-                ))}
-              </ul>
-            )}
+            {entry.escalationReasons.length === 0
+              ? t("Approved request still being sent")
+              : entry.escalationReasons.map((reason) => escalationReasonLabel[reason]).join("; ")}
           </dd>
         </div>
         <div>
@@ -346,23 +427,23 @@ function ApprovalCard({
                     : t("Waiting for approval")}
           </dd>
         </div>
-        <div>
-          <dt>
-            {entry.requestedByYou
-              ? t("Your verification")
-              : t("{who}'s verification", { who: who })}
-          </dt>
-          <dd>
-            {requesterCurrent && requesterVerifiedUntil !== null ? (
-              <>
-                {t("Current until")} <SourceTime instant={requesterVerifiedUntil} />
-              </>
-            ) : (
-              t("Needs to verify again before approval")
-            )}
-          </dd>
-        </div>
       </dl>
+      {entry.canApprove && !entry.requestedByYou && !sole && entry.state === "AwaitingApproval" ? (
+        // Owner 2026-10-25: the requester's check in plain words.
+        <p className="refund-approval-card__requester">
+          {requesterCurrent && requesterVerifiedUntil !== null ? (
+            <>
+              {t("{who} has confirmed it is them; approve before", { who: who })}{" "}
+              <SourceTime instant={requesterVerifiedUntil} />.
+            </>
+          ) : (
+            t(
+              "{who} needs to confirm it is them again (authenticator code on their own screen) before you can approve.",
+              { who: who },
+            )
+          )}
+        </p>
+      ) : null}
       {sole && outcome.kind !== "Sent" && outcome.kind !== "Declined" ? (
         <div className="sole-operator-confirm">
           <p>
@@ -406,25 +487,61 @@ function ApprovalCard({
           fetcher={fetcher}
         />
       ) : null}
+      {entry.requestedByYou && !sole && entry.state === "AwaitingApproval" ? (
+        <p>
+          {soleOperator === "OtherApprovers"
+            ? t(
+                "Someone else holds refund approval at this store, so they must approve your request.",
+              )
+            : t("An owner or finance member who did not ask for this refund must approve it.")}
+        </p>
+      ) : null}
+      {entry.requestedByYou && !sole && outcome.kind !== "Sent" ? (
+        <StepUpVerification
+          purpose="RefundRequest"
+          csrf={csrf}
+          verifiedUntil={viewerVerifiedUntil}
+          onVerified={onViewerVerified}
+          loadServerStatus={false}
+          label={t("Verify for the owner's approval")}
+          fetcher={fetcher}
+        />
+      ) : null}
+      {entry.canApprove ? (
+        <StepUpVerification
+          purpose="RefundApproval"
+          csrf={csrf}
+          verifiedUntil={viewerVerifiedUntil}
+          onVerified={(validUntil) => {
+            onViewerVerified(validUntil);
+            const next = afterVerify.current;
+            afterVerify.current = null;
+            if (next === "approve") void approve();
+            else if (next === "decline") void declineRefund();
+          }}
+          loadServerStatus={false}
+          label={t("Verify to approve")}
+          fetcher={fetcher}
+          mode="dialog"
+          openRef={openVerification}
+        />
+      ) : null}
       {entry.canApprove &&
       !machineApproved &&
       outcome.kind !== "Declined" &&
       !(outcome.kind === "Sent" && !outcome.unknown && outcome.progress !== "NotSent") ? (
         <div className="card-actions">
-          <StepUpVerification
-            purpose="RefundApproval"
-            csrf={csrf}
-            verifiedUntil={viewerVerifiedUntil}
-            onVerified={onViewerVerified}
-            loadServerStatus={false}
-            label={t("Verify to approve")}
-            fetcher={fetcher}
-          />
           <button
             type="button"
             data-variant="primary"
-            disabled={busy || !approverCurrent || (sole && !confirmed)}
-            onClick={() => void approve()}
+            disabled={busy || (sole && !confirmed)}
+            onClick={() => {
+              if (approverCurrent) void approve();
+              else {
+                afterVerify.current = "approve";
+                openVerification.current?.();
+              }
+            }}
           >
             {busy
               ? t("Approving…")
@@ -446,9 +563,15 @@ function ApprovalCard({
                             amountMinor: formatCad(entry.amountMinor),
                           })}
           </button>
+          {entry.state === "AwaitingApproval" && outcome.kind !== "Sent" && !declining ? (
+            <button type="button" disabled={busy} onClick={() => setDeclining(true)}>
+              {sole ? t("Withdraw…") : t("Decline…")}
+            </button>
+          ) : null}
         </div>
       ) : null}
       {entry.canApprove &&
+      declining &&
       entry.state === "AwaitingApproval" &&
       outcome.kind !== "Sent" &&
       outcome.kind !== "Declined" ? (
@@ -456,7 +579,12 @@ function ApprovalCard({
           className="card-actions refund-decline"
           onSubmit={(event) => {
             event.preventDefault();
-            void declineRefund();
+            if (declineReason === "") return;
+            if (approverCurrent) void declineRefund();
+            else {
+              afterVerify.current = "decline";
+              openVerification.current?.();
+            }
           }}
         >
           <label htmlFor={"decline-reason-" + entry.requestReference}>
@@ -476,12 +604,11 @@ function ApprovalCard({
               </option>
             ))}
           </select>
-          <button
-            type="submit"
-            data-variant="destructive"
-            disabled={busy || !approverCurrent || declineReason === ""}
-          >
+          <button type="submit" data-variant="destructive" disabled={busy || declineReason === ""}>
             {sole ? t("Withdraw my request") : t("Decline refund")}
+          </button>
+          <button type="button" disabled={busy} onClick={() => setDeclining(false)}>
+            {t("Cancel")}
           </button>
         </form>
       ) : null}
@@ -558,10 +685,12 @@ function ApprovalCard({
 export function RefundApprovalsPage({
   csrf,
   storeLabel,
+  storeReference,
   fetcher,
 }: {
   readonly csrf: string;
   readonly storeLabel: string;
+  readonly storeReference: string;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const client = useRef(createRefundApprovalClient(fetcher ?? fetch));
@@ -603,6 +732,7 @@ export function RefundApprovalsPage({
   }, [refresh]);
   return (
     <WorkspacePage
+      className="approvals-page"
       title={t("Approvals")}
       meta={storeLabel}
       actions={
@@ -613,11 +743,17 @@ export function RefundApprovalsPage({
     >
       <section aria-labelledby="refund-approvals-heading" data-screen-id="APPROVAL-INBOX">
         <h2 id="refund-approvals-heading">{t("Refunds awaiting approval")}</h2>
-        <p>
-          {t(
-            "Refunds above $100 for an order, from an earlier business day or more than 24 hours after payment need an owner or finance member who did not ask for them. Approve in person: both of you confirm with your authenticator code, then the refund is sent.",
-          )}
-        </p>
+        {/* Owner 2026-10-25: one line; the rule itself behind "Why approval?". */}
+        <details className="approvals-why">
+          <summary>
+            {t("Large or late refunds need a second person.")} {t("Why approval?")}
+          </summary>
+          <p>
+            {t(
+              "Refunds above $100 for an order, from an earlier business day or more than 24 hours after payment need an owner or finance member who did not ask for them. Approve in person: both of you confirm with your authenticator code, then the refund is sent.",
+            )}
+          </p>
+        </details>
         {state === "Loading" ? (
           <StatePanel heading={t("Loading refunds")} status>
             <p>{t("Checking refunds awaiting approval…")}</p>
@@ -656,14 +792,12 @@ export function RefundApprovalsPage({
           </>
         ) : null}
       </section>
-      <SoleOperatorSection
-        key={refresh}
-        csrf={csrf}
-        fetcher={fetcher}
-        onChanged={reload}
-        verifiedUntil={viewerVerifiedUntil}
-        onVerified={setViewerVerifiedUntil}
-      />
+      {/* Owner 2026-10-25: the sole-operator setting lives with the Store's settings. */}
+      <p className="approvals-sole-link">
+        {t("Sole operator (approving your own refunds) is set in")}{" "}
+        <Link to={"/app/organization/stores/" + storeReference + "/setup"}>{t("Store setup")}</Link>
+        .
+      </p>
     </WorkspacePage>
   );
 }

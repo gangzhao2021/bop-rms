@@ -147,8 +147,13 @@ test("@production owner verifies and approves a refund above $100 once", async (
   await expect(card).toContainText("Refunds on this order would total more than $100");
   await expect(card).toContainText("Waiting for approval");
   await expect(page.getByRole("heading", { name: "Sole operator" })).toHaveCount(0);
+  // Owner 2026-10-25: one primary action; it asks for the code only when it is needed.
   const approve = card.getByRole("button", { name: "Approve and refund $125.00" });
-  await expect(approve).toBeDisabled();
+  await expect(approve).toBeEnabled();
+  await expect(card.getByRole("button", { name: "Verify to approve" })).toHaveCount(0);
+  await expect(card.getByRole("link", { name: "Order A-0042" })).toBeVisible();
+  await expect(card).toContainText(/Waiting \d+ (min|h|days)/u);
+  await expect(card.getByLabel("Decline reason")).toHaveCount(0);
 
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -159,22 +164,17 @@ test("@production owner verifies and approves a refund above $100 once", async (
   }
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  await card.getByRole("button", { name: "Verify to approve" }).click();
+  // Not verified yet: Approve opens the code dialog, then approves once the code is accepted.
+  await approve.click();
   const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
   await dialog.getByLabel("Six-digit code").fill("123456");
   await dialog.getByRole("button", { name: "Verify" }).click();
   await expect(dialog).toBeHidden();
   expect(JSON.parse(stepUps[0] ?? "{}")).toEqual({ purpose: "RefundApproval", code: "123456" });
-  // Verified: no code entry is offered again until the verification runs out.
-  await expect(card.getByRole("button", { name: "Verify to approve" })).toHaveCount(0);
-  await expect(card).toContainText("Verified until");
   await expect(page.getByLabel("Six-digit code").first()).toHaveValue("");
-
-  await approve.click();
   await expect(card.getByRole("alert")).toContainText("Mia must confirm it is them again");
-  // The other card uses the same person's verification at once.
+  // The other card uses the same person's verification at once (no second code).
   const secondCard = page.getByRole("listitem").filter({ hasText: "Order A-0044" });
-  await expect(secondCard.getByRole("button", { name: "Verify to approve" })).toHaveCount(0);
   await expect(
     secondCard.getByRole("button", { name: "Approve and refund $125.00" }),
   ).toBeEnabled();
@@ -313,15 +313,16 @@ test("@production owner declines a refund with a reason and it leaves the list",
   await page.goto("/app/approvals");
   const card = page.getByRole("listitem").filter({ hasText: "Order A-0043" });
   await expect(card).toContainText("Customer left before the food arrived");
-  await expect(card).toContainText("Needs to verify again before approval");
+  await expect(card).toContainText("needs to confirm it is them again");
+  // Owner 2026-10-25: decline sits behind "Decline…", which opens the reason and the confirm.
+  await card.getByRole("button", { name: "Decline…" }).click();
   const declineButton = card.getByRole("button", { name: "Decline refund" });
-  await card.getByLabel("Decline reason").selectOption("NEEDS_MORE_INFORMATION");
   await expect(declineButton).toBeDisabled();
-  await card.getByRole("button", { name: "Verify to approve" }).click();
+  await card.getByLabel("Decline reason").selectOption("NEEDS_MORE_INFORMATION");
+  await declineButton.click();
   const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
   await dialog.getByLabel("Six-digit code").fill("246810");
   await dialog.getByRole("button", { name: "Verify" }).click();
-  await declineButton.click();
   await expect(card).toContainText("Declined — nothing was refunded");
   expect(JSON.parse(declines[0] ?? "{}")).toMatchObject({
     orderReference: id(1),

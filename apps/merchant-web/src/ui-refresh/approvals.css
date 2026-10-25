@@ -64,3 +64,43 @@
   width: auto;
   min-width: 14rem;
 }
+
+/* Owner 2026-10-25: one readable column, the decision first. */
+.workspace-page.approvals-page {
+  max-width: 60rem;
+}
+.approvals-page .approvals-why {
+  margin: 0 0 var(--bop-space-4);
+  color: var(--bop-color-text-muted);
+}
+.approvals-page .approvals-why summary {
+  min-height: 44px;
+  cursor: pointer;
+}
+.approvals-page .approvals-why p {
+  max-width: 44rem;
+}
+.refund-approval-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--bop-space-1) var(--bop-space-4);
+  margin-bottom: var(--bop-space-4);
+}
+.refund-approval-card .refund-approval-card__header h3 {
+  margin: 0;
+}
+.refund-approval-card__waiting {
+  margin: 0;
+  color: var(--bop-color-warning);
+  font-size: 14px;
+  font-weight: 600;
+}
+.refund-approval-card__requester {
+  color: var(--bop-color-text-muted);
+}
+.approvals-page .approvals-sole-link {
+  margin-top: var(--bop-space-6);
+  color: var(--bop-color-text-muted);
+}

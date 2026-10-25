@@ -179,7 +179,13 @@ test("@production a sole operator turns it on and approves their own refund afte
     });
   });
 
+  // Owner 2026-10-25: Approvals lists the requests; the setting itself is in Store setup.
   await page.goto("/app/approvals");
+  const card = page.getByRole("listitem").filter({ hasText: "Order A-0051" });
+  await expect(card).toContainText("An owner or finance member who did not ask for this refund");
+  await expect(page.getByRole("region", { name: "Sole operator" })).toHaveCount(0);
+  await page.getByRole("link", { name: "Store setup" }).click();
+  await expect(page).toHaveURL(new RegExp(`/app/organization/stores/${id(99)}/setup$`, "u"));
   const section = page.getByRole("region", { name: "Sole operator" });
   await expect(section).toContainText("Off. Refunds that need approval are approved by a second");
   // WP-2423 (2026-10-16 v15): the setting's change number and who changed it, when and why.
@@ -189,8 +195,6 @@ test("@production a sole operator turns it on and approves their own refund afte
     /^Change 2: Turned off by you · Someone else can now approve · /u,
     /^Change 1: Turned on by you · I run this business on my own · /u,
   ]);
-  const card = page.getByRole("listitem").filter({ hasText: "Order A-0051" });
-  await expect(card).toContainText("An owner or finance member who did not ask for this refund");
   const turnOn = section.getByRole("button", { name: "Turn on sole operator" });
   await expect(turnOn).toBeDisabled();
   await section.getByLabel("Reason for turning it on").selectOption("OWNER_RUNS_STORE_ALONE");
@@ -216,7 +220,8 @@ test("@production a sole operator turns it on and approves their own refund afte
     /^Change 3: Turned on by you · I run this business on my own · /u,
   );
 
-  // The list refreshes: the owner may now approve their own request after confirming it.
+  // Back on Approvals: the owner may now approve their own request after confirming it.
+  await page.goto("/app/approvals");
   const ownCard = page.getByRole("listitem").filter({ hasText: "Order A-0051" });
   await expect(ownCard).toContainText("you are the only person who can approve refunds");
   const approve = ownCard.getByRole("button", { name: "Approve my own refund of $116.00" });
@@ -313,7 +318,7 @@ test("@production sole operator not in effect names the other approver", async (
       },
     }),
   );
-  await page.goto("/app/approvals");
+  await page.goto(`/app/organization/stores/${id(99)}/setup`);
   const section = page.getByRole("region", { name: "Sole operator" });
   await expect(section).toContainText(
     "On, but not in effect: Mia also holds refund approval at this store, so a second person is required.",

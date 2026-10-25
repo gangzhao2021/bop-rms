@@ -303,7 +303,7 @@ function RecordedRequestStatus({
                   <p>
                     {approval.state === "AwaitingApproval"
                       ? "Waiting for an owner or finance member to approve this refund in person. It is sent once approved."
-                      : "Approved, not sent yet. The approver sends it with Send approved refund on the Approvals page; it is never sent twice."}{" "}
+                      : "Approved, not sent yet. The approver sends it with Send approved refund in Store setup; it is never sent twice."}{" "}
                     <Link to="/app/approvals">Open approvals</Link>
                   </p>
                 ) : null}
@@ -969,7 +969,7 @@ function RefundWizard({
               </ul>
               <p>
                 {preview.approveAlone
-                  ? "You run this business alone (sole operator), so you can approve this refund yourself on the Approvals page after confirming it is you. First confirm it is you; your verification lasts 15 minutes."
+                  ? "You run this business alone (sole operator), so you can approve this refund yourself in Store setup after confirming it is you. First confirm it is you; your verification lasts 15 minutes."
                   : "An owner or finance member who is not you must approve this refund in person. First confirm it is you; your verification lasts 15 minutes."}
               </p>
               <StepUpVerification

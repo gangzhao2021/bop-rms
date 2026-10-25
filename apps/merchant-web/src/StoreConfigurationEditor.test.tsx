@@ -459,7 +459,7 @@ it("WP-2423 DEC-SOLE-OPERATOR-APPROVAL: your own hours change is approved alone,
   // The person who made it is never offered the ordinary approval of someone else's change.
   expect(off.form).not.toContain("Approve reviewed configuration");
   expect(off.own).toContain("Sole operator is off.");
-  expect(off.own).toContain("turn on Sole operator on the Approvals page");
+  expect(off.own).toContain("turn on Sole operator in Store setup");
   const others = render({
     status: "OtherApprovers",
     otherApprovers: [{ displayName: "Sam Lee" }],
