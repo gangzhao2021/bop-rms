@@ -343,3 +343,238 @@
     justify-self: start;
   }
 }
+
+/*
+ * Figma v1 (2026-10-25) Home: the figures as separate tiles across the top, "Needs attention now"
+ * on the left with one action per row, the store's status, system and checklist on the right.
+ */
+.workspace-page--overview .overview-card--today {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.workspace-page--overview .overview-card--today > header h3 {
+  font-size: 15px;
+}
+.workspace-page--overview .overview-card--today .overview-counts {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: var(--bop-space-3);
+  margin: 0;
+  overflow: visible;
+}
+.workspace-page--overview .overview-card--today .overview-counts li {
+  padding: var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+  box-shadow: none;
+}
+.workspace-page--overview .overview-card--today .overview-count__value {
+  font-size: 28px;
+  font-weight: 600;
+}
+/* The words to act on also read in the warning colour; the words carry the meaning. */
+.workspace-page--overview .overview-counts .overview-count--attention .overview-count__detail {
+  color: var(--bop-color-warning);
+}
+.workspace-page--overview .overview-counts .overview-count--attention .overview-count__note {
+  color: var(--bop-color-text-muted);
+}
+
+.workspace-page--overview .overview-card--attention header h3 {
+  font-size: 18px;
+}
+.overview-attention {
+  margin: var(--bop-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.overview-attention li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--bop-space-2) var(--bop-space-4);
+  padding: var(--bop-space-3) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.overview-attention__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.overview-attention__text strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+.overview-attention__text span {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+/* Figma "Status tag": an outlined word with a dot, coloured by state. */
+.overview-attention__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--bop-radius-control);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.overview-attention__state::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.overview-attention__state--warning {
+  color: var(--bop-color-warning);
+}
+.overview-attention__state--danger {
+  color: var(--bop-color-danger);
+}
+.workspace-page--overview .overview-attention__action {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  color: var(--bop-color-text-default);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.workspace-page--overview .overview-attention__action:hover {
+  background: var(--bop-color-surface-raised);
+}
+.overview-attention__empty {
+  margin: var(--bop-space-3) 0 0;
+  color: var(--bop-color-text-muted);
+}
+@media (max-width: 767px) {
+  .overview-attention li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .overview-attention__text {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Doubled class: wins over the 2026-10-21 status-beside-figures rule above. */
+@media (min-width: 1200px) {
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--attention) {
+    grid-template-rows: auto auto auto auto 1fr;
+    align-items: start;
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--attention)
+    > .overview-card--today {
+    grid-row: 1;
+    grid-column: 1 / -1;
+  }
+  .workspace-page--overview.workspace-page--overview .overview-grid > .overview-card--attention {
+    grid-row: 2 / span 4;
+    grid-column: 1 / span 7;
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--attention)
+    > :is(.overview-card--status, .overview-card--alerts, .overview-card--checklist) {
+    grid-column: 8 / -1;
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--attention)
+    > .overview-card--status {
+    grid-row: 2;
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--attention)
+    > .overview-card--alerts {
+    grid-row: 3;
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--attention)
+    > .overview-card--checklist {
+    grid-row: 4;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* In the right column the status is a compact strip and the system card stacks its lines. */
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--attention)
+    > .overview-card--status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--bop-space-1) var(--bop-space-4);
+    padding: var(--bop-space-4) var(--bop-space-5);
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--attention)
+    > .overview-card--status
+    .overview-status-value {
+    margin-top: 0;
+    font-size: 22px;
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--attention)
+    > .overview-card--alerts-clear {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title action"
+      "status status"
+      "meta meta";
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--attention)
+    > .overview-card--alerts-clear
+    .system-alert__footer {
+    flex-direction: column;
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--attention)
+    > .overview-card--alerts-clear
+    .system-alert__footer
+    > p
+    + p::before {
+    content: none;
+  }
+  /* An alert that needs action (not "everything is working") leads the page, above the figures. */
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--attention):has(
+      > .overview-card--alerts:not(.overview-card--alerts-clear)
+    ) {
+    grid-template-rows: auto auto auto auto 1fr;
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--attention)
+    > .overview-card--alerts:not(.overview-card--alerts-clear) {
+    grid-row: 1;
+    grid-column: 1 / -1;
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--alerts:not(.overview-card--alerts-clear))
+    > .overview-card--today {
+    grid-row: 2;
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--alerts:not(.overview-card--alerts-clear))
+    > .overview-card--attention {
+    grid-row: 3 / span 3;
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--alerts:not(.overview-card--alerts-clear))
+    > .overview-card--status {
+    grid-row: 3;
+  }
+  .workspace-page--overview.workspace-page--overview
+    .overview-grid:has(> .overview-card--alerts:not(.overview-card--alerts-clear))
+    > .overview-card--checklist {
+    grid-row: 4;
+  }
+}

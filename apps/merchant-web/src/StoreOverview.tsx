@@ -253,6 +253,7 @@ function Count<T>({
   detail,
   href,
   linkLabel,
+  attention,
 }: {
   readonly label: string;
   readonly read: OverviewRead<T>;
@@ -260,13 +261,19 @@ function Count<T>({
   readonly detail: (summary: T) => string;
   readonly href: string;
   readonly linkLabel: string;
+  /** Figma v1: the detail words are the ones to act on (shown in the warning colour too). */
+  readonly attention?: ((summary: T) => boolean) | undefined;
 }) {
   if (read.kind === "Hidden") return null;
   const shown = read.kind === "Ready" ? value(read.value) : null;
   const count: CountShown | null =
     typeof shown === "string" ? { qualifier: null, number: shown, note: null } : shown;
+  const needsAction = read.kind === "Ready" && attention?.(read.value) === true;
   return (
-    <li aria-busy={read.kind === "Loading"}>
+    <li
+      aria-busy={read.kind === "Loading"}
+      className={needsAction ? "overview-count--attention" : undefined}
+    >
       <span className="overview-count__label">{label}</span>
       {read.kind === "Ready" && count !== null ? (
         <>
@@ -350,6 +357,7 @@ export function OverviewToday({
           }
           href="/operations/orders"
           linkLabel={t("View orders")}
+          attention={(o) => o.awaitingAcceptance + o.awaitingRounds > 0}
         />
         <Count
           label={t("Pickups waiting")}
@@ -377,6 +385,7 @@ export function OverviewToday({
             }
             href="/operations/pickup"
             linkLabel={t("Check and close")}
+            attention={() => true}
           />
         ) : null}
         <Count
@@ -396,6 +405,7 @@ export function OverviewToday({
           }
           href="/operations/dining"
           linkLabel={t("View tables")}
+          attention={(read) => (read.toClose ?? 0) > 0}
         />
         <Count
           label={t("Open exceptions")}
@@ -406,6 +416,7 @@ export function OverviewToday({
           }
           href="/operations/order-exceptions"
           linkLabel={t("View exceptions")}
+          attention={(e) => e.overdue > 0}
         />
         {approvals === null ? null : (
           <Count
@@ -426,9 +437,149 @@ export function OverviewToday({
             }
             href="/app/approvals"
             linkLabel={t("Review approvals")}
+            attention={(a) => a.awaiting > 0}
           />
         )}
       </ul>
+    </section>
+  );
+}
+
+/** One row of "Needs attention now": what, the detail, its state in words, and where to act. */
+export interface AttentionItem {
+  readonly key: string;
+  readonly title: string;
+  readonly detail: string;
+  readonly state: string;
+  readonly tone: "warning" | "danger";
+  readonly href: string;
+  readonly action: string;
+}
+/**
+ * Figma v1 (2026-10-25): the work on Home that someone has to act on now, most urgent first, each
+ * with the page that settles it. Built only from the summaries Home already reads.
+ */
+export function attentionItems(
+  state: OverviewTodayState,
+  approvals: ApprovalsWaiting | null,
+  dayStartsAt: string | null = null,
+): readonly AttentionItem[] {
+  const items: AttentionItem[] = [];
+  const tables = state.tables.kind === "Ready" ? state.tables.value.tables : [];
+  const calls = tables.filter((table) => table.staffCall != null).length;
+  if (calls > 0)
+    items.push({
+      key: "staff-calls",
+      title: t("{tables} asking for staff", { tables: countOf(calls, "table") }),
+      detail: t("A guest asked a staff member to come to the table."),
+      state: t("Waiting"),
+      tone: "danger",
+      href: "/operations/dining",
+      action: t("Go to Tables"),
+    });
+  if (state.orders.kind === "Ready") {
+    const o = state.orders.value;
+    if (o.awaitingAcceptance + o.awaitingRounds > 0)
+      items.push({
+        key: "orders",
+        title: t("Orders waiting to be accepted"),
+        detail: awaitingAcceptanceText({
+          orders: o.awaitingAcceptance,
+          rounds: o.awaitingRounds,
+          urgentRounds: o.urgentRounds,
+        }),
+        state: t("To accept"),
+        tone: o.urgentRounds > 0 ? "danger" : "warning",
+        href: "/operations/orders",
+        action: t("Open orders"),
+      });
+  }
+  if (state.exceptions.kind === "Ready" && state.exceptions.value.overdue > 0)
+    items.push({
+      key: "exceptions",
+      title: t("Exceptions overdue"),
+      detail: t("{overdue} overdue", { overdue: state.exceptions.value.overdue }),
+      state: t("Overdue"),
+      tone: "danger",
+      href: "/operations/order-exceptions",
+      action: t("View exceptions"),
+    });
+  if (approvals !== null && approvals.awaiting > 0)
+    items.push({
+      key: "approvals",
+      title: t("Refunds waiting for approval"),
+      detail: t("{count} to approve", { count: approvals.awaiting }),
+      state: t("To approve"),
+      tone: "warning",
+      href: "/app/approvals",
+      action: t("Review approvals"),
+    });
+  if (state.pickups.kind === "Ready" && state.pickups.value.earlierDays > 0)
+    items.push({
+      key: "pickups",
+      title: t("Pickups from earlier days"),
+      detail: t("Check whether they were collected; if not, a manager marks them not collected"),
+      state: t("To check"),
+      tone: "warning",
+      href: "/operations/pickup",
+      action: t("Check and close"),
+    });
+  const summary = tablesSummary(state, dayStartsAt);
+  if (summary.kind === "Ready" && (summary.value.toClose ?? 0) > 0)
+    items.push({
+      key: "tables",
+      title: t("Tables to close"),
+      detail: t("{toClose} served — close when the guests have left", {
+        toClose: countOf(summary.value.toClose ?? 0, "table"),
+      }),
+      state: t("To close"),
+      tone: "warning",
+      href: "/operations/dining",
+      action: t("View tables"),
+    });
+  return items;
+}
+export function NeedsAttention({
+  state,
+  approvals = null,
+}: {
+  readonly state: OverviewTodayState;
+  readonly approvals?: ApprovalsWaiting | null;
+}) {
+  const reads = [state.orders, state.pickups, state.exceptions, state.tables];
+  if (reads.every((read) => read.kind === "Hidden")) return null;
+  const items = attentionItems(state, approvals);
+  const reading = reads.some((read) => read.kind === "Loading");
+  return (
+    <section
+      className="overview-card overview-card--attention"
+      aria-labelledby="needs-attention-heading"
+    >
+      <header>
+        <h3 id="needs-attention-heading">{t("Needs attention now")}</h3>
+      </header>
+      {items.length === 0 ? (
+        <p className="overview-attention__empty" role="status">
+          {reading ? t("Reading current work…") : t("Nothing needs attention right now.")}
+        </p>
+      ) : (
+        <ul className="overview-attention">
+          {items.map((item) => (
+            <li key={item.key}>
+              <span className="overview-attention__text">
+                <strong>{item.title}</strong>
+                <span>{item.detail}</span>
+              </span>
+              <span className={`overview-attention__state overview-attention__state--${item.tone}`}>
+                {item.state}
+              </span>
+              <Link className="overview-attention__action" to={item.href}>
+                {item.action}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
@@ -872,6 +1023,7 @@ export function StoreOverview({
         onRefresh={() => void load(true)}
         approvals={approvals}
       />
+      <NeedsAttention state={state} approvals={approvals} />
       <DayChecklist
         state={state}
         settlement={settlement}

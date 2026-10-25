@@ -449,3 +449,118 @@
   font-weight: 500;
   cursor: pointer;
 }
+
+/*
+ * Figma v1 (2026-10-25) Orders: status filters with counts above the search, a dot in each status
+ * tag, and the order's "Accept" at the end of its row (outside the row's disclosure).
+ */
+.orders-page .order-status-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-2);
+  margin: 0 0 var(--bop-space-2);
+}
+.orders-page .order-status-filters button {
+  min-height: 40px;
+  padding: 0 var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  cursor: pointer;
+}
+.orders-page .order-status-filters button:hover {
+  border-color: var(--bop-color-border-strong);
+}
+.orders-page .order-status-filters button[aria-pressed="true"] {
+  border-color: var(--bop-color-brand-primary);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+}
+.orders-page .order-workbench-phase::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-inline-end: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.orders-page .order-workbench-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.orders-page .order-workbench-item[hidden] {
+  display: none;
+}
+.orders-page .order-workbench-item > .order-workbench-entry {
+  border-bottom: 0;
+}
+.orders-page .order-workbench-next {
+  padding: var(--bop-space-3) var(--bop-space-3) 0 0;
+}
+.orders-page .order-workbench-next:empty {
+  padding: 0;
+}
+.orders-page .order-workbench-next fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.orders-page .order-workbench-next .card-actions {
+  display: grid;
+  gap: var(--bop-space-1);
+  margin: 0;
+  max-width: 14rem;
+}
+.orders-page .order-workbench-next .card-actions button {
+  min-height: 40px;
+  padding: 0 var(--bop-space-3);
+  border: 1px solid var(--bop-color-brand-primary);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.orders-page .order-workbench-next .card-actions p {
+  margin: 0;
+  font-size: 13px;
+}
+@container order-list (max-width: 35.99rem) {
+  .orders-page .order-workbench-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .orders-page .order-workbench-next {
+    padding: 0 var(--bop-space-3) var(--bop-space-3);
+  }
+}
+/* Wide rows keep one column for the next step, so the amounts line up whether or not a row has
+   one; narrower rows put the step under the order. */
+@container order-list (min-width: 56rem) {
+  .orders-page .order-workbench-next {
+    width: 13rem;
+  }
+  .orders-page .order-workbench:has(.order-workbench-next) .order-workbench-columns {
+    margin-inline-end: 13rem;
+  }
+}
+@container order-list (max-width: 55.99rem) {
+  .orders-page .order-workbench-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .orders-page .order-workbench-next {
+    padding: 0 var(--bop-space-3) var(--bop-space-3);
+  }
+  .orders-page .order-workbench-next:empty {
+    padding: 0;
+  }
+}

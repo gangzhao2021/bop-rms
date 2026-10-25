@@ -416,6 +416,7 @@ function ProductEditor({
 
   return (
     <AppFrame
+      className="product-editor-page"
       title={product ? product.name : t("New product")}
       description={product ? t("Edit product") : t("New product")}
     >

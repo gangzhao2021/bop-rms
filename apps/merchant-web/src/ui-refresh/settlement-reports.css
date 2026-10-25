@@ -421,3 +421,22 @@
     font-size: 14px;
   }
 }
+
+/* Figma v1 (2026-10-25) Sales and tips: the totals as separate tiles, like Home's figures. */
+.workspace-page.workspace-page .store-reports__totals {
+  gap: var(--bop-space-3);
+  overflow: visible;
+  border: 0;
+  background: none;
+}
+.workspace-page.workspace-page .store-reports__totals li {
+  padding: var(--bop-space-5);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+  box-shadow: none;
+}
+.workspace-page.workspace-page .store-reports__totals .overview-count__value {
+  font-size: 28px;
+  font-weight: 600;
+}

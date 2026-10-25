@@ -5509,4 +5509,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "— set the time above": "— 请在上方设置时间",
   "“Use the live Store’s settings” also replaces the opening hours in this setup with the live Store’s.":
     '"使用当前门店的设置"也会用当前门店的营业时间替换此设置中的营业时间。',
+  // Figma v1 (2026-10-25): Home's "Needs attention now".
+  "To accept": "待接单",
+  "Exceptions overdue": "异常已超时",
+  "To approve": "待审批",
+  "To check": "待核对",
+  "Tables to close": "待关闭的桌台",
+  "To close": "待关闭",
+  "Go to Tables": "前往桌台",
+  "Needs attention now": "现在需要处理",
+  "Nothing needs attention right now.": "目前没有需要处理的事项。",
+  "{tables} asking for staff": "{tables}在呼叫店员",
+  "A guest asked a staff member to come to the table.": "有顾客请店员到桌边。",
+  "Orders waiting to be accepted": "等待接单的订单",
+  // Figma v1: Orders status filters.
+  "Show orders": "显示订单",
 });

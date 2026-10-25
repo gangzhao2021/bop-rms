@@ -265,11 +265,13 @@ test("@production acceptance retries the same operation after a lost response", 
   await expect(
     page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
   ).toBeVisible();
+  // Figma v1 (2026-10-25): Accept sits at the end of the order's row, so closing the order keeps
+  // it (and its pending retry) in view.
   const disclosure = page.locator("details.order-workbench-entry > summary");
   await disclosure.click();
   await expect(
     page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
-  ).toBeHidden();
+  ).toBeVisible();
   await disclosure.click();
   await expect(
     page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),

@@ -9,8 +9,10 @@ import {
 import { currentOrderQueueFixture } from "./current-order-queue.fixtures.js";
 import { parseOrderExceptionView } from "./OrderExceptionPage.js";
 import {
+  NeedsAttention,
   OverviewToday,
   StoreOverview,
+  attentionItems,
   countShown,
   initialOverviewState,
   summarizeExceptions,
@@ -682,5 +684,105 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
     };
     expect(settlementStatusText(view)).toBe("Matches the payment provider");
     expect(settlementStatusText({ ...view, reconciliation: null })).toBe("Not checked yet");
+  });
+});
+
+describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
+  const ready = <T,>(value: T) => ({ kind: "Ready", value }) as const;
+  const orders = {
+    open: 3,
+    awaitingAcceptance: 1,
+    awaitingRounds: 0,
+    urgentRounds: 0,
+    readyToServe: 0,
+    dineIn: false,
+    more: false,
+    servedDineIn: new Set<string>(),
+  };
+  const table: StaffDiningTable = {
+    tableReference: "01909985-0000-7000-8000-000000000201",
+    stableLabel: "T1",
+    areaCode: "MAIN",
+    capacity: 4,
+    lifecycle: "Published",
+    operationalState: "Available",
+    aggregateVersion: 1,
+    currentDiningSessionReference: "01909985-0000-7000-8000-000000000301",
+    elapsedMinutes: 10,
+    qrCodeValidUntil: null,
+    staffRoundsAwaitingPayment: [],
+    guestRoundsAwaitingPayment: [],
+    roundsAwaitingAcceptance: [],
+    staffCall: {
+      callReference: "01909985-0000-7000-8000-000000000401",
+      reason: "TableNeeds",
+      calledAt: "2026-10-25T15:00:00.000Z",
+    },
+  };
+  const state: OverviewTodayState = {
+    ...initialOverviewState,
+    orders: ready(orders),
+    pickups: ready({ waiting: 1, earlierDays: 1, remaking: 0, more: false }),
+    exceptions: ready({ open: 2, overdue: 1 }),
+    tables: ready({ tables: [table], canClose: true, more: false }),
+    updatedAt: "2026-10-25T15:01:00.000Z",
+  };
+  it("puts staff calls first, then orders to accept, overdue exceptions, approvals and checks", () => {
+    const items = attentionItems(state, { awaiting: 2, approvedNotSent: 0 });
+    expect(items.map((item) => [item.title, item.state, item.href])).toEqual([
+      ["1 table asking for staff", "Waiting", "/operations/dining"],
+      ["Orders waiting to be accepted", "To accept", "/operations/orders"],
+      ["Exceptions overdue", "Overdue", "/operations/order-exceptions"],
+      ["Refunds waiting for approval", "To approve", "/app/approvals"],
+      ["Pickups from earlier days", "To check", "/operations/pickup"],
+    ]);
+    expect(items[1]?.detail).toBe(
+      awaitingAcceptanceText({ orders: 1, rounds: 0, urgentRounds: 0 }),
+    );
+  });
+  it("says so when nothing needs attention, and renders nothing for a role without these screens", () => {
+    const quiet: OverviewTodayState = {
+      ...state,
+      orders: ready({ ...orders, awaitingAcceptance: 0 }),
+      pickups: ready({ waiting: 0, earlierDays: 0, remaking: 0, more: false }),
+      exceptions: ready({ open: 0, overdue: 0 }),
+      tables: ready({ tables: [], canClose: true, more: false }),
+    };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <NeedsAttention state={quiet} />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Needs attention now");
+    expect(html).toContain("Nothing needs attention right now.");
+    const hidden = { kind: "Hidden" } as const;
+    expect(
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <NeedsAttention
+            state={{
+              ...quiet,
+              orders: hidden,
+              pickups: hidden,
+              exceptions: hidden,
+              tables: hidden,
+            }}
+          />
+        </MemoryRouter>,
+      ),
+    ).toBe("");
+  });
+  it("gives each row its state in words and one link to the page that settles it", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <NeedsAttention state={state} />
+      </MemoryRouter>,
+    );
+    expect(html).toContain(
+      '<span class="overview-attention__state overview-attention__state--danger">Overdue</span>',
+    );
+    expect(html).toContain(
+      '<a class="overview-attention__action" href="/operations/orders" data-discover="true">Open orders</a>',
+    );
   });
 });

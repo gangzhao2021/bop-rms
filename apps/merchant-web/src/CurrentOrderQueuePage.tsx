@@ -115,18 +115,21 @@ export function filterCurrentOrderItems(
       (filters.type === "All" || order.orderType === filters.type) &&
       (filters.channel === "All" || orderChannel(order) === filters.channel) &&
       (filters.phase === "All" ||
-        (filters.phase === "OutageHeld"
-          ? order.acceptanceHold !== null
-          : filters.phase === "Expired"
-            ? order.unfulfillable !== null
-            : filters.phase === "NotCollected"
-              ? order.pickupNotCollected
-              : filters.phase === "AwaitingPayment"
-                ? order.awaitingPayment
-                : order.unfulfillable === null &&
-                  !order.pickupNotCollected &&
-                  !order.awaitingPayment &&
-                  (order.currentPhase ?? "Unavailable") === filters.phase)),
+        // Figma v1 "To accept": any round staff still have to accept, whatever the order's phase.
+        (filters.phase === "AwaitingAcceptance"
+          ? isAwaitingAcceptance(order)
+          : filters.phase === "OutageHeld"
+            ? order.acceptanceHold !== null
+            : filters.phase === "Expired"
+              ? order.unfulfillable !== null
+              : filters.phase === "NotCollected"
+                ? order.pickupNotCollected
+                : filters.phase === "AwaitingPayment"
+                  ? order.awaitingPayment
+                  : order.unfulfillable === null &&
+                    !order.pickupNotCollected &&
+                    !order.awaitingPayment &&
+                    (order.currentPhase ?? "Unavailable") === filters.phase)),
   );
 }
 /** WP-2423 Q6 step 2: what "Check refund" on a cancelled item needs (omitted: not offered). */
@@ -982,6 +985,49 @@ const unfulfillableText = {
   OrderNoLongerFulfillable: t("The order could no longer be fulfilled after payment."),
 } as const;
 
+/**
+ * Figma v1 (2026-10-25): whether this round's only action is the plain "Accept" (no outage hold,
+ * nothing to charge, refund or cancel first). On the list that button sits in the order's row.
+ */
+export function acceptsInRow(
+  order: CurrentOrderQueue["items"][number],
+  batch: CurrentOrderQueue["items"][number]["batches"][number],
+  now: number,
+): boolean {
+  return (
+    batch.canRequestAcceptance &&
+    !(
+      order.acceptanceHold !== null &&
+      order.acceptanceHold.orderBatchReference === batch.orderBatchReference
+    ) &&
+    !(
+      order.heldStock !== null &&
+      order.heldStock.state === "Ended" &&
+      !order.heldStock.productionStarted &&
+      order.heldStock.orderBatchReference === batch.orderBatchReference
+    ) &&
+    !(
+      batch.sequence === 1 &&
+      order.canRecordCardMachinePayment &&
+      counterAwaitingCardMachine(order, now)
+    ) &&
+    !(
+      order.canRecordCardMachinePayment &&
+      batch.staffRound != null &&
+      batch.staffRound.paidOnCardMachine === null &&
+      batch.acceptanceStatus === "NotAccepted" &&
+      batch.paymentDue !== null &&
+      batch.paymentDue.status === "Awaiting" &&
+      (batch.paymentDue.cancelsAt === null || Date.parse(batch.paymentDue.cancelsAt) > now)
+    ) &&
+    !(
+      (batch.staffCancellation?.refundMethod === "CardMachine" &&
+        batch.staffCancellation.refundStatus === "Pending") ||
+      (batch.sequence === 1 && cardMachineOwed(order) !== null)
+    ) &&
+    !(batch.canCancel || batch.canCancelItems)
+  );
+}
 export function CurrentOrderQueueRows({
   single = false,
   view,
@@ -993,8 +1039,12 @@ export function CurrentOrderQueueRows({
   paymentPosition,
   paymentPositions,
   expanded,
+  rowAction,
 }: {
   readonly view: CurrentOrderQueue;
+  /** Figma v1: the order's next step, shown at the end of its row on the list (outside the row's
+      disclosure, so it is its own control). */
+  readonly rowAction?: ((order: CurrentOrderQueue["items"][number]) => React.ReactNode) | undefined;
   /** WP-2423: Payment's refund position of the one Order shown (the order detail page). */
   readonly paymentPosition?: CurrentOrderDetail["paymentPosition"] | undefined;
   /** WP-2423: on the list, the refund positions of the orders whose detail was read (opened). */
@@ -1082,422 +1132,442 @@ export function CurrentOrderQueueRows({
           {dayHeadings.has(order.orderReference) ? (
             <h2 className="order-workbench-day">{dayHeadings.get(order.orderReference)}</h2>
           ) : null}
-          <details
-            className="order-workbench-entry"
+          <div
+            className="order-workbench-item"
             hidden={
               visibleOrderReferences !== undefined &&
               !visibleOrderReferences.has(order.orderReference)
             }
-            open={
-              autoOpen ||
-              (opened.has(order.orderReference) && !autoOpened.current.has(order.orderReference))
-            }
-            onToggle={(event) => {
-              const open = event.currentTarget.open;
-              if (!open) autoOpened.current.delete(order.orderReference);
-              else if (autoOpen && !opened.has(order.orderReference))
-                autoOpened.current.add(order.orderReference);
-              setOpened((current) => {
-                if (open === current.has(order.orderReference)) return current;
-                const next = new Set(current);
-                if (open) next.add(order.orderReference);
-                else next.delete(order.orderReference);
-                return next;
-              });
-            }}
           >
-            <summary>
-              <span className="order-workbench-identity">
-                <h2>{order.orderNumber}</h2>
-                <span className="order-workbench-type">
-                  {orderTypeLabel[order.orderType]} · {orderChannelLabel(orderChannel(order))}
+            <details
+              className="order-workbench-entry"
+              hidden={
+                visibleOrderReferences !== undefined &&
+                !visibleOrderReferences.has(order.orderReference)
+              }
+              open={
+                autoOpen ||
+                (opened.has(order.orderReference) && !autoOpened.current.has(order.orderReference))
+              }
+              onToggle={(event) => {
+                const open = event.currentTarget.open;
+                if (!open) autoOpened.current.delete(order.orderReference);
+                else if (autoOpen && !opened.has(order.orderReference))
+                  autoOpened.current.add(order.orderReference);
+                setOpened((current) => {
+                  if (open === current.has(order.orderReference)) return current;
+                  const next = new Set(current);
+                  if (open) next.add(order.orderReference);
+                  else next.delete(order.orderReference);
+                  return next;
+                });
+              }}
+            >
+              <summary>
+                <span className="order-workbench-identity">
+                  <h2>{order.orderNumber}</h2>
+                  <span className="order-workbench-type">
+                    {orderTypeLabel[order.orderType]} · {orderChannelLabel(orderChannel(order))}
+                  </span>
                 </span>
-              </span>
-              <span className="order-workbench-when">
-                <time
-                  className="order-workbench-time"
-                  dateTime={order.submittedAt}
-                  title={order.submittedAt}
-                >
-                  {storeTime(order.submittedAt, timeZone)}
-                </time>
-                {now === undefined || orderAgeText(order, now) === null ? null : (
-                  <span
-                    className="order-workbench-age"
-                    data-tone={
-                      isAwaitingAcceptance(order) ? orderStatusTone(order, now) : "neutral"
-                    }
+                <span className="order-workbench-when">
+                  <time
+                    className="order-workbench-time"
+                    dateTime={order.submittedAt}
+                    title={order.submittedAt}
                   >
-                    {orderAgeText(order, now)}
-                  </span>
-                )}
-              </span>
-              <span
-                className="order-workbench-phase"
-                data-tone={orderStatusTone(order, now)}
-                data-phase={
-                  order.awaitingPayment
-                    ? "AwaitingPayment"
-                    : order.pickupNotCollected
-                      ? "NotCollected"
-                      : order.unfulfillable !== null
-                        ? "Expired"
-                        : (order.currentPhase ?? "Unavailable")
-                }
-              >
-                {order.awaitingPayment
-                  ? order.counter !== null
-                    ? t("Awaiting card-machine payment")
-                    : t("Awaiting payment")
-                  : order.pickupNotCollected
-                    ? t("Not collected")
-                    : order.unfulfillable !== null
-                      ? cardMachineOwed(order) !== null
-                        ? t("Expired · refund on card machine")
-                        : t("Expired · refunded")
-                      : orderPhaseLabel(order)}
-              </span>
-              <span className="order-workbench-batches">
-                {roundSummary(order) === "" ? null : (
-                  <span className="order-workbench-rounds">{roundSummary(order)}</span>
-                )}
-                {order.heldStock !== null && order.businessDate !== null ? (
-                  <span className="order-held-stock-tag">
-                    {businessDateLabel(order.businessDate, today)} ·{" "}
-                    {order.heldStock.state === "Open"
-                      ? t("still open, holding stock")
-                      : t("finished, stock still set aside")}
-                  </span>
-                ) : null}
-                {order.orderType === "Pickup" && order.batches[0]?.staffCancellation ? (
-                  <span className="order-staff-cancelled">
-                    {staffCancellationSummary(order, order.batches[0])}
-                  </span>
-                ) : null}
-                {/* WP-2423 Q7: a counter order — paid on the Store's card machine, or a paper order. */}
-                {order.counter?.paidOnCardMachine ? (
-                  <span className="order-counter-paid">
-                    {cardMachinePaymentText(
-                      BigInt(order.counter.paidOnCardMachine.amountMinor),
-                      BigInt(order.counter.paidOnCardMachine.refundedMinor),
-                    )}
-                  </span>
-                ) : null}
-                {/* WP-2423: an online order — paid online, and any refund of that payment. */}
-                {order.paidOnline !== null ? (
-                  <span className="order-counter-paid order-online-paid">
-                    {onlinePaymentText(order, positionOf(order))}
-                  </span>
-                ) : null}
-                {cardMachineRoundsText(order) !== null ? (
-                  <span className="order-counter-paid">{cardMachineRoundsText(order)}</span>
-                ) : null}
-                {order.counter?.recordedAfterOutage ? (
-                  <span className="order-counter-outage" data-tier="warning">
-                    {t("Recorded after outage")}
-                  </span>
-                ) : null}
-                {now === undefined ? null : <AcceptanceDeadline order={order} now={now} />}
-                {/* WP-2423 (v15 751dd768): warn before a sent counter order is released unpaid. */}
-                {counterAwaitingCardMachine(order, now ?? Date.now()) && order.counter?.payBy ? (
-                  <span
-                    className="order-accept-by"
-                    data-tier={counterPayByTier(order.counter.payBy, now)}
-                  >
-                    {counterPayByText(order.counter.payBy, timeZone, now)}
-                  </span>
-                ) : null}
-                {cancelledUnpaid(order) ? (
-                  <span className="order-staff-cancelled">{t("Cancelled before payment")}</span>
-                ) : null}
-                {order.batches.map((batch) =>
-                  batch.paymentDue === null ? null : (
+                    {storeTime(order.submittedAt, timeZone)}
+                  </time>
+                  {now === undefined || orderAgeText(order, now) === null ? null : (
                     <span
-                      key={batch.orderBatchReference}
-                      className="order-accept-by"
-                      data-tier={paymentDueTier(batch.paymentDue, now)}
+                      className="order-workbench-age"
+                      data-tone={
+                        isAwaitingAcceptance(order) ? orderStatusTone(order, now) : "neutral"
+                      }
                     >
-                      {order.batches.length > 1
-                        ? t("Round {sequence}: ", { sequence: batch.sequence })
-                        : ""}
-                      {paymentDueText(batch.paymentDue, timeZone, now, batch.staffRound !== null)}
+                      {orderAgeText(order, now)}
                     </span>
-                  ),
-                )}
-              </span>
-              <span className="order-workbench-amount">
-                {orderAmountTaken(order) === null ? (
-                  <>
-                    <span aria-hidden="true">—</span>
-                    <span className="visually-hidden">{t("No payment recorded")}</span>
-                  </>
-                ) : (
-                  orderMoney(orderAmountTaken(order) ?? { amountMinor: "0", currencyCode: "CAD" })
-                )}
-              </span>
-              <span className="order-workbench-disclosure" aria-hidden="true" />
-            </summary>
-            <div className="order-workbench-detail">
-              <dl>
-                <div>
-                  <dt>{t("Order type")}</dt>
-                  <dd>{orderTypeLabel[order.orderType]}</dd>
-                </div>
-                <div>
-                  <dt>{t("Channel")}</dt>
-                  <dd>{orderChannelLabel(orderChannel(order))}</dd>
-                </div>
-                <div>
-                  <dt>{t("Submitted")}</dt>
-                  <dd>
-                    <time dateTime={order.submittedAt}>
-                      {storeTime(order.submittedAt, timeZone, true)}
-                    </time>
-                  </dd>
-                </div>
-                {order.paidOnline === null && cardMachineRoundsText(order) === null ? null : (
-                  <div>
-                    <dt>{t("Payment")}</dt>
-                    <dd>
-                      {[
-                        order.paidOnline === null
-                          ? null
-                          : onlinePaymentText(order, positionOf(order)),
-                        cardMachineRoundsText(order),
-                      ]
-                        .filter((text) => text !== null)
-                        .join(" · ")}
-                    </dd>
-                  </div>
-                )}
-                {order.businessDate === null ? null : (
-                  <div>
-                    <dt>{t("Business day")}</dt>
-                    <dd>
-                      {order.heldStock === null &&
-                      order.listedBusinessDate !== null &&
-                      order.listedBusinessDate !== order.businessDate
-                        ? openedEarlierText(order.businessDate, order.listedBusinessDate, today)
-                        : businessDateLabel(order.businessDate, today)}
-                    </dd>
-                  </div>
-                )}
-                <div>
-                  <dt>{t("Last checked")}</dt>
-                  <dd>
-                    <time dateTime={order.observedAt} title={order.observedAt}>
-                      {storeTime(order.observedAt, timeZone, true)}
-                    </time>
-                  </dd>
-                </div>
-              </dl>
-              <HeldStockNotice order={order} />
-              {order.counter !== null ? (
-                <p className="order-counter-note" role="note">
-                  {t("Taken at the counter. {value}{value2}", {
-                    value:
-                      order.counter.paidOnCardMachine === null
-                        ? counterAwaitingCardMachine(order, now ?? Date.now())
-                          ? t(
-                              "Not paid yet: charge it on the card machine, then record it below (or from Counter order).",
-                            )
-                          : t("Not paid on the card machine.")
-                        : t("Paid on the store's card machine ({value}) at {takenAt}.", {
-                            value: orderMoney({
-                              amountMinor: order.counter.paidOnCardMachine.amountMinor,
-                              currencyCode: "CAD",
-                            }),
-                            takenAt: storeTime(
-                              order.counter.paidOnCardMachine.takenAt,
-                              timeZone,
-                              true,
-                            ),
-                          }),
-                    value2: order.counter.recordedAfterOutage
-                      ? t(
-                          " Recorded after an outage from a paper order: it may already have been made and handed over.",
-                        )
-                      : "",
-                  })}
-                </p>
-              ) : null}
-              {order.pickupNotCollected ? (
-                <p className="order-workbench-closed" role="note">
-                  {t(
-                    "Closed as not collected after the pickup hold. It was not refunded automatically; a manager can still grant a refund from payments.",
                   )}
-                </p>
-              ) : null}
-              {order.unfulfillable !== null ? (
-                <p className="order-workbench-closed" role="note">
-                  {unfulfillableText[order.unfulfillable]}{" "}
-                  {order.counter?.paidOnCardMachine
-                    ? cardMachineOwed(order) !== null
-                      ? t(
-                          "It was paid on the store's card machine: refund {value} on the card machine, then record it here.",
-                          {
-                            value: orderMoney({
-                              amountMinor: cardMachineOwed(order) ?? "0",
-                              currencyCode: "CAD",
-                            }),
-                          },
-                        )
-                      : t("It was refunded on the store's card machine.")
-                    : t("The payment was refunded automatically; this order cannot be accepted.")}
-                </p>
-              ) : null}
-              {detail?.(order, opened.has(order.orderReference) || view.items.length === 1)}
-              {order.batches.map((batch) => (
-                <section
-                  key={batch.orderBatchReference}
-                  aria-label={
-                    order.orderType === "Pickup"
-                      ? t("Order")
-                      : t("Round {sequence}", { sequence: batch.sequence })
+                </span>
+                <span
+                  className="order-workbench-phase"
+                  data-tone={orderStatusTone(order, now)}
+                  data-phase={
+                    order.awaitingPayment
+                      ? "AwaitingPayment"
+                      : order.pickupNotCollected
+                        ? "NotCollected"
+                        : order.unfulfillable !== null
+                          ? "Expired"
+                          : (order.currentPhase ?? "Unavailable")
                   }
                 >
-                  <h3>
-                    {/* v15 1fc58e90 ⑧: a pickup order has one batch, so it reads as the order. */}
-                    {order.orderType === "Pickup"
-                      ? t("Order")
-                      : t("Round {sequence}{value}", {
-                          sequence: batch.sequence,
-                          value: batch.sequence === 1 ? t(" · First round") : t(" · Added round"),
-                        })}
-                    {batch.staffRound !== null ? t(" · Entered by staff") : ""}
-                  </h3>
-                  {batch.staffRound !== null &&
-                  (batch.staffRound.paidOnCardMachine !== null ||
-                    batch.staffRound.recordedAfterOutage) ? (
-                    <p className="order-staff-round" role="note">
-                      {batch.staffRound.paidOnCardMachine !== null
-                        ? t("Paid on card machine {value} · {takenAt}", {
-                            value: orderMoney({
-                              amountMinor: batch.staffRound.paidOnCardMachine.amountMinor,
-                              currencyCode: "CAD",
-                            }),
-                            takenAt: storeTime(
-                              batch.staffRound.paidOnCardMachine.takenAt,
-                              timeZone,
-                              true,
-                            ),
-                          })
-                        : ""}
-                      {batch.staffRound.paidOnCardMachine !== null &&
-                      batch.staffRound.recordedAfterOutage
-                        ? " · "
-                        : ""}
-                      {batch.staffRound.recordedAfterOutage ? t("Recorded after outage") : ""}
-                    </p>
+                  {order.awaitingPayment
+                    ? order.counter !== null
+                      ? t("Awaiting card-machine payment")
+                      : t("Awaiting payment")
+                    : order.pickupNotCollected
+                      ? t("Not collected")
+                      : order.unfulfillable !== null
+                        ? cardMachineOwed(order) !== null
+                          ? t("Expired · refund on card machine")
+                          : t("Expired · refunded")
+                        : orderPhaseLabel(order)}
+                </span>
+                <span className="order-workbench-batches">
+                  {roundSummary(order) === "" ? null : (
+                    <span className="order-workbench-rounds">{roundSummary(order)}</span>
+                  )}
+                  {order.heldStock !== null && order.businessDate !== null ? (
+                    <span className="order-held-stock-tag">
+                      {businessDateLabel(order.businessDate, today)} ·{" "}
+                      {order.heldStock.state === "Open"
+                        ? t("still open, holding stock")
+                        : t("finished, stock still set aside")}
+                    </span>
                   ) : null}
-                  {batch.staffCancellation !== null ? (
-                    <p className="order-workbench-closed order-staff-cancellation" role="note">
-                      {staffCancellationSummary(order, batch)}
-                      <span>
-                        {t("Reason: {value} ·", {
-                          value: staffCancellationReasonLabel[batch.staffCancellation.reasonCode],
-                        })}{" "}
-                        <time dateTime={batch.staffCancellation.cancelledAt}>
-                          {storeTime(batch.staffCancellation.cancelledAt, timeZone, true)}
-                        </time>
-                      </span>
-                      <span>
-                        {batch.staffCancellation.refundMethod === "CardMachine"
-                          ? batch.staffCancellation.refundStatus === "Refunded"
-                            ? t("Refunded in full on the store's card machine, including any tip.")
-                            : t(
-                                "Refund {value} on the store's card machine, then record it here.",
-                                {
-                                  value: orderMoney({
-                                    amountMinor: batch.staffCancellation.refundAmountMinor ?? "0",
-                                    currencyCode: "CAD",
-                                  }),
-                                },
-                              )
-                          : batch.staffCancellation.refundAmountMinor !== null &&
-                              batch.staffCancellation.refundAmountMinor !== "0"
-                            ? // 46940b76 L2: what is left of the payment (items refunded earlier
-                              // are listed with the order's refunds).
-                              t(
-                                "{value} {value2}: everything left of the payment, including any tip left.",
-                                {
-                                  value:
-                                    batch.staffCancellation.refundStatus === "Refunded"
-                                      ? t("Refunded")
-                                      : "Refunding",
-                                  value2: orderMoney({
-                                    amountMinor: batch.staffCancellation.refundAmountMinor,
-                                    currencyCode: "CAD",
-                                  }),
-                                },
-                              )
-                            : batch.staffCancellation.refundStatus === "Refunded"
-                              ? t("The payment, including any tip, was refunded in full.")
-                              : t("The payment, including any tip, is being refunded in full.")}
-                      </span>
-                    </p>
-                  ) : batch.acceptanceStatus === "Cancelled" ? (
-                    // WP-2423: cancelled automatically because its payment failed (no store refund).
-                    <p className="order-workbench-closed" role="note">
-                      {t(
-                        "Round cancelled · not paid. It wasn't paid (cancelled when its payment time ended, or by a manager), so it never went to the kitchen and its items went back to stock. Nothing was charged for it in the system.{value}",
-                        {
-                          value:
-                            batch.staffRound !== null
-                              ? t(
-                                  " If the card machine was charged for it, refund that payment on the machine.",
-                                )
-                              : "",
-                        },
+                  {order.orderType === "Pickup" && order.batches[0]?.staffCancellation ? (
+                    <span className="order-staff-cancelled">
+                      {staffCancellationSummary(order, order.batches[0])}
+                    </span>
+                  ) : null}
+                  {/* WP-2423 Q7: a counter order — paid on the Store's card machine, or a paper order. */}
+                  {order.counter?.paidOnCardMachine ? (
+                    <span className="order-counter-paid">
+                      {cardMachinePaymentText(
+                        BigInt(order.counter.paidOnCardMachine.amountMinor),
+                        BigInt(order.counter.paidOnCardMachine.refundedMinor),
                       )}
-                    </p>
-                  ) : batch.paymentDue !== null ? (
-                    <p className="order-workbench-closed" role="note">
+                    </span>
+                  ) : null}
+                  {/* WP-2423: an online order — paid online, and any refund of that payment. */}
+                  {order.paidOnline !== null ? (
+                    <span className="order-counter-paid order-online-paid">
+                      {onlinePaymentText(order, positionOf(order))}
+                    </span>
+                  ) : null}
+                  {cardMachineRoundsText(order) !== null ? (
+                    <span className="order-counter-paid">{cardMachineRoundsText(order)}</span>
+                  ) : null}
+                  {order.counter?.recordedAfterOutage ? (
+                    <span className="order-counter-outage" data-tier="warning">
+                      {t("Recorded after outage")}
+                    </span>
+                  ) : null}
+                  {now === undefined ? null : <AcceptanceDeadline order={order} now={now} />}
+                  {/* WP-2423 (v15 751dd768): warn before a sent counter order is released unpaid. */}
+                  {counterAwaitingCardMachine(order, now ?? Date.now()) && order.counter?.payBy ? (
+                    <span
+                      className="order-accept-by"
+                      data-tier={counterPayByTier(order.counter.payBy, now)}
+                    >
+                      {counterPayByText(order.counter.payBy, timeZone, now)}
+                    </span>
+                  ) : null}
+                  {cancelledUnpaid(order) ? (
+                    <span className="order-staff-cancelled">{t("Cancelled before payment")}</span>
+                  ) : null}
+                  {order.batches.map((batch) =>
+                    batch.paymentDue === null ? null : (
                       <span
+                        key={batch.orderBatchReference}
                         className="order-accept-by"
                         data-tier={paymentDueTier(batch.paymentDue, now)}
                       >
+                        {order.batches.length > 1
+                          ? t("Round {sequence}: ", { sequence: batch.sequence })
+                          : ""}
                         {paymentDueText(batch.paymentDue, timeZone, now, batch.staffRound !== null)}
                       </span>
-                      {batch.paymentDue.status === "Failed"
-                        ? t(
-                            " Don't prepare it; it will not be charged. If the guest still wants these items, they can order them again.",
-                          )
-                        : batch.staffRound !== null
-                          ? t(
-                              " Charge it on the card machine and record it below; the kitchen starts it once recorded. If it isn't recorded in time, it is cancelled and its items go back to stock.",
-                            )
-                          : batch.canCancelUnpaid
-                            ? t(
-                                " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or cancel it below.",
-                              )
-                            : t(
-                                " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or ask a manager to cancel it.",
-                              )}
-                    </p>
-                  ) : batch.awaitingAcceptanceSince !== null && now !== undefined ? (
-                    // WP-2423: a paid round waits for staff, never for a timer; say how long.
-                    <p role="note">
-                      <span
-                        className="order-accept-by"
-                        data-tier={paidRoundWait(batch.awaitingAcceptanceSince, now).tier}
-                      >
-                        {paidRoundWaitText(batch.awaitingAcceptanceSince, now)}
-                      </span>
-                    </p>
-                  ) : (
-                    <p>
-                      {t("Acceptance: {value}", {
-                        value:
-                          batch.acceptanceStatus === "Accepted" ? t("Accepted") : t("Not accepted"),
-                      })}
-                    </p>
+                    ),
                   )}
-                  {action?.(order, batch)}
-                </section>
-              ))}
-            </div>
-          </details>
+                </span>
+                <span className="order-workbench-amount">
+                  {orderAmountTaken(order) === null ? (
+                    <>
+                      <span aria-hidden="true">—</span>
+                      <span className="visually-hidden">{t("No payment recorded")}</span>
+                    </>
+                  ) : (
+                    orderMoney(orderAmountTaken(order) ?? { amountMinor: "0", currencyCode: "CAD" })
+                  )}
+                </span>
+                <span className="order-workbench-disclosure" aria-hidden="true" />
+              </summary>
+              <div className="order-workbench-detail">
+                <dl>
+                  <div>
+                    <dt>{t("Order type")}</dt>
+                    <dd>{orderTypeLabel[order.orderType]}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("Channel")}</dt>
+                    <dd>{orderChannelLabel(orderChannel(order))}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("Submitted")}</dt>
+                    <dd>
+                      <time dateTime={order.submittedAt}>
+                        {storeTime(order.submittedAt, timeZone, true)}
+                      </time>
+                    </dd>
+                  </div>
+                  {order.paidOnline === null && cardMachineRoundsText(order) === null ? null : (
+                    <div>
+                      <dt>{t("Payment")}</dt>
+                      <dd>
+                        {[
+                          order.paidOnline === null
+                            ? null
+                            : onlinePaymentText(order, positionOf(order)),
+                          cardMachineRoundsText(order),
+                        ]
+                          .filter((text) => text !== null)
+                          .join(" · ")}
+                      </dd>
+                    </div>
+                  )}
+                  {order.businessDate === null ? null : (
+                    <div>
+                      <dt>{t("Business day")}</dt>
+                      <dd>
+                        {order.heldStock === null &&
+                        order.listedBusinessDate !== null &&
+                        order.listedBusinessDate !== order.businessDate
+                          ? openedEarlierText(order.businessDate, order.listedBusinessDate, today)
+                          : businessDateLabel(order.businessDate, today)}
+                      </dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt>{t("Last checked")}</dt>
+                    <dd>
+                      <time dateTime={order.observedAt} title={order.observedAt}>
+                        {storeTime(order.observedAt, timeZone, true)}
+                      </time>
+                    </dd>
+                  </div>
+                </dl>
+                <HeldStockNotice order={order} />
+                {order.counter !== null ? (
+                  <p className="order-counter-note" role="note">
+                    {t("Taken at the counter. {value}{value2}", {
+                      value:
+                        order.counter.paidOnCardMachine === null
+                          ? counterAwaitingCardMachine(order, now ?? Date.now())
+                            ? t(
+                                "Not paid yet: charge it on the card machine, then record it below (or from Counter order).",
+                              )
+                            : t("Not paid on the card machine.")
+                          : t("Paid on the store's card machine ({value}) at {takenAt}.", {
+                              value: orderMoney({
+                                amountMinor: order.counter.paidOnCardMachine.amountMinor,
+                                currencyCode: "CAD",
+                              }),
+                              takenAt: storeTime(
+                                order.counter.paidOnCardMachine.takenAt,
+                                timeZone,
+                                true,
+                              ),
+                            }),
+                      value2: order.counter.recordedAfterOutage
+                        ? t(
+                            " Recorded after an outage from a paper order: it may already have been made and handed over.",
+                          )
+                        : "",
+                    })}
+                  </p>
+                ) : null}
+                {order.pickupNotCollected ? (
+                  <p className="order-workbench-closed" role="note">
+                    {t(
+                      "Closed as not collected after the pickup hold. It was not refunded automatically; a manager can still grant a refund from payments.",
+                    )}
+                  </p>
+                ) : null}
+                {order.unfulfillable !== null ? (
+                  <p className="order-workbench-closed" role="note">
+                    {unfulfillableText[order.unfulfillable]}{" "}
+                    {order.counter?.paidOnCardMachine
+                      ? cardMachineOwed(order) !== null
+                        ? t(
+                            "It was paid on the store's card machine: refund {value} on the card machine, then record it here.",
+                            {
+                              value: orderMoney({
+                                amountMinor: cardMachineOwed(order) ?? "0",
+                                currencyCode: "CAD",
+                              }),
+                            },
+                          )
+                        : t("It was refunded on the store's card machine.")
+                      : t("The payment was refunded automatically; this order cannot be accepted.")}
+                  </p>
+                ) : null}
+                {detail?.(order, opened.has(order.orderReference) || view.items.length === 1)}
+                {order.batches.map((batch) => (
+                  <section
+                    key={batch.orderBatchReference}
+                    aria-label={
+                      order.orderType === "Pickup"
+                        ? t("Order")
+                        : t("Round {sequence}", { sequence: batch.sequence })
+                    }
+                  >
+                    <h3>
+                      {/* v15 1fc58e90 ⑧: a pickup order has one batch, so it reads as the order. */}
+                      {order.orderType === "Pickup"
+                        ? t("Order")
+                        : t("Round {sequence}{value}", {
+                            sequence: batch.sequence,
+                            value: batch.sequence === 1 ? t(" · First round") : t(" · Added round"),
+                          })}
+                      {batch.staffRound !== null ? t(" · Entered by staff") : ""}
+                    </h3>
+                    {batch.staffRound !== null &&
+                    (batch.staffRound.paidOnCardMachine !== null ||
+                      batch.staffRound.recordedAfterOutage) ? (
+                      <p className="order-staff-round" role="note">
+                        {batch.staffRound.paidOnCardMachine !== null
+                          ? t("Paid on card machine {value} · {takenAt}", {
+                              value: orderMoney({
+                                amountMinor: batch.staffRound.paidOnCardMachine.amountMinor,
+                                currencyCode: "CAD",
+                              }),
+                              takenAt: storeTime(
+                                batch.staffRound.paidOnCardMachine.takenAt,
+                                timeZone,
+                                true,
+                              ),
+                            })
+                          : ""}
+                        {batch.staffRound.paidOnCardMachine !== null &&
+                        batch.staffRound.recordedAfterOutage
+                          ? " · "
+                          : ""}
+                        {batch.staffRound.recordedAfterOutage ? t("Recorded after outage") : ""}
+                      </p>
+                    ) : null}
+                    {batch.staffCancellation !== null ? (
+                      <p className="order-workbench-closed order-staff-cancellation" role="note">
+                        {staffCancellationSummary(order, batch)}
+                        <span>
+                          {t("Reason: {value} ·", {
+                            value: staffCancellationReasonLabel[batch.staffCancellation.reasonCode],
+                          })}{" "}
+                          <time dateTime={batch.staffCancellation.cancelledAt}>
+                            {storeTime(batch.staffCancellation.cancelledAt, timeZone, true)}
+                          </time>
+                        </span>
+                        <span>
+                          {batch.staffCancellation.refundMethod === "CardMachine"
+                            ? batch.staffCancellation.refundStatus === "Refunded"
+                              ? t(
+                                  "Refunded in full on the store's card machine, including any tip.",
+                                )
+                              : t(
+                                  "Refund {value} on the store's card machine, then record it here.",
+                                  {
+                                    value: orderMoney({
+                                      amountMinor: batch.staffCancellation.refundAmountMinor ?? "0",
+                                      currencyCode: "CAD",
+                                    }),
+                                  },
+                                )
+                            : batch.staffCancellation.refundAmountMinor !== null &&
+                                batch.staffCancellation.refundAmountMinor !== "0"
+                              ? // 46940b76 L2: what is left of the payment (items refunded earlier
+                                // are listed with the order's refunds).
+                                t(
+                                  "{value} {value2}: everything left of the payment, including any tip left.",
+                                  {
+                                    value:
+                                      batch.staffCancellation.refundStatus === "Refunded"
+                                        ? t("Refunded")
+                                        : "Refunding",
+                                    value2: orderMoney({
+                                      amountMinor: batch.staffCancellation.refundAmountMinor,
+                                      currencyCode: "CAD",
+                                    }),
+                                  },
+                                )
+                              : batch.staffCancellation.refundStatus === "Refunded"
+                                ? t("The payment, including any tip, was refunded in full.")
+                                : t("The payment, including any tip, is being refunded in full.")}
+                        </span>
+                      </p>
+                    ) : batch.acceptanceStatus === "Cancelled" ? (
+                      // WP-2423: cancelled automatically because its payment failed (no store refund).
+                      <p className="order-workbench-closed" role="note">
+                        {t(
+                          "Round cancelled · not paid. It wasn't paid (cancelled when its payment time ended, or by a manager), so it never went to the kitchen and its items went back to stock. Nothing was charged for it in the system.{value}",
+                          {
+                            value:
+                              batch.staffRound !== null
+                                ? t(
+                                    " If the card machine was charged for it, refund that payment on the machine.",
+                                  )
+                                : "",
+                          },
+                        )}
+                      </p>
+                    ) : batch.paymentDue !== null ? (
+                      <p className="order-workbench-closed" role="note">
+                        <span
+                          className="order-accept-by"
+                          data-tier={paymentDueTier(batch.paymentDue, now)}
+                        >
+                          {paymentDueText(
+                            batch.paymentDue,
+                            timeZone,
+                            now,
+                            batch.staffRound !== null,
+                          )}
+                        </span>
+                        {batch.paymentDue.status === "Failed"
+                          ? t(
+                              " Don't prepare it; it will not be charged. If the guest still wants these items, they can order them again.",
+                            )
+                          : batch.staffRound !== null
+                            ? t(
+                                " Charge it on the card machine and record it below; the kitchen starts it once recorded. If it isn't recorded in time, it is cancelled and its items go back to stock.",
+                              )
+                            : batch.canCancelUnpaid
+                              ? t(
+                                  " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or cancel it below.",
+                                )
+                              : t(
+                                  " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or ask a manager to cancel it.",
+                                )}
+                      </p>
+                    ) : batch.awaitingAcceptanceSince !== null && now !== undefined ? (
+                      // WP-2423: a paid round waits for staff, never for a timer; say how long.
+                      <p role="note">
+                        <span
+                          className="order-accept-by"
+                          data-tier={paidRoundWait(batch.awaitingAcceptanceSince, now).tier}
+                        >
+                          {paidRoundWaitText(batch.awaitingAcceptanceSince, now)}
+                        </span>
+                      </p>
+                    ) : (
+                      <p>
+                        {t("Acceptance: {value}", {
+                          value:
+                            batch.acceptanceStatus === "Accepted"
+                              ? t("Accepted")
+                              : t("Not accepted"),
+                        })}
+                      </p>
+                    )}
+                    {action?.(order, batch)}
+                  </section>
+                ))}
+              </div>
+            </details>
+            {rowAction === undefined ? null : (
+              <div className="order-workbench-next">{rowAction(order)}</div>
+            )}
+          </div>
         </Fragment>
       ))}
     </div>
@@ -1771,6 +1841,38 @@ export function CurrentOrderQueuePage({
   };
   const single = orderReference !== undefined;
   const detail = state.kind === "Ready" ? state.detail : undefined;
+  const acceptAction = (
+    order: CurrentOrderQueue["items"][number],
+    batch: CurrentOrderQueue["items"][number]["batches"][number],
+  ) => (
+    <OrderAcceptanceAction
+      key={batch.orderBatchReference}
+      csrf={csrf}
+      orderNumber={
+        batch.sequence === 1 ? order.orderNumber : order.orderNumber + " · round " + batch.sequence
+      }
+      operation={() => {
+        let operation = operations.current.get(batch.orderBatchReference);
+        if (!operation) {
+          operation = createOrderAcceptanceClient(fetcher).prepare({
+            acceptanceReference: serviceOperationReference(),
+            operationReference: serviceOperationReference(),
+            orderReference: order.orderReference,
+            orderBatchReference: batch.orderBatchReference,
+            expectedOrderVersion: order.currentVersion ?? 0,
+          });
+          operations.current.set(batch.orderBatchReference, operation);
+        }
+        return operation;
+      }}
+      onRejected={() => operations.current.delete(batch.orderBatchReference)}
+      onChanged={() => reload(after)}
+      onAccepted={() => {
+        operations.current.delete(batch.orderBatchReference);
+        reload(after);
+      }}
+    />
+  );
   return (
     <WorkspacePage
       className="orders-page"
@@ -1831,6 +1933,39 @@ export function CurrentOrderQueuePage({
             {single ? null : (
               <AcceptanceHoldNotice view={state.view} onShow={() => setPhaseFilter("OutageHeld")} />
             )}
+            {single ? null : (
+              // Figma v1: the statuses staff switch between most, with how many are on this page.
+              <div className="order-status-filters" role="group" aria-label={t("Show orders")}>
+                {(
+                  [
+                    ["All", t("All")],
+                    ["AwaitingAcceptance", t("To accept")],
+                    ["InProgress", t("In progress")],
+                    ["Ready", t("Ready")],
+                    ["Fulfilled", t("Served or picked up")],
+                  ] as const
+                ).map(([phase, label]) => (
+                  <button
+                    key={phase}
+                    type="button"
+                    aria-pressed={phaseFilter === phase}
+                    onClick={() => setPhaseFilter(phase)}
+                  >
+                    {label}
+                    {phase === "All" || phase === "Fulfilled"
+                      ? null
+                      : ` · ${
+                          filterCurrentOrderItems(state.view.items, {
+                            orderNumber: orderNumberSearch,
+                            type: typeFilter,
+                            channel: channelFilter,
+                            phase,
+                          }).length
+                        }`}
+                  </button>
+                ))}
+              </div>
+            )}
             <div
               hidden={single}
               className="list-filters order-queue-filters"
@@ -1876,6 +2011,7 @@ export function CurrentOrderQueuePage({
                   onChange={(event) => setPhaseFilter(event.target.value)}
                 >
                   <option value="All">{t("All statuses")}</option>
+                  <option value="AwaitingAcceptance">{t("To accept")}</option>
                   <option value="Submitted">{t("Submitted")}</option>
                   <option value="Accepted">{t("Accepted")}</option>
                   <option value="InProgress">{t("In progress")}</option>
@@ -1981,6 +2117,20 @@ export function CurrentOrderQueuePage({
                   }}
                 />
               )}
+              rowAction={
+                single
+                  ? undefined
+                  : (order) => {
+                      const batches = order.batches.filter((batch) =>
+                        acceptsInRow(order, batch, now ?? Date.now()),
+                      );
+                      return batches.length === 0 ? null : (
+                        <fieldset disabled={servingBusy}>
+                          {batches.map((batch) => acceptAction(order, batch))}
+                        </fieldset>
+                      );
+                    }
+              }
               action={(order, batch) => (
                 <>
                   {
@@ -2117,7 +2267,8 @@ export function CurrentOrderQueuePage({
                           </Link>
                         )}
                       </fieldset>
-                    ) : batch.canRequestAcceptance ? (
+                    ) : batch.canRequestAcceptance &&
+                      !(!single && acceptsInRow(order, batch, now ?? Date.now())) ? (
                       <fieldset disabled={servingBusy}>
                         {order.acceptanceHold !== null &&
                         order.acceptanceHold.orderBatchReference === batch.orderBatchReference ? (
@@ -2164,35 +2315,7 @@ export function CurrentOrderQueuePage({
                             }
                           />
                         ) : (
-                          <OrderAcceptanceAction
-                            key={batch.orderBatchReference}
-                            csrf={csrf}
-                            orderNumber={
-                              batch.sequence === 1
-                                ? order.orderNumber
-                                : order.orderNumber + " · round " + batch.sequence
-                            }
-                            operation={() => {
-                              let operation = operations.current.get(batch.orderBatchReference);
-                              if (!operation) {
-                                operation = createOrderAcceptanceClient(fetcher).prepare({
-                                  acceptanceReference: serviceOperationReference(),
-                                  operationReference: serviceOperationReference(),
-                                  orderReference: order.orderReference,
-                                  orderBatchReference: batch.orderBatchReference,
-                                  expectedOrderVersion: order.currentVersion ?? 0,
-                                });
-                                operations.current.set(batch.orderBatchReference, operation);
-                              }
-                              return operation;
-                            }}
-                            onRejected={() => operations.current.delete(batch.orderBatchReference)}
-                            onChanged={() => reload(after)}
-                            onAccepted={() => {
-                              operations.current.delete(batch.orderBatchReference);
-                              reload(after);
-                            }}
-                          />
+                          acceptAction(order, batch)
                         )}
                       </fieldset>
                     ) : null

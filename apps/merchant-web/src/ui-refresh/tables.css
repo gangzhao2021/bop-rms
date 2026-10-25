@@ -438,3 +438,56 @@
   display: block;
   margin-top: var(--bop-space-2);
 }
+
+/*
+ * Figma v1 (2026-10-25) Tables: the staff-call box on top in white with a danger outline, one line
+ * per table with a marker and "Handled" at the end; the details panel stays fixed beside the floor.
+ */
+.workspace-page.dining-floor .dining-staff-calls {
+  margin-block: 0 var(--bop-space-5);
+  padding: var(--bop-space-5);
+  border: 2px solid var(--bop-color-danger);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+.workspace-page.dining-floor .dining-staff-calls h2 {
+  margin: 0 0 var(--bop-space-3);
+  font-size: 18px;
+  font-weight: 600;
+}
+.workspace-page.dining-floor .dining-staff-calls li {
+  flex-wrap: nowrap;
+  font-size: 15px;
+}
+.workspace-page.dining-floor .dining-staff-calls li > span {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--bop-space-1);
+  min-width: 0;
+}
+.workspace-page.dining-floor .dining-staff-calls li > span::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-inline-end: var(--bop-space-2);
+  border-radius: 50%;
+  background: var(--bop-color-warning);
+}
+.workspace-page.dining-floor .dining-staff-calls li[data-tier="urgent"] > span::before {
+  background: var(--bop-color-danger);
+}
+.workspace-page.dining-floor .dining-staff-calls button {
+  flex: none;
+  min-width: 6.5rem;
+  border-color: var(--bop-color-brand-primary);
+}
+.workspace-page.dining-floor .dining-session-detail {
+  border-radius: var(--bop-radius-card);
+}
+@media (max-width: 767px) {
+  .workspace-page.dining-floor .dining-staff-calls li {
+    flex-wrap: wrap;
+  }
+}

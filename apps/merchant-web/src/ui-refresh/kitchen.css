@@ -555,3 +555,36 @@
   display: flex;
   justify-content: flex-end;
 }
+
+/*
+ * Figma v1 (2026-10-25) kitchen display: a black ticket header with the order and its minutes; a
+ * ticket running long or late keeps a white header with the minutes and words in the state colour
+ * and an outline in that colour; declared allergens read in the danger colour on their bar.
+ */
+.kitchen-ticket__header .kitchen-order-group__label {
+  font-size: 16px;
+  font-weight: 600;
+}
+.kitchen-ticket__timer {
+  font-size: 20px;
+}
+.kitchen-ticket[data-age="warning"] {
+  border: 2px solid var(--bop-color-warning);
+}
+.kitchen-ticket[data-age="warning"] .kitchen-ticket__header {
+  border-bottom: 1px solid var(--bop-color-warning);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-warning);
+}
+.kitchen-ticket[data-age="late"] {
+  border: 2px solid var(--bop-color-danger);
+}
+.kitchen-ticket[data-age="late"] .kitchen-ticket__header {
+  border-bottom: 1px solid var(--bop-color-danger);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-danger);
+}
+.kitchen-work-item__allergens[data-kind="declared"] {
+  color: var(--bop-color-danger);
+  font-weight: 600;
+}

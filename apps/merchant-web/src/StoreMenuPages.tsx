@@ -582,7 +582,7 @@ function MenuBuilder({
   const mayApproveHere =
     view.permissions.mayApprove && view.submittedBy !== null && view.submittedBy !== view.viewer;
   return (
-    <AppFrame title={menu.name} description={t("Menu")}>
+    <AppFrame className="menu-builder-page" title={menu.name} description={t("Menu")}>
       <header className="screen-heading">
         <div>
           <p className="bop-eyebrow">{t("Menu · Brand")}</p>
