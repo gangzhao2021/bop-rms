@@ -1,4 +1,5 @@
 import { LanguageSwitch, t } from "./i18n/i18n.js";
+import { useApprovalsWaiting } from "./approvals-waiting.js";
 import { SkipLinkProvidedContext } from "@bop-rms/ui";
 import {
   useEffect,
@@ -217,6 +218,20 @@ export function WorkspaceLayout({
 }) {
   const current = currentNavigationItem(items, path);
   const sections = workspaceNavigationSections(items);
+  // WP-2423 Q35: refunds waiting for an approver are counted beside "Approvals" on every page.
+  const approvals = useApprovalsWaiting(items.some((item) => item.screenId === "APPROVAL-INBOX"));
+  const badges: Partial<Record<string, number>> = {
+    "APPROVAL-INBOX": approvals === null ? 0 : approvals.awaiting + approvals.approvedNotSent,
+  };
+  const badge = (screenId: string) => {
+    const count = badges[screenId] ?? 0;
+    return count > 0 ? (
+      <span className="workspace-nav__badge">
+        <span className="visually-hidden">{t("{count} waiting", { count })}</span>
+        <span aria-hidden="true">{count}</span>
+      </span>
+    ) : null;
+  };
   const currentGroup =
     sections.find((section) => section.items.some((item) => item.screenId === current))?.group ??
     null;
@@ -292,6 +307,7 @@ export function WorkspaceLayout({
               onClick={closeCompactMenu}
             >
               {t(item.label)}
+              {badge(item.screenId)}
             </Link>
           </li>
         ))}
@@ -313,6 +329,13 @@ export function WorkspaceLayout({
               onClick={() => toggleGroup(section.group)}
             >
               <span>{section.label}</span>
+              {open ? null : (
+                <>
+                  {section.items.map((item) => (
+                    <span key={item.screenId}>{badge(item.screenId)}</span>
+                  ))}
+                </>
+              )}
               {!open && section.group === currentGroup && currentLabel !== null ? (
                 <span className="workspace-nav__group-current">{currentLabel}</span>
               ) : null}
@@ -326,6 +349,7 @@ export function WorkspaceLayout({
                     onClick={closeCompactMenu}
                   >
                     {t(item.label)}
+                    {badge(item.screenId)}
                   </Link>
                 </li>
               ))}

@@ -1,4 +1,5 @@
 import { systemText, countOf, t } from "./i18n/i18n.js";
+import { useApprovalsWaiting, type ApprovalsWaiting } from "./approvals-waiting.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link } from "react-router";
@@ -298,8 +299,11 @@ export function OverviewToday({
   timeZone,
   busy = false,
   onRefresh,
+  approvals = null,
 }: {
   readonly state: OverviewTodayState;
+  /** WP-2423 Q35: refunds waiting for an approver; null when not permitted or not read. */
+  readonly approvals?: ApprovalsWaiting | null;
   readonly timeZone?: string | undefined;
   readonly busy?: boolean;
   readonly onRefresh?: (() => void) | undefined;
@@ -403,6 +407,27 @@ export function OverviewToday({
           href="/operations/order-exceptions"
           linkLabel={t("View exceptions")}
         />
+        {approvals === null ? null : (
+          <Count
+            label={t("Refunds waiting for approval")}
+            read={{ kind: "Ready", value: approvals }}
+            value={(a) => String(a.awaiting + a.approvedNotSent)}
+            detail={(a) =>
+              a.awaiting === 0 && a.approvedNotSent === 0
+                ? t("Nothing waiting")
+                : [
+                    a.awaiting === 0 ? null : t("{count} to approve", { count: a.awaiting }),
+                    a.approvedNotSent === 0
+                      ? null
+                      : t("{count} approved, not sent yet", { count: a.approvedNotSent }),
+                  ]
+                    .filter((part) => part !== null)
+                    .join(" · ")
+            }
+            href="/app/approvals"
+            linkLabel={t("Review approvals")}
+          />
+        )}
       </ul>
     </section>
   );
@@ -820,6 +845,7 @@ export function StoreOverview({
   );
   // v15 cbff9d6f: no reads once this screen's sign-in has ended; again at once if it is live.
   const live = useStaffSessionLive();
+  const approvals = useApprovalsWaiting(screenKey.split("|").includes("APPROVAL-INBOX"), fetcher);
   useEffect(() => {
     if (!live) return;
     if (!permitted.orders && !permitted.pickups && !permitted.exceptions && !permitted.tables)
@@ -844,6 +870,7 @@ export function StoreOverview({
         timeZone={timeZone}
         busy={busy}
         onRefresh={() => void load(true)}
+        approvals={approvals}
       />
       <DayChecklist
         state={state}

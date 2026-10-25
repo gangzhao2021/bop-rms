@@ -9520,3 +9520,20 @@ tr[data-drop-target="true"] {
 .menu-builder-unsaved {
   color: var(--bop-color-text-muted);
 }
+/* WP-2423 Q35: how many items wait for this person on a page (refunds waiting for approval). */
+.workspace-nav__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  margin-left: var(--bop-space-2);
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--bop-color-danger);
+  color: var(--bop-color-on-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
