@@ -9429,36 +9429,6 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin-left: auto;
   align-self: center;
 }
-/* Owner 2026-10-25: under the Store name on desktop, beside it in the tablet and phone top bar. */
-.workspace-sidebar .workspace-sidebar__language {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: fit-content;
-  min-width: 44px;
-  min-height: 36px;
-  margin: 0 8px 16px;
-  font-size: 13px;
-}
-@media (max-width: 64rem) {
-  .workspace-sidebar .workspace-sidebar__identity {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  .workspace-sidebar .workspace-sidebar__language {
-    flex: none;
-    min-height: 44px;
-  }
-}
-@media (max-width: 767px) {
-  .workspace-sidebar .workspace-sidebar__language {
-    margin: 0;
-  }
-  .workspace-sidebar .workspace-sidebar__compact {
-    flex: none;
-    margin-inline-start: 0;
-  }
-}
 .staff-switch__language {
   justify-self: start;
 }
