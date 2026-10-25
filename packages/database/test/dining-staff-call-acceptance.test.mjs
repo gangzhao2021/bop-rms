@@ -380,7 +380,7 @@ it("lets a seated guest call staff once at a time, within a budget, and staff an
       });
       // Staff reads and answers borrow one authorized merchant transaction.
       const staff = (work) => runner().run((tx) => work(calls({ run: (next) => next(tx) }), tx));
-      const allowed = () => undefined;
+      const allowed = () => true;
       const join = (credential, guest, operation, minute) =>
         sessions.joinCurrent({
           guestSessionReference: id(guest),

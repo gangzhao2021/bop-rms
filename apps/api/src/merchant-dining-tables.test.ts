@@ -12,6 +12,7 @@ const mock = vi.hoisted(() => ({
   unpaidGuestRounds: vi.fn(),
   paidAwaitingAcceptance: vi.fn(),
   paidOnline: vi.fn(),
+  staffCalls: vi.fn(),
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
@@ -33,6 +34,7 @@ vi.mock("@rms/dining", async (original) => ({
   createPostgresDiningTableStore: mock.store,
   createPostgresDiningSessionReadStore: vi.fn(() => ({ loadSessions: mock.loadSessions })),
   createPostgresDiningTableQrStore: vi.fn(() => ({ loadLatestForTables: mock.codes })),
+  createPostgresDiningStaffCallStore: vi.fn(() => ({ listOpen: mock.staffCalls })),
 }));
 const id = (n: number) => "01909988-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 type Options = Parameters<typeof createMerchantDiningTables>[0];
@@ -69,6 +71,7 @@ function setup() {
   mock.unpaidGuestRounds.mockResolvedValue([]);
   mock.paidAwaitingAcceptance.mockResolvedValue([]);
   mock.paidOnline.mockResolvedValue(new Set());
+  mock.staffCalls.mockResolvedValue(new Map());
   mock.list.mockResolvedValue({
     items: [
       {
@@ -494,4 +497,65 @@ it("reads the polled Tables page in the composition's snapshot transaction when 
   // A composition without a snapshot transaction still reads, as an ordinary transaction.
   expect((await read({ run })).items).toHaveLength(1);
   expect(run).toHaveBeenCalledOnce();
+});
+it("WP-2423 Q28: shows the open call for staff at each open table, and none elsewhere", async () => {
+  const f = setup();
+  mock.list.mockResolvedValueOnce({
+    items: [
+      {
+        tableReference: id(4),
+        stableLabel: "T1",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 3,
+        activeDiningSessionReference: id(5),
+      },
+      {
+        tableReference: id(6),
+        stableLabel: "T2",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 1,
+        activeDiningSessionReference: null,
+      },
+    ],
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValueOnce([
+    {
+      diningSessionReference: id(5),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      startedAt: "2026-09-25T11:42:00.000Z",
+    },
+  ]);
+  mock.staffCalls.mockResolvedValueOnce(
+    new Map([
+      [
+        id(5),
+        {
+          callReference: id(7),
+          diningSessionReference: id(5),
+          participantReference: id(8),
+          reason: "TableNeeds",
+          calledAt: "2026-09-25T11:55:00.000Z",
+        },
+      ],
+    ]),
+  );
+  const view = await f.read(f.input);
+  expect(mock.staffCalls).toHaveBeenCalledWith(expect.anything(), [id(5)], expect.any(Function));
+  expect(view.items[0]?.staffCall).toEqual({
+    callReference: id(7),
+    reason: "TableNeeds",
+    calledAt: "2026-09-25T11:55:00.000Z",
+  });
+  // Never the participant who called: staff go to the table.
+  expect(JSON.stringify(view.items[0]?.staffCall)).not.toContain(id(8));
+  expect(view.items[1]?.staffCall).toBeNull();
 });

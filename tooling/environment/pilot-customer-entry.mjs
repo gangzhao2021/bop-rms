@@ -99,5 +99,14 @@ export async function createInternalCustomerEntry(
       retentionPolicyVersion: 1,
       newReference: resources.credentials.reference,
     },
+    // WP-2423 Q28 DEC-DINING-STAFF-CALL: a seated guest asks staff to come to the table, bound to
+    // the same Guest Session binding as the invitation.
+    diningStaffCall: {
+      tenantReference: owner.scope.tenantReference,
+      transactions: resources.transactions,
+      binding: (tx) => binding({ run: (work) => work(tx) }),
+      hashIntent: owner.credentials.hashOperationIntent,
+      newReference: resources.credentials.reference,
+    },
   };
 }

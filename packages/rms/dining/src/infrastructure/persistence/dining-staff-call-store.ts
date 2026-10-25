@@ -433,11 +433,11 @@ export function createPostgresDiningStaffCallStore(
     async listOpen(
       tx: DiningTableTransaction,
       sessions: readonly string[],
-      authorize: () => Promise<void> | void,
+      authorize: () => Promise<boolean> | boolean,
     ): Promise<ReadonlyMap<string, DiningStaffCall>> {
       if (sessions.length > 500) return fail();
       const references = sessions.map((session) => parseDiningReference(session));
-      await authorize();
+      await staffAllowed(authorize);
       if (references.length === 0) return new Map();
       await context(tx);
       const found = rows(
@@ -447,7 +447,7 @@ export function createPostgresDiningStaffCallStore(
         ),
         501,
       ).map(call);
-      await authorize();
+      await staffAllowed(authorize);
       const open = new Map<string, DiningStaffCall>();
       for (const entry of found) {
         if (open.has(entry.diningSessionReference)) return fail();
@@ -459,9 +459,9 @@ export function createPostgresDiningStaffCallStore(
     /** Staff: how many open calls at this Store's Active Sessions (navigation count). */
     async countOpen(
       tx: DiningTableTransaction,
-      authorize: () => Promise<void> | void,
+      authorize: () => Promise<boolean> | boolean,
     ): Promise<number> {
-      await authorize();
+      await staffAllowed(authorize);
       await context(tx);
       const row = rows(
         await tx.query(
@@ -469,7 +469,7 @@ export function createPostgresDiningStaffCallStore(
           [tenant, brand, store],
         ),
       )[0];
-      await authorize();
+      await staffAllowed(authorize);
       const open = row?.open;
       return typeof open === "number" && Number.isSafeInteger(open) && open >= 0 ? open : fail();
     },
@@ -478,11 +478,11 @@ export function createPostgresDiningStaffCallStore(
     async answer(
       tx: DiningTableTransaction,
       value: unknown,
-      authorize: () => Promise<void> | void,
+      authorize: () => Promise<boolean> | boolean,
     ): Promise<DiningStaffCallCloseResult> {
       const command = parseDiningStaffCallAnswerCommand(value);
       const intent = parseDiningHash(options.hashIntent(diningStaffCallAnswerIntent(command)));
-      await authorize();
+      await staffAllowed(authorize);
       await context(tx);
       const result = await closeCall(tx, {
         callReference: command.callReference,
@@ -494,7 +494,7 @@ export function createPostgresDiningStaffCallStore(
         at: command.observedAt,
         session: null,
       });
-      await authorize();
+      await staffAllowed(authorize);
       return result;
     },
   });
@@ -505,4 +505,10 @@ function refused(
   retryAt: DiningInstant | null,
 ): DiningStaffCallResult {
   return Object.freeze({ status: "Refused" as const, reason, retryAt });
+}
+
+/** The merchant guard answers true only while the authorized run is in progress. */
+async function staffAllowed(authorize: () => Promise<boolean> | boolean): Promise<void> {
+  if ((await authorize()) !== true)
+    throw new DiningSessionError("DINING_SESSION_PERMISSION_DENIED");
 }

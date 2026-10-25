@@ -1,5 +1,9 @@
 /** Merchant BFF public contract: the workspace snapshot, navigation, Session service and router options. */
 import type {
+  createMerchantDiningStaffCallAnswer,
+  createMerchantDiningStaffCallCount,
+} from "./merchant-dining-staff-calls.js";
+import type {
   AuthenticationSession,
   BrowserCookieMutation,
   RawBrowserCredential,
@@ -545,6 +549,9 @@ export interface MerchantBffRouterOptions {
   /** WP-2423: "Serve all ready items" for a round or a table (one serve command per line). */
   readonly diningServeReady?: ReturnType<typeof createMerchantDiningServeReadyCommand>;
   readonly diningTables?: ReturnType<typeof createMerchantDiningTables>;
+  /** WP-2423 Q28: guests waiting for staff (navigation count) and answering a call. */
+  readonly diningStaffCallCount?: ReturnType<typeof createMerchantDiningStaffCallCount>;
+  readonly diningStaffCallAnswer?: ReturnType<typeof createMerchantDiningStaffCallAnswer>;
   readonly diningTableCommand?: ReturnType<typeof createMerchantDiningTableCommand>;
   /** WP-2423 Q11: table QR codes (DIN-TABLE-LIST). */
   readonly diningTableQr?: ReturnType<typeof createMerchantDiningTableQr>;

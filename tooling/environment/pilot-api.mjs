@@ -74,6 +74,7 @@ export async function createRuntime(
       ...diningCart,
       diningAdmission: configuredEntry.diningAdmission,
       diningInvitation: configuredEntry.diningInvitation,
+      diningStaffCall: configuredEntry.diningStaffCall,
       pickupCode: {
         readiness: ready.storeOptions,
         proof: proof.storeOptions,

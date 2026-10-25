@@ -34,6 +34,11 @@ import {
   createCustomerDiningInvitation,
   type CustomerDiningInvitationOptions,
 } from "./customer-dining-invitation.js";
+import {
+  CustomerDiningStaffCallHandler,
+  createCustomerDiningStaffCall,
+  type CustomerDiningStaffCallOptions,
+} from "./customer-dining-staff-call.js";
 import { CustomerDiningBindingHandler } from "./customer-dining-binding.js";
 import {
   createCustomerDiningJoinComposition,
@@ -167,6 +172,13 @@ export interface LocalCustomerRuntimeOptions {
     CustomerDiningInvitationOptions,
     "scope" | "credentials" | "now"
   > & { readonly tenantReference: string };
+  /** WP-2423 Q28 DEC-DINING-STAFF-CALL: a seated guest asks staff to come to the table. */
+  readonly diningStaffCall?: Omit<
+    CustomerDiningStaffCallOptions,
+    "scope" | "credentials" | "now"
+  > & {
+    readonly tenantReference: string;
+  };
   readonly scope: Readonly<{ brandReference: string; storeReference: string }>;
   readonly entry: {
     readonly session: Omit<CustomerEntryCompositionOptions["session"], "store">;
@@ -505,6 +517,21 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
             }),
           });
         })();
+  const customerDiningStaffCall =
+    options.diningStaffCall === undefined
+      ? undefined
+      : (() => {
+          const { tenantReference, ...staffCall } = options.diningStaffCall;
+          return new CustomerDiningStaffCallHandler({
+            allowedOrigin: options.allowedOrigin,
+            port: createCustomerDiningStaffCall({
+              ...staffCall,
+              scope: { tenantReference, ...scope },
+              credentials: entry.session.credentials,
+              now,
+            }),
+          });
+        })();
   const payment = options.payment;
   const paymentAccess =
     payment === undefined
@@ -682,6 +709,7 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
     ...(customerDiningJoin === undefined ? {} : { customerDiningJoin }),
     ...(customerDiningBinding === undefined ? {} : { customerDiningBinding }),
     ...(customerDiningInvitation === undefined ? {} : { customerDiningInvitation }),
+    ...(customerDiningStaffCall === undefined ? {} : { customerDiningStaffCall }),
     ...(configuredQuote !== undefined
       ? {
           customerQuote: new CustomerQuoteHandler({

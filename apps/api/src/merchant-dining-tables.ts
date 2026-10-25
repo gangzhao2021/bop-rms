@@ -21,6 +21,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
+import { merchantDiningStaffCallStore } from "./merchant-dining-staff-calls.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 /** The Tables page's own permission first, then the actions it offers. */
 const tableCloseActions = ["dining.session.close", "order.close", "dining.item.serve"] as const;
@@ -272,6 +273,16 @@ export function createMerchantDiningTables(options: {
                 activeReferences,
               )
             : new Map<string, string>();
+          // WP-2423 Q28 DEC-DINING-STAFF-CALL: the open call of each open session (one read).
+          const staffCalls = await merchantDiningStaffCallStore(tx, {
+            tenantReference: String(current.selected.tenantReference),
+            brandReference: String(current.context.brand.brandReference),
+            storeReference: String(current.store.storeReference),
+          }).listOpen(
+            tx,
+            activeReferences.map((reference) => String(reference)),
+            async () => authorize(),
+          );
           const codeUntil = (table: (typeof page.items)[number]) => {
             const issue = codes.get(table.tableReference);
             return table.qrStatus === "Active" && issue?.qrVersion === table.qrVersion
@@ -299,6 +310,19 @@ export function createMerchantDiningTables(options: {
                       ? null
                       : (elapsedMinutes.get(table.activeDiningSessionReference) ?? null),
                   qrCodeValidUntil: codeUntil(table),
+                  staffCall: (() => {
+                    const call =
+                      table.activeDiningSessionReference === null
+                        ? undefined
+                        : staffCalls.get(String(table.activeDiningSessionReference));
+                    return call === undefined
+                      ? null
+                      : Object.freeze({
+                          callReference: String(call.callReference),
+                          reason: call.reason,
+                          calledAt: String(call.calledAt),
+                        });
+                  })(),
                   session:
                     table.activeDiningSessionReference === null
                       ? null

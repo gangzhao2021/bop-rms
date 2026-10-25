@@ -294,6 +294,50 @@ export function installMerchantDiningRoutes(
       .catch(() => denied(response));
   });
 
+  // WP-2423 Q28 DEC-DINING-STAFF-CALL: how many guests wait for staff, and answering one call.
+  router.post("/dining/staff-calls/count", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningStaffCallCount) {
+      response.status(503).json({ error: "dining_staff_calls_unavailable" });
+      return;
+    }
+    void options
+      .diningStaffCallCount({ sessionCookie, csrf })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch(() => denied(response));
+  });
+  router.post("/dining/staff-calls/answer", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningStaffCallAnswer) {
+      response.status(503).json({ error: "dining_staff_calls_unavailable" });
+      return;
+    }
+    void options
+      .diningStaffCallAnswer({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch(() => denied(response));
+  });
+
   router.post("/dining/tables/availability", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
       csrf = exactHeader(request, "x-bop-csrf");

@@ -74,6 +74,7 @@ function dependencies() {
         entry: port("entry"),
         diningAdmission: port("diningAdmission"),
         diningInvitation: port("diningInvitation"),
+        diningStaffCall: port("diningStaffCall"),
         binding: port("binding"),
       }),
       createInternalTestItems: async () => ({ catalogCartItems }),

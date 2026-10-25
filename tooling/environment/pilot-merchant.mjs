@@ -32,6 +32,10 @@ import { createMerchantDiningJoinRegenerate } from "../../apps/api/dist/merchant
 import { createMerchantDiningSessionStart } from "../../apps/api/dist/merchant-dining-session-start.js";
 import { createMerchantDiningTableCommand } from "../../apps/api/dist/merchant-dining-table-command.js";
 import { createMerchantDiningTables } from "../../apps/api/dist/merchant-dining-tables.js";
+import {
+  createMerchantDiningStaffCallAnswer,
+  createMerchantDiningStaffCallCount,
+} from "../../apps/api/dist/merchant-dining-staff-calls.js";
 import { createMerchantDiningClosingCommand } from "../../apps/api/dist/merchant-dining-closing-command.js";
 import { createMerchantDiningTableClosePlan } from "../../apps/api/dist/merchant-dining-table-close-plan.js";
 import { createMerchantDiningOrderCloseCommand } from "../../apps/api/dist/merchant-dining-order-close-command.js";
@@ -1115,6 +1119,15 @@ export async function createInternalMerchant(
     authentication: service,
     tableAvailabilityCommandEnabled: true,
   });
+  // WP-2423 Q28 DEC-DINING-STAFF-CALL: guests waiting for staff, and answering a call.
+  const diningStaffCallCount = createMerchantDiningStaffCallCount({
+    persistence,
+    authentication: service,
+  });
+  const diningStaffCallAnswer = createMerchantDiningStaffCallAnswer({
+    persistence,
+    authentication: service,
+  });
   // DEC-TABLE-CLOSE-GUESTS-LEFT: the close dialog's per-round plan (Owner, Store Manager).
   const diningTableClosePlan = createMerchantDiningTableClosePlan({
     persistence,
@@ -1539,6 +1552,8 @@ export async function createInternalMerchant(
       taskInbox,
       diningServe,
       diningServeReady,
+      diningStaffCallCount,
+      diningStaffCallAnswer,
       diningOrderProgress,
       diningTableClosePlan,
       diningItemService,
