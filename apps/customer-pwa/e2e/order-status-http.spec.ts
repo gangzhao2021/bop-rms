@@ -371,7 +371,8 @@ test.describe("@production order status HTTP continuity", () => {
     await expect(main.getByRole("link", { name: "Back to menu" })).toBeVisible();
     await expect(main).not.toContainText("Synthetic tea");
     const card = main.locator(".order-status__unavailable");
-    await expect(card).toHaveCSS("background-color", "rgb(255, 255, 255)");
+    // Owner 2026-10-25 "fewer lines": a grey panel instead of an outlined white card.
+    await expect(card).toHaveCSS("background-color", "rgb(245, 245, 245)");
 
     for (const viewport of [
       { width: 1440, height: 900 },

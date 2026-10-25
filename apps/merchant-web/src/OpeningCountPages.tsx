@@ -187,7 +187,7 @@ function Editor({
               <tr
                 key={line.lineReference}
                 aria-invalid={flagged}
-                style={flagged ? { outline: "2px solid #b42318" } : undefined}
+                style={flagged ? { outline: "2px solid var(--bop-color-danger)" } : undefined}
               >
                 <td>
                   {draft ? (

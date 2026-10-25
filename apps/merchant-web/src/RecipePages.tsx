@@ -419,7 +419,7 @@ function DraftForm({
           <fieldset
             key={item.key}
             aria-invalid={flagged}
-            style={flagged ? { outline: "2px solid #b42318" } : undefined}
+            style={flagged ? { outline: "2px solid var(--bop-color-danger)" } : undefined}
           >
             <legend>{t("Ingredient {value}", { value: index + 1 })}</legend>
             <label>

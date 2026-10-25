@@ -142,8 +142,9 @@ test.describe("@demo local-only Customer preview", () => {
       });
       expect(layout.background).toBe("rgb(255, 255, 255)");
       expect(layout.header).toBe("rgb(255, 255, 255)");
-      expect(layout.item).toBe("rgb(255, 255, 255)");
-      expect(layout.summary).toBe("rgb(255, 255, 255)");
+      // Owner 2026-10-25 "fewer lines": cart lines and the summary are grey panels on the white page.
+      expect(layout.item).toBe("rgb(245, 245, 245)");
+      expect(layout.summary).toBe("rgb(245, 245, 245)");
       expect(layout.columns).toBe(width >= 768 ? 2 : 1);
       const navigationUsesOneRow = await page.locator(".bop-shell__nav").evaluate((element) => {
         const rows = [...element.children].map((child) => child.getBoundingClientRect().y);

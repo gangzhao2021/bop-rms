@@ -192,7 +192,7 @@
   .pickup-queue__card
   > .card-actions
   > button:first-child:not(.pickup-handoff__no-code):hover:not(:disabled) {
-  background: #000000;
+  background: var(--bop-color-brand-primary);
 }
 .workspace-page
   .pickup-queue__card

@@ -414,7 +414,7 @@
   width: 100%;
   min-height: 44px;
   padding: var(--bop-space-2) var(--bop-space-3);
-  border: 1px solid #c8c8c8;
+  border: 1px solid var(--bop-color-border-default);
   border-radius: var(--bop-radius-control);
   font: inherit;
 }
@@ -904,7 +904,7 @@
 .menu-search select {
   min-height: 44px;
   padding: 0 var(--bop-space-3);
-  border: 1px solid #c8c8c8;
+  border: 1px solid var(--bop-color-border-default);
   border-radius: var(--bop-radius-control);
   font: inherit;
 }
@@ -1211,7 +1211,7 @@
 }
 .customer-page .configure-stepper button:disabled {
   border: 0;
-  color: #b0b0b0;
+  color: var(--bop-color-text-muted);
   background: transparent;
 }
 .sellable-configurator .configure-stepper input[type="number"] {
@@ -1510,7 +1510,7 @@
   min-height: 44px;
   width: 100%;
   padding: 0 var(--bop-space-3);
-  border: 1px solid #c8c8c8;
+  border: 1px solid var(--bop-color-border-default);
   border-radius: var(--bop-radius-control);
   font: inherit;
   font-size: 1rem;
@@ -1585,7 +1585,7 @@
   min-height: 44px;
   margin-top: var(--bop-space-1);
   padding: 0 var(--bop-space-3);
-  border: 1px solid #c8c8c8;
+  border: 1px solid var(--bop-color-border-default);
   border-radius: var(--bop-radius-control);
   font: inherit;
   font-size: 1rem;
@@ -2721,4 +2721,188 @@
   margin-top: var(--bop-space-3);
   color: var(--bop-color-danger);
   font-weight: 600;
+}
+
+/* ---------- Owner 2026-10-25 "fewer lines" ---------- */
+/*
+ * Areas are told apart by space and fill, not by rules and boxes. The hairline token is clear on
+ * the customer pages, so dividers and card outlines drop out; cards read as soft grey panels;
+ * secondary buttons and fields are filled shapes (white inside a grey panel); notices lose their
+ * side bar. Borders stay only where they mean something: the chosen option row, a field with an
+ * error, and focus rings.
+ */
+:root {
+  --bop-color-border-default: transparent;
+  --customer-control-fill: var(--bop-color-surface-raised);
+}
+.customer-page .cart-item,
+.customer-page .cart-summary,
+.customer-page .cart-state,
+.customer-page .checkout-attention,
+.customer-page .entry-card,
+.customer-page .entry-help,
+.customer-page .store-identity,
+.customer-page .menu-state,
+.customer-page .menu-help,
+.customer-page .order-status__unavailable,
+.customer-page .order-status__warning,
+.customer-page .payment-page__amount,
+.customer-page .payment-page__unavailable,
+.customer-page .payment-result-page__card,
+.customer-page .receipt-page__content > section,
+.customer-page .receipt-page__version,
+.customer-page .store-contact,
+.customer-page .dining-admission,
+.customer-page .bop-state-card {
+  --customer-control-fill: var(--bop-color-surface-canvas);
+  border: 0;
+  background: var(--bop-color-surface-raised);
+}
+/* Notices: no side bar; the panel and the words carry them. */
+.cart-warning,
+.cart-offline,
+.cart-stale,
+.entry-state--warning,
+.entry-state--error,
+.menu-state--warning,
+.menu-state--error,
+.configure-issues,
+.configure-status,
+.checkout-attention,
+.order-status__warning,
+.cart-state--warning,
+.cart-state--error,
+.customer-page .menu-help {
+  border-inline-start: 0;
+  border-radius: var(--bop-radius-card);
+}
+/* On a grey panel the lighter red is not AA as text, so a danger state is dark words with a red
+   dot; warning text (6:1 on grey) keeps its colour. */
+.menu-state--error h2::before,
+.entry-state--error h2::before,
+.cart-state--error h2::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: var(--bop-space-2);
+  border-radius: 50%;
+  background: var(--bop-color-danger);
+  vertical-align: 0.1em;
+}
+.menu-state--warning h2,
+.entry-state--warning h2,
+.cart-state--warning h2,
+.order-status__warning h2 {
+  color: var(--bop-color-warning);
+}
+/* Secondary buttons and fields: filled, no outline. */
+.customer-page
+  :is(
+    .language-switch,
+    .entry-secondary-action,
+    .checkout-details-form__save,
+    .receipt-page__toolbar button,
+    .order-status__actions button,
+    .payment-retry__secondary,
+    .pwa-update button,
+    .menu-search-primary button,
+    .cart-item__actions button,
+    .cart-state button,
+    .checkout-continue > button:not(.checkout-continue__button),
+    .checkout-details-form button:not(.checkout-details-form__reload),
+    .checkout-attention button,
+    .checkout-totals button,
+    .checkout-tip__choices button:not([aria-pressed="true"]),
+    .dining-invitation__action--secondary,
+    .pickup-code button,
+    .receipt-page__actions button,
+    .configure-stepper
+  ),
+.customer-page :is(input:not([type="checkbox"], [type="radio"]), select, textarea) {
+  border-color: transparent;
+  background: var(--customer-control-fill);
+}
+.customer-page .configure-stepper button,
+.customer-page .configure-stepper input[type="number"] {
+  background: transparent;
+}
+.customer-page :is(input, select, textarea):focus {
+  border-color: var(--bop-color-text-default);
+}
+.customer-page :is(input, select, textarea)[aria-invalid="true"] {
+  border-color: var(--bop-color-danger);
+}
+/* Tags: words only. */
+.menu-badge {
+  padding: 0;
+  border: 0;
+  color: var(--bop-color-text-muted);
+}
+/* A payment result's state: dark words after a dot in the tone (tone colours are AA as text on
+   white only, and this sits on a grey panel). */
+.customer-page .payment-result-page__badge,
+.customer-page .payment-result-page__badge[data-tone] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bop-space-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+}
+.payment-result-page__badge::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-text-muted);
+}
+.payment-result-page__badge[data-tone="success"]::before {
+  background: var(--bop-color-success);
+}
+.payment-result-page__badge[data-tone="danger"]::before {
+  background: var(--bop-color-danger);
+}
+.payment-result-page__badge[data-tone="warning"]::before {
+  background: var(--bop-color-warning);
+}
+/* Choice rows: grey until chosen; the chosen row is white with a 1.5 px outline. */
+.configure-option {
+  border-color: transparent;
+  background: var(--bop-color-surface-raised);
+}
+.configure-option:has(input:checked) {
+  padding: 0 calc(var(--bop-space-4) - 0.5px);
+  border: 1.5px solid var(--bop-color-text-default);
+  background: var(--bop-color-surface-canvas);
+}
+/* Menu, checkout and order pages: space between items instead of rules. */
+.menu-grid {
+  row-gap: var(--bop-space-2);
+}
+.menu-card__link {
+  padding: var(--bop-space-3) 0;
+}
+.cart-summary__total,
+.checkout-totals__total,
+.payment-page__total {
+  border-top: 0;
+}
+.pickup-code__visual {
+  border: 0;
+  background: var(--bop-color-surface-raised);
+}
+.pwa-update {
+  border-bottom: 0;
+}
+/* The order timeline keeps its joining line: it shows the steps belong together. */
+.order-status__step + .order-status__step::after {
+  width: 1px;
+  left: 5.5px;
+  background: var(--bop-color-text-muted);
+}
+/* Steps not reached yet: a grey disc instead of a ring. */
+.checkout-progress li:not([aria-current="step"])::before {
+  background: var(--bop-color-surface-raised);
 }

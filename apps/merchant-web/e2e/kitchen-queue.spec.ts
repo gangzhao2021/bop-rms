@@ -849,11 +849,12 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
   await expect(page.locator(".kitchen-work-item")).toHaveCount(5);
   const card = (name: string) => page.locator(".kitchen-work-item").filter({ hasText: name });
   const expectations = [
-    ["Synthetic queued", "Queued", "1 min", "ok", "rgb(23, 23, 23)"],
+    // Owner 2026-10-25 "fewer lines": only waiting too long draws an edge, in its tone.
+    ["Synthetic queued", "Queued", "1 min", "ok", "rgba(0, 0, 0, 0)"],
     ["Synthetic in progress", "In progress", "9 min", "warning", "rgb(138, 90, 0)"],
-    ["Synthetic held", "Held", "20 min", "late", "rgb(180, 35, 24)"],
-    ["Synthetic completed", "Completed", "30 min", "late", "rgb(229, 229, 229)"],
-    ["Synthetic cancelled", "Cancelled", "Done", "ok", "rgb(229, 229, 229)"],
+    ["Synthetic held", "Held", "20 min", "late", "rgb(220, 53, 69)"],
+    ["Synthetic completed", "Completed", "30 min", "late", "rgba(0, 0, 0, 0)"],
+    ["Synthetic cancelled", "Cancelled", "Done", "ok", "rgba(0, 0, 0, 0)"],
   ] as const;
   for (const [width, height] of [
     [1440, 900],
@@ -869,10 +870,11 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
       // Finished work drops out of the waiting-time tiers; open work carries them on its edge.
       await expect(current).toHaveCSS("border-left-color", edge);
     }
-    // The active state is the one filled chip; every chip still carries its label.
+    // The active state is the one coloured tag (no box, Owner 2026-10-25); every tag carries its
+    // label.
     const active = card("Synthetic in progress").locator(".kitchen-work-item__state strong");
-    await expect(active).toHaveCSS("background-color", "rgb(23, 23, 23)");
-    await expect(active).toHaveCSS("color", "rgb(255, 255, 255)");
+    await expect(active).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(active).toHaveCSS("color", "rgb(29, 78, 216)");
     await expectNoHorizontalOverflow(page);
     await page.screenshot({
       path: `test-results/kitchen-status-tiers-${width}.png`,

@@ -1,0 +1,186 @@
+/*
+ * Owner 2026-10-25 "fewer lines" (条条框框太生硬): areas are told apart by space and fill, not by
+ * boxes and rules. Loaded last. Two token moves do most of it, so every older rule follows:
+ * - the line tokens are transparent in the back office, so hairlines, outlines and box borders
+ *   drop out; the few borders that carry meaning are drawn below with their own colours;
+ * - a white control (button, field) takes the raised fill instead, so secondary buttons and
+ *   inputs read as filled grey shapes without an outline.
+ * The page itself is the raised grey; cards, lists and panels are white on it.
+ */
+:root {
+  --bop-color-border-default: transparent;
+  --bop-color-border-strong: transparent;
+}
+.workspace-layout,
+.workspace-content,
+.workspace-content .bop-shell,
+.workspace-page.bop-shell__main {
+  background: var(--bop-color-surface-raised);
+}
+.workspace-sidebar {
+  border-right: 0;
+  background: var(--bop-color-surface-raised);
+}
+
+/* Cards, lists and panels: white on the grey page. */
+.workspace-content
+  :is(
+    .store-card,
+    .overview-card,
+    .list-filters,
+    .detail-section,
+    .refund-approval-card,
+    .dining-session-detail,
+    .dining-table-tile,
+    .pickup-queue__card,
+    .order-workbench-item,
+    .kitchen-ticket,
+    .bop-state-card
+  ),
+.workspace-content
+  :is(.menu-builder-section, .product-editor-page form > fieldset, .product-customer-menu) {
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+.workspace-page .list-filters {
+  padding: var(--bop-space-4);
+}
+/* "Right now" is a row of white tiles on the page, not a card around them. */
+.workspace-page.workspace-page .overview-card--today {
+  padding: 0;
+  background: none;
+}
+.workspace-page .overview-card--today .overview-counts li,
+.workspace-page .store-reports__totals li {
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+/* Order rows: a white row each, with space between instead of rules. */
+.orders-page .order-workbench-item {
+  margin-bottom: var(--bop-space-2);
+  overflow: hidden;
+}
+.orders-page .order-workbench-entry[open] > summary,
+.orders-page .order-workbench-entry > summary:hover {
+  background: var(--bop-color-surface-default);
+}
+
+/* Controls: a white control becomes a filled grey one; on the grey page itself (page header
+   actions) it stays white so it still reads as a control. */
+.workspace-content :is(button, input:not([type="checkbox"], [type="radio"]), select, textarea) {
+  --bop-color-surface-default: var(--bop-color-surface-raised);
+}
+.workspace-page__header :is(button, input, select),
+.workspace-content .screen-heading :is(button, input, select),
+.workspace-content .kitchen-board-filters :is(button, input, select),
+.orders-page .order-status-filters button,
+.workspace-content
+  :is(.dining-floor-filters, .kitchen-board-filters, .kitchen-reference-search)
+  :is(input, select, button) {
+  --bop-color-surface-default: var(--bop-color-surface-canvas);
+}
+.workspace-page.workspace-page .dining-floor-filters :is(input, select),
+.workspace-content
+  :is(.kitchen-board-filters, .kitchen-reference-search)
+  :is(input, select, button) {
+  border-color: transparent;
+  background: var(--bop-color-surface-canvas);
+}
+.workspace-page__header button:not(:disabled, [type="submit"]),
+.workspace-page__header select,
+.workspace-page .overview-card--today > header button,
+.workspace-layout > :not(.workspace-content) button:not([aria-current]),
+.orders-page .order-status-filters button:not([aria-pressed="true"]) {
+  background: var(--bop-color-surface-canvas);
+}
+.workspace-content :is(input, select, textarea)[aria-invalid="true"] {
+  border: 1px solid var(--bop-color-danger);
+}
+.workspace-page .overview-attention__action {
+  background: var(--bop-color-surface-raised);
+}
+
+/* Status tags: words in the tone colour with a small dot; no box. */
+.orders-page .order-workbench-phase {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.overview-attention__state {
+  padding: 0;
+  border: 0;
+}
+.kitchen-work-item__state strong,
+.kitchen-work-item__state strong[data-status="In Progress"] {
+  padding: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+}
+.kitchen-work-item__state strong::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-inline-end: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.kitchen-work-item__state strong[data-status="In Progress"] {
+  color: var(--bop-color-info);
+}
+
+/* Notices: no coloured side bar; a rounded fill, the tone carried by the words. */
+:is(
+  .command-error,
+  .stale-warning,
+  .recipe-source-notice,
+  .kitchen-work-item__note,
+  .store-setup-draft-page [role="alert"],
+  .staff-session__notice,
+  .refund-deadline-warning,
+  .pickup-queue__remake,
+  .pickup-queue__locked,
+  .pickup-queue__handed-over,
+  .kitchen-close-dialog__money,
+  .staff-switch__message,
+  .staff-pin__notice,
+  .staff-pin__verify,
+  .store-devices__verify,
+  .full-sign-in-prompt,
+  .counter-order__ticket [role="alert"],
+  .kitchen-screen-awake,
+  .kitchen-sound-reminder,
+  .orders-page .order-queue-awaiting,
+  .orders-page .order-queue-stale,
+  .orders-page .order-queue-released,
+  .workspace-page .settlement__difference-help,
+  .workspace-page .settlement__unmatched
+) {
+  border: 0;
+  border-radius: var(--bop-radius-card);
+}
+.workspace-page
+  :is(.overview-card--alerts-critical, .overview-card--alerts-warning, .own-name-prompt--required) {
+  border: 0;
+}
+.workspace-page .overview-card--alerts-critical header h3 {
+  color: var(--bop-color-danger);
+}
+.workspace-page .overview-card--alerts-warning header h3,
+.kitchen-sound-reminder,
+.orders-page .order-queue-awaiting,
+.orders-page .order-queue-stale {
+  color: var(--bop-color-warning);
+}
+.orders-page .order-queue-released {
+  color: var(--bop-color-success);
+}
+
+/* The borders that carry meaning. */
+.workspace-page.dining-floor .dining-table-tile[data-selected="true"] {
+  outline: 2px solid var(--bop-color-text-default);
+  background: var(--bop-color-surface-default);
+}
+.workspace-page.dining-floor .dining-table-tile[data-session="linked"] {
+  box-shadow: none;
+}
