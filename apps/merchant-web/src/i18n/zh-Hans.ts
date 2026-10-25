@@ -921,7 +921,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Closed as not collected.": "已作为未取餐关闭。",
   "Closed days match the day-end settlement. Today is checked against it when the day closes.":
     "已关闭的营业日与日结一致。今天会在营业日结束时与日结核对。",
-  "Closed for business": "已打烊",
   "Closing order…": "正在关闭订单…",
   "Closing out": "结束轮次",
   "Closing out the rounds…": "正在结束各轮次…",
@@ -2278,7 +2277,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "开台时间较长 — 如果顾客已离开，请经理或店主关台。",
   "Open for a long time — if the guests have left, select the table and close it.":
     "开台时间较长 — 如果顾客已离开，请选中桌台并关台。",
-  "Open for business": "营业中",
   "Open it and print at 100% scale.": "打开后按 100% 比例打印。",
   "Open less than a minute": "已开不到一分钟",
   "Open order": "打开订单",

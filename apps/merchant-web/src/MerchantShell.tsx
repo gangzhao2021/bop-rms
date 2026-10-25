@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { currentLanguage, t } from "./i18n/i18n.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import type { ReactNode } from "react";
 import type { MerchantWorkspaceSnapshot } from "./merchant-workspace.js";
@@ -8,6 +8,14 @@ import { FULL_SIGN_IN_REQUIRED } from "./full-sign-in.js";
 import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
+
+/** The Store's status in Chinese ("Open" alone is also an unresolved follow-up's status there). */
+const STORE_STATUS_CHINESE = Object.freeze({
+  Open: "营业中",
+  Closed: "已打烊",
+  Paused: "已暂停",
+  Unavailable: "不可用",
+} as const);
 
 type MerchantShellState =
   | { readonly kind: "Loading" }
@@ -147,13 +155,9 @@ export function MerchantShell({
               <h3 id="live-store-status-heading">{t("Store status")}</h3>
               <p className="overview-status-value">
                 <span>
-                  {ready.workspace.storeStatus === "Open"
-                    ? t("Open for business")
-                    : ready.workspace.storeStatus === "Closed"
-                      ? t("Closed for business")
-                      : ready.workspace.storeStatus === "Paused"
-                        ? t("Paused")
-                        : t("Unavailable")}
+                  {currentLanguage() === "zh-Hans"
+                    ? STORE_STATUS_CHINESE[ready.workspace.storeStatus]
+                    : ready.workspace.storeStatus}
                 </span>
               </p>
               <p className="overview-status-date">
