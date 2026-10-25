@@ -90,10 +90,11 @@ function useOrderFacts(orderReference: string, fetcher?: typeof fetch): OrderFac
             : machine !== null
               ? BigInt(machine.amountMinor)
               : null;
+        // Confirmed refunds only: a refund still pending (this request among them) is not
+        // taken off yet (v15 2026-10-25 showed $0.00 refundable for the request itself).
         const refundedMinor =
           online !== null && detail.paymentPosition !== null
-            ? BigInt(detail.paymentPosition.refundedMinor) +
-              BigInt(detail.paymentPosition.refundPendingMinor)
+            ? BigInt(detail.paymentPosition.refundedMinor)
             : machine !== null
               ? BigInt(machine.refundedMinor)
               : null;

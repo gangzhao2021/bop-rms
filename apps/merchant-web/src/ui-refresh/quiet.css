@@ -248,3 +248,6 @@
     padding-inline: var(--bop-space-4);
   }
 }
+.workspace-page > button:not(:disabled, [type="submit"]) {
+  background: var(--bop-color-surface-canvas);
+}
