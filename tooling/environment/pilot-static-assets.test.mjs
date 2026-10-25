@@ -9,9 +9,12 @@ import { URL } from "node:url";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import {
   createPilotStaticAssets,
+  createResponseCompressor,
+  encodedHeaders,
   IMMUTABLE_CACHE,
   missingPilotAsset,
   preferredEncoding,
+  publicApiEncoding,
 } from "./pilot-static-assets.mjs";
 
 const require = createRequire(new URL("../../apps/api/package.json", import.meta.url));
@@ -135,4 +138,75 @@ test("encoding preference honours refusals", () => {
   expect(preferredEncoding("*")).toBe("br");
   expect(preferredEncoding("identity")).toBeNull();
   expect(preferredEncoding(undefined)).toBeNull();
+});
+
+test("WP-2423 Q30: only large public JSON reads are compressed on the way to the guest", () => {
+  const json = (length, extra = {}) => ({
+    statusCode: 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": String(length),
+      ...extra,
+    },
+  });
+  const menu = "/api/v1/public/stores/0190/menu";
+  expect(publicApiEncoding(menu, "GET", json(98_648), "gzip, br")).toBe("br");
+  expect(publicApiEncoding(menu, "GET", json(98_648), "gzip")).toBe("gzip");
+  expect(publicApiEncoding(menu, "GET", json(98_648), undefined)).toBeNull();
+  // Small, already encoded, not JSON, not 200, not GET, or not public: passed through unchanged.
+  expect(publicApiEncoding(menu, "GET", json(300), "br")).toBeNull();
+  expect(
+    publicApiEncoding(menu, "GET", json(98_648, { "content-encoding": "br" }), "br"),
+  ).toBeNull();
+  expect(
+    publicApiEncoding(
+      menu,
+      "GET",
+      { statusCode: 200, headers: { "content-type": "text/event-stream" } },
+      "br",
+    ),
+  ).toBeNull();
+  expect(publicApiEncoding(menu, "GET", { ...json(98_648), statusCode: 404 }, "br")).toBeNull();
+  expect(publicApiEncoding(menu, "POST", json(98_648), "br")).toBeNull();
+  expect(publicApiEncoding("/api/v1/customer/session/csrf", "GET", json(98_648), "br")).toBeNull();
+  expect(publicApiEncoding("/bff/customer/cart", "GET", json(98_648), "br")).toBeNull();
+  // Unknown length (chunked) is compressed.
+  expect(
+    publicApiEncoding(
+      menu,
+      "GET",
+      { statusCode: 200, headers: { "content-type": "application/json" } },
+      "br",
+    ),
+  ).toBe("br");
+});
+
+test("WP-2423 Q30: a compressed answer drops its length and varies by encoding", async () => {
+  const headers = encodedHeaders(
+    { "content-type": "application/json", "content-length": "98648", vary: "Origin" },
+    "br",
+  );
+  expect(headers).toEqual({
+    "content-type": "application/json",
+    "content-encoding": "br",
+    vary: "Origin, Accept-Encoding",
+  });
+  expect(encodedHeaders({ vary: "accept-encoding" }, "gzip").vary).toBe("accept-encoding");
+  const body = JSON.stringify({
+    items: Array.from({ length: 400 }, (_, i) => ({ name: "Latte " + i })),
+  });
+  for (const [encoding, decode] of [
+    ["br", brotliDecompressSync],
+    ["gzip", gunzipSync],
+  ]) {
+    const compressor = createResponseCompressor(encoding);
+    const chunks = [];
+    compressor.on("data", (chunk) => chunks.push(chunk));
+    const done = new Promise((resolve) => compressor.on("end", resolve));
+    compressor.end(body);
+    await done;
+    const sent = Buffer.concat(chunks);
+    expect(decode(sent).toString()).toBe(body);
+    expect(sent.length).toBeLessThan(body.length / 5);
+  }
 });

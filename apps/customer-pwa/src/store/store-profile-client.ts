@@ -138,10 +138,18 @@ export function parseStoreProfile(value: unknown): StoreProfile {
   });
 }
 
+/**
+ * WP-2423 Q30: one page shows the Store's name and its hours from two components; both share one
+ * read made within a few seconds, so a guest on a slow network waits for one round trip, not two.
+ */
+export const STORE_PROFILE_SHARE_MS = 5_000;
+
 export function createStoreProfileClient(
   request: typeof globalThis.fetch = globalThis.fetch,
+  now: () => number = Date.now,
 ): StoreProfileLoader {
-  return async () => {
+  let shared: { readonly at: number; readonly read: Promise<StoreProfile | null> } | null = null;
+  const read = async (): Promise<StoreProfile | null> => {
     try {
       const response = await boundedFetch(request, "/api/v1/customer/store", {
         method: "GET",
@@ -155,6 +163,11 @@ export function createStoreProfileClient(
     } catch {
       return null;
     }
+  };
+  return () => {
+    const at = now();
+    if (shared === null || at - shared.at >= STORE_PROFILE_SHARE_MS) shared = { at, read: read() };
+    return shared.read;
   };
 }
 

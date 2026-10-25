@@ -2,7 +2,7 @@ import { stat, readFile } from "node:fs/promises";
 import { URL } from "node:url";
 import { extname, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import { brotliCompress, constants, gzip } from "node:zlib";
+import { brotliCompress, constants, createBrotliCompress, createGzip, gzip } from "node:zlib";
 
 const brotli = promisify(brotliCompress),
   gzipAsync = promisify(gzip);
@@ -105,4 +105,47 @@ export function createPilotStaticAssets(root) {
 /** A missing build file is a 404, never the app page (a script must not receive HTML). */
 export function missingPilotAsset(_req, res) {
   res.status(404).set("Cache-Control", "no-store").end();
+}
+
+/**
+ * WP-2423 Q30: the public menu answer is the largest thing a guest downloads after the app (about
+ * 100 KB of JSON for a small menu) and was sent uncompressed through the pilot entry. Only public
+ * reads (`/api/v1/public/`, no tokens, no personal data, so compression cannot leak a secret next
+ * to reflected input) of a JSON body the API sent without an encoding are compressed, on the fly.
+ * Returns the encoding to use, or null to pass the answer through unchanged.
+ */
+export function publicApiEncoding(path, method, upstream, acceptEncoding) {
+  if (method !== "GET" || !String(path).startsWith("/api/v1/public/")) return null;
+  const headers = upstream.headers ?? {};
+  if (upstream.statusCode !== 200 || headers["content-encoding"] !== undefined) return null;
+  if (!/^application\/json\b/iu.test(String(headers["content-type"] ?? ""))) return null;
+  const length = Number(headers["content-length"] ?? Number.NaN);
+  if (Number.isFinite(length) && length < 1024) return null;
+  return preferredEncoding(acceptEncoding);
+}
+
+/** The upstream headers for a body re-sent with `encoding` (length unknown until it is sent). */
+export function encodedHeaders(headers, encoding) {
+  const next = { ...headers };
+  delete next["content-length"];
+  next["content-encoding"] = encoding;
+  const vary = String(next.vary ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part !== "");
+  if (!vary.some((part) => part.toLowerCase() === "accept-encoding")) vary.push("Accept-Encoding");
+  next.vary = vary.join(", ");
+  return next;
+}
+
+/** A streaming compressor for `encoding`, tuned for answers built per request. */
+export function createResponseCompressor(encoding) {
+  return encoding === "br"
+    ? createBrotliCompress({
+        params: {
+          [constants.BROTLI_PARAM_MODE]: constants.BROTLI_MODE_TEXT,
+          [constants.BROTLI_PARAM_QUALITY]: 5,
+        },
+      })
+    : createGzip({ level: 6 });
 }

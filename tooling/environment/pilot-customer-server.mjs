@@ -16,7 +16,13 @@ import { request } from "node:http";
 import { readFile, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
-import { createPilotStaticAssets, missingPilotAsset } from "./pilot-static-assets.mjs";
+import {
+  createPilotStaticAssets,
+  createResponseCompressor,
+  encodedHeaders,
+  missingPilotAsset,
+  publicApiEncoding,
+} from "./pilot-static-assets.mjs";
 import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
 import { isInternalTest, isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 const require = createRequire(new URL("../../apps/api/package.json", import.meta.url));
@@ -246,8 +252,22 @@ export async function startInternalCustomerServer({
           headers: { ...req.headers, host, connection: "close" },
         },
         (response) => {
-          res.writeHead(response.statusCode ?? 502, response.headers);
-          response.pipe(res);
+          // WP-2423 Q30: the public menu answer is sent compressed when the browser accepts it.
+          const encoding = publicApiEncoding(
+            req.path,
+            req.method,
+            response,
+            req.headers["accept-encoding"],
+          );
+          if (encoding === null) {
+            res.writeHead(response.statusCode ?? 502, response.headers);
+            response.pipe(res);
+          } else {
+            res.writeHead(response.statusCode ?? 502, encodedHeaders(response.headers, encoding));
+            const compressor = createResponseCompressor(encoding);
+            compressor.on("error", () => res.destroy());
+            response.pipe(compressor).pipe(res);
+          }
           response.on("error", () => res.destroy());
         },
       );

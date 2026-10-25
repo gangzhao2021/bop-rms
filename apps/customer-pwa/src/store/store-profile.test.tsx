@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
   createStoreProfileClient,
+  STORE_PROFILE_SHARE_MS,
   parseStoreProfile,
   storeDirectionsUrl,
   type StoreProfile,
@@ -63,6 +64,18 @@ describe("WP-2423 store profile client", () => {
     expect(await createStoreProfileClient(failing)()).toBeNull();
     const malformed = vi.fn(async () => new Response("not json", { status: 200 }));
     expect(await createStoreProfileClient(malformed)()).toBeNull();
+  });
+
+  it("WP-2423 Q30: shares one read between the parts of a page, and reads again later", async () => {
+    let clock = 1_000;
+    const fetch = vi.fn(async () => new Response(JSON.stringify(body()), { status: 200 }));
+    const load = createStoreProfileClient(fetch, () => clock);
+    const [first, second] = await Promise.all([load(), load()]);
+    expect(first).toBe(second);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    clock += STORE_PROFILE_SHARE_MS;
+    await load();
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it("links directions to a map search for the published address", () => {
