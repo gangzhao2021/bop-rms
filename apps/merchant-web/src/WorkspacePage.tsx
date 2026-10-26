@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { LanguageSwitch } from "./i18n/i18n.js";
 
 /**
  * WP-2423 M1: one page frame for every back-office page inside the workspace layout: a title,
@@ -38,6 +39,8 @@ export function WorkspacePage({
             {actions ? <div className="workspace-page__actions">{actions}</div> : null}
           </div>
         ) : null}
+        {/* Owner 2026-10-26: the language switch ends the title row, top right of the page. */}
+        <LanguageSwitch className="workspace-page__language" />
       </header>
       {children}
     </main>

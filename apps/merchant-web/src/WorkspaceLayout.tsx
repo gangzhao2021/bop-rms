@@ -385,7 +385,7 @@ export function WorkspaceLayout({
           </p>
           <p className="workspace-sidebar__store">{storeLabel}</p>
         </div>
-        {/* Owner 2026-10-25: always in view beside the Store name, on every width. */}
+        {/* Owner 2026-10-26: on a phone, top right in the bar beside Menu (never inside it). */}
         <LanguageSwitch className="workspace-sidebar__language" />
         <div className="workspace-sidebar__links">{links("sidebar")}</div>
         <details
@@ -420,6 +420,11 @@ export function WorkspaceLayout({
         {footer === null ? null : <div className="workspace-sidebar__footer">{footer}</div>}
       </nav>
       <div className="workspace-content" inert={drawerOpen}>
+        {/* Owner 2026-10-26 ("语言切换的位置就很反常理"): top right of every page, on the page's
+            title row, where people look for it. */}
+        <div className="workspace-topbar">
+          <LanguageSwitch className="workspace-topbar__language" />
+        </div>
         <SkipLinkProvidedContext.Provider value={true}>
           <WorkspaceFrameContext.Provider value={true}>{children}</WorkspaceFrameContext.Provider>
         </SkipLinkProvidedContext.Provider>

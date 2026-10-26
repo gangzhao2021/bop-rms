@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { orderPanel } from "./order-queue-helpers";
 import { expectNoInternalText } from "./internal-text-guard";
 
 /**
@@ -211,10 +212,11 @@ test("@production cancelling paid items previews and refunds their share of the 
     });
   });
   await page.goto("/operations/orders");
-  const entry = page.locator("details.order-workbench-entry").first();
+  const row = page.locator("li.order-row").first();
+  if ((await row.getAttribute("data-open")) !== "true")
+    await row.locator(".order-row__open").click();
+  const entry = orderPanel(page);
   await expect(entry).toContainText("Paid online $14.24");
-  if (!(await entry.evaluate((element) => (element as HTMLDetailsElement).open)))
-    await entry.locator("summary").click();
   // Items are chosen on the order's own page, from its lines.
   await entry.getByRole("link", { name: "Cancel items" }).click();
   await page.getByRole("button", { name: "Cancel items" }).click();

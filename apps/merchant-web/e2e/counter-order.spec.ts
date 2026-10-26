@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { orderPanel } from "./order-queue-helpers";
 
 // WP-2423 Q7 (OPS-ORDER-ENTRY, DEC-COUNTER-PAYMENT-RECORD): staff take a pickup order at the
 // counter, charge it on the store's card machine and record it; a paper order is entered after an
@@ -419,16 +420,20 @@ test("@production the order queue shows counter orders and records a card-machin
     });
   });
   await page.goto("/operations/orders");
-  const expired = page.locator("details.order-workbench-entry").first();
+  const expired = page.locator("li.order-row").first();
   await expect(expired).toContainText("Expired · refund on card machine");
+  await expired.locator(".order-row__open").click();
   await expect(
-    expired.getByText("refund $5.00 on the card machine, then record it here.", { exact: false }),
-  ).toBeAttached();
-  await expired.locator("summary").click();
-  await expect(expired.getByRole("button", { name: "Record card-machine refund" })).toBeVisible();
-  await expired.locator("summary").click();
-  const entry = page.locator("details.order-workbench-entry").nth(1);
-  await entry.locator("summary").click();
+    orderPanel(page).getByText("refund $5.00 on the card machine, then record it here.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(
+    orderPanel(page).getByRole("button", { name: "Record card-machine refund" }),
+  ).toBeVisible();
+  const row = page.locator("li.order-row").nth(1);
+  await row.locator(".order-row__open").click();
+  const entry = orderPanel(page);
   await expect(entry).toContainText("Pickup · Counter");
   await expect(entry).toContainText("Paid on card machine $6.72");
   await expect(entry).toContainText("Recorded after outage");
@@ -443,7 +448,7 @@ test("@production the order queue shows counter orders and records a card-machin
   await dialog.getByRole("button", { name: "Refunded $6.72 on card machine" }).click();
   await expect(entry).toContainText("Cancelled by store · refunded on card machine");
   // WP-2423: recording the refund refreshes the order in place; it stays open.
-  await expect(entry).toHaveAttribute("open", "");
+  await expect(row).toHaveAttribute("data-open", "true");
   expect(refunds).toEqual([
     {
       operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
@@ -785,11 +790,12 @@ test("@production a sent, unpaid counter order is charged after a reload, from C
 
   // Orders: the row warns when it is released and offers the charge; no Payments and refunds.
   await page.goto("/operations/orders");
-  const entry = page.locator("details.order-workbench-entry").first();
-  await expect(entry).toContainText(/Charge on card machine by \d\d:\d\d · released if unpaid/u);
+  const orderRow = page.locator("li.order-row").first();
+  await expect(orderRow).toContainText(/Charge on card machine by \d\d:\d\d · released if unpaid/u);
   await expect(page.getByText("1 order.", { exact: true })).toBeVisible();
   // The only order on the page opens on its own.
-  await expect(entry).toHaveAttribute("open", "");
+  await expect(orderRow).toHaveAttribute("data-open", "true");
+  const entry = orderPanel(page);
   await expect(entry.getByText(/Not paid yet: charge it on the card machine/u)).toBeVisible();
   await expect(entry.getByRole("button", { name: "Payments and refunds" })).toHaveCount(0);
   await expect(entry.getByRole("button", { name: "Charge on card machine" })).toBeVisible();

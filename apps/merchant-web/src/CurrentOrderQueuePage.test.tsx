@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import { expect, it } from "vitest";
 import {
   readCurrentOrders,
@@ -71,8 +72,11 @@ it("renders actual Accepted version and visibly unresolved state without fabrica
     );
   expect(render(item)).toContain("Accepted");
   expect(render(item)).not.toContain("Current version");
-  expect(render(item)).toContain('class="order-workbench-entry" open=""');
-  expect(render(item)).toContain("1 accepted");
+  // Orders v2: the one order opens in the panel beside its row.
+  expect(render(item)).toContain('class="order-row" data-open="true"');
+  expect(render(item)).toContain('<aside class="order-panel"');
+  // Owner 2026-10-26: no internal round counts ("1 accepted") on the row.
+  expect(render(item)).not.toContain("1 accepted");
   expect(render(item)).toContain("00:00 UTC");
   expect(render(item)).not.toContain("guestSession");
   expect(render({ ...item, currentPhase: null, currentVersion: null })).toContain(
@@ -84,7 +88,7 @@ it("renders an empty page explicitly", () => {
     renderToStaticMarkup(
       <CurrentOrderQueueRows view={{ items: [], nextAfterOrderReference: null }} />,
     ),
-  ).toContain("No orders on this page");
+  ).toContain("No orders yet");
 });
 
 it("filters only by exact public order number and fields present on the current queue item", () => {
@@ -226,7 +230,9 @@ it("labels a cancelled additional Batch distinctly from unaccepted work", () => 
     })),
   };
   const pickupHtml = renderToStaticMarkup(<CurrentOrderQueueRows view={pickup} />);
-  expect(pickupHtml).toContain("<h3>Order</h3>");
+  // The panel already names the order, so a pickup's one batch has no second heading.
+  expect(pickupHtml).toContain('aria-label="Order"');
+  expect(pickupHtml).not.toContain("<h3>");
   expect(pickupHtml).not.toContain("Round 1");
 });
 
@@ -552,6 +558,10 @@ it("WP-2423 UI refresh: a row reads the order's age, status tone and amount take
   expect(orderAgeText(finished, at)).toBeNull();
   expect(orderStatusTone(finished, at)).toBe("done");
   expect(orderStatusTone({ ...finished, currentPhase: "Cancelled" }, at)).toBe("cancelled");
+  // Orders v2: the ready tone follows the phase, not its words, so it holds in Chinese too.
+  setLanguageForTest("zh-Hans");
+  expect(orderStatusTone({ ...finished, currentPhase: "Ready" }, at)).toBe("ready");
+  setLanguageForTest("en");
   expect(orderAmountTaken(one({ ...waiting, paidOnline: null }))).toBeNull();
   const html = renderToStaticMarkup(
     <CurrentOrderQueueRows
@@ -561,8 +571,12 @@ it("WP-2423 UI refresh: a row reads the order's age, status tone and amount take
   );
   expect(html).toContain('<span class="order-workbench-age" data-tone="warning">12 min</span>');
   expect(html).toContain('data-tone="warning" data-phase="Submitted"');
-  expect(html).toContain('<span class="order-workbench-amount">$11.30</span>');
-  expect(html).toContain("<h2>21</h2>");
+  // A plain online payment is the amount alone; only exceptions get words under it.
+  expect(html).toContain(
+    '<span class="order-workbench-amount"><span class="order-row__money">$11.30</span></span>',
+  );
+  // The order number is the row's heading and the button that opens it.
+  expect(html).toMatch(/<h3 class="order-row__number"><button[^>]*>21<\/button><\/h3>/u);
   // No payment recorded is said, never shown as a made-up amount.
   expect(
     renderToStaticMarkup(
@@ -943,8 +957,8 @@ it("WP-2423: warns staff before an unpaid dine-in round is cancelled and says so
   expect(failed).toContain("Don&#x27;t prepare it; it will not be charged.");
   expect(failed).not.toContain("Acceptance: Not accepted");
   // Plain words, never internal codes.
-  expect(failed).toContain("<dt>Order type</dt><dd>Dine-in</dd>");
-  expect(failed).toContain("<dt>Channel</dt><dd>Table QR code</dd>");
+  // Owner 2026-10-26: the type and channel are said once (row and panel header), not repeated.
+  expect(failed).not.toContain("<dt>Order type</dt>");
   expect(failed).toContain("Dine-in · Table QR code");
   expect(failed).not.toMatch(/>DineIn<|>Qr</u);
   // Once the time has passed the round reads as being cancelled.
@@ -970,7 +984,9 @@ it("WP-2423: warns staff before an unpaid dine-in round is cancelled and says so
     "never went to the kitchen and its items went back to stock. Nothing was charged for it in the system.",
   );
   expect(cancelled).not.toContain("Payment failed");
-  expect(cancelled).toContain("1 cancelled");
+  // Owner 2026-10-26: the row says "2 rounds", not internal counts; the round itself says why.
+  expect(cancelled).toContain("2 rounds");
+  expect(cancelled).not.toContain("1 cancelled");
 });
 it("WP-2423: lines of a round cancelled for a failed payment are marked and not owed", () => {
   const line = (n: number, batch: number, amount: string) => ({
@@ -1395,10 +1411,19 @@ it("WP-2423: says an online order is paid, and what happened to the payment", ()
   const html = renderToStaticMarkup(
     <CurrentOrderQueueRows view={parse(order())} timeZone="America/Toronto" />,
   );
-  expect(html).toContain(
-    '<span class="order-counter-paid order-online-paid">Paid online $11.30</span>',
-  );
+  // The row shows the amount alone; the panel says how it was paid.
+  expect(html).toContain('<span class="order-row__money">$11.30</span>');
+  expect(html).not.toContain('class="order-row__paid"');
   expect(html).toContain("<dt>Payment</dt><dd>Paid online $11.30</dd>");
+  // A refund is an exception, so the row says it under the amount.
+  expect(
+    renderToStaticMarkup(
+      <CurrentOrderQueueRows
+        view={parse(order())}
+        paymentPositions={new Map([[order().orderReference as string, position("1130")]])}
+      />,
+    ),
+  ).toContain('<span class="order-row__paid">refunded in full</span>');
   expect(html).toContain("Oct 14, 2026, 10:08 PM");
   expect(html).not.toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/u);
   const single = renderToStaticMarkup(
@@ -1531,10 +1556,10 @@ it("WP-2423: an opened order stays open and in place when the page refreshes aft
       detail={(order, open) => (open ? <p>{"open:" + order.orderNumber}</p> : null)}
     />,
   );
-  const entries = html.split('<details class="order-workbench-entry"').slice(1);
+  const entries = html.split('<li class="order-row"').slice(1);
   expect(entries).toHaveLength(fixture.items.length);
-  expect(entries[0]?.startsWith(" open")).toBe(false);
-  expect(entries[1]?.startsWith(' open=""')).toBe(true);
+  expect(entries[0]?.startsWith(' data-open="true"')).toBe(false);
+  expect(entries[1]?.startsWith(' data-open="true"')).toBe(true);
   expect(html).toContain("open:" + second.orderNumber);
   expect(html).not.toContain("open:" + first.orderNumber);
   // A reread in place never passes through Loading (which unmounts the rows) and keeps the detail.

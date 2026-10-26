@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { chooseOrderFilter, openOrder, orderPanel } from "./order-queue-helpers";
 
 /**
  * WP-2423 Q21: "today" on the merchant screens is the Store's business day (its time zone and
@@ -112,15 +113,16 @@ test("@production Orders after midnight stay under the Store's business day", as
   const days = page.locator(".order-workbench-day");
   // Owner 2026-10-25: Orders opens on today; every loaded day is one choice away.
   await expect(days).toHaveText(["Today · Wed, Oct 14"]);
-  await page.getByRole("button", { name: "All days on this page" }).click();
+  await chooseOrderFilter(page, "Date", "All days");
   await expect(days).toHaveText(["Today · Wed, Oct 14", "Yesterday · Tue, Oct 13"]);
   expect(reads.length).toBeGreaterThan(0);
-  const afterMidnight = page.locator("details.order-workbench-entry").first();
+  const afterMidnight = page.locator("li.order-row").first();
   await expect(afterMidnight).toContainText("A-5");
   await expect(afterMidnight.locator(".order-workbench-time")).toHaveText("00:40");
-  await afterMidnight.locator("summary").click();
-  await expect(afterMidnight.getByText("Oct 15, 2026, 12:40 AM")).toBeVisible();
-  await expect(afterMidnight.getByText("Today · Wed, Oct 14", { exact: true })).toBeVisible();
+  await openOrder(page, "A-5");
+  await expect(orderPanel(page).getByText("Oct 15, 2026, 12:40 AM")).toBeVisible();
+  await expect(orderPanel(page).getByText("Today · Wed, Oct 14", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     await expect(days.first()).toBeVisible();

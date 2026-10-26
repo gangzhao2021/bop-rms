@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { orderPanel } from "./order-queue-helpers";
 
 // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): from the Tables page staff take an order for a
 // table on behalf of guests who can't or won't use their phone, send it to the table's order,
@@ -480,22 +481,20 @@ test("@production the order queue marks a round entered by staff and its card-ma
     });
   });
   await page.goto("/operations/orders");
-  const entry = page.locator("details.order-workbench-entry").first();
-  await expect(entry).toContainText(
+  const row = page.locator("li.order-row").first();
+  await expect(row).toContainText(
     /Round 3: Entered by staff · record the card-machine payment by \d\d:\d\d or it is cancelled/u,
   );
-  if (!(await entry.evaluate((element) => (element as HTMLDetailsElement).open)))
-    await entry.locator("summary").click();
+  if ((await row.getAttribute("data-open")) !== "true")
+    await row.locator(".order-row__open").click();
+  const entry = orderPanel(page);
   await expect(
     entry.getByRole("heading", { name: "Round 2 · Added round · Entered by staff" }),
   ).toBeVisible();
-  // WP-2423 D5: the summary shows the card-machine total apart from what was paid online.
-  await expect(
-    entry.locator(".order-counter-paid", { hasText: "Paid online $11.30" }),
-  ).toBeVisible();
-  await expect(
-    entry.locator(".order-counter-paid", { hasText: "Paid on card machine $23.04" }),
-  ).toBeVisible();
+  // WP-2423 D5: the order shows the card-machine total apart from what was paid online.
+  const payment = entry.locator(".order-panel__facts");
+  await expect(payment).toContainText("Paid online $11.30");
+  await expect(payment).toContainText("Paid on card machine $23.04");
   await expect(entry.getByText(/the guest has not paid/u)).toHaveCount(0);
   // WP-2423 (3cd0f8dd M1): the order's tip, and a total that includes it (what was paid).
   const totals = entry.locator(".order-lines-totals").first();
@@ -520,9 +519,7 @@ test("@production the order queue marks a round entered by staff and its card-ma
   await entry.getByRole("textbox", { name: "Slip reference (optional)" }).fill("AUTH 771205");
   await entry.getByRole("button", { name: "Paid on card machine · $16.95" }).click();
   // The list reloads: the round is paid on the card machine and no longer asks for payment.
-  await expect(
-    entry.locator(".order-counter-paid", { hasText: "Paid on card machine $39.99" }),
-  ).toBeVisible();
+  await expect(payment).toContainText("Paid on card machine $39.99");
   await expect(entry.getByRole("button", { name: /Record card-machine payment/u })).toHaveCount(0);
   expect(payments).toEqual([
     {

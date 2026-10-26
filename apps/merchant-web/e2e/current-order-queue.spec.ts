@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
+import { chooseOrderFilter, openOrder, orderPanel } from "./order-queue-helpers";
 
 test("@production current queue pages and clears old orders after denied refresh", async ({
   page,
@@ -94,8 +95,8 @@ test("@production current queue pages and clears old orders after denied refresh
     "color",
     "rgb(23, 23, 23)",
   );
-  const orderRows = page.locator("details.order-workbench-entry");
-  const visibleOrderRows = page.locator("details.order-workbench-entry:visible");
+  const orderRows = page.locator("li.order-row");
+  const visibleOrderRows = page.locator("li.order-row:visible");
   await expect(visibleOrderRows).toHaveCount(50);
   // v15 751dd768: the count in plain words, with where older orders are.
   await expect(
@@ -108,34 +109,38 @@ test("@production current queue pages and clears old orders after denied refresh
     page.getByText("1 of 50 orders on this page match. Other pages are not searched."),
   ).toBeVisible();
   await expect(orderRows.first()).toContainText("ORD-100");
-  await expect(orderRows.first()).toHaveAttribute("open", "");
-  // WP-2423: an online order says it is paid, in the row and the detail, with store-time dates
-  // in words (the guard now also refuses machine dates such as 2026-09-13 20:00).
-  await expect(orderRows.first().locator(".order-online-paid")).toHaveText("Paid online $11.30");
-  await expect(orderRows.first().locator(".order-workbench-detail")).toContainText(
-    "PaymentPaid online $11.30",
-  );
-  await expect(orderRows.first().locator(".order-workbench-detail")).toContainText(
-    "Sep 13, 2026, 8:00 PM",
-  );
+  // Orders v2: the one match opens in the side panel.
+  await expect(orderRows.first()).toHaveAttribute("data-open", "true");
+  // WP-2423: an online order's row shows the amount; the panel says it was paid online, with
+  // store-time dates in words (the guard also refuses machine dates such as 2026-09-13 20:00).
+  await expect(orderRows.first().locator(".order-workbench-amount")).toHaveText("$11.30");
+  await expect(orderPanel(page)).toContainText("PaymentPaid online $11.30");
+  await expect(orderPanel(page)).toContainText("Sep 13, 2026, 8:00 PM");
   await expectNoInternalText(page);
-  await page.getByRole("combobox", { name: "Order type" }).selectOption("DineIn");
+  await chooseOrderFilter(page, "Order type", "Dine-in");
   await expect(page.getByRole("heading", { name: "No orders match these filters" })).toBeVisible();
   await expect(visibleOrderRows).toHaveCount(0);
   await page.getByRole("button", { name: "Clear order filters" }).click();
   await expect(visibleOrderRows).toHaveCount(50);
-  await page.getByRole("combobox", { name: "Channel" }).selectOption("Online");
-  await page.getByRole("combobox", { name: "Order status" }).selectOption("InProgress");
+  await chooseOrderFilter(page, "Channel", "Online");
+  await page
+    .getByRole("group", { name: "Show orders" })
+    .getByRole("button", { name: /^In progress/u })
+    .click();
   await expect(page.getByRole("heading", { name: "No orders match these filters" })).toBeVisible();
   await page.getByRole("button", { name: "Clear order filters" }).click();
   await expect(visibleOrderRows).toHaveCount(50);
-  const firstOrder = page.locator("details.order-workbench-entry").first();
-  await expect(firstOrder.locator(".order-workbench-detail")).toBeHidden();
-  await firstOrder.locator("summary").focus();
+  const firstOrder = page.locator("li.order-row").first();
+  await expect(orderPanel(page)).toBeHidden();
+  // Orders v2: Enter opens the order in the panel and moves to its heading; Escape closes it and
+  // returns to the order's row.
+  await firstOrder.locator(".order-row__open").focus();
   await page.keyboard.press("Enter");
-  await expect(firstOrder.locator(".order-workbench-detail")).toBeVisible();
-  await page.keyboard.press("Enter");
-  await expect(firstOrder.locator(".order-workbench-detail")).toBeHidden();
+  await expect(orderPanel(page)).toBeVisible();
+  await expect(orderPanel(page).getByRole("heading", { name: "Order ORD-100" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(orderPanel(page)).toBeHidden();
+  await expect(firstOrder.locator(".order-row__open")).toBeFocused();
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(firstOrder).toBeVisible();
@@ -262,7 +267,7 @@ test("@production acceptance retries the same operation after a lost response", 
   ).toBeVisible();
   const searchOrder = page.getByRole("searchbox", { name: "Exact order number" });
   await searchOrder.fill("ORD-2");
-  await expect(page.locator("details.order-workbench-entry").first()).toHaveAttribute("hidden", "");
+  await expect(page.locator("li.order-row").first()).toHaveAttribute("hidden", "");
   await expect(
     page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
   ).toBeHidden();
@@ -270,18 +275,18 @@ test("@production acceptance retries the same operation after a lost response", 
   await expect(
     page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
   ).toBeVisible();
-  // Figma v1 (2026-10-25): Accept sits at the end of the order's row, so closing the order keeps
-  // it (and its pending retry) in view.
-  const disclosure = page.locator("details.order-workbench-entry > summary");
-  await disclosure.click();
+  // Orders v2: opening the order moves its Accept into the panel and closing it brings it back to
+  // the row; either way the pending retry is kept.
+  await openOrder(page, "ORD-1");
   await expect(
     page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
   ).toBeVisible();
-  await disclosure.click();
+  await page.keyboard.press("Escape");
   await expect(
     page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
   ).toBeVisible();
   expect(bodies).toHaveLength(1);
+  await openOrder(page, "ORD-1");
   await expect(
     page
       .getByRole("region", { name: "Round 2" })
@@ -623,23 +628,23 @@ test("@production WP-2423 Q1: new orders and acceptance deadlines surface withou
     ),
   );
   await page.goto("/operations/orders");
-  await expect(page.getByRole("heading", { name: "No orders on this page" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No orders yet" })).toBeVisible();
   mode = "waiting";
   await page.clock.fastForward(10_000);
   await expect(page.getByRole("heading", { name: "ORD-21", exact: true })).toBeVisible();
-  await expect(page.getByText("1 order is waiting to be accepted.")).toBeVisible();
+  // Orders v2: the header's one line says how many wait to be accepted.
+  await expect(page.locator(".workspace-page__meta")).toContainText("1 to accept");
   // DEC-ORDER-CHANNEL-LABEL: a pickup order placed from the customer start page (recorded Qr) is
   // listed as online, never as a table QR code.
-  await expect(page.locator("details.order-workbench-entry").first()).toContainText(
-    "Pickup · Online",
-  );
-  await expect(page.locator("details.order-workbench-entry").first()).not.toContainText("QR code");
-  await expect(page.locator(".order-accept-by")).toHaveText("Accept within 8 min");
-  await expect(page.locator(".order-accept-by")).toHaveAttribute("data-tier", "warning");
+  await expect(page.locator("li.order-row").first()).toContainText("Pickup · Online");
+  await expect(page.locator("li.order-row").first()).not.toContainText("QR code");
+  const deadline = page.locator("li.order-row .order-accept-by");
+  await expect(deadline).toHaveText("Accept within 8 min");
+  await expect(deadline).toHaveAttribute("data-tier", "warning");
   expect(await page.title()).toMatch(/^\(1\) /u);
   await page.clock.fastForward(240_000);
-  await expect(page.locator(".order-accept-by")).toHaveText("Accept within 4 min");
-  await expect(page.locator(".order-accept-by")).toHaveAttribute("data-tier", "urgent");
+  await expect(deadline).toHaveText("Accept within 4 min");
+  await expect(deadline).toHaveAttribute("data-tier", "urgent");
   mode = "down";
   await page.clock.fastForward(10_000);
   await expect(
@@ -757,19 +762,25 @@ test("@production WP-2423 v15: earlier-day orders still holding stock are listed
     return route.fulfill({ headers, json: { status: "Released" } });
   });
   await page.goto("/operations/orders");
+  await expect(page.getByRole("heading", { name: "Earlier days · not finished" })).toBeVisible();
+  // Orders v2 (Owner 2026-10-26): one "Needs attention" notice says it in staff words, with a way
+  // to each order; the rows say it in a few words.
+  const attention = page.getByRole("region", { name: "Needs attention" });
   await expect(
-    page.getByRole("heading", { name: "Earlier days · still holding stock" }),
+    attention.getByText("Order 2 is from Sat, Oct 10 and still holds its ingredients."),
   ).toBeVisible();
-  await expect(page.getByText("Sat, Oct 10 · still open, holding stock")).toBeVisible();
-  await expect(page.getByText("Sat, Oct 10 · finished, stock still set aside")).toBeVisible();
-  await page.getByRole("heading", { name: "2", exact: true }).click();
-  await page.getByRole("heading", { name: "7", exact: true }).click();
+  await expect(page.locator("li.order-row").getByText("Still holds its ingredients")).toBeVisible();
   await expect(
-    page.getByText("Still open from an earlier day and holding ingredients"),
+    page.locator("li.order-row").getByText("Finished · ingredients still set aside"),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Cancel order" })).toBeVisible();
+  await attention.getByRole("button", { name: "Show order 2" }).click();
   await expect(
-    page.getByText(
+    orderPanel(page).getByText("Still open from an earlier day and holding ingredients"),
+  ).toBeVisible();
+  await expect(orderPanel(page).getByRole("button", { name: "Cancel order" })).toBeVisible();
+  await openOrder(page, "7");
+  await expect(
+    orderPanel(page).getByText(
       "This order from an earlier day is finished, but ingredients are still set aside",
     ),
   ).toBeVisible();
@@ -783,8 +794,8 @@ test("@production WP-2423 v15: earlier-day orders still holding stock are listed
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   // The page itself is intact: its orders and the next page are there (yesterday's orders are
-  // under "All days on this page"; Orders opens on today, Owner 2026-10-25).
-  await page.getByRole("button", { name: "All days on this page" }).click();
+  // under Filter › Date › All days; Orders opens on today, Owner 2026-10-25).
+  await chooseOrderFilter(page, "Date", "All days");
   await expect(page.getByRole("heading", { name: "B-50", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Next page" })).toBeVisible();
   await page.getByRole("button", { name: "Release held ingredients" }).click();
@@ -802,9 +813,7 @@ test("@production WP-2423 v15: earlier-day orders still holding stock are listed
   await page.getByRole("button", { name: "Refresh orders" }).click();
   await expect(page.getByText("Orders unavailable")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "B-1", exact: true })).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Earlier days · still holding stock" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Earlier days · not finished" })).toBeVisible();
   expect(releases).toEqual([
     {
       orderReference: id(2),

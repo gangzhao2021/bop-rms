@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openOrder, orderPanel } from "./order-queue-helpers";
 
 /** WP-2423 Q9-G1 (DEC-OUTAGE-ACCEPTANCE-HOLD): staff decide orders paid while the store was offline. */
 test("@production orders paid during an outage are listed for a decision: accept or refund", async ({
@@ -125,7 +126,7 @@ test("@production orders paid during an outage are listed for a decision: accept
   await expect(page.getByText("Paid during an outage · decide within 12 min")).toBeVisible();
   await expect(page.getByText("Accept within 20 min")).toBeVisible();
   await page.getByRole("button", { name: "Show these orders" }).click();
-  const visible = page.locator("details.order-workbench-entry:visible");
+  const visible = page.locator("li.order-row:visible");
   await expect(visible).toHaveCount(2);
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -136,8 +137,8 @@ test("@production orders paid during an outage are listed for a decision: accept
     await page.screenshot({ path: `test-results/outage-hold-${width}.png`, fullPage: true });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
-  const order2 = page.locator("details.order-workbench-entry").filter({ hasText: "ORD-2" });
-  await order2.locator("summary").click();
+  await openOrder(page, "ORD-2");
+  const order2 = orderPanel(page);
   await expect(order2).toContainText("It was not refunded automatically.");
   await expect(order2).toContainText("If you already made it from a paper ticket, accept it");
   await expect(order2.getByRole("button", { name: /Accept/u })).toBeVisible();
@@ -149,7 +150,9 @@ test("@production orders paid during an outage are listed for a decision: accept
   expect(refundBodies).toEqual([
     { orderReference: id(2), orderBatchReference: id(52), holdReference: id(72) },
   ]);
-  await expect(page.getByText("Refund chosen · refund pending")).toBeVisible();
+  await expect(
+    page.locator("li.order-row").getByText("Refund chosen · refund pending"),
+  ).toBeVisible();
   await expect(order2).toContainText("You chose to refund this order.");
   await expect(order2.getByRole("button", { name: /Accept/u })).toHaveCount(0);
   await expect(notice).toContainText("1 online order was paid while the store was offline.");

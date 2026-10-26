@@ -13,8 +13,15 @@ export function OrderAcceptanceAction({
   onAccepted,
   onRejected,
   onChanged,
+  resumeUnknown = false,
 }: {
   readonly orderNumber: string;
+  /**
+   * Orders v2: this round's earlier attempt is still unresolved (its operation is kept only until
+   * the outcome is known), so the button shown again — in the panel, or back in the row — offers
+   * the same retry instead of a fresh "Accept".
+   */
+  readonly resumeUnknown?: boolean;
   readonly csrf: string;
   readonly operation: () => Operation;
   readonly onAccepted: () => void;
@@ -24,7 +31,7 @@ export function OrderAcceptanceAction({
 }) {
   const [state, setState] = useState<
     "Idle" | "Submitting" | "Unknown" | "Denied" | OrderAcceptanceConflict
-  >("Idle");
+  >(resumeUnknown ? "Unknown" : "Idle");
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
   const accept = async () => {
@@ -58,7 +65,7 @@ export function OrderAcceptanceAction({
     }
   };
   return (
-    <div className="card-actions">
+    <div className="card-actions order-accept-action">
       {state === "Idle" || state === "Submitting" || state === "Unknown" || state === "Changed" ? (
         <button disabled={state === "Submitting"} onClick={() => void accept()}>
           {state === "Unknown"

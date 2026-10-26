@@ -132,7 +132,14 @@ describe("WP-2423 Q21: Orders are grouped by the Store business day", () => {
         <StoreBusinessDayContext.Provider
           value={{ businessDate: "2026-10-14", startsAt: null, endsAt: null }}
         >
-          <CurrentOrderQueueRows view={view} timeZone="America/Toronto" />
+          <CurrentOrderQueueRows
+            view={view}
+            timeZone="America/Toronto"
+            expanded={{
+              opened: new Set([view.items[0]?.orderReference ?? ""]),
+              setOpened: () => undefined,
+            }}
+          />
         </StoreBusinessDayContext.Provider>
       </MemoryRouter>,
     );
@@ -211,7 +218,14 @@ it("WP-2423 D4: an older table's Order with a round today is under Today, not it
       <StoreBusinessDayContext.Provider
         value={{ businessDate: "2026-10-14", startsAt: null, endsAt: null }}
       >
-        <CurrentOrderQueueRows view={view} timeZone="America/Toronto" />
+        <CurrentOrderQueueRows
+          view={view}
+          timeZone="America/Toronto"
+          expanded={{
+            opened: new Set([view.items[0]?.orderReference ?? ""]),
+            setOpened: () => undefined,
+          }}
+        />
       </StoreBusinessDayContext.Provider>
     </MemoryRouter>,
   );

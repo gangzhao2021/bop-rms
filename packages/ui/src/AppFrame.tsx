@@ -50,6 +50,9 @@ export function AppFrame({
       {inWorkspace ? (
         <header className="bop-shell__header bop-shell__header--in-workspace">
           <h1>{title}</h1>
+          {text.headerExtra === undefined ? null : (
+            <div className="bop-shell__header-extra">{text.headerExtra}</div>
+          )}
         </header>
       ) : null}
       {inWorkspace && headerStatus !== undefined ? (

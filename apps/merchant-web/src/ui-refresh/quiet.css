@@ -15,6 +15,10 @@
 :root {
   --bop-color-border-default: transparent;
   --bop-color-border-strong: transparent;
+  /* Owner 2026-10-26 ("订单之间可以有适当的分割线"): list rows, and only list rows, are parted by
+     a light hairline — between rows, never above the first or below the last. Decorative: the
+     row text carries the meaning, so it needs no 3:1. Cards and page areas keep spacing only. */
+  --bop-color-row-divider: #e5e5e5;
 }
 .workspace-layout,
 .workspace-content,
@@ -422,5 +426,88 @@
 /* Tag words stay dark in every tone (the per-tone colours in orders.css are more specific). */
 .orders-page .order-workbench-phase[data-tone],
 .orders-page .order-workbench-phase[data-phase] {
+  color: var(--bop-color-text-default);
+}
+
+/*
+ * Owner 2026-10-26 ("语言切换的位置就很反常理"): the language switch is plain words at the top
+ * right of every page, on the page's title row ("English" in Chinese, "中文" in English). The page
+ * header keeps that corner free. On a phone it sits in the top bar beside Menu (nav.css).
+ */
+.workspace-content {
+  position: relative;
+}
+/* Every page's header ends with it; the top bar is the fallback for a page without one. */
+.workspace-topbar {
+  position: absolute;
+  top: 18px;
+  right: clamp(8px, 3vw, 24px);
+  z-index: 6;
+}
+.workspace-content:has(.workspace-page__header, .bop-shell__header--in-workspace)
+  .workspace-topbar {
+  display: none;
+}
+.workspace-page__header .workspace-page__language {
+  order: 99;
+  margin-inline-start: auto;
+}
+.workspace-page__header .workspace-page__toolbar {
+  margin-inline-start: auto;
+}
+.workspace-page__header .workspace-page__toolbar + .workspace-page__language {
+  margin-inline-start: 0;
+}
+.bop-shell__header--in-workspace {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--bop-space-4);
+}
+.bop-shell__header--in-workspace .bop-shell__header-extra {
+  margin-inline-start: auto;
+}
+.workspace-layout .workspace-content button:is(.workspace-topbar__language, .language-switch),
+.workspace-layout .workspace-sidebar button.workspace-sidebar__language {
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 15px;
+  font-weight: 500;
+}
+.workspace-layout .language-switch:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (max-width: 48rem) {
+  .workspace-topbar,
+  .workspace-layout .workspace-content button.language-switch,
+  .workspace-content .bop-shell__header-extra {
+    display: none;
+  }
+  .workspace-layout .workspace-sidebar button.workspace-sidebar__language {
+    display: inline-flex;
+  }
+}
+@media (min-width: 48.0625rem) {
+  .workspace-layout .workspace-sidebar button.workspace-sidebar__language {
+    display: none;
+  }
+}
+/* Owner 2026-10-26: counts in the navigation are dark, not red — the page's own content leads. */
+.workspace-nav__badge {
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+}
+.workspace-sidebar a[aria-current="page"] .workspace-nav__badge,
+.workspace-drawer__panel a[aria-current="page"] .workspace-nav__badge {
+  background: var(--bop-color-on-primary);
   color: var(--bop-color-text-default);
 }

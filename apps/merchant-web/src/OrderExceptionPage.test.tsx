@@ -101,7 +101,10 @@ describe("WP-2402 workbench recovery states", () => {
     expect(html).toContain("2026-08-12T16:15:00.000Z");
     expect(html).toContain("Paid without a fulfillable order");
     expect(html).not.toContain("PaidWithoutFulfillableOrder</h3>");
-    const buttons = [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/gu)];
+    const buttons = [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/gu)].filter(
+      // The shell's language switch (Owner 2026-10-26) is not one of the page's commands.
+      (button) => !button[1]?.includes("language-switch"),
+    );
     expect(buttons[0]?.[1]).not.toContain("disabled");
     // Dead placeholder actions are gone; only real source actions remain.
     for (const label of [
@@ -219,7 +222,10 @@ it("does not advertise executable generic commands for a fresh unlinked payment 
     />,
   );
   expect(html).toContain("No order is linked to this payment difference");
-  const buttons = [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/gu)];
+  const buttons = [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/gu)].filter(
+    // The shell's language switch (Owner 2026-10-26) is not one of the page's commands.
+    (button) => !button[1]?.includes("language-switch"),
+  );
   expect(buttons[0]?.[1]).not.toContain("disabled");
   for (const button of buttons.slice(1)) expect(button[1]).toContain("disabled");
 });
