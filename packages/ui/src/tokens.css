@@ -362,13 +362,13 @@ button {
   grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
   gap: var(--bop-space-4);
 }
-/* Notices: no side bar or outline; a filled card whose title carries the tone, in words. */
+/* Notices (Owner 2026-10-25 "只要白底"): no box, side bar or fill; the title (with a tone dot for
+   an error, a tone colour for offline) and then the words. */
 .bop-state-card {
-  margin: 0 0 var(--bop-space-4);
-  padding: var(--bop-space-4) var(--bop-space-5);
+  margin: 0 0 var(--bop-space-5);
+  padding: 0;
   border: 0;
-  border-radius: var(--bop-radius-card);
-  background: var(--bop-color-surface-raised);
+  background: none;
 }
 /* Red text is AA on white only; on the grey card an error is a red dot before dark words. */
 .bop-state-card[data-tone="error"] h2::before {

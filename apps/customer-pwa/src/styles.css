@@ -2944,3 +2944,59 @@
 .store-strip__label--paused::before {
   background: var(--bop-color-warning);
 }
+
+/* ---------- Owner 2026-10-25 "只要白底" ---------- */
+/* Every panel is white; space and type separate them. Grey stays on controls only (buttons,
+   fields, unselected choices, the stepper), which therefore keep the grey fill inside panels too. */
+.customer-page .cart-item,
+.customer-page .cart-summary,
+.customer-page .cart-state,
+.customer-page .checkout-attention,
+.customer-page .entry-card,
+.customer-page .entry-help,
+.customer-page .store-identity,
+.customer-page .menu-state,
+.customer-page .menu-help,
+.customer-page .order-status__unavailable,
+.customer-page .order-status__warning,
+.customer-page .payment-page__amount,
+.customer-page .payment-page__unavailable,
+.customer-page .payment-result-page__card,
+.customer-page .receipt-page__content > section,
+.customer-page .receipt-page__version,
+.customer-page .store-contact,
+.customer-page .dining-admission,
+.customer-page .bop-state-card,
+.customer-page.checkout-page .checkout-totals,
+.pickup-code__visual,
+.connectivity-banner,
+.pwa-update {
+  --customer-control-fill: var(--bop-color-surface-raised);
+  background: var(--bop-color-surface-canvas);
+}
+.customer-page .cart-item,
+.customer-page .cart-summary,
+.customer-page .cart-state,
+.customer-page .checkout-attention,
+.customer-page .menu-state,
+.customer-page .menu-help,
+.customer-page .order-status__unavailable,
+.customer-page .order-status__warning,
+.customer-page .payment-page__amount,
+.customer-page .payment-page__unavailable,
+.customer-page .payment-result-page__card,
+.customer-page.checkout-page .checkout-totals {
+  padding-inline: 0;
+}
+.customer-page.checkout-page .checkout-totals {
+  margin-inline: 0;
+}
+/* Notices: the words, without a box. */
+.cart-warning,
+.cart-offline,
+.cart-stale,
+.configure-issues,
+.configure-status {
+  padding-inline: 0;
+  background: none;
+}

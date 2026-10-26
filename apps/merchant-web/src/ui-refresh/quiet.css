@@ -5,7 +5,9 @@
  *   drop out; the few borders that carry meaning are drawn below with their own colours;
  * - a white control (button, field) takes the raised fill instead, so secondary buttons and
  *   inputs read as filled grey shapes without an outline.
- * The page itself is the raised grey; cards, lists and panels are white on it.
+ * Owner 2026-10-25 ("只要白底"): every surface is white — page, sidebar, cards, rows, notices;
+ * areas are told apart by space and type. Grey stays only on controls (buttons, fields, chips),
+ * which would otherwise disappear.
  */
 :root {
   --bop-color-border-default: transparent;
@@ -15,11 +17,11 @@
 .workspace-content,
 .workspace-content .bop-shell,
 .workspace-page.bop-shell__main {
-  background: var(--bop-color-surface-raised);
+  background: var(--bop-color-surface-canvas);
 }
 .workspace-sidebar {
   border-right: 0;
-  background: var(--bop-color-surface-raised);
+  background: var(--bop-color-surface-canvas);
 }
 
 /* Cards, lists and panels: white on the grey page. */
@@ -34,8 +36,7 @@
     .dining-table-tile,
     .pickup-queue__card,
     .order-workbench-item,
-    .kitchen-ticket,
-    .bop-state-card
+    .kitchen-ticket
   ),
 .workspace-content
   :is(.menu-builder-section, .product-editor-page form > fieldset, .product-customer-menu) {
@@ -60,38 +61,32 @@
   margin-bottom: var(--bop-space-2);
   overflow: hidden;
 }
-.orders-page .order-workbench-entry[open] > summary,
-.orders-page .order-workbench-entry > summary:hover {
+.orders-page .order-workbench-entry[open] > summary {
   background: var(--bop-color-surface-default);
 }
+.orders-page .order-workbench-entry > summary:hover {
+  background: var(--bop-color-surface-raised);
+}
 
-/* Controls: a white control becomes a filled grey one; on the grey page itself (page header
-   actions) it stays white so it still reads as a control. */
+/* Controls: a white control becomes a filled grey one, wherever it sits. */
 .workspace-content :is(button, input:not([type="checkbox"], [type="radio"]), select, textarea) {
   --bop-color-surface-default: var(--bop-color-surface-raised);
-}
-.workspace-page__header :is(button, input, select),
-.workspace-content .screen-heading :is(button, input, select),
-.workspace-content .kitchen-board-filters :is(button, input, select),
-.orders-page .order-status-filters button,
-.workspace-content
-  :is(.dining-floor-filters, .kitchen-board-filters, .kitchen-reference-search)
-  :is(input, select, button) {
-  --bop-color-surface-default: var(--bop-color-surface-canvas);
 }
 .workspace-page.workspace-page .dining-floor-filters :is(input, select),
 .workspace-content
   :is(.kitchen-board-filters, .kitchen-reference-search)
-  :is(input, select, button) {
-  border-color: transparent;
-  background: var(--bop-color-surface-canvas);
-}
+  :is(input, select, button),
 .workspace-page__header button:not(:disabled, [type="submit"]),
 .workspace-page__header select,
-.workspace-page .overview-card--today > header button,
-.workspace-layout > :not(.workspace-content) button:not([aria-current]),
+.workspace-layout
+  > :not(.workspace-content)
+  button:not([aria-current], .workspace-nav__group-toggle, [type="submit"], dialog *),
 .orders-page .order-status-filters button:not([aria-pressed="true"]) {
-  background: var(--bop-color-surface-canvas);
+  border-color: transparent;
+  background: var(--bop-color-surface-raised);
+}
+.workspace-sidebar .workspace-nav__group-toggle {
+  background: transparent;
 }
 .workspace-content :is(input, select, textarea)[aria-invalid="true"] {
   border: 1px solid var(--bop-color-danger-mark);
@@ -157,7 +152,9 @@
   .workspace-page .settlement__unmatched
 ) {
   border: 0;
-  border-radius: var(--bop-radius-card);
+  border-radius: 0;
+  padding-inline: 0;
+  background: none;
 }
 .workspace-page
   :is(.overview-card--alerts-critical, .overview-card--alerts-warning, .own-name-prompt--required) {
@@ -249,7 +246,7 @@
   }
 }
 .workspace-page > button:not(:disabled, [type="submit"]) {
-  background: var(--bop-color-surface-canvas);
+  background: var(--bop-color-surface-raised);
 }
 
 /* Danger actions: red words with no fill (the lighter red is AA on white only, 4.53:1; on the
@@ -362,4 +359,33 @@
 .kitchen-ticket[data-age="late"] .kitchen-ticket__timer,
 .kitchen-ticket[data-age="late"] .kitchen-ticket__tier {
   color: var(--bop-color-danger);
+}
+
+/* Owner 2026-10-25 ("只要白底"): space and type separate the areas now that every surface is
+   white; a notice is its title (or a tone dot) and its words, without a box. */
+.workspace-content .bop-state-card {
+  padding: 0;
+  background: none;
+}
+.workspace-page--overview .overview-grid,
+.workspace-page .overview-card--today .overview-counts {
+  gap: var(--bop-space-6);
+}
+.workspace-content
+  :is(.store-card, .overview-card, .detail-section, .refund-approval-card):not(
+    .counter-order__ticket
+  ) {
+  padding-inline: 0;
+}
+.workspace-page .overview-card--today .overview-counts li {
+  padding: 0;
+}
+.orders-page .order-workbench-item {
+  margin-bottom: 0;
+}
+/* A kitchen step that cannot be taken here reads as muted words, not as a grey button like the
+   ones that work. */
+.kitchen-work-item__actions button:disabled {
+  background: transparent;
+  color: var(--bop-color-text-muted);
 }
