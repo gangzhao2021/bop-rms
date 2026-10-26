@@ -11,11 +11,14 @@ import {
   listStoreOrderAcceptanceHolds,
   listStoreUnfulfillablePaidOrders,
   loadMerchantOrderLines,
+  loadMerchantOrderListSummaries,
   loadOrderPickupContact,
+  type MerchantOrderListSummary,
   type OrderAcceptanceHold,
   type StaffOrderCancellationRecord,
 } from "@rms/ordering";
 import { listStoreKitchenOrderItemStates, listStoreStartedKitchenBatches } from "@rms/kitchen";
+import { listDiningSessionTableLabels } from "@rms/dining";
 import {
   listStorePickupAcceptanceDeadlines,
   listStoreUncollectedPickupOrders,
@@ -768,6 +771,35 @@ export function createPersistentMerchantOrderQueue(options: {
             ownerScope === null
               ? null
               : await loadOrderPickupContact(businessTransaction, ownerScope, only.orderReference);
+          // Orders v2 (Owner 2026-10-26, "a row doesn't say what or who"): each listed order's
+          // items, the pickup name (never the phone or email) and a table's label, read under the
+          // same ordering.operate scope in this transaction.
+          const summaries =
+            ownerScope === null || result.items.length === 0
+              ? new Map<string, MerchantOrderListSummary>()
+              : await (async () => {
+                  if (!(await authority.guard(businessTransaction))) return unavailable();
+                  return loadMerchantOrderListSummaries(
+                    businessTransaction,
+                    ownerScope,
+                    result.items.map((item) => item.orderReference),
+                    staffNameLocales(options.locale ?? "en-CA"),
+                  );
+                })();
+          const sessions = [
+            ...new Set(
+              result.items.flatMap((item) =>
+                item.diningSessionReference === null ? [] : [item.diningSessionReference],
+              ),
+            ),
+          ];
+          const tables =
+            ownerScope === null || sessions.length === 0
+              ? new Map<string, string>()
+              : await (async () => {
+                  if (!(await authority.guard(businessTransaction))) return unavailable();
+                  return listDiningSessionTableLabels(businessTransaction, ownerScope, sessions);
+                })();
           // WP-2423: how much of an order's online payment Payment has refunded or is refunding
           // (ordinary, item-cancellation, cancellation and automatic refunds), as the receipt reads
           // it. The one-order detail always reads it; the list reads the same position for orders
@@ -841,8 +873,22 @@ export function createPersistentMerchantOrderQueue(options: {
                 const closed = unfulfillable.get(item.orderReference) ?? null;
                 const hold = closed === null ? (held.get(item.orderReference) ?? null) : null;
                 const { decideBy, refundChosen } = pickupAcceptanceDeadline(null, hold);
+                const summary = summaries.get(item.orderReference);
                 return Object.freeze({
                   ...item,
+                  /** Orders v2: what the order is and who it is for (null when not read). */
+                  summary:
+                    summary === undefined
+                      ? null
+                      : Object.freeze({
+                          items: summary.items,
+                          lineCount: summary.lineCount,
+                          pickupName: item.orderType === "Pickup" ? summary.pickupName : null,
+                          tableLabel:
+                            item.diningSessionReference === null
+                              ? null
+                              : (tables.get(item.diningSessionReference) ?? null),
+                        }),
                   unfulfillable: closed,
                   pickupNotCollected: uncollected.has(item.orderReference),
                   counter: counter.get(item.orderReference) ?? null,

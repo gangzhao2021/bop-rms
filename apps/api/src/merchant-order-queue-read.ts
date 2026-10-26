@@ -237,6 +237,8 @@ export function createMerchantOrderQueueRead(options: {
             ownerScope,
             item.initialSubmissionReference,
           )) ?? options.quoteVersion;
+        // Orders v2: the table's dining session, for the list row's table label.
+        let diningSessionReference: string | null = null;
         const current = await (readers[version] as (typeof readers)[1]).withCurrentSubmission(
           item.initialSubmissionReference,
           async (_, original) => {
@@ -300,6 +302,7 @@ export function createMerchantOrderQueueRead(options: {
               };
             }
             if (original.order.diningSessionReference === null) return unavailable();
+            diningSessionReference = String(original.order.diningSessionReference);
             const execution = await createPostgresDiningOrderItemStateReader({
               ...ownerScope,
               authorize: allowed,
@@ -443,6 +446,8 @@ export function createMerchantOrderQueueRead(options: {
              */
             kitchenPhase: current.kitchenPhase,
             observedAt: current.observedAt,
+            /** Orders v2: a dine-in Order's dining session (server side only, for its table). */
+            diningSessionReference,
           }),
         );
       }

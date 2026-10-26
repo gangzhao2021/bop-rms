@@ -407,6 +407,7 @@ export * from "./infrastructure/persistence/pickup-payment-window-closure-store.
 export * from "./infrastructure/persistence/guest-session-order-source.js";
 // WP-2423 Q10: staff see the pickup contact on the order; it is removed after its retention period.
 export * from "./infrastructure/persistence/order-pickup-contact-source.js";
+export * from "./infrastructure/persistence/merchant-order-list-summary.js";
 export * from "./infrastructure/persistence/checkout-contact-retention-store.js";
 // WP-2423 Q16: a customer removes their own pickup contact from the order page.
 export * from "./infrastructure/persistence/checkout-contact-customer-removal-store.js";

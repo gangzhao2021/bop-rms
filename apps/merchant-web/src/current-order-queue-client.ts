@@ -313,6 +313,42 @@ function parseHeldStock(value: unknown): HeldStock | null {
     productionStarted: raw.productionStarted,
   });
 }
+/** Orders v2: a list row's summary — strict, so an unexpected field fails closed. */
+function parseOrderSummary(value: unknown, orderType: unknown) {
+  if (value === null) return null;
+  const raw = exact(value, ["items", "lineCount", "pickupName", "tableLabel"]);
+  const text = (entry: unknown, max: number) =>
+    typeof entry === "string" &&
+    entry.length <= max &&
+    entry.trim() === entry &&
+    !/[\p{Cc}\p{Cf}]/u.test(entry)
+      ? entry
+      : fail();
+  if (!Array.isArray(raw.items) || raw.items.length === 0 || raw.items.length > 3) return fail();
+  const items = raw.items.map((entry: unknown) => {
+    const line = exact(entry, ["name", "option", "quantity"]);
+    if (!Number.isSafeInteger(line.quantity) || Number(line.quantity) < 1) return fail();
+    return Object.freeze({
+      name: text(line.name, 200),
+      option: line.option === null ? null : text(line.option, 200),
+      quantity: Number(line.quantity),
+    });
+  });
+  if (!Number.isSafeInteger(raw.lineCount) || Number(raw.lineCount) < items.length) return fail();
+  const pickupName = raw.pickupName === null ? null : text(raw.pickupName, 120);
+  const tableLabel = raw.tableLabel === null ? null : text(raw.tableLabel, 40);
+  if (
+    (pickupName !== null && orderType !== "Pickup") ||
+    (tableLabel !== null && orderType !== "DineIn")
+  )
+    return fail();
+  return Object.freeze({
+    items: Object.freeze(items),
+    lineCount: Number(raw.lineCount),
+    pickupName,
+    tableLabel,
+  });
+}
 export function parseCurrentOrderQueue(value: unknown, after: string | null = null) {
   // WP-2423 (2026-10-16 v15): earlier-day Orders listed with today's (older tables with a round
   // today, Orders still holding stock) come apart from the page (absent from an older server).
@@ -369,10 +405,14 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     // WP-2423 (v15 2026-10-18): a pickup's kitchen state on the detail (absent from an older server).
     const withKitchen =
       value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenPhase");
+    // Orders v2 (2026-10-26): what the order is and who it is for (absent from an older server).
+    const withSummary =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "summary");
     // WP-2423 (v15 751dd768): what this person may do with the payment (absent from an older server).
     const withCapabilities =
       value !== null && typeof value === "object" && Object.hasOwn(value, "canViewPayments");
     const item = exact(value, [
+      ...(withSummary ? ["summary"] : []),
       ...(withCapabilities ? ["canRecordCardMachinePayment", "canViewPayments"] : []),
       ...(withReady ? ["readyToServeItemCount"] : []),
       ...(withRemaking ? ["remakingItemCount"] : []),
@@ -476,6 +516,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     const submittedAt = instant(item.submittedAt),
       observedAt = instant(item.observedAt);
     const heldStock = withHeldStock ? parseHeldStock(item.heldStock) : null;
+    const summary = withSummary ? parseOrderSummary(item.summary, item.orderType) : null;
     if (observedAt < submittedAt) return fail();
     // WP-2423 Q1: only a paid pickup still awaiting acceptance has a deadline.
     const acceptBy = item.acceptBy === null ? null : instant(item.acceptBy);
@@ -715,6 +756,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
        * detail ("InProgress" or "Ready") before Ordering records it; null otherwise.
        */
       kitchenPhase: kitchenPhase as "InProgress" | "Ready" | null,
+      /**
+       * Orders v2: the first items (name, first option, quantity), how many lines, and who it is for
+       * — the pickup name or the table; never a phone or email. Null from an older server.
+       */
+      summary,
     });
   };
   const earlier = withEarlier

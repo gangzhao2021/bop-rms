@@ -105,6 +105,9 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
     // WP-2423 (v15 2026-10-18): a pickup's kitchen state on the detail before Ordering records it.
     ...(item.kitchenPhase === undefined ? {} : { kitchenPhase: item.kitchenPhase }),
     observedAt: item.observedAt,
+    // Orders v2 (Owner 2026-10-26): item names, the pickup name and the table, for the list row.
+    // Never the pickup contact's phone or email (the order detail alone has them).
+    summary: item.summary,
   };
 }
 
