@@ -441,7 +441,8 @@ test("@production the order queue shows counter orders and records a card-machin
   await expect(
     entry.getByText("Refund $6.72 on the store's card machine, then record it here."),
   ).toBeVisible();
-  await expect(entry.getByText(/Taken at the counter\./u)).toBeVisible();
+  // Orders v3: the panel says "Counter" in its header line; the payment is under Payment.
+  await expect(entry.locator(".order-panel__meta")).toContainText("Counter");
   await entry.getByRole("button", { name: "Record card-machine refund" }).click();
   const dialog = page.getByRole("dialog", { name: "Refund $6.72 on the card machine" });
   await dialog.getByRole("textbox", { name: "Slip reference (optional)" }).fill("REFUND 7731");

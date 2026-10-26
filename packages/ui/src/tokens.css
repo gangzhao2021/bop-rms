@@ -17,7 +17,12 @@
   --bop-color-text-muted: #666666;
   --bop-color-border-default: #e5e5e5;
   --bop-color-border-strong: #171717;
-  --bop-color-focus: #1d4ed8;
+  /* Owner 2026-10-26 (Orders v3, "Square style"): one accent for what can be clicked — text
+     links and text buttons, primary buttons, the selected navigation item and filter, the focus
+     ring. 5.36:1 on white, and white on it. Black stays for body text. */
+  --bop-color-accent: #1f63e0;
+  --bop-color-on-accent-fill: #ffffff;
+  --bop-color-focus: var(--bop-color-accent);
   --bop-color-on-focus: #ffffff;
   /* Owner 2026-10-25 ("先这样吧"): muted red and green, two roles each. The text colours are AA
      on white (success 4.79:1, danger 4.53:1, white on danger 4.53:1); the "-mark" colours are for

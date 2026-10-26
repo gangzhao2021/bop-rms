@@ -115,7 +115,7 @@ test("@production current queue pages and clears old orders after denied refresh
   // store-time dates in words (the guard also refuses machine dates such as 2026-09-13 20:00).
   await expect(orderRows.first().locator(".order-workbench-amount")).toHaveText("$11.30");
   await expect(orderPanel(page)).toContainText("PaymentPaid online $11.30");
-  await expect(orderPanel(page)).toContainText("Sep 13, 2026, 8:00 PM");
+  await expect(orderPanel(page)).toContainText(/Sun, Sep 13 20:00/u);
   await expectNoInternalText(page);
   await chooseOrderFilter(page, "Order type", "Dine-in");
   await expect(page.getByRole("heading", { name: "No orders match these filters" })).toBeVisible();
@@ -261,7 +261,7 @@ test("@production acceptance retries the same operation after a lost response", 
     });
   });
   await page.goto("/operations/orders");
-  await page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }).click();
+  await page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }).first().click();
   await expect(
     page.getByText("Acceptance could not be confirmed.", { exact: false }),
   ).toBeVisible();
@@ -269,21 +269,21 @@ test("@production acceptance retries the same operation after a lost response", 
   await searchOrder.fill("ORD-2");
   await expect(page.locator("li.order-row").first()).toHaveAttribute("hidden", "");
   await expect(
-    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
+    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }).first(),
   ).toBeHidden();
   await page.getByRole("button", { name: "Clear order filters" }).click();
   await expect(
-    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
+    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }).first(),
   ).toBeVisible();
   // Orders v2: opening the order moves its Accept into the panel and closing it brings it back to
   // the row; either way the pending retry is kept.
   await openOrder(page, "ORD-1");
   await expect(
-    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
+    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }).first(),
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(
-    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }),
+    page.getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true }).first(),
   ).toBeVisible();
   expect(bodies).toHaveLength(1);
   await openOrder(page, "ORD-1");
@@ -294,6 +294,7 @@ test("@production acceptance retries the same operation after a lost response", 
   ).toBeVisible();
   await page
     .getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true })
+    .first()
     .click();
   await expect(
     page
@@ -314,7 +315,7 @@ test("@production acceptance retries the same operation after a lost response", 
     "orderReference",
   ]);
   await expect(
-    page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }),
+    page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }).first(),
   ).toHaveCount(0);
 });
 
@@ -417,10 +418,10 @@ test("@production refresh after rejected acceptance uses current order version",
     return route.fulfill({ headers, json: { status: "Created", acceptedOrderVersion: 5 } });
   });
   await page.goto("/operations/orders");
-  await page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }).click();
+  await page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }).first().click();
   await expect(page.getByText("Acceptance was not confirmed.", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Refresh orders", exact: true }).click();
-  await page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }).click();
+  await page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }).first().click();
   await expect(
     page
       .getByRole("region", { name: "Round 2" })
@@ -767,22 +768,22 @@ test("@production WP-2423 v15: earlier-day orders still holding stock are listed
   // to each order; the rows say it in a few words.
   const attention = page.getByRole("region", { name: "Needs attention" });
   await expect(
-    attention.getByText("Order 2 is from Sat, Oct 10 and still holds its ingredients."),
+    // Orders v3: an earlier day's order carries its date with its number ("10/10 · 2").
+    attention.getByText("Order 10/10 · 2 isn't finished and still holds its ingredients."),
   ).toBeVisible();
   await expect(page.locator("li.order-row").getByText("Still holds its ingredients")).toBeVisible();
   await expect(
     page.locator("li.order-row").getByText("Finished · ingredients still set aside"),
   ).toBeVisible();
-  await attention.getByRole("button", { name: "Show order 2" }).click();
+  await attention.getByRole("button", { name: "Show order 10/10 · 2" }).click();
   await expect(
-    orderPanel(page).getByText("Still open from an earlier day and holding ingredients"),
+    // One short sentence beside the action, not the long notice again.
+    orderPanel(page).getByText("If the guest doesn't come back, cancel it", { exact: false }),
   ).toBeVisible();
   await expect(orderPanel(page).getByRole("button", { name: "Cancel order" })).toBeVisible();
-  await openOrder(page, "7");
+  await openOrder(page, "10/10 · 7");
   await expect(
-    orderPanel(page).getByText(
-      "This order from an earlier day is finished, but ingredients are still set aside",
-    ),
+    orderPanel(page).getByText("It is finished; release its ingredients below."),
   ).toBeVisible();
   await expectNoInternalText(page);
   for (const width of [1440, 1024, 390]) {
@@ -796,23 +797,21 @@ test("@production WP-2423 v15: earlier-day orders still holding stock are listed
   // The page itself is intact: its orders and the next page are there (yesterday's orders are
   // under Filter › Date › All days; Orders opens on today, Owner 2026-10-25).
   await chooseOrderFilter(page, "Date", "All days");
-  await expect(page.getByRole("heading", { name: "B-50", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /B-50$/u })).toBeVisible();
   await expect(page.getByRole("button", { name: "Next page" })).toBeVisible();
   await page.getByRole("button", { name: "Release held ingredients" }).click();
-  await expect(
-    page.getByText("This order from an earlier day is finished, but ingredients"),
-  ).toHaveCount(0);
+  await expect(page.getByText("It is finished; release its ingredients below.")).toHaveCount(0);
   // Staff are told plainly what happened, after the order has left the list.
   await expect(
     page.getByText("Ingredients for Order 7 (Sat, Oct 10) returned to stock."),
   ).toBeVisible();
-  await expect(page.getByRole("heading", { name: "7", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /(^|· )7$/u })).toHaveCount(0);
   await page.screenshot({ path: "test-results/orders-held-stock-released.png", fullPage: true });
   // An older server's mixed answer is read too, never "Orders unavailable".
   shape = "older";
   await page.getByRole("button", { name: "Refresh orders" }).click();
   await expect(page.getByText("Orders unavailable")).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "B-1", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /(^| )B-1$/u })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Earlier days · not finished" })).toBeVisible();
   expect(releases).toEqual([
     {

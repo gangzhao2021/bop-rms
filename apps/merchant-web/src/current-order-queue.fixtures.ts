@@ -156,6 +156,34 @@ function applyDemoCancellation(order: ReturnType<typeof row>) {
  * cancelled demo pickup stays cancelled in this tab. Every other merchant endpoint answers 503 so
  * the pages show their unavailable states without any application request leaving the browser.
  */
+/** Orders v2: synthetic list summaries for the local demo (TEST names, no contact details). */
+const demoSummaries: Readonly<Record<string, unknown>> = {
+  [CURRENT_ORDER_REFS.ready]: {
+    items: [{ name: "Synthetic latte", option: "Small", quantity: 1 }],
+    lineCount: 1,
+    pickupName: "TEST Sam",
+    tableLabel: null,
+  },
+  [CURRENT_ORDER_REFS.awaitingAcceptance]: {
+    items: [
+      { name: "Synthetic mushroom rice bowl", option: "Extra mushrooms", quantity: 2 },
+      { name: "Synthetic iced tea", option: null, quantity: 1 },
+    ],
+    lineCount: 2,
+    pickupName: null,
+    tableLabel: "12",
+  },
+  [CURRENT_ORDER_REFS.accepted]: {
+    items: [
+      { name: "Synthetic mocha", option: "Small", quantity: 1 },
+      { name: "Synthetic croissant", option: null, quantity: 2 },
+      { name: "Synthetic water", option: null, quantity: 1 },
+    ],
+    lineCount: 4,
+    pickupName: "TEST Alex",
+    tableLabel: null,
+  },
+};
 export const localMerchantFetch: typeof fetch = async (input, init) => {
   const target = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const url = new URL(target, "http://127.0.0.1");
@@ -163,7 +191,14 @@ export const localMerchantFetch: typeof fetch = async (input, init) => {
   if (method === "GET" && url.pathname === "/merchant/orders") {
     const queue = currentOrderQueueFixture();
     queue.items.forEach(applyDemoCancellation);
-    return json(queue);
+    // Orders v2: the list row's summary (synthetic names; no contact details).
+    return json({
+      ...queue,
+      items: queue.items.map((item) => ({
+        ...item,
+        summary: demoSummaries[item.orderReference] ?? null,
+      })),
+    });
   }
   if (method === "GET" && url.pathname === "/merchant/orders/detail") {
     const detail = currentOrderDetailFixture(url.searchParams.get("order") ?? "");

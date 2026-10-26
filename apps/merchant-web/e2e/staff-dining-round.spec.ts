@@ -492,7 +492,7 @@ test("@production the order queue marks a round entered by staff and its card-ma
     entry.getByRole("heading", { name: "Round 2 · Added round · Entered by staff" }),
   ).toBeVisible();
   // WP-2423 D5: the order shows the card-machine total apart from what was paid online.
-  const payment = entry.locator(".order-panel__facts");
+  const payment = entry.locator(".order-panel__payment");
   await expect(payment).toContainText("Paid online $11.30");
   await expect(payment).toContainText("Paid on card machine $23.04");
   await expect(entry.getByText(/the guest has not paid/u)).toHaveCount(0);

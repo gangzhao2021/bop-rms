@@ -77,7 +77,7 @@ export function OrderPaymentLinks({
     }
   };
   return (
-    <section aria-label={t("Order payments")}>
+    <section className="order-payment-links" aria-label={t("Order payments")}>
       {denied ? null : (
         <button disabled={busy} onClick={() => void load()}>
           {t("Payments and refunds")}

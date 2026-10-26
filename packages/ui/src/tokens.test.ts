@@ -26,6 +26,9 @@ describe("BOP Pilot Neutral tokens", () => {
     expect(contrast(color("success"), color("surface-default"))).toBeGreaterThanOrEqual(4.5);
     expect(contrast(color("warning"), color("surface-default"))).toBeGreaterThanOrEqual(4.5);
     expect(contrast(color("on-primary"), color("danger"))).toBeGreaterThanOrEqual(4.5);
+    // Owner 2026-10-26: the accent is text on white and the fill behind white button words.
+    expect(contrast(color("accent"), color("surface-default"))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(color("on-accent-fill"), color("accent"))).toBeGreaterThanOrEqual(4.5);
   });
   it("keeps the red and green marks (dots, outlines, bars) at 3:1 on white", () => {
     for (const mark of ["danger-mark", "success-mark"])

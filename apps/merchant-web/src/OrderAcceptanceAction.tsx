@@ -69,13 +69,15 @@ export function OrderAcceptanceAction({
   return (
     <div className="card-actions order-accept-action">
       {state === "Idle" || state === "Submitting" || state === "Unknown" || state === "Changed" ? (
-        <button disabled={state === "Submitting"} onClick={() => void accept()}>
+        <button data-state={state} disabled={state === "Submitting"} onClick={() => void accept()}>
           {state === "Unknown"
             ? t("Retry acceptance for ")
             : state === "Submitting"
               ? t("Accepting ")
               : t("Accept ")}
-          {orderNumber}
+          {/* Orders v3: on a list row the number is already beside the button; it stays in the
+              button's name for screen readers. */}
+          <span className="order-accept-action__number">{orderNumber}</span>
         </button>
       ) : null}
       {state === "Unknown" ? (

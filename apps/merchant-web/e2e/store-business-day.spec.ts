@@ -120,7 +120,12 @@ test("@production Orders after midnight stay under the Store's business day", as
   await expect(afterMidnight).toContainText("A-5");
   await expect(afterMidnight.locator(".order-workbench-time")).toHaveText("00:40");
   await openOrder(page, "A-5");
-  await expect(orderPanel(page).getByText("Oct 15, 2026, 12:40 AM")).toBeVisible();
+  // Orders v3: one date style (the calendar day it was placed, then the time).
+  await expect(
+    orderPanel(page)
+      .getByText(/Oct 15 00:40/u)
+      .first(),
+  ).toBeVisible();
   await expect(orderPanel(page).getByText("Today · Wed, Oct 14", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   for (const width of [1440, 390]) {

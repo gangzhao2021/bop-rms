@@ -583,7 +583,8 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await page.reload();
   await page.setViewportSize({ width: 390, height: 844 });
   const menu = workspaceNav.locator(".workspace-sidebar__compact > summary");
-  await expect(menu).toHaveText("Menu · Kitchen");
+  // Owner 2026-10-26: the phone menu button reads just "Menu"; the page title is on the page.
+  await expect(menu).toHaveText("Menu");
   await menu.click();
   const drawer = workspaceNav.locator(".workspace-drawer");
   await expect(drawer.getByRole("link", { name: "Orders", exact: true })).toBeVisible();
@@ -1705,7 +1706,7 @@ test("@production a view-only Kitchen starts the kitchen display on this device"
       await expect(sidebar.getByRole("button", { name: /^Commerce/u })).toBeVisible();
     } else
       await expect(workspaceNav.locator(".workspace-sidebar__compact > summary")).toHaveText(
-        "Menu · Kitchen",
+        "Menu",
       );
     await page.screenshot({ path: `test-results/kitchen-view-only-${width}.png`, fullPage: true });
   }

@@ -511,3 +511,65 @@
   background: var(--bop-color-on-primary);
   color: var(--bop-color-text-default);
 }
+
+/*
+ * Owner 2026-10-26 (Orders v3, "Square style"), for every page with the sidebar: white sidebar
+ * parted from the page by one hairline; the current page in the accent with a 3px accent bar, no
+ * dark block; counts as grey numbers. On a phone the top bar keeps a hairline under it, the menu
+ * button reads "Menu", and it sits at least 24px from the language switch.
+ */
+@media (min-width: 48.0625rem) {
+  .workspace-layout .workspace-sidebar {
+    border-right: 1px solid var(--bop-color-row-divider);
+  }
+}
+.workspace-sidebar .workspace-nav__list a[aria-current="page"],
+.workspace-sidebar a[aria-current="page"],
+.workspace-drawer__panel .workspace-nav__list a[aria-current="page"] {
+  border-radius: 0;
+  background: none;
+  box-shadow: inset 3px 0 0 var(--bop-color-accent);
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.workspace-sidebar a:hover,
+.workspace-drawer__panel a:hover {
+  color: var(--bop-color-accent);
+}
+.workspace-nav__badge,
+.workspace-sidebar a[aria-current="page"] .workspace-nav__badge,
+.workspace-drawer__panel a[aria-current="page"] .workspace-nav__badge {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  background: none;
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+}
+.workspace-layout .workspace-content .workspace-page__header .language-switch,
+.workspace-layout .workspace-content .bop-shell__header-extra .language-switch {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+@media (max-width: 48rem) {
+  .workspace-layout .workspace-sidebar {
+    border-bottom: 1px solid var(--bop-color-row-divider);
+  }
+  .workspace-layout .workspace-sidebar button.workspace-sidebar__language {
+    min-width: 44px;
+    min-height: 44px;
+    margin-inline-end: 24px;
+    color: var(--bop-color-text-muted);
+    font-size: 14px;
+    font-weight: 400;
+  }
+  .workspace-layout .workspace-sidebar .workspace-sidebar__compact > summary {
+    min-height: 44px;
+    padding: 0 4px;
+    border: 0;
+    color: var(--bop-color-accent);
+    font-size: 14px;
+    font-weight: 600;
+  }
+}

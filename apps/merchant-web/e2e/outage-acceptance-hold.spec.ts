@@ -151,7 +151,8 @@ test("@production orders paid during an outage are listed for a decision: accept
     { orderReference: id(2), orderBatchReference: id(52), holdReference: id(72) },
   ]);
   await expect(
-    page.locator("li.order-row").getByText("Refund chosen · refund pending"),
+    // Beside the open panel the list rows drop their second-line notes; the panel says it.
+    orderPanel(page).getByText("Refund chosen · refund pending"),
   ).toBeVisible();
   await expect(order2).toContainText("You chose to refund this order.");
   await expect(order2.getByRole("button", { name: /Accept/u })).toHaveCount(0);

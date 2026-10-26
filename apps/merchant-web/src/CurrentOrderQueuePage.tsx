@@ -15,11 +15,7 @@ import {
   staffCancellationSummary,
 } from "./StaffOrderCancelAction.js";
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
-import {
-  HeldStockNotice,
-  HeldStockReleaseAction,
-  heldStockReleasedText,
-} from "./HeldStockNotice.js";
+import { HeldStockReleaseAction, heldStockReleasedText } from "./HeldStockNotice.js";
 import {
   ItemRefundCheck,
   StaffItemCancelAction,
@@ -1146,6 +1142,104 @@ export function orderAmountNote(
 }
 
 /** Orders v2: how many rounds a table's order has, in its row ("2 rounds"); null for one. */
+/** Orders v2 (Owner 2026-10-26): "10/24 · 1" for an order not of today's business day. */
+export function orderLabel(
+  order: Pick<QueuedOrder, "orderNumber" | "businessDate">,
+  today: string | null,
+): string {
+  if (order.businessDate === null || today === null || order.businessDate === today)
+    return order.orderNumber;
+  const [, month, day] = order.businessDate.split("-");
+  return t("{month}/{day} · {orderNumber}", {
+    month: String(Number(month)),
+    day: String(Number(day)),
+    orderNumber: order.orderNumber,
+  });
+}
+
+/**
+ * Orders v2: when an order was placed, in one style — the time today, else the date with the
+ * weekday ("Sat, Oct 24 20:00"), with the year only when it is not this year.
+ */
+export function orderWhen(instant: string, timeZone: string | undefined, today: string | null) {
+  const time = storeTime(instant, timeZone);
+  if (timeZone === undefined) return time;
+  const date = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(instant));
+  if (date === today) return time;
+  const label = new Intl.DateTimeFormat(displayLocale(), {
+    timeZone,
+    ...(today !== null && date.slice(0, 4) === today.slice(0, 4) ? {} : { year: "numeric" }),
+    month: "short",
+    day: "numeric",
+    weekday: "short",
+  }).format(new Date(instant));
+  return `${label} ${time}`;
+}
+
+/** Orders v2: what the order is — "1× Latte (Small), 2× Mocha +1 more" (null when not read). */
+export function orderItemsText(summary: QueuedOrder["summary"]): string | null {
+  if (summary === null) return null;
+  const shown = summary.items.slice(0, 2).map((item) =>
+    t("{quantity}× {name}", {
+      quantity: item.quantity,
+      name:
+        item.option === null
+          ? item.name
+          : t("{name} ({option})", { name: item.name, option: item.option }),
+    }),
+  );
+  const more = summary.lineCount - shown.length;
+  return shown.join(t(", ")) + (more > 0 ? t(" +{count} more", { count: more }) : "");
+}
+
+/** Orders v2: who the order is for — the pickup name, the table, else how it came in. */
+export function orderWho(order: QueuedOrder): string {
+  if (order.summary?.pickupName) return order.summary.pickupName;
+  if (order.summary?.tableLabel) return t("Table {label}", { label: order.summary.tableLabel });
+  return orderChannelLabel(orderChannel(order));
+}
+
+/**
+ * Orders v2: a pickup staff can hand over now (accepted, paid or recorded, not closed): its next
+ * step is the handoff on Pickup, where the guest's code is checked.
+ */
+export function handoverReady(order: QueuedOrder, now: number): boolean {
+  return (
+    order.orderType === "Pickup" &&
+    (order.currentPhase === "Accepted" ||
+      order.currentPhase === "InProgress" ||
+      order.currentPhase === "Ready") &&
+    order.unfulfillable === null &&
+    !order.pickupNotCollected &&
+    !order.awaitingPayment &&
+    order.acceptanceHold === null &&
+    !counterAwaitingCardMachine(order, now)
+  );
+}
+
+/** Orders v2: the handoff on Pickup, with this order already searched. */
+export function HandoverLink({
+  order,
+  className,
+}: {
+  readonly order: QueuedOrder;
+  readonly className?: string;
+}) {
+  return (
+    <Link
+      className={className}
+      to={`/operations/pickup?order=${encodeURIComponent(order.orderNumber)}`}
+    >
+      {t("Hand over to guest")}
+    </Link>
+  );
+}
+
 function roundCount(order: QueuedOrder): string | null {
   return order.orderType === "DineIn" && order.batches.length > 1
     ? t("{count} rounds", { count: order.batches.length })
@@ -1193,12 +1287,19 @@ function OrderDetailBody({
         <header className="order-panel__head">
           <div>
             <h2 id={headingId} tabIndex={-1}>
-              {t("Order {orderNumber}", { orderNumber: order.orderNumber })}
+              {t("Order {orderNumber}", { orderNumber: orderLabel(order, today) })}
             </h2>
             <p className="order-panel__meta">
-              {orderTypeLabel[order.orderType]} · {orderChannelLabel(orderChannel(order))} ·{" "}
+              {[
+                orderWho(order) === orderChannelLabel(orderChannel(order)) ? null : orderWho(order),
+                orderTypeLabel[order.orderType],
+                orderChannelLabel(orderChannel(order)),
+              ]
+                .filter((part) => part !== null)
+                .join(" · ")}{" "}
+              ·{" "}
               <time dateTime={order.submittedAt}>
-                {storeTime(order.submittedAt, timeZone, true)}
+                {orderWhen(order.submittedAt, timeZone, today)}
               </time>
             </p>
           </div>
@@ -1212,30 +1313,29 @@ function OrderDetailBody({
         <OrderPhase order={order} now={now} inPanel={!single} />
         <OrderStatusNotes order={order} now={now} timeZone={timeZone} />
       </div>
-      <HeldStockNotice order={order} />
-      {order.counter !== null ? (
+      {order.heldStock === null ? null : (
+        <p className="order-panel__hint">
+          {order.heldStock.state === "Open"
+            ? t(
+                "If the guest doesn't come back, cancel it: they are refunded and the ingredients go back to stock.",
+              )
+            : t("It is finished; release its ingredients below.")}
+        </p>
+      )}
+      {order.counter !== null && order.counter.paidOnCardMachine === null ? (
         <p className="order-counter-note" role="note">
-          {t("Taken at the counter. {value}{value2}", {
-            value:
-              order.counter.paidOnCardMachine === null
-                ? counterAwaitingCardMachine(order, now ?? Date.now())
-                  ? t(
-                      "Not paid yet: charge it on the card machine, then record it below (or from Counter order).",
-                    )
-                  : t("Not paid on the card machine.")
-                : t("Paid on the store's card machine ({value}) at {takenAt}.", {
-                    value: orderMoney({
-                      amountMinor: order.counter.paidOnCardMachine.amountMinor,
-                      currencyCode: "CAD",
-                    }),
-                    takenAt: storeTime(order.counter.paidOnCardMachine.takenAt, timeZone, true),
-                  }),
-            value2: order.counter.recordedAfterOutage
-              ? t(
-                  " Recorded after an outage from a paper order: it may already have been made and handed over.",
-                )
-              : "",
-          })}
+          {counterAwaitingCardMachine(order, now ?? Date.now())
+            ? t(
+                "Not paid yet: charge it on the card machine, then record it below (or from Counter order).",
+              )
+            : t("Not paid on the card machine.")}
+        </p>
+      ) : null}
+      {order.counter?.recordedAfterOutage ? (
+        <p className="order-counter-note" role="note">
+          {t(
+            " Recorded after an outage from a paper order: it may already have been made and handed over.",
+          ).trim()}
         </p>
       ) : null}
       {order.pickupNotCollected ? (
@@ -1397,38 +1497,64 @@ function OrderDetailBody({
               })}
             </p>
           )}
-          {action?.(order, batch)}
+          {/* A pickup's one step is the panel's next step (below); a table's stays per round. */}
+          {order.orderType === "Pickup" ? null : action?.(order, batch)}
         </section>
       ))}
       {detail?.(order, true)}
-      <dl className="order-panel__facts">
-        {payment.length === 0 ? null : (
+      {payment.length === 0 ? null : (
+        <section className="order-panel__section" aria-label={t("Payment")}>
+          <h3>{t("Payment")}</h3>
+          <ul className="order-panel__payment">
+            {payment.map((text) => (
+              <li key={text}>{text}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <section className="order-panel__section" aria-label={t("Record")}>
+        <h3>{t("Record")}</h3>
+        <dl className="order-panel__facts">
           <div>
-            <dt>{t("Payment")}</dt>
-            <dd>{payment.join(" · ")}</dd>
-          </div>
-        )}
-        {order.businessDate === null ? null : (
-          <div>
-            <dt>{t("Business day")}</dt>
+            <dt>{t("Placed")}</dt>
             <dd>
-              {order.heldStock === null &&
-              order.listedBusinessDate !== null &&
-              order.listedBusinessDate !== order.businessDate
-                ? openedEarlierText(order.businessDate, order.listedBusinessDate, today)
-                : businessDateLabel(order.businessDate, today)}
+              <time dateTime={order.submittedAt}>
+                {orderWhen(order.submittedAt, timeZone, today)}
+              </time>
             </dd>
           </div>
-        )}
-        <div>
-          <dt>{t("Last checked")}</dt>
-          <dd>
-            <time dateTime={order.observedAt} title={order.observedAt}>
-              {storeTime(order.observedAt, timeZone, true)}
-            </time>
-          </dd>
+          {order.businessDate === null ? null : (
+            <div>
+              <dt>{t("Business day")}</dt>
+              <dd>
+                {order.heldStock === null &&
+                order.listedBusinessDate !== null &&
+                order.listedBusinessDate !== order.businessDate
+                  ? openedEarlierText(order.businessDate, order.listedBusinessDate, today)
+                  : businessDateLabel(order.businessDate, today)}
+              </dd>
+            </div>
+          )}
+          <div>
+            <dt>{t("Last checked")}</dt>
+            <dd>
+              <time dateTime={order.observedAt} title={order.observedAt}>
+                {orderWhen(order.observedAt, timeZone, today)}
+              </time>
+            </dd>
+          </div>
+        </dl>
+      </section>
+      {/* Orders v2 (Owner 2026-10-26): the order's one next step leads (the accent button), and
+          cancelling sits under it as red words that ask before they act. */}
+      {order.orderType === "Pickup" && order.batches[0] !== undefined ? (
+        <div className="order-panel__next">
+          {now !== undefined && handoverReady(order, now) ? (
+            <HandoverLink order={order} className="order-next-primary" />
+          ) : null}
+          {action?.(order, order.batches[0])}
         </div>
-      </dl>
+      ) : null}
     </div>
   );
 }
@@ -1450,7 +1576,7 @@ export function CurrentOrderQueueRows({
 }: {
   readonly view: CurrentOrderQueue;
   /** Figma v1: the order's next step, shown at the end of its row on the list (outside the row's
-      button, so it is its own control). Hidden while the panel shows the same order. */
+      button, so it is its own control). Kept while the panel shows the same order (Owner). */
   readonly rowAction?: ((order: CurrentOrderQueue["items"][number]) => React.ReactNode) | undefined;
   /** WP-2423: Payment's refund position of the one Order shown (the order detail page). */
   readonly paymentPosition?: CurrentOrderDetail["paymentPosition"] | undefined;
@@ -1604,20 +1730,34 @@ export function CurrentOrderQueueRows({
                           }}
                           onClick={() => (isOpen ? close() : open(order))}
                         >
-                          {order.orderNumber}
+                          {orderLabel(order, today)}
                         </button>
                       </h3>
                       <span className="order-row__what">
+                        {/* Orders v2: what it is (its items), then who and when. */}
                         <span className="order-workbench-type">
-                          {[
-                            orderTypeLabel[order.orderType],
-                            orderChannelLabel(orderChannel(order)),
-                            roundCount(order),
-                          ]
-                            .filter((part) => part !== null)
-                            .join(" · ")}
+                          {orderItemsText(order.summary) ??
+                            [
+                              orderTypeLabel[order.orderType],
+                              orderChannelLabel(orderChannel(order)),
+                              roundCount(order),
+                            ]
+                              .filter((part) => part !== null)
+                              .join(" · ")}
                         </span>
                         <span className="order-row__when">
+                          {order.summary === null
+                            ? ""
+                            : [
+                                orderWho(order),
+                                order.orderType === "Pickup" &&
+                                orderWho(order) !== orderChannelLabel(orderChannel(order))
+                                  ? orderTypeLabel[order.orderType]
+                                  : null,
+                                roundCount(order),
+                              ]
+                                .filter((part) => part !== null)
+                                .join(" · ") + " · "}
                           {earlier && order.businessDate !== null
                             ? businessDateLabel(order.businessDate, today) + " "
                             : ""}
@@ -1724,11 +1864,15 @@ export function CurrentOrderDetails({
       {order.counter?.paidOnCardMachine ? (
         // WP-2423 Q7 / item 4: refunds of a card-machine payment are made on that machine and
         // recorded here: in full by cancelling before the kitchen starts, or by item afterwards.
-        <p className="order-counter-note" role="note">
-          {t(
-            "Paid on the store's card machine. To refund it in full before the kitchen starts, cancel the order. To refund some items, a manager opens Payments and refunds, records the refund, makes it on the card machine and records it there.",
-          )}
-        </p>
+        // Orders v2 (Owner 2026-10-26): the how-to waits behind a question, not in the way.
+        <details className="order-refund-howto">
+          <summary>{t("How do refunds work?")}</summary>
+          <p>
+            {t(
+              "Paid on the store's card machine. To refund it in full before the kitchen starts, cancel the order. To refund some items, a manager opens Payments and refunds, records the refund, makes it on the card machine and records it there.",
+            )}
+          </p>
+        </details>
       ) : null}
       {/* WP-2423 (v15 751dd768): offered only to people the server lets read payments. */}
       {order.canViewPayments ? (
@@ -1811,12 +1955,8 @@ function OrderAttention({
             <li key={order.orderReference}>
               <div>
                 <p>
-                  {t("Order {orderNumber} is from {date} and still holds its ingredients.", {
-                    orderNumber: order.orderNumber,
-                    date:
-                      order.businessDate === null
-                        ? t("an earlier day")
-                        : businessDateLabel(order.businessDate, today),
+                  {t("Order {orderNumber} isn't finished and still holds its ingredients.", {
+                    orderNumber: orderLabel(order, today),
                   })}
                 </p>
                 <p className="order-attention__hint">
@@ -1830,7 +1970,7 @@ function OrderAttention({
                 </p>
               </div>
               <button type="button" onClick={() => onOpen(order)}>
-                {t("Show order {orderNumber}", { orderNumber: order.orderNumber })}
+                {t("Show order {orderNumber}", { orderNumber: orderLabel(order, today) })}
               </button>
             </li>
           ))}
@@ -2172,7 +2312,7 @@ export function CurrentOrderQueuePage({
     ["AwaitingAcceptance", t("To accept")],
     ["InProgress", t("In progress")],
     ["Ready", t("Ready")],
-    ["Fulfilled", t("Done")],
+    ["Fulfilled", t("Picked up / served")],
   ] as const;
   const segmentPhase = segments.some(([phase]) => phase === phaseFilter);
   const filtersApplied =
@@ -2211,7 +2351,7 @@ export function CurrentOrderQueuePage({
         single
           ? detail === undefined
             ? t("Order")
-            : t("Order {orderNumber}", { orderNumber: detail.order.orderNumber })
+            : t("Order {orderNumber}", { orderNumber: orderLabel(detail.order, businessDay) })
           : t("Orders")
       }
       meta={
@@ -2441,17 +2581,31 @@ export function CurrentOrderQueuePage({
                 ) : null}
               </>
             }
-            after={
-              single ? null : (
+            after={(() => {
+              if (single) return null;
+              // Orders v2 (Owner 2026-10-26): the count and the pager speak only where they add
+              // something — history (all days, an older page), a filtered view, or a busy day whose
+              // earlier orders run onto the next page. Today's view that fits says nothing.
+              const history = today === null || dayFilter === "All" || after !== null;
+              const last = state.view.items[state.view.items.length - 1];
+              const todaySpills =
+                !history &&
+                state.view.nextAfterOrderReference !== null &&
+                last?.listedBusinessDate === today;
+              const pager = (history || todaySpills) && state.view.nextAfterOrderReference !== null;
+              if (!history && !todaySpills && !hasOrderFilters) return null;
+              return (
                 <div className="order-paging">
                   <p className="order-queue-filter-count" aria-live="polite">
-                    {orderCountText({
-                      shown: filteredOrders.length,
-                      total: state.view.items.length,
-                      filtered: hasOrderFilters,
-                      olderPage: after !== null,
-                      morePages: state.view.nextAfterOrderReference !== null,
-                    })}
+                    {todaySpills && !hasOrderFilters
+                      ? t("Today's earlier orders are on the next page.")
+                      : orderCountText({
+                          shown: filteredOrders.length,
+                          total: state.view.items.length,
+                          filtered: hasOrderFilters,
+                          olderPage: after !== null,
+                          morePages: state.view.nextAfterOrderReference !== null,
+                        })}
                   </p>
                   {hasOrderFilters ? (
                     <button type="button" onClick={clearOrderFilters}>
@@ -2463,7 +2617,7 @@ export function CurrentOrderQueuePage({
                       {t("First page")}
                     </button>
                   ) : null}
-                  {state.view.nextAfterOrderReference !== null ? (
+                  {pager ? (
                     <button
                       type="button"
                       disabled={servingBusy}
@@ -2473,8 +2627,8 @@ export function CurrentOrderQueuePage({
                     </button>
                   ) : null}
                 </div>
-              )
-            }
+              );
+            })()}
             detail={(order, open) => (
               <CurrentOrderDetails
                 fetcher={fetcher}
@@ -2556,11 +2710,22 @@ export function CurrentOrderQueuePage({
                       );
                     // Orders v2: a counter order to charge opens the order, where the payment is
                     // recorded with its amount.
-                    return order.canRecordCardMachinePayment &&
-                      counterAwaitingCardMachine(order, now ?? Date.now()) ? (
-                      <button type="button" onClick={() => openOrder(order)}>
-                        {t("Charge on card machine")}
-                      </button>
+                    if (
+                      order.canRecordCardMachinePayment &&
+                      counterAwaitingCardMachine(order, now ?? Date.now())
+                    )
+                      return (
+                        <button
+                          type="button"
+                          className="order-next-fill"
+                          onClick={() => openOrder(order)}
+                        >
+                          {t("Charge on card machine")}
+                        </button>
+                      );
+                    // Orders v2: an accepted pickup is handed over on Pickup (the code is checked there).
+                    return handoverReady(order, now ?? Date.now()) ? (
+                      <HandoverLink order={order} className="order-next-text" />
                     ) : null;
                   }
             }

@@ -29,6 +29,11 @@ import {
   orderAmountTaken,
   orderStatusTone,
   ordersSummary,
+  orderLabel,
+  orderItemsText,
+  orderWho,
+  orderWhen,
+  handoverReady,
 } from "./CurrentOrderQueuePage.js";
 import {
   ordersAwaitingAcceptance,
@@ -233,7 +238,8 @@ it("labels a cancelled additional Batch distinctly from unaccepted work", () => 
   const pickupHtml = renderToStaticMarkup(<CurrentOrderQueueRows view={pickup} />);
   // The panel already names the order, so a pickup's one batch has no second heading.
   expect(pickupHtml).toContain('aria-label="Order"');
-  expect(pickupHtml).not.toContain("<h3>");
+  expect(pickupHtml).not.toContain("<h3>Order</h3>");
+  expect(pickupHtml).not.toContain("Round 1");
   expect(pickupHtml).not.toContain("Round 1");
 });
 
@@ -1415,7 +1421,7 @@ it("WP-2423: says an online order is paid, and what happened to the payment", ()
   // The row shows the amount alone; the panel says how it was paid.
   expect(html).toContain('<span class="order-row__money">$11.30</span>');
   expect(html).not.toContain('class="order-row__paid"');
-  expect(html).toContain("<dt>Payment</dt><dd>Paid online $11.30</dd>");
+  expect(html).toContain('<ul class="order-panel__payment"><li>Paid online $11.30</li></ul>');
   // A refund is an exception, so the row says it under the amount.
   expect(
     renderToStaticMarkup(
@@ -1425,7 +1431,8 @@ it("WP-2423: says an online order is paid, and what happened to the payment", ()
       />,
     ),
   ).toContain('<span class="order-row__paid">refunded in full</span>');
-  expect(html).toContain("Oct 14, 2026, 10:08 PM");
+  // Orders v3: one date style — weekday and date, the year when not this year, then the time.
+  expect(html).toContain("Wed, Oct 14, 2026 22:08");
   expect(html).not.toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/u);
   const single = renderToStaticMarkup(
     <CurrentOrderQueueRows single view={parse(order())} paymentPosition={position("500")} />,
@@ -1705,4 +1712,51 @@ it("Orders v2: the header line counts today's orders apart from earlier-day orde
     "1 order today · 2 to accept · 1 from earlier days",
   );
   expect(ordersSummary(view, null, 1)).toBe("2 orders on this page · 1 to accept");
+});
+
+it("Orders v3: a row says what, who and which day, and an accepted pickup's next step is the handoff", () => {
+  const fixture = parseCurrentOrderQueue(currentOrderQueueFixture());
+  const [, , accepted] = fixture.items;
+  if (!accepted) throw new Error("fixture");
+  // Numbers restart each business day: an earlier day's order carries its date.
+  expect(orderLabel({ orderNumber: "1", businessDate: "2026-10-24" }, "2026-10-26")).toBe(
+    "10/24 · 1",
+  );
+  expect(orderLabel({ orderNumber: "4", businessDate: "2026-10-26" }, "2026-10-26")).toBe("4");
+  const summary = {
+    items: [
+      { name: "Latte", option: "Small", quantity: 1 },
+      { name: "Mocha", option: null, quantity: 2 },
+      { name: "Water", option: null, quantity: 1 },
+    ],
+    lineCount: 4,
+    pickupName: "TEST Sam",
+    tableLabel: null,
+  };
+  expect(orderItemsText(summary)).toBe("1× Latte (Small), 2× Mocha +2 more");
+  expect(orderItemsText(null)).toBeNull();
+  // Who: the pickup name, else the table, else how it came in — never a phone or email.
+  expect(orderWho({ ...accepted, summary })).toBe("TEST Sam");
+  expect(
+    orderWho({
+      ...accepted,
+      orderType: "DineIn",
+      summary: { ...summary, pickupName: null, tableLabel: "12" },
+    }),
+  ).toBe("Table 12");
+  expect(orderWho({ ...accepted, summary: null })).toBe("Online");
+  // One date style: the time today, else weekday and date (the year only when not this year).
+  expect(orderWhen("2026-10-26T19:02:00.000Z", "America/Toronto", "2026-10-26")).toBe("15:02");
+  expect(orderWhen("2026-10-25T00:00:00.000Z", "America/Toronto", "2026-10-26")).toBe(
+    "Sat, Oct 24 20:00",
+  );
+  expect(orderWhen("2025-10-25T00:00:00.000Z", "America/Toronto", "2026-10-26")).toBe(
+    "Fri, Oct 24, 2025 20:00",
+  );
+  // An accepted, paid pickup is handed over on Pickup; one waiting to be accepted is not.
+  const now = Date.parse("2026-08-12T12:00:00.000Z");
+  expect(handoverReady(accepted, now)).toBe(true);
+  expect(handoverReady({ ...accepted, currentPhase: "Submitted" }, now)).toBe(false);
+  expect(handoverReady({ ...accepted, awaitingPayment: true }, now)).toBe(false);
+  expect(handoverReady({ ...accepted, orderType: "DineIn" }, now)).toBe(false);
 });

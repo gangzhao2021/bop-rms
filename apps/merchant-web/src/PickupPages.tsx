@@ -357,7 +357,11 @@ export function PickupQueueScreen({
   const [filter, setFilter] = useState("All");
   const [claimFilter, setClaimFilter] = useState("All");
   const [exceptionFilter, setExceptionFilter] = useState("All");
-  const [orderQuery, setOrderQuery] = useState("");
+  // Orders v2: "Hand over to guest" on Orders opens Pickup with that order already searched.
+  const [orderQuery, setOrderQuery] = useState(() => {
+    const search = (globalThis as { location?: { search?: string } }).location?.search;
+    return (search === undefined ? null : new URLSearchParams(search).get("order")) ?? "";
+  });
   const readOnly = view.freshnessStatus !== "Fresh";
   const claimFilterAvailable =
     view.items.length > 0 && view.items.every((item) => item.claimStatus !== "Unavailable");

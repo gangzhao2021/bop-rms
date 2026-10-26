@@ -5593,4 +5593,21 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "只筛选本页已加载的订单。清除筛选，或去下一页找更早的订单。",
   "Open full page": "打开完整页面",
   "Close details": "关闭详情",
+  // Orders v3 (Owner 2026-10-26).
+  "{month}/{day} · {orderNumber}": "{month}/{day} · {orderNumber}",
+  "{quantity}× {name}": "{quantity}× {name}",
+  "{name} ({option})": "{name}（{option}）",
+  ", ": "、",
+  " +{count} more": " +{count} 件",
+  "Table {label}": "{label} 号桌",
+  "If the guest doesn't come back, cancel it: they are refunded and the ingredients go back to stock.":
+    "顾客不来就取消：会退款，食材放回库存。",
+  "It is finished; release its ingredients below.": "已做完，请在下面释放占着的食材。",
+  Record: "记录",
+  "How do refunds work?": "怎么退款？",
+  "Order {orderNumber} isn't finished and still holds its ingredients.":
+    "{orderNumber} 号单还没做完，占着它的食材。",
+  "Picked up / served": "已取餐/上桌",
+  "Today's earlier orders are on the next page.": "今天更早的订单在下一页。",
+  "Hand over to guest": "交给顾客",
 });

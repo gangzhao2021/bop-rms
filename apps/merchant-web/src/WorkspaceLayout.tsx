@@ -396,7 +396,8 @@ export function WorkspaceLayout({
           onKeyDown={closeOnEscape}
         >
           <summary>
-            {t("Menu{value}", { value: currentLabel === null ? "" : " · " + currentLabel })}
+            {/* Owner 2026-10-26: just "Menu"; the page title is on the page. */}
+            {t("Menu{value}", { value: "" })}
           </summary>
           <div className="workspace-drawer">
             <div className="workspace-drawer__panel">
