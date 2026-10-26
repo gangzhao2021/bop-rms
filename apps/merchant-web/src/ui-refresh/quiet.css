@@ -389,3 +389,8 @@
   background: transparent;
   color: var(--bop-color-text-muted);
 }
+/* Tag words stay dark in every tone (the per-tone colours in orders.css are more specific). */
+.orders-page .order-workbench-phase[data-tone],
+.orders-page .order-workbench-phase[data-phase] {
+  color: var(--bop-color-text-default);
+}

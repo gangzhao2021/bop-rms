@@ -89,6 +89,11 @@ test("@production current queue pages and clears old orders after denied refresh
   });
   await page.goto("/operations/orders");
   await expect(page.getByRole("heading", { name: "ORD-100", exact: true })).toBeVisible();
+  // Owner 2026-10-25: a status tag's words are dark in every tone; the dot carries the tone.
+  await expect(page.locator(".order-workbench-phase").first()).toHaveCSS(
+    "color",
+    "rgb(23, 23, 23)",
+  );
   const orderRows = page.locator("details.order-workbench-entry");
   const visibleOrderRows = page.locator("details.order-workbench-entry:visible");
   await expect(visibleOrderRows).toHaveCount(50);
