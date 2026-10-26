@@ -2833,6 +2833,8 @@
 }
 .customer-page :is(input:not([type="checkbox"], [type="radio"]), select, textarea),
 .customer-page .menu-navigation__search {
+  --bop-color-border-default: var(--bop-color-border-control);
+  --bop-color-border-strong: var(--bop-color-border-control);
   border: 0;
   border-bottom: 1px solid var(--bop-color-border-control);
   border-radius: 0;
