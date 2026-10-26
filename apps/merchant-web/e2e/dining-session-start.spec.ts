@@ -248,9 +248,13 @@ test("@production staff starts a table and recovers a lost entry code without du
   ).toBeVisible();
   expect(await reasonField.getAttribute("aria-describedby")).toBe("dining-table-reason-help");
   expect((await reasonField.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-  expect(await reasonField.evaluate((input) => getComputedStyle(input).borderTopStyle)).toBe(
-    "solid",
-  );
+  // A field is one 3:1 bottom line under its label (Owner 2026-10-26), not a box.
+  expect(
+    await reasonField.evaluate((input) => {
+      const style = getComputedStyle(input);
+      return [style.borderTopWidth, style.borderBottomStyle, style.borderBottomColor];
+    }),
+  ).toEqual(["0px", "solid", "rgb(138, 138, 138)"]);
   expect(availability.map((body) => JSON.parse(body).expectedAggregateVersion)).toEqual([2, 2, 3]);
   expect(availability.map((body) => JSON.parse(body).action)).toEqual([
     "SetBlock",

@@ -667,7 +667,7 @@
   aspect-ratio: 1 / 1;
   overflow: hidden;
   border-radius: var(--bop-radius-card);
-  background: var(--bop-color-surface-raised);
+  background: var(--bop-color-surface-placeholder);
 }
 .menu-card__media img,
 .sellable-detail__media img {
@@ -751,7 +751,7 @@
   display: block;
   height: 0.875rem;
   border-radius: var(--bop-radius-control);
-  background: var(--bop-color-surface-raised);
+  background: var(--bop-color-surface-placeholder);
 }
 .menu-skeleton__card span:first-child {
   width: 45%;
@@ -980,7 +980,7 @@
   margin-bottom: var(--bop-space-5);
   overflow: hidden;
   border-radius: var(--bop-radius-card);
-  background: var(--bop-color-surface-raised);
+  background: var(--bop-color-surface-placeholder);
 }
 .sellable-detail__content {
   min-width: 0;
@@ -2796,7 +2796,9 @@
 .order-status__warning h2 {
   color: var(--bop-color-warning);
 }
-/* Secondary buttons and fields: filled, no outline. */
+/* Owner 2026-10-26 ("订单号这些还是灰底"): controls are white. A secondary button keeps a 3:1
+   hairline outline; a field is one 3:1 bottom line under its label (2px dark on focus, the red
+   mark on an error); an unselected tip is plain words; the stepper's − and + are outlined discs. */
 .customer-page
   :is(
     .language-switch,
@@ -2813,25 +2815,56 @@
     .checkout-details-form button:not(.checkout-details-form__reload),
     .checkout-attention button,
     .checkout-totals button,
-    .checkout-tip__choices button:not([aria-pressed="true"]),
     .dining-invitation__action--secondary,
     .pickup-code button,
-    .receipt-page__actions button,
-    .configure-stepper
-  ),
-.customer-page :is(input:not([type="checkbox"], [type="radio"]), select, textarea) {
-  border-color: transparent;
-  background: var(--customer-control-fill);
+    .receipt-page__actions button
+  ) {
+  border: 1px solid var(--bop-color-border-control);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
 }
-.customer-page .configure-stepper button,
-.customer-page .configure-stepper input[type="number"] {
+.customer-page
+  :is(
+    .checkout-tip__choices button:not([aria-pressed="true"]),
+    .checkout-tip__choices button:disabled:not([aria-pressed="true"])
+  ) {
+  border-color: transparent;
   background: transparent;
 }
-.customer-page :is(input, select, textarea):focus {
-  border-color: var(--bop-color-text-default);
+.customer-page :is(input:not([type="checkbox"], [type="radio"]), select, textarea),
+.customer-page .menu-navigation__search {
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-border-control);
+  border-radius: 0;
+  padding-inline: 0;
+  background: var(--bop-color-surface-default);
 }
-.customer-page :is(input, select, textarea)[aria-invalid="true"] {
-  border-color: var(--bop-color-danger-mark);
+.customer-page :is(input, select, textarea):focus,
+.customer-page .menu-navigation__search:hover {
+  border-bottom-color: var(--bop-color-text-default);
+  box-shadow: 0 1px 0 var(--bop-color-text-default);
+}
+.customer-page :is(input, select, textarea):is([aria-invalid="true"], :user-invalid) {
+  border-bottom-color: var(--bop-color-danger-mark);
+}
+.customer-page .configure-stepper {
+  gap: var(--bop-space-1);
+  border: 0;
+  background: var(--bop-color-surface-default);
+}
+.customer-page .configure-stepper button,
+.customer-page .configure-stepper button:disabled {
+  width: 40px;
+  min-height: 40px;
+  height: 40px;
+  margin: 2px;
+  border: 1px solid var(--bop-color-border-control);
+  border-radius: 50%;
+  background: var(--bop-color-surface-default);
+}
+.customer-page .sellable-configurator .configure-stepper input[type="number"] {
+  border: 0;
+  box-shadow: none;
 }
 /* Tags: words only. */
 .menu-badge {
@@ -2867,10 +2900,11 @@
 .payment-result-page__badge[data-tone="warning"]::before {
   background: var(--bop-color-warning);
 }
-/* Choice rows: grey until chosen; the chosen row is white with a 1.5 px outline. */
+/* Choice rows: white with no outline until chosen (the radio or box is the affordance); the
+   chosen row has a 1.5 px outline. */
 .configure-option {
   border-color: transparent;
-  background: var(--bop-color-surface-raised);
+  background: var(--bop-color-surface-default);
 }
 .configure-option:has(input:checked) {
   padding: 0 calc(var(--bop-space-4) - 0.5px);
@@ -2902,9 +2936,10 @@
   left: 5.5px;
   background: var(--bop-color-text-muted);
 }
-/* Steps not reached yet: a grey disc instead of a ring. */
+/* Steps not reached yet: a ring in the control line. */
 .checkout-progress li:not([aria-current="step"])::before {
-  background: var(--bop-color-surface-raised);
+  border-color: var(--bop-color-border-control);
+  background: var(--bop-color-surface-default);
 }
 
 /*

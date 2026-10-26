@@ -7,7 +7,12 @@
   --bop-color-on-accent: #ffffff;
   --bop-color-surface-canvas: #ffffff;
   --bop-color-surface-default: #ffffff;
-  --bop-color-surface-raised: #f5f5f5;
+  /* Owner 2026-10-26 ("只要白底", then "订单号这些还是灰底"): no grey surfaces anywhere, controls
+     included. "Raised" is white; grey stays only for image placeholders, and a control is told
+     by a 3:1 line (field bottom line, button hairline). */
+  --bop-color-surface-raised: #ffffff;
+  --bop-color-surface-placeholder: #f5f5f5;
+  --bop-color-border-control: #8a8a8a;
   --bop-color-text-default: #171717;
   --bop-color-text-muted: #666666;
   --bop-color-border-default: #e5e5e5;
@@ -202,10 +207,10 @@ button {
   justify-content: center;
   min-height: 44px;
   padding: 0 var(--bop-space-4);
-  border: 1px solid transparent;
+  border: 1px solid var(--bop-color-border-control);
   border-radius: var(--bop-radius-control);
   color: var(--bop-color-text-default);
-  background: var(--bop-color-surface-raised);
+  background: var(--bop-color-surface-default);
   font: inherit;
   font-size: 14px;
   font-weight: 500;
@@ -217,9 +222,10 @@ button {
   margin-left: var(--bop-space-2);
 }
 :where(.bop-shell__main) :where(button:not([class]):hover:not(:disabled)) {
-  background: var(--bop-color-border-default);
+  border-color: var(--bop-color-text-default);
 }
 :where(.bop-shell__main) :where(button[type="submit"]:not([class])) {
+  border-color: var(--bop-color-brand-primary);
   color: var(--bop-color-on-primary);
   background: var(--bop-color-brand-primary);
 }
@@ -254,23 +260,25 @@ button {
     textarea:not([class])
   ) {
   min-height: 44px;
-  padding: var(--bop-space-2) var(--bop-space-3);
-  border: 1px solid transparent;
-  border-radius: var(--bop-radius-control);
+  padding: var(--bop-space-2) 0;
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-border-control);
+  border-radius: 0;
   color: var(--bop-color-text-default);
-  background: var(--bop-color-surface-raised);
+  background: var(--bop-color-surface-default);
   font: inherit;
   font-size: 15px;
   font-weight: 400;
 }
 :where(.bop-shell__main)
   :where(input:not([class]), select:not([class]), textarea:not([class])):focus {
-  border-color: var(--bop-color-border-strong);
+  border-bottom-color: var(--bop-color-text-default);
+  box-shadow: 0 1px 0 var(--bop-color-text-default);
 }
-/* A field with an error keeps a red outline: the one border a form still needs. */
+/* A field with an error draws its bottom line in the red mark, beside its message. */
 :where(.bop-shell__main)
   :where(input, select, textarea):where([aria-invalid="true"], :user-invalid) {
-  border-color: var(--bop-color-danger-mark);
+  border-bottom-color: var(--bop-color-danger-mark);
 }
 /* A field inside a table cell fills the cell. */
 :where(.bop-shell__main)

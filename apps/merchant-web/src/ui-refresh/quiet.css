@@ -8,6 +8,9 @@
  * Owner 2026-10-25 ("只要白底"): every surface is white — page, sidebar, cards, rows, notices;
  * areas are told apart by space and type. Grey stays only on controls (buttons, fields, chips),
  * which would otherwise disappear.
+ * Owner 2026-10-26 ("订单号这些还是灰底"): controls are white too. A field is a single 3:1 bottom
+ * line under its label; a secondary button keeps a 3:1 hairline outline; an unselected chip is
+ * plain words and a selected one the dark pill. Grey stays only on image placeholders.
  */
 :root {
   --bop-color-border-default: transparent;
@@ -65,34 +68,64 @@
   background: var(--bop-color-surface-default);
 }
 .orders-page .order-workbench-entry > summary:hover {
-  background: var(--bop-color-surface-raised);
+  background: var(--bop-color-surface-default);
 }
 
-/* Controls: a white control becomes a filled grey one, wherever it sits. */
-.workspace-content :is(button, input:not([type="checkbox"], [type="radio"]), select, textarea) {
-  --bop-color-surface-default: var(--bop-color-surface-raised);
+/* Buttons: any button drawn with a line gets the 3:1 control hairline back. */
+.workspace-layout :is(button, .availability-menu > summary) {
+  --bop-color-border-default: var(--bop-color-border-control);
+  --bop-color-border-strong: var(--bop-color-border-control);
 }
-.workspace-page.workspace-page .dining-floor-filters :is(input, select),
-.workspace-content
-  :is(.kitchen-board-filters, .kitchen-reference-search)
-  :is(input, select, button),
-.workspace-page__header button:not(:disabled, [type="submit"]),
-.workspace-page__header select,
+.workspace-page__header button:not(:disabled, [type="submit"], [data-variant="destructive"]),
 .workspace-layout
   > :not(.workspace-content)
   button:not([aria-current], .workspace-nav__group-toggle, [type="submit"], dialog *),
-.orders-page .order-status-filters button:not([aria-pressed="true"]) {
-  border-color: transparent;
-  background: var(--bop-color-surface-raised);
+.workspace-content
+  :is(.kitchen-board-filters, .kitchen-reference-search)
+  button:not([type="submit"]),
+.workspace-page > button:not(:disabled, [type="submit"]),
+.workspace-page .overview-attention__action,
+.workspace-layout .availability-menu > summary {
+  border: 1px solid var(--bop-color-border-control);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
 }
 .workspace-sidebar .workspace-nav__group-toggle {
+  border: 0;
   background: transparent;
 }
-.workspace-content :is(input, select, textarea)[aria-invalid="true"] {
-  border: 1px solid var(--bop-color-danger-mark);
+/* Filter chips: an unselected chip is plain words; the selected one keeps the dark pill. */
+.orders-page .order-status-filters button:not([aria-pressed="true"]) {
+  border-color: transparent;
+  background: transparent;
 }
-.workspace-page .overview-attention__action {
-  background: var(--bop-color-surface-raised);
+/* Fields: white, no box, one bottom line; 2px dark on focus; the red mark on an error. */
+.workspace-layout.workspace-layout
+  :is(
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]),
+    select,
+    textarea
+  ) {
+  --bop-color-border-default: var(--bop-color-border-control);
+  --bop-color-border-strong: var(--bop-color-text-default);
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-border-control);
+  border-radius: 0;
+  padding-inline: 0;
+  background-color: var(--bop-color-surface-default);
+}
+.workspace-layout.workspace-layout
+  :is(
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]),
+    select,
+    textarea
+  ):focus {
+  border-bottom-color: var(--bop-color-text-default);
+  box-shadow: 0 1px 0 var(--bop-color-text-default);
+}
+.workspace-layout.workspace-layout
+  :is(input, select, textarea):is([aria-invalid="true"], :user-invalid) {
+  border-bottom-color: var(--bop-color-danger-mark);
 }
 
 /* Status tags: words in the tone colour with a small dot; no box. */
@@ -244,9 +277,6 @@
   .workspace-content .bop-shell__main > section > table tr {
     padding-inline: var(--bop-space-4);
   }
-}
-.workspace-page > button:not(:disabled, [type="submit"]) {
-  background: var(--bop-color-surface-raised);
 }
 
 /* Danger actions: red words with no fill (the lighter red is AA on white only, 4.53:1; on the

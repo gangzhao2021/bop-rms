@@ -6093,7 +6093,7 @@
   aspect-ratio: 4 / 3;
   border: 1px solid var(--bop-color-border-default);
   border-radius: var(--bop-radius-control);
-  background: var(--bop-color-surface-raised);
+  background: var(--bop-color-surface-placeholder);
 }
 .product-customer-menu__preview img {
   display: block;
@@ -6191,7 +6191,7 @@ section.product-customer-menu figcaption {
   aspect-ratio: 4 / 3;
   object-fit: cover;
   border-radius: var(--bop-radius-control);
-  background: var(--bop-color-surface-raised);
+  background: var(--bop-color-surface-placeholder);
 }
 .menu-customer-view__photo figcaption,
 .menu-customer-view__section,
