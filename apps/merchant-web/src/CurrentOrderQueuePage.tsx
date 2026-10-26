@@ -1450,7 +1450,7 @@ export function CurrentOrderQueueRows({
 }: {
   readonly view: CurrentOrderQueue;
   /** Figma v1: the order's next step, shown at the end of its row on the list (outside the row's
-      button, so it is its own control). Not shown for the order open in the panel. */
+      button, so it is its own control). Hidden while the panel shows the same order. */
   readonly rowAction?: ((order: CurrentOrderQueue["items"][number]) => React.ReactNode) | undefined;
   /** WP-2423: Payment's refund position of the one Order shown (the order detail page). */
   readonly paymentPosition?: CurrentOrderDetail["paymentPosition"] | undefined;
@@ -1555,7 +1555,13 @@ export function CurrentOrderQueueRows({
     previous = group;
   }
   return (
-    <div className="order-workbench" data-panel={selected === undefined ? undefined : "open"}>
+    // "auto": open only because it is the one order shown; a phone then keeps the list in view.
+    <div
+      className="order-workbench"
+      data-panel={
+        selected === undefined ? undefined : opened.has(selected.orderReference) ? "open" : "auto"
+      }
+    >
       <div className="order-workbench-main">
         {before}
         {view.items.length === 0 ? (
@@ -1570,9 +1576,7 @@ export function CurrentOrderQueueRows({
               const amount = orderAmountTaken(order);
               const age = now === undefined ? null : orderAgeText(order, now);
               const earlier =
-                order.listedBusinessDate !== null &&
-                today !== null &&
-                order.listedBusinessDate !== today;
+                order.businessDate !== null && today !== null && order.businessDate !== today;
               return (
                 <Fragment key={order.orderReference}>
                   {dayHeadings.has(order.orderReference) ? (
@@ -1657,9 +1661,7 @@ export function CurrentOrderQueueRows({
                         ) : null}
                       </span>
                     </div>
-                    <div className="order-workbench-next">
-                      {rowAction === undefined || isOpen ? null : rowAction(order)}
-                    </div>
+                    <div className="order-workbench-next">{rowAction?.(order)}</div>
                   </li>
                 </Fragment>
               );
@@ -1762,7 +1764,10 @@ export function ordersSummary(
         ? t("1 order on this page")
         : t("{count} orders on this page", { count: view.items.length })) + waiting
     );
-  const todays = view.items.filter((order) => order.listedBusinessDate === today).length;
+  // An earlier-day order still holding stock is listed with today's but is not one of them.
+  const todays = view.items.filter(
+    (order) => order.listedBusinessDate === today && order.heldStock === null,
+  ).length;
   const earlier =
     filterCurrentOrderItems(view.items, {
       orderNumber: "",

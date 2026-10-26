@@ -32,6 +32,8 @@ export function OrderAcceptanceAction({
   const [state, setState] = useState<
     "Idle" | "Submitting" | "Unknown" | "Denied" | OrderAcceptanceConflict
   >(resumeUnknown ? "Unknown" : "Idle");
+  // Another copy of this button (row or panel) may have left the attempt unresolved meanwhile.
+  if (state === "Idle" && resumeUnknown) setState("Unknown");
   const pending = useRef<AbortController | null>(null);
   useEffect(() => () => pending.current?.abort(), []);
   const accept = async () => {

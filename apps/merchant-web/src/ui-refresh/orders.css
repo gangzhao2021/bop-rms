@@ -449,6 +449,10 @@
   justify-content: flex-end;
   padding: 0 12px 0 0;
 }
+/* The open order's next step is in its panel. */
+.orders-page .order-row[data-open="true"] .order-workbench-next {
+  display: none;
+}
 .orders-page .order-workbench-next fieldset {
   margin: 0;
   padding: 0;
@@ -600,12 +604,13 @@
 }
 .orders-page
   .order-workbench-detail
-  :is(.order-workbench-closed, .order-counter-note, .order-staff-round) {
+  :is(.order-workbench-closed, .order-counter-note, .order-staff-round, .order-held-stock) {
   margin: 0;
   padding: 0;
   border: 0;
   background: none;
   font-size: 15px;
+  font-weight: 400;
 }
 .orders-page .order-workbench-detail .order-staff-cancellation {
   font-weight: 400;
@@ -698,13 +703,13 @@
 
 /* Wide screens: the panel is a column beside the list, staying in view as the list scrolls. */
 @media (min-width: 80rem) {
-  .orders-page .order-workbench[data-panel="open"] {
+  .orders-page .order-workbench[data-panel] {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 24rem;
     align-items: start;
     gap: var(--bop-space-8);
   }
-  .orders-page .order-workbench[data-panel="open"] .order-panel {
+  .orders-page .order-workbench[data-panel] .order-panel {
     position: sticky;
     top: calc(var(--bop-pinned-top, 0px) + 16px);
     max-height: calc(100vh - var(--bop-pinned-top, 0px) - 32px);
@@ -725,10 +730,14 @@
     box-shadow: -8px 0 32px rgb(0 0 0 / 10%);
   }
 }
-/* Phones: the order is the page; the list comes back on close. The filter is a full sheet. */
+/* Phones: an order staff opened is the page; the list comes back on close. The one order shown
+   keeps the list, with its panel under it. The filter is a full sheet. */
 @media (max-width: 48rem) {
   .orders-page .order-workbench[data-panel="open"] .order-workbench-main {
     display: none;
+  }
+  .orders-page .order-workbench[data-panel="auto"] .order-panel {
+    margin-top: var(--bop-space-6);
   }
   .orders-page .order-toolbar {
     display: grid;

@@ -28,6 +28,7 @@ import {
   orderAgeText,
   orderAmountTaken,
   orderStatusTone,
+  ordersSummary,
 } from "./CurrentOrderQueuePage.js";
 import {
   ordersAwaitingAcceptance,
@@ -1676,4 +1677,32 @@ it("WP-2423: a list row reads its refund position with the list, so it agrees wi
   expect(() =>
     parse(order({ paymentPosition: { refundedMinor: "1.5", refundPendingMinor: "0" } })),
   ).toThrow();
+});
+
+it("Orders v2: the header line counts today's orders apart from earlier-day orders still listed", () => {
+  const fixture = parseCurrentOrderQueue(currentOrderQueueFixture());
+  const [first, second] = fixture.items;
+  if (!first || !second) throw new Error("fixture");
+  const view = {
+    ...fixture,
+    items: [
+      { ...first, listedBusinessDate: "2026-10-26", heldStock: null },
+      {
+        ...second,
+        businessDate: "2026-10-24",
+        listedBusinessDate: "2026-10-26",
+        heldStock: {
+          since: "2026-10-24T23:00:00.000Z",
+          state: "Open" as const,
+          orderBatchReference: second.initialBatchReference,
+          productionStarted: true,
+        },
+      },
+    ],
+  };
+  expect(ordersSummary(view, "2026-10-26", 0)).toBe("1 order today · 1 from earlier days");
+  expect(ordersSummary(view, "2026-10-26", 2)).toBe(
+    "1 order today · 2 to accept · 1 from earlier days",
+  );
+  expect(ordersSummary(view, null, 1)).toBe("2 orders on this page · 1 to accept");
 });
