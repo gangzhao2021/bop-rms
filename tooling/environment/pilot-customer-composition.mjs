@@ -14,7 +14,8 @@ import { createInternalChannelPayment } from "./pilot-channel-payment.mjs";
 import { createPilotPaymentProvider, isStripeProvider } from "./pilot-stripe-provider.mjs";
 import { loadPilotPaymentConfig } from "./pilot-payment-config.mjs";
 import { createPilotStripeWebhookReceiver } from "./pilot-stripe-webhook.mjs";
-import { currentPilotEnvironment } from "./pilot-environment.mjs";
+import { currentPilotEnvironment, matchesPilotEnvironment } from "./pilot-environment.mjs";
+import { createCustomerDiningPayLaterRound } from "../../apps/api/dist/customer-dining-pay-later-round.js";
 import { createInternalOrder } from "./pilot-order.mjs";
 import { createInternalCheckout } from "./pilot-checkout.mjs";
 import { createInternalCheckoutDetails } from "./pilot-checkout-details.mjs";
@@ -190,6 +191,32 @@ export function composeCustomerDependencies(directory, installation, config, hos
     // Stripe mode only: the webhook receiver of the API runtime.
     createPaymentWebhookReceiver: (resources, provider) =>
       createPaymentWebhookReceiver(directory, resources, provider, account),
+    // DEC-DINE-IN-PAY-LATER: a guest's round at a pay-later table goes to the kitchen unpaid,
+    // through the dining workflow's Accept for the System.
+    createInternalPayLaterRound: async (resources, configuredEntry, submitRound) => {
+      const saved = await installation.loadWorkflow("DineIn");
+      if (
+        !matchesPilotEnvironment(saved.environment) ||
+        saved.database !== expectedDatabaseName ||
+        saved.scope.storeReference !== resources.scope.storeReference
+      )
+        throw new Error("INTERNAL_PAY_LATER_ONLY");
+      const staffCall = configuredEntry.diningStaffCall;
+      return createCustomerDiningPayLaterRound({
+        scope: { tenantReference: staffCall.tenantReference, ...resources.scope },
+        transactions: resources.transactions,
+        credentials: configuredEntry.entry.session.credentials,
+        binding: staffCall.binding,
+        workflow: {
+          purposeCode: saved.workflow.purposeCode,
+          applicabilityCode: saved.workflow.applicabilityCode,
+          workflowVersionReference: saved.workflow.payment.workflowVersionReference,
+        },
+        submitRound,
+        now: resources.now,
+        newReference: resources.credentials.reference,
+      });
+    },
     createInternalPaymentTerminal: (r, c, i, s) =>
       createInternalPaymentTerminal(r, c, i, s, account),
     createInternalChannelPayment: (r, c, d, o, orders, simulator, items) =>

@@ -93,6 +93,7 @@ export class CustomerDiningSessionHandler {
           tableLabel: view.tableLabel,
           orderNumber: view.orderNumber,
           checkedAt: view.checkedAt,
+          paymentTiming: view.paymentTiming,
           rounds: view.rounds.map((round) => ({
             roundNumber: round.roundNumber,
             orderedBy: round.orderedBy,

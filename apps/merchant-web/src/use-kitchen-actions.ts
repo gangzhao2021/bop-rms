@@ -169,9 +169,10 @@ export function useKitchenActions(input: {
     !authority ||
     inFlight.current ||
     !(state.kind === "Idle" || state.kind === "Confirmed" || rejectedRefreshed);
-  async function execute(attempt: Attempt) {
+  /** The server's result, or null when the step was not confirmed (the state says why). */
+  async function execute(attempt: Attempt): Promise<Result | null> {
     const controller = lifetime.current;
-    if (inFlight.current || !input.csrf || !controller || controller.signal.aborted) return;
+    if (inFlight.current || !input.csrf || !controller || controller.signal.aborted) return null;
     inFlight.current = true;
     setState({ kind: "Submitting", attempt });
     try {
@@ -186,6 +187,7 @@ export function useKitchenActions(input: {
           },
         ]);
         setState({ kind: "Confirmed", attempt, result });
+        return result;
       }
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -201,6 +203,7 @@ export function useKitchenActions(input: {
     } finally {
       inFlight.current = false;
     }
+    return null;
   }
   return {
     blocked,
@@ -219,6 +222,43 @@ export function useKitchenActions(input: {
         correlationReference: serviceOperationReference(),
       });
       void execute({ item, operation, revision: input.revision });
+    },
+    /**
+     * Kitchen v3 (Owner 2026-10-26, one main step per ticket): the same step for each of these
+     * items, one after another. Each is still its own recorded step; the next item expects the
+     * ticket version the server just confirmed. Stops at the first step not confirmed, which the
+     * board then reports (and offers to retry) as for a single item.
+     */
+    actAll(items: readonly KitchenBoardItem[], action: KitchenAction) {
+      const storeReference = input.storeReference;
+      if (blocked || inFlight.current || !storeReference || items.length === 0) return;
+      const revision = input.revision;
+      void (async () => {
+        const versions = new Map<string, string>();
+        for (const original of items) {
+          const confirmedVersion = versions.get(original.ticketReference);
+          const execution = original.execution;
+          const item =
+            execution &&
+            confirmedVersion !== undefined &&
+            BigInt(confirmedVersion) > BigInt(execution.ticketVersion)
+              ? Object.freeze({
+                  ...original,
+                  execution: Object.freeze({ ...execution, ticketVersion: confirmedVersion }),
+                })
+              : original;
+          const operation = createKitchenWorkClient().prepare({
+            action,
+            item,
+            storeReference,
+            idempotencyKey: serviceOperationReference(),
+            correlationReference: serviceOperationReference(),
+          });
+          const result = await execute({ item, operation, revision });
+          if (result === null) return;
+          versions.set(item.ticketReference, result.ticketVersion);
+        }
+      })();
     },
     retry() {
       if (state.kind === "Unknown" && authority) void execute(state.attempt);

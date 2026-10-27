@@ -273,9 +273,13 @@ it("keeps payments accessible on cancelled Dining without offering unavailable s
       />,
     );
   expect(render("Cancelled")).toContain("Payments and refunds");
-  expect(render("Cancelled")).not.toContain("View serving progress");
-  expect(render("Accepted")).toContain("View serving progress");
-  expect(render("Fulfilled")).toContain("View serving progress");
+  // Orders v3 (Owner 2026-10-26): serving progress is read with the order, under each round —
+  // no switch to open (and no way to get stuck open); none for a cancelled order.
+  for (const phase of ["Cancelled", "Accepted", "Fulfilled"])
+    expect(render(phase)).not.toContain("View serving progress");
+  expect(render("Cancelled")).not.toContain("dining-rounds__status");
+  expect(render("Accepted")).toContain("dining-rounds__status");
+  expect(render("Fulfilled")).toContain("dining-rounds__status");
 });
 
 it("WP-2423: shows order times in the Store's time zone", () => {

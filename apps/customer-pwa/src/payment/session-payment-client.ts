@@ -26,6 +26,10 @@ export class SessionPaymentClientError extends Error {
       | "window_ended"
       /** WP-2423: items ran out after checkout; no order was placed and nothing was charged. */
       | "items_short"
+      /** DEC-DINE-IN-PAY-LATER: the table pays at the end (rounds are sent, not paid). */
+      | "pay_later_table"
+      /** DEC-DINE-IN-PAY-LATER: the table pays each round as it is sent. */
+      | "pay_first_table"
       | "unknown",
   ) {
     super("Payment unavailable.");
@@ -67,6 +71,8 @@ export function createSessionPaymentClient() {
     payment_already_paid: "already_paid",
     payment_window_ended: "window_ended",
     payment_items_short: "items_short",
+    payment_pay_later_table: "pay_later_table",
+    payment_pay_first_table: "pay_first_table",
   } as const;
   async function post(session: string, suffix: string, body: object, key?: string) {
     if (!uuid.test(session)) throw new SessionPaymentClientError("invalid");
@@ -182,6 +188,54 @@ export function createSessionPaymentClient() {
   }
   return Object.freeze({
     create: (session: string, selection: string, tip: string) => create(session, selection, tip),
+    /**
+     * DEC-DINE-IN-PAY-LATER: at a table that pays at the end, send this checkout's round to the
+     * kitchen (no payment, no tip). Sending again with the same key returns the same round.
+     */
+    async sendToKitchen(
+      session: string,
+      selection: string,
+    ): Promise<{
+      readonly status: "Sent" | "AlreadySent";
+      readonly total: Readonly<{ amountMinor: string; currency: "CAD" }>;
+    }> {
+      if (!uuid.test(selection)) throw new SessionPaymentClientError("invalid");
+      const { response, payload } = await post(
+        session,
+        "payment-intents",
+        { sendToKitchen: true },
+        selection,
+      );
+      try {
+        const root = exact(payload, ["schemaVersion", "round"]);
+        const raw = exact(root.round, [
+          "checkoutSessionReference",
+          "orderReference",
+          "status",
+          "total",
+        ]);
+        const total = exact(raw.total, ["amountMinor", "currency"]);
+        const expected = response.status === 201 ? "Sent" : "AlreadySent";
+        if (
+          root.schemaVersion !== 1 ||
+          raw.checkoutSessionReference !== session ||
+          raw.status !== expected ||
+          typeof raw.orderReference !== "string" ||
+          !uuid.test(raw.orderReference) ||
+          total.currency !== "CAD"
+        )
+          throw new Error();
+        return Object.freeze({
+          status: expected,
+          total: Object.freeze({
+            amountMinor: amount(total.amountMinor),
+            currency: "CAD" as const,
+          }),
+        });
+      } catch {
+        throw new SessionPaymentClientError("unknown");
+      }
+    },
     /** Explicit local simulation only; navigate to the authoritative result reader afterward. */
     simulate: (session: string, selection: string, tip: string) =>
       create(session, selection, tip, "simulation-confirm"),

@@ -3,6 +3,30 @@ const databaseAccessManifestInput = {
   module: { moduleName: "payment", packageName: "@rms/payment", layer: "RMS" },
   tables: [
     {
+      table: "dining_table_settlement",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
+      table: "dining_table_settlement_round",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
+      table: "order_unpaid_write_off",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
       table: "card_machine_payment",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/payment" },
@@ -309,6 +333,66 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "dining-table-settlement.read.dining_table_settlement",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_settlement" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.write.dining_table_settlement",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_settlement" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.read.dining_table_settlement_round",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_settlement_round" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.write.dining_table_settlement_round",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_settlement_round" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.read.order_unpaid_write_off",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "order_unpaid_write_off" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.write.order_unpaid_write_off",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "order_unpaid_write_off" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
     {
       id: "card-machine-payment.read",
       operation: "read",

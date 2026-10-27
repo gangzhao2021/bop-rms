@@ -27,6 +27,7 @@ it("passes all existing customer routes and configured resources to the API runt
             "createInternalPickupReadiness",
             "createInternalPickupProof",
             "createInternalPaymentTerminal",
+            "createInternalPayLaterRound",
             "createInternalChannelPayment",
             "createInternalSimulatedProvider",
             "createInternalOrder",

@@ -32,6 +32,8 @@ export const fullSignInMutationPaths: ReadonlySet<string> = new Set([
   "/orders/card-machine-refund",
   "/orders/acceptance-hold/refund",
   "/orders/cancel",
+  // DEC-DINE-IN-PAY-LATER: a manager writes off a table that left without paying.
+  "/orders/close-unpaid-departure",
   "/orders/cancel-items",
   "/orders/cancel-items/refund",
   "/commerce/pricing/command",

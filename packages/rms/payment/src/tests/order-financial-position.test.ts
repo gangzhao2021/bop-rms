@@ -1,5 +1,13 @@
 import { beforeEach, expect, it, vi } from "vitest";
-const mock = vi.hoisted(() => ({ load: vi.fn(), refund: vi.fn(), machine: vi.fn() }));
+const mock = vi.hoisted(() => ({
+  load: vi.fn(),
+  refund: vi.fn(),
+  machine: vi.fn(),
+  table: vi.fn(async () => [] as unknown[]),
+}));
+vi.mock("../infrastructure/persistence/dining-table-settlement-store.js", () => ({
+  createPostgresDiningTableSettlementStore: () => ({ listByOrders: mock.table }),
+}));
 vi.mock("../infrastructure/persistence/card-machine-payment-store.js", () => ({
   createPostgresCardMachinePaymentStore: () => ({ listByOrder: mock.machine }),
 }));
@@ -261,6 +269,31 @@ it("B759: counts a served card-machine round as paid (order and tip), online fie
     paymentIntentReference: id(61),
     paymentAttemptReference: id(62),
   });
+});
+it("DEC-DINE-IN-PAY-LATER: a table settlement pays its rounds and tip; cash rounding is not the Order's", async () => {
+  onlineOnlyRefunds();
+  mock.refund.mockResolvedValue(noRefund);
+  mock.machine.mockResolvedValue([]);
+  mock.table.mockResolvedValueOnce([
+    {
+      settlementReference: id(80),
+      orderReference: id(4),
+      method: "Cash",
+      environment: "Test",
+      recordedAt: at,
+      lines: [
+        { orderBatchReference: id(81), roundMinor: 2260n, tipMinor: 0n, roundingMinor: 0n },
+        { orderBatchReference: id(82), roundMinor: 1130n, tipMinor: 512n, roundingMinor: -2n },
+      ],
+    },
+  ]);
+  const result = await setup().read();
+  expect(result.settlement).toMatchObject({
+    capturedMinor: 3902n,
+    capturedOrderAllocationMinor: 3390n,
+    capturedTipMinor: 512n,
+  });
+  expect(result.tableSettlementCaptures.map((c) => c.roundingMinor)).toEqual([0n, -2n]);
 });
 it("B759: a cancelled card-machine round refunded in full is reversed in full, tip included", async () => {
   onlineOnlyRefunds();

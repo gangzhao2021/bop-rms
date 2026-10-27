@@ -107,6 +107,45 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
     for (const n of [10, 20, 21, 30, 31, 40, 41]) expect(serialized).not.toContain(id(n));
   });
 
+  it("DEC-DINE-IN-PAY-LATER: a round sent unpaid is in the kitchen, on the bill and never cancelled", () => {
+    const view = composeCustomerDiningSession({
+      ...facts({
+        paymentOutcomes: new Map(),
+        payments: [],
+        payLaterRounds: new Set([id(30), id(40)]),
+        delivery: new Map([
+          [id(31), { phase: "InProgress", deliveredQuantity: 0 }],
+          [id(41), { phase: "Accepted", deliveredQuantity: 0 }],
+        ]),
+      }),
+      paymentTiming: "PayLater",
+    });
+    expect(view.paymentTiming).toBe("PayLater");
+    expect(view.rounds.map((round) => [round.status, round.payment, round.cancelsAt])).toEqual([
+      ["Preparing", "OnTableBill", null],
+      ["Queued", "OnTableBill", null],
+    ]);
+    // Everything ordered is still owed until the table pays.
+    expect(view.summary?.due).toEqual(cad(3900n));
+    expect(view.summary?.paid).toEqual(cad(0n));
+  });
+
+  it("DEC-DINE-IN-PAY-LATER: once the table paid at the end, its rounds read paid and nothing is owed", () => {
+    const view = composeCustomerDiningSession({
+      ...facts({
+        paymentOutcomes: new Map(),
+        payments: [{ status: "Succeeded", amount: cad(4410n) }],
+        payLaterRounds: new Set([id(30), id(40)]),
+        settledRounds: new Set([id(30), id(40)]),
+      }),
+      paymentTiming: "PayLater",
+    });
+    expect(view.rounds.map((round) => round.payment)).toEqual(["Paid", "Paid"]);
+    expect(view.summary?.due).toEqual(cad(0n));
+    // What the table paid: rounds, tip and cash rounding.
+    expect(view.summary?.paid).toEqual(cad(4410n));
+  });
+
   it("follows the kitchen and service of a paid round", () => {
     const status = (entries: [number, string, number][]) =>
       composeCustomerDiningSession(
@@ -236,6 +275,7 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
       tableLabel: "12",
       orderNumber: null,
       checkedAt: at,
+      paymentTiming: "PayFirst",
       rounds: [],
       summary: null,
     });

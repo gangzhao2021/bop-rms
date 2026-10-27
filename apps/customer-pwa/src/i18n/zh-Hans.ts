@@ -832,6 +832,20 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "View your receipt": "查看你的收据",
   "View {name}": "查看 {name}",
   "Waiting for payment": "等待付款",
+  "Send to the kitchen · {total}": "送厨房 · {total}",
+  "Send to the kitchen": "送厨房",
+  "Nothing is charged now. Your table pays once at the end, and you choose any tip then.":
+    "现在不收款。这桌最后一起结账，小费也在那时选。",
+  Send: "送出",
+  "Sending your order to the kitchen…": "正在把你的菜送到厨房…",
+  "We couldn’t confirm your order reached the kitchen. Send it again — it is never sent twice.":
+    "没能确认已送到厨房。请再送一次，不会重复下单。",
+  "This table pays for each round as it orders. Continue to payment instead.":
+    "这桌每一轮点完就付款。请继续付款。",
+  "On the table's bill": "记入本桌账单",
+  "To pay at the end": "最后结账",
+  "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax and any tip.":
+    "每一轮提交后直接送厨房。这桌最后一起结账，含税，小费也在那时选。",
   "Waiting for the store": "等待门店",
   "We can make only {left} {name} along with the rest of your order — some items use the same ingredients. {notCharged} {value1} or change other items, then try again.":
     "结合你订单里的其他商品，{name} 只能做 {left} 份——有些商品用到相同的配料。{notCharged}请{value1}或修改其他商品后重试。",

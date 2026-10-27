@@ -558,9 +558,13 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         value !== null &&
         typeof value === "object" &&
         Object.hasOwn(value, "awaitingAcceptanceSince");
+      // Orders v3 (Owner 2026-10-26): when the round was sent (absent from an older server).
+      const withSubmittedAt =
+        value !== null && typeof value === "object" && Object.hasOwn(value, "submittedAt");
       const batch = exact(value, [
         "orderBatchReference",
         "sequence",
+        ...(withSubmittedAt ? ["submittedAt"] : []),
         "acceptanceStatus",
         "canRequestAcceptance",
         "canCancel",
@@ -647,9 +651,12 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         return fail();
       previousSequence = batch.sequence;
       seenBatches.add(orderBatchReference);
+      const batchSubmittedAt = withSubmittedAt ? instant(batch.submittedAt) : null;
       return Object.freeze({
         orderBatchReference,
         sequence: batch.sequence,
+        /** Orders v3: when this round was sent; null from an older server. */
+        submittedAt: batchSubmittedAt,
         acceptanceStatus: batch.acceptanceStatus as "Accepted" | "NotAccepted" | "Cancelled",
         canRequestAcceptance: batch.canRequestAcceptance,
         /** WP-2423 Q6: the caller may cancel this paid batch before the kitchen starts. */

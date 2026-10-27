@@ -2203,6 +2203,18 @@ async function scanUnsupported(root, module, diagnostics) {
               "additional_dining_batch_record",
             ],
           },
+          // Orders v2 (Owner 2026-10-26): what each listed Order is (items) and who (pickup name).
+          "src/infrastructure/persistence/merchant-order-list-summary.ts": {
+            owner: "ordering",
+            tables: [
+              "order_item",
+              "order_batch",
+              "order_submission_record",
+              "order_checkout_details_link",
+              "checkout_details_record",
+              "checkout_contact_redaction",
+            ],
+          },
           "src/infrastructure/persistence/merchant-order-index.ts": {
             owner: "ordering",
             tables: ["order_header", "order_submission_record", "order_batch"],
@@ -2324,6 +2336,15 @@ async function scanUnsupported(root, module, diagnostics) {
           "src/infrastructure/persistence/card-machine-payment-store.ts": {
             owner: "payment",
             tables: ["card_machine_payment", "card_machine_refund"],
+          },
+          // WP-2423 DEC-DINE-IN-PAY-LATER: a table's one payment split by round, and write-offs.
+          "src/infrastructure/persistence/dining-table-settlement-store.ts": {
+            owner: "payment",
+            tables: [
+              "dining_table_settlement",
+              "dining_table_settlement_round",
+              "order_unpaid_write_off",
+            ],
           },
           // WP-2423 Q14: payments and refunds behind the Store sales reports (read only).
           "src/infrastructure/persistence/store-sales-payment-ledger.ts": {
@@ -2781,6 +2802,14 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_staff_call_closure",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-staff-call-store.ts";
+        // WP-2423 DEC-DINE-IN-PAY-LATER: exact scoped Store dine-in payment timing and each Session's.
+        const acceptedDiningPaymentTimingAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          ["dining_session", "store_dining_payment_timing", "dining_session_payment_timing"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/dining-payment-timing-store.ts";
         // WP-2423 DEC-DINING-GUEST-INVITATION: exact scoped Host invitation (next join code) store.
         const acceptedDiningGuestInvitationAsset =
           module.packageName === "@rms/dining" &&
@@ -3049,6 +3078,24 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/order-item-inventory-link-reader.ts";
+        // WP-2423 DEC-DINE-IN-PAY-LATER: a pay-later round sent to the kitchen with its acceptance.
+        const acceptedOrderPayLaterConfirmationAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "order_pay_later_confirmation",
+            "order_acceptance_record",
+            "order_revision",
+            "order_header",
+            "order_batch",
+            "order_submission_record",
+            "order_payment_disposition_record",
+            "order_payment_acceptance_wait",
+            "order_batch_checkout_cancellation",
+            "order_staff_cancellation",
+            "order_termination_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/order-pay-later-confirmation-store.ts";
         const acceptedOrderKitchenSourceAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -3060,6 +3107,7 @@ async function scanUnsupported(root, module, diagnostics) {
             "order_submission_record",
             "order_acceptance_record",
             "order_termination_record",
+            "order_pay_later_confirmation",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/order-kitchen-source-store.ts";
         const acceptedPaymentReceiptCoverageAsset =
@@ -3725,6 +3773,8 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningHostTransferAsset &&
           !acceptedDiningGuestInvitationAsset &&
           !acceptedDiningStaffCallAsset &&
+          !acceptedDiningPaymentTimingAsset &&
+          !acceptedOrderPayLaterConfirmationAsset &&
           !acceptedDiningMoveAsset &&
           !acceptedDiningMovedJoinAsset &&
           !acceptedDiningAdmissionConsumptionAsset &&

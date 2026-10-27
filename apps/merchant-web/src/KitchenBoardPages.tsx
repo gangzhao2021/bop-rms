@@ -78,6 +78,54 @@ export function kitchenTicketTierText(tier: "ok" | "warning" | "late" | "done"):
   return tier === "late" ? t("Overdue") : tier === "warning" ? t("Running long") : null;
 }
 
+/**
+ * Kitchen v3 (Owner 2026-10-26): a ticket's one main step — the earliest step any of its open items
+ * is at — and every item at that step. Accept, then Start, then Done (the rest of each quantity),
+ * then Ready for any done item not yet marked ready. Null when nothing on it takes a step here.
+ */
+export function kitchenTicketNextStep(items: readonly KitchenBoardItem[]): {
+  readonly action: KitchenAction;
+  readonly items: readonly KitchenBoardItem[];
+  readonly label: string;
+} | null {
+  const open = items.filter((item) => item.execution !== undefined && isActiveKitchenWork(item));
+  const at = (test: (item: KitchenBoardItem) => boolean) => open.filter(test);
+  const accept = at((item) => item.status === "Queued" && item.execution?.acceptedAt === null);
+  if (accept.length > 0)
+    return {
+      action: "AcceptKitchenWorkItem",
+      items: accept,
+      label: accept.length > 1 ? t("Accept all") : t("Accept order"),
+    };
+  const start = at((item) => item.status === "Queued" && item.execution?.acceptedAt !== null);
+  if (start.length > 0)
+    return {
+      action: "StartKitchenWorkItem",
+      items: start,
+      label: start.length > 1 ? t("Start all") : t("Start cooking"),
+    };
+  const done = at(
+    (item) => item.status === "In Progress" && item.completedQuantity < item.requiredQuantity,
+  );
+  if (done.length > 0)
+    return { action: "CompleteKitchenWorkItem", items: done, label: t("Finished") };
+  const ready = at((item) => item.status === "Completed" && item.execution?.readyAt === null);
+  if (ready.length > 0)
+    return { action: "MarkKitchenOrderItemReady", items: ready, label: t("Mark ready") };
+  return null;
+}
+
+/** Kitchen v3: what the whole ticket is at, in the three status meanings. */
+export function kitchenTicketState(
+  items: readonly KitchenBoardItem[],
+): "ToAccept" | "InProgress" | "Done" {
+  const open = items.filter(isActiveKitchenWork);
+  if (open.length === 0) return "Done";
+  return open.some((item) => item.status === "Queued" && !item.execution?.acceptedAt)
+    ? "ToAccept"
+    : "InProgress";
+}
+
 import { playKitchenChime } from "./alert-chime.js";
 export { playKitchenChime };
 
@@ -825,7 +873,11 @@ function kitchenFocusIntent(root: ParentNode | null, reference: string): Kitchen
   const index = order.indexOf(reference);
   return { reference, followers: index < 0 ? [] : order.slice(index + 1) };
 }
+/** Kitchen v3: on a ticket, its one main step; otherwise the card's own next step. */
 const nextStep = (card: HTMLElement) =>
+  card
+    .closest(".kitchen-ticket")
+    ?.querySelector<HTMLButtonElement>(".kitchen-ticket__next:not(:disabled)") ??
   card.querySelector<HTMLButtonElement>(".kitchen-work-item__actions button:not(:disabled)");
 /** Focus is lost when it fell to the page, onto a control the step disabled, or stayed on the card. */
 function focusLost(root: HTMLElement, pending: KitchenFocusIntent): boolean {
@@ -853,7 +905,15 @@ export function kitchenFocusTarget(
     if (follower)
       return { element: (!actionsBlocked && nextStep(follower)) || follower, done: true };
   }
-  return { element: root.querySelector<HTMLElement>("#kitchen-queue-heading"), done: true };
+  // The queue heading where it is shown (an older layout), else the board's title.
+  const queueHeading = root.querySelector<HTMLElement>("#kitchen-queue-heading");
+  return {
+    element:
+      queueHeading && queueHeading.getClientRects().length > 0
+        ? queueHeading
+        : root.querySelector<HTMLElement>("#kitchen-board-title"),
+    done: true,
+  };
 }
 
 function WorkCard({
@@ -867,8 +927,14 @@ function WorkCard({
   showActions = true,
   showModifiers = false,
   detailState,
+  inTicket = false,
 }: {
   readonly item: KitchenBoardItem;
+  /**
+   * Kitchen v3: on a ticket whose one main step is at its foot. The item then offers only "Done"
+   * for itself while it is being made (and Remake once finished).
+   */
+  readonly inTicket?: boolean;
   readonly readOnly: boolean;
   readonly observedAt: string;
   /** The ticking clock ages are measured against (falls back to the projection time). */
@@ -900,6 +966,13 @@ function WorkCard({
       data-read-only={readOnly}
       data-age={kitchenAgeTier(age)}
       data-status={item.status}
+      data-in-ticket={inTicket ? "true" : undefined}
+      data-finished={inTicket && !isActiveKitchenWork(item) ? "true" : undefined}
+      data-partial={
+        item.completedQuantity > 0 && item.completedQuantity < item.requiredQuantity
+          ? "true"
+          : undefined
+      }
     >
       <div className="kitchen-work-item__summary">
         <h3>
@@ -1003,7 +1076,36 @@ function WorkCard({
       {showDetails || showActions ? (
         <div className="kitchen-work-item__actions">
           {showActions ? (
-            item.execution ? (
+            inTicket ? (
+              <>
+                {item.execution ? null : (
+                  <span className="kitchen-work-item__no-actions">
+                    {t("No kitchen steps for this item on this screen")}
+                  </span>
+                )}
+                {item.execution &&
+                item.status === "In Progress" &&
+                item.completedQuantity < item.requiredQuantity ? (
+                  <button
+                    className="kitchen-work-item__done"
+                    disabled={readOnly || !onAction}
+                    aria-label={t("Mark {displayName} finished", { displayName: item.displayName })}
+                    onClick={() => onAction?.(item, "CompleteKitchenWorkItem")}
+                  >
+                    {t("Finished")}
+                  </button>
+                ) : null}
+                {onRemake && remakeOffered(item, observedAt) ? (
+                  <button
+                    className="kitchen-remake-button"
+                    disabled={readOnly}
+                    onClick={() => onRemake(item)}
+                  >
+                    {t("Remake")}
+                  </button>
+                ) : null}
+              </>
+            ) : item.execution ? (
               <>
                 {item.status === "Queued" && item.execution.acceptedAt === null ? (
                   <button
@@ -1108,6 +1210,7 @@ export function KitchenBoardScreen({
   onRefresh,
   refreshButtonRef,
   onAction,
+  onActionAll,
   actionsBlocked = true,
   navigation,
   soundOn,
@@ -1155,6 +1258,8 @@ export function KitchenBoardScreen({
       }
     | undefined;
   readonly onAction?: (item: KitchenBoardItem, action: KitchenAction) => void;
+  /** Kitchen v3: one step for every item of a ticket at that step, one after another. */
+  readonly onActionAll?: (items: readonly KitchenBoardItem[], action: KitchenAction) => void;
   readonly actionsBlocked?: boolean;
   readonly onRefresh?: () => void;
   readonly refreshButtonRef?: RefObject<HTMLButtonElement | null>;
@@ -1252,6 +1357,17 @@ export function KitchenBoardScreen({
           pendingFocus.current = kitchenFocusIntent(workspaceRef.current, item.workItemReference);
           onAction(item, action);
         })
+    : undefined;
+  const guardedActionAll = onAction
+    ? (group: readonly KitchenBoardItem[], action: KitchenAction) => {
+        const first = group[0];
+        if (first === undefined) return;
+        guarded(first, actionLabels[action], () => {
+          pendingFocus.current = kitchenFocusIntent(workspaceRef.current, first.workItemReference);
+          if (onActionAll) onActionAll(group, action);
+          else onAction(first, action);
+        });
+      }
     : undefined;
   const onRemake = remakes?.canRework
     ? (item: KitchenBoardItem) => guarded(item, "Remake", () => setRemakeTarget(item))
@@ -1513,7 +1629,15 @@ export function KitchenBoardScreen({
       <div className="kitchen-board-workspace" ref={workspaceRef}>
         <header className="screen-heading kitchen-board-heading">
           <div>
-            {workspaceFrame ? <h1>{t("Kitchen")}</h1> : <h2>{t("Kitchen")}</h2>}
+            {workspaceFrame ? (
+              <h1 id="kitchen-board-title" tabIndex={-1}>
+                {t("Kitchen")}
+              </h1>
+            ) : (
+              <h2 id="kitchen-board-title" tabIndex={-1}>
+                {t("Kitchen")}
+              </h2>
+            )}
             <p className="kitchen-board-freshness">
               <Freshness
                 status={stale ? "Stale" : view.freshnessStatus}
@@ -1523,10 +1647,41 @@ export function KitchenBoardScreen({
               <span data-operator={view.operatorStatus}>
                 {kitchenOperatorText(view.operatorStatus)}
               </span>
-              {autoRefresh && !stale ? <span>{t("Auto-refresh every 10 s")}</span> : null}
+              {autoRefresh && !stale ? (
+                <span className="kitchen-board-autorefresh">{t("Auto-refresh every 10 s")}</span>
+              ) : null}
+              <span className="kitchen-queue-count" aria-live="polite">
+                {t("{length} work {value}", {
+                  length: items.length,
+                  value: items.length === 1 ? t("item") : t("items"),
+                })}
+              </span>
             </p>
           </div>
           <div className="kitchen-board-heading__actions">
+            {/* Owner 2026-10-26: recently finished sits in the top bar, so a wrong dish is found
+                and remade at once. */}
+            {remakes && onRemake ? (
+              <KitchenRecentlyFinished
+                items={board.items}
+                reworks={remakes.items}
+                observedAt={view.projectedAt}
+                readOnly={remakeReadOnly}
+                onRemake={onRemake}
+                orderLabel={dayLabel}
+              />
+            ) : null}
+            {/* The workspace view keeps its own search row. */}
+            {workspaceFrame ? null : (
+              <button
+                type="button"
+                className="kitchen-find-button"
+                aria-haspopup="dialog"
+                onClick={openFilterSheet}
+              >
+                {searchApplied || hasFilters ? t("Find an order · Applied") : t("Find an order")}
+              </button>
+            )}
             {soldOutHref ? (
               <Link className="kitchen-sold-out-link" to={soldOutHref}>
                 {t("Mark an item sold out")}
@@ -1583,12 +1738,6 @@ export function KitchenBoardScreen({
           <div className="kitchen-filter-toolbar">
             {renderOrderSearch("desktop")}
             {renderFilters("desktop")}
-            <span className="kitchen-queue-count" aria-live="polite">
-              {t("{length} work {value}", {
-                length: items.length,
-                value: items.length === 1 ? t("item") : t("items"),
-              })}
-            </span>
           </div>
         </div>
         <dialog
@@ -1775,16 +1924,48 @@ export function KitchenBoardScreen({
                     {groupKitchenItemsByOrder(stationItems).map((group) => {
                       const ticket = kitchenTicketAge(group.items, clockAt);
                       const tierText = kitchenTicketTierText(ticket.tier);
+                      const first = group.items[0] as KitchenBoardItem;
+                      const label = first.orderLabel;
+                      const state = kitchenTicketState(group.items);
+                      const next = kitchenTicketNextStep(group.items);
+                      const ticketReadOnly = readOnly || actionsBlocked || stale !== undefined;
                       return (
                         <section
                           className="kitchen-order-group kitchen-ticket"
                           key={group.orderReference}
                           data-age={ticket.tier}
-                          aria-label={dayLabel(group.items[0] as KitchenBoardItem)}
+                          data-fresh={
+                            group.items.some((item) => arrivals.includes(item.workItemReference))
+                              ? "true"
+                              : undefined
+                          }
+                          aria-label={dayLabel(first)}
                         >
                           <header className="kitchen-ticket__header">
-                            <h4 className="kitchen-order-group__label">
-                              {dayLabel(group.items[0] as KitchenBoardItem)}
+                            <h4 className="kitchen-order-group__label" aria-label={dayLabel(first)}>
+                              {/* Kitchen v3: the number (or table) read from across the kitchen;
+                                  how the order came, in grey after it. */}
+                              <span className="kitchen-ticket__number">
+                                {!label
+                                  ? kitchenOrderLabel(first)
+                                  : label.orderType === "DineIn" && label.tableLabel
+                                    ? t("Table {tableLabel}", { tableLabel: label.tableLabel })
+                                    : label.orderNumber}
+                              </span>
+                              {label ? (
+                                <span className="kitchen-ticket__kind">
+                                  {label.orderType === "Pickup"
+                                    ? t("Pickup")
+                                    : label.tableLabel
+                                      ? t("Order {orderNumber}", {
+                                          orderNumber: label.orderNumber,
+                                        })
+                                      : t("Dine-in")}
+                                  {fromEarlierKitchenDay(first, today) && first.businessDate
+                                    ? ` · ${earlierDayText(first.businessDate)}`
+                                    : ""}
+                                </span>
+                              ) : null}
                             </h4>
                             <p className="kitchen-ticket__wait">
                               {ticket.minutes === null ? (
@@ -1799,11 +1980,19 @@ export function KitchenBoardScreen({
                               ) : null}
                             </p>
                           </header>
+                          <p className="kitchen-ticket__state" data-state={state}>
+                            {state === "ToAccept"
+                              ? t("To accept")
+                              : state === "InProgress"
+                                ? t("In progress")
+                                : t("Done")}
+                          </p>
                           {group.items.map((item) => (
                             <WorkCard
                               key={item.workItemReference}
                               item={item}
-                              readOnly={readOnly || actionsBlocked || stale !== undefined}
+                              inTicket
+                              readOnly={ticketReadOnly}
                               {...(guardedAction ? { onAction: guardedAction } : {})}
                               onRemake={onRemake}
                               observedAt={view.projectedAt}
@@ -1816,6 +2005,16 @@ export function KitchenBoardScreen({
                               }}
                             />
                           ))}
+                          {next && guardedActionAll ? (
+                            <button
+                              type="button"
+                              className="kitchen-ticket__next"
+                              disabled={ticketReadOnly}
+                              onClick={() => guardedActionAll(next.items, next.action)}
+                            >
+                              {next.label}
+                            </button>
+                          ) : null}
                         </section>
                       );
                     })}
@@ -1825,16 +2024,6 @@ export function KitchenBoardScreen({
             })}
           </div>
         )}
-        {remakes && onRemake ? (
-          <KitchenRecentlyFinished
-            items={board.items}
-            reworks={remakes.items}
-            observedAt={view.projectedAt}
-            readOnly={remakeReadOnly}
-            onRemake={onRemake}
-            orderLabel={dayLabel}
-          />
-        ) : null}
         {remakes?.canRework && remakes.onCancel ? (
           <KitchenRemakeCancelDialog
             rework={cancelTarget}
@@ -2186,6 +2375,11 @@ function KitchenBoardContent(
     restoreRetryFocus.current = document.activeElement instanceof HTMLButtonElement;
     actions.act(item, action);
   };
+  const runActionAll = (items: readonly KitchenBoardItem[], action: KitchenAction) => {
+    if (stale !== undefined || browserOffline()) return;
+    restoreRetryFocus.current = document.activeElement instanceof HTMLButtonElement;
+    actions.actAll(items, action);
+  };
   const retry = () => {
     if (stale !== undefined || browserOffline()) return;
     restoreRetryFocus.current = document.activeElement === retryButtonRef.current;
@@ -2269,6 +2463,7 @@ function KitchenBoardContent(
           onRefresh={refresh}
           refreshButtonRef={refreshButtonRef}
           onAction={runAction}
+          onActionAll={runActionAll}
           actionsBlocked={actions.blocked || stale !== undefined}
           navigation={navigation}
           headerStatus={headerStatus}

@@ -19,6 +19,7 @@ function view(): CustomerDiningSessionView {
     tableLabel: "12",
     orderNumber: "1042",
     checkedAt: "2026-10-13T18:00:00.000Z",
+    paymentTiming: "PayFirst",
     rounds: [
       {
         roundNumber: 1,

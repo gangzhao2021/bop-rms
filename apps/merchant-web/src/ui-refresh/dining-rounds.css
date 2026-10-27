@@ -1,0 +1,344 @@
+/*
+ * Orders v3 (Owner 2026-10-26): a table's order round by round, on Orders and on Tables. Each
+ * round: its number and time, "Served x/y" and its state in grey, its amount on the right; its
+ * dishes under it with their state in grey and "Served" in accent words; "All served" under the
+ * round. Rounds are parted by space and the row hairline, no boxes (v3 system).
+ */
+.order-round.order-round--lines {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.order-round--lines + .order-round--lines {
+  padding-top: 16px;
+  border-top: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.order-round--lines .order-round__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title amount"
+    "progress progress";
+  align-items: baseline;
+  gap: 2px 16px;
+}
+.order-round--lines .order-round__head h3,
+.orders-page .order-round--lines .order-round__head h3 {
+  grid-area: title;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  margin: 0;
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 600;
+}
+.order-round--lines .order-round__time {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.order-round--lines .order-round__amount {
+  grid-area: amount;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.order-round--lines .dining-round__progress {
+  grid-area: progress;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.order-round--lines .dining-round__state::before {
+  content: "· ";
+}
+.order-round--lines ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.order-round--lines li {
+  display: grid;
+  grid-template-columns: 2.5em minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  padding: 8px 0;
+  border: 0;
+}
+.order-round--lines li + li {
+  border-top: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+/* The dish's serving state sits under its name, "Served" at the right of that line. */
+.order-round--lines .dining-round-item {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.order-round--lines .dining-round-item[data-phase="Ready"] .dining-round-item__state {
+  color: var(--bop-color-text-default);
+  font-weight: 600;
+}
+.order-round--lines .dining-round-item .dining-progress-remaking {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-danger);
+  font-weight: 600;
+}
+.dining-round-item__serve,
+.dining-round__serve-all {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.dining-round__serve-all {
+  justify-self: start;
+}
+:is(.dining-round-item__serve, .dining-round__serve-all):disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+.dining-rounds__status:empty {
+  display: none;
+}
+.dining-rounds__status {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.table-order-rounds {
+  display: grid;
+  gap: 16px;
+}
+.table-order-rounds .order-lines {
+  display: grid;
+  gap: 16px;
+}
+
+/* WP-2423 DEC-DINE-IN-PAY-LATER: the Store's dine-in payment choice (hours & service page). */
+.dining-payment-timing {
+  display: grid;
+  gap: 12px;
+  max-width: 40rem;
+  margin-top: 32px;
+}
+.dining-payment-timing h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.dining-payment-timing fieldset {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.dining-payment-timing__option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  min-height: 44px;
+  padding: 12px 0;
+  cursor: pointer;
+}
+.dining-payment-timing__option + .dining-payment-timing__option {
+  border-top: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.dining-payment-timing__option input {
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  accent-color: var(--bop-color-accent);
+}
+.dining-payment-timing__option > span {
+  display: grid;
+  gap: 2px;
+}
+.dining-payment-timing__option strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+.dining-payment-timing__option span span,
+.dining-payment-timing__note,
+.dining-payment-timing__message {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.dining-payment-timing__message:empty {
+  display: none;
+}
+.dining-payment-timing__save {
+  justify-self: start;
+  min-height: 44px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+.dining-payment-timing__save:disabled {
+  background: var(--bop-color-surface-raised, #f2f2f2);
+  color: var(--bop-color-text-muted);
+}
+
+/* DEC-DINE-IN-PAY-LATER: a pay-later table's checkout on Tables (v3: white, row hairlines only). */
+.table-checkout {
+  display: grid;
+  gap: 16px;
+  margin: 24px 0 0;
+}
+.table-checkout h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.table-checkout p {
+  margin: 0;
+}
+.table-checkout__rounds {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.table-checkout__rounds > li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider);
+  font-weight: 600;
+}
+.table-checkout__rounds ul {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.table-checkout__rounds ul li,
+.table-checkout__totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.table-checkout__totals {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+.table-checkout__totals dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.table-checkout__total {
+  font-size: 20px;
+  font-weight: 600;
+}
+.table-checkout fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.table-checkout legend {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.table-checkout fieldset label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.table-checkout__field {
+  display: grid;
+  gap: 4px;
+}
+.table-checkout__field input,
+.table-checkout__tip input:not([type="radio"]) {
+  min-height: 44px;
+  max-width: 240px;
+  font: inherit;
+}
+.table-checkout__field small,
+.table-checkout__cash-due {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.table-checkout__change {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.table-checkout__primary {
+  justify-self: start;
+  min-height: 48px;
+  padding: 0 24px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+  font-weight: 600;
+}
+.table-checkout__primary:disabled {
+  background: var(--bop-color-surface-raised, #f2f2f2);
+  color: var(--bop-color-text-muted);
+}
+.table-checkout__secondary {
+  justify-self: start;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-danger);
+  font: inherit;
+  text-decoration: underline;
+}
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .table-checkout,
+  .table-checkout * {
+    visibility: visible;
+  }
+  .table-checkout {
+    position: absolute;
+    inset: 0 auto auto 0;
+  }
+  .table-checkout button {
+    display: none;
+  }
+}

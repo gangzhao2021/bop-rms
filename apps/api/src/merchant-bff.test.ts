@@ -3217,6 +3217,7 @@ it("WP-2423 Q7 slice 2: protects the staff table round transport and maps refusa
     tipMinor: "300",
     totalMinor: "2560",
     payBy: "2026-10-15T18:30:00.000Z",
+    payLater: false,
     recordedAfterOutage: false,
   };
   const staffDiningRound = vi.fn<NonNullable<MerchantBffRouterOptions["staffDiningRound"]>>(

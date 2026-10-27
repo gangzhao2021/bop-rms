@@ -41,6 +41,7 @@ function view(overrides: Partial<DiningSessionView> = {}): DiningSessionView {
     tableLabel: "12",
     orderNumber: "1042",
     checkedAt: at,
+    paymentTiming: "PayFirst",
     rounds: [
       round(),
       round({

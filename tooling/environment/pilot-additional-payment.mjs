@@ -140,6 +140,10 @@ export async function createInternalAdditionalPayment(
     async prepare(input) {
       return (await resolveRequest(input)).service.prepare(input);
     },
+    // WP-2423 DEC-DINE-IN-PAY-LATER: submit a round of a pay-later table (no clock, no Provider).
+    async submitRound(input) {
+      return (await resolveRequest(input)).service.submitRound(input);
+    },
     // WP-2423 Q20: another card for this round's existing payment after a decline.
     async retry(input) {
       return (await resolveRequest(input)).service.retry(input);

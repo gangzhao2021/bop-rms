@@ -281,6 +281,49 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "某个规格的配方没有使用要替换或移除的配料。",
   "About {value} before tax and tip. The final total comes when you send the order.":
     "税前、不含小费约 {value}。发送订单时才会得到最终合计。",
+  "Accept order": "接单",
+  "Accept all": "全部接单",
+  "Start cooking": "开始做",
+  "Start all": "全部开始做",
+  Finished: "做好了",
+  "Mark {displayName} finished": "{displayName}做好了",
+  "All served": "全部上了",
+  "{text} · {count} ready to serve": "{text} · {count} 道可上",
+  "{count} ready to serve": "{count} 道可上",
+  "We could not confirm it was recorded. Tap it again: the same request is sent, so nothing is served twice.":
+    "没能确认是否已记下。请再点一次：会发送同一个请求，不会重复记为已上。",
+  "Nothing was marked served. Your access may have changed.": "没有记为已上。你的权限可能已变更。",
+  "Nothing was marked served. This table has changed; check it and try again.":
+    "没有记为已上。这桌的情况有变化，请看一下再试。",
+  "Serving progress could not be read. It is read again with the order.":
+    "暂时读不到上菜进度，会随订单一起重新读取。",
+  " · {served} of {ordered} served": " · 已上 {served}/{ordered}",
+  "Remaking — don't serve it until the kitchen marks the remake done.":
+    "重做中——等后厨做好后再上。",
+  "Mark {quantity} × {displayName} served": "{quantity} × {displayName} 已上",
+  "Served {served}/{ordered}": "已上 {served}/{ordered}",
+  "Serve the {count} ready": "这 {count} 道都上了",
+  "Mark served": "已上",
+  "Reading the table's order…": "正在读取这桌的订单…",
+  "The table's order could not be read. It is read again with the table.":
+    "读不到这桌的订单，会随桌台一起重新读取。",
+  "This table's order": "这桌的订单",
+  "Someone changed it meanwhile. This is the current choice; choose again if needed.":
+    "其间有人改过了。这是现在的设置，需要的话请重新选择。",
+  "Saved. Tables opened from now on use it; tables already open keep theirs.":
+    "已保存。之后新开的桌按这个方式；已经开着的桌不变。",
+  "Not saved. Check your connection and save again.": "没有保存。请检查网络后再保存一次。",
+  "Dine-in payment": "堂食付款",
+  "The dine-in payment setting could not be read. Refresh to retry.":
+    "读不到堂食付款设置，请刷新重试。",
+  "When dine-in guests pay": "堂食客人什么时候付款",
+  "Pay at the end": "先点后付",
+  "Guests order rounds that go straight to the kitchen and pay once for the whole table: on their phone, on the card machine or in cash.":
+    "客人每一轮点的菜直接送到后厨，最后整桌一起付：用手机付、刷卡机或现金。",
+  "Pay before each round": "先付后做",
+  "Each round is paid before it goes to the kitchen.": "每一轮先付款，再送到后厨。",
+  "A change applies to tables opened after it; tables already open keep theirs.":
+    "改动只对之后新开的桌生效，已经开着的桌不变。",
   Accept: "接受",
   "Accept ": "接单 ",
   "Accept a Kitchen work item": "接受后厨工作项",
@@ -451,6 +494,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Another administrator must approve this change.": "需由另一位管理员批准此更改。",
   "Another classification in use already has that name. Choose a different name.":
     "另一个使用中的税类已有这个名称。请换一个名称。",
+  "Sent to the kitchen. {totalMinor} with tax goes on the table's bill.":
+    "已送厨房。含税 {totalMinor} 记入本桌账单。",
+  "About {value} before tax. It goes on the table's bill; the table pays once at the end.":
+    "税前约 {value}。记入本桌账单，这桌最后一起结账。",
+  "Table {value} round sent to the kitchen": "{value} 桌这一轮已送厨房",
+  "Round total incl. tax": "本轮含税合计",
+  "Nothing to charge now. The round is on the table's bill; the table pays once at the end, tip included.":
+    "现在不用收款。这一轮已记入本桌账单，这桌最后一起结账，小费也在那时选。",
   "Another order for this table": "这张桌台的另一笔订单",
   "Another person with Owner access must approve this configuration. You cannot approve a change you made.":
     "需由另一位有店主权限的人批准此配置。你不能批准自己提出的更改。",
@@ -1367,6 +1418,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Finalize uploaded media": "完成媒体上传",
   Find: "查找",
   "Find a table": "查找桌台",
+  "Find an order · Applied": "查找订单 · 已筛选",
   "Find an order": "查找订单",
   "Finding the sign-in page…": "正在查找登录页面…",
   "Finish closing this dining session. All orders, payments and unresolved exceptions will be checked before releasing its table.":
@@ -5418,6 +5470,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{store} · Dine-in · added to the table's order · paid on the store's card machine":
     "{store} · 堂食 · 加到该桌的订单 · 在门店刷卡机付款",
   "{store} · Pickup · paid on the store's card machine": "{store} · 自取 · 在门店刷卡机付款",
+  "{store} · Dine-in · added to the table's bill · the table pays at the end":
+    "{store} · 堂食 · 记入本桌账单 · 最后一起结账",
   "{subject} has a new round that is not accepted yet — accept it on Orders.":
     "{subject}有新的一轮尚未接单 — 请在订单页接单。",
   "{subject} is not accepted yet — accept it on Orders.": "{subject}尚未接单 — 请在订单页接单。",
@@ -5611,4 +5665,52 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Today's earlier orders are on the next page.": "今天更早的订单在下一页。",
   "Hand over to guest": "交给顾客",
   Charge: "收款",
+  "Needs cleaning": "待清洁",
+  "Cleaned · ready for guests": "已清洁，可以入座",
+  "Your access doesn't allow this. Ask an Owner or Store Manager.":
+    "你的权限不能做这件事。请找老板或店长。",
+  "Start checkout first, so no more rounds are sent from this table.":
+    "请先开始结账，这样这桌就不能再下单了。",
+  "This table owes nothing.": "这桌没有要付的。",
+  "The bill changed (a round is still being sent, or something was changed). It has been read again: check it and try again.":
+    "账单有变化（有一轮还在送出，或有改动）。已重新读取，请核对后再试。",
+  "The cash received is less than the cash total.": "收到的现金少于现金应付。",
+  "This table has already paid.": "这桌已经付过了。",
+  "Every dish must be served or cancelled first.": "每道菜都要先上齐或取消。",
+  "We couldn't confirm the result. Check the connection and press the button again: it is never recorded twice.":
+    "没能确认结果。请检查网络后再按一次，不会重复记录。",
+  "This couldn't be done right now. Try again.": "现在无法完成，请再试一次。",
+  Checkout: "结账",
+  "This table pays once at the end. When the guests ask for the bill, start checkout: no more rounds can be sent from the table.":
+    "这桌最后一起结账。客人要买单时开始结账，之后这桌不能再下单。",
+  "Starting checkout…": "正在开始结账…",
+  "Start checkout": "开始结账",
+  "An Owner or Store Manager starts checkout.": "由老板或店长开始结账。",
+  "Reading the bill…": "正在读取账单…",
+  "Round {number}": "第 {number} 轮",
+  "Total with tax": "含税合计",
+  "A round is still being sent or was just changed. Wait a moment and read the bill again.":
+    "有一轮还在送出或刚有改动。请稍等后重新读取账单。",
+  "Read the bill again": "重新读取账单",
+  "Tip amount": "小费金额",
+  "How the table pays": "付款方式",
+  Cash: "现金",
+  "The approval or reference code on the card machine slip. Never the card number.":
+    "刷卡机小票上的授权码或参考号，不要填卡号。",
+  "Cash total {amount} (rounded to 5 cents)": "现金应付 {amount}（按 5 分取整）",
+  "Cash received": "实收现金",
+  "Change {amount}": "找零 {amount}",
+  "{amount} short": "还差 {amount}",
+  "Record payment": "记录付款",
+  "Cash received · {amount}": "已收现金 · {amount}",
+  "Guests left without paying": "客人未付离开",
+  "Record that the guests at table {table} left without paying {amount}? A manager decides this. It stays in the reports as written off.":
+    "确认 {table} 桌客人未付 {amount} 就离开？此项由经理决定，会作为核销留在报表中。",
+  "Yes, they left without paying": "确认，客人未付离开",
+  "Receipt for table {table}": "{table} 桌收据",
+  "Cash rounding": "现金取整",
+  "Total paid": "实付合计",
+  "Paid by": "付款方式",
+  "Paid in full. Close the table when the guests have left.": "已全部付清。客人离开后关台。",
+  "Print receipt": "打印收据",
 });

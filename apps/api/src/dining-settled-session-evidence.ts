@@ -102,10 +102,13 @@ function createSessionEvidence(options: Options, allowUnresolved: boolean) {
             digests.push([closure.snapshotDigest, position.snapshotDigest, null]);
             continue;
           }
+          // WP-2423 DEC-DINE-IN-PAY-LATER: an Order closed on a manager's unpaid-departure write-off
+          // is still Unpaid by its balances, written off for exactly what it owes.
+          const writtenOff = fact?.classification === "AuthorizedWriteOff";
           if (
             !fact ||
             closure.status !== "Closed" ||
-            position.settlement.classification !== "Settled" ||
+            position.settlement.classification !== (writtenOff ? "Unpaid" : "Settled") ||
             !position.execution.kitchenEvidenceComplete ||
             position.cancellation.pendingCount !== 0 ||
             position.priced.pendingAmendmentCount !== 0
@@ -122,10 +125,12 @@ function createSessionEvidence(options: Options, allowUnresolved: boolean) {
             fact.decidedAt > current.observedAt ||
             fact.currencyCode !== position.financial.currencyCode ||
             fact.pricedOrderTotalMinor !== position.priced.pricedTotalMinor.toString() ||
-            fact.capturedMinor !== position.financial.settlement.capturedMinor.toString() ||
             fact.capturedOrderAllocationMinor !==
               position.financial.settlement.capturedOrderAllocationMinor.toString() ||
-            fact.capturedTipMinor !== position.financial.settlement.capturedTipMinor.toString()
+            (fact.classification === "AuthorizedWriteOff"
+              ? fact.writtenOffMinor !== position.settlement.allocationDifferenceMinor.toString()
+              : fact.capturedMinor !== position.financial.settlement.capturedMinor.toString() ||
+                fact.capturedTipMinor !== position.financial.settlement.capturedTipMinor.toString())
           )
             return fail();
           const resolver = createDiningExceptionResolution({

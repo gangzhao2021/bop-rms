@@ -85,6 +85,9 @@ const paymentText: Readonly<Record<DiningRoundPayment, string>> = {
   get RefundPending() {
     return t("Refund on its way");
   },
+  get OnTableBill() {
+    return t("On the table's bill");
+  },
 };
 /** WP-2423 Q7 slice 2: who ordered a round, in the guest's words (never a staff name). */
 const orderedByText: Readonly<Record<DiningRound["orderedBy"], string>> = {
@@ -246,6 +249,7 @@ function RoundCard({ round }: { readonly round: DiningRound }) {
 }
 
 function TableSummary({ view }: { readonly view: DiningSessionView }) {
+  const payLater = view.paymentTiming === "PayLater";
   const summary = view.summary;
   if (summary === null) return null;
   const nonZero = (value: DiningMoney) => value.amountMinor !== "0";
@@ -285,7 +289,7 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
           <dd>{money(summary.paid)}</dd>
         </div>
         <div>
-          <dt>{t("Waiting for payment")}</dt>
+          <dt>{payLater ? t("To pay at the end") : t("Waiting for payment")}</dt>
           <dd>{nonZero(summary.due) ? money(summary.due) : t("Nothing")}</dd>
         </div>
         {nonZero(summary.refunded) ? (
@@ -305,9 +309,13 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
         {summary.ordered !== undefined
           ? t("Item prices are before tax. Rounds that were never paid are not included. ")
           : ""}
-        {t(
-          "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
-        )}
+        {payLater
+          ? t(
+              "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax and any tip.",
+            )
+          : t(
+              "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
+            )}
       </p>
     </section>
   );

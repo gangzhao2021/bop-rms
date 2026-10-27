@@ -66,6 +66,16 @@ export function createCustomerAdmittedAdditionalDiningPayment(options: {
     });
   }
   return Object.freeze({
+    /** WP-2423 DEC-DINE-IN-PAY-LATER: submit the round of a pay-later table (no clock, no tip). */
+    async submitRound(value: unknown) {
+      const raw = readClosedRecord(value, [
+        "sessionCredential",
+        "csrfCredential",
+        "checkoutSessionReference",
+        "selectionReference",
+      ]);
+      return payment({ ...raw, tip: null }).submitRound(value);
+    },
     /** WP-2423 Q7 slice 2: the round's payment preparation for the Store's card machine. */
     async prepare(value: unknown) {
       const raw = readClosedRecord(value, [

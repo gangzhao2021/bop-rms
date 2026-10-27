@@ -23,6 +23,7 @@ import { UnpaidRoundCancellationError } from "./merchant-unpaid-round-cancellati
 import { EndedOrderStockReleaseError } from "./merchant-stock-holding-orders.js";
 import { StaffItemCancellationError } from "./merchant-order-item-staff-cancellation.js";
 import { OrderCloseCommandError } from "./merchant-dining-order-close-command.js";
+import { UnpaidDepartureError } from "./merchant-dining-unpaid-departure.js";
 import { MerchantOrderAcceptanceError } from "./merchant-order-acceptance-command.js";
 
 type MerchantOrderQueueItem = Awaited<
@@ -93,6 +94,8 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
       // WP-2423 (v15 2026-10-16): when this paid dine-in round, still waiting for staff, was
       // paid; Orders, Home and Tables warn at 5 and 10 minutes (it is never refunded on its own).
       awaitingAcceptanceSince: batch.awaitingAcceptanceSince,
+      // Orders v3 (Owner 2026-10-26): when the round was sent, shown with its items.
+      submittedAt: batch.submittedAt,
     })),
     currentPhase: item.currentPhase,
     currentVersion: item.currentVersion,
@@ -358,6 +361,7 @@ export function installMerchantOrderRoutes(
           tipMinor: result.tipMinor,
           totalMinor: result.totalMinor,
           payBy: result.payBy,
+          payLater: result.payLater,
           recordedAfterOutage: result.recordedAfterOutage,
         });
       })
@@ -494,6 +498,46 @@ export function installMerchantOrderRoutes(
         response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
       });
   });
+  // WP-2423 DEC-DINE-IN-PAY-LATER: a table left without paying; a manager records it and its Order
+  // is closed on the write-off (PIN-confirmed, as other money decisions).
+  router.post(
+    "/orders/close-unpaid-departure",
+    sameOriginMutation(options),
+    (request, response) => {
+      const auth = mutation(request, response);
+      if (auth === null) return;
+      if (!options.orderUnpaidDeparture) {
+        response.status(503).json({ error: "unpaid_departure_unavailable" });
+        return;
+      }
+      void options
+        .orderUnpaidDeparture({ ...auth, command: request.body })
+        .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+        .catch((error: unknown) => {
+          if (!(error instanceof UnpaidDepartureError)) {
+            response.status(503).set("Cache-Control", NO_STORE).json({ error: "unavailable" });
+            return;
+          }
+          if (error.code === "UNPAID_DEPARTURE_PERMISSION_DENIED") {
+            denied(response);
+            return;
+          }
+          const status =
+            error.code === "UNPAID_DEPARTURE_INPUT_INVALID"
+              ? 400
+              : error.code === "UNPAID_DEPARTURE_UNAVAILABLE"
+                ? 503
+                : 409;
+          response
+            .status(status)
+            .set("Cache-Control", NO_STORE)
+            .json({
+              error: error.code.replace(/^UNPAID_DEPARTURE_/u, "").toLowerCase(),
+              reasons: error.reasons,
+            });
+        });
+    },
+  );
   // WP-2423 item 4: an ordinary (item) refund of a card-machine payment was made on the Store's
   // machine; staff record it (after the approval, when one is needed).
   router.post(

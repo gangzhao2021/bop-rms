@@ -22,6 +22,7 @@ import {
 } from "../../../packages/rms/payment/src/tests/payment-intent-creation.fixture.js";
 import { createApp } from "./app.js";
 import { CustomerStoreClosedError } from "./customer-store-open-gate.js";
+import { CustomerDiningPayLaterError } from "./customer-dining-pay-later-round.js";
 import {
   CustomerPaymentIntentHandler,
   type CustomerPaymentIntentPort,
@@ -93,12 +94,15 @@ async function setup(enabled = true) {
   const resume = vi
     .fn<NonNullable<CustomerPaymentIntentPort["resume"]>>()
     .mockResolvedValue({ ...result, status: "AlreadyCreated" });
+  const sendToKitchen = vi
+    .fn<NonNullable<CustomerPaymentIntentPort["sendToKitchen"]>>()
+    .mockResolvedValue({ status: "Sent", orderReference: id(40), totalMinor: 2260n });
   const server = createServer(
     createApp(
       enabled
         ? {
             customerPaymentIntent: new CustomerPaymentIntentHandler({
-              port: { create, retry, resume },
+              port: { create, retry, resume, sendToKitchen },
               allowedOrigin: "https://customer.example",
             }),
           }
@@ -137,7 +141,7 @@ async function setup(enabled = true) {
       headers: { ...retryHeaders, ...extra },
       body: JSON.stringify(payload),
     });
-  return { result, create, retry, resume, body, send, sendRetry };
+  return { result, create, retry, resume, sendToKitchen, body, send, sendRetry };
 }
 it.each([
   ["Created", 201],
@@ -328,3 +332,56 @@ it.each([
     expect(((await response.json()) as { error: { code: string } }).error.code).toBe(named);
   },
 );
+
+it("DEC-DINE-IN-PAY-LATER: sends a pay-later table's round to the kitchen with no tip or payment", async () => {
+  const { send, sendToKitchen, create } = await setup();
+  const sent = await send({ sendToKitchen: true });
+  expect(sent.status).toBe(201);
+  expect(await sent.json()).toEqual({
+    schemaVersion: 1,
+    round: {
+      checkoutSessionReference: id(31),
+      orderReference: id(40),
+      status: "Sent",
+      total: { amountMinor: "2260", currency: "CAD" },
+    },
+  });
+  expect(sendToKitchen).toHaveBeenCalledWith({
+    sessionCredential: "s".repeat(43),
+    csrfCredential: "c".repeat(43),
+    checkoutSessionReference: id(31),
+    selectionReference: id(30),
+  });
+  expect(create).not.toHaveBeenCalled();
+  // Sent again with the same key: the same round, never a second one.
+  sendToKitchen.mockResolvedValueOnce({
+    status: "AlreadySent",
+    orderReference: id(40),
+    totalMinor: 2260n,
+  });
+  expect((await send({ sendToKitchen: true })).status).toBe(200);
+  // No key, a tip alongside, or anything but true is refused before the service.
+  const calls = sendToKitchen.mock.calls.length;
+  expect((await send({ sendToKitchen: true }, { "idempotency-key": "x" })).status).toBe(400);
+  expect(
+    (await send({ sendToKitchen: true, tip: { amountMinor: "0", currency: "CAD" } })).status,
+  ).toBe(400);
+  expect((await send({ sendToKitchen: "yes" })).status).toBe(400);
+  expect(sendToKitchen.mock.calls.length).toBe(calls);
+  // A table that pays as it orders is told so (the guest pays the round instead).
+  sendToKitchen.mockRejectedValueOnce(new CustomerDiningPayLaterError("PayFirst"));
+  const payFirst = await send({ sendToKitchen: true });
+  expect(payFirst.status).toBe(409);
+  expect(((await payFirst.json()) as { error: { code: string } }).error.code).toBe(
+    "payment_pay_first_table",
+  );
+  // Paying a round at a table that pays at the end is refused with its own reason.
+  create.mockRejectedValueOnce(new CustomerDiningPayLaterError("PayLater"));
+  const payLater = await send();
+  expect(payLater.status).toBe(409);
+  expect(((await payLater.json()) as { error: { code: string } }).error.code).toBe(
+    "payment_pay_later_table",
+  );
+  sendToKitchen.mockRejectedValueOnce(new CustomerStoreClosedError());
+  expect((await send({ sendToKitchen: true })).status).toBe(409);
+});

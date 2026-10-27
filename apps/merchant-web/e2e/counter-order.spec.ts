@@ -220,8 +220,8 @@ test("@production staff take a counter pickup order, charge it on the card machi
   await page.getByRole("button", { name: "Add Flat White" }).click();
   await page.getByRole("radio", { name: /Oat milk/ }).check();
   await page.getByRole("button", { name: "Add to order" }).click();
+  // Owner 2026-10-26: an item with nothing to choose goes straight onto the order.
   await page.getByRole("button", { name: "Add Banana Bread" }).click();
-  await page.getByRole("button", { name: "Add to order" }).click();
   const ticket = page.getByRole("list", { name: "Items in this order" });
   await expect(ticket).toContainText("1 × Flat White · Oat milk");
   await expect(ticket).toContainText("$5.25");
@@ -524,8 +524,8 @@ test("@production a short item names how many are left and the order stays edita
     await page.getByRole("button", { name: "Add Flat White" }).click();
     await page.getByRole("button", { name: "Add to order" }).click();
   }
+  // Owner 2026-10-26: an item with nothing to choose goes straight onto the order.
   await page.getByRole("button", { name: "Add Banana Bread" }).click();
-  await page.getByRole("button", { name: "Add to order" }).click();
   await page.getByRole("button", { name: "Send order" }).click();
   await expect(page.getByRole("alert")).toHaveText(
     "Only 1 Flat White left, 2 in this order. Remove Flat White and add 1 back, then send again. Nothing was sent or charged.",
@@ -579,8 +579,8 @@ test("@production a refused counter order says why and what to do, then sends as
     });
   });
   await page.goto("/operations/order-entry");
+  // Owner 2026-10-26: an item with nothing to choose goes straight onto the order.
   await page.getByRole("button", { name: "Add Banana Bread" }).click();
-  await page.getByRole("button", { name: "Add to order" }).click();
   await page.getByRole("button", { name: "Send order" }).click();
   await expect(page.getByRole("alert")).toHaveText(
     "The system couldn't place this order (a problem on our side, not with the order). Nothing was charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.",
@@ -861,4 +861,46 @@ test("@production a sent, unpaid counter order is charged after a reload, from C
   await expect(page.getByRole("region", { name: "Sent, not paid yet" })).toHaveCount(0);
   await paidPanel.getByRole("button", { name: "Done" }).click();
   await expect(page.getByRole("region", { name: "Order 21 paid" })).toHaveCount(0);
+});
+
+// Owner 2026-10-26: one tile per drink with its sizes as buttons; a tap on a size adds it; a sold
+// out size cannot be tapped. Sizes are grouped only by the catalog's Product (version), never by
+// name alone.
+test("@production a drink's sizes share one tile and a tap adds that size", async ({ page }) => {
+  await signIn(page);
+  const bread = menu.menu.menu.sections[0]?.sellables[2];
+  const sized = (n: number, version: number, name: string, amount: string, sold = false) => ({
+    ...bread,
+    sellableReference: id(n),
+    productVersionReference: id(version),
+    name,
+    availability: sold ? "SoldOut" : "Available",
+    displayPrice: price(amount),
+  });
+  const sizedMenu = structuredClone(menu);
+  const coffee = sizedMenu.menu.menu.sections[0];
+  if (coffee === undefined) throw new Error("the counter test menu has no section");
+  coffee.sellables = [
+    sized(60, 70, "Latte — Small (8 oz)", "4.50"),
+    sized(61, 70, "Latte — Large (16 oz)", "5.65", true),
+    // Same name pattern, another Product: its own tile.
+    sized(62, 71, "Latte — Regular (12 oz)", "5.15"),
+  ] as never;
+  await page.route("**/merchant/counter/menu", (route) =>
+    route.fulfill({ headers, json: sizedMenu }),
+  );
+  await page.goto("/operations/order-entry");
+  const latte = page.getByRole("group", { name: "Latte", exact: true });
+  await expect(latte.getByRole("button")).toHaveCount(2);
+  await expect(latte.getByRole("button", { name: "Add Latte — Large (16 oz)" })).toBeDisabled();
+  await expect(latte.getByRole("button", { name: "Add Latte — Large (16 oz)" })).toContainText(
+    "Sold out",
+  );
+  await expect(page.getByRole("button", { name: "Add Latte — Regular (12 oz)" })).toBeVisible();
+  await latte.getByRole("button", { name: "Add Latte — Small (8 oz)" }).click();
+  await latte.getByRole("button", { name: "Add Latte — Small (8 oz)" }).click();
+  const ticket = page.getByRole("list", { name: "Items in this order" });
+  await expect(ticket.getByRole("listitem")).toHaveCount(1);
+  await expect(ticket).toContainText("2 × Latte — Small (8 oz)");
+  await expect(ticket).toContainText("$9.00");
 });

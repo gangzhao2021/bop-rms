@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readClosedRecord } from "@bop/identity";
 import {
+  createPostgresDiningPaymentTimingStore,
   createPostgresDiningSessionReadStore,
   createPostgresDiningTableQrStore,
   createPostgresDiningTableStore,
@@ -121,6 +122,19 @@ export function createMerchantDiningTables(options: {
           const activeReferences = page.items.flatMap((table) =>
             table.activeDiningSessionReference === null ? [] : [table.activeDiningSessionReference],
           );
+          // DEC-DINE-IN-PAY-LATER: how each table pays — an open table as it was opened, a free one
+          // as the Store opens tables now — so staff entering a round know whether it is charged.
+          const timings = createPostgresDiningPaymentTimingStore({
+            scope: {
+              tenantReference: current.selected.tenantReference,
+              brandReference: current.context.brand.brandReference,
+              storeReference: current.store.storeReference,
+            },
+            hashIntent: (v) => createHash("sha256").update(v).digest("hex"),
+            equals: (a, b) => a === b,
+          });
+          const storeTiming = (await timings.load(tx, authorize)).paymentTiming;
+          const sessionTimings = await timings.loadSessionTimings(tx, activeReferences);
           const elapsedMinutes = new Map<string, number>();
           // WP-2423 D4: each open session's phase and version, for closing it from this page.
           const sessionFacts = new Map<string, { phase: string; version: number }>();
@@ -303,6 +317,8 @@ export function createMerchantDiningTables(options: {
                   capacity: table.capacity,
                   lifecycle: table.lifecycle,
                   operationalState: table.operationalState,
+                  // WP-2423: why a table is blocked (CLEANING after its guests left), for Tables.
+                  blockReasonCode: table.blockReasonCode,
                   aggregateVersion: table.aggregateVersion,
                   currentDiningSessionReference: table.activeDiningSessionReference,
                   elapsedMinutes:
@@ -310,6 +326,10 @@ export function createMerchantDiningTables(options: {
                       ? null
                       : (elapsedMinutes.get(table.activeDiningSessionReference) ?? null),
                   qrCodeValidUntil: codeUntil(table),
+                  paymentTiming:
+                    table.activeDiningSessionReference === null
+                      ? storeTiming
+                      : (sessionTimings.get(table.activeDiningSessionReference) ?? "PayFirst"),
                   staffCall: (() => {
                     const call =
                       table.activeDiningSessionReference === null

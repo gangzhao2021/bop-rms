@@ -30,6 +30,7 @@ import {
   type CounterOrderLine,
   type CounterTipChoice,
 } from "./merchant-counter-order.js";
+import type { DiningPayLaterRound } from "./dining-pay-later-round.js";
 import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-payment-preparation.js";
 
 /**
@@ -195,6 +196,22 @@ export interface StaffTableGuestPipeline extends Pick<
       readonly cartItemReferences: readonly string[];
     },
   ): Promise<"Removed" | "Kept">;
+  /**
+   * DEC-DINE-IN-PAY-LATER: submits a round of a table opened pay later — no tip, no payment clock;
+   * the round then goes to the kitchen. Absent where pay-later is not composed.
+   */
+  submitPayLater?(
+    credentials: CounterGuestCredentials,
+    input: {
+      readonly checkoutSessionReference: string;
+      readonly selectionReference: string;
+      readonly recordedAfterOutage: boolean;
+    },
+  ): Promise<{
+    readonly submissionReference: string;
+    readonly kind: "Initial" | "Additional";
+    readonly guestSessionReference: string;
+  }>;
   /** Submits the round, records the tip choice and starts the payment clock (no Provider). */
   preparePayment(
     credentials: CounterGuestCredentials,
@@ -217,10 +234,14 @@ export interface StaffDiningRoundResult {
   /** Round total from the quote, tax included. */
   readonly orderMinor: string;
   readonly tipMinor: string;
-  /** What staff charge on the card machine. */
+  /** What staff charge on the card machine (pay later: what the round adds to the table's bill). */
   readonly totalMinor: string;
-  /** The card-machine payment must be recorded before then. */
-  readonly payBy: string;
+  /**
+   * The card-machine payment must be recorded before then; null when the table pays later
+   * (DEC-DINE-IN-PAY-LATER): the round went to the kitchen and the table pays once at the end.
+   */
+  readonly payBy: string | null;
+  readonly payLater: boolean;
   readonly recordedAfterOutage: boolean;
 }
 
@@ -297,6 +318,8 @@ export function createMerchantStaffDiningRound(options: {
   onUnexpected?(error: unknown): void;
   /** How long an unfinished attempt is treated as still being sent (default two minutes). */
   inProgressMs?: number;
+  /** DEC-DINE-IN-PAY-LATER: rounds of tables opened pay later go to the kitchen unpaid. */
+  payLater?(scope: StaffScope["selected"]): DiningPayLaterRound;
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
   const now = () => options.persistence.now();
@@ -387,6 +410,43 @@ export function createMerchantStaffDiningRound(options: {
           String(entry.guestSessionReference),
         );
         if (batch === null) return fail("STAFF_ROUND_NOT_FINISHED");
+        const labels = await listDiningSessionTableLabels(tx as never, scope.selected, [
+          String(entry.diningSessionReference),
+        ]);
+        const payLater = options.payLater?.(scope.selected);
+        if (
+          payLater !== undefined &&
+          (await payLater.isPayLater(tx, String(entry.diningSessionReference)))
+        ) {
+          // Sent to the kitchen in the same transaction that reads it back, so a retry of a round
+          // whose sending was cut off finishes it (an already-sent round is returned as it is).
+          const sent = await payLater.confirm(tx, {
+            submissionReference: String(batch.submissionReference),
+            actorReference: scope.actorReference,
+            operationReference: String(entry.operationReference),
+            correlationReference: String(entry.operationReference),
+            authorize: async () => allowed(),
+          });
+          const roundMinor = await payLater.roundTotalMinor(tx, {
+            orderReference: String(batch.orderReference),
+            orderBatchReference: String(batch.orderBatchReference),
+            authorize: async () => allowed(),
+          });
+          return Object.freeze({
+            status,
+            orderReference: String(batch.orderReference),
+            orderBatchReference: String(batch.orderBatchReference),
+            orderNumber: batch.orderNumber,
+            orderVersion: sent.confirmation.acceptedOrderVersion,
+            tableLabel: labels.get(String(entry.diningSessionReference)) ?? null,
+            orderMinor: roundMinor.toString(),
+            tipMinor: "0",
+            totalMinor: roundMinor.toString(),
+            payBy: null,
+            payLater: true,
+            recordedAfterOutage: entry.recordedAfterOutage,
+          });
+        }
         const current = await readStaffDiningRoundPaymentPreparation(
           tx,
           {
@@ -402,9 +462,6 @@ export function createMerchantStaffDiningRound(options: {
           },
         );
         if (current === null) return fail("STAFF_ROUND_NOT_FINISHED");
-        const labels = await listDiningSessionTableLabels(tx as never, scope.selected, [
-          String(entry.diningSessionReference),
-        ]);
         // WP-2423 D1: a later round's table Order is at the version its other rounds moved it to
         // (the Order header keeps the first round's version).
         const execution = current.additional
@@ -431,6 +488,7 @@ export function createMerchantStaffDiningRound(options: {
           tipMinor: p.tip.amountMinor.toString(),
           totalMinor: p.total.amountMinor.toString(),
           payBy: String(p.capacityExpiresAt),
+          payLater: false,
           recordedAfterOutage: entry.recordedAfterOutage,
         });
       });
@@ -655,6 +713,30 @@ export function createMerchantStaffDiningRound(options: {
             });
       }
       if (checkout.status !== "Started") return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
+      const submitPayLater = options.pipeline.submitPayLater;
+      const payLaterRound = options.payLater;
+      const payLater =
+        payLaterRound !== undefined &&
+        submitPayLater !== undefined &&
+        (await inScope(async (tx, scope) =>
+          payLaterRound(scope.selected).isPayLater(tx, table.diningSessionReference),
+        ));
+      if (payLater) {
+        // DEC-DINE-IN-PAY-LATER: no tip and no charge now; the table pays once at the end.
+        try {
+          await submitPayLater(credentials, {
+            checkoutSessionReference: checkout.checkoutSessionReference,
+            selectionReference: tipSelectionReference,
+            recordedAfterOutage: command.recordedAfterOutage,
+          });
+        } catch (error) {
+          if ((error as { code?: unknown } | null)?.code !== "ORDER_CREATE_STOCK_SHORT")
+            throw error;
+          await withdraw();
+          return fail("STAFF_ROUND_ITEM_UNAVAILABLE");
+        }
+        return await finished("Placed", entry.record);
+      }
       let preparation: OrderPaymentPreparationEvidence;
       try {
         preparation = await options.pipeline.preparePayment(credentials, {

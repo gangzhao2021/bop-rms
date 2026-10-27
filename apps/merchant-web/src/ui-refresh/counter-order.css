@@ -556,3 +556,59 @@
     min-height: 48px;
   }
 }
+
+/* Owner 2026-10-26: one tile per drink; its sizes are the buttons, each with its price. A tile with
+   sizes takes two columns so three sizes fit; a sold-out size is greyed and says so. */
+.counter-order .counter-order__items li.counter-order__family {
+  grid-column: span 2;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: start;
+}
+.counter-order .counter-order__sizes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+  gap: var(--bop-space-2);
+}
+.counter-order .counter-order__sizes > button {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-height: 56px;
+  padding: 8px 12px;
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+.counter-order .counter-order__sizes > button .counter-order__item-price {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.counter-order .counter-order__sizes > button:focus-visible {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.counter-order .counter-order__sizes > button:disabled {
+  border-color: var(--bop-color-border-default);
+  background: var(--bop-color-surface-raised);
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.counter-order .counter-order__sizes > button[data-available="false"] span:first-child {
+  text-decoration: line-through;
+}
+.counter-order .counter-order__sizes > button[data-available="false"] .counter-order__item-price {
+  color: var(--bop-color-text-default);
+}
+@media (max-width: 40rem) {
+  .counter-order .counter-order__items li.counter-order__family {
+    grid-column: 1 / -1;
+  }
+}

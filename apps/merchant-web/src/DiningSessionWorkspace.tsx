@@ -16,6 +16,8 @@ import { serviceOperationReference } from "./service-control-client.js";
 import { storeTime } from "./StoreTime.js";
 import { newOperationReference } from "./operation-reference.js";
 import { TableSessionClose } from "./TableSessionClose.js";
+import { TableCheckout } from "./TableCheckout.js";
+import { TableOrderRounds } from "./TableOrderRounds.js";
 import {
   browserOffline,
   StaleReadNotice,
@@ -49,7 +51,7 @@ export function elapsedText(minutes: number): string {
 }
 export { longOpenSessionMinutes };
 /** What staff see on the floor: free, blocked, seated, or seated so long the guests have likely left. */
-export type TableFloorState = "Available" | "Unavailable" | "Seated" | "LongOpen";
+export type TableFloorState = "Available" | "Unavailable" | "NeedsCleaning" | "Seated" | "LongOpen";
 /**
  * WP-2423 follow-up: the table's real floor state. Its operational state only says whether the
  * table is blocked, so a table with an open session is "Seated", never "Available".
@@ -58,9 +60,17 @@ export function tableFloorStatus(
   table: Pick<
     StaffDiningTable,
     "operationalState" | "currentDiningSessionReference" | "elapsedMinutes"
-  >,
+  > &
+    Partial<Pick<StaffDiningTable, "blockReasonCode">>,
 ): { state: TableFloorState; label: string } {
   const blocked = table.operationalState === "TemporarilyBlocked";
+  // Handoff §25.3: a table its guests just left waits for cleaning before it is seated again.
+  if (
+    table.currentDiningSessionReference === null &&
+    blocked &&
+    table.blockReasonCode === "CLEANING"
+  )
+    return { state: "NeedsCleaning", label: t("Needs cleaning") };
   if (table.currentDiningSessionReference === null)
     return blocked
       ? { state: "Unavailable", label: t("Temporarily unavailable") }
@@ -384,6 +394,7 @@ export function DiningSessionWorkspace({
   const [canCancelUnpaidRounds, setCanCancelUnpaidRounds] = useState(false);
   const [canOperateTables, setCanOperateTables] = useState(false),
     [blockReasonCode, setBlockReasonCode] = useState(""),
+    [checkoutRevision, setCheckoutRevision] = useState(0),
     [unknownAction, setUnknownAction] = useState<"Session" | "Availability" | null>(null);
   const [hostLocked, setHostLocked] = useState(false);
   const [search, setSearch] = useState("");
@@ -997,12 +1008,43 @@ export function DiningSessionWorkspace({
                   </section>
                 );
               })()}
+              {selected.session?.orderReference ? (
+                // Orders v3 (Owner 2026-10-26): the table's rounds and dishes, served from here.
+                <TableOrderRounds
+                  key={selected.session.orderReference}
+                  orderReference={selected.session.orderReference}
+                  csrf={csrf}
+                  timeZone={timeZone}
+                  refreshKey={String(loadedAt.current)}
+                  locked={locked || paused}
+                  onChanged={() => void loadRef.current(false, true)}
+                />
+              ) : null}
+              {selected.currentDiningSessionReference !== null &&
+              selected.paymentTiming === "PayLater" &&
+              selected.session &&
+              (canCloseSessions || canOperateTables) ? (
+                // DEC-DINE-IN-PAY-LATER: the table pays once at the end, here.
+                <TableCheckout
+                  key={selected.currentDiningSessionReference + ":" + selected.session.phase}
+                  table={selected}
+                  session={selected.session}
+                  csrf={csrf}
+                  canStart={canCloseSessions}
+                  locked={locked || paused}
+                  onChanged={() => {
+                    // The close check reads the table again once it is paid (or written off).
+                    setCheckoutRevision((value) => value + 1);
+                    void loadRef.current(false, true);
+                  }}
+                />
+              ) : null}
               {selected.currentDiningSessionReference !== null &&
               canCloseSessions &&
               selected.session ? (
                 // WP-2423 D4: close the table's session here, after checking its rounds.
                 <TableSessionClose
-                  key={selected.currentDiningSessionReference}
+                  key={selected.currentDiningSessionReference + ":" + String(checkoutRevision)}
                   table={selected}
                   session={selected.session}
                   csrf={csrf}
@@ -1189,7 +1231,9 @@ export function DiningSessionWorkspace({
                         ? t("Retry same availability request")
                         : state === "Submitting"
                           ? t("Updating availability…")
-                          : t("Mark table available")}
+                          : selected.blockReasonCode === "CLEANING"
+                            ? t("Cleaned · ready for guests")
+                            : t("Mark table available")}
                     </button>
                   )}
                 </section>

@@ -20,6 +20,7 @@ import {
 } from "./counter-payment.js";
 import {
   CounterOrderClientError,
+  counterMenuFamilies,
   createCounterOrderClient,
   type CounterMenu,
   type CounterMenuItem,
@@ -252,6 +253,8 @@ export function StaffOrderEntryPage({
       : null;
   const tableMode = requestedTable !== null;
   const [tableLabel, setTableLabel] = useState<string | null>(null);
+  // DEC-DINE-IN-PAY-LATER: the table pays once at the end — no tip and no charge per round.
+  const [tablePaysLater, setTablePaysLater] = useState(false);
   const [menu, setMenu] = useState<
     { kind: "Loading" } | { kind: "Error"; code: string } | { kind: "Ready"; menu: CounterMenu }
   >({ kind: "Loading" });
@@ -270,7 +273,7 @@ export function StaffOrderEntryPage({
   const [slip, setSlip] = useState("");
   const [placed, setPlaced] = useState<PlacedCounterOrder | null>(null);
   const [phase, setPhase] = useState<
-    "Building" | "Sending" | "Charge" | "Recording" | "Paid" | "Accepted"
+    "Building" | "Sending" | "Charge" | "Recording" | "Paid" | "Accepted" | "Sent"
   >("Building");
   const [problem, setProblem] = useState<string | null>(null);
   const [problemNeedsTableCode, setProblemNeedsTableCode] = useState(false);
@@ -311,6 +314,7 @@ export function StaffOrderEntryPage({
             throw new CounterOrderClientError("TableUnavailable");
           if (found.qrCodeValidUntil === null) throw new CounterOrderClientError("TableHasNoQr");
           setTableLabel(found.stableLabel);
+          setTablePaysLater(found.paymentTiming === "PayLater");
           return;
         }
         if (result.next === null) break;
@@ -338,7 +342,7 @@ export function StaffOrderEntryPage({
     return () => controller.abort();
   }, [client, reload, csrf, fetcher, tableMode, tableReference]);
   useEffect(() => {
-    if (phase === "Charge") chargeHeading.current?.focus();
+    if (phase === "Charge" || phase === "Sent") chargeHeading.current?.focus();
   }, [phase]);
   // The item's options open beside the menu (a sheet on a phone); move focus there.
   const choosingItem = choosing?.item.sellableReference ?? null;
@@ -391,8 +395,40 @@ export function StaffOrderEntryPage({
     setProblemNeedsTableCode(false);
     setLines(next);
   };
+  const itemPrice = (item: CounterMenuItem) =>
+    item.available
+      ? item.priceMinor === null
+        ? t("Price at checkout")
+        : cad(item.priceMinor)
+      : t("Sold out");
+  const canAdd = (item: CounterMenuItem) => item.available && ordering && item.priceMinor !== null;
+  // At the counter an item with nothing to choose goes straight onto the order (one more of the
+  // same line); one with options, or any item for a table (its line can carry a note for the
+  // kitchen), opens its choices first, as before.
+  const add = (item: CounterMenuItem) => {
+    if (item.rules.length > 0 || tableMode) {
+      setChoosing({ item, choices: defaultChoices(item), quantity: 1, note: "" });
+      return;
+    }
+    const same = lines.find(
+      (line) =>
+        line.item.sellableReference === item.sellableReference &&
+        line.options.length === 0 &&
+        (line.note ?? null) === null,
+    );
+    changeLines(
+      same
+        ? lines.map((line) =>
+            line.key === same.key ? { ...line, quantity: line.quantity + 1 } : line,
+          )
+        : [
+            ...lines,
+            { key: serviceOperationReference(), item, quantity: 1, options: [], note: null },
+          ],
+    );
+  };
   const tipChoice = (): CounterTip | null => {
-    if (tip === "0") return { kind: "None" };
+    if (tip === "0" || tablePaysLater) return { kind: "None" };
     if (tip !== "Custom") return { kind: "Percent", percent: Number(tip) as 10 | 15 | 18 };
     const match = /^(0|[1-9][0-9]{0,4})(?:\.([0-9]{1,2}))?$/u.exec(customTip.trim());
     if (!match) return null;
@@ -411,7 +447,7 @@ export function StaffOrderEntryPage({
     phase === "Building" &&
     lines.length > 0 &&
     tipChoice() !== null &&
-    (!paper || paperInstant !== null);
+    (!paper || tablePaysLater || paperInstant !== null);
 
   const send = async () => {
     const chosenTip = tipChoice();
@@ -446,7 +482,7 @@ export function StaffOrderEntryPage({
             });
       setPlaced(order);
       payOperation.current = null;
-      setPhase("Charge");
+      setPhase(order.payLater ? "Sent" : "Charge");
       setAwaitingKey((value) => value + 1);
       refreshMenu();
     } catch (error) {
@@ -580,9 +616,16 @@ export function StaffOrderEntryPage({
       title={pageTitle}
       meta={
         tableMode
-          ? t("{store} · Dine-in · added to the table's order · paid on the store's card machine", {
-              store: storeLabel,
-            })
+          ? tablePaysLater
+            ? t("{store} · Dine-in · added to the table's bill · the table pays at the end", {
+                store: storeLabel,
+              })
+            : t(
+                "{store} · Dine-in · added to the table's order · paid on the store's card machine",
+                {
+                  store: storeLabel,
+                },
+              )
           : t("{store} · Pickup · paid on the store's card machine", { store: storeLabel })
       }
       className="counter-order"
@@ -642,29 +685,52 @@ export function StaffOrderEntryPage({
             >
               <h3>{section.name}</h3>
               <ul className="counter-order__items">
-                {section.items.map((item) => (
-                  <li key={item.sellableReference} data-available={item.available}>
-                    <span className="counter-order__item-name">{item.name}</span>
-                    <span className="counter-order__item-price">
-                      {item.available
-                        ? item.priceMinor === null
-                          ? t("Price at checkout")
-                          : cad(item.priceMinor)
-                        : t("Sold out")}
-                    </span>
-                    {/* The Add button covers the whole tile (CSS), so the tile is the tap target. */}
-                    <button
-                      type="button"
-                      disabled={!item.available || !ordering || item.priceMinor === null}
-                      aria-label={t("Add {name}", { name: item.name })}
-                      onClick={() =>
-                        setChoosing({ item, choices: defaultChoices(item), quantity: 1, note: "" })
-                      }
+                {counterMenuFamilies(section.items).map((family) => {
+                  const single = family.sizes.length === 1 ? family.sizes[0]?.item : undefined;
+                  if (single !== undefined)
+                    return (
+                      <li key={family.key} data-available={single.available}>
+                        <span className="counter-order__item-name">{single.name}</span>
+                        <span className="counter-order__item-price">{itemPrice(single)}</span>
+                        {/* The Add button covers the whole tile (CSS), so the tile is the tap target. */}
+                        <button
+                          type="button"
+                          disabled={!canAdd(single)}
+                          aria-label={t("Add {name}", { name: single.name })}
+                          onClick={() => add(single)}
+                        >
+                          {t("Add")}
+                        </button>
+                      </li>
+                    );
+                  // Owner 2026-10-26: one tile per drink; a tap on a size adds that size.
+                  return (
+                    <li
+                      key={family.key}
+                      className="counter-order__family"
+                      data-available={family.sizes.some((size) => size.item.available)}
                     >
-                      {t("Add")}
-                    </button>
-                  </li>
-                ))}
+                      <span className="counter-order__item-name">{family.name}</span>
+                      <span className="counter-order__sizes" role="group" aria-label={family.name}>
+                        {family.sizes.map((size) => (
+                          <button
+                            key={size.item.sellableReference}
+                            type="button"
+                            disabled={!canAdd(size.item)}
+                            aria-label={t("Add {name}", { name: size.item.name })}
+                            data-available={size.item.available}
+                            onClick={() => add(size.item)}
+                          >
+                            <span>{size.label}</span>
+                            <span className="counter-order__item-price">
+                              {itemPrice(size.item)}
+                            </span>
+                          </button>
+                        ))}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           ))}
@@ -883,63 +949,74 @@ export function StaffOrderEntryPage({
               </p>
               <p className="counter-order__estimate">
                 {placed !== null && !ordering
-                  ? phase === "Paid" || phase === "Accepted"
-                    ? t("Sent and paid: {totalMinor} with tax and tip.", {
+                  ? placed.payLater
+                    ? t("Sent to the kitchen. {totalMinor} with tax goes on the table's bill.", {
                         totalMinor: cad(placed.totalMinor),
                       })
-                    : t("Sent. Charge {totalMinor} with tax and tip on the card machine.", {
-                        totalMinor: cad(placed.totalMinor),
-                      })
-                  : t(
-                      "About {value} before tax and tip. The final total comes when you send the order.",
-                      { value: cad(estimate.toString()) },
-                    )}
+                    : phase === "Paid" || phase === "Accepted"
+                      ? t("Sent and paid: {totalMinor} with tax and tip.", {
+                          totalMinor: cad(placed.totalMinor),
+                        })
+                      : t("Sent. Charge {totalMinor} with tax and tip on the card machine.", {
+                          totalMinor: cad(placed.totalMinor),
+                        })
+                  : tablePaysLater
+                    ? t(
+                        "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
+                        { value: cad(estimate.toString()) },
+                      )
+                    : t(
+                        "About {value} before tax and tip. The final total comes when you send the order.",
+                        { value: cad(estimate.toString()) },
+                      )}
               </p>
             </div>
           ) : null}
-          <fieldset className="counter-order__tip" disabled={!ordering}>
-            <legend>{t("Tip")}</legend>
-            {(["0", "10", "15", "18"] as const).map((value) => (
-              <label key={value}>
+          {tablePaysLater ? null : (
+            <fieldset className="counter-order__tip" disabled={!ordering}>
+              <legend>{t("Tip")}</legend>
+              {(["0", "10", "15", "18"] as const).map((value) => (
+                <label key={value}>
+                  <input
+                    type="radio"
+                    name="counter-tip"
+                    checked={tip === value}
+                    onChange={() => {
+                      placeOperation.current = null;
+                      setTip(value);
+                    }}
+                  />
+                  {value === "0" ? t("No tip") : `${value}%`}
+                </label>
+              ))}
+              <label>
                 <input
                   type="radio"
                   name="counter-tip"
-                  checked={tip === value}
+                  checked={tip === "Custom"}
                   onChange={() => {
                     placeOperation.current = null;
-                    setTip(value);
+                    setTip("Custom");
                   }}
                 />
-                {value === "0" ? t("No tip") : `${value}%`}
+                {t("Other amount")}
               </label>
-            ))}
-            <label>
-              <input
-                type="radio"
-                name="counter-tip"
-                checked={tip === "Custom"}
-                onChange={() => {
-                  placeOperation.current = null;
-                  setTip("Custom");
-                }}
-              />
-              {t("Other amount")}
-            </label>
-            {tip === "Custom" ? (
-              <label className="counter-order__custom-tip">
-                {t("Tip amount ($)")}
-                <input
-                  inputMode="decimal"
-                  value={customTip}
-                  aria-invalid={tipChoice() === null}
-                  onChange={(event) => {
-                    placeOperation.current = null;
-                    setCustomTip(event.currentTarget.value);
-                  }}
-                />
-              </label>
-            ) : null}
-          </fieldset>
+              {tip === "Custom" ? (
+                <label className="counter-order__custom-tip">
+                  {t("Tip amount ($)")}
+                  <input
+                    inputMode="decimal"
+                    value={customTip}
+                    aria-invalid={tipChoice() === null}
+                    onChange={(event) => {
+                      placeOperation.current = null;
+                      setCustomTip(event.currentTarget.value);
+                    }}
+                  />
+                </label>
+              ) : null}
+            </fieldset>
+          )}
           <fieldset className="counter-order__paper" disabled={!ordering}>
             <legend>{t("Paper order")}</legend>
             <label>
@@ -953,7 +1030,7 @@ export function StaffOrderEntryPage({
               />
               {t("Recorded after an outage (taken on paper)")}
             </label>
-            {paper ? (
+            {paper && !tablePaysLater ? (
               <label>
                 {t("Paid at (store time, from the paper order)")}
                 <input
@@ -968,7 +1045,7 @@ export function StaffOrderEntryPage({
                 />
               </label>
             ) : null}
-            {paper ? (
+            {paper && !tablePaysLater ? (
               <p id="counter-paper-hint" className="field-hint">
                 {t(
                   "Within the last 3 days. The order is marked “Recorded after outage” and its payment counts on the day it was paid.",
@@ -1028,7 +1105,43 @@ export function StaffOrderEntryPage({
           </div>
         ) : null}
 
-        {placed !== null && !ordering ? (
+        {placed !== null && !ordering && placed.payLater ? (
+          <section
+            className="counter-order__charge store-card"
+            aria-labelledby="counter-charge"
+            data-phase={phase}
+          >
+            <h2 id="counter-charge" ref={chargeHeading} tabIndex={-1}>
+              {t("Table {value} round sent to the kitchen", {
+                value: placed.tableLabel ?? tableLabel ?? "",
+              })}
+            </h2>
+            <dl>
+              <div>
+                <dt>{t("Order")}</dt>
+                <dd>{placed.orderNumber}</dd>
+              </div>
+              <div>
+                <dt>{t("Round total incl. tax")}</dt>
+                <dd>
+                  <strong>{cad(placed.orderMinor)}</strong>
+                </dd>
+              </div>
+            </dl>
+            <p role="status">
+              {t(
+                "Nothing to charge now. The round is on the table's bill; the table pays once at the end, tip included.",
+              )}
+            </p>
+            <div className="card-actions">
+              <button type="button" onClick={startOver}>
+                {t("Another order for this table")}
+              </button>
+              <Link to="/operations/dining">{t("Back to Tables")}</Link>
+              <Link to="/operations/orders">{t("Open Orders")}</Link>
+            </div>
+          </section>
+        ) : placed !== null && !ordering ? (
           <section
             className="counter-order__charge store-card"
             aria-labelledby="counter-charge"
@@ -1067,7 +1180,7 @@ export function StaffOrderEntryPage({
               <>
                 {(() => {
                   const notice = paymentWindowNotice({
-                    payBy: placed.payBy,
+                    payBy: placed.payBy ?? "",
                     now,
                     tableMode,
                     timeZone,
@@ -1137,11 +1250,11 @@ export function StaffOrderEntryPage({
                   {tableMode
                     ? t(
                         "Card declined? Try another card. Nothing goes to the kitchen until this is recorded; after {payBy} it can no longer be paid here and must be sent again.",
-                        { payBy: storeTime(placed.payBy, timeZone) },
+                        { payBy: storeTime(placed.payBy ?? "", timeZone) },
                       )
                     : t(
                         "Card declined? Try another card. Not paying? Leave it: the order is released at {payBy}.",
-                        { payBy: storeTime(placed.payBy, timeZone) },
+                        { payBy: storeTime(placed.payBy ?? "", timeZone) },
                       )}
                 </p>
               </>

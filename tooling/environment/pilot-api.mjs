@@ -1,4 +1,5 @@
 import { CustomerStoreClosedError } from "../../apps/api/dist/customer-store-open-gate.js";
+import { CustomerDiningPayLaterError } from "../../apps/api/dist/customer-dining-pay-later-round.js";
 import { createLocalCustomerRuntime } from "../../apps/api/dist/local-customer-runtime.js";
 import { HealthReadinessController } from "../../apps/api/dist/health-readiness.js";
 import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
@@ -25,6 +26,7 @@ export async function createRuntime(
     createInternalTestResources,
     createInternalCustomerEntry,
     createPaymentWebhookReceiver,
+    createInternalPayLaterRound,
     providerAccountReference,
     publicOrigin = INTERNAL_CUSTOMER_ORIGIN,
   },
@@ -61,6 +63,14 @@ export async function createRuntime(
       simulator,
       items.catalogCartItems,
     );
+    // DEC-DINE-IN-PAY-LATER: at a table opened "pay later" a guest sends rounds to the kitchen
+    // (no payment per round); paying a round there is refused so the table pays once.
+    const payLater =
+      createInternalPayLaterRound === undefined
+        ? null
+        : await createInternalPayLaterRound(resources, configuredEntry, (input) =>
+            paymentIntent.submitRound(input),
+          );
     const paymentTerminal = createInternalPaymentTerminal(
       resources,
       checkout,
@@ -102,8 +112,18 @@ export async function createRuntime(
         ...paymentIntent,
         async create(input) {
           if (!(await diningCheckout.takesOrder(input))) throw new CustomerStoreClosedError();
+          if (payLater !== null && (await payLater.tableTiming(input)) === "PayLater")
+            throw new CustomerDiningPayLaterError("PayLater");
           return paymentIntent.create(input);
         },
+        ...(payLater === null
+          ? {}
+          : {
+              async sendToKitchen(input) {
+                if (!(await diningCheckout.takesOrder(input))) throw new CustomerStoreClosedError();
+                return payLater.send(input);
+              },
+            }),
       },
       paymentResult: paymentTerminal.resultOptions,
       ...(paymentProviderWebhook === null ? {} : { paymentProviderWebhook }),

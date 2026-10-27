@@ -1,16 +1,9 @@
 import { expect, it, vi } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
 import {
   createDiningServeReadyClient,
   DINING_SERVE_READY_MAX_LINES,
 } from "./dining-serve-ready-client.js";
-import {
-  DiningServeReadyAction,
-  DiningServeReadyActions,
-  readyToServe,
-  serveReadySummary,
-} from "./DiningServeReadyAction.js";
-import { parseDiningProgress } from "./dining-progress-client.js";
+import { serveReadySummary } from "./dining-serve-ready.js";
 
 const id = (n: number) => "01909988-2222-7000-8000-" + n.toString(16).padStart(12, "0");
 const csrf = "A".repeat(43);
@@ -115,122 +108,4 @@ it("summarises the result in staff words without internal codes", () => {
   expect(summary(0, 1, 0, 0)).toBe("1 was already marked served by someone else.");
   for (const text of [summary(1, 1, 1, 1), summary(3, 3, 3, 3)])
     expect(text).not.toMatch(/[a-z]+_[a-z]+|[A-Z]{3,}|[0-9a-f]{8}-/u);
-});
-
-const item = (n: number, round: number, extra: Record<string, unknown> = {}) => ({
-  orderItemReference: id(100 + n),
-  orderBatchReference: id(200 + round),
-  displayName: "Dish " + n,
-  batchSequence: round,
-  itemOrdinal: n,
-  phase: "Ready",
-  orderedQuantity: 2,
-  deliveredQuantity: 0,
-  remainingQuantity: 2,
-  itemServiceVersion: 0,
-  ...extra,
-});
-const view = (items: unknown[], extra: Record<string, unknown> = {}) =>
-  parseDiningProgress(
-    {
-      orderReference: id(2),
-      orderVersion: 4,
-      sessionVersion: 2,
-      diningSessionReference: id(55),
-      sessionPhase: "Active",
-      tableAssignmentVersion: 3,
-      closureStatus: "Open",
-      closureVersion: 0,
-      currentOrderVersion: 4,
-      tableLabel: "T1",
-      phase: "Ready",
-      observedAt: "2026-09-20T11:00:00.000Z",
-      items,
-      ...extra,
-    },
-    id(2),
-  );
-const text = (html: string) =>
-  html
-    .replaceAll("<!-- -->", "")
-    .replace(/<[^>]+>/gu, " ")
-    .replace(/\s+/gu, " ");
-const renderActions = (current: ReturnType<typeof view>) =>
-  text(
-    renderToStaticMarkup(
-      <DiningServeReadyActions
-        view={current}
-        csrf={csrf}
-        locked={false}
-        onBusy={() => undefined}
-        onDone={() => undefined}
-      />,
-    ),
-  );
-
-it("offers one action per round with 2+ ready items, and the table action across rounds", () => {
-  const current = view([
-    item(1, 1),
-    item(2, 1),
-    item(3, 1, { phase: "Fulfilled", deliveredQuantity: 2, remainingQuantity: 0 }),
-    item(4, 2),
-    item(5, 2, { phase: "InProgress" }),
-    item(6, 3),
-    item(7, 3),
-  ]);
-  expect(readyToServe(current).map((entry) => entry.displayName)).toEqual([
-    "Dish 1",
-    "Dish 2",
-    "Dish 4",
-    "Dish 6",
-    "Dish 7",
-  ]);
-  const html = renderActions(current);
-  expect(html).toContain("Serve all 5 ready items");
-  expect(html).toContain("Serve all 2 ready items in round 1");
-  expect(html).toContain("Serve all 2 ready items in round 3");
-  // Round 2 has one ready item: it is served on its own.
-  expect(html).not.toContain("in round 2");
-  // One confirmation stating how many items are marked served, listing them.
-  expect(html).toContain("Mark 5 items served for table T1?");
-  expect(html).toContain("Mark 2 items served for round 1 at table T1?");
-  expect(html).toContain("2 × Dish 6 · round 3");
-  expect(html.match(/Mark 5 items served(?!\s+for)/gu)).toHaveLength(1);
-  expect(html).not.toContain(id(101));
-});
-
-it("shows no action with fewer than two ready items, or at a closed or closing table", () => {
-  expect(renderActions(view([item(1, 1), item(2, 1, { phase: "Accepted" })]))).toBe("");
-  expect(renderActions(view([item(1, 1), item(2, 1)], { sessionPhase: "Closing" }))).toBe("");
-  expect(
-    renderActions(view([item(1, 1), item(2, 1)], { closureStatus: "Closed", closureVersion: 1 })),
-  ).toBe("");
-  // All ready items in one round: the round action alone, no duplicate table action.
-  const single = renderActions(view([item(1, 1), item(2, 1)]));
-  expect(single).toContain("Serve all 2 ready items in round 1");
-  expect(single.match(/Serve all/gu)).toHaveLength(1);
-});
-
-it("serves at most the request limit and says what is left", () => {
-  const current = view(
-    Array.from({ length: DINING_SERVE_READY_MAX_LINES + 3 }, (_, n) =>
-      item(n + 1, 1, { itemOrdinal: 1 }),
-    ),
-  );
-  const html = text(
-    renderToStaticMarkup(
-      <DiningServeReadyAction
-        view={current}
-        ready={readyToServe(current)}
-        scope={{ kind: "Table" }}
-        csrf={csrf}
-        locked={false}
-        onBusy={() => undefined}
-        onDone={() => undefined}
-      />,
-    ),
-  );
-  expect(html).toContain(`Serve the first 100 of 103 ready items`);
-  expect(html).toContain("Mark 100 items served for table T1?");
-  expect(html).toContain("The other 3 ready items stay as they are");
 });

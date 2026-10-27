@@ -3,7 +3,8 @@ import { cookie, denied, exactHeader, NO_STORE, sameOriginMutation } from "./mer
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 import { DiningServeReadyError } from "./merchant-dining-serve-ready-command.js";
 import { DiningClosingError } from "@rms/dining";
-import type { Router } from "express";
+import type { Response, Router } from "express";
+import { DiningTableCheckoutError } from "./merchant-dining-table-checkout.js";
 
 export function installMerchantDiningRoutes(
   router: Router,
@@ -336,6 +337,115 @@ export function installMerchantDiningRoutes(
       .diningStaffCallAnswer({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch(() => denied(response));
+  });
+
+  // WP-2423 DEC-DINE-IN-PAY-LATER: the Store's dine-in payment timing (Owner, Store Manager).
+  router.post("/dining/payment-timing", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningPaymentTimingRead) {
+      response.status(503).json({ error: "dining_payment_timing_unavailable" });
+      return;
+    }
+    void options
+      .diningPaymentTimingRead({ sessionCookie, csrf })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch(() => denied(response));
+  });
+  router.post("/dining/payment-timing/change", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningPaymentTimingChange) {
+      response.status(503).json({ error: "dining_payment_timing_unavailable" });
+      return;
+    }
+    void options
+      .diningPaymentTimingChange({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch(() => denied(response));
+  });
+
+  // WP-2423 DEC-DINE-IN-PAY-LATER: a pay-later table's bill, and its one payment (card machine or
+  // cash) recorded at checkout. Refusals keep their meaning for the page (409 changed/owed, 422 cash
+  // short); a missing permission reads as denied.
+  const checkoutFailure = (response: Response, error: unknown) => {
+    const code = error instanceof DiningTableCheckoutError ? error.code : null;
+    if (code === null || code === "TABLE_CHECKOUT_PERMISSION_DENIED") {
+      denied(response);
+      return;
+    }
+    const status =
+      code === "TABLE_CHECKOUT_INPUT_INVALID"
+        ? 400
+        : code === "TABLE_CHECKOUT_TENDER_SHORT"
+          ? 422
+          : code === "TABLE_CHECKOUT_UNAVAILABLE"
+            ? 503
+            : 409;
+    response
+      .status(status)
+      .set("Cache-Control", NO_STORE)
+      .json({ error: code.replace(/^TABLE_CHECKOUT_/u, "").toLowerCase() });
+  };
+  router.post("/dining/table-bill", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningTableBill) {
+      response.status(503).json({ error: "dining_table_bill_unavailable" });
+      return;
+    }
+    void options
+      .diningTableBill({ sessionCookie, csrf, query: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => checkoutFailure(response, error));
+  });
+  router.post("/dining/table-settle", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningTableSettle) {
+      response.status(503).json({ error: "dining_table_settle_unavailable" });
+      return;
+    }
+    void options
+      .diningTableSettle({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => checkoutFailure(response, error));
   });
 
   router.post("/dining/tables/availability", sameOriginMutation(options), (request, response) => {

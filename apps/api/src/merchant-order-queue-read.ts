@@ -298,6 +298,8 @@ export function createMerchantOrderQueueRead(options: {
                   {
                     orderBatchReference: item.initialBatchReference,
                     sequence: 1,
+                    // A pickup's one batch is sent with the order.
+                    submittedAt: String(item.submittedAt),
                     acceptanceStatus: initialAcceptance ? "Accepted" : "NotAccepted",
                   },
                 ],
@@ -387,6 +389,8 @@ export function createMerchantOrderQueueRead(options: {
                   batches: execution.batches.map((batch) => ({
                     orderBatchReference: batch.orderBatchReference,
                     sequence: batch.sequence,
+                    // Orders v3 (Owner 2026-10-26): when the round was sent.
+                    submittedAt: batch.submittedAt,
                     // WP-2423 Q6: a batch staff cancelled after acceptance is Cancelled too.
                     acceptanceStatus:
                       batch.cancellation || batch.staffCancellation

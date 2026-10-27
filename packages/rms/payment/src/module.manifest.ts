@@ -52,6 +52,9 @@ const moduleManifestInput =
       tables: [
         "card_machine_payment",
         "card_machine_refund",
+        "dining_table_settlement",
+        "dining_table_settlement_round",
+        "order_unpaid_write_off",
         "store_payment_configuration_version",
         "store_payment_configuration_operation",
         "reconciliation_follow_up_history",

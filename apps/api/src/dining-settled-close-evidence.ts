@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { canonicalizeRfc8785 } from "@bop/audit";
 import { createTaskRecord } from "@bop/task";
-import { parseOrderSettledFinality } from "@rms/payment";
+import { parseOrderSettledFinality, type OrderUnpaidWriteOffRecord } from "@rms/payment";
 import { evaluateOrderClosureEligibility, summarizeOrderItemProgress } from "@rms/ordering";
 import {
   createPostgresDiningExceptionTaskSource,
@@ -26,7 +26,7 @@ export function createDiningSettledCloseEvidence(options: Options) {
     readonly storeReference: string;
     readonly orderReference: string;
     readonly orderVersion: number;
-    readonly classification: "Settled";
+    readonly classification: "Settled" | "AuthorizedWriteOff";
     readonly finalityReference: string;
     readonly decidedAt: string;
   }
@@ -182,6 +182,91 @@ export function createDiningSettledCloseEvidence(options: Options) {
           classification: "Settled",
           finalityReference: String(fact.finalityReference),
           decidedAt: fact.decidedAt,
+        });
+      } catch {
+        return fail();
+      }
+    },
+    /**
+     * WP-2423 DEC-DINE-IN-PAY-LATER: the Order of a table that left without paying, closed on a
+     * manager's recorded write-off (class AuthorizedWriteOff) instead of a settlement. The
+     * write-off must be of exactly what is still owed (priced total less what was paid) at this
+     * Order version and checkpoint, decided now from these same owner facts; everything else the
+     * close requires (served or resolved items, no pending change or refund) still applies.
+     */
+    async loadWriteOff(input: Input, writeOff: OrderUnpaidWriteOffRecord) {
+      try {
+        const current = await inputs.load(input);
+        if (!current) return fail();
+        const execution = current.execution;
+        if (
+          writeOff.tenantReference !== String(options.diningScope.tenantReference) ||
+          writeOff.brandReference !== String(execution.brandReference) ||
+          writeOff.storeReference !== String(execution.storeReference) ||
+          writeOff.orderReference !== String(execution.orderReference) ||
+          writeOff.orderVersion !== execution.orderVersion ||
+          writeOff.orderCheckpoint !== String(execution.revisionCheckpoint) ||
+          writeOff.decidedAt !== execution.observedAt ||
+          writeOff.paymentEvidenceDigest !== current.financial.snapshotDigest ||
+          writeOff.orderEvidenceDigest !==
+            "sha256:" +
+              createHash("sha256")
+                .update(JSON.stringify([execution.revisionDigest, current.priced.snapshotDigest]))
+                .digest("hex") ||
+          current.settlement.classification !== "Unpaid" ||
+          writeOff.pricedOrderTotalMinor !== current.priced.pricedTotalMinor ||
+          writeOff.capturedOrderAllocationMinor !==
+            current.financial.settlement.capturedOrderAllocationMinor ||
+          writeOff.writtenOffMinor !== current.settlement.allocationDifferenceMinor
+        )
+          return fail();
+        return await decide(input, current, {
+          tenantReference: writeOff.tenantReference,
+          brandReference: writeOff.brandReference,
+          storeReference: writeOff.storeReference,
+          orderReference: writeOff.orderReference,
+          orderVersion: writeOff.orderVersion,
+          classification: "AuthorizedWriteOff",
+          finalityReference: writeOff.writeOffReference,
+          decidedAt: writeOff.decidedAt,
+        });
+      } catch {
+        return fail();
+      }
+    },
+    /**
+     * WP-2423 DEC-DINE-IN-PAY-LATER: what a write-off of this unpaid Order would record (the amount
+     * still owed, the Order version and checkpoint, the evidence digests), and what else still
+     * stops it from closing (empty when the write-off alone is missing). Read only.
+     */
+    async writeOffBasis(input: Input) {
+      try {
+        const current = await inputs.load(input);
+        if (!current) return null;
+        const execution = current.execution;
+        const result = await decide(input, current, null);
+        return Object.freeze({
+          orderVersion: execution.orderVersion,
+          orderCheckpoint: String(execution.revisionCheckpoint),
+          observedAt: execution.observedAt,
+          classification: current.settlement.classification,
+          pricedOrderTotalMinor: current.priced.pricedTotalMinor,
+          capturedOrderAllocationMinor: current.financial.settlement.capturedOrderAllocationMinor,
+          owedMinor: current.settlement.allocationDifferenceMinor,
+          orderEvidenceDigest:
+            "sha256:" +
+            createHash("sha256")
+              .update(JSON.stringify([execution.revisionDigest, current.priced.snapshotDigest]))
+              .digest("hex"),
+          paymentEvidenceDigest: current.financial.snapshotDigest,
+          reasons: Object.freeze([
+            ...new Set([
+              ...current.settlement.reasons.filter((reason) => reason !== "ORDER_BALANCE_UNPAID"),
+              ...result.decision.reasons.filter(
+                (reason) => reason !== "FINANCIAL_FINALITY_REQUIRED",
+              ),
+            ]),
+          ]),
         });
       } catch {
         return fail();

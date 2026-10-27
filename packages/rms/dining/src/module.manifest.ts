@@ -62,6 +62,8 @@ const moduleManifestInput =
         "dining_guest_invitation_operation",
         "dining_staff_call",
         "dining_staff_call_closure",
+        "store_dining_payment_timing",
+        "dining_session_payment_timing",
       ],
     },
     ownedJobs: [],

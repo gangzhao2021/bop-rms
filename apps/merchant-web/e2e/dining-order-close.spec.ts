@@ -122,7 +122,7 @@ test("@production order closure retries the same intent then renders read-only h
     });
   });
   await page.goto("/operations/orders");
-  await page.getByRole("button", { name: "View serving progress", exact: true }).click();
+  // Orders v3: the table's rounds and close steps are read with the order (no switch).
   const submit = page.getByRole("button", { name: "Close order", exact: true });
   await expect(submit).toBeDisabled();
   const confirmation = page.getByRole("checkbox", {
@@ -135,9 +135,6 @@ test("@production order closure retries the same intent then renders read-only h
   await expect(retry).toBeEnabled();
   await expect(confirmation).toBeDisabled();
   await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeDisabled();
-  await expect(
-    page.getByRole("button", { name: "Refresh serving progress", exact: true }),
-  ).toBeDisabled();
   await retry.click();
   await expect(
     page.getByText("Order closed. Serving history is read-only.", { exact: true }),
@@ -155,7 +152,8 @@ test("@production order closure retries the same intent then renders read-only h
     expectedClosureVersion: 0,
     reasonCode: "ORDER_COMPLETED",
   });
-  await page.getByRole("button", { name: "Refresh serving progress", exact: true }).click();
+  // The page's own refresh rereads the order and its rounds.
+  await page.getByRole("button", { name: "Refresh orders", exact: true }).click();
   await expect(
     page.getByText("Order closed. Serving history is read-only.", { exact: true }),
   ).toBeVisible();

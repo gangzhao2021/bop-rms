@@ -34,7 +34,7 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
         : await current.resolveCurrent(input);
       if (!state) return null;
       const rows = await input.transaction.query(
-        "SELECT i.order_item_id,i.order_batch_id,i.quantity,s.submission_kind,a.batch_sequence FROM rms_ordering.order_batch b " +
+        "SELECT i.order_item_id,i.order_batch_id,i.quantity,s.submission_kind,a.batch_sequence,b.submitted_at FROM rms_ordering.order_batch b " +
           "JOIN rms_ordering.order_submission_record s ON s.brand_id=b.brand_id AND s.store_id=b.store_id AND s.order_id=b.order_id AND s.submission_id=b.submission_id " +
           "LEFT JOIN rms_ordering.additional_dining_batch_record a ON a.brand_id=b.brand_id AND a.store_id=b.store_id AND a.order_id=b.order_id AND a.order_batch_id=b.order_batch_id AND a.submission_id=b.submission_id " +
           "LEFT JOIN rms_ordering.order_item i ON i.brand_id=b.brand_id AND i.store_id=b.store_id AND i.order_id=b.order_id AND i.order_batch_id=b.order_batch_id " +
@@ -46,6 +46,8 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
       const seen = new Set<string>();
       const batches = new Map<string, string[]>();
       const sequences = new Map<string, number>();
+      // Orders v3 (Owner 2026-10-26): when each round was sent, so staff read it per round.
+      const submittedAts = new Map<string, string>();
       const quantities = new Map<string, number>();
       for (const row of rows.rows) {
         const item = parseOrderingReference(row.order_item_id);
@@ -72,6 +74,14 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
         )
           throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
         sequences.set(batch, sequence);
+        const submittedAt =
+          row.submitted_at instanceof Date ? row.submitted_at.toISOString() : row.submitted_at;
+        if (
+          typeof submittedAt !== "string" ||
+          (submittedAts.has(batch) && submittedAts.get(batch) !== submittedAt)
+        )
+          throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
+        submittedAts.set(batch, submittedAt);
         quantities.set(item, row.quantity);
         seen.add(item);
         const items = batches.get(batch) ?? [];
@@ -207,6 +217,7 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
           Object.freeze({
             orderBatchReference,
             sequence: sequences.get(orderBatchReference) as number,
+            submittedAt: submittedAts.get(orderBatchReference) as string,
             acceptance,
             cancellation,
             staffCancellation,
