@@ -44,6 +44,12 @@
   --bop-radius-control: 0.5rem;
   --bop-radius-surface: 0.75rem;
   --bop-radius-card: 0.75rem;
+  /* Kitchen v3 (Owner 2026-10-26): the one exception to the 28/20/16/14 type scale. A kitchen
+     screen is read from 1-2 m away, so the ticket number and the dishes are larger. */
+  --bop-kitchen-ticket-number: 32px;
+  --bop-kitchen-item: 22px;
+  --bop-kitchen-modifier: 18px;
+  --bop-kitchen-target: 48px;
   --bop-motion-fast: 120ms;
   --bop-motion-standard: 180ms;
   --bop-motion-emphasis: 240ms;

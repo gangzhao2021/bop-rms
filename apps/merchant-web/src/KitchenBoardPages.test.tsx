@@ -628,7 +628,7 @@ describe("WP-2423 kitchen display search and chrome", () => {
     );
     expect(html.startsWith('<div data-frame="workspace">')).toBe(true);
     expect(html).toContain('<main class="bop-shell__main" id="main-content" tabindex="-1">');
-    expect(html).toContain("<h1>Kitchen</h1>");
+    expect(html).toContain('<h1 id="kitchen-board-title" tabindex="-1">Kitchen</h1>');
     expect(html).toContain("Screen kept on");
     // No kitchen display header or its own list of links inside the workspace page.
     expect(html).not.toContain("bop-shell__header");
@@ -643,7 +643,7 @@ describe("WP-2423 kitchen display search and chrome", () => {
       </MemoryRouter>,
     );
     expect(display).toContain("bop-shell__header");
-    expect(display).toContain("<h2>Kitchen</h2>");
+    expect(display).toContain('<h2 id="kitchen-board-title" tabindex="-1">Kitchen</h2>');
   });
   it("2026-10-21 live check: frames a work item by who the board says is using it", () => {
     const frame = (content: ReactNode) => <div data-frame="workspace">{content}</div>;
@@ -944,7 +944,9 @@ describe("IDR-0039 kitchen stale read-only mode", () => {
         />
       </MemoryRouter>,
     );
-    expect(live).toContain("<button>Accept</button>");
+    expect(live).toContain(
+      '<button type="button" class="kitchen-ticket__next">Accept order</button>',
+    );
     expect(live).not.toContain("Read-only until reconnected");
     const html = renderToStaticMarkup(
       <MemoryRouter>
@@ -963,7 +965,9 @@ describe("IDR-0039 kitchen stale read-only mode", () => {
       'Offline — showing the last update from <time dateTime="2026-08-12T15:12:30.000Z">15:12 UTC</time>. Actions are paused until the connection returns.',
     );
     expect(html).toContain("Trying again automatically.");
-    expect(html).toContain('<button disabled="">Accept</button>');
+    expect(html).toContain(
+      '<button type="button" class="kitchen-ticket__next" disabled="">Accept order</button>',
+    );
     expect(html).toContain("Data may be out of date");
     expect(html).not.toContain("Auto-refresh every 10 s");
     expect(html).not.toContain("Board locked — read-only");

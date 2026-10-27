@@ -281,6 +281,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "某个规格的配方没有使用要替换或移除的配料。",
   "About {value} before tax and tip. The final total comes when you send the order.":
     "税前、不含小费约 {value}。发送订单时才会得到最终合计。",
+  "Accept order": "接单",
+  "Accept all": "全部接单",
+  "Start cooking": "开始做",
+  "Start all": "全部开始做",
+  Finished: "做好了",
+  "Mark {displayName} finished": "{displayName}做好了",
   Accept: "接受",
   "Accept ": "接单 ",
   "Accept a Kitchen work item": "接受后厨工作项",
@@ -1367,6 +1373,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Finalize uploaded media": "完成媒体上传",
   Find: "查找",
   "Find a table": "查找桌台",
+  "Find an order · Applied": "查找订单 · 已筛选",
   "Find an order": "查找订单",
   "Finding the sign-in page…": "正在查找登录页面…",
   "Finish closing this dining session. All orders, payments and unresolved exceptions will be checked before releasing its table.":

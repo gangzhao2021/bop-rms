@@ -14,3 +14,5 @@
 @import "./quiet.css";
 /* Orders v2 (2026-10-26) comes last: it replaces the older Orders rules in quiet.css. */
 @import "./orders.css";
+/* Kitchen v3 (2026-10-26) comes after quiet.css for the same reason. */
+@import "./kitchen-v3.css";

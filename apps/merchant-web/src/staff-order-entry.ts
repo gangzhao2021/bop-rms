@@ -114,6 +114,11 @@ export interface CounterMenuRule {
 }
 export interface CounterMenuItem {
   readonly sellableReference: string;
+  /**
+   * The Product version this sellable is a SKU of: the sizes of one Product share it (the catalog's
+   * Product → SKU relation). Null when the menu does not say.
+   */
+  readonly productVersionReference: string | null;
   readonly name: string;
   readonly available: boolean;
   readonly priceMinor: string | null;
@@ -179,6 +184,8 @@ export function parseCounterMenu(value: unknown): CounterMenu {
                 return invalid();
               return Object.freeze({
                 sellableReference: ref(item.sellableReference),
+                productVersionReference:
+                  item.productVersionReference === null ? null : ref(item.productVersionReference),
                 name: text(item.name),
                 available: item.availability === "Available",
                 priceMinor: price.status === "Available" ? displayMinor(price.amount) : null,
@@ -546,4 +553,82 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       throw new CounterOrderClientError(response.status >= 500 ? "OutcomeUnknown" : "Unavailable");
     },
   });
+}
+
+/**
+ * Owner 2026-10-26 (counter): one tile per drink, its sizes as buttons on it. The sizes of a Product
+ * are its SKUs, published as separate sellables that share the Product version and are named by the
+ * server as "<Product> — <Size>" ("Latte — Small (8 oz)"). Sellables are grouped only when both
+ * agree — the same Product version and the same "<Product> — " prefix, every size different — as on
+ * the customer menu; anything else stays its own tile.
+ */
+export interface CounterMenuFamily {
+  readonly key: string;
+  /** "Latte" for a sized Product; the item's own name otherwise. */
+  readonly name: string;
+  /** Each size with its label ("Small (8 oz)"); one entry, labelled with the full name, otherwise. */
+  readonly sizes: readonly { readonly label: string; readonly item: CounterMenuItem }[];
+}
+
+const sizeSeparator = " — ";
+function splitSizeName(name: string): readonly [string, string] | null {
+  const index = name.indexOf(sizeSeparator);
+  if (index < 1) return null;
+  const product = name.slice(0, index).trim();
+  const size = name.slice(index + sizeSeparator.length).trim();
+  return product === "" || size === "" ? null : [product, size];
+}
+
+export function counterMenuFamilies(
+  items: readonly CounterMenuItem[],
+): readonly CounterMenuFamily[] {
+  const byVersion = new Map<string, CounterMenuItem[]>();
+  for (const item of items) {
+    if (item.productVersionReference === null) continue;
+    const group = byVersion.get(item.productVersionReference);
+    if (group) group.push(item);
+    else byVersion.set(item.productVersionReference, [item]);
+  }
+  const families: CounterMenuFamily[] = [];
+  const placed = new Set<string>();
+  for (const item of items) {
+    if (placed.has(item.sellableReference)) continue;
+    const group =
+      item.productVersionReference === null
+        ? undefined
+        : byVersion.get(item.productVersionReference);
+    const parts =
+      group && group.length > 1 ? group.map((entry) => splitSizeName(entry.name)) : null;
+    const product = parts?.[0]?.[0];
+    if (
+      group &&
+      parts &&
+      product !== undefined &&
+      parts.every((part) => part !== null && part[0] === product) &&
+      new Set(parts.map((part) => part?.[1])).size === parts.length
+    ) {
+      group.forEach((entry) => placed.add(entry.sellableReference));
+      families.push(
+        Object.freeze({
+          key: item.sellableReference,
+          name: product,
+          sizes: Object.freeze(
+            group.map((entry, index) =>
+              Object.freeze({ label: parts[index]?.[1] ?? entry.name, item: entry }),
+            ),
+          ),
+        }),
+      );
+      continue;
+    }
+    placed.add(item.sellableReference);
+    families.push(
+      Object.freeze({
+        key: item.sellableReference,
+        name: item.name,
+        sizes: Object.freeze([Object.freeze({ label: item.name, item })]),
+      }),
+    );
+  }
+  return Object.freeze(families);
 }

@@ -20,6 +20,7 @@ import {
 } from "./counter-payment.js";
 import {
   CounterOrderClientError,
+  counterMenuFamilies,
   createCounterOrderClient,
   type CounterMenu,
   type CounterMenuItem,
@@ -391,6 +392,38 @@ export function StaffOrderEntryPage({
     setProblemNeedsTableCode(false);
     setLines(next);
   };
+  const itemPrice = (item: CounterMenuItem) =>
+    item.available
+      ? item.priceMinor === null
+        ? t("Price at checkout")
+        : cad(item.priceMinor)
+      : t("Sold out");
+  const canAdd = (item: CounterMenuItem) => item.available && ordering && item.priceMinor !== null;
+  // At the counter an item with nothing to choose goes straight onto the order (one more of the
+  // same line); one with options, or any item for a table (its line can carry a note for the
+  // kitchen), opens its choices first, as before.
+  const add = (item: CounterMenuItem) => {
+    if (item.rules.length > 0 || tableMode) {
+      setChoosing({ item, choices: defaultChoices(item), quantity: 1, note: "" });
+      return;
+    }
+    const same = lines.find(
+      (line) =>
+        line.item.sellableReference === item.sellableReference &&
+        line.options.length === 0 &&
+        (line.note ?? null) === null,
+    );
+    changeLines(
+      same
+        ? lines.map((line) =>
+            line.key === same.key ? { ...line, quantity: line.quantity + 1 } : line,
+          )
+        : [
+            ...lines,
+            { key: serviceOperationReference(), item, quantity: 1, options: [], note: null },
+          ],
+    );
+  };
   const tipChoice = (): CounterTip | null => {
     if (tip === "0") return { kind: "None" };
     if (tip !== "Custom") return { kind: "Percent", percent: Number(tip) as 10 | 15 | 18 };
@@ -642,29 +675,52 @@ export function StaffOrderEntryPage({
             >
               <h3>{section.name}</h3>
               <ul className="counter-order__items">
-                {section.items.map((item) => (
-                  <li key={item.sellableReference} data-available={item.available}>
-                    <span className="counter-order__item-name">{item.name}</span>
-                    <span className="counter-order__item-price">
-                      {item.available
-                        ? item.priceMinor === null
-                          ? t("Price at checkout")
-                          : cad(item.priceMinor)
-                        : t("Sold out")}
-                    </span>
-                    {/* The Add button covers the whole tile (CSS), so the tile is the tap target. */}
-                    <button
-                      type="button"
-                      disabled={!item.available || !ordering || item.priceMinor === null}
-                      aria-label={t("Add {name}", { name: item.name })}
-                      onClick={() =>
-                        setChoosing({ item, choices: defaultChoices(item), quantity: 1, note: "" })
-                      }
+                {counterMenuFamilies(section.items).map((family) => {
+                  const single = family.sizes.length === 1 ? family.sizes[0]?.item : undefined;
+                  if (single !== undefined)
+                    return (
+                      <li key={family.key} data-available={single.available}>
+                        <span className="counter-order__item-name">{single.name}</span>
+                        <span className="counter-order__item-price">{itemPrice(single)}</span>
+                        {/* The Add button covers the whole tile (CSS), so the tile is the tap target. */}
+                        <button
+                          type="button"
+                          disabled={!canAdd(single)}
+                          aria-label={t("Add {name}", { name: single.name })}
+                          onClick={() => add(single)}
+                        >
+                          {t("Add")}
+                        </button>
+                      </li>
+                    );
+                  // Owner 2026-10-26: one tile per drink; a tap on a size adds that size.
+                  return (
+                    <li
+                      key={family.key}
+                      className="counter-order__family"
+                      data-available={family.sizes.some((size) => size.item.available)}
                     >
-                      {t("Add")}
-                    </button>
-                  </li>
-                ))}
+                      <span className="counter-order__item-name">{family.name}</span>
+                      <span className="counter-order__sizes" role="group" aria-label={family.name}>
+                        {family.sizes.map((size) => (
+                          <button
+                            key={size.item.sellableReference}
+                            type="button"
+                            disabled={!canAdd(size.item)}
+                            aria-label={t("Add {name}", { name: size.item.name })}
+                            data-available={size.item.available}
+                            onClick={() => add(size.item)}
+                          >
+                            <span>{size.label}</span>
+                            <span className="counter-order__item-price">
+                              {itemPrice(size.item)}
+                            </span>
+                          </button>
+                        ))}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           ))}

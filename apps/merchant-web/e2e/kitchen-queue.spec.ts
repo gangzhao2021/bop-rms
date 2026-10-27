@@ -227,9 +227,10 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page.locator("body")).not.toContainText("device lock");
   // WP-2423: no internal codes, identifiers or technical words anywhere a staff member reads.
   await expectNoInternalText(page);
-  await expect(page.getByRole("button", { name: "Accept", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Start", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Complete quantity", exact: true })).toBeDisabled();
+  // Kitchen v3: each ticket's one main step, disabled for a view-only sign-in.
+  await expect(page.getByRole("button", { name: "Accept order", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Start cooking", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Finished", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Mark ready", exact: true })).toBeDisabled();
   // WP-2423: filters the source cannot answer are not offered (no "Unavailable" stubs).
   for (const label of ["Station", "Allergen", "Exception"])
@@ -242,8 +243,9 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     "page",
   );
   await expect(sidebarLinks.getByRole("link", { name: "Orders" })).toHaveCount(0);
-  await expect(page.getByText("Quantity", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("0 / 2", { exact: true })).toBeVisible();
+  // Kitchen v3: "2×" leads each dish; the count is written out only once part of it is done.
+  await expect(page.getByText("Quantity", { exact: true }).first()).toBeAttached();
+  await expect(page.getByText("0 / 2", { exact: true })).toBeAttached();
   // WP-2423 Q3: menu allergens on every card; no placeholder for cues that have no source.
   const allergenLine = page.locator('.kitchen-work-item__allergens[data-kind="declared"]');
   await expect(allergenLine).toHaveCount(3);
@@ -281,7 +283,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     await expect(page.locator("body")).not.toContainText(stationReference);
   }
   await expect(page.getByRole("heading", { name: "View only on this screen" })).toBeVisible();
-  const accept = page.getByRole("button", { name: "Accept", exact: true });
+  const accept = page.getByRole("button", { name: "Accept order", exact: true });
   const refresh = page.getByRole("button", { name: "Refresh", exact: true });
   await expect(accept).toBeDisabled();
   expect(await accept.evaluate((button) => getComputedStyle(button).backgroundColor)).not.toBe(
@@ -310,10 +312,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
       mobileQueueCard.locator(".kitchen-work-item__detail-link"),
       "Queue item detail",
     );
-    await expectTouchTarget(
-      mobileQueueCard.locator(".kitchen-work-item__actions button").first(),
-      "Queue action",
-    );
+    await expectTouchTarget(page.locator(".kitchen-ticket__next").first(), "Queue action");
     const laneItems = page.locator(".kitchen-station-lane__items").first();
     const mobileColumns = await laneItems.evaluate(
       (element) =>
@@ -850,12 +849,11 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
   await expect(page.locator(".kitchen-work-item")).toHaveCount(5);
   const card = (name: string) => page.locator(".kitchen-work-item").filter({ hasText: name });
   const expectations = [
-    // Owner 2026-10-25 "fewer lines": only waiting too long draws an edge, in its tone.
-    ["Synthetic queued", "Queued", "1 min", "ok", "rgba(0, 0, 0, 0)"],
-    ["Synthetic in progress", "In progress", "9 min", "warning", "rgb(138, 90, 0)"],
-    ["Synthetic held", "Held", "20 min", "late", "rgb(214, 110, 106)"],
-    ["Synthetic completed", "Completed", "30 min", "late", "rgba(0, 0, 0, 0)"],
-    ["Synthetic cancelled", "Cancelled", "Done", "ok", "rgba(0, 0, 0, 0)"],
+    ["Synthetic queued", "Queued", "1 min", "ok"],
+    ["Synthetic in progress", "In progress", "9 min", "warning"],
+    ["Synthetic held", "Held", "20 min", "late"],
+    ["Synthetic completed", "Completed", "30 min", "late"],
+    ["Synthetic cancelled", "Cancelled", "Done", "ok"],
   ] as const;
   for (const [width, height] of [
     [1440, 900],
@@ -863,14 +861,17 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
     [320, 844],
   ] as const) {
     await page.setViewportSize({ width, height });
-    for (const [name, state, waited, tier, edge] of expectations) {
+    for (const [name, state, waited, tier] of expectations) {
       const current = card(name);
       await expect(current.locator(".kitchen-work-item__state strong")).toHaveText(state);
       await expect(current.locator(".kitchen-work-item__state span")).toHaveText(waited);
       await expect(current).toHaveAttribute("data-age", tier);
-      // Finished work drops out of the waiting-time tiers; open work carries them on its edge.
-      await expect(current).toHaveCSS("border-left-color", edge);
     }
+    // Kitchen v3: a dish draws no edge; a late ticket (its longest wait) has a red top edge.
+    await expect(card("Synthetic held")).toHaveCSS("border-left-width", "0px");
+    const late = page.locator('.kitchen-ticket[data-age="late"]').first();
+    await expect(late).toHaveCSS("border-top-color", "rgb(191, 85, 82)");
+    await expect(late).toHaveCSS("border-top-width", "4px");
     // The active state is the one coloured tag (no box, Owner 2026-10-25); every tag carries its
     // label.
     const active = card("Synthetic in progress").locator(".kitchen-work-item__state strong");
@@ -1011,9 +1012,10 @@ test("@production Kitchen commands preserve intent and wait for projection versi
     });
   });
   await page.goto("/operations/kitchen");
-  const accept = page.getByRole("button", { name: "Accept", exact: true }),
-    start = page.getByRole("button", { name: "Start", exact: true }),
-    complete = page.getByRole("button", { name: "Complete quantity", exact: true }),
+  // Kitchen v3: the ticket's one main step at its foot.
+  const accept = page.getByRole("button", { name: "Accept order", exact: true }),
+    start = page.getByRole("button", { name: "Start cooking", exact: true }),
+    complete = page.getByRole("button", { name: "Finished", exact: true }),
     refresh = page.getByRole("button", { name: "Refresh", exact: true });
   await expect(accept).toBeEnabled();
   // WP-2423: the kitchen display sign-in hands over; it is not asked to start the display again.
@@ -1287,7 +1289,11 @@ test("@production a kitchen display shows the kitchen only and keeps focus on th
   });
   await page.goto("/operations/kitchen");
   const card = (name: string) => page.locator(".kitchen-work-item").filter({ hasText: name });
-  await expect(card("Synthetic rice").getByRole("button", { name: "Accept" })).toBeEnabled();
+  // Kitchen v3: each ticket's one main step sits at its foot.
+  const ticketOf = (name: string) => page.locator(".kitchen-ticket").filter({ has: card(name) });
+  const step = (name: string, label: string) =>
+    ticketOf(name).getByRole("button", { name: label, exact: true });
+  await expect(step("Synthetic rice", "Accept order")).toBeEnabled();
 
   // The kitchen only: the board and marking an item sold out (Q17), no back-office navigation.
   const kitchenNav = page.getByRole("navigation", { name: "Primary" });
@@ -1322,7 +1328,8 @@ test("@production a kitchen display shows the kitchen only and keeps focus on th
       kitchenNav.getByRole("link", { name: "Mark an item sold out" }),
       "Kitchen sold-out link",
     );
-    await expect(handover).toHaveCSS("border-top-style", "solid");
+    // Kitchen v3: header controls are accent words, 48px tall.
+    await expect(handover).toHaveCSS("color", "rgb(31, 99, 224)");
     await expectNoHorizontalOverflow(page);
     await page.screenshot({
       path: `test-results/kitchen-display-board-${width}.png`,
@@ -1340,19 +1347,17 @@ test("@production a kitchen display shows the kitchen only and keeps focus on th
     );
   };
   // Accepting keeps the cook on the same ticket, now on its next step.
-  await card("Synthetic rice").getByRole("button", { name: "Accept" }).click();
-  await expect(card("Synthetic rice").getByRole("button", { name: "Start" })).toBeFocused();
+  await step("Synthetic rice", "Accept order").click();
+  await expect(step("Synthetic rice", "Start cooking")).toBeFocused();
   await skipHidden();
   // By keyboard too.
   await page.keyboard.press("Enter");
-  await expect(
-    card("Synthetic rice").getByRole("button", { name: "Complete quantity" }),
-  ).toBeFocused();
+  await expect(step("Synthetic rice", "Finished")).toBeFocused();
   await skipHidden();
   // A ticket that leaves the board hands focus to the next ticket's step.
-  await card("Synthetic soup").getByRole("button", { name: "Mark ready" }).click();
+  await step("Synthetic soup", "Mark ready").click();
   await expect(card("Synthetic soup")).toHaveCount(0);
-  await expect(card("Synthetic bread").getByRole("button", { name: "Start" })).toBeFocused();
+  await expect(step("Synthetic bread", "Start cooking")).toBeFocused();
   await skipHidden();
   // The skip link still appears for a keyboard user who reaches it.
   await page.reload();
@@ -1537,12 +1542,13 @@ test("@production Kitchen keeps the last tickets read-only offline and recovers 
   page.on("request", (request) => {
     if (new URL(request.url()).pathname === "/merchant/kitchen/work") commands++;
   });
-  const accept = page.getByRole("button", { name: "Accept", exact: true });
+  const accept = page.getByRole("button", { name: "Accept order", exact: true });
   const notice = page.getByRole("status").filter({ hasText: "Read-only until reconnected" });
   await page.goto("/operations/kitchen");
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
   await expect(accept).toBeEnabled();
-  await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeVisible();
+  // Kitchen v3: the display's one-line bar leaves the refresh rhythm out; it is still stated.
+  await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeAttached();
 
   // The store system stops answering while the device stays online: the next read fails, the
   // tickets stay read-only, and it keeps retrying (first after 5 s) until a read succeeds.
@@ -1585,7 +1591,7 @@ test("@production Kitchen keeps the last tickets read-only offline and recovers 
     await context.setOffline(false);
     await expect(notice).toHaveCount(0, { timeout: 5_000 });
     await expect(accept).toBeEnabled();
-    await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeVisible();
+    await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeAttached();
   }
   expect(commands).toBe(0);
 });

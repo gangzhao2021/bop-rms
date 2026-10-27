@@ -168,6 +168,14 @@ async function expectLayout(page: Page, name: string) {
   ).toEqual([]);
 }
 
+/** Kitchen v3: the kitchen display's order search opens from its bar ("Find an order"). */
+async function findOrder(page: Page, text: string) {
+  await page.getByRole("button", { name: /^Find an order/u }).click();
+  const sheet = page.getByRole("dialog", { name: "Filter Kitchen work" });
+  await sheet.getByRole("searchbox", { name: "Order number or table" }).fill(text);
+  await sheet.getByRole("button", { name: "Find", exact: true }).click();
+}
+
 test("@production DEC-KITCHEN-STALE-TICKETS: an earlier day's ticket is kept apart, asks before a kitchen step and a manager closes it with a reason", async ({
   page,
 }) => {
@@ -259,13 +267,10 @@ test("@production DEC-KITCHEN-STALE-TICKETS: kitchen staff see earlier days apar
   await expect(page.getByText("Ask a manager to check and close them.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Close ticket" })).toHaveCount(0);
   // WP-2423: one order search covers the earlier days too, and says how many it found there.
-  const search = page.locator(".kitchen-reference-search--desktop");
   const summary = page.locator("details.kitchen-earlier-days summary");
-  await search.getByRole("searchbox", { name: "Order number or table" }).fill("2");
-  await search.getByRole("button", { name: "Find" }).click();
+  await findOrder(page, "2");
   await expect(summary).toContainText("1 ticket from an earlier day has number or table “2”");
-  await search.getByRole("searchbox", { name: "Order number or table" }).fill("9");
-  await search.getByRole("button", { name: "Find" }).click();
+  await findOrder(page, "9");
   await expect(page.locator("details.kitchen-earlier-days")).toHaveCount(0);
   await expect(page.getByText("Nothing on the board for order or table “9”.")).toBeVisible();
 });
@@ -299,10 +304,8 @@ test("@production v15: the kitchen search answers for today's order only, and sa
     awaitingAcceptance: [label("13"), label("12")],
   });
   await page.goto("/operations/kitchen");
-  const search = page.locator(".kitchen-reference-search--desktop");
   for (const number of ["13", "12"]) {
-    await search.getByRole("searchbox", { name: "Order number or table" }).fill(number);
-    await search.getByRole("button", { name: "Find" }).click();
+    await findOrder(page, number);
     await expect(
       page.getByText(`Order ${number} is not accepted yet — accept it on Orders.`),
     ).toBeVisible();
@@ -310,7 +313,6 @@ test("@production v15: the kitchen search answers for today's order only, and sa
     await expect(page.getByText(/has nothing left to make/u)).toHaveCount(0);
   }
   // Today's own order is still found on the board.
-  await search.getByRole("searchbox", { name: "Order number or table" }).fill("2");
-  await search.getByRole("button", { name: "Find" }).click();
+  await findOrder(page, "2");
   await expect(page.getByText(/is not accepted yet/u)).toHaveCount(0);
 });
