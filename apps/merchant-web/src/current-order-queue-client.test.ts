@@ -3,6 +3,7 @@ import {
   cancelledItemsRefund,
   createCurrentOrderQueueClient,
   CurrentOrderQueueError,
+  orderQueueMaximumResponseBytes,
   isAwaitingAcceptance,
   ordersAwaitingAcceptance,
   parseCurrentOrderDetail,
@@ -148,6 +149,41 @@ it("uses same-origin no-store GET and only cursor in URL", async () => {
       cache: "no-store",
     }),
   );
+});
+it("shows a full page of Orders larger than 64 KiB", async () => {
+  const name = "Large item name ".repeat(12).trim();
+  const summary = {
+    items: [1, 2, 3].map((n) => ({ name: name + " " + n, option: name, quantity: 1 })),
+    lineCount: 3,
+    pickupName: null,
+    tableLabel: null,
+  };
+  const body = JSON.stringify({
+    items: Array.from({ length: 50 }, (_, n) => {
+      const base = row(100 - n);
+      const batch = id(1000 + n);
+      return {
+        ...base,
+        orderNumber: String(n + 1),
+        initialBatchReference: batch,
+        batches: base.batches.map((round) => ({ ...round, orderBatchReference: batch })),
+        summary,
+      };
+    }),
+    nextAfterOrderReference: null,
+  });
+  expect(body.length).toBeGreaterThan(65536);
+  expect(body.length).toBeLessThan(orderQueueMaximumResponseBytes);
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(body, {
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    }),
+  );
+  const view = await createCurrentOrderQueueClient(fetcher).load(
+    null,
+    new AbortController().signal,
+  );
+  expect(view.items).toHaveLength(50);
 });
 it("discards response after cancellation", async () => {
   const context = new AbortController();
