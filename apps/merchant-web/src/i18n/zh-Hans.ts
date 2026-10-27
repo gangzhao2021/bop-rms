@@ -5610,4 +5610,5 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Picked up / served": "已取餐/上桌",
   "Today's earlier orders are on the next page.": "今天更早的订单在下一页。",
   "Hand over to guest": "交给顾客",
+  Charge: "收款",
 });

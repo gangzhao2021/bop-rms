@@ -1297,3 +1297,144 @@
 .orders-page .order-payment-links p {
   margin: 0;
 }
+
+/* Live check 2026-10-26: the next-step column fits its longest label in English and Chinese
+   ("Hand over to guest"), with a fixed gap after the amount, so nothing overlaps. */
+.orders-page .order-row {
+  grid-template-columns: minmax(0, 1fr) 10.5rem;
+  column-gap: var(--bop-space-4);
+}
+.orders-page .order-row__summary {
+  grid-template-columns: 5.5rem minmax(0, 1fr) 13rem 6.5rem;
+}
+.orders-page .order-workbench-amount,
+.orders-page .order-row__paid {
+  white-space: nowrap;
+}
+@container order-list (min-width: 513px) and (max-width: 800px) {
+  .orders-page .order-row {
+    grid-template-columns: minmax(0, 1fr) 9.5rem;
+  }
+  .orders-page .order-row__summary {
+    grid-template-columns: 5rem minmax(0, 1fr) 7.5rem 4.5rem;
+  }
+  .orders-page .order-row__paid {
+    display: none;
+  }
+}
+
+/* Live check 2026-10-26, phones: every tab label is whole (the row wraps, no hidden scroll); the
+   updated time, Refresh and Sound sit on the title's line; the amount moves up beside the status
+   so the items can wrap to two lines. */
+@media (max-width: 48rem) {
+  .orders-page .order-status-filters {
+    flex-wrap: wrap;
+    overflow: visible;
+    row-gap: 0;
+  }
+  .orders-page .workspace-page__header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title tools"
+      "meta meta";
+    align-items: center;
+    gap: 2px var(--bop-space-3);
+  }
+  .orders-page .workspace-page__title {
+    display: contents;
+  }
+  .orders-page .workspace-page__title h1 {
+    grid-area: title;
+  }
+  .orders-page .workspace-page__meta {
+    grid-area: meta;
+    margin: 0;
+  }
+  .orders-page .workspace-page__toolbar {
+    grid-area: tools;
+    flex-wrap: nowrap;
+    gap: 0 var(--bop-space-3);
+  }
+  .orders-page .workspace-page__actions {
+    flex-wrap: nowrap;
+    gap: 0 var(--bop-space-2);
+  }
+}
+@container order-list (max-width: 512px) {
+  .orders-page .order-row__summary {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "num status amount"
+      "what what what";
+  }
+  .orders-page .order-workbench-type {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+}
+
+/* Live check 2026-10-26: the opened order reads as a few groups, 24px apart — who and what,
+   Payment with its links, Record with the full page — then the next step. */
+.orders-page .order-workbench-detail > * {
+  order: 4;
+}
+.orders-page .order-workbench-detail > .order-panel__head {
+  order: 0;
+}
+.orders-page .order-workbench-detail > .order-panel__status {
+  order: 1;
+}
+.orders-page .order-workbench-detail > :is(.order-panel__hint, .order-counter-note) {
+  order: 2;
+}
+.orders-page .order-workbench-detail > .order-round {
+  order: 3;
+}
+.orders-page .order-workbench-detail > .order-panel__section[aria-label="Payment"],
+.orders-page .order-workbench-detail > .order-panel__section:has(.order-panel__payment) {
+  order: 6;
+}
+.orders-page .order-workbench-detail > :is(.order-payment-links, .order-refund-howto) {
+  order: 7;
+  margin-top: calc(-1 * var(--bop-space-4));
+}
+.orders-page .order-workbench-detail > .order-panel__section:has(.order-panel__facts) {
+  order: 8;
+}
+.orders-page .order-workbench-detail > .order-panel__page-link {
+  order: 9;
+  margin-top: calc(-1 * var(--bop-space-4));
+}
+.orders-page .order-workbench-detail > .order-panel__next {
+  order: 10;
+}
+.orders-page .order-payment-links {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+@container order-list (max-width: 512px) {
+  .orders-page .order-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .orders-page .order-row__summary {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .orders-page .order-row__status {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .orders-page .order-row__status .order-workbench-phase {
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+}
+@media (max-width: 48rem) {
+  .orders-page .orders-page__updated {
+    display: none;
+  }
+}
