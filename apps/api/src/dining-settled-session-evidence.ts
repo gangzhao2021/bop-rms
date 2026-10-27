@@ -60,8 +60,12 @@ function createSessionEvidence(options: Options, allowUnresolved: boolean) {
               return fail();
             return { batchReference: batch.orderBatchReference, executionState: state };
           });
+          // v15 2026-10-27 (DEMO-02): an Order already closed on a manager's unpaid-departure
+          // write-off is Unpaid by its balances but resolved — never "unresolved money" (which
+          // requires an open Order and refused here, so the table could never close).
           if (
             allowUnresolved &&
+            fact?.classification !== "AuthorizedWriteOff" &&
             (position.settlement.classification === "Unpaid" ||
               position.settlement.classification === "Indeterminate")
           ) {

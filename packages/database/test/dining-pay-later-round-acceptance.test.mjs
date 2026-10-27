@@ -490,6 +490,10 @@ async function journey(ending) {
             sessionReference,
           ]).then(([row]) =>
             createMerchantDiningClosingCommand({
+              // As the pilot composes it: with the Store's exception Task policy, so closing uses
+              // the general evidence (unresolved money needs a manager Task). Its content is read
+              // only when a Task must be opened, which none of these tables needs (test-only).
+              exceptionTaskPolicy: { synthetic: "test-only exception task policy" },
               persistence: persistenceOf(who),
               authentication: who.authentication,
               providerAccountReference: provider,
