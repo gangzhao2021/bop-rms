@@ -5,7 +5,8 @@
  * only — the rounding to 5 cents go on one line, the last round's, so the lines add up to what was
  * taken. The rounding is its own amount: prices, tax and sales are unchanged.
  */
-export type DiningTableSettlementMethod = "CardMachine" | "Cash";
+/** S4: "Online" — the guest paid the whole table on their phone (one Provider transaction). */
+export type DiningTableSettlementMethod = "CardMachine" | "Cash" | "Online";
 
 export class DiningTableSettlementError extends Error {
   constructor(
@@ -85,7 +86,8 @@ export function planDiningTableSettlement(input: {
   readonly tipMinor: bigint;
   readonly tenderedMinor: bigint | null;
 }): DiningTableSettlementPlan {
-  if (input.method !== "CardMachine" && input.method !== "Cash") return fail();
+  if (input.method !== "CardMachine" && input.method !== "Cash" && input.method !== "Online")
+    return fail();
   if (!Array.isArray(input.rounds) || input.rounds.length > 200) return fail();
   if (input.rounds.length === 0) return fail("DINING_TABLE_SETTLEMENT_NOTHING_OWED");
   const seen = new Set<string>();

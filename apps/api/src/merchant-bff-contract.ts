@@ -17,6 +17,7 @@ import type {
   createMerchantDiningTableBillRead,
   createMerchantDiningTableSettle,
 } from "./merchant-dining-table-checkout.js";
+import type { createMerchantDiningTableOnlinePaymentStop } from "./merchant-dining-table-online-payment.js";
 import type {
   AuthenticationSession,
   BrowserCookieMutation,
@@ -572,6 +573,10 @@ export interface MerchantBffRouterOptions {
   /** WP-2423 DEC-DINE-IN-PAY-LATER: a pay-later table's bill and its one payment. */
   readonly diningTableBill?: ReturnType<typeof createMerchantDiningTableBillRead>;
   readonly diningTableSettle?: ReturnType<typeof createMerchantDiningTableSettle>;
+  /** S4: staff stop a phone payment a guest gave up on (the Provider is asked first). */
+  readonly diningTableOnlinePaymentStop?: ReturnType<
+    typeof createMerchantDiningTableOnlinePaymentStop
+  >;
   readonly orderUnpaidDeparture?: ReturnType<typeof createMerchantDiningUnpaidDeparture>;
   readonly tablePayment?: ReturnType<typeof createMerchantDiningTablePaymentRead>;
   readonly tableCashRefund?: ReturnType<typeof createMerchantDiningTableCashRefund>;

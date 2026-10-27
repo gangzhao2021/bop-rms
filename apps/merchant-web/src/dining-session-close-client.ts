@@ -14,7 +14,12 @@ export interface DiningSessionCloseCommand {
 export class DiningSessionCloseClientError extends Error {
   constructor(
     readonly code:
-      "PermissionDenied" | "Conflict" | "AlreadyPaid" | "Unavailable" | "OutcomeUnknown",
+      | "PermissionDenied"
+      | "Conflict"
+      | "AlreadyPaid"
+      | "GuestPaying"
+      | "Unavailable"
+      | "OutcomeUnknown",
   ) {
     super(t("Dining session closure could not be confirmed"));
     this.name = "DiningSessionCloseClientError";
@@ -103,13 +108,17 @@ export function createDiningSessionCloseClient(
           if (controller.signal.aborted) throw new DiningSessionCloseClientError("OutcomeUnknown");
           if (response.status === 401 || response.status === 403)
             throw new DiningSessionCloseClientError("PermissionDenied");
-          if (response.status === 409)
+          if (response.status === 409) {
+            const error = ((await response.json().catch(() => null)) as { error?: unknown } | null)
+              ?.error;
             throw new DiningSessionCloseClientError(
-              ((await response.json().catch(() => null)) as { error?: unknown } | null)?.error ===
-                "table_already_paid"
+              error === "table_already_paid"
                 ? "AlreadyPaid"
-                : "Conflict",
+                : error === "table_guest_paying"
+                  ? "GuestPaying"
+                  : "Conflict",
             );
+          }
           if (
             !response.ok ||
             response.headers.get("cache-control") !== "no-store" ||

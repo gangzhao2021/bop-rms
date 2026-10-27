@@ -10,6 +10,7 @@ import { createInternalDiningCart } from "./pilot-dining-cart.mjs";
 import { createInternalPickupReadiness } from "./pilot-pickup-readiness.mjs";
 import { createInternalPickupProof } from "./pilot-pickup-proof.mjs";
 import { createInternalPaymentTerminal } from "./pilot-payment-terminal.mjs";
+import { registerInternalDiningTablePayment } from "./pilot-dining-table-payment.mjs";
 import { createInternalChannelPayment } from "./pilot-channel-payment.mjs";
 import { createPilotPaymentProvider, isStripeProvider } from "./pilot-stripe-provider.mjs";
 import { loadPilotPaymentConfig } from "./pilot-payment-config.mjs";
@@ -219,6 +220,9 @@ export function composeCustomerDependencies(directory, installation, config, hos
     },
     createInternalPaymentTerminal: (r, c, i, s) =>
       createInternalPaymentTerminal(r, c, i, s, account),
+    // DEC-DINE-IN-PAY-LATER S4: the guest pays the whole table on their phone.
+    registerInternalDiningTablePayment: (app, options) =>
+      registerInternalDiningTablePayment(app, { ...options, ...account }),
     createInternalChannelPayment: (r, c, d, o, orders, simulator, items) =>
       createInternalChannelPayment(r, c, d, o, orders, simulator, items, {
         createPaymentIntent: (resources, checkout, order, provider, type = "Pickup") =>

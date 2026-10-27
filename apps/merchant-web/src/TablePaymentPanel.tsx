@@ -10,7 +10,7 @@ const minor = /^-?(?:0|[1-9][0-9]{0,18})$/u;
 
 export type CashRefundReason = "FOOD_ISSUE" | "CUSTOMER_REQUEST" | "OVERCHARGED" | "STORE_ERROR";
 export interface TablePayment {
-  readonly method: "CardMachine" | "Cash";
+  readonly method: "CardMachine" | "Cash" | "Online";
   readonly roundsMinor: string;
   readonly tipMinor: string;
   readonly roundingMinor: string;
@@ -47,7 +47,7 @@ export function parseTablePayment(value: unknown): TablePayment | null {
   const p = raw.payment as Record<string, unknown>;
   const amount = (v: unknown) => (typeof v === "string" && minor.test(v) ? v : fail());
   if (
-    (p.method !== "Cash" && p.method !== "CardMachine") ||
+    (p.method !== "Cash" && p.method !== "CardMachine" && p.method !== "Online") ||
     typeof p.takenAt !== "string" ||
     !Array.isArray(p.cashRefunds)
   )
@@ -188,7 +188,13 @@ export function TablePaymentPanel({
       <dl className="table-checkout__totals">
         <div>
           <dt>{t("Paid by")}</dt>
-          <dd>{payment.method === "Cash" ? t("Cash") : t("Card machine")}</dd>
+          <dd>
+            {payment.method === "Cash"
+              ? t("Cash")
+              : payment.method === "Online"
+                ? t("Guest's phone")
+                : t("Card machine")}
+          </dd>
         </div>
         <div>
           <dt>{t("Rounds")}</dt>

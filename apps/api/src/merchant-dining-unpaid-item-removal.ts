@@ -163,12 +163,20 @@ export function createMerchantDiningUnpaidItemRemoval(options: {
               return result(prior, "AlreadyRemoved");
             }
             // Once the table paid, its dishes are refunded instead (never taken off a paid bill).
-            const paid = await createPostgresDiningTableSettlementStore({
+            const payments = createPostgresDiningTableSettlementStore({
               scope: selected,
               authorize: async (_t, value) =>
                 value.orderReference === intent.orderReference && (await guard()) === true,
-            }).listByOrders(tx, [intent.orderReference]);
+            });
+            const paid = await payments.listByOrders(tx, [intent.orderReference]);
             if (paid.length > 0) return fail("UNPAID_ITEM_REMOVAL_ALREADY_PAID");
+            // S4: while a guest pays the whole table on their phone, the bill can't change.
+            if (
+              (await payments.listOnlinePaymentsByOrders(tx, [intent.orderReference])).some(
+                (attempt) => attempt.outcome === null,
+              )
+            )
+              return fail("UNPAID_ITEM_REMOVAL_ALREADY_PAID");
             const prepared = await ordering.prepare(tx, intent);
             if (prepared.status === "NotEligible")
               return fail(

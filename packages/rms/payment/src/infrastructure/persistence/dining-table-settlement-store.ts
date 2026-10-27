@@ -60,6 +60,8 @@ export interface DiningTableSettlementRecord {
   readonly recordedAt: string;
   readonly actorReference: string;
   readonly auditReference: string;
+  /** S4: the guest's online payment this settlement records (method Online only). */
+  readonly onlinePaymentReference: string | null;
   /** One line per round the table owed; the tip and rounding are on the last line. */
   readonly lines: readonly {
     readonly orderBatchReference: string;
@@ -122,6 +124,84 @@ function cashRefundFrom(row: Record<string, unknown>): DiningTableCashRefundReco
   });
 }
 
+/**
+ * S4 (DEC-DINE-IN-PAY-LATER decisions 3-5): a guest's attempt to pay the whole table on their
+ * phone — one Provider transaction — and, once the Provider reports it, its outcome.
+ */
+export interface DiningTableOnlinePaymentRecord {
+  readonly onlinePaymentReference: string;
+  readonly operationReference: string;
+  readonly intentDigest: string;
+  readonly diningSessionReference: string;
+  readonly orderReference: string;
+  readonly guestSessionReference: string;
+  readonly roundsMinor: bigint;
+  readonly tipMinor: bigint;
+  readonly totalMinor: bigint;
+  readonly providerAccountReference: string;
+  readonly environment: "Test" | "Live";
+  readonly providerIntentReference: string;
+  readonly createdAt: string;
+  readonly outcome: null | {
+    readonly status: "Captured" | "Failed" | "Cancelled";
+    readonly capturedMinor: bigint | null;
+    readonly providerTransactionReference: string | null;
+    readonly occurredAt: string;
+    readonly recordedAt: string;
+  };
+}
+const onlinePaymentSelect = `SELECT p.online_payment_id::text AS payment,p.tenant_id::text AS tenant,
+ p.operation_id::text AS operation,p.intent_digest,p.dining_session_id::text AS session,p.order_id::text AS "order",
+ p.guest_session_id::text AS guest,p.rounds_minor::text AS rounds,p.tip_minor::text AS tip,
+ p.total_minor::text AS total,p.provider_account_id::text AS account,p.payment_environment AS environment,
+ p.provider_intent_reference AS intent,${instant("p.created_at")} AS created_at,o.status,
+ o.captured_minor::text AS captured,o.provider_transaction_reference AS transaction,
+ ${instant("o.occurred_at")} AS occurred_at,${instant("o.recorded_at")} AS outcome_recorded_at
+ FROM rms_payment.dining_table_online_payment p LEFT JOIN rms_payment.dining_table_online_payment_outcome o
+ ON o.online_payment_id=p.online_payment_id AND o.brand_id=p.brand_id AND o.store_id=p.store_id
+ WHERE p.brand_id=$1 AND p.store_id=$2`;
+function onlinePaymentFrom(row: Record<string, unknown>): DiningTableOnlinePaymentRecord {
+  const environment =
+    row.environment === "Test" || row.environment === "Live" ? row.environment : fail();
+  const status =
+    row.status === null
+      ? null
+      : row.status === "Captured" || row.status === "Failed" || row.status === "Cancelled"
+        ? row.status
+        : fail();
+  return Object.freeze({
+    onlinePaymentReference: ref(row.payment),
+    operationReference: ref(row.operation),
+    intentDigest:
+      typeof row.intent_digest === "string" && /^sha256:[0-9a-f]{64}$/u.test(row.intent_digest)
+        ? row.intent_digest
+        : fail(),
+    diningSessionReference: ref(row.session),
+    orderReference: ref(row.order),
+    guestSessionReference: ref(row.guest),
+    roundsMinor: minor(row.rounds, 1n),
+    tipMinor: minor(row.tip),
+    totalMinor: minor(row.total, 1n),
+    providerAccountReference: ref(row.account),
+    environment,
+    providerIntentReference:
+      typeof row.intent === "string" && /^pi_[A-Za-z0-9]{1,250}$/u.test(row.intent)
+        ? row.intent
+        : fail(),
+    createdAt: String(parsePaymentInstant(row.created_at)),
+    outcome:
+      status === null
+        ? null
+        : Object.freeze({
+            status,
+            capturedMinor: row.captured === null ? null : minor(row.captured, 1n),
+            providerTransactionReference: row.transaction === null ? null : String(row.transaction),
+            occurredAt: String(parsePaymentInstant(row.occurred_at)),
+            recordedAt: String(parsePaymentInstant(row.outcome_recorded_at)),
+          }),
+  });
+}
+
 export interface OrderUnpaidWriteOffRecord {
   readonly writeOffReference: string;
   readonly tenantReference: string;
@@ -150,7 +230,7 @@ const settlementSelect = `SELECT s.settlement_id::text AS settlement,s.tenant_id
  s.tip_minor::text AS tip,s.rounding_minor::text AS rounding,s.total_minor::text AS total,
  s.tendered_minor::text AS tendered,s.change_minor::text AS change,s.payment_environment AS environment,
  s.slip_reference,s.recording_reason,${instant("s.taken_at")} AS taken_at,${instant("s.recorded_at")} AS recorded_at,
- s.actor_id::text AS actor,s.audit_id::text AS audit,
+ s.actor_id::text AS actor,s.audit_id::text AS audit,s.online_payment_id::text AS online_payment,
  (SELECT coalesce(jsonb_agg(jsonb_build_object('batch',r.order_batch_id,'submission',r.submission_id,
    'line',r.line_number,'round',r.round_minor::text,'tip',r.tip_minor::text,'rounding',r.rounding_minor::text)
    ORDER BY r.line_number),'[]'::jsonb) FROM rms_payment.dining_table_settlement_round r
@@ -168,7 +248,11 @@ const writeOffSelect = `SELECT w.write_off_id::text AS write_off,w.tenant_id::te
 function settlementFrom(row: Record<string, unknown>): DiningTableSettlementRecord {
   const lines = row.lines;
   if (!Array.isArray(lines) || lines.length < 1) return fail();
-  const method = row.method === "Cash" || row.method === "CardMachine" ? row.method : fail();
+  const method =
+    row.method === "Cash" || row.method === "CardMachine" || row.method === "Online"
+      ? row.method
+      : fail();
+  if ((method === "Online") !== (row.online_payment !== null)) return fail();
   const environment =
     row.environment === "Test" || row.environment === "Live" ? row.environment : fail();
   const reason =
@@ -201,6 +285,7 @@ function settlementFrom(row: Record<string, unknown>): DiningTableSettlementReco
     recordedAt: String(parsePaymentInstant(row.recorded_at)),
     actorReference: ref(row.actor),
     auditReference: ref(row.audit),
+    onlinePaymentReference: row.online_payment === null ? null : ref(row.online_payment),
     lines: Object.freeze(
       lines.map((value: Record<string, unknown>) =>
         Object.freeze({
@@ -453,9 +538,13 @@ export function createPostgresDiningTableSettlementStore(options: {
         readonly actorReference: string;
         readonly auditReference: string;
         readonly correlationReference: string;
+        /** S4: method Online only — the captured guest payment this settlement records. */
+        readonly onlinePaymentReference?: string;
       },
     ) {
       const order = ref(input.orderReference);
+      if ((input.method === "Online") !== (input.onlinePaymentReference !== undefined))
+        return fail();
       await allowed(tx, order);
       if (!/^sha256:[0-9a-f]{64}$/u.test(input.intentDigest)) return fail();
       if (input.method === "Cash" && input.slipReference !== null) return fail();
@@ -483,8 +572,9 @@ export function createPostgresDiningTableSettlementStore(options: {
       await tx.query(
         `INSERT INTO rms_payment.dining_table_settlement (settlement_id,tenant_id,brand_id,store_id,operation_id,
  intent_digest,dining_session_id,order_id,method,rounds_minor,tip_minor,rounding_minor,total_minor,tendered_minor,
- change_minor,currency_code,payment_environment,slip_reference,recording_reason,taken_at,recorded_at,actor_id,audit_id)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'CAD',$16,$17,$18,$19,$20,$21,$22)`,
+ change_minor,currency_code,payment_environment,slip_reference,recording_reason,taken_at,recorded_at,actor_id,audit_id,
+ online_payment_id)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'CAD',$16,$17,$18,$19,$20,$21,$22,$23)`,
         [
           ref(input.settlementReference),
           tenant,
@@ -508,6 +598,7 @@ export function createPostgresDiningTableSettlementStore(options: {
           recordedAt,
           ref(input.actorReference),
           ref(input.auditReference),
+          input.onlinePaymentReference === undefined ? null : ref(input.onlinePaymentReference),
         ],
       );
       for (const [index, line] of plan.lines.entries())
@@ -531,7 +622,11 @@ export function createPostgresDiningTableSettlementStore(options: {
         auditId: ref(input.auditReference),
         brandId: brand,
         storeId: store,
-        actor: { type: "User", reference: ref(input.actorReference) },
+        // S4: a guest's online payment is recorded by the System from the Provider's capture.
+        actor:
+          plan.method === "Online"
+            ? { type: "System" }
+            : { type: "User", reference: ref(input.actorReference) },
         actionCode: "PAYMENT_DINING_TABLE_SETTLED",
         targetType: "Order",
         targetId: order,
@@ -546,11 +641,13 @@ export function createPostgresDiningTableSettlementStore(options: {
           input.recordingReason === "AtTable"
             ? plan.method === "Cash"
               ? "CASH_RECEIVED"
-              : "CARD_MACHINE_APPROVED"
+              : plan.method === "Online"
+                ? "ONLINE_PAYMENT_CAPTURED"
+                : "CARD_MACHINE_APPROVED"
             : "RECORDED_AFTER_OUTAGE",
         correlationId: ref(input.correlationReference),
         occurredAt: recordedAt,
-        sourceChannel: "MERCHANT_WEB",
+        sourceChannel: plan.method === "Online" ? "CUSTOMER_PWA" : "MERCHANT_WEB",
         dataClassification: "Restricted",
         retentionPolicyCode: "FINANCIAL_COMPLIANCE",
         retentionPolicyVersion: 1,
@@ -558,6 +655,210 @@ export function createPostgresDiningTableSettlementStore(options: {
       const [saved] = await settlements(tx, "s.settlement_id=$3", [ref(input.settlementReference)]);
       if (saved === undefined) return fail();
       return Object.freeze({ status: "Recorded" as const, settlement: saved });
+    },
+
+    /** S4: the guests' online payments of these Orders, oldest first, with their outcomes. */
+    async listOnlinePaymentsByOrders(tx: AuditTransaction, orderReferences: readonly string[]) {
+      if (orderReferences.length === 0) return Object.freeze([]);
+      if (orderReferences.length > 200) return fail();
+      const orders = orderReferences.map(ref);
+      for (const order of orders) await allowed(tx, order);
+      await context(tx);
+      const found = rows(
+        await tx.query(
+          `${onlinePaymentSelect} AND p.order_id=ANY($3::uuid[]) ORDER BY p.created_at,p.online_payment_id LIMIT 1001`,
+          [brand, store, orders],
+        ),
+      );
+      if (found.length > 1000) return fail();
+      return Object.freeze(
+        found.map((row) => (ref(row.tenant) === tenant ? onlinePaymentFrom(row) : fail())),
+      );
+    },
+
+    /**
+     * S4: records a guest's attempt to pay the whole table on their phone, after its Provider
+     * transaction was created (with the attempt's own idempotency key). A retry with the same
+     * operation returns it; while another attempt is open, or once the table paid or was written
+     * off, the database refuses it.
+     */
+    async recordOnlinePayment(
+      tx: AuditTransaction,
+      input: {
+        readonly onlinePaymentReference: string;
+        readonly operationReference: string;
+        readonly intentDigest: string;
+        readonly diningSessionReference: string;
+        readonly orderReference: string;
+        readonly guestSessionReference: string;
+        readonly roundsMinor: bigint;
+        readonly tipMinor: bigint;
+        readonly providerAccountReference: string;
+        readonly environment: "Test" | "Live";
+        readonly providerIntentReference: string;
+        readonly createdAt: string;
+        readonly auditReference: string;
+      },
+    ) {
+      const order = ref(input.orderReference);
+      await allowed(tx, order);
+      if (!/^sha256:[0-9a-f]{64}$/u.test(input.intentDigest)) return fail();
+      const rounds = minor(String(input.roundsMinor), 1n),
+        tip = minor(String(input.tipMinor));
+      await context(tx);
+      const prior = rows(
+        await tx.query(`${onlinePaymentSelect} AND p.operation_id=$3`, [
+          brand,
+          store,
+          ref(input.operationReference),
+        ]),
+      ).map(onlinePaymentFrom);
+      if (prior.length > 0) {
+        const same = prior[0] as DiningTableOnlinePaymentRecord;
+        if (same.intentDigest !== input.intentDigest || same.orderReference !== order)
+          return fail("DINING_TABLE_SETTLEMENT_IDEMPOTENCY_CONFLICT");
+        return Object.freeze({ status: "AlreadyRecorded" as const, payment: same });
+      }
+      const createdAt = String(parsePaymentInstant(input.createdAt));
+      await tx.query(
+        `INSERT INTO rms_payment.dining_table_online_payment (online_payment_id,tenant_id,brand_id,store_id,operation_id,
+ intent_digest,dining_session_id,order_id,guest_session_id,rounds_minor,tip_minor,total_minor,currency_code,
+ provider_account_id,payment_environment,provider_intent_reference,created_at,audit_id)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'CAD',$13,$14,$15,$16,$17)`,
+        [
+          ref(input.onlinePaymentReference),
+          tenant,
+          brand,
+          store,
+          ref(input.operationReference),
+          input.intentDigest,
+          ref(input.diningSessionReference),
+          order,
+          ref(input.guestSessionReference),
+          rounds.toString(),
+          tip.toString(),
+          (rounds + tip).toString(),
+          ref(input.providerAccountReference),
+          input.environment,
+          input.providerIntentReference,
+          createdAt,
+          ref(input.auditReference),
+        ],
+      );
+      await appendAuditRecordInTransaction(tx, {
+        auditId: ref(input.auditReference),
+        brandId: brand,
+        storeId: store,
+        actor: { type: "System" },
+        actionCode: "PAYMENT_DINING_TABLE_ONLINE_STARTED",
+        targetType: "Order",
+        targetId: order,
+        afterSummary: { totalMinor: (rounds + tip).toString(), tipMinor: tip.toString() },
+        reasonCode: "GUEST_PAYS_TABLE",
+        correlationId: ref(input.operationReference),
+        occurredAt: createdAt,
+        sourceChannel: "CUSTOMER_PWA",
+        dataClassification: "Restricted",
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      });
+      const saved = rows(
+        await tx.query(`${onlinePaymentSelect} AND p.online_payment_id=$3`, [
+          brand,
+          store,
+          ref(input.onlinePaymentReference),
+        ]),
+      ).map(onlinePaymentFrom)[0];
+      if (saved === undefined) return fail();
+      return Object.freeze({ status: "Recorded" as const, payment: saved });
+    },
+
+    /**
+     * S4: what the Provider reported for a guest's online payment (captured, failed, cancelled),
+     * once. Recording it again returns the outcome already recorded.
+     */
+    async recordOnlinePaymentOutcome(
+      tx: AuditTransaction,
+      input: {
+        readonly onlinePaymentReference: string;
+        readonly orderReference: string;
+        readonly status: "Captured" | "Failed" | "Cancelled";
+        readonly capturedMinor: bigint | null;
+        readonly providerTransactionReference: string | null;
+        readonly occurredAt: string;
+        readonly recordedAt: string;
+        readonly auditReference: string;
+        readonly correlationReference: string;
+        readonly actor:
+          { readonly type: "System" } | { readonly type: "User"; readonly reference: string };
+      },
+    ) {
+      const order = ref(input.orderReference);
+      await allowed(tx, order);
+      await context(tx);
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        "DiningTableOnlinePayment:" + brand + ":" + store + ":" + ref(input.onlinePaymentReference),
+      ]);
+      const [current] = rows(
+        await tx.query(`${onlinePaymentSelect} AND p.online_payment_id=$3`, [
+          brand,
+          store,
+          ref(input.onlinePaymentReference),
+        ]),
+      ).map(onlinePaymentFrom);
+      if (current === undefined || current.orderReference !== order) return fail();
+      if (current.outcome !== null)
+        return Object.freeze({ status: "AlreadyRecorded" as const, payment: current });
+      const occurredAt = String(parsePaymentInstant(input.occurredAt)),
+        recordedAt = String(parsePaymentInstant(input.recordedAt));
+      await tx.query(
+        `INSERT INTO rms_payment.dining_table_online_payment_outcome (online_payment_id,brand_id,store_id,order_id,status,
+ captured_minor,provider_transaction_reference,occurred_at,recorded_at,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          ref(input.onlinePaymentReference),
+          brand,
+          store,
+          order,
+          input.status,
+          input.capturedMinor === null ? null : input.capturedMinor.toString(),
+          input.providerTransactionReference,
+          occurredAt,
+          recordedAt,
+          ref(input.auditReference),
+        ],
+      );
+      await appendAuditRecordInTransaction(tx, {
+        auditId: ref(input.auditReference),
+        brandId: brand,
+        storeId: store,
+        actor:
+          input.actor.type === "System"
+            ? { type: "System" }
+            : { type: "User", reference: ref(input.actor.reference) },
+        actionCode: "PAYMENT_DINING_TABLE_ONLINE_" + input.status.toUpperCase(),
+        targetType: "Order",
+        targetId: order,
+        afterSummary: {
+          status: input.status,
+          capturedMinor: input.capturedMinor === null ? null : input.capturedMinor.toString(),
+        },
+        reasonCode: "PROVIDER_REPORTED",
+        correlationId: ref(input.correlationReference),
+        occurredAt: recordedAt,
+        sourceChannel: input.actor.type === "System" ? "CUSTOMER_PWA" : "MERCHANT_WEB",
+        dataClassification: "Restricted",
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      });
+      const [saved] = rows(
+        await tx.query(`${onlinePaymentSelect} AND p.online_payment_id=$3`, [
+          brand,
+          store,
+          ref(input.onlinePaymentReference),
+        ]),
+      ).map(onlinePaymentFrom);
+      if (saved === undefined) return fail();
+      return Object.freeze({ status: "Recorded" as const, payment: saved });
     },
 
     /** The write-offs of these Orders (at most one each). */

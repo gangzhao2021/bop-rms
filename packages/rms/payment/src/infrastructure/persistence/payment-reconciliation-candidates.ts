@@ -404,6 +404,49 @@ export function createPostgresPaymentCaptureWindowSource(options: {
         capturedAmountMinor += BigInt(row.amount);
         events.push([reference, row.amount, occurredAt, recordedAt, row.digest]);
       }
+      // DEC-DINE-IN-PAY-LATER S4 (decision 4): a whole table paid on a guest's phone is one
+      // Provider transaction — counted once, for its settlement's total, when it was captured.
+      const tables = await tx.query(
+        "SELECT p.online_payment_id::text AS reference,p.provider_account_id::text AS account,p.payment_environment AS environment,o.captured_minor::text AS amount,o.provider_transaction_reference AS transaction,o.occurred_at,o.recorded_at FROM rms_payment.dining_table_online_payment p JOIN rms_payment.dining_table_online_payment_outcome o ON o.online_payment_id=p.online_payment_id AND o.brand_id=p.brand_id AND o.store_id=p.store_id WHERE p.brand_id=$1 AND p.store_id=$2 AND p.provider_account_id=$3 AND p.payment_environment=$4 AND o.status='Captured' AND o.occurred_at >= $5 AND o.occurred_at < $6 AND o.recorded_at <= $7 ORDER BY p.online_payment_id LIMIT 100001",
+        [
+          scope.brandReference,
+          scope.storeReference,
+          scope.providerAccountReference,
+          scope.environment,
+          input.startsAt,
+          input.endsAt,
+          input.observedAt,
+        ],
+      );
+      if (tables.rows.length > 100000) return fail();
+      for (const row of tables.rows) {
+        const reference = String(parsePaymentReference(row.reference));
+        if (
+          row.account !== scope.providerAccountReference ||
+          row.environment !== scope.environment ||
+          typeof row.amount !== "string" ||
+          !/^[1-9][0-9]{0,18}$/u.test(row.amount) ||
+          typeof row.transaction !== "string" ||
+          seen.has(reference) ||
+          !(row.occurred_at instanceof Date) ||
+          !(row.recorded_at instanceof Date)
+        )
+          return fail();
+        const occurredAt = parsePaymentInstant(row.occurred_at.toISOString()),
+          recordedAt = parsePaymentInstant(row.recorded_at.toISOString());
+        seen.add(reference);
+        capturedAmountMinor += BigInt(row.amount);
+        events.push([
+          reference,
+          row.amount,
+          occurredAt,
+          recordedAt,
+          "sha256:" +
+            createHash("sha256")
+              .update(JSON.stringify(["DiningTableOnlinePayment", reference, row.transaction]))
+              .digest("hex"),
+        ]);
+      }
       await authorize();
       return Object.freeze({
         ...scope,

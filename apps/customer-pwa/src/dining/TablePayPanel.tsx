@@ -1,0 +1,264 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { v7 as uuidv7 } from "uuid";
+import { t } from "../i18n/i18n.js";
+import { formatMoney } from "../journey/format.js";
+import { paymentConfiguration } from "../payment/payment-configuration.js";
+import { StripeCardForm } from "../payment/StripeCardForm.js";
+import {
+  createTablePaymentClient,
+  TablePaymentClientError,
+  type TablePaymentView,
+  type TableTip,
+} from "./table-payment-client.js";
+
+const money = (amountMinor: string) => formatMoney(amountMinor, "CAD");
+type TipChoice = "0" | "10" | "15" | "18";
+const tipOf = (choice: TipChoice): TableTip =>
+  choice === "0" ? { kind: "None" } : { kind: "Percent", percent: Number(choice) as 10 | 15 | 18 };
+const tipMinor = (choice: TipChoice, subtotalMinor: string) =>
+  ((BigInt(subtotalMinor) * BigInt(choice) + 50n) / 100n).toString();
+
+function problemText(error: unknown) {
+  const code = error instanceof TablePaymentClientError ? error.code : "unavailable";
+  switch (code) {
+    case "not-checking-out":
+      return t("Ask a staff member for the bill first; then you can pay it here.");
+    case "already-paid":
+      return t("This table has already been paid.");
+    case "bill-changed":
+      return t("The bill just changed. It has been read again: check it and pay again.");
+    case "another-guest-paying":
+      return t("Someone else at your table is paying the bill right now.");
+    case "processing":
+      return t("Your payment is still being processed. Check again in a moment.");
+    case "not-found":
+      return t("This phone isn’t part of the table any more. Ask a staff member for help.");
+    default:
+      return t("We couldn’t reach the payment service. Check your connection and try again.");
+  }
+}
+
+/**
+ * WP-2423 DEC-DINE-IN-PAY-LATER S4: the guest pays the whole table here once staff started
+ * checkout — the bill as it stands, the tip chosen once, one card payment. A declined card is
+ * tried again; coming back finds the same payment; the receipt is the whole table's.
+ */
+export function TablePayPanel({
+  client: provided,
+}: {
+  readonly client?: ReturnType<typeof createTablePaymentClient>;
+}) {
+  const [client] = useState(() => provided ?? createTablePaymentClient());
+  const [view, setView] = useState<TablePaymentView | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [tip, setTip] = useState<TipChoice>("15");
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const operation = useRef<{ key: string; reference: string } | null>(null);
+  const configuration = paymentConfiguration();
+
+  const read = useCallback(async () => {
+    try {
+      setView(await client.read());
+      setProblem(null);
+    } catch (error) {
+      setProblem(problemText(error));
+    }
+  }, [client]);
+  useEffect(() => {
+    void read();
+  }, [read]);
+  // After the card was submitted (or while another guest pays), the result is read again.
+  useEffect(() => {
+    if (view?.state !== "Paying" && view?.state !== "AnotherGuestPaying") return;
+    if (view.state === "Paying" && !submitted && configuration?.mode !== "simulation") return;
+    const timer = window.setInterval(() => void read(), 3000);
+    return () => window.clearInterval(timer);
+  }, [view?.state, submitted, configuration?.mode, read]);
+  // The secure card form's one-time value, once this guest's payment is open (Stripe only).
+  useEffect(() => {
+    if (view?.state !== "Paying" || configuration?.mode !== "stripe" || clientSecret !== null)
+      return;
+    client
+      .handoff()
+      .then(setClientSecret)
+      .catch((error: unknown) => setProblem(problemText(error)));
+  }, [view?.state, configuration?.mode, clientSecret, client]);
+
+  if (view === null) return problem ? <p role="alert">{problem}</p> : null;
+  if (!view.checkingOut && view.state !== "Paid") return null;
+
+  const pay = async () => {
+    if (busy) return;
+    const key = tip;
+    // A failed payment is followed by a new one; a lost answer is retried with the same one.
+    if (operation.current?.key !== key || view.state === "Failed")
+      operation.current = { key, reference: uuidv7() };
+    setBusy(true);
+    setProblem(null);
+    setSubmitted(false);
+    setClientSecret(null);
+    try {
+      setView(await client.start(operation.current.reference, tipOf(tip)));
+    } catch (error) {
+      setProblem(problemText(error));
+      if (error instanceof TablePaymentClientError && error.code !== "unavailable") void read();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const simulate = async (outcome: "approve" | "decline") => {
+    setBusy(true);
+    try {
+      setView(await client.simulate(outcome));
+    } catch (error) {
+      setProblem(problemText(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (view.state === "Paid" && view.receipt !== null) {
+    const receipt = view.receipt;
+    return (
+      <section
+        className="order-status__card dining-session__receipt"
+        aria-labelledby="table-receipt"
+      >
+        <h2 id="table-receipt">{t("Receipt")}</h2>
+        <dl className="order-status__money">
+          <div>
+            <dt>{t("Your table’s order")}</dt>
+            <dd>{money(receipt.roundsMinor)}</dd>
+          </div>
+          {receipt.tipMinor !== "0" ? (
+            <div>
+              <dt>{t("Tip")}</dt>
+              <dd>{money(receipt.tipMinor)}</dd>
+            </div>
+          ) : null}
+          {receipt.roundingMinor !== "0" ? (
+            <div>
+              <dt>{t("Cash rounding")}</dt>
+              <dd>{money(receipt.roundingMinor)}</dd>
+            </div>
+          ) : null}
+          <div>
+            <dt>{t("Total paid")}</dt>
+            <dd>{money(receipt.totalMinor)}</dd>
+          </div>
+          <div>
+            <dt>{t("Paid by")}</dt>
+            <dd>
+              {receipt.method === "Online"
+                ? t("Card on a guest’s phone")
+                : receipt.method === "Cash"
+                  ? t("Cash")
+                  : t("Card at the table")}
+            </dd>
+          </div>
+        </dl>
+        <p>{t("Thank you! Your table is paid in full.")}</p>
+      </section>
+    );
+  }
+  if (view.state === "Closed") return null;
+
+  const subtotal = view.owed.subtotalMinor;
+  const chosenTip = tipMinor(tip, subtotal);
+  const total = (BigInt(view.owed.totalMinor) + BigInt(chosenTip)).toString();
+  return (
+    <section className="order-status__card dining-session__pay" aria-labelledby="table-pay">
+      <h2 id="table-pay">{t("Pay the bill")}</h2>
+      {view.state === "AnotherGuestPaying" ? (
+        <p role="status">{t("Someone else at your table is paying the bill right now.")}</p>
+      ) : view.state === "Paying" && view.attempt !== null ? (
+        <>
+          <p>
+            {t("Paying {amount} for the whole table, tip included.", {
+              amount: money(view.attempt.totalMinor),
+            })}
+          </p>
+          {configuration?.mode === "simulation" ? (
+            <div className="payment-retry__simulated">
+              <button type="button" disabled={busy} onClick={() => void simulate("approve")}>
+                {t("Confirm simulated payment")}
+              </button>{" "}
+              <button type="button" disabled={busy} onClick={() => void simulate("decline")}>
+                {t("Decline simulated payment")}
+              </button>
+            </div>
+          ) : configuration?.mode === "stripe" && clientSecret !== null ? (
+            submitted ? (
+              <p role="status">{t("Confirming your payment…")}</p>
+            ) : (
+              <StripeCardForm
+                publishableKey={configuration.publishableKey}
+                returnUrl={configuration.returnUrl}
+                clientSecret={clientSecret}
+                wallets={configuration.wallets}
+                onSubmitted={() => setSubmitted(true)}
+              />
+            )
+          ) : configuration === null ? (
+            <p role="alert">
+              {t(
+                "Card payment isn’t available on this phone. Ask a staff member to take the payment.",
+              )}
+            </p>
+          ) : (
+            <p role="status">{t("Preparing the secure card form…")}</p>
+          )}
+        </>
+      ) : (
+        <>
+          {view.state === "Failed" ? (
+            <p role="alert">
+              {t("The payment didn’t go through. You can try again with another card.")}
+            </p>
+          ) : null}
+          <dl className="order-status__money">
+            <div>
+              <dt>{t("Subtotal")}</dt>
+              <dd>{money(view.owed.subtotalMinor)}</dd>
+            </div>
+            <div>
+              <dt>{t("Tax")}</dt>
+              <dd>{money(view.owed.taxMinor)}</dd>
+            </div>
+          </dl>
+          <fieldset className="dining-session__tip">
+            <legend>{t("Tip (once, for the whole table)")}</legend>
+            {(["0", "10", "15", "18"] as const).map((choice) => (
+              <label key={choice}>
+                <input
+                  type="radio"
+                  name="table-tip"
+                  value={choice}
+                  checked={tip === choice}
+                  onChange={() => setTip(choice)}
+                />{" "}
+                {choice === "0"
+                  ? t("No tip")
+                  : t("{percent}% · {amount}", {
+                      percent: choice,
+                      amount: money(tipMinor(choice, subtotal)),
+                    })}
+              </label>
+            ))}
+          </fieldset>
+          <button
+            type="button"
+            className="dining-session__pay-button"
+            disabled={busy || !view.consistent || view.owed.totalMinor === "0"}
+            onClick={() => void pay()}
+          >
+            {busy ? t("Starting your payment…") : t("Pay {amount}", { amount: money(total) })}
+          </button>
+        </>
+      )}
+      {problem ? <p role="alert">{problem}</p> : null}
+    </section>
+  );
+}

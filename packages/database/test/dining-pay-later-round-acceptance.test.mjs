@@ -21,6 +21,7 @@ import {
 import { createMerchantDiningUnpaidDeparture } from "../../../apps/api/src/merchant-dining-unpaid-departure.ts";
 import { createMerchantDiningUnpaidItemRemoval } from "../../../apps/api/src/merchant-dining-unpaid-item-removal.ts";
 import { createMerchantDiningServeCommand } from "../../../apps/api/src/merchant-dining-serve-command.ts";
+import { createDiningTableOnlinePayments } from "../../../apps/api/src/dining-table-online-payment.ts";
 import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
 import { createMerchantDiningTableClosePlan } from "../../../apps/api/src/merchant-dining-table-close-plan.ts";
 import { createKitchenInventoryConsumption } from "../../../apps/api/src/kitchen-inventory-consumption.ts";
@@ -33,6 +34,7 @@ import { createDiningOrderCloseConfiguration } from "../../../apps/api/src/dinin
 import {
   assessOrderSettlement,
   createPostgresOrderFinancialPosition,
+  createPostgresPaymentCaptureWindowSource,
 } from "../../rms/payment/src/index.ts";
 import { createPostgresOrderPricedAmountSource } from "../../rms/ordering/src/index.ts";
 import { createPostgresStoreSalesPaymentLedger } from "../../rms/payment/src/index.ts";
@@ -89,10 +91,21 @@ it("sends each round of a pay-later table to the kitchen unpaid, once; the table
 // v15 2026-10-27 (DEMO-02): the guests left without paying — a manager writes the bill off and the
 // table closes, then waits for cleaning; it can never be paid as well.
 it("a table the guests left without paying is written off and closes", () => journey("WrittenOff"));
+// S4 (decisions 3-5): a guest pays the whole table on their phone; staff can't take another
+// payment meanwhile; a failed payment is tried again; staff stop one a guest gave up on.
+it("a guest pays the whole table on their phone, once, split by round", () =>
+  journey("PaidOnline"));
 
 async function journey(ending) {
   await withIsolatedDatabase(
-    { caseId: ending === "Paid" ? "wp2423_paylater" : "wp2423_plwo" },
+    {
+      caseId:
+        ending === "Paid"
+          ? "wp2423_paylater"
+          : ending === "WrittenOff"
+            ? "wp2423_plwo"
+            : "wp2423_plon",
+    },
     async (context) => {
       const admin = new Client(context.clientConfig);
       await admin.connect();
@@ -1193,8 +1206,259 @@ async function journey(ending) {
           );
           assert.deepEqual(table, { state: "TemporarilyBlocked", reason: "CLEANING" });
         }
+        /**
+         * S4: the guest pays the whole table on their phone. The Provider is a test-only stand-in
+         * (Stripe's normalized answers; the test decides each outcome); everything else is the
+         * real composition under the restricted role.
+         */
+        async function paidOnlineEnding() {
+          const intents = new Map();
+          let created = 0;
+          const answer = (request, intent) => ({
+            kind: "Snapshot",
+            context: request.context,
+            providerIntentReference: intent.reference,
+            providerTransactionReference: intent.status === "Captured" ? intent.transaction : null,
+            paymentMethod: "OnlineCard",
+            captureMode: "Automatic",
+            status: intent.status,
+            requestedAmount: intent.amount,
+            authorizedAmount:
+              intent.status === "Captured"
+                ? intent.amount
+                : { amountMinor: 0n, currencyCode: "CAD" },
+            capturedAmount:
+              intent.status === "Captured"
+                ? intent.amount
+                : { amountMinor: 0n, currencyCode: "CAD" },
+            refundedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+            observedAt: new Date().toISOString(),
+            evidenceDigest: sha256("intent:" + intent.reference + ":" + intent.status),
+          });
+          const stripe = {
+            async createIntent(request) {
+              const known = intents.get(request.idempotencyKey);
+              if (known) return answer(request, known);
+              const intent = {
+                reference: "pi_TEST" + String(++created).padStart(6, "0"),
+                transaction: "ch_TEST" + String(created).padStart(6, "0"),
+                status: "RequiresCustomerAction",
+                amount: request.amount,
+              };
+              intents.set(request.idempotencyKey, intent);
+              intents.set(intent.reference, intent);
+              return answer(request, intent);
+            },
+            async retrieveIntent(request) {
+              return answer(request, intents.get(String(request.providerIntentReference)));
+            },
+            async cancelIntent(request) {
+              const intent = intents.get(String(request.providerIntentReference));
+              if (intent.status === "RequiresCustomerAction") intent.status = "Cancelled";
+              return answer(request, intent);
+            },
+          };
+          const payments = createDiningTableOnlinePayments({
+            scope: ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+            provider: stripe,
+            transactions: transactions(),
+            now,
+            nextReference: fresh,
+          });
+          const guestAt = (guestSessionReference) => ({
+            diningSessionReference: sessionReference,
+            guestSessionReference,
+            allowed: async () => true,
+          });
+          const me = guestAt(guestSession),
+            other = guestAt(tableGuest);
+          const fifteen = { kind: "Percent", percent: 15 };
+          const subtotalMinor = BigInt(open.owed.subtotalMinor);
+          const tipMinor = (subtotalMinor * 15n + 50n) / 100n;
+          const due = round1Minor + tipMinor;
+          const attempts = () =>
+            rows(
+              "SELECT p.total_minor::text AS total,p.tip_minor::text AS tip,o.status FROM rms_payment.dining_table_online_payment p LEFT JOIN rms_payment.dining_table_online_payment_outcome o ON o.online_payment_id=p.online_payment_id WHERE p.order_id=$1 ORDER BY p.created_at,p.online_payment_id",
+              [orderReference],
+            );
+
+          // ── The guest starts paying the bill as it stands with a 15 % tip, chosen once.
+          const firstOperation = fresh();
+          const started = await payments.start(me, {
+            operationReference: firstOperation,
+            tip: fifteen,
+          });
+          assert.equal(started.attempt?.totalMinor, due.toString());
+          assert.equal(started.attempt?.mine, true);
+          // The same request again comes back to the same payment (nothing new with the Provider).
+          await payments.start(me, { operationReference: firstOperation, tip: fifteen });
+          assert.equal(created, 1);
+          assert.deepEqual(await attempts(), [
+            { total: due.toString(), tip: tipMinor.toString(), status: null },
+          ]);
+
+          // ── While the guest pays, nothing else is taken for the table.
+          await assert.rejects(settleWith(server, {}), { code: "TABLE_CHECKOUT_GUEST_PAYING" });
+          await assert.rejects(
+            admin.query(
+              "INSERT INTO rms_payment.dining_table_settlement (settlement_id,tenant_id,brand_id,store_id,operation_id,intent_digest,dining_session_id,order_id,method,rounds_minor,tip_minor,rounding_minor,total_minor,currency_code,payment_environment,recording_reason,taken_at,recorded_at,actor_id,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'CardMachine',100,0,0,100,'CAD','Test','AtTable',date_trunc('milliseconds',now()),date_trunc('milliseconds',now()),$9,$10)",
+              [
+                fresh(),
+                tenant,
+                scope.brandReference,
+                scope.storeReference,
+                fresh(),
+                "sha256:" + "c".repeat(64),
+                sessionReference,
+                orderReference,
+                id(0x700),
+                fresh(),
+              ],
+            ),
+            /paying for the table on their phone/u,
+          );
+          await assert.rejects(departure(manager, orderVersion), {
+            code: "UNPAID_DEPARTURE_GUEST_PAYING",
+          });
+          await assert.rejects(closing(server, "Cancel"), {
+            code: "DINING_CHECKOUT_GUEST_PAYING",
+          });
+          // Another guest at the table can't start a second payment.
+          await assert.rejects(
+            payments.start(other, { operationReference: fresh(), tip: fifteen }),
+            {
+              code: "TABLE_ONLINE_PAYMENT_ANOTHER_GUEST_PAYING",
+            },
+          );
+          const bill1 = await bill();
+          assert.equal(bill1.onlinePayment?.status, "InProgress");
+
+          // ── The card is declined: recorded as failed; the guest tries again (a new payment).
+          intents.get("pi_TEST000001").status = "Failed";
+          const failedView = await payments.refresh(me);
+          assert.equal(failedView.attempt, null);
+          assert.equal(failedView.bill.onlinePayment?.status, "Failed");
+          await payments.start(me, { operationReference: fresh(), tip: fifteen });
+          assert.equal(created, 2);
+
+          // ── The guest gives up; staff stop the phone payment (cancelled with the Provider,
+          // recorded with who stopped it), so the table could be paid another way.
+          const stopped = await payments.stop(me, id(0x700));
+          assert.equal(stopped.bill.onlinePayment?.status, "Cancelled");
+          assert.equal(intents.get("pi_TEST000002").status, "Cancelled");
+          assert.deepEqual(
+            await rows(
+              "SELECT actor_reference::text AS actor FROM platform_audit.audit_record WHERE action_code='PAYMENT_DINING_TABLE_ONLINE_CANCELLED' AND target_id=$1",
+              [orderReference],
+            ),
+            [{ actor: id(0x700) }],
+          );
+
+          // ── The guest comes back and pays: captured → the table's one payment, by round.
+          await payments.start(me, { operationReference: fresh(), tip: fifteen });
+          intents.get("pi_TEST000003").status = "Captured";
+          const paidView = await payments.refresh(me);
+          assert.equal(paidView.bill.settlement?.method, "Online");
+          assert.equal(paidView.bill.settlement?.totalMinor, due.toString());
+          assert.equal(paidView.bill.settlement?.tipMinor, tipMinor.toString());
+          assert.deepEqual(
+            (await attempts()).map((attempt) => attempt.status),
+            ["Failed", "Cancelled", "Captured"],
+          );
+          assert.deepEqual(
+            await rows(
+              "SELECT r.line_number,r.order_batch_id::text AS batch,r.round_minor::text AS round,r.tip_minor::text AS tip,s.method,s.online_payment_id IS NOT NULL AS online FROM rms_payment.dining_table_settlement_round r JOIN rms_payment.dining_table_settlement s ON s.settlement_id=r.settlement_id WHERE s.order_id=$1 ORDER BY r.line_number",
+              [orderReference],
+            ),
+            [
+              {
+                line_number: 1,
+                batch: R1.batch.orderBatchReference,
+                round: round1Minor.toString(),
+                tip: tipMinor.toString(),
+                method: "Online",
+                online: true,
+              },
+            ],
+          );
+          // Refreshing again records nothing twice; a paid table never goes back to ordering.
+          await payments.refresh(me);
+          assert.equal(
+            (
+              await rows("SELECT 1 FROM rms_payment.dining_table_settlement WHERE order_id=$1", [
+                orderReference,
+              ])
+            ).length,
+            1,
+          );
+          await assert.rejects(closing(server, "Cancel"), { code: "DINING_CHECKOUT_ALREADY_PAID" });
+          await assert.rejects(payments.start(me, { operationReference: fresh(), tip: fifteen }), {
+            code: "TABLE_ONLINE_PAYMENT_ALREADY_PAID",
+          });
+          // Payment counts the table as paid (the Order can close as usual).
+          const settledNow = await transactions().run(async (tx) => {
+            const at = now();
+            const financial = await createPostgresOrderFinancialPosition({
+              scope: ownerScope,
+              providerAccountReference: provider,
+              environment: "Test",
+              authorize: async () => true,
+            })(tx, { orderReference, observedAt: at });
+            const priced = await createPostgresOrderPricedAmountSource({
+              ...scope,
+              authorize: async () => true,
+            })(tx, { orderReference, observedAt: at });
+            return assessOrderSettlement({
+              currencyCode: "CAD",
+              pricedOrderTotalMinor: priced.pricedTotalMinor,
+              capturedMinor: financial.settlement.capturedMinor,
+              capturedOrderAllocationMinor: financial.settlement.capturedOrderAllocationMinor,
+              capturedTipMinor: financial.settlement.capturedTipMinor,
+              confirmedRefundMinor: financial.settlement.confirmedRefundMinor,
+              refundAllocation: financial.settlement.refundAllocation,
+              pendingRefundMinor: financial.settlement.pendingRefundMinor,
+              unresolvedAttemptCount: financial.unresolvedAttemptCount,
+              pendingAmendmentCount: priced.pendingAmendmentCount,
+            });
+          });
+          assert.equal(settledNow.classification, "Settled");
+
+          // ── Reports and reconciliation: one online payment (one Provider transaction).
+          const window = {
+            startsAt: time(-minutes(120)),
+            endsAt: new Date(Date.now() + 1000).toISOString(),
+            observedAt: new Date(Date.now() + 1000).toISOString(),
+          };
+          const day = await transactions().run((tx) =>
+            createPostgresStoreSalesPaymentLedger({
+              scope: { ...ownerScope, providerAccountReference: provider, environment: "Test" },
+              authorize: async () => true,
+            })(tx, window),
+          );
+          assert.deepEqual(
+            day.payments
+              .filter((payment) => payment.orderReference === orderReference)
+              .map((payment) => [payment.channel, payment.totalMinor, payment.paymentCount]),
+            [["Online", due, 1]],
+          );
+          assert.deepEqual(day.settlement.onlineCaptured, { count: 1, amountMinor: due });
+          assert.equal(day.settlement.cardMachineTaken.count, 0);
+          const captures = await transactions().run((tx) =>
+            createPostgresPaymentCaptureWindowSource({
+              scope: { ...scope, providerAccountReference: provider, environment: "Test" },
+              authorize: async () => true,
+            })(tx, window),
+          );
+          assert.deepEqual([captures.captureCount, captures.capturedAmountMinor], [1, due]);
+        }
         if (ending === "WrittenOff") {
           await writtenOffEnding();
+          return;
+        }
+        if (ending === "PaidOnline") {
+          await paidOnlineEnding();
           return;
         }
 

@@ -11,6 +11,8 @@ export type TableCheckoutErrorCode =
   | "BillChanged"
   | "TenderShort"
   | "AlreadyPaid"
+  /** S4: a guest is paying the whole table on their phone right now. */
+  | "GuestPaying"
   | "NotReady"
   | "Unavailable"
   | "OutcomeUnknown";
@@ -50,7 +52,8 @@ export interface TableBill {
   };
   readonly consistent: boolean;
   readonly settlement: null | {
-    readonly method: "CardMachine" | "Cash";
+    /** S4: "Online" — a guest paid the whole table on their phone. */
+    readonly method: "CardMachine" | "Cash" | "Online";
     readonly roundsMinor: string;
     readonly tipMinor: string;
     readonly roundingMinor: string;
@@ -62,6 +65,12 @@ export interface TableBill {
   };
   /** DEC-DINE-IN-PAY-LATER: written off by a manager when the guests left (null from older). */
   readonly writeOff: null | { readonly amountMinor: string; readonly decidedAt: string };
+  /** S4: the guests' latest phone payment for the table (null from older servers). */
+  readonly onlinePayment: null | {
+    readonly status: "InProgress" | "Captured" | "Failed" | "Cancelled";
+    readonly totalMinor: string;
+    readonly startedAt: string;
+  };
 }
 
 const minor = /^-?(?:0|[1-9][0-9]{0,18})$/u;
@@ -140,7 +149,9 @@ export function parseTableBill(value: unknown): TableBill {
         ? null
         : Object.freeze({
             method:
-              settlement.method === "Cash" || settlement.method === "CardMachine"
+              settlement.method === "Cash" ||
+              settlement.method === "CardMachine" ||
+              settlement.method === "Online"
                 ? settlement.method
                 : invalid(),
             roundsMinor: amount(settlement.roundsMinor),
@@ -154,6 +165,24 @@ export function parseTableBill(value: unknown): TableBill {
             recordedAfterOutage: settlement.recordedAfterOutage === true,
           }),
     writeOff: writeOffOf(raw.writeOff),
+    onlinePayment: onlinePaymentOf(raw.onlinePayment),
+  });
+}
+
+function onlinePaymentOf(value: unknown): TableBill["onlinePayment"] {
+  if (value === undefined || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (
+    !["InProgress", "Captured", "Failed", "Cancelled"].includes(String(raw.status)) ||
+    typeof raw.totalMinor !== "string" ||
+    !minor.test(raw.totalMinor) ||
+    typeof raw.startedAt !== "string"
+  )
+    throw new TableCheckoutError("OutcomeUnknown");
+  return Object.freeze({
+    status: raw.status as "InProgress" | "Captured" | "Failed" | "Cancelled",
+    totalMinor: raw.totalMinor,
+    startedAt: raw.startedAt,
   });
 }
 
@@ -182,6 +211,7 @@ const codes: Readonly<Record<string, TableCheckoutErrorCode>> = {
   bill_changed: "BillChanged",
   tender_short: "TenderShort",
   already_paid: "AlreadyPaid",
+  guest_paying: "GuestPaying",
   idempotency_conflict: "BillChanged",
   not_ready: "NotReady",
   not_at_checkout: "NotStarted",
@@ -257,6 +287,14 @@ export function createTableCheckoutClient(fetcher: typeof fetch = fetch) {
       })) as { status?: unknown; bill?: unknown } | null;
       if (raw?.status !== "Recorded" && raw?.status !== "AlreadyRecorded") return invalid();
       return Object.freeze({ status: raw.status, bill: parseTableBill(raw.bill) });
+    },
+    /** S4: stop a phone payment a guest gave up on (the Provider is asked first). */
+    async stopOnlinePayment(csrf: string, diningSessionReference: string) {
+      const raw = (await post("/merchant/dining/table-online-payment/stop", csrf, {
+        diningSessionReference,
+      })) as { status?: unknown; bill?: unknown } | null;
+      if (raw?.status !== "Stopped") return invalid();
+      return parseTableBill(raw.bill);
     },
     async leftWithoutPaying(
       csrf: string,

@@ -22,14 +22,21 @@ function fixture() {
       digest: "sha256:" + "a".repeat(64),
     },
   ];
+  // DEC-DINE-IN-PAY-LATER S4: whole tables paid on a guest's phone (none unless a test adds one).
+  const tables: Record<string, unknown>[] = [];
   const query = vi.fn(async (sql: string) => ({
-    rows: sql.includes("FROM rms_payment") ? rows : [],
+    rows: sql.includes("dining_table_online_payment")
+      ? tables
+      : sql.includes("FROM rms_payment")
+        ? rows
+        : [],
     rowCount: 0,
   }));
   const tx = { query } as unknown as ConsumerTransaction,
     authorize = vi.fn(async () => true);
   return {
     rows,
+    tables,
     query,
     tx,
     authorize,
@@ -84,4 +91,23 @@ it("returns an actual empty source with zero counts", async () => {
   const f = fixture();
   f.rows.length = 0;
   expect(await f.read(f.tx, input)).toMatchObject({ captureCount: 0, capturedAmountMinor: 0n });
+});
+
+it("DEC-DINE-IN-PAY-LATER S4: counts a whole table paid on a guest's phone once, for its total", async () => {
+  const f = fixture();
+  f.tables.push({
+    reference: id(7),
+    account: id(4),
+    environment: "Test",
+    amount: "2304",
+    transaction: "ch_TEST000001",
+    occurred_at: new Date(input.startsAt),
+    recorded_at: new Date(input.endsAt),
+  });
+  const r = await f.read(f.tx, input);
+  expect(r.captureCount).toBe(2);
+  expect(r.capturedAmountMinor).toBe(9007199254740993n + 2304n);
+  // Another Provider account's table payment never counts here.
+  f.tables[0] = { ...f.tables[0], account: id(9) };
+  await expect(f.read(f.tx, input)).rejects.toThrow();
 });
