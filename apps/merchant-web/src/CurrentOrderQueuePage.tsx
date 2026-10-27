@@ -28,6 +28,7 @@ import {
   StaffItemCancelAction,
   itemCancellationStatus,
 } from "./StaffItemCancelAction.js";
+import { PayLaterItemRemoveAction } from "./PayLaterItemRemoveAction.js";
 import { orderMoney } from "./order-money.js";
 export { orderMoney } from "./order-money.js";
 import { CardMachineRefundAction } from "./CardMachineRefundAction.js";
@@ -178,6 +179,7 @@ export function CurrentOrderLines({
   cancelledBatches,
   unpaidCancelledBatches,
   failedPaymentBatches,
+  removedItems,
   refundRows,
   rounds,
 }: {
@@ -191,6 +193,8 @@ export function CurrentOrderLines({
   readonly unpaidCancelledBatches?: ReadonlySet<string> | undefined;
   /** WP-2423: rounds whose payment failed and that are about to be cancelled automatically. */
   readonly failedPaymentBatches?: ReadonlySet<string> | undefined;
+  /** DEC-DINE-IN-PAY-LATER: dishes taken off the bill before the table paid (never charged). */
+  readonly removedItems?: ReadonlySet<string> | undefined;
   /**
    * 46940b76 L2: every refund on the order (items, whole order or round cancellations, others),
    * from orderRefundRows. Absent: only the cancelled items' refund is listed.
@@ -207,6 +211,9 @@ export function CurrentOrderLines({
   const unpaid = unpaidCancelledTotal(lines, unpaidCancelledBatches);
   const unpaidLine = (item: CurrentOrderDetail["lines"]["items"][number]) =>
     item.cancellation === null && unpaidCancelledBatches?.has(item.orderBatchReference) === true;
+  const removedLine = (item: CurrentOrderDetail["lines"]["items"][number]) =>
+    removedItems?.has(item.orderItemReference) === true;
+  const removed = removedItemsTotal(lines, removedItems);
   // One "Check refund" per pending cancellation, on its first line.
   const checkReferences = new Set<string>();
   const checkLines = new Map<string, string>();
@@ -227,7 +234,8 @@ export function CurrentOrderLines({
       className={
         item.cancellation === null &&
         !cancelledBatches?.has(item.orderBatchReference) &&
-        !unpaidLine(item)
+        !unpaidLine(item) &&
+        !removedLine(item)
           ? undefined
           : "order-line-cancelled"
       }
@@ -256,6 +264,10 @@ export function CurrentOrderLines({
         ) : unpaidLine(item) ? (
           <span className="order-line-cancellation">
             <strong>{t("Cancelled · not paid")}</strong>
+          </span>
+        ) : removedLine(item) ? (
+          <span className="order-line-cancellation">
+            <strong>{t("Taken off the bill · not charged")}</strong>
           </span>
         ) : item.cancellation === null &&
           failedPaymentBatches?.has(item.orderBatchReference) === true ? (
@@ -386,6 +398,18 @@ export function CurrentOrderLines({
           </div>
         </dl>
       ) : null}
+      {removed !== null ? (
+        <dl className="order-lines-totals order-lines-cancelled-refund">
+          <div>
+            <dt>{t("Taken off the bill")}</dt>
+            <dd>−{orderMoney(removed.cancelled)}</dd>
+          </div>
+          <div>
+            <dt>{t("Total after dishes taken off")}</dt>
+            <dd>{orderMoney(removed.remaining)}</dd>
+          </div>
+        </dl>
+      ) : null}
       {refunds.length > 0 ? (
         <dl className="order-lines-totals order-lines-cancelled-refund">
           {refunds.map((row) => (
@@ -492,6 +516,33 @@ export function unpaidCancelledTotal(
       currencyCode,
     }),
   });
+}
+
+/** DEC-DINE-IN-PAY-LATER: what the dishes taken off an unpaid bill came to, and what is left. */
+export function removedItemsTotal(
+  lines: CurrentOrderDetail["lines"],
+  items: ReadonlySet<string> | undefined,
+) {
+  if (items === undefined || items.size === 0) return null;
+  const currencyCode = lines.totals.total.currencyCode;
+  const removed = lines.items.filter((item) => items.has(item.orderItemReference));
+  if (removed.length === 0 || removed.some((item) => item.total.currencyCode !== currencyCode))
+    return null;
+  const amount = removed.reduce((sum, item) => sum + BigInt(item.total.amountMinor), 0n);
+  return Object.freeze({
+    cancelled: Object.freeze({ amountMinor: amount.toString(), currencyCode }),
+    remaining: Object.freeze({
+      amountMinor: (BigInt(orderTotalWithTip(lines.totals).amountMinor) - amount).toString(),
+      currencyCode,
+    }),
+  });
+}
+
+/** DEC-DINE-IN-PAY-LATER: every dish taken off an unpaid bill in this view. */
+export function removedUnpaidItems(view: CurrentOrderQueue): ReadonlySet<string> {
+  return new Set(
+    view.items.flatMap((order) => order.batches.flatMap((batch) => batch.unpaidRemovedItems)),
+  );
 }
 
 /** WP-2423: unpaid rounds whose payment failed and that are not cancelled yet. */
@@ -990,6 +1041,7 @@ function QueuedOrderLines({
         cancelledBatches={storeCancelledBatches(state.detail.view)}
         unpaidCancelledBatches={unpaidCancelledBatches(state.detail.view)}
         failedPaymentBatches={failedPaymentBatches(state.detail.view)}
+        removedItems={removedUnpaidItems(state.detail.view)}
         refundRows={orderRefundRows(
           state.detail.order,
           state.detail.lines,
@@ -2786,6 +2838,7 @@ export function CurrentOrderQueuePage({
                         cancelledBatches={storeCancelledBatches(detail.view)}
                         unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
                         failedPaymentBatches={failedPaymentBatches(detail.view)}
+                        removedItems={removedUnpaidItems(detail.view)}
                         refundRows={orderRefundRows(
                           detail.order,
                           detail.lines,
@@ -2990,6 +3043,28 @@ export function CurrentOrderQueuePage({
                         fetcher={fetcher}
                         onSettled={refreshInPlace}
                       />
+                    </fieldset>
+                  ) : batch.unpaidRemovableItems.length > 0 ? (
+                    // DEC-DINE-IN-PAY-LATER (rule 2): dishes come off an unpaid table's bill.
+                    <fieldset disabled={servingBusy} className="order-cancel-actions">
+                      {detail !== undefined ? (
+                        <PayLaterItemRemoveAction
+                          key={"remove-" + batch.orderBatchReference}
+                          order={order}
+                          batch={batch}
+                          lines={detail.lines.items}
+                          csrf={csrf}
+                          fetcher={fetcher}
+                          onSettled={() => reload(after)}
+                        />
+                      ) : (
+                        <Link
+                          className="order-cancel-items-link"
+                          to={`/operations/orders/${order.orderReference}`}
+                        >
+                          {t("Take dishes off the bill")}
+                        </Link>
+                      )}
                     </fieldset>
                   ) : batch.canCancel || batch.canCancelItems ? (
                     <fieldset disabled={servingBusy} className="order-cancel-actions">

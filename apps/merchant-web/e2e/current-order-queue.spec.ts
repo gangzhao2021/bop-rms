@@ -926,3 +926,157 @@ test("@production WP-2423: a table whose dish is being remade reads Being remade
   await expect(open).toContainText("1 ready to serve");
   await expectNoInternalText(page);
 });
+
+test("@production DEC-DINE-IN-PAY-LATER: staff take a dish off an unpaid table's bill, with a reason", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/**", (route) =>
+    route.fulfill({ status: 503, json: { error: "unavailable" } }),
+  );
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-18",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "OPS-ORDER-QUEUE",
+              label: "Orders",
+              href: "/operations/orders",
+              permission: "ordering.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  const line = (n: number, name: string) => ({
+    orderItemReference: id(200 + n),
+    orderBatchReference: id(51),
+    name,
+    options: [],
+    quantity: 1,
+    customerNote: null,
+    unitPrice: money("1000"),
+    subtotal: money("1000"),
+    discount: money("0"),
+    tax: money("130"),
+    fee: money("0"),
+    total: money("1130"),
+    canCancel: false,
+    cancellation: null,
+  });
+  let removed = false;
+  const order = () => ({
+    orderReference: id(1),
+    orderNumber: "T-1",
+    orderType: "DineIn",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-18T14:00:00.000Z",
+    observedAt: "2026-10-18T14:05:00.000Z",
+    initialBatchReference: id(51),
+    batches: [
+      {
+        orderBatchReference: id(51),
+        sequence: 1,
+        acceptanceStatus: "Accepted",
+        canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
+        canCancelItems: false,
+        unpaidRemovableItems: removed ? [] : [id(201), id(202)],
+        unpaidRemovedItems: removed ? [id(202)] : [],
+      },
+    ],
+    canRequestAcceptance: false,
+    currentPhase: "InProgress",
+    currentVersion: removed ? 4 : 3,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+  });
+  await page.route("**/merchant/orders*", (route) =>
+    route.fulfill({ headers, json: { items: [order()], nextAfterOrderReference: null } }),
+  );
+  await page.route("**/merchant/orders/detail*", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "OPS-ORDER-DETAIL",
+        pickupContact: null,
+        order: order(),
+        lines: {
+          items: [line(1, "Synthetic rice bowl"), line(2, "Synthetic soup")],
+          totals: {
+            subtotal: money("2000"),
+            discount: money("0"),
+            tax: money("260"),
+            fee: money("0"),
+            total: money("2260"),
+          },
+        },
+      },
+    }),
+  );
+  const sent: unknown[] = [];
+  await page.route("**/merchant/orders/remove-unpaid-items", (route) => {
+    sent.push(route.request().postDataJSON());
+    removed = true;
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Removed",
+        orderReference: id(1),
+        orderBatchReference: id(51),
+        orderItemReferences: [id(202)],
+        cancelledOrderVersion: 4,
+      },
+    });
+  });
+  for (const width of [1440, 390]) {
+    removed = false;
+    const before = sent.length;
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/operations/orders/" + id(1));
+    await page.getByRole("button", { name: "Take dishes off the bill" }).click();
+    const group = page.getByRole("group", { name: "Take dishes off the bill" });
+    await group.getByLabel(/Synthetic soup/u).check();
+    // Nothing is sent without a reason.
+    await expect(group.getByRole("button", { name: "Take off $11.30" })).toBeDisabled();
+    await group.getByLabel("Reason").selectOption("CUSTOMER_REQUEST");
+    await group.getByRole("button", { name: "Take off $11.30" }).click();
+    await expect(page.getByText("Taken off the bill · not charged")).toBeVisible();
+    expect(sent.length).toBe(before + 1);
+    expect(sent.at(-1)).toMatchObject({
+      orderReference: id(1),
+      orderBatchReference: id(51),
+      orderItemReferences: [id(202)],
+      expectedOrderVersion: 3,
+      reasonCode: "CUSTOMER_REQUEST",
+    });
+    await expect(page.getByText("Total after dishes taken off")).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await expectNoInternalText(page);
+  }
+});

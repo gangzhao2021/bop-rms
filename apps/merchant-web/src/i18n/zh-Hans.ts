@@ -5741,4 +5741,22 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paper payment": "纸单补录",
   "Paid while the system was down (enter it from paper now)": "断网时已收款（现在按纸单补录）",
   "Within the last 3 days. It counts on the day it was paid.": "限 3 天内。按实际收款那天计入。",
+  "Taking dishes off the bill was refused. Ask a manager to do it.":
+    "从账单删菜被拒绝。请让经理操作。",
+  "This table has paid. Give the guest money back from its payment instead.":
+    "这桌已经付款。请改为从这笔付款里退钱给客人。",
+  "The kitchen has started one of these dishes. Refresh the order.":
+    "后厨已经开始做其中一道菜。请刷新订单。",
+  "This order changed since it was shown. Refresh it, then try again.":
+    "这张订单在显示后有变动。请刷新后再试。",
+  "These dishes can no longer be taken off the bill. Refresh the order.":
+    "这些菜已经不能从账单删除。请刷新订单。",
+  "Take dishes off the bill": "从账单删菜",
+  "Tick the dishes the table won't be charged for. The kitchen stops them.":
+    "勾选这桌不收钱的菜，后厨会停做。",
+  "Take the whole round off · {amount}": "删掉整轮 · {amount}",
+  "Take off {amount}": "删掉 {amount}",
+  "Taken off the bill · not charged": "已从账单删除 · 不收费",
+  "Taken off the bill": "已从账单删除",
+  "Total after dishes taken off": "删菜后合计",
 });

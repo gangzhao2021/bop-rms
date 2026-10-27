@@ -25,6 +25,7 @@ import { StaffItemCancellationError } from "./merchant-order-item-staff-cancella
 import { OrderCloseCommandError } from "./merchant-dining-order-close-command.js";
 import { UnpaidDepartureError } from "./merchant-dining-unpaid-departure.js";
 import { TablePaymentError } from "./merchant-dining-table-payment.js";
+import { UnpaidItemRemovalError } from "./merchant-dining-unpaid-item-removal.js";
 import { MerchantOrderAcceptanceError } from "./merchant-order-acceptance-command.js";
 
 type MerchantOrderQueueItem = Awaited<
@@ -543,6 +544,35 @@ export function installMerchantOrderRoutes(
         .catch((error: unknown) => tablePaymentFailure(response, error));
     },
   );
+  // WP-2423 DEC-DINE-IN-PAY-LATER: dishes taken off a pay-later table's bill before it pays.
+  router.post("/orders/remove-unpaid-items", sameOriginMutation(options), (request, response) => {
+    const auth = mutation(request, response);
+    if (auth === null) return;
+    if (!options.unpaidItemRemoval) {
+      response.status(503).json({ error: "unpaid_item_removal_unavailable" });
+      return;
+    }
+    void options
+      .unpaidItemRemoval({ ...auth, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        if (
+          !(error instanceof UnpaidItemRemovalError) ||
+          error.code === "UNPAID_ITEM_REMOVAL_UNAVAILABLE"
+        ) {
+          response.status(503).set("Cache-Control", NO_STORE).json({ error: "unavailable" });
+          return;
+        }
+        if (error.code === "UNPAID_ITEM_REMOVAL_PERMISSION_DENIED") {
+          denied(response);
+          return;
+        }
+        response
+          .status(error.code === "UNPAID_ITEM_REMOVAL_INPUT_INVALID" ? 400 : 409)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: error.code.replace(/^UNPAID_ITEM_REMOVAL_/u, "").toLowerCase() });
+      });
+  });
   // WP-2423 DEC-DINE-IN-PAY-LATER: a table left without paying; a manager records it and its Order
   // is closed on the write-off (PIN-confirmed, as other money decisions).
   router.post(

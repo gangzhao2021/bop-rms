@@ -410,6 +410,146 @@ const databaseAccessManifestInput = {
   ],
   accesses: [
     {
+      id: "pay-later-item-cancellation.read.order_item_staff_cancellation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_item_staff_cancellation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
+      id: "pay-later-item-cancellation.write.order_item_staff_cancellation",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_item_staff_cancellation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
+      id: "pay-later-item-cancellation.read.order_revision",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_revision" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
+      id: "pay-later-item-cancellation.write.order_revision",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_revision" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
+      id: "pay-later-item-cancellation.read.order_header",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_header" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
+      id: "pay-later-item-cancellation.read.order_batch",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_batch" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
+      id: "pay-later-item-cancellation.read.order_item",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_item" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
+      id: "pay-later-item-cancellation.read.order_staff_cancellation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_staff_cancellation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
+      id: "pay-later-item-cancellation.read.order_batch_checkout_cancellation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_batch_checkout_cancellation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
+      id: "pay-later-item-cancellation.read.order_termination_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_termination_record" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
+      id: "pay-later-item-cancellation.read.order_closure_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_closure_version" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
+      id: "pay-later-item-cancellation.read.order_fulfillment_completion_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_fulfillment_completion_record" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
+      id: "pay-later-item-cancellation.read.order_payment_disposition_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_payment_disposition_record" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
+      id: "pay-later-item-cancellation.read.order_pay_later_confirmation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_pay_later_confirmation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/pay-later-item-cancellation-store.ts",
+    },
+    {
       id: "order-progress.write.order_pickup_not_collected_fact",
       operation: "write",
       mechanism: "repository",

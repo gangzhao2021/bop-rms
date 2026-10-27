@@ -48,6 +48,7 @@ import {
 import { createMerchantDiningTableClosePlan } from "../../apps/api/dist/merchant-dining-table-close-plan.js";
 import { createMerchantDiningOrderCloseCommand } from "../../apps/api/dist/merchant-dining-order-close-command.js";
 import { createMerchantDiningUnpaidDeparture } from "../../apps/api/dist/merchant-dining-unpaid-departure.js";
+import { createMerchantDiningUnpaidItemRemoval } from "../../apps/api/dist/merchant-dining-unpaid-item-removal.js";
 import {
   createMerchantDiningTableCashRefund,
   createMerchantDiningTablePaymentRead,
@@ -1101,6 +1102,21 @@ export async function createInternalMerchant(
     persistence,
     authentication: service,
   });
+  // DEC-DINE-IN-PAY-LATER: dishes taken off an unpaid pay-later bill (who and why).
+  const unpaidItemRemoval = createMerchantDiningUnpaidItemRemoval({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+    installContext: async (tx, scope) => {
+      for (const key of ["tenantReference", "brandReference", "storeReference"])
+        if (scope[key] !== selected[key])
+          throw new Error("INTERNAL_ORDER_CANCELLATION_SCOPE_DENIED");
+      await tx.query(
+        "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+        [scope.tenantReference, scope.brandReference, scope.storeReference],
+      );
+    },
+  });
   const tableCashRefund = createMerchantDiningTableCashRefund({
     persistence,
     authentication: service,
@@ -1615,6 +1631,7 @@ export async function createInternalMerchant(
       orderUnpaidDeparture,
       tablePayment,
       tableCashRefund,
+      unpaidItemRemoval,
       diningOrderProgress,
       diningTableClosePlan,
       diningItemService,

@@ -9,6 +9,7 @@ import {
   parseDiningReference,
 } from "@rms/dining";
 import {
+  createPostgresPayLaterItemCancellationStore,
   createPostgresOrderPayLaterConfirmationStore,
   createPostgresOrderPricedAmountSource,
   listOrderItemPrices,
@@ -118,7 +119,11 @@ export interface DiningTableBill {
   };
 }
 
-type Scope = { tenantReference: string; brandReference: string; storeReference: string };
+interface Scope {
+  tenantReference: string;
+  brandReference: string;
+  storeReference: string;
+}
 
 /** The table's bill from the owners' records, in the caller's (authorized) transaction. */
 export async function readDiningTableBill(
@@ -176,7 +181,19 @@ export async function readDiningTableBill(
       authorize: allowed,
     }).listByOrders({ transaction: tx, orderReferences: [orderReference] })),
   ].sort((a, b) => (a.confirmedAt < b.confirmedAt ? -1 : a.confirmedAt > b.confirmedAt ? 1 : 0));
-  const prices = await listOrderItemPrices(tx, owner, orderReference);
+  // Dishes taken off the bill before the table paid (rule 2) are no longer owed.
+  const removed = new Set(
+    (
+      await createPostgresPayLaterItemCancellationStore({
+        ...owner,
+        authorize: async (_tx, value) =>
+          value.orderReference === orderReference && (await allowed()),
+      }).listByOrders(tx, [orderReference])
+    ).flatMap((record) => record.orderItemReferences),
+  );
+  const prices = (await listOrderItemPrices(tx, owner, orderReference)).filter(
+    (item) => !removed.has(String(item.orderItemReference)),
+  );
   const settlements = await createPostgresDiningTableSettlementStore({
     scope,
     authorize: async (_tx, value) => value.orderReference === orderReference && (await allowed()),
@@ -194,7 +211,10 @@ export async function readDiningTableBill(
     const tax = items.reduce((sum, item) => sum + item.tax.amountMinor, 0n);
     const total = items.reduce((sum, item) => sum + item.total.amountMinor, 0n);
     const paid = paidBatches.has(batch);
-    if (paid) paidAllocation += total;
+    // A round whose every dish was taken off owes nothing (and is never a payment line).
+    if (total === 0n) {
+      /* nothing owed */
+    } else if (paid) paidAllocation += total;
     else {
       owedSubtotal += subtotal;
       owedTax += tax;
@@ -482,7 +502,7 @@ export function createMerchantDiningTableSettle(options: {
                   ? "TABLE_CHECKOUT_NOTHING_OWED"
                   : "TABLE_CHECKOUT_BILL_CHANGED",
               );
-            const owed = bill.rounds.filter((round) => !round.paid);
+            const owed = bill.rounds.filter((round) => !round.paid && round.totalMinor !== "0");
             if (owed.length === 0) return fail("TABLE_CHECKOUT_NOTHING_OWED");
             const tipMinor = tableTipMinor(command.tip, BigInt(bill.owed.subtotalMinor));
             await store.record(tx, {

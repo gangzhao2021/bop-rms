@@ -561,6 +561,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       // Orders v3 (Owner 2026-10-26): when the round was sent (absent from an older server).
       const withSubmittedAt =
         value !== null && typeof value === "object" && Object.hasOwn(value, "submittedAt");
+      // DEC-DINE-IN-PAY-LATER (rule 2): absent from an older server (no removal then).
+      const withUnpaidRemoval =
+        value !== null && typeof value === "object" && Object.hasOwn(value, "unpaidRemovableItems");
       const batch = exact(value, [
         "orderBatchReference",
         "sequence",
@@ -574,7 +577,28 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         ...(withStaffRound ? ["staffRound"] : []),
         ...(withCancelUnpaid ? ["canCancelUnpaid"] : []),
         ...(withWaitingSince ? ["awaitingAcceptanceSince"] : []),
+        ...(withUnpaidRemoval ? ["unpaidRemovableItems", "unpaidRemovedItems"] : []),
       ]);
+      const references = (list: unknown) =>
+        Array.isArray(list) && list.length <= 500
+          ? Object.freeze(list.map((entry) => reference(entry)))
+          : fail();
+      const unpaidRemovableItems = withUnpaidRemoval
+        ? references(batch.unpaidRemovableItems)
+        : Object.freeze([] as string[]);
+      const unpaidRemovedItems = withUnpaidRemoval
+        ? references(batch.unpaidRemovedItems)
+        : Object.freeze([] as string[]);
+      if (
+        // Only an accepted dine-in round, never cancelled by the Store, has dishes to take off.
+        (unpaidRemovableItems.length > 0 &&
+          (item.orderType !== "DineIn" ||
+            batch.acceptanceStatus !== "Accepted" ||
+            item.currentVersion === null)) ||
+        (unpaidRemovedItems.length > 0 && item.orderType !== "DineIn") ||
+        unpaidRemovableItems.some((line) => unpaidRemovedItems.includes(line))
+      )
+        return fail();
       const awaitingAcceptanceSince = withWaitingSince ? batch.awaitingAcceptanceSince : null;
       const canCancelUnpaid = withCancelUnpaid ? batch.canCancelUnpaid : false;
       const staffRound = parseStaffRound(batch.staffRound ?? null, item.orderType);
@@ -673,6 +697,10 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         staffRound,
         /** WP-2423: when this paid dine-in round, awaiting acceptance, was paid (else null). */
         awaitingAcceptanceSince: awaitingAcceptanceSince as string | null,
+        /** DEC-DINE-IN-PAY-LATER: dishes of this unpaid pay-later round staff may take off now. */
+        unpaidRemovableItems,
+        /** DEC-DINE-IN-PAY-LATER: dishes taken off this round's bill before the table paid. */
+        unpaidRemovedItems,
       });
     });
     const counter = parseCounter(item.counter, item.sourceChannel);

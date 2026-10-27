@@ -133,7 +133,7 @@ export async function readStaffItemCancellations(
   const found = await tx.query(
     "SELECT " +
       selection +
-      " FROM rms_ordering.order_item_staff_cancellation WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[]) ORDER BY cancellation_id LIMIT 10001",
+      " FROM rms_ordering.order_item_staff_cancellation WHERE brand_id=$1 AND store_id=$2 AND basis='Paid' AND order_id=ANY($3::uuid[]) ORDER BY cancellation_id LIMIT 10001",
     [brand, store, orders],
   );
   if (!Array.isArray(found.rows) || found.rows.length > 10000) return unavailable();
@@ -183,14 +183,18 @@ export async function readStaffBatchLineSources(
     )
   ).rows;
   if (rows.length === 0 || rows.length > 10000) return unavailable();
-  const cancelled = new Set(
-    (
-      await readStaffItemCancellations(tx, { brandReference: brand, storeReference: store }, [
-        order,
-      ])
+  // Every cancelled line of the Batch, paid or (DEC-DINE-IN-PAY-LATER) taken off an unpaid bill.
+  const cancelledRows = (
+    await tx.query(
+      "SELECT order_item_ids::text[] AS items FROM rms_ordering.order_item_staff_cancellation WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND order_batch_id=$4 LIMIT 10001",
+      [brand, store, order, batch],
     )
-      .filter((record) => record.orderBatchReference === batch)
-      .flatMap((record) => record.orderItemReferences),
+  ).rows;
+  if (cancelledRows.length > 10000) return unavailable();
+  const cancelled = new Set(
+    cancelledRows.flatMap((row) =>
+      Array.isArray(row.items) ? row.items.map((item: unknown) => String(item)) : unavailable(),
+    ),
   );
   return Object.freeze(
     rows.map((row) =>
@@ -386,7 +390,7 @@ export function createPostgresStaffItemCancellationStore(options: {
       tx,
       "SELECT " +
         selection +
-        " FROM rms_ordering.order_item_staff_cancellation WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3 LIMIT 2",
+        " FROM rms_ordering.order_item_staff_cancellation WHERE brand_id=$1 AND store_id=$2 AND basis='Paid' AND operation_id=$3 LIMIT 2",
       [brand, store, operationReference],
     );
     if (!row) return null;
@@ -638,7 +642,7 @@ export function createPostgresStaffItemCancellationReader(scope: {
         await transaction.query(
           "SELECT " +
             selection +
-            " FROM rms_ordering.order_item_staff_cancellation WHERE brand_id=$1 AND store_id=$2 AND cancellation_id=$3 LIMIT 2",
+            " FROM rms_ordering.order_item_staff_cancellation WHERE brand_id=$1 AND store_id=$2 AND basis='Paid' AND cancellation_id=$3 LIMIT 2",
           [owner.brandReference, owner.storeReference, reference],
         )
       ).rows;

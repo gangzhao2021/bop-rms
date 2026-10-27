@@ -18,6 +18,7 @@ import {
   createMerchantDiningTableSettle,
 } from "../../../apps/api/src/merchant-dining-table-checkout.ts";
 import { createMerchantDiningUnpaidDeparture } from "../../../apps/api/src/merchant-dining-unpaid-departure.ts";
+import { createMerchantDiningUnpaidItemRemoval } from "../../../apps/api/src/merchant-dining-unpaid-item-removal.ts";
 import { createMerchantDiningClosingCommand } from "../../../apps/api/src/merchant-dining-closing-command.ts";
 import { createDiningOrderCloseConfiguration } from "../../../apps/api/src/dining-order-close-configuration.ts";
 import {
@@ -519,6 +520,7 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
         "dining.operate",
         "dining.session.close",
         "order.close",
+        "ordering.order.cancel",
       ];
       const server = await seedMerchantAcceptanceSession({
         admin,
@@ -586,6 +588,111 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
           },
         });
 
+      // ── S3 (rule 2): a dish comes off the unpaid bill before the table pays — who and why, as
+      // an append-only cancellation on the 'PayLater' basis; the table is never charged for it.
+      const removal = (who, command) =>
+        createMerchantDiningUnpaidItemRemoval({
+          persistence: persistenceOf(who),
+          authentication: who.authentication,
+          nextReference: fresh,
+          installContext: async (tx, selected) => {
+            await tx.query(
+              "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+              [selected.tenantReference, selected.brandReference, selected.storeReference],
+            );
+          },
+        })({
+          ...as(who),
+          command: {
+            orderReference,
+            orderBatchReference: R2.batch.orderBatchReference,
+            orderItemReferences: [String(items2[0].orderItemReference)],
+            reasonCode: "CUSTOMER_REQUEST",
+            ...command,
+          },
+        });
+      const versionNow = async () =>
+        Number(
+          (
+            await rows(
+              "SELECT max(version)::int AS version FROM rms_ordering.order_revision WHERE order_id=$1",
+              [orderReference],
+            )
+          )[0].version,
+        );
+      const removeOperation = fresh();
+      const beforeRemoval = await versionNow();
+      // Without the cancel permission nothing is written.
+      const outsider = await seedMerchantAcceptanceSession({
+        admin,
+        runner: transactions(),
+        scope: ownerScope,
+        actor: id(0x702),
+        at: now(),
+        extraPermissions: ["dining.operate"],
+        referencePrefix: "01909964",
+        sessionReferencePrefix: "01909963",
+      });
+      await assert.rejects(
+        removal(outsider, { expectedOrderVersion: beforeRemoval, operationReference: fresh() }),
+        { code: "UNPAID_ITEM_REMOVAL_PERMISSION_DENIED" },
+      );
+      // A stale Order version is refused.
+      await assert.rejects(
+        removal(server, { expectedOrderVersion: beforeRemoval - 1, operationReference: fresh() }),
+        { code: "UNPAID_ITEM_REMOVAL_VERSION_CONFLICT" },
+      );
+      const removed = await removal(server, {
+        expectedOrderVersion: beforeRemoval,
+        operationReference: removeOperation,
+      });
+      assert.equal(removed.status, "Removed");
+      assert.equal(removed.cancelledOrderVersion, beforeRemoval + 1);
+      // The same command again returns that removal; nothing is written twice.
+      assert.equal(
+        (
+          await removal(server, {
+            expectedOrderVersion: beforeRemoval,
+            operationReference: removeOperation,
+          })
+        ).status,
+        "AlreadyRemoved",
+      );
+      assert.deepEqual(
+        await rows(
+          "SELECT basis,reason_code,actor_id::text AS actor,payment_disposition_id,refund_request_id FROM rms_ordering.order_item_staff_cancellation WHERE order_id=$1",
+          [orderReference],
+        ),
+        [
+          {
+            basis: "PayLater",
+            reason_code: "CUSTOMER_REQUEST",
+            actor: id(0x700),
+            payment_disposition_id: null,
+            refund_request_id: null,
+          },
+        ],
+      );
+      assert.equal(
+        (
+          await rows(
+            "SELECT count(*)::int AS n FROM rms_ordering.order_revision WHERE order_id=$1 AND version=$2 AND kind='StaffItemCancellation'",
+            [orderReference, beforeRemoval + 1],
+          )
+        )[0].n,
+        1,
+      );
+      assert.equal(
+        (
+          await rows(
+            "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE action_code='ORDER_ITEMS_REMOVED_FROM_UNPAID_BILL'",
+          )
+        )[0].n,
+        1,
+      );
+      // Round 2's only dish came off: the whole round is off the bill (it owes nothing).
+      assert.equal(items2.length, 1);
+      const removedMinor = items2[0].pricing.total.amountMinor;
       // Paying before checkout started is refused: rounds can still be added.
       await assert.rejects(settleWith(server, {}), { code: "TABLE_CHECKOUT_NOT_STARTED" });
       const sessionVersion = Number(
@@ -614,9 +721,11 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
       });
       assert.equal(begun.phase, "Closing");
 
-      // The bill: both rounds owed, each with its items, before tax, tax and total.
+      // The bill: round 1 owed with its items, before tax, tax and total; round 2 owes nothing.
       const round1Minor = items1.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n);
-      const round2Minor = items2.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n);
+      const round2Minor =
+        items2.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n) - removedMinor;
+      assert.equal(round2Minor, 0n);
       const open = await bill();
       assert.equal(open.paymentTiming, "PayLater");
       assert.equal(open.sessionPhase, "Closing");
@@ -625,7 +734,7 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
         open.rounds.map((round) => [round.roundNumber, round.totalMinor, round.paid]),
         [
           [1, round1Minor.toString(), false],
-          [2, round2Minor.toString(), false],
+          [2, "0", false],
         ],
       );
       assert.equal(open.owed.totalMinor, (round1Minor + round2Minor).toString());
@@ -688,10 +797,21 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
       });
       assert.deepEqual(
         paid.bill.rounds.map((round) => round.paid),
-        [true, true],
+        // The round taken off the bill is never a payment line.
+        [true, false],
       );
       assert.equal(paid.bill.owed.totalMinor, "0");
-      // One payment, one line per round; the tip and the rounding on the last round.
+      // Once the table paid, no dish comes off its bill (it is refunded from the payment instead).
+      await assert.rejects(
+        removal(server, {
+          orderBatchReference: R1.batch.orderBatchReference,
+          orderItemReferences: [String(items1[0].orderItemReference)],
+          expectedOrderVersion: await versionNow(),
+          operationReference: fresh(),
+        }),
+        { code: "UNPAID_ITEM_REMOVAL_ALREADY_PAID" },
+      );
+      // One payment, one line per owed round; the tip and the rounding on the last one.
       assert.deepEqual(
         await rows(
           "SELECT r.line_number,r.order_batch_id::text AS batch,r.round_minor::text AS round,r.tip_minor::text AS tip,r.rounding_minor::text AS rounding FROM rms_payment.dining_table_settlement_round r JOIN rms_payment.dining_table_settlement s ON s.settlement_id=r.settlement_id WHERE s.order_id=$1 ORDER BY r.line_number",
@@ -702,13 +822,6 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
             line_number: 1,
             batch: R1.batch.orderBatchReference,
             round: round1Minor.toString(),
-            tip: "0",
-            rounding: "0",
-          },
-          {
-            line_number: 2,
-            batch: R2.batch.orderBatchReference,
-            round: round2Minor.toString(),
             tip: tipMinor.toString(),
             rounding: rounding.toString(),
           },
@@ -775,7 +888,7 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
       await assert.rejects(
         admin.query(
           "INSERT INTO rms_payment.dining_table_settlement_round (settlement_id,brand_id,store_id,order_id,order_batch_id,submission_id,line_number,round_minor,tip_minor,rounding_minor) SELECT settlement_id,brand_id,store_id,order_id,$2,$3,3,1,0,0 FROM rms_payment.dining_table_settlement WHERE order_id=$1",
-          [orderReference, R2.batch.orderBatchReference, R2.batch.submissionReference],
+          [orderReference, R1.batch.orderBatchReference, R1.batch.submissionReference],
         ),
         /duplicate key|paid/u,
       );
@@ -839,10 +952,7 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
           line.roundingMinor,
           line.paymentCount,
         ]),
-        [
-          [R1.batch.orderBatchReference, round1Minor, 0n, 0n, 1],
-          [R2.batch.orderBatchReference, round2Minor, tipMinor, rounding, 0],
-        ],
+        [[R1.batch.orderBatchReference, round1Minor, tipMinor, rounding, 1]],
       );
       assert.deepEqual(ledger.settlement.cashTaken, {
         count: 1,
