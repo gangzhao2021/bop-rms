@@ -82,6 +82,8 @@ export type CartErrorCode =
   | "cart_order_processing"
   /** WP-2423: another guest at the table is checking out this cart; nothing was changed. */
   | "cart_checkout_in_progress"
+  /** DEC-DINE-IN-PAY-LATER: the table is checking out; staff add dishes. */
+  | "cart_table_checking_out"
   | "cart_service_unavailable"
   | "quote_operation_expired"
   | "network_unknown";

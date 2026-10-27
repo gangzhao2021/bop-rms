@@ -272,6 +272,7 @@ function ErrorState({
       commonText.checkoutInProgressHeading,
       checkoutInProgressMessage(state.retryAfterSeconds),
     ],
+    "table-checking-out": failure.tableCheckingOut,
     "command-failed": failure.commandFailed,
     unavailable: failure.unavailable,
   } as const;

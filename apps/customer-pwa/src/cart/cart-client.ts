@@ -21,6 +21,7 @@ const errorStatuses: Partial<Record<CartErrorCode, number>> = {
   cart_rate_limited: 429,
   cart_order_processing: 409,
   cart_checkout_in_progress: 409,
+  cart_table_checking_out: 409,
   cart_service_unavailable: 503,
 };
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;

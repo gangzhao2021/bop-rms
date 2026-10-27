@@ -9,6 +9,35 @@ const fail = (): never => {
   throw new CurrentOrderQueueError("Unavailable");
 };
 const ref = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const minorAmount = /^(0|[1-9][0-9]{0,17})$/u;
+function parseTableBill(
+  value: unknown,
+  orderType: unknown,
+): {
+  readonly totalMinor: string;
+  readonly paid: { readonly amountMinor: string; readonly method: "CardMachine" | "Cash" } | null;
+} | null {
+  if (value === null) return null;
+  const bill = exact(value, ["totalMinor", "paid"]);
+  if (
+    orderType !== "DineIn" ||
+    typeof bill.totalMinor !== "string" ||
+    !minorAmount.test(bill.totalMinor)
+  )
+    return fail();
+  if (bill.paid === null) return Object.freeze({ totalMinor: bill.totalMinor, paid: null });
+  const paid = exact(bill.paid, ["amountMinor", "method"]);
+  if (
+    typeof paid.amountMinor !== "string" ||
+    !minorAmount.test(paid.amountMinor) ||
+    (paid.method !== "CardMachine" && paid.method !== "Cash")
+  )
+    return fail();
+  return Object.freeze({
+    totalMinor: bill.totalMinor,
+    paid: Object.freeze({ amountMinor: paid.amountMinor, method: paid.method }),
+  });
+}
 function reference(value: unknown): string {
   if (typeof value !== "string" || !ref.test(value)) return fail();
   return value;
@@ -411,8 +440,12 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     // WP-2423 (v15 751dd768): what this person may do with the payment (absent from an older server).
     const withCapabilities =
       value !== null && typeof value === "object" && Object.hasOwn(value, "canViewPayments");
+    // DEC-DINE-IN-PAY-LATER: a pay-later table's bill (absent from an older server).
+    const withTableBill =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "tableBill");
     const item = exact(value, [
       ...(withSummary ? ["summary"] : []),
+      ...(withTableBill ? ["tableBill"] : []),
       ...(withCapabilities ? ["canRecordCardMachinePayment", "canViewPayments"] : []),
       ...(withReady ? ["readyToServeItemCount"] : []),
       ...(withRemaking ? ["remakingItemCount"] : []),
@@ -777,6 +810,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         ? (item.canRecordCardMachinePayment as boolean)
         : true,
       canViewPayments: withCapabilities ? (item.canViewPayments as boolean) : true,
+      /** DEC-DINE-IN-PAY-LATER: what a pay-later table owes on its bill, or what it paid. */
+      tableBill: withTableBill ? parseTableBill(item.tableBill, item.orderType) : null,
       currentPhase: item.currentPhase as string | null,
       currentVersion: item.currentVersion as number | null,
       /**

@@ -119,7 +119,8 @@ export function createPostgresDiningItemServiceStore(options: {
           session.tableReference !== record.tableReference ||
           session.tableAssignmentVersion !== record.tableAssignmentVersion ||
           session.version !== record.sessionVersion ||
-          session.phase !== "Active" ||
+          // A table checking out (Closing) is still served; a closed one is not.
+          (session.phase !== "Active" && session.phase !== "Closing") ||
           session.startedAt > record.servedAt
         )
           return fail();

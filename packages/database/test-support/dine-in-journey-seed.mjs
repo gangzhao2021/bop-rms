@@ -94,8 +94,19 @@ export function journeyRound({ at, prefix, submitter = null }) {
   });
 }
 
-/** One occupied table: Active Session with the Host and a second (non-Host) participant. */
-export async function seedJourneyDining({ client, scope, round, startedAt, guestParticipant }) {
+/**
+ * One occupied table: Active Session with the Host and a second (non-Host) participant.
+ * `tableVersion` 2 is the table as seating moved it on (needed to release it when the table
+ * closes); 1 keeps the earlier fixture for tests that never close the table.
+ */
+export async function seedJourneyDining({
+  client,
+  scope,
+  round,
+  startedAt,
+  guestParticipant,
+  tableVersion = 1,
+}) {
   const record = round.f.request.record;
   const tableReference = round.f.scope.storeReference.slice(0, 24) + "00000000a001";
   const session = parseDiningSession({
@@ -135,12 +146,12 @@ export async function seedJourneyDining({ client, scope, round, startedAt, guest
     operationalState: "Available",
     blockReasonCode: null,
     activeDiningSessionReference: session.diningSessionReference,
-    aggregateVersion: 1,
+    aggregateVersion: tableVersion,
     createdAt: startedAt,
     observedAt: startedAt,
   });
   await client.query(
-    "INSERT INTO rms_dining.dining_table (table_id,tenant_id,brand_id,store_id,version,table_snapshot,created_at,observed_at) VALUES ($1,$2,$3,$4,1,$5::jsonb,$6,$6)",
+    "INSERT INTO rms_dining.dining_table (table_id,tenant_id,brand_id,store_id,version,table_snapshot,created_at,observed_at) VALUES ($1,$2,$3,$4,$7,$5::jsonb,$6,$6)",
     [
       tableReference,
       scope.tenantReference,
@@ -148,6 +159,7 @@ export async function seedJourneyDining({ client, scope, round, startedAt, guest
       scope.storeReference,
       JSON.stringify(table),
       startedAt,
+      tableVersion,
     ],
   );
   await client.query(
@@ -213,7 +225,10 @@ export async function seedJourneyDining({ client, scope, round, startedAt, guest
     audit,
     /** Dining's checkout commitment for one round, prepared by `participant` (the Host unless
      * another seated participant submits the round) through the real owner store. */
-    async prepare(target, { paymentOperationReference, participant = host }) {
+    async prepare(
+      target,
+      { paymentOperationReference, participant = host, currentSession = session },
+    ) {
       const r = target.f.request.record,
         b = target.batch,
         e = target.f.request.checkoutValidationEvidence;
@@ -222,7 +237,8 @@ export async function seedJourneyDining({ client, scope, round, startedAt, guest
           commitmentReference: e.fulfillment.evidenceReference,
           ...target.f.scope,
           diningSessionReference: session.diningSessionReference,
-          sessionVersion: 2,
+          // The session as it is now (a table whose checkout was started and cancelled moved on).
+          sessionVersion: currentSession.version,
           tableReference,
           tableAssignmentVersion: 1,
           participantReference: participant.participantReference,
@@ -239,7 +255,7 @@ export async function seedJourneyDining({ client, scope, round, startedAt, guest
           preparedAt: e.fulfillment.checkedAt,
           preparationValidUntil: e.fulfillment.validUntil,
         },
-        { session, participant },
+        { session: currentSession, participant },
       );
       await createPostgresDiningCheckoutCommitmentStore(ownerRunner, scope, {
         now: () => e.fulfillment.checkedAt,

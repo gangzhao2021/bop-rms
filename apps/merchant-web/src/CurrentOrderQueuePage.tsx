@@ -814,6 +814,9 @@ export function orderAmountTaken(order: QueuedOrder) {
         amountMinor: batch.staffRound.paidOnCardMachine.amountMinor,
         currencyCode: "CAD",
       });
+  // DEC-DINE-IN-PAY-LATER: the table's one payment (tip and cash rounding included).
+  if (order.tableBill?.paid != null)
+    parts.push({ amountMinor: order.tableBill.paid.amountMinor, currencyCode: "CAD" });
   const currencyCode = parts[0]?.currencyCode;
   if (currencyCode === undefined || parts.some((part) => part.currencyCode !== currencyCode))
     return null;
@@ -1288,6 +1291,13 @@ export function orderAmountNote(
   order: QueuedOrder,
   position?: CurrentOrderDetail["paymentPosition"],
 ): string | null {
+  // DEC-DINE-IN-PAY-LATER: a pay-later table's dishes are on its bill until it pays once.
+  if (order.tableBill !== null)
+    return order.tableBill.paid === null
+      ? t("On the table's bill")
+      : order.tableBill.paid.method === "Cash"
+        ? t("Paid at the table · cash")
+        : t("Paid at the table · card machine");
   // Only an order known to be waiting for its payment says "Not paid"; no payment on the list is
   // otherwise just not known here.
   if (orderAmountTaken(order) === null)
@@ -1880,7 +1890,12 @@ export function CurrentOrderQueueRows({
             {view.items.map((order) => {
               const isOpen = order.orderReference === selected?.orderReference;
               const note = orderAmountNote(order, positionOf(order));
-              const amount = orderAmountTaken(order);
+              // DEC-DINE-IN-PAY-LATER: an unpaid pay-later table shows what is on its bill.
+              const amount =
+                orderAmountTaken(order) ??
+                (order.tableBill !== null && order.tableBill.paid === null
+                  ? { amountMinor: order.tableBill.totalMinor, currencyCode: "CAD" }
+                  : null);
               const age = now === undefined ? null : orderAgeText(order, now);
               const earlier =
                 order.businessDate !== null && today !== null && order.businessDate !== today;

@@ -12,6 +12,7 @@ import {
   listStorePaidOrderBatches,
   listStoreOrderAcceptanceHolds,
   listStoreUnfulfillablePaidOrders,
+  listOrderItemPrices,
   loadMerchantOrderLines,
   loadMerchantOrderListSummaries,
   loadOrderPickupContact,
@@ -441,6 +442,14 @@ export function createPersistentMerchantOrderQueue(options: {
            * taken off it (never charged).
            */
           const unpaidRemovable = new Map<string, string[]>();
+          /** DEC-DINE-IN-PAY-LATER: a pay-later table's bill by Order (owed, or what it paid). */
+          const tableBills = new Map<
+            string,
+            {
+              totalMinor: string;
+              paid: { amountMinor: string; method: "CardMachine" | "Cash" } | null;
+            }
+          >();
           const unpaidRemoved = new Map<string, string[]>();
           if (scoped !== null && orderReferences.length > 0) {
             for (const record of await createPostgresStaffOrderCancellationReader(
@@ -699,7 +708,7 @@ export function createPersistentMerchantOrderQueue(options: {
                     line,
                   ]);
                 }
-              if (!cancelAllowed || tenantReference === null) continue;
+              if (tenantReference === null) continue;
               const rounds = await createPostgresOrderPayLaterConfirmationStore({
                 ...scoped,
                 quoteVersion: 2,
@@ -707,16 +716,46 @@ export function createPersistentMerchantOrderQueue(options: {
                 authorize: async () => stillAllowed(),
               }).listByOrders({ transaction: businessTransaction, orderReferences: orders });
               if (rounds.length === 0) continue;
+              const payLaterOrders = [
+                ...new Set(rounds.map((round) => String(round.orderReference))),
+              ];
+              const settlements = await createPostgresDiningTableSettlementStore({
+                scope: { tenantReference, ...scoped },
+                authorize: async () => stillAllowed(),
+              }).listByOrders(businessTransaction, payLaterOrders);
               const paid = new Set(
-                (
-                  await createPostgresDiningTableSettlementStore({
-                    scope: { tenantReference, ...scoped },
-                    authorize: async () => stillAllowed(),
-                  }).listByOrders(businessTransaction, [
-                    ...new Set(rounds.map((round) => String(round.orderReference))),
-                  ])
-                ).map((settlement) => String(settlement.orderReference)),
+                settlements.map((settlement) => String(settlement.orderReference)),
               );
+              // The table's bill on the Orders list: what it paid, else what its rounds come to.
+              for (const order of payLaterOrders) {
+                const settlement = settlements.find(
+                  (entry) => String(entry.orderReference) === order,
+                );
+                if (settlement !== undefined) {
+                  tableBills.set(order, {
+                    totalMinor: settlement.roundsMinor.toString(),
+                    paid: {
+                      amountMinor: settlement.totalMinor.toString(),
+                      method: settlement.method,
+                    },
+                  });
+                  continue;
+                }
+                const sent = new Set(
+                  rounds
+                    .filter((round) => String(round.orderReference) === order)
+                    .map((round) => String(round.orderBatchReference)),
+                );
+                const owed = (await listOrderItemPrices(businessTransaction, scoped, order))
+                  .filter(
+                    (price) =>
+                      sent.has(String(price.orderBatchReference)) &&
+                      !removed.has(String(price.orderItemReference)),
+                  )
+                  .reduce((sum, price) => sum + price.total.amountMinor, 0n);
+                tableBills.set(order, { totalMinor: owed.toString(), paid: null });
+              }
+              if (!cancelAllowed) continue;
               for (const round of rounds) {
                 if (paid.has(String(round.orderReference))) continue;
                 const batch = String(round.orderBatchReference);
@@ -1061,6 +1100,8 @@ export function createPersistentMerchantOrderQueue(options: {
                     payments.awaitingAcceptance.has(item.initialBatchReference) &&
                     item.currentPhase === "Submitted" &&
                     item.currentVersion === 1,
+                  // DEC-DINE-IN-PAY-LATER: on the table's bill (owed), or what the table paid.
+                  tableBill: tableBills.get(item.orderReference) ?? null,
                   // WP-2423 (v15 751dd768): whether this person may record a card-machine payment
                   // and open the order's payments and refunds (the commands and reads recheck).
                   canRecordCardMachinePayment: cardMachinePaymentAllowed,

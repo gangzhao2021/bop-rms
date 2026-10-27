@@ -7,11 +7,15 @@ import {
 export interface DiningSessionCloseCommand {
   readonly operationReference: string;
   readonly diningSessionReference: string;
-  readonly action: "Begin" | "Finalize";
+  /** DEC-DINE-IN-PAY-LATER: "Cancel" takes a checking-out table back to ordering. */
+  readonly action: "Begin" | "Cancel" | "Finalize";
   readonly expectedSessionVersion: number;
 }
 export class DiningSessionCloseClientError extends Error {
-  constructor(readonly code: "PermissionDenied" | "Conflict" | "Unavailable" | "OutcomeUnknown") {
+  constructor(
+    readonly code:
+      "PermissionDenied" | "Conflict" | "AlreadyPaid" | "Unavailable" | "OutcomeUnknown",
+  ) {
     super(t("Dining session closure could not be confirmed"));
     this.name = "DiningSessionCloseClientError";
   }
@@ -40,7 +44,7 @@ function commandSnapshot(command: DiningSessionCloseCommand): DiningSessionClose
   });
   for (const value of values.slice(0, 2))
     if (typeof value !== "string" || !reference.test(value)) return invalid();
-  if (values[2] !== "Begin" && values[2] !== "Finalize") return invalid();
+  if (values[2] !== "Begin" && values[2] !== "Cancel" && values[2] !== "Finalize") return invalid();
   if (
     typeof values[3] !== "number" ||
     !Number.isSafeInteger(values[3]) ||
@@ -99,7 +103,13 @@ export function createDiningSessionCloseClient(
           if (controller.signal.aborted) throw new DiningSessionCloseClientError("OutcomeUnknown");
           if (response.status === 401 || response.status === 403)
             throw new DiningSessionCloseClientError("PermissionDenied");
-          if (response.status === 409) throw new DiningSessionCloseClientError("Conflict");
+          if (response.status === 409)
+            throw new DiningSessionCloseClientError(
+              ((await response.json().catch(() => null)) as { error?: unknown } | null)?.error ===
+                "table_already_paid"
+                ? "AlreadyPaid"
+                : "Conflict",
+            );
           if (
             !response.ok ||
             response.headers.get("cache-control") !== "no-store" ||
@@ -121,7 +131,8 @@ export function createDiningSessionCloseClient(
           if (
             (result.status !== "Applied" && result.status !== "AlreadyApplied") ||
             result.sessionVersion !== snapshot.expectedSessionVersion + 1 ||
-            result.phase !== (snapshot.action === "Begin" ? "Closing" : "Closed")
+            result.phase !==
+              ({ Begin: "Closing", Cancel: "Active", Finalize: "Closed" } as const)[snapshot.action]
           )
             throw new DiningSessionCloseClientError("OutcomeUnknown");
           return Object.freeze({

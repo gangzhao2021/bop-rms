@@ -208,8 +208,18 @@ describe("Orders v3: a table's order read round by round (Owner 2026-10-26)", ()
     expect(allReady.match(/class="dining-round__serve-all"/gu)).toHaveLength(1);
   });
 
-  it("offers no serving at a closing or closed table", () => {
-    for (const extra of [{ sessionPhase: "Closing" }, { sessionPhase: "Closed" }]) {
+  it("serves a table checking out (DEC-DINE-IN-PAY-LATER), never a closed one", () => {
+    const closing = progress(
+      [
+        progressItem(1, 1, "TEST beef noodles", "Ready"),
+        progressItem(2, 1, "TEST green tea", "Ready"),
+      ],
+      { sessionPhase: "Closing" },
+    );
+    expect(render(closing)).toContain("dining-round-item__serve");
+    expect(render(closing)).toContain("dining-round__serve-all");
+    expect(readyToServe(closing)).toHaveLength(2);
+    for (const extra of [{ sessionPhase: "Closed" }]) {
       const view = progress(
         [
           progressItem(1, 1, "TEST beef noodles", "Ready"),

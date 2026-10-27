@@ -6,7 +6,12 @@ type Item = DiningProgress["items"][number];
 
 /** Items staff can hand over now: kitchen-ready with something left to serve, at an open table. */
 export function readyToServe(view: DiningProgress, batchSequence?: number): readonly Item[] {
-  if (view.sessionPhase !== "Active" || view.closureStatus !== "Open") return [];
+  // A table checking out (Closing) is still served: its last dishes come before it closes.
+  if (
+    (view.sessionPhase !== "Active" && view.sessionPhase !== "Closing") ||
+    view.closureStatus !== "Open"
+  )
+    return [];
   return view.items.filter(
     (item) =>
       item.phase === "Ready" &&

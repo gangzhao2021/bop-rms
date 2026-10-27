@@ -150,11 +150,16 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
   await page.route("**/merchant/dining/closing", (route) => {
     const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
     closing.push(body);
-    state.phase = "Closing";
-    state.version = 7;
+    // Begin starts checkout; Cancel takes the table back to ordering (DEC rule 3).
+    state.phase = body.action === "Cancel" ? "Active" : "Closing";
+    state.version += 1;
     return route.fulfill({
       headers: { ...headers, "content-type": "application/json" },
-      body: JSON.stringify({ status: "Applied", phase: "Closing", sessionVersion: 7 }),
+      body: JSON.stringify({
+        status: "Applied",
+        phase: state.phase,
+        sessionVersion: state.version,
+      }),
     });
   });
   await page.route("**/merchant/dining/table-close-plan", (route) =>
@@ -207,6 +212,14 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
     expectedSessionVersion: 6,
   });
 
+  // The guests want more after all: checkout is cancelled and the table orders again.
+  await expect(checkout.getByText("Round 1")).toBeVisible();
+  await checkout.getByRole("button", { name: "Cancel checkout" }).click();
+  await expect(checkout.getByRole("button", { name: "Start checkout" })).toBeVisible();
+  expect(closing[1]).toMatchObject({ action: "Cancel", expectedSessionVersion: 7 });
+  await checkout.getByRole("button", { name: "Start checkout" }).click();
+  expect(closing[2]).toMatchObject({ action: "Begin", expectedSessionVersion: 8 });
+
   // The whole table's bill, round by round, then subtotal, tax and total.
   await expect(checkout.getByText("Round 1")).toBeVisible();
   await expect(checkout).toContainText("Shoyu Ramen");
@@ -243,6 +256,8 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
   await expect(receipt).toContainText("$38.45");
   await expect(receipt).toContainText("$11.55");
   await expect(checkout.getByRole("button", { name: "Print receipt" })).toBeVisible();
+  // A paid table never goes back to ordering: no Cancel checkout.
+  await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
   // Paid in full and every dish served: the table can now be closed as usual.
   await expect(page.getByRole("button", { name: "Close table T2", exact: true })).toBeVisible();
 

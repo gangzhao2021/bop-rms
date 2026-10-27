@@ -4,7 +4,7 @@ import { createDiningSessionCloseClient } from "./dining-session-close-client.js
 import { DiningSessionCloseAction } from "./DiningSessionCloseAction.js";
 import type { DiningProgress } from "./dining-progress-client.js";
 const id = (n: number) => "01909988-0000-7000-8000-" + n.toString(16).padStart(12, "0");
-const command = (action: "Begin" | "Finalize" = "Begin") => ({
+const command = (action: "Begin" | "Cancel" | "Finalize" = "Begin") => ({
   operationReference: id(1),
   diningSessionReference: id(2),
   expectedSessionVersion: 4,
@@ -15,13 +15,15 @@ const response = (phase = "Closing", extra: Record<string, unknown> = {}) =>
   new Response(JSON.stringify({ status: "AlreadyApplied", sessionVersion: 5, phase, ...extra }), {
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
-it.each(["Begin", "Finalize"] as const)(
+it.each(["Begin", "Cancel", "Finalize"] as const)(
   "retries immutable %s with exact phase and version",
   async (action) => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValueOnce(response(action === "Begin" ? "Closing" : "Closed"));
+      .mockResolvedValueOnce(
+        response({ Begin: "Closing", Cancel: "Active", Finalize: "Closed" }[action]),
+      );
     const input = command(action),
       op = createDiningSessionCloseClient(fetcher, once).prepare(input);
     input.expectedSessionVersion = 9;
@@ -35,7 +37,7 @@ it.each(["Begin", "Finalize"] as const)(
     expect(fetcher.mock.calls[1]?.[1]?.body).toBe(fetcher.mock.calls[0]?.[1]?.body);
   },
 );
-it.each([{ action: "Cancel" }, { expectedSessionVersion: 0 }, { actorReference: id(9) }])(
+it.each([{ action: "Reopen" }, { expectedSessionVersion: 0 }, { actorReference: id(9) }])(
   "rejects invalid authority/action %j",
   (change) => {
     expect(() =>

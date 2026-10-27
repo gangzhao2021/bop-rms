@@ -222,6 +222,9 @@ export const cartText = Object.freeze({
     get "checkout-in-progress"() {
       return t("Another guest is checking out.");
     },
+    get "table-checking-out"() {
+      return t("Your table is checking out.");
+    },
     get expired() {
       return t("Your cart expired. See the message on this page.");
     },
@@ -274,6 +277,14 @@ export const cartText = Object.freeze({
         t("Cart replacement not permitted"),
         t(
           "This session isn’t part of the table any more, or only the person who started the table can restart this cart. Scan the table QR code again or ask staff for help.",
+        ),
+      ] as const;
+    },
+    get tableCheckingOut() {
+      return [
+        t("Your table is checking out"),
+        t(
+          "New dishes can’t be sent while the bill is being settled. To add more, ask a staff member.",
         ),
       ] as const;
     },

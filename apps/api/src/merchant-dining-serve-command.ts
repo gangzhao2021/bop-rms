@@ -185,11 +185,12 @@ export function createMerchantDiningServeCommand(options: {
             item.phase !== "Ready"
           )
             return fail();
-          const table = await createMerchantDiningTableContext({ scope, authorize: guard }).load(
-            businessTransaction,
-            selected.diningSessionReference,
-            observedAt,
-          );
+          const table = await createMerchantDiningTableContext({
+            scope,
+            authorize: guard,
+            // A table checking out is still served (DEC-DINE-IN-PAY-LATER: close after serving).
+            allowClosingSession: true,
+          }).load(businessTransaction, selected.diningSessionReference, observedAt);
           if (
             table.sessionVersion !== command.expectedSessionVersion ||
             table.tableAssignmentVersion !== command.expectedTableAssignmentVersion

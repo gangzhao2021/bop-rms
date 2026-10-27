@@ -103,6 +103,8 @@ export interface CustomerDiningSessionFacts {
     readonly payLaterRounds?: ReadonlySet<string>;
     /** DEC-DINE-IN-PAY-LATER: rounds the table paid at the end, with its one payment. */
     readonly settledRounds?: ReadonlySet<string>;
+    /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment (if paid). */
+    readonly tableSettlement?: { readonly tipMinor: bigint; readonly roundingMinor: bigint } | null;
     readonly unpaidCancellations: ReadonlySet<string>;
     readonly staffCancellations: ReadonlyMap<
       string,
@@ -423,6 +425,14 @@ export function composeCustomerDiningSession(
     paymentTiming: facts.paymentTiming ?? "PayFirst",
     rounds: Object.freeze(rounds),
     summary: Object.freeze({
+      // DEC-DINE-IN-PAY-LATER: what the table's one payment added to its dishes, so the guest's
+      // total and what was paid agree line by line.
+      ...(order.tableSettlement == null
+        ? {}
+        : {
+            tableTip: money(order.tableSettlement.tipMinor),
+            cashRounding: money(order.tableSettlement.roundingMinor),
+          }),
       paid: money(paid),
       refunded: money(refunded),
       refundPending: money(refundPending),
@@ -859,6 +869,13 @@ function postgresDependencies(
           paymentStarted,
           payLaterRounds,
           settledRounds,
+          tableSettlement:
+            tableSettlements[0] === undefined
+              ? null
+              : {
+                  tipMinor: tableSettlements[0].tipMinor,
+                  roundingMinor: tableSettlements[0].roundingMinor,
+                },
           unpaidCancellations,
           staffCancellations,
           itemCancellations,

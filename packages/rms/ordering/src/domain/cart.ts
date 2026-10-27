@@ -75,6 +75,8 @@ export const cartErrorCodes = [
   "CART_REPLACEMENT_CHECKOUT_PENDING",
   /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest's checkout holds this table Cart version. */
   "CART_CHECKOUT_IN_PROGRESS",
+  /** DEC-DINE-IN-PAY-LATER: the guest's table is checking out; staff add dishes. */
+  "CART_TABLE_CHECKING_OUT",
   "CART_VERSION_CONFLICT",
   "CART_IDEMPOTENCY_CONFLICT",
   "CART_ITEM_NOT_FOUND",

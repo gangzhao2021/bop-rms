@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import { createDiningSessionCloseClient } from "./dining-session-close-client.js";
+import {
+  createDiningSessionCloseClient,
+  DiningSessionCloseClientError,
+} from "./dining-session-close-client.js";
 import { createDiningProgressClient } from "./dining-progress-client.js";
 import { paidAtInstant } from "./counter-payment.js";
 import {
@@ -24,7 +27,16 @@ export function dollarsToMinor(value: string): bigint | null {
 }
 
 function errorText(error: unknown): string {
-  const code = error instanceof TableCheckoutError ? error.code : "OutcomeUnknown";
+  const code =
+    error instanceof TableCheckoutError
+      ? error.code
+      : error instanceof DiningSessionCloseClientError
+        ? error.code === "Conflict"
+          ? "SessionChanged"
+          : error.code === "Unavailable"
+            ? "Unavailable"
+            : error.code
+        : "OutcomeUnknown";
   switch (code) {
     case "PermissionDenied":
       return t("Your access doesn't allow this. Ask an Owner or Store Manager.");
@@ -42,6 +54,8 @@ function errorText(error: unknown): string {
       return t("This table has already paid.");
     case "NotReady":
       return t("Every dish must be served or cancelled first.");
+    case "SessionChanged":
+      return t("This table changed since it was shown. It has been read again: try again.");
     case "OutcomeUnknown":
       return t(
         "We couldn't confirm the result. Check the connection and press the button again: it is never recorded twice.",
@@ -153,6 +167,36 @@ export function TableCheckout({
       onChanged();
     } catch (error) {
       setProblem(errorText(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // DEC-DINE-IN-PAY-LATER (rule 3): the guests want more after asking for the bill — back to
+  // ordering, recorded with who did it. Only while nothing is paid.
+  const cancelOperation = useRef<string | null>(null);
+  const cancelCheckout = async () => {
+    if (busy || locked) return;
+    setBusy(true);
+    setProblem(null);
+    cancelOperation.current ??= serviceOperationReference();
+    try {
+      await createDiningSessionCloseClient(fetcher)
+        .prepare({
+          operationReference: cancelOperation.current,
+          diningSessionReference: sessionReference,
+          action: "Cancel",
+          expectedSessionVersion: session.version,
+        })
+        .execute(csrf);
+      cancelOperation.current = null;
+      onChanged();
+    } catch (error) {
+      if (!(error instanceof DiningSessionCloseClientError && error.code === "OutcomeUnknown"))
+        cancelOperation.current = null;
+      setProblem(errorText(error));
+      if (error instanceof DiningSessionCloseClientError && error.code !== "OutcomeUnknown")
+        onChanged();
     } finally {
       setBusy(false);
     }
@@ -479,6 +523,15 @@ export function TableCheckout({
           )}
         </>
       )}
+      {canStart && bill !== null && bill.settlement === null ? (
+        // DEC-DINE-IN-PAY-LATER (rule 3): the guests want to order more — back to ordering.
+        <p className="table-checkout__cancel">
+          <button type="button" disabled={busy || locked} onClick={() => void cancelCheckout()}>
+            {t("Cancel checkout")}
+          </button>{" "}
+          <small>{t("The table can order again; checkout is started again later.")}</small>
+        </p>
+      ) : null}
       {problem ? <p role="alert">{problem}</p> : null}
     </section>
   );

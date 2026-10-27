@@ -109,6 +109,8 @@ export type CustomerCartPortResult =
   /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is checking out this Cart
    * version until heldUntil; nothing was changed. */
   | { readonly status: "CheckoutInProgress"; readonly heldUntil: string }
+  /** DEC-DINE-IN-PAY-LATER: the guest's table is checking out; staff add dishes. */
+  | { readonly status: "TableCheckingOut" }
   | { readonly status: "Unavailable" };
 
 export interface CustomerCartReplacementPort {
@@ -199,6 +201,7 @@ type ErrorCode =
   | "cart_rate_limited"
   | "cart_order_processing"
   | "cart_checkout_in_progress"
+  | "cart_table_checking_out"
   | "cart_service_unavailable";
 
 /**
@@ -227,6 +230,8 @@ const errors = Object.freeze({
   },
   cart_abandoned: { status: 409, messageKey: "customer.cart.abandoned" },
   cart_rate_limited: { status: 429, messageKey: "customer.cart.rate_limited" },
+  // DEC-DINE-IN-PAY-LATER: the table is checking out (no new rounds; staff add dishes).
+  cart_table_checking_out: { status: 409, messageKey: "customer.cart.table_checking_out" },
   // WP-2423: the table's last checkout may still create an order or charge; retry shortly.
   cart_order_processing: { status: 409, messageKey: "customer.cart.order_processing" },
   // DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is paying for this Cart.
@@ -550,6 +555,10 @@ function handleResult(
     } catch {
       sendError(response, "cart_service_unavailable");
     }
+    return;
+  }
+  if (result.status === "TableCheckingOut") {
+    sendError(response, "cart_table_checking_out");
     return;
   }
   if (result.status === "CheckoutInProgress") {

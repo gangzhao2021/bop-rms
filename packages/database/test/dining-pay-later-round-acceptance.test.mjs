@@ -5,6 +5,7 @@ import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
 import { loadOutboxEnvelope } from "../../bop/eventing/src/index.ts";
+import { parseDiningSession } from "../../rms/dining/src/index.ts";
 import {
   createOrderNumberAllocation,
   createPostgresOrderKitchenSourceStore,
@@ -385,9 +386,137 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
       assert.ok(source1, "the kitchen resolves the first pay-later round");
       assert.equal(String(source1.orderBatchReference), R1.batch.orderBatchReference);
 
+      // ── S2: the table checks out and pays once (DEC-DINE-IN-PAY-LATER rules 3, 6).
+      const provider = id(0x1);
+      const staffPermissions = [
+        "ordering.order.create_staff",
+        "dining.operate",
+        "dining.session.close",
+        "order.close",
+        "ordering.order.cancel",
+      ];
+      const server = await seedMerchantAcceptanceSession({
+        admin,
+        runner: transactions(),
+        scope: ownerScope,
+        actor: id(0x700),
+        at: now(),
+        extraPermissions: staffPermissions,
+      });
+      const manager = await seedMerchantAcceptanceSession({
+        admin,
+        runner: transactions(),
+        scope: ownerScope,
+        actor: id(0x701),
+        at: now(),
+        extraPermissions: [...staffPermissions, "payment.refund.approve"],
+        referencePrefix: "01909966",
+        sessionReferencePrefix: "01909965",
+      });
+      const as = (who) => ({ sessionCookie: who.sessionCookie, csrf: who.csrf });
+      const persistenceOf = (who) => ({ ...who.persistence, now });
+      const bill = (who = server) =>
+        createMerchantDiningTableBillRead({
+          persistence: persistenceOf(who),
+          authentication: who.authentication,
+        })({ ...as(who), query: { diningSessionReference: sessionReference } });
+      const settleWith = (who, command) =>
+        createMerchantDiningTableSettle({
+          persistence: persistenceOf(who),
+          authentication: who.authentication,
+          environment: "Test",
+          nextReference: fresh,
+        })({
+          ...as(who),
+          command: {
+            operationReference: fresh(),
+            diningSessionReference: sessionReference,
+            method: "Cash",
+            tip: { kind: "Percent", percent: 15 },
+            tenderedMinor: "100000",
+            slipReference: null,
+            recordedAfterOutage: false,
+            takenAt: null,
+            ...command,
+          },
+        });
+      const departure = (who, expectedOrderVersion) =>
+        createMerchantDiningUnpaidDeparture({
+          persistence: persistenceOf(who),
+          authentication: who.authentication,
+          resolveConfiguration: createDiningOrderCloseConfiguration({
+            ...ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+          }),
+          newReference: fresh,
+          audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+        })({
+          ...as(who),
+          command: {
+            orderReference,
+            operationReference: fresh(),
+            expectedOrderVersion,
+            expectedClosureVersion: 0,
+          },
+        });
+
+      // The table's checkout (Dining's closing command, as the merchant API composes it).
+      const closing = (who, action) =>
+        rows("SELECT version FROM rms_dining.dining_session WHERE session_id=$1", [
+          sessionReference,
+        ]).then(([row]) =>
+          createMerchantDiningClosingCommand({
+            persistence: persistenceOf(who),
+            authentication: who.authentication,
+            providerAccountReference: provider,
+            environment: "Test",
+            newReference: fresh,
+            retentionPolicyCode: "AUDIT_DEFAULT",
+            retentionPolicyVersion: 1,
+          })({
+            ...as(who),
+            command: {
+              action,
+              diningSessionReference: sessionReference,
+              operationReference: fresh(),
+              expectedSessionVersion: Number(row.version),
+            },
+          }),
+        );
+      // ── Checkout started, then cancelled: the guests want more (DEC rule 3). Back to Active,
+      // recorded with who did it; then the table orders round 2 and checkout starts again.
+      assert.equal((await closing(server, "Begin")).phase, "Closing");
+      const reopened = await closing(server, "Cancel");
+      assert.equal(reopened.phase, "Active");
+      assert.deepEqual(
+        await rows(
+          "SELECT actor_reference::text AS actor FROM platform_audit.audit_record WHERE action_code='DINING_SESSION_CLOSING_CANCEL' AND target_id=$1",
+          [sessionReference],
+        ),
+        [{ actor: id(0x700) }],
+      );
+      assert.equal(
+        (
+          await rows(
+            "SELECT session_snapshot->>'phase' AS phase FROM rms_dining.dining_session WHERE session_id=$1",
+            [sessionReference],
+          )
+        )[0].phase,
+        "Active",
+      );
+
       // ── Round 2: the table guest's later round through the actual Ordering writer.
       await seedSubmissionCart(admin, R2.f);
+      const liveSession = parseDiningSession(
+        (
+          await rows("SELECT session_snapshot FROM rms_dining.dining_session WHERE session_id=$1", [
+            sessionReference,
+          ])
+        )[0].session_snapshot,
+      );
       const link2 = await dining.prepare(R2, {
+        currentSession: liveSession,
         paymentOperationReference: id(0x2010),
         participant: dining.guest,
       });
@@ -513,81 +642,6 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
       assert.ok(source2, "the kitchen resolves the later pay-later round");
       assert.equal(String(source2.orderBatchReference), R2.batch.orderBatchReference);
 
-      // ── S2: the table checks out and pays once (DEC-DINE-IN-PAY-LATER rules 3, 6).
-      const provider = id(0x1);
-      const staffPermissions = [
-        "ordering.order.create_staff",
-        "dining.operate",
-        "dining.session.close",
-        "order.close",
-        "ordering.order.cancel",
-      ];
-      const server = await seedMerchantAcceptanceSession({
-        admin,
-        runner: transactions(),
-        scope: ownerScope,
-        actor: id(0x700),
-        at: now(),
-        extraPermissions: staffPermissions,
-      });
-      const manager = await seedMerchantAcceptanceSession({
-        admin,
-        runner: transactions(),
-        scope: ownerScope,
-        actor: id(0x701),
-        at: now(),
-        extraPermissions: [...staffPermissions, "payment.refund.approve"],
-        referencePrefix: "01909966",
-        sessionReferencePrefix: "01909965",
-      });
-      const as = (who) => ({ sessionCookie: who.sessionCookie, csrf: who.csrf });
-      const persistenceOf = (who) => ({ ...who.persistence, now });
-      const bill = (who = server) =>
-        createMerchantDiningTableBillRead({
-          persistence: persistenceOf(who),
-          authentication: who.authentication,
-        })({ ...as(who), query: { diningSessionReference: sessionReference } });
-      const settleWith = (who, command) =>
-        createMerchantDiningTableSettle({
-          persistence: persistenceOf(who),
-          authentication: who.authentication,
-          environment: "Test",
-          nextReference: fresh,
-        })({
-          ...as(who),
-          command: {
-            operationReference: fresh(),
-            diningSessionReference: sessionReference,
-            method: "Cash",
-            tip: { kind: "Percent", percent: 15 },
-            tenderedMinor: "100000",
-            slipReference: null,
-            recordedAfterOutage: false,
-            takenAt: null,
-            ...command,
-          },
-        });
-      const departure = (who, expectedOrderVersion) =>
-        createMerchantDiningUnpaidDeparture({
-          persistence: persistenceOf(who),
-          authentication: who.authentication,
-          resolveConfiguration: createDiningOrderCloseConfiguration({
-            ...ownerScope,
-            providerAccountReference: provider,
-            environment: "Test",
-          }),
-          newReference: fresh,
-          audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
-        })({
-          ...as(who),
-          command: {
-            orderReference,
-            operationReference: fresh(),
-            expectedOrderVersion,
-            expectedClosureVersion: 0,
-          },
-        });
-
       // ── S3 (rule 2): a dish comes off the unpaid bill before the table pays — who and why, as
       // an append-only cancellation on the 'PayLater' basis; the table is never charged for it.
       const removal = (who, command) =>
@@ -695,30 +749,8 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
       const removedMinor = items2[0].pricing.total.amountMinor;
       // Paying before checkout started is refused: rounds can still be added.
       await assert.rejects(settleWith(server, {}), { code: "TABLE_CHECKOUT_NOT_STARTED" });
-      const sessionVersion = Number(
-        (
-          await rows("SELECT version FROM rms_dining.dining_session WHERE session_id=$1", [
-            sessionReference,
-          ])
-        )[0].version,
-      );
-      const begun = await createMerchantDiningClosingCommand({
-        persistence: persistenceOf(server),
-        authentication: server.authentication,
-        providerAccountReference: provider,
-        environment: "Test",
-        newReference: fresh,
-        retentionPolicyCode: "AUDIT_DEFAULT",
-        retentionPolicyVersion: 1,
-      })({
-        ...as(server),
-        command: {
-          action: "Begin",
-          diningSessionReference: sessionReference,
-          operationReference: fresh(),
-          expectedSessionVersion: sessionVersion,
-        },
-      });
+      // Checkout starts again with round 2 on the table.
+      const begun = await closing(server, "Begin");
       assert.equal(begun.phase, "Closing");
 
       // The bill: round 1 owed with its items, before tax, tax and total; round 2 owes nothing.
@@ -801,6 +833,8 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
         [true, false],
       );
       assert.equal(paid.bill.owed.totalMinor, "0");
+      // A paid table can't go back to ordering: it pays once and its payment never changes.
+      await assert.rejects(closing(server, "Cancel"), { code: "DINING_CHECKOUT_ALREADY_PAID" });
       // Once the table paid, no dish comes off its bill (it is refunded from the payment instead).
       await assert.rejects(
         removal(server, {

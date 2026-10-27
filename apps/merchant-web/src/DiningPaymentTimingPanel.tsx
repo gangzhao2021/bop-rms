@@ -194,7 +194,7 @@ export function DiningPaymentTimingPanel({
               "PayLater",
               t("Pay at the end"),
               t(
-                "Guests order rounds that go straight to the kitchen and pay once for the whole table: on their phone, on the card machine or in cash.",
+                "Guests order rounds that go straight to the kitchen. Staff take one payment for the whole table at the end, on the card machine or in cash.",
               ),
             )}
             {option(

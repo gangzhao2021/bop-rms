@@ -318,8 +318,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "读不到堂食付款设置，请刷新重试。",
   "When dine-in guests pay": "堂食客人什么时候付款",
   "Pay at the end": "先点后付",
-  "Guests order rounds that go straight to the kitchen and pay once for the whole table: on their phone, on the card machine or in cash.":
-    "客人每一轮点的菜直接送到后厨，最后整桌一起付：用手机付、刷卡机或现金。",
+  "Guests order rounds that go straight to the kitchen. Staff take one payment for the whole table at the end, on the card machine or in cash.":
+    "客人每一轮点的菜直接送到后厨。最后由店员为整桌收一次款，用刷卡机或现金。",
   "Pay before each round": "先付后做",
   "Each round is paid before it goes to the kitchen.": "每一轮先付款，再送到后厨。",
   "A change applies to tables opened after it; tables already open keep theirs.":
@@ -5759,4 +5759,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Taken off the bill · not charged": "已从账单删除 · 不收费",
   "Taken off the bill": "已从账单删除",
   "Total after dishes taken off": "删菜后合计",
+  "Cancel checkout": "取消结账",
+  "The table can order again; checkout is started again later.":
+    "这桌可以继续点菜，之后再重新开始结账。",
+  "This table changed since it was shown. It has been read again: try again.":
+    "这桌在显示后有变动，已重新读取，请再试一次。",
+  "On the table's bill": "记入本桌账单",
+  "Paid at the table · cash": "已在桌上付清 · 现金",
+  "Paid at the table · card machine": "已在桌上付清 · 刷卡机",
 });

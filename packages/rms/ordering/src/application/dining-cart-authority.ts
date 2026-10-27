@@ -174,6 +174,7 @@ export function createDiningCartAuthority(ports: DiningCartAuthorityPorts) {
         } catch (error) {
           if (error instanceof CartError && error.code === "CART_PERMISSION_DENIED")
             return denied();
+          if (error instanceof CartError && error.code === "CART_TABLE_CHECKING_OUT") throw error;
           return unavailable();
         }
         const checkedAt = tick();
