@@ -752,8 +752,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       /** WP-2423 (2026-10-18): dine-in portions the kitchen is remaking (0 when none or unknown). */
       remakingItemCount,
       /**
-       * WP-2423 (v15 2026-10-18): what the kitchen shows for an accepted pickup on the order
-       * detail ("InProgress" or "Ready") before Ordering records it; null otherwise.
+       * WP-2423 (v15 2026-10-18): what the kitchen shows for an accepted pickup ("InProgress" or
+       * "Ready") before Ordering records it — on the list and the detail; null otherwise.
        */
       kitchenPhase: kitchenPhase as "InProgress" | "Ready" | null,
       /**

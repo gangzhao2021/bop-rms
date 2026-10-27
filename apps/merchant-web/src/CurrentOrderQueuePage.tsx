@@ -137,7 +137,11 @@ export function filterCurrentOrderItems(
                   : order.unfulfillable === null &&
                     !order.pickupNotCollected &&
                     !order.awaitingPayment &&
-                    (order.currentPhase ?? "Unavailable") === filters.phase)),
+                    // Orders v3: an accepted pickup counts where the kitchen has it (being made,
+                    // ready), as its row says.
+                    (order.currentPhase === "Accepted" && order.kitchenPhase !== null
+                      ? order.kitchenPhase
+                      : (order.currentPhase ?? "Unavailable")) === filters.phase)),
   );
 }
 /** WP-2423 Q6 step 2: what "Check refund" on a cancelled item needs (omitted: not offered). */
@@ -1205,15 +1209,15 @@ export function orderWho(order: QueuedOrder): string {
 }
 
 /**
- * Orders v2: a pickup staff can hand over now (accepted, paid or recorded, not closed): its next
- * step is the handoff on Pickup, where the guest's code is checked.
+ * Orders v3: a pickup staff can hand over now — ready (Ordering or the kitchen says so), paid or
+ * recorded, not closed. Its next step is the handoff on Pickup, where the guest's code is checked.
  */
 export function handoverReady(order: QueuedOrder, now: number): boolean {
   return (
     order.orderType === "Pickup" &&
-    (order.currentPhase === "Accepted" ||
-      order.currentPhase === "InProgress" ||
-      order.currentPhase === "Ready") &&
+    // Only once it is ready: before that the kitchen is still making it.
+    (order.currentPhase === "Ready" ||
+      (order.currentPhase === "Accepted" && order.kitchenPhase === "Ready")) &&
     order.unfulfillable === null &&
     !order.pickupNotCollected &&
     !order.awaitingPayment &&
@@ -2720,7 +2724,7 @@ export function CurrentOrderQueuePage({
                           className="order-next-fill"
                           onClick={() => openOrder(order)}
                         >
-                          {t("Charge on card machine")}
+                          {t("Charge")}
                         </button>
                       );
                     // Orders v2: an accepted pickup is handed over on Pickup (the code is checked there).

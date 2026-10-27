@@ -260,13 +260,15 @@ export function createMerchantOrderQueueRead(options: {
                 orderBatchReference: item.initialBatchReference,
               });
               if (execution.occurredAt > observedAt) return unavailable();
-              // WP-2423 (v15 2026-10-18): on the order detail, what the kitchen itself shows now —
-              // the public source the customer's page reads — so staff see "Preparing"/"Ready" the
-              // moment the kitchen does, as the customer does. It changes nothing on the Order
-              // (its version and commands still follow Ordering). Unreadable leaves it unknown.
+              // WP-2423 (v15 2026-10-18): what the kitchen itself shows now — the public source the
+              // customer's page reads — so staff see "Preparing"/"Ready" the moment the kitchen
+              // does, as the customer does. Orders v3 (2026-10-26 live check): on the list too, so
+              // a row, its tab count and its next step ("Hand over") follow the kitchen. It changes
+              // nothing on the Order (its version and commands still follow Ordering).
+              // Unreadable leaves it unknown.
               let kitchenPhase: "InProgress" | "Ready" | null = null;
               // A pickup's Ordering phase stays Accepted until it is handed over.
-              if (!listing && execution.phase === "Accepted") {
+              if (execution.phase === "Accepted") {
                 const work = await createPostgresKitchenCustomerStatusReader({
                   ...ownerScope,
                   authorize: async (_tx, kitchenScope) =>
@@ -441,8 +443,8 @@ export function createMerchantOrderQueueRead(options: {
              */
             remakingItemCount: current.remakingItemCount,
             /**
-             * WP-2423 (v15 2026-10-18): a pickup's kitchen state on the order detail while Ordering
-             * has not recorded it yet (null otherwise, and always on the list).
+             * WP-2423 (v15 2026-10-18): a pickup's kitchen state while Ordering has not recorded it
+             * yet (null otherwise); Orders v3: on the list too.
              */
             kitchenPhase: current.kitchenPhase,
             observedAt: current.observedAt,

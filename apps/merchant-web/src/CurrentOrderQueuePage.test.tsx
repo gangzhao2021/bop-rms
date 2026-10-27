@@ -1755,8 +1755,18 @@ it("Orders v3: a row says what, who and which day, and an accepted pickup's next
   );
   // An accepted, paid pickup is handed over on Pickup; one waiting to be accepted is not.
   const now = Date.parse("2026-08-12T12:00:00.000Z");
-  expect(handoverReady(accepted, now)).toBe(true);
-  expect(handoverReady({ ...accepted, currentPhase: "Submitted" }, now)).toBe(false);
-  expect(handoverReady({ ...accepted, awaitingPayment: true }, now)).toBe(false);
-  expect(handoverReady({ ...accepted, orderType: "DineIn" }, now)).toBe(false);
+  // Live check 2026-10-26: not while the kitchen is still making it.
+  expect(handoverReady(accepted, now)).toBe(false);
+  expect(handoverReady({ ...accepted, kitchenPhase: "InProgress" }, now)).toBe(false);
+  const ready = { ...accepted, kitchenPhase: "Ready" as const };
+  expect(handoverReady(ready, now)).toBe(true);
+  expect(handoverReady({ ...accepted, currentPhase: "Ready" }, now)).toBe(true);
+  expect(handoverReady({ ...ready, currentPhase: "Submitted" }, now)).toBe(false);
+  expect(handoverReady({ ...ready, awaitingPayment: true }, now)).toBe(false);
+  expect(handoverReady({ ...ready, orderType: "DineIn" }, now)).toBe(false);
+  // The tabs count it where the kitchen has it.
+  const items = [accepted, ready, { ...accepted, kitchenPhase: "InProgress" as const }];
+  const count = (phase: string) =>
+    filterCurrentOrderItems(items, { orderNumber: "", type: "All", channel: "All", phase }).length;
+  expect([count("Accepted"), count("InProgress"), count("Ready")]).toEqual([1, 1, 1]);
 });
