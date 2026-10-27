@@ -268,7 +268,7 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
     endsAt: instant(raw.endsAt),
     includesOpenDay: bool(raw.includesOpenDay),
     summary: summary(exact(raw.summary, summaryKeys)),
-    byChannel: list(raw.byChannel, 2, (item) => {
+    byChannel: list(raw.byChannel, channels.length, (item) => {
       const entry = exact(item, ["channel", ...summaryKeys]);
       return Object.freeze({ channel: oneOf(entry.channel, channels), ...summary(entry) });
     }),
@@ -282,7 +282,7 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
       const day = exact(item, ["businessDate", "channels"]);
       return Object.freeze({
         businessDate: date(day.businessDate),
-        channels: list(day.channels, 2, (entry) => {
+        channels: list(day.channels, channels.length, (entry) => {
           const tip = exact(entry, ["channel", "tipsMinor", "refundedMinor", "netMinor"]);
           return Object.freeze({
             channel: oneOf(tip.channel, channels),
