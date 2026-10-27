@@ -21,6 +21,7 @@ const money = formatCad;
 export const channelLabel: Record<StoreReportChannel, string> = {
   Online: t("Online (card)"),
   CardMachine: t("Store card machine"),
+  Cash: t("Cash"),
 };
 export const orderTypeLabel: Record<StoreReportOrderType, string> = {
   DineIn: t("Dine-in"),
@@ -98,6 +99,8 @@ function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
     lines.push([t("Tax · {label}", { label: tax.label }), money(tax.amountMinor)]);
   if (summary.taxes.length !== 1) lines.push([t("Tax"), money(summary.taxMinor)]);
   lines.push([t("Tips"), money(summary.tipsMinor)]);
+  if (summary.cashRoundingMinor !== "0")
+    lines.push([t("Cash rounding"), money(summary.cashRoundingMinor)]);
   if (summary.unmatchedMinor !== "0")
     lines.push([t("Paid but not matched to items"), money(summary.unmatchedMinor)]);
   lines.push([t("Total collected"), money(summary.collectedMinor), true]);

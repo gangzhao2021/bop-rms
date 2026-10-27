@@ -235,12 +235,13 @@ export function createTableCheckoutClient(fetcher: typeof fetch = fetch) {
           | { readonly kind: "Amount"; readonly amountMinor: string };
         readonly tenderedMinor: string | null;
         readonly slipReference: string | null;
+        /** Paid while the system was down (paper), at this instant; null when paid now. */
+        readonly takenAt: string | null;
       },
     ) {
       const raw = (await post("/merchant/dining/table-settle", csrf, {
         ...command,
-        recordedAfterOutage: false,
-        takenAt: null,
+        recordedAfterOutage: command.takenAt !== null,
       })) as { status?: unknown; bill?: unknown } | null;
       if (raw?.status !== "Recorded" && raw?.status !== "AlreadyRecorded") return invalid();
       return Object.freeze({ status: raw.status, bill: parseTableBill(raw.bill) });

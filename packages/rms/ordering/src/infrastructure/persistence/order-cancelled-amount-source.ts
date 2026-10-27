@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import { createPostgresOrderRevisionPosition } from "./order-revision-position.js";
 import { createPostgresSubmittedOrderAmountSource } from "./submitted-order-amount-source.js";
 import { parseOrderingReference, parseOrderingInstant } from "../../domain/cart.js";
+import {
+  decodeConfiguredOrderItemSnapshot,
+  decodeOrderItemSnapshot,
+} from "../../domain/order-item-snapshot-codec.js";
 type Options = Parameters<typeof createPostgresSubmittedOrderAmountSource>[0];
 type Base = Awaited<ReturnType<ReturnType<typeof createPostgresSubmittedOrderAmountSource>>>;
 const fail = (): never => {
@@ -75,7 +79,35 @@ export function createPostgresOrderCancelledAmountSource(options: Options) {
           amountMinor: batch.totalMinor.toString(),
         });
       });
-      const cancelledTotalMinor = evidence.reduce((sum, row) => sum + BigInt(row.amountMinor), 0n);
+      // DEC-DINE-IN-PAY-LATER: dishes taken off a pay-later round's bill before the table paid
+      // (item cancellations on the 'PayLater' basis): nothing was charged, so they leave the total.
+      const voided = (
+        await tx.query(
+          "SELECT c.cancellation_id::text AS cancellation,i.order_item_id::text AS item,i.transaction_snapshot_json AS snapshot," +
+            "i.transaction_snapshot_json->'pricing'->>'quoteVersion' AS quote_version FROM rms_ordering.order_item_staff_cancellation c " +
+            "JOIN rms_ordering.order_item i ON i.brand_id=c.brand_id AND i.store_id=c.store_id AND i.order_id=c.order_id " +
+            "AND i.order_batch_id=c.order_batch_id AND i.order_item_id=ANY(c.order_item_ids) " +
+            "WHERE c.brand_id=$1 AND c.store_id=$2 AND c.order_id=$3 AND c.basis='PayLater' AND c.cancelled_at<=$4 " +
+            "ORDER BY c.cancellation_id,i.order_item_id LIMIT 10001",
+          [brand, store, query.orderReference, query.observedAt],
+        )
+      ).rows as Record<string, unknown>[];
+      if (voided.length > 10000) return fail();
+      const voidedEvidence = voided.map((row) => {
+        if (row.quote_version !== "1" && row.quote_version !== "2") return fail();
+        const item = (
+          row.quote_version === "2" ? decodeConfiguredOrderItemSnapshot : decodeOrderItemSnapshot
+        )(row.snapshot);
+        if (item.orderItemReference !== String(row.item)) return fail();
+        return Object.freeze({
+          cancellationReference: String(parseOrderingReference(row.cancellation)),
+          orderItemReference: item.orderItemReference,
+          amountMinor: item.pricing.total.amountMinor.toString(),
+        });
+      });
+      const cancelledTotalMinor =
+        evidence.reduce((sum, row) => sum + BigInt(row.amountMinor), 0n) +
+        voidedEvidence.reduce((sum, row) => sum + BigInt(row.amountMinor), 0n);
       if (
         cancelledTotalMinor > base.totalMinor ||
         (await options.authorize(tx, {
@@ -98,6 +130,7 @@ export function createPostgresOrderCancelledAmountSource(options: Options) {
                 base.snapshotDigest,
                 position?.snapshotDigest ?? null,
                 evidence,
+                voidedEvidence,
               ]),
             )
             .digest("hex"),

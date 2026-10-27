@@ -160,3 +160,24 @@ describe("WP-2423 settlement re-check and unmatched charges", () => {
     ).toThrow("Unavailable");
   });
 });
+
+describe("DEC-DINE-IN-PAY-LATER settlement cash block", () => {
+  it("reads the day's table cash: received, refunds, net and rounding", () => {
+    const view = parseSettlementView({
+      ...settlementViewFixture(),
+      cash: {
+        received: { count: 2, amountMinor: "7690", currencyCode: "CAD" },
+        tipMinor: "900",
+        roundingMinor: "-3",
+        refunded: { count: 1, amountMinor: "500", currencyCode: "CAD" },
+        netMinor: "7190",
+        recordedAfterOutageCount: 0,
+      },
+    });
+    expect(view.cash).toMatchObject({ roundingMinor: "-3", netMinor: "7190" });
+    expect(parseSettlementView({ ...settlementViewFixture(), cash: null }).cash).toBeNull();
+    expect(() =>
+      parseSettlementView({ ...settlementViewFixture(), cash: { received: null } }),
+    ).toThrow();
+  });
+});

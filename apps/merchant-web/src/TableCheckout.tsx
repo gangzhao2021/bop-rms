@@ -2,8 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import { createDiningSessionCloseClient } from "./dining-session-close-client.js";
+import {
+  createDiningSessionCloseClient,
+  DiningSessionCloseClientError,
+} from "./dining-session-close-client.js";
 import { createDiningProgressClient } from "./dining-progress-client.js";
+import { paidAtInstant } from "./counter-payment.js";
 import {
   cashTotalMinor,
   createTableCheckoutClient,
@@ -23,7 +27,16 @@ export function dollarsToMinor(value: string): bigint | null {
 }
 
 function errorText(error: unknown): string {
-  const code = error instanceof TableCheckoutError ? error.code : "OutcomeUnknown";
+  const code =
+    error instanceof TableCheckoutError
+      ? error.code
+      : error instanceof DiningSessionCloseClientError
+        ? error.code === "Conflict"
+          ? "SessionChanged"
+          : error.code === "Unavailable"
+            ? "Unavailable"
+            : error.code
+        : "OutcomeUnknown";
   switch (code) {
     case "PermissionDenied":
       return t("Your access doesn't allow this. Ask an Owner or Store Manager.");
@@ -41,6 +54,8 @@ function errorText(error: unknown): string {
       return t("This table has already paid.");
     case "NotReady":
       return t("Every dish must be served or cancelled first.");
+    case "SessionChanged":
+      return t("This table changed since it was shown. It has been read again: try again.");
     case "OutcomeUnknown":
       return t(
         "We couldn't confirm the result. Check the connection and press the button again: it is never recorded twice.",
@@ -64,7 +79,10 @@ export function TableCheckout({
   canStart,
   onChanged,
   fetcher,
+  timeZone,
 }: {
+  /** The Store's time zone (a paper payment's time is Store time). */
+  readonly timeZone?: string | undefined;
   readonly table: StaffDiningTable;
   readonly session: StaffDiningTableSession;
   readonly csrf: string;
@@ -86,6 +104,10 @@ export function TableCheckout({
   const [slip, setSlip] = useState("");
   const [received, setReceived] = useState("");
   const [leaving, setLeaving] = useState(false);
+  // Operating continuity: a table paid while the system was down is entered afterwards from paper.
+  const [paper, setPaper] = useState(false);
+  const [paidAt, setPaidAt] = useState("");
+  const paperInstant = paper ? paidAtInstant(paidAt, Date.now(), timeZone) : null;
   // One operation per intent: a lost answer is resent with the same one.
   const operation = useRef<{ key: string; reference: string } | null>(null);
   const beginOperation = useRef<string | null>(null);
@@ -124,7 +146,8 @@ export function TableCheckout({
     due !== null &&
     !busy &&
     !locked &&
-    (method === "CardMachine" ? slipValid : change !== null && change >= 0n);
+    (method === "CardMachine" ? slipValid : change !== null && change >= 0n) &&
+    (!paper || paperInstant !== null);
 
   const start = async () => {
     if (busy || locked) return;
@@ -149,9 +172,46 @@ export function TableCheckout({
     }
   };
 
+  // DEC-DINE-IN-PAY-LATER (rule 3): the guests want more after asking for the bill — back to
+  // ordering, recorded with who did it. Only while nothing is paid.
+  const cancelOperation = useRef<string | null>(null);
+  const cancelCheckout = async () => {
+    if (busy || locked) return;
+    setBusy(true);
+    setProblem(null);
+    cancelOperation.current ??= serviceOperationReference();
+    try {
+      await createDiningSessionCloseClient(fetcher)
+        .prepare({
+          operationReference: cancelOperation.current,
+          diningSessionReference: sessionReference,
+          action: "Cancel",
+          expectedSessionVersion: session.version,
+        })
+        .execute(csrf);
+      cancelOperation.current = null;
+      onChanged();
+    } catch (error) {
+      if (!(error instanceof DiningSessionCloseClientError && error.code === "OutcomeUnknown"))
+        cancelOperation.current = null;
+      setProblem(errorText(error));
+      if (error instanceof DiningSessionCloseClientError && error.code !== "OutcomeUnknown")
+        onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const pay = async () => {
     if (!canPay || bill === null || tipMinor === null) return;
-    const intent = JSON.stringify([method, tip, tipMinor.toString(), received, slip.trim()]);
+    const intent = JSON.stringify([
+      method,
+      tip,
+      tipMinor.toString(),
+      received,
+      slip.trim(),
+      paperInstant,
+    ]);
     if (operation.current?.key !== intent)
       operation.current = { key: intent, reference: serviceOperationReference() };
     setBusy(true);
@@ -169,6 +229,7 @@ export function TableCheckout({
               : { kind: "Percent", percent: Number(tip) as 10 | 15 | 18 },
         tenderedMinor: method === "Cash" ? String(receivedMinor) : null,
         slipReference: method === "CardMachine" && slip.trim() !== "" ? slip.trim() : null,
+        takenAt: paper ? paperInstant : null,
       });
       operation.current = null;
       setBill(result.bill);
@@ -381,6 +442,29 @@ export function TableCheckout({
                   ) : null}
                 </>
               )}
+              <fieldset className="table-checkout__paper" disabled={busy || locked}>
+                <legend>{t("Paper payment")}</legend>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={paper}
+                    onChange={(event) => setPaper(event.currentTarget.checked)}
+                  />
+                  {t("Paid while the system was down (enter it from paper now)")}
+                </label>
+                {paper ? (
+                  <label className="table-checkout__field">
+                    {t("Paid at (store time)")}
+                    <input
+                      type="datetime-local"
+                      value={paidAt}
+                      aria-invalid={paperInstant === null}
+                      onChange={(event) => setPaidAt(event.currentTarget.value)}
+                    />
+                    <small>{t("Within the last 3 days. It counts on the day it was paid.")}</small>
+                  </label>
+                ) : null}
+              </fieldset>
               <button
                 type="button"
                 className="table-checkout__primary"
@@ -439,6 +523,15 @@ export function TableCheckout({
           )}
         </>
       )}
+      {canStart && bill !== null && bill.settlement === null ? (
+        // DEC-DINE-IN-PAY-LATER (rule 3): the guests want to order more — back to ordering.
+        <p className="table-checkout__cancel">
+          <button type="button" disabled={busy || locked} onClick={() => void cancelCheckout()}>
+            {t("Cancel checkout")}
+          </button>{" "}
+          <small>{t("The table can order again; checkout is started again later.")}</small>
+        </p>
+      ) : null}
       {problem ? <p role="alert">{problem}</p> : null}
     </section>
   );

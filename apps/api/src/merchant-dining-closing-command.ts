@@ -17,6 +17,7 @@ import {
   createPostgresStaffOrderCancellationReader,
   listStoreDiningSessionOrders,
 } from "@rms/ordering";
+import { createPostgresDiningTableSettlementStore } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
   withMerchantTransactionAuthorization,
@@ -38,6 +39,17 @@ const denied = (): never => {
 const changed = (): never => {
   throw new DiningClosingError("DINING_CLOSING_VERSION_CONFLICT");
 };
+/**
+ * DEC-DINE-IN-PAY-LATER (rule 3): checkout is cancelled (back to ordering) only while nothing has
+ * been paid or written off for the table — a paid table pays once, and its payment never changes.
+ */
+export class DiningCheckoutAlreadyPaidError extends Error {
+  readonly code = "DINING_CHECKOUT_ALREADY_PAID" as const;
+  constructor() {
+    super("DINING_CHECKOUT_ALREADY_PAID");
+    this.name = "DiningCheckoutAlreadyPaidError";
+  }
+}
 /** The Task actions an unpaid-order exception Task can need while a table closes. */
 const taskActions = ["task.create", "task.assign"] as const;
 
@@ -60,7 +72,8 @@ export function createMerchantDiningClosingCommand(options: {
       "operationReference",
       "expectedSessionVersion",
     ]);
-    if (raw.action !== "Begin" && raw.action !== "Finalize") return fail();
+    if (raw.action !== "Begin" && raw.action !== "Cancel" && raw.action !== "Finalize")
+      return fail();
     const command = {
       action: raw.action,
       diningSessionReference: parseDiningReference(raw.diningSessionReference),
@@ -205,6 +218,30 @@ export function createMerchantDiningClosingCommand(options: {
         });
       }
       if (session.version !== command.expectedSessionVersion) return changed();
+      // Cancel is reversible only once proven here: nothing paid or written off for the table.
+      let reversible = false;
+      if (command.action === "Cancel") {
+        // Back to ordering only while the table has paid nothing and was not written off.
+        const order = (
+          await listStoreDiningSessionOrders(
+            tx,
+            { brandReference: scope.brandReference, storeReference: scope.storeReference },
+            [String(command.diningSessionReference)],
+          )
+        ).get(String(command.diningSessionReference));
+        if (order !== undefined) {
+          const payments = createPostgresDiningTableSettlementStore({
+            scope: { ...scope, tenantReference: String(scope.tenantReference) },
+            authorize: async (_tx, value) => value.orderReference === order && (await guard()),
+          });
+          if (
+            (await payments.listByOrders(tx, [order])).length > 0 ||
+            (await payments.listWriteOffsByOrders(tx, [order])).length > 0
+          )
+            throw new DiningCheckoutAlreadyPaidError();
+        }
+        reversible = true;
+      }
       const authorizeAndFence = async () => {
         const again = await fence(tx, {
           diningSessionReference: command.diningSessionReference,
@@ -302,7 +339,9 @@ export function createMerchantDiningClosingCommand(options: {
             return resolvedEvidence;
           },
         },
-        reversibility: { evaluate: async () => "Unavailable" },
+        reversibility: {
+          evaluate: async () => (reversible && (await guard()) ? "Reversible" : "Unavailable"),
+        },
         tasks: {
           ensure: async (taskInput) => {
             if (!resolvedEvidence || options.exceptionTaskPolicy === undefined) return fail();
@@ -337,7 +376,9 @@ export function createMerchantDiningClosingCommand(options: {
       };
       const result = await (command.action === "Begin"
         ? service.begin(request)
-        : service.finalize(request));
+        : command.action === "Cancel"
+          ? service.cancel(request)
+          : service.finalize(request));
       if (command.action === "Finalize") await releaseClosedTable(result.session.version);
       return Object.freeze({
         status: result.status,

@@ -71,6 +71,19 @@ function closed(value: unknown, keys: readonly string[]): Record<string, unknown
   return result;
 }
 
+/**
+ * DEC-DINE-IN-PAY-LATER (rule 3): the guest is still at a table that is checking out — the Cart is
+ * locked (no new rounds) and staff add dishes by cancelling checkout. Told apart from "not part of
+ * the table" so the guest is told what is happening instead of to scan again.
+ */
+export class DiningTableCheckingOutError extends Error {
+  readonly code = "DINING_TABLE_CHECKING_OUT" as const;
+  constructor() {
+    super("the table is checking out");
+    this.name = "DiningTableCheckingOutError";
+  }
+}
+
 /** Internal owner facts only. Callers must separately authorize the current Guest and Cart action. */
 export function createDiningCartParticipationQuery(options: DiningCartParticipationOptions) {
   const scope = closed(options.scope, ["brandReference", "storeReference"]);
@@ -125,7 +138,7 @@ export function createDiningCartParticipationQuery(options: DiningCartParticipat
           table.tableReference !== session.tableReference ||
           table.assignmentVersion !== session.tableAssignmentVersion ||
           table.activeDiningSessionReference !== diningSessionReference ||
-          session.phase !== "Active" ||
+          (session.phase !== "Active" && session.phase !== "Closing") ||
           participant.status !== "Active" ||
           table.tableState !== "Eligible" ||
           session.startedAt > table.observedAt ||
@@ -133,6 +146,7 @@ export function createDiningCartParticipationQuery(options: DiningCartParticipat
           participant.joinedAt > table.observedAt
         )
           return null;
+        if (session.phase === "Closing") throw new DiningTableCheckingOutError();
         return Object.freeze({
           schemaVersion: 1,
           brandReference,
@@ -145,7 +159,8 @@ export function createDiningCartParticipationQuery(options: DiningCartParticipat
           participantVersion: participant.version,
           observedAt: table.observedAt,
         });
-      } catch {
+      } catch (error) {
+        if (error instanceof DiningTableCheckingOutError) throw error;
         return unavailable();
       }
     },

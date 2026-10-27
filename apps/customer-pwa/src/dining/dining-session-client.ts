@@ -74,6 +74,9 @@ export interface DiningSessionView {
     readonly refunded: DiningMoney;
     readonly refundPending: DiningMoney;
     readonly due: DiningMoney;
+    /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment, once paid. */
+    readonly tableTip?: DiningMoney;
+    readonly cashRounding?: DiningMoney;
     /** WP-2423 D5: what the table ordered: items before tax, tax and total including tax. */
     readonly ordered?: {
       readonly subtotal: DiningMoney;
@@ -278,7 +281,12 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       session.summary !== null &&
       typeof session.summary === "object" &&
       Object.hasOwn(session.summary, "ordered");
+    const withSettlement =
+      session.summary !== null &&
+      typeof session.summary === "object" &&
+      Object.hasOwn(session.summary, "cashRounding");
     const raw = record(session.summary, [
+      ...(withSettlement ? ["tableTip", "cashRounding"] : []),
       "paid",
       "refunded",
       "refundPending",
@@ -304,6 +312,9 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       refundPending: money(raw.refundPending),
       due: money(raw.due),
       ...(ordered === null ? {} : { ordered }),
+      ...(withSettlement
+        ? { tableTip: money(raw.tableTip), cashRounding: money(raw.cashRounding) }
+        : {}),
     });
   }
   if ((summary === null) !== (rounds.length === 0)) return invalid();
@@ -333,37 +344,54 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
 export function createHttpDiningSessionClient(
   request: typeof globalThis.fetch = globalThis.fetch,
 ): DiningSessionClient {
+  const once = async (signal?: AbortSignal) => {
+    const csrf = getCustomerCsrfCredential();
+    const current = captureCustomerCsrfContext();
+    // Without this browser's session there is no table to show (not an error to retry).
+    if (csrf === null || !credential.test(csrf)) throw new DiningSessionClientError("not-joined");
+    let response: Response;
+    try {
+      response = await boundedFetch(request, withNameLocale("/api/v1/dine-in/session"), {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+        redirect: "error",
+        headers: { accept: "application/json", "x-csrf-token": csrf },
+        ...(signal === undefined ? {} : { signal }),
+      });
+    } catch {
+      throw new DiningSessionClientError("unavailable");
+    }
+    if (!current()) throw new DiningSessionClientError("not-joined");
+    if (response.status === 404 || response.status === 403 || response.status === 401)
+      throw new DiningSessionClientError("not-joined");
+    if (response.status !== 200) throw new DiningSessionClientError("unavailable");
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new DiningSessionClientError("unavailable");
+    }
+    if (!current()) throw new DiningSessionClientError("not-joined");
+    return parseDiningSessionView(payload);
+  };
   return Object.freeze({
     async load(signal?: AbortSignal) {
-      const csrf = getCustomerCsrfCredential();
-      const current = captureCustomerCsrfContext();
-      // Without this browser's session there is no table to show (not an error to retry).
-      if (csrf === null || !credential.test(csrf)) throw new DiningSessionClientError("not-joined");
-      let response: Response;
+      const started = captureCustomerCsrfContext();
       try {
-        response = await boundedFetch(request, withNameLocale("/api/v1/dine-in/session"), {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-          redirect: "error",
-          headers: { accept: "application/json", "x-csrf-token": csrf },
-          ...(signal === undefined ? {} : { signal }),
-        });
-      } catch {
-        throw new DiningSessionClientError("unavailable");
+        return await once(signal);
+      } catch (error) {
+        // WP-2423 (v15 2026-10-27): the browser's session credential was replaced while this read
+        // ran (right after a round was sent): read again with the current one, never "not joined".
+        if (
+          error instanceof DiningSessionClientError &&
+          error.code === "not-joined" &&
+          !started() &&
+          signal?.aborted !== true
+        )
+          return once(signal);
+        throw error;
       }
-      if (!current()) throw new DiningSessionClientError("not-joined");
-      if (response.status === 404 || response.status === 403 || response.status === 401)
-        throw new DiningSessionClientError("not-joined");
-      if (response.status !== 200) throw new DiningSessionClientError("unavailable");
-      let payload: unknown;
-      try {
-        payload = await response.json();
-      } catch {
-        throw new DiningSessionClientError("unavailable");
-      }
-      if (!current()) throw new DiningSessionClientError("not-joined");
-      return parseDiningSessionView(payload);
     },
   });
 }

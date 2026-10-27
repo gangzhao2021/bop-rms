@@ -6,6 +6,7 @@ import {
   type CustomerCartSelectionInventoryOptions,
 } from "./customer-cart-selection-inventory.js";
 import { createCustomerDiningCartInventoryAuthorization } from "./customer-dining-cart-inventory-authorization.js";
+import { DiningTableCheckingOutError } from "@rms/dining";
 import {
   assertGuestSessionUsable,
   createGuestSession,
@@ -109,6 +110,7 @@ function failure(error: unknown): CustomerCartPortResult {
   if (error instanceof CartCheckoutInProgressError)
     return { status: "CheckoutInProgress", heldUntil: error.heldUntil };
   if (!(error instanceof CartError)) return unavailable;
+  if (error.code === "CART_TABLE_CHECKING_OUT") return { status: "TableCheckingOut" };
   switch (error.code) {
     case "CART_PERMISSION_DENIED":
       return { status: "SessionExpired" };
@@ -343,7 +345,18 @@ export function createCustomerDiningCartComposition(
   const fixedScope = scope(options.scope);
   const now = options.now;
   const sessions = options.sessions;
-  const participation = options.participation;
+  // DEC-DINE-IN-PAY-LATER: Dining's "this table is checking out" reaches the guest as such.
+  const participation: DiningCartReadPorts["participation"] = Object.freeze({
+    resolve: async (value: Parameters<DiningCartReadPorts["participation"]["resolve"]>[0]) => {
+      try {
+        return await options.participation.resolve(value);
+      } catch (error) {
+        if (error instanceof DiningTableCheckingOutError)
+          throw new CartError("CART_TABLE_CHECKING_OUT");
+        throw error;
+      }
+    },
+  });
   const writer = createPostgresDiningCartSelectionStore(options.selectionTransactions, {
     ...options.selection,
     scope: fixedScope,

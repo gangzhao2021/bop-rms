@@ -12,7 +12,7 @@ import {
   sameOriginMutation,
 } from "./merchant-bff-http.js";
 import { CounterMenuError } from "./merchant-counter-menu.js";
-import express, { type Router } from "express";
+import express, { type Response as ExpressResponse, type Router } from "express";
 import { CounterOrderError } from "./merchant-counter-order.js";
 import { StaffDiningRoundError } from "./merchant-staff-dining-round.js";
 import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.js";
@@ -24,6 +24,8 @@ import { EndedOrderStockReleaseError } from "./merchant-stock-holding-orders.js"
 import { StaffItemCancellationError } from "./merchant-order-item-staff-cancellation.js";
 import { OrderCloseCommandError } from "./merchant-dining-order-close-command.js";
 import { UnpaidDepartureError } from "./merchant-dining-unpaid-departure.js";
+import { TablePaymentError } from "./merchant-dining-table-payment.js";
+import { UnpaidItemRemovalError } from "./merchant-dining-unpaid-item-removal.js";
 import { MerchantOrderAcceptanceError } from "./merchant-order-acceptance-command.js";
 
 type MerchantOrderQueueItem = Awaited<
@@ -496,6 +498,79 @@ export function installMerchantOrderRoutes(
           } as const
         )[error.code];
         response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
+      });
+  });
+  // WP-2423 DEC-DINE-IN-PAY-LATER: a table's one payment (Orders page), and cash given back from a
+  // cash payment by a manager (PIN-confirmed).
+  const tablePaymentFailure = (response: ExpressResponse, error: unknown) => {
+    if (!(error instanceof TablePaymentError) || error.code === "TABLE_PAYMENT_UNAVAILABLE") {
+      response.status(503).set("Cache-Control", NO_STORE).json({ error: "unavailable" });
+      return;
+    }
+    if (error.code === "TABLE_PAYMENT_PERMISSION_DENIED") {
+      denied(response);
+      return;
+    }
+    response
+      .status(error.code === "TABLE_PAYMENT_INPUT_INVALID" ? 400 : 409)
+      .set("Cache-Control", NO_STORE)
+      .json({ error: error.code.replace(/^TABLE_PAYMENT_/u, "").toLowerCase() });
+  };
+  router.post("/orders/table-payment", sameOriginMutation(options), (request, response) => {
+    const auth = mutation(request, response);
+    if (auth === null) return;
+    if (!options.tablePayment) {
+      response.status(503).json({ error: "table_payment_unavailable" });
+      return;
+    }
+    void options
+      .tablePayment({ ...auth, query: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => tablePaymentFailure(response, error));
+  });
+  router.post(
+    "/orders/table-payment/cash-refund",
+    sameOriginMutation(options),
+    (request, response) => {
+      const auth = mutation(request, response);
+      if (auth === null) return;
+      if (!options.tableCashRefund) {
+        response.status(503).json({ error: "table_cash_refund_unavailable" });
+        return;
+      }
+      void options
+        .tableCashRefund({ ...auth, command: request.body })
+        .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+        .catch((error: unknown) => tablePaymentFailure(response, error));
+    },
+  );
+  // WP-2423 DEC-DINE-IN-PAY-LATER: dishes taken off a pay-later table's bill before it pays.
+  router.post("/orders/remove-unpaid-items", sameOriginMutation(options), (request, response) => {
+    const auth = mutation(request, response);
+    if (auth === null) return;
+    if (!options.unpaidItemRemoval) {
+      response.status(503).json({ error: "unpaid_item_removal_unavailable" });
+      return;
+    }
+    void options
+      .unpaidItemRemoval({ ...auth, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        if (
+          !(error instanceof UnpaidItemRemovalError) ||
+          error.code === "UNPAID_ITEM_REMOVAL_UNAVAILABLE"
+        ) {
+          response.status(503).set("Cache-Control", NO_STORE).json({ error: "unavailable" });
+          return;
+        }
+        if (error.code === "UNPAID_ITEM_REMOVAL_PERMISSION_DENIED") {
+          denied(response);
+          return;
+        }
+        response
+          .status(error.code === "UNPAID_ITEM_REMOVAL_INPUT_INVALID" ? 400 : 409)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: error.code.replace(/^UNPAID_ITEM_REMOVAL_/u, "").toLowerCase() });
       });
   });
   // WP-2423 DEC-DINE-IN-PAY-LATER: a table left without paying; a manager records it and its Order

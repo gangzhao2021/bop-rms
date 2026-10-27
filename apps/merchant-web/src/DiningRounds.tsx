@@ -288,7 +288,7 @@ export function DiningRoundsProvider({
         </p>
       ) : null}
       {view === null || view.sessionPhase === "Active" ? null : (
-        // The table is being closed, or closed: said plainly; serving has stopped.
+        // The table is checking out (dishes still served, no new rounds), or closed.
         <p className="dining-rounds__table" role="status">
           {view.sessionPhase === "Closing" ? t("Table closing") : t("Table closed")}
         </p>
@@ -333,7 +333,10 @@ export function DiningRoundItemState({
   const rounds = useDiningRounds();
   const item = rounds?.view?.items.find((entry) => entry.orderItemReference === orderItemReference);
   if (rounds === null || rounds.view === null || item === undefined) return null;
-  const open = rounds.view.sessionPhase === "Active" && rounds.view.closureStatus === "Open";
+  // A table checking out (Closing) still gets its last dishes served before it closes.
+  const open =
+    (rounds.view.sessionPhase === "Active" || rounds.view.sessionPhase === "Closing") &&
+    rounds.view.closureStatus === "Open";
   const servable = servableQuantity(item);
   const remaking = (item.remakingQuantity ?? 0) > 0;
   const key = "item:" + item.orderItemReference;

@@ -1114,4 +1114,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Order progress": "订单进度",
   "Payment received": "已收款",
   "Picked up": "已取餐",
+  "Your table is checking out": "这桌正在结账",
+  "New dishes can’t be sent while the bill is being settled. To add more, ask a staff member.":
+    "结账期间不能再送新菜。要加菜请找店员。",
+  "Your table is checking out, so new dishes can’t be sent. To add more, ask a staff member.":
+    "这桌正在结账，不能再送新菜。要加菜请找店员。",
+  "Your table is checking out.": "这桌正在结账。",
+  "Cash rounding": "现金取整",
+  "Item prices are before tax. ": "菜品价格为税前价格。",
+  "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
+    "这桌已在最后一起付清。现金按 5 分取整，刷卡不取整。",
 });

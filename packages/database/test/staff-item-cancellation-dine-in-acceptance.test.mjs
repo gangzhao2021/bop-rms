@@ -34,6 +34,8 @@ import { withStaffContentLocale } from "../../../apps/api/src/staff-content-loca
 import { createMerchantDiningServeCommand } from "../../../apps/api/src/merchant-dining-serve-command.ts";
 import { createMerchantDiningServeReadyCommand } from "../../../apps/api/src/merchant-dining-serve-ready-command.ts";
 import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/merchant-dining-order-close-command.ts";
+import { createMerchantDiningClosingCommand } from "../../../apps/api/src/merchant-dining-closing-command.ts";
+import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
 import { createDiningOrderCloseConfiguration } from "../../../apps/api/src/dining-order-close-configuration.ts";
 import { createKitchenInventoryConsumption } from "../../../apps/api/src/kitchen-inventory-consumption.ts";
 import {
@@ -58,17 +60,28 @@ const merchant = vi.hoisted(() => ({
   allowed: null,
   actions: [],
 }));
-vi.mock("../../../apps/api/src/merchant-store-scope.ts", () => ({
-  createMerchantStoreScope: () => async (_tx, _cookie, action) => {
-    merchant.actions.push(action);
-    return {
-      actorReference: merchant.actor,
-      selected: { tenantReference: merchant.tenant },
-      context: { brand: { brandReference: merchant.brand } },
-      store: { storeReference: merchant.store },
-      allowed: async () => merchant.allowed(),
-    };
-  },
+vi.mock("../../../apps/api/src/merchant-store-scope.ts", async (importActual) => ({
+  // A real staff session (the table's checkout, which needs Identity's actual context) goes
+  // through the actual scope; the synthetic one stands in for the other merchant commands.
+  createMerchantStoreScope:
+    (persistence) =>
+    async (tx, cookie, action, ...rest) => {
+      if (cookie !== "synthetic-session")
+        return (await importActual()).createMerchantStoreScope(persistence)(
+          tx,
+          cookie,
+          action,
+          ...rest,
+        );
+      merchant.actions.push(action);
+      return {
+        actorReference: merchant.actor,
+        selected: { tenantReference: merchant.tenant },
+        context: { brand: { brandReference: merchant.brand } },
+        store: { storeReference: merchant.store },
+        allowed: async () => merchant.allowed(),
+      };
+    },
 }));
 
 const { Client } = pg;
@@ -366,6 +379,8 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
         },
         startedAt: time(-minutes(50)),
         guestParticipant: id(n + 5),
+        // The table closes at the end: seated as the real open moved it on.
+        tableVersion: 2,
       });
       assert.equal(dining.session.diningSessionReference, order.session);
 
@@ -1309,6 +1324,46 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
       // Line A's 2 KG are used; line B's reservation was released by the cancellation.
       assert.deepEqual(await stock(), { onHand: "48", reserved: "0" });
 
+      // ── The guests ask for the bill before their last dish is served: checkout starts (the
+      // table is Closing, no more rounds) and the dish is still served (DEC-DINE-IN-PAY-LATER).
+      const manager = await seedMerchantAcceptanceSession({
+        admin,
+        runner: transactions({ guc: false }),
+        scope,
+        actor: id(0x710),
+        at: now(),
+        extraPermissions: ["dining.operate", "dining.session.close", "order.close"],
+        referencePrefix: "01909962",
+        sessionReferencePrefix: "01909961",
+      });
+      const closingCommand = createMerchantDiningClosingCommand({
+        persistence: { ...manager.persistence, now },
+        authentication: manager.authentication,
+        providerAccountReference: provider,
+        environment: "Test",
+        newReference: fresh,
+        retentionPolicyCode: "AUDIT_DEFAULT",
+        retentionPolicyVersion: 1,
+      });
+      const tableClosing = async (action) =>
+        closingCommand({
+          sessionCookie: manager.sessionCookie,
+          csrf: manager.csrf,
+          command: {
+            action,
+            diningSessionReference: order.session,
+            operationReference: fresh(),
+            expectedSessionVersion: Number(
+              (
+                await one("SELECT version FROM rms_dining.dining_session WHERE session_id=$1", [
+                  order.session,
+                ])
+              )[0].version,
+            ),
+          },
+        });
+      assert.equal((await tableClosing("Begin")).phase, "Closing");
+
       // ── The serving view (current Order version 3): line A Ready, line B Cancelled.
       const ready = await progress();
       assert.equal(ready.currentOrderVersion, 3);
@@ -1439,6 +1494,8 @@ it("after staff cancel one line of a dine-in round, the kitchen completes the re
         [{ closures: 1, finalities: 1 }],
       );
       assert.equal((await progress()).closureStatus, "Closed");
+      // Served and paid: the table closes.
+      assert.equal((await tableClosing("Finalize")).phase, "Closed");
       // Closing the table's Order keeps the served Order Fulfilled.
       assert.equal(await orderPhase(), "Fulfilled");
       assert.deepEqual(

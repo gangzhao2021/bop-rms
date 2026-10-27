@@ -95,6 +95,8 @@ const payment = (
   orderAllocationMinor: total(items),
   tipMinor: BigInt(tip),
   totalMinor: total(items) + BigInt(tip),
+  roundingMinor: 0n,
+  paymentCount: 1,
   takenAt,
 });
 const p0 = payment("Online", 100, 0, p0Items, 0, "2026-10-13T20:00:00.000Z");
@@ -160,6 +162,8 @@ const today: StoreSalesReportInput = {
     onlineRefunded: { count: 2, amountMinor: 1526n },
     cardMachineTaken: { count: 2, amountMinor: 898n, tipMinor: 50n },
     cardMachineRefunded: { count: 1, amountMinor: 396n },
+    cashTaken: { count: 0, amountMinor: 0n, tipMinor: 0n, roundingMinor: 0n },
+    cashRefunded: { count: 0, amountMinor: 0n },
   },
   unresolvedOnlineRefundCount: 0,
   orders,
@@ -267,6 +271,7 @@ describe("store sales report (WP-2423 Q14)", () => {
         channels: [
           { channel: "Online", tipsMinor: "300", refundedMinor: "0", netMinor: "300" },
           { channel: "CardMachine", tipsMinor: "50", refundedMinor: "0", netMinor: "50" },
+          { channel: "Cash", tipsMinor: "0", refundedMinor: "0", netMinor: "0" },
         ],
       },
     ]);
@@ -337,6 +342,8 @@ describe("store sales report (WP-2423 Q14)", () => {
         onlineRefunded: { count: 0, amountMinor: 0n },
         cardMachineTaken: { count: 0, amountMinor: 0n, tipMinor: 0n },
         cardMachineRefunded: { count: 0, amountMinor: 0n },
+        cashTaken: { count: 0, amountMinor: 0n, tipMinor: 0n, roundingMinor: 0n },
+        cashRefunded: { count: 0, amountMinor: 0n },
       },
     });
     expect(
@@ -369,10 +376,10 @@ describe("store sales report (WP-2423 Q14)", () => {
     expect(summary.startsWith("﻿")).toBe(true);
     const lines = summary.slice(1).trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "business_date,day_status,payments,orders,gross_sales,discounts,net_sales,service_charges,tax_synthetic_tax,tax_total,tips,total_collected,refunds,net_collected,online_collected,card_machine_collected,online_refunds,card_machine_refunds,currency",
+      "business_date,day_status,payments,orders,gross_sales,discounts,net_sales,service_charges,tax_synthetic_tax,tax_total,tips,total_collected,refunds,net_collected,online_collected,card_machine_collected,cash_collected,online_refunds,card_machine_refunds,cash_refunds,cash_rounding,currency",
     );
     expect(lines[1]).toBe(
-      "2026-10-14,open (so far),5,4,33.00,1.00,32.00,0.00,4.17,4.17,3.50,39.67,19.22,20.45,30.69,8.98,15.26,3.96,CAD",
+      "2026-10-14,open (so far),5,4,33.00,1.00,32.00,0.00,4.17,4.17,3.50,39.67,19.22,20.45,30.69,8.98,0.00,15.26,3.96,0.00,0.00,CAD",
     );
     const items = storeSalesReportCsv(view, "items").slice(1).trimEnd().split("\r\n");
     expect(items[0]).toBe(
@@ -386,6 +393,7 @@ describe("store sales report (WP-2423 Q14)", () => {
       "business_date,payment_channel,tips,tips_refunded,net_tips,currency",
       "2026-10-14,Online,3.00,0.00,3.00,CAD",
       "2026-10-14,Store card machine,0.50,0.00,0.50,CAD",
+      "2026-10-14,Cash,0.00,0.00,0.00,CAD",
     ]);
     for (const kind of ["summary", "items", "hourly", "tips"] as const)
       expect(storeSalesReportCsv(view, kind)).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-7/u);
@@ -425,5 +433,94 @@ describe("store sales report (WP-2423 Q14)", () => {
     ]);
     expect(() => businessDatesBetween("2026-10-14", "2026-10-13", 31)).toThrow();
     expect(() => businessDatesBetween("2026-09-01", "2026-10-14", 31)).toThrow();
+  });
+
+  it("DEC-DINE-IN-PAY-LATER: a table paid in cash is one payment over its rounds, rounding apart", () => {
+    const tableOrder = order(900, "DineIn", "Qr", [p0Items, c1Items]);
+    const key = (line: number) => ref(950) + ":" + String(line);
+    const round1 = total(p0Items),
+      round2 = total(c1Items);
+    const lines: StoreSalesPayment[] = [
+      {
+        channel: "Cash",
+        paymentIntentReference: key(1),
+        orderReference: ref(900),
+        orderBatchReference: ref(910),
+        orderAllocationMinor: round1,
+        tipMinor: 0n,
+        totalMinor: round1,
+        roundingMinor: 0n,
+        paymentCount: 1,
+        takenAt: "2026-10-14T20:00:00.000Z",
+      },
+      {
+        channel: "Cash",
+        paymentIntentReference: key(2),
+        orderReference: ref(900),
+        orderBatchReference: ref(911),
+        orderAllocationMinor: round2,
+        tipMinor: 300n,
+        totalMinor: round2 + 300n,
+        roundingMinor: 2n,
+        paymentCount: 0,
+        takenAt: "2026-10-14T20:00:00.000Z",
+      },
+    ];
+    const taken = round1 + round2 + 302n;
+    const view = computeStoreSalesReport({
+      ...today,
+      orders: [tableOrder],
+      payments: lines,
+      refundedPayments: [],
+      refunds: [
+        {
+          channel: "Cash",
+          kind: "Cash",
+          refundReference: ref(960),
+          orderReference: ref(900),
+          paymentIntentReference: key(2),
+          amountMinor: 500n,
+          refundedAt: "2026-10-14T21:00:00.000Z",
+          items: null,
+        },
+      ],
+      settlement: {
+        onlineCaptured: { count: 0, amountMinor: 0n },
+        onlineRefunded: { count: 0, amountMinor: 0n },
+        cardMachineTaken: { count: 0, amountMinor: 0n, tipMinor: 0n },
+        cardMachineRefunded: { count: 0, amountMinor: 0n },
+        cashTaken: { count: 1, amountMinor: taken, tipMinor: 300n, roundingMinor: 2n },
+        cashRefunded: { count: 1, amountMinor: 500n },
+      },
+    });
+    const cash = view.byChannel.find((row) => row.channel === "Cash");
+    expect(cash).toMatchObject({
+      paymentCount: 1,
+      orderCount: 1,
+      collectedMinor: taken.toString(),
+      tipsMinor: "300",
+      cashRoundingMinor: "2",
+      refundsMinor: "500",
+    });
+    expect(view.reconciliation.matchesSettlement).toBe(true);
+    // A settlement that took a different amount in cash would not agree.
+    expect(
+      computeStoreSalesReport({
+        ...today,
+        orders: [tableOrder],
+        payments: lines,
+        refundedPayments: [],
+        refunds: [],
+        settlement: {
+          onlineCaptured: { count: 0, amountMinor: 0n },
+          onlineRefunded: { count: 0, amountMinor: 0n },
+          cardMachineTaken: { count: 0, amountMinor: 0n, tipMinor: 0n },
+          cardMachineRefunded: { count: 0, amountMinor: 0n },
+          cashTaken: { count: 1, amountMinor: taken + 5n, tipMinor: 300n, roundingMinor: 2n },
+          cashRefunded: { count: 0, amountMinor: 0n },
+        },
+      }).reconciliation.matchesSettlement,
+    ).toBe(false);
+    expect(storeSalesReportCsv(view, "summary").split("\r\n")[0]).toContain("cash_collected");
   });
 });

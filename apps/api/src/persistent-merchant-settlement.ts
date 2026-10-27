@@ -2,6 +2,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createPostgresCardMachinePaymentStore,
   createPostgresConfirmedCompensationRefundSource,
+  createPostgresDiningTableSettlementStore,
   createPostgresOrdinaryRefundWindowSource,
   createPostgresPaymentCaptureWindowSource,
   createPostgresPaymentReconciliationDaySource,
@@ -182,6 +183,69 @@ export function createPersistentMerchantSettlement(options: {
         return null;
       }
     };
+    /**
+     * DEC-DINE-IN-PAY-LATER: tables paid once at the end in the day, by when the money moved —
+     * on the card machine (counted with its takings) and in cash (with refunds and rounding).
+     * Read once per transaction and window.
+     */
+    const tableWindows = new Map<string, Promise<TableWindow>>();
+    interface TableWindow {
+      readonly card: { count: number; amountMinor: bigint; tipMinor: bigint; backEntered: number };
+      readonly cash: {
+        count: number;
+        amountMinor: bigint;
+        tipMinor: bigint;
+        roundingMinor: bigint;
+        backEntered: number;
+        refundCount: number;
+        refundedMinor: bigint;
+      };
+    }
+    const tableWindow = (
+      tx: ConsumerTransaction,
+      scope: MerchantSettlementScope,
+      window: MerchantSettlementWindow,
+    ): Promise<TableWindow> => {
+      const key = window.startsAt + "|" + window.endsAt;
+      const known = tableWindows.get(key);
+      if (known) return known;
+      const loaded = (async () => {
+        const listed = await createPostgresDiningTableSettlementStore({
+          scope: {
+            tenantReference: scope.tenantReference,
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+          },
+          authorize: async (t) => t === tx && (await guard(scope)(tx)),
+        }).listWindow(tx, { from: window.startsAt, to: window.endsAt });
+        const card = { count: 0, amountMinor: 0n, tipMinor: 0n, backEntered: 0 };
+        const cash = {
+          count: 0,
+          amountMinor: 0n,
+          tipMinor: 0n,
+          roundingMinor: 0n,
+          backEntered: 0,
+          refundCount: 0,
+          refundedMinor: 0n,
+        };
+        for (const settlement of listed.settlements) {
+          if (settlement.takenAt < window.startsAt || settlement.takenAt >= window.endsAt) continue;
+          const totals = settlement.method === "Cash" ? cash : card;
+          totals.count++;
+          totals.amountMinor += settlement.totalMinor;
+          totals.tipMinor += settlement.tipMinor;
+          if (settlement.recordingReason === "RecordedAfterOutage") totals.backEntered++;
+          if (settlement.method === "Cash") cash.roundingMinor += settlement.roundingMinor;
+        }
+        for (const refund of listed.cashRefunds) {
+          cash.refundCount++;
+          cash.refundedMinor += refund.amountMinor;
+        }
+        return Object.freeze({ card, cash });
+      })();
+      tableWindows.set(key, loaded);
+      return loaded;
+    };
     const read = createMerchantSettlementRead({
       transactions,
       authorize: async (tx) => authorize(tx),
@@ -311,19 +375,43 @@ export function createPersistentMerchantSettlement(options: {
             },
             authorize: async (t) => t === tx && (await guard(scope)(tx)),
           }).summarize(tx, { from: window.startsAt, to: window.endsAt });
+          // DEC-DINE-IN-PAY-LATER: tables paid at the end on the same machine count with it, so
+          // the takings match the machine's own day total.
+          const table = (await tableWindow(tx, scope, window)).card;
           return {
             taken: {
-              count: summary.paymentCount,
-              amountMinor: summary.takenMinor.toString(),
+              count: summary.paymentCount + table.count,
+              amountMinor: (summary.takenMinor + table.amountMinor).toString(),
               currencyCode: "CAD" as const,
             },
-            tipMinor: summary.tipMinor.toString(),
-            recordedAfterOutageCount: summary.backEnteredCount,
+            tipMinor: (summary.tipMinor + table.tipMinor).toString(),
+            recordedAfterOutageCount: summary.backEnteredCount + table.backEntered,
             refunded: {
               count: summary.refundCount,
               amountMinor: summary.refundedMinor.toString(),
               currencyCode: "CAD" as const,
             },
+          };
+        }),
+      // DEC-DINE-IN-PAY-LATER (cash): tables paid in cash, cash given back, net and rounding.
+      cash: (tx, scope, window) =>
+        optional(async () => {
+          const { cash } = await tableWindow(tx, scope, window);
+          return {
+            received: {
+              count: cash.count,
+              amountMinor: cash.amountMinor.toString(),
+              currencyCode: "CAD" as const,
+            },
+            tipMinor: cash.tipMinor.toString(),
+            roundingMinor: cash.roundingMinor.toString(),
+            refunded: {
+              count: cash.refundCount,
+              amountMinor: cash.refundedMinor.toString(),
+              currencyCode: "CAD" as const,
+            },
+            netMinor: (cash.amountMinor - cash.refundedMinor).toString(),
+            recordedAfterOutageCount: cash.backEntered,
           };
         }),
       // WP-2423: Provider charges matching no Order, and their refunds, in the day — the lines the

@@ -15,6 +15,7 @@ import {
   type DiningSessionView,
 } from "./dining-session-client.js";
 import { DiningInvitationPanel } from "./DiningInvitationPanel.js";
+import { subscribeCustomerCsrfContext } from "../session/customer-transaction-context.js";
 import { DiningStaffCallPanel } from "./DiningStaffCallPanel.js";
 import type { DiningStaffCallClient } from "./dining-staff-call-client.js";
 import type { DiningInvitationClient } from "./dining-invitation-client.js";
@@ -281,6 +282,19 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
             <dt>{t("Total ordered")}</dt>
             <dd>{money(summary.ordered.total)}</dd>
           </div>
+          {/* DEC-DINE-IN-PAY-LATER: the table's one payment, line by line up to what was paid. */}
+          {summary.tableTip !== undefined && nonZero(summary.tableTip) ? (
+            <div>
+              <dt>{t("Tip")}</dt>
+              <dd>{money(summary.tableTip)}</dd>
+            </div>
+          ) : null}
+          {summary.cashRounding !== undefined && nonZero(summary.cashRounding) ? (
+            <div>
+              <dt>{t("Cash rounding")}</dt>
+              <dd>{money(summary.cashRounding)}</dd>
+            </div>
+          ) : null}
         </dl>
       ) : null}
       <dl>
@@ -306,13 +320,19 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
         ) : null}
       </dl>
       <p>
-        {summary.ordered !== undefined
-          ? t("Item prices are before tax. Rounds that were never paid are not included. ")
-          : ""}
+        {summary.ordered === undefined
+          ? ""
+          : payLater
+            ? t("Item prices are before tax. ")
+            : t("Item prices are before tax. Rounds that were never paid are not included. ")}
         {payLater
-          ? t(
-              "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax and any tip.",
-            )
+          ? summary.cashRounding !== undefined
+            ? t(
+                "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+              )
+            : t(
+                "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax and any tip.",
+              )
           : t(
               "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
             )}
@@ -386,6 +406,9 @@ export function DiningSessionPage({
   }, [client]);
   // Owner 2026-10-23: item names come from the Store in the chosen language.
   useReloadOnLanguageChange(() => void load());
+  // A replaced session credential (the visit refreshed after a round was sent) reads the table
+  // again, so a read made with the previous one never leaves "Join your table first" on screen.
+  useEffect(() => subscribeCustomerCsrfContext(() => void load()), [load]);
   useEffect(() => {
     void load();
     return () => {

@@ -41,7 +41,10 @@ function fixture() {
     source_bound: true,
   };
   const rows: (typeof row)[] = [row];
-  const query = vi.fn(async () => ({ rows, rowCount: rows.length }));
+  // DEC-DINE-IN-PAY-LATER: no dish was taken off an unpaid bill in these cases.
+  const query = vi.fn(async (sql: string) =>
+    sql.includes("basis='PayLater'") ? { rows: [], rowCount: 0 } : { rows, rowCount: rows.length },
+  );
   const tx = { query: query as typeof query & ConsumerTransaction["query"] };
   const authorize = vi.fn(async () => true);
   mocks.revision.mockResolvedValue({ version: 4, snapshotDigest: "sha256:" + "b".repeat(64) });

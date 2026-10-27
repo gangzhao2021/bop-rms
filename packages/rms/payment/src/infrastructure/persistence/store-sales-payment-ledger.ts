@@ -5,10 +5,14 @@ import { decodeOrdinaryRefundRequest } from "../../application/ordinary-refund-r
 import { createPostgresOrdinaryRefundWindowSource } from "../ordinary-refund-window-source.js";
 import { createPostgresConfirmedCompensationRefundSource } from "./payment-compensation-refund-source.js";
 import { createPostgresCardMachinePaymentStore } from "./card-machine-payment-store.js";
+import { createPostgresDiningTableSettlementStore } from "./dining-table-settlement-store.js";
 import { createPostgresPaymentCaptureWindowSource } from "./payment-reconciliation-candidates.js";
 
-/** Where the money moved: the Provider (online card) or the Store's own card machine. */
-export type StoreSalesPaymentChannel = "Online" | "CardMachine";
+/**
+ * Where the money moved: the Provider (online card), the Store's own card machine, or cash
+ * (DEC-DINE-IN-PAY-LATER: a table paid in cash at the end).
+ */
+export type StoreSalesPaymentChannel = "Online" | "CardMachine" | "Cash";
 export interface StoreSalesPayment {
   readonly channel: StoreSalesPaymentChannel;
   readonly paymentIntentReference: string;
@@ -18,6 +22,16 @@ export interface StoreSalesPayment {
   readonly orderAllocationMinor: bigint;
   readonly tipMinor: bigint;
   readonly totalMinor: bigint;
+  /**
+   * DEC-DINE-IN-PAY-LATER: cash rounding to 5 cents taken with this line (cash only; 0 otherwise).
+   * It is collected but is not the Order's amount, tip or tax.
+   */
+  readonly roundingMinor: bigint;
+  /**
+   * How many payments this record is: 1, except the further round lines of one table payment
+   * (a table pays once; each round is its own line), which are 0.
+   */
+  readonly paymentCount: 0 | 1;
   /** When the money was taken: the Provider capture or the card-machine approval time. */
   readonly takenAt: string;
 }
@@ -33,8 +47,9 @@ export interface StoreSalesRefundItemShare {
 export interface StoreSalesRefund {
   readonly channel: StoreSalesPaymentChannel;
   /** Ordinary: an item refund (also staff item cancellations); Compensation and CardMachine
-   * whole-payment refunds return what remained of the payment. */
-  readonly kind: "Ordinary" | "Compensation" | "CardMachine";
+   * whole-payment refunds return what remained of the payment; Cash: cash given back from a
+   * table's cash payment (an amount, not itemized). */
+  readonly kind: "Ordinary" | "Compensation" | "CardMachine" | "Cash";
   readonly refundReference: string;
   readonly orderReference: string;
   readonly paymentIntentReference: string;
@@ -54,6 +69,14 @@ export interface StoreSalesSettlementTotals {
     readonly tipMinor: bigint;
   };
   readonly cardMachineRefunded: { readonly count: number; readonly amountMinor: bigint };
+  /** DEC-DINE-IN-PAY-LATER: tables paid in cash (taken includes the cash rounding). */
+  readonly cashTaken: {
+    readonly count: number;
+    readonly amountMinor: bigint;
+    readonly tipMinor: bigint;
+    readonly roundingMinor: bigint;
+  };
+  readonly cashRefunded: { readonly count: number; readonly amountMinor: bigint };
 }
 
 const fail = (): never => {
@@ -131,6 +154,17 @@ export function createPostgresStoreSalesPaymentLedger(options: {
     });
     const cardSummary = await cardMachineStore.summarize(tx, { from: startsAt, to: endsAt });
     const cardMachine = await cardMachineStore.listWindow(tx, { from: startsAt, to: endsAt });
+    // DEC-DINE-IN-PAY-LATER: tables that paid once at the end (card machine or cash) and cash
+    // given back from them, by when the money moved.
+    const table = await createPostgresDiningTableSettlementStore({
+      scope: {
+        tenantReference: scope.tenantReference,
+        brandReference: scope.brandReference,
+        storeReference: scope.storeReference,
+      },
+      authorize: async (t) => (t as unknown) === tx && (await allowed(tx)),
+    }).listWindow(tx, { from: startsAt, to: endsAt });
+    const lineKey = (settlement: string, line: number) => settlement + ":" + String(line);
 
     // Refunds made before the window's end (earlier ones let a whole-payment refund know what was
     // already returned on its items).
@@ -303,6 +337,29 @@ export function createPostgresStoreSalesPaymentLedger(options: {
       );
     }
 
+    const tableSettlements = new Map(
+      table.settlements.map((settlement) => [settlement.settlementReference, settlement]),
+    );
+    const cashRefunded = { count: 0, amountMinor: 0n };
+    for (const refund of table.cashRefunds) {
+      const settlement = tableSettlements.get(refund.settlementReference) ?? fail();
+      const last = settlement.lines.at(-1) ?? fail();
+      cashRefunded.count++;
+      cashRefunded.amountMinor += refund.amountMinor;
+      refunds.push(
+        Object.freeze({
+          channel: "Cash" as const,
+          kind: "Cash" as const,
+          refundReference: refund.cashRefundReference,
+          orderReference: refund.orderReference,
+          paymentIntentReference: lineKey(settlement.settlementReference, last.lineNumber),
+          amountMinor: refund.amountMinor,
+          refundedAt: refund.refundedAt,
+          items: null,
+        }),
+      );
+    }
+
     // Online payments captured in the window, and those any refund above belongs to.
     const refundedIntents = [
       ...new Set(
@@ -356,6 +413,8 @@ export function createPostgresStoreSalesPaymentLedger(options: {
         orderAllocationMinor: allocation,
         tipMinor: tip,
         totalMinor: total,
+        roundingMinor: 0n,
+        paymentCount: 1 as const,
         takenAt,
       });
       if (takenAt >= startsAt && takenAt < endsAt) payments.push(payment);
@@ -374,11 +433,41 @@ export function createPostgresStoreSalesPaymentLedger(options: {
         orderAllocationMinor: payment.preparation.orderAllocation.amountMinor,
         tipMinor: payment.preparation.tip.amountMinor,
         totalMinor: payment.preparation.total.amountMinor,
+        roundingMinor: 0n,
+        paymentCount: 1 as const,
         takenAt: payment.takenAt,
       });
       if (record.orderAllocationMinor + record.tipMinor !== record.totalMinor) return fail();
       if (payment.takenAt >= startsAt && payment.takenAt < endsAt) payments.push(record);
       else refundedPayments.push(record);
+    }
+    const tableCard = { count: 0, amountMinor: 0n, tipMinor: 0n };
+    const cashTaken = { count: 0, amountMinor: 0n, tipMinor: 0n, roundingMinor: 0n };
+    for (const settlement of table.settlements) {
+      const inWindow = settlement.takenAt >= startsAt && settlement.takenAt < endsAt;
+      if (inWindow) {
+        const totals = settlement.method === "Cash" ? cashTaken : tableCard;
+        totals.count++;
+        totals.amountMinor += settlement.totalMinor;
+        totals.tipMinor += settlement.tipMinor;
+        if (settlement.method === "Cash") cashTaken.roundingMinor += settlement.roundingMinor;
+      }
+      for (const [index, line] of settlement.lines.entries()) {
+        const record = Object.freeze({
+          channel: settlement.method === "Cash" ? ("Cash" as const) : ("CardMachine" as const),
+          paymentIntentReference: lineKey(settlement.settlementReference, line.lineNumber),
+          orderReference: settlement.orderReference,
+          orderBatchReference: line.orderBatchReference,
+          orderAllocationMinor: line.roundMinor,
+          tipMinor: line.tipMinor,
+          totalMinor: line.roundMinor + line.tipMinor,
+          roundingMinor: line.roundingMinor,
+          paymentCount: index === 0 ? (1 as const) : (0 as const),
+          takenAt: settlement.takenAt,
+        });
+        if (inWindow) payments.push(record);
+        else refundedPayments.push(record);
+      }
     }
     await allowed(tx);
     return Object.freeze({
@@ -397,15 +486,18 @@ export function createPostgresStoreSalesPaymentLedger(options: {
           count: ordinary.refundCount + compensationInWindow.count,
           amountMinor: ordinary.refundedAmountMinor + compensationInWindow.amountMinor,
         },
+        // The Store's card machine took both counter/round payments and tables paid at the end.
         cardMachineTaken: {
-          count: cardSummary.paymentCount,
-          amountMinor: cardSummary.takenMinor,
-          tipMinor: cardSummary.tipMinor,
+          count: cardSummary.paymentCount + tableCard.count,
+          amountMinor: cardSummary.takenMinor + tableCard.amountMinor,
+          tipMinor: cardSummary.tipMinor + tableCard.tipMinor,
         },
         cardMachineRefunded: {
           count: cardSummary.refundCount,
           amountMinor: cardSummary.refundedMinor,
         },
+        cashTaken,
+        cashRefunded,
       }) satisfies StoreSalesSettlementTotals,
     });
   };

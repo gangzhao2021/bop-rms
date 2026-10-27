@@ -26,6 +26,7 @@ import {
   type OrderItemProgressPhase,
   createPostgresStaffDiningRoundEntryStore,
   createPostgresOrderPayLaterConfirmationStore,
+  createPostgresPayLaterItemCancellationStore,
 } from "@rms/ordering";
 import {
   createPostgresDiningTableSettlementStore,
@@ -102,6 +103,8 @@ export interface CustomerDiningSessionFacts {
     readonly payLaterRounds?: ReadonlySet<string>;
     /** DEC-DINE-IN-PAY-LATER: rounds the table paid at the end, with its one payment. */
     readonly settledRounds?: ReadonlySet<string>;
+    /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment (if paid). */
+    readonly tableSettlement?: { readonly tipMinor: bigint; readonly roundingMinor: bigint } | null;
     readonly unpaidCancellations: ReadonlySet<string>;
     readonly staffCancellations: ReadonlyMap<
       string,
@@ -115,6 +118,11 @@ export interface CustomerDiningSessionFacts {
       readonly orderItemReferences: readonly string[];
       readonly refunded: boolean;
       readonly refundAmount: CustomerMoney;
+      /**
+       * DEC-DINE-IN-PAY-LATER: taken off a pay-later bill before the table paid — never charged,
+       * so not part of what the table ordered.
+       */
+      readonly notCharged?: true;
     }[];
     /** WP-2423 Q26: Order items the kitchen is remaking (Kitchen's public Query). */
     readonly remakes?: ReadonlySet<string>;
@@ -284,6 +292,7 @@ export function composeCustomerDiningSession(
         price: prices?.get(item.orderItemReference),
         phase: delivery.phase,
         beingRemade: !cancelled && order.remakes?.has(item.orderItemReference) === true,
+        notCharged: itemCancellation(item.orderItemReference)?.notCharged === true,
       });
     });
     const itemsTotal = items.reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
@@ -293,9 +302,13 @@ export function composeCustomerDiningSession(
     );
     const tax = items.reduce((sum, item) => sum + (item.price?.tax.amountMinor ?? 0n), 0n);
     if (!unpaidCancelled) {
-      ordered.subtotal += subtotal;
-      ordered.tax += tax;
-      ordered.total += itemsTotal;
+      const charged = items.filter((item) => !item.notCharged);
+      ordered.subtotal += charged.reduce(
+        (sum, item) => sum + (item.price?.subtotal.amountMinor ?? 0n),
+        0n,
+      );
+      ordered.tax += charged.reduce((sum, item) => sum + (item.price?.tax.amountMinor ?? 0n), 0n);
+      ordered.total += charged.reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n);
     }
     const outcome = order.paymentOutcomes.get(reference);
     const deadline = order.paymentDeadlines.get(reference) ?? null;
@@ -412,6 +425,14 @@ export function composeCustomerDiningSession(
     paymentTiming: facts.paymentTiming ?? "PayFirst",
     rounds: Object.freeze(rounds),
     summary: Object.freeze({
+      // DEC-DINE-IN-PAY-LATER: what the table's one payment added to its dishes, so the guest's
+      // total and what was paid agree line by line.
+      ...(order.tableSettlement == null
+        ? {}
+        : {
+            tableTip: money(order.tableSettlement.tipMinor),
+            cashRounding: money(order.tableSettlement.roundingMinor),
+          }),
       paid: money(paid),
       refunded: money(refunded),
       refundPending: money(refundPending),
@@ -679,6 +700,19 @@ function postgresDependencies(
             currencyCode: record.currencyCode,
           },
         });
+      // DEC-DINE-IN-PAY-LATER: dishes taken off the bill before the table paid (nothing charged).
+      if (paymentTiming === "PayLater")
+        for (const record of await createPostgresPayLaterItemCancellationStore({
+          ...scope,
+          authorize: async (_tx, value) =>
+            value.orderReference === orderReference && (await stillAuthorized()),
+        }).listByOrders(transaction, [orderReference]))
+          itemCancellations.push({
+            orderItemReferences: [...record.orderItemReferences],
+            refunded: false,
+            refundAmount: { amountMinor: 0n, currencyCode: "CAD" },
+            notCharged: true as const,
+          });
       // WP-2423 Q26: items the kitchen is remaking for this table's order.
       const remakes = new Set(
         (await listOpenKitchenReworkItems(transaction, scope, [orderReference])).map(
@@ -835,6 +869,13 @@ function postgresDependencies(
           paymentStarted,
           payLaterRounds,
           settledRounds,
+          tableSettlement:
+            tableSettlements[0] === undefined
+              ? null
+              : {
+                  tipMinor: tableSettlements[0].tipMinor,
+                  roundingMinor: tableSettlements[0].roundingMinor,
+                },
           unpaidCancellations,
           staffCancellations,
           itemCancellations,

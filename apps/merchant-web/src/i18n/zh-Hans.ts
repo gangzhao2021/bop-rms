@@ -318,8 +318,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "读不到堂食付款设置，请刷新重试。",
   "When dine-in guests pay": "堂食客人什么时候付款",
   "Pay at the end": "先点后付",
-  "Guests order rounds that go straight to the kitchen and pay once for the whole table: on their phone, on the card machine or in cash.":
-    "客人每一轮点的菜直接送到后厨，最后整桌一起付：用手机付、刷卡机或现金。",
+  "Guests order rounds that go straight to the kitchen. Staff take one payment for the whole table at the end, on the card machine or in cash.":
+    "客人每一轮点的菜直接送到后厨。最后由店员为整桌收一次款，用刷卡机或现金。",
   "Pay before each round": "先付后做",
   "Each round is paid before it goes to the kitchen.": "每一轮先付款，再送到后厨。",
   "A change applies to tables opened after it; tables already open keep theirs.":
@@ -5713,4 +5713,58 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid by": "付款方式",
   "Paid in full. Close the table when the guests have left.": "已全部付清。客人离开后关台。",
   "Print receipt": "打印收据",
+  "Cash payments could not be read.": "现金收款读取失败。",
+  "Cash totals": "现金合计",
+  "{count} table{value} · tips {tipMinor}": "{count} 桌 · 小费 {tipMinor}",
+  "Cash refunds": "现金退款",
+  "Net cash": "现金净额",
+  "Cash rounding {roundingMinor}": "现金取整 {roundingMinor}",
+  "{recordedAfterOutageCount} cash payment(s) were recorded after an outage; they count on the day they were paid.":
+    "{recordedAfterOutageCount} 笔现金收款是断网后补录的，按实际收款那天计入。",
+  "Cash our system recorded for tables. The till also holds cash from your own register, so compare this part only.":
+    "这是本系统为桌台记录的现金。钱箱里还有你们自己收银机收的现金，只对这一部分。",
+  "Problem with the food": "菜品有问题",
+  "Guest asked": "客人要求",
+  "Charged too much": "多收了",
+  "A manager gives cash back. Ask an Owner or Store Manager to sign in with their PIN.":
+    "现金退款由经理处理。请老板或店长用自己的 PIN 登录。",
+  "That is more than is left of this cash payment.": "超过了这笔现金收款剩下的金额。",
+  "The cash refund wasn't recorded. Try again.": "现金退款没有记录成功，请再试一次。",
+  "Paid at the table": "在桌上付款",
+  Rounds: "各轮合计",
+  "Cash given back · {reason}": "已退现金 · {reason}",
+  "Recorded after an outage.": "断网后补录。",
+  "Give cash back": "退现金",
+  "Amount to give back": "退还金额",
+  "Up to {amount}": "最多 {amount}",
+  "Give back {amount} in cash": "退还现金 {amount}",
+  "Paper payment": "纸单补录",
+  "Paid while the system was down (enter it from paper now)": "断网时已收款（现在按纸单补录）",
+  "Within the last 3 days. It counts on the day it was paid.": "限 3 天内。按实际收款那天计入。",
+  "Taking dishes off the bill was refused. Ask a manager to do it.":
+    "从账单删菜被拒绝。请让经理操作。",
+  "This table has paid. Give the guest money back from its payment instead.":
+    "这桌已经付款。请改为从这笔付款里退钱给客人。",
+  "The kitchen has started one of these dishes. Refresh the order.":
+    "后厨已经开始做其中一道菜。请刷新订单。",
+  "This order changed since it was shown. Refresh it, then try again.":
+    "这张订单在显示后有变动。请刷新后再试。",
+  "These dishes can no longer be taken off the bill. Refresh the order.":
+    "这些菜已经不能从账单删除。请刷新订单。",
+  "Take dishes off the bill": "从账单删菜",
+  "Tick the dishes the table won't be charged for. The kitchen stops them.":
+    "勾选这桌不收钱的菜，后厨会停做。",
+  "Take the whole round off · {amount}": "删掉整轮 · {amount}",
+  "Take off {amount}": "删掉 {amount}",
+  "Taken off the bill · not charged": "已从账单删除 · 不收费",
+  "Taken off the bill": "已从账单删除",
+  "Total after dishes taken off": "删菜后合计",
+  "Cancel checkout": "取消结账",
+  "The table can order again; checkout is started again later.":
+    "这桌可以继续点菜，之后再重新开始结账。",
+  "This table changed since it was shown. It has been read again: try again.":
+    "这桌在显示后有变动，已重新读取，请再试一次。",
+  "On the table's bill": "记入本桌账单",
+  "Paid at the table · cash": "已在桌上付清 · 现金",
+  "Paid at the table · card machine": "已在桌上付清 · 刷卡机",
 });

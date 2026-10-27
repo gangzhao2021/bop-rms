@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createDiningCartParticipationQuery,
+  DiningTableCheckingOutError,
   type DiningParticipationReadSnapshot,
 } from "../application/dining-cart-participation-query.js";
 const id = (n: number) => `018f2000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -120,7 +121,6 @@ describe("Dining current Cart participation facts", () => {
     ["table", "assignmentVersion", 3],
     ["table", "activeDiningSessionReference", id(90)],
     ["table", "activeDiningSessionReference", null],
-    ["session", "phase", "Closing"],
     ["session", "phase", "Closed"],
     ["session", "phase", "Cancelled"],
     ["table", "tableState", "Unavailable"],
@@ -135,6 +135,15 @@ describe("Dining current Cart participation facts", () => {
       [group]: { ...current[group], [field]: value },
     } as never);
     expect(await f.query.resolve(input)).toBeNull();
+  });
+  it("says a table checking out is checking out (DEC-DINE-IN-PAY-LATER)", async () => {
+    const f = fixture();
+    const current = source();
+    f.readCurrent.mockResolvedValue({
+      ...current,
+      session: { ...current.session, phase: "Closing" },
+    } as never);
+    await expect(f.query.resolve(input)).rejects.toBeInstanceOf(DiningTableCheckingOutError);
   });
   it("denies a participant who has left even if they were the host", async () => {
     const f = fixture();

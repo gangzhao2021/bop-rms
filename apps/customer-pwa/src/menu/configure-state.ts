@@ -19,6 +19,7 @@ export type ConfigureState =
         | "rate-limited"
         | "order-processing"
         | "checkout-in-progress"
+        | "table-checking-out"
         | "expired"
         | "abandoned"
         | "unavailable"
@@ -107,13 +108,15 @@ export function createConfigureController({
                 ? "order-processing"
                 : parsed.code === "cart_checkout_in_progress"
                   ? "checkout-in-progress"
-                  : parsed.code === "cart_expired"
-                    ? "expired"
-                    : parsed.code === "cart_abandoned"
-                      ? "abandoned"
-                      : parsed.code === "network_unknown"
-                        ? "outcome-unknown"
-                        : "unavailable";
+                  : parsed.code === "cart_table_checking_out"
+                    ? "table-checking-out"
+                    : parsed.code === "cart_expired"
+                      ? "expired"
+                      : parsed.code === "cart_abandoned"
+                        ? "abandoned"
+                        : parsed.code === "network_unknown"
+                          ? "outcome-unknown"
+                          : "unavailable";
     publish({
       status,
       issueCodes: parsed.issueCodes,

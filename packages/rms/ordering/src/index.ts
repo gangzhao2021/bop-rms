@@ -506,3 +506,4 @@ export {
 } from "./application/pickup-not-collected-event-consumer-service.js";
 export * from "./application/order-pay-later-confirmation.js";
 export * from "./infrastructure/persistence/order-pay-later-confirmation-store.js";
+export * from "./infrastructure/persistence/pay-later-item-cancellation-store.js";

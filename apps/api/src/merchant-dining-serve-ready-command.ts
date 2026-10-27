@@ -197,7 +197,7 @@ export function createMerchantDiningServeReadyCommand(options: {
       const after = await read().catch(() => null);
       if (after) {
         const tableChanged =
-          after.sessionPhase !== "Active" ||
+          (after.sessionPhase !== "Active" && after.sessionPhase !== "Closing") ||
           after.closureStatus !== "Open" ||
           after.orderVersion !== command.expectedOrderVersion ||
           after.sessionVersion !== command.expectedSessionVersion ||
