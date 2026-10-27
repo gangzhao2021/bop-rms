@@ -739,6 +739,7 @@ describe("migration catalog", () => {
       "2000_095_create_dining_staff_call",
       "2000_096_create_dining_payment_timing",
       "2000_097_create_order_pay_later_confirmation",
+      "2000_098_create_dining_table_settlement",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

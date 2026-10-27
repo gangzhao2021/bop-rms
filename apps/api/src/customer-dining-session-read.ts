@@ -28,6 +28,7 @@ import {
   createPostgresOrderPayLaterConfirmationStore,
 } from "@rms/ordering";
 import {
+  createPostgresDiningTableSettlementStore,
   createPostgresCardMachinePaymentStore,
   createPostgresOrdinaryRefundPositionSource,
   createPostgresPaymentCompensationRefundPositionSource,
@@ -99,6 +100,8 @@ export interface CustomerDiningSessionFacts {
      * end; they are owed (due) until the table is settled and are never cancelled for it.
      */
     readonly payLaterRounds?: ReadonlySet<string>;
+    /** DEC-DINE-IN-PAY-LATER: rounds the table paid at the end, with its one payment. */
+    readonly settledRounds?: ReadonlySet<string>;
     readonly unpaidCancellations: ReadonlySet<string>;
     readonly staffCancellations: ReadonlyMap<
       string,
@@ -313,6 +316,13 @@ export function composeCustomerDiningSession(
       payment = "Failed";
       cancelsAt = deadline;
       due += itemsTotal;
+    } else if (
+      outcome === undefined &&
+      order.payLaterRounds?.has(reference) === true &&
+      order.settledRounds?.has(reference) === true
+    ) {
+      payment = "Paid";
+      status = kitchenStatus();
     } else if (outcome === undefined && order.payLaterRounds?.has(reference) === true) {
       // In the kitchen and owed until the table pays at the end; never cancelled for payment.
       payment = "OnTableBill";
@@ -781,6 +791,21 @@ function postgresDependencies(
               }).listByOrders({ transaction, orderReferences: [orderReference] })
             ).map((entry) => String(entry.orderBatchReference)),
       );
+      // DEC-DINE-IN-PAY-LATER: the table's one payment at the end (card machine or cash), what
+      // the guests paid in total (tip and cash rounding included).
+      const tableSettlements =
+        paymentTiming !== "PayLater" || options.diningScope === undefined
+          ? []
+          : await createPostgresDiningTableSettlementStore({
+              scope: options.diningScope,
+              authorize: async (_tx, value) =>
+                value.orderReference === orderReference && (await stillAuthorized()),
+            }).listByOrders(transaction, [orderReference]);
+      const settledRounds = new Set(
+        tableSettlements.flatMap((settlement) =>
+          settlement.lines.map((line) => line.orderBatchReference),
+        ),
+      );
       return {
         diningSessionReference,
         tableLabel,
@@ -809,6 +834,7 @@ function postgresDependencies(
           paymentDeadlines,
           paymentStarted,
           payLaterRounds,
+          settledRounds,
           unpaidCancellations,
           staffCancellations,
           itemCancellations,
@@ -818,6 +844,10 @@ function postgresDependencies(
             ...payments.map((projection) => ({
               status: projection.snapshot.terminalStatus,
               amount: projection.snapshot.amount,
+            })),
+            ...tableSettlements.map((settlement) => ({
+              status: "Succeeded" as const,
+              amount: { amountMinor: settlement.totalMinor, currencyCode: "CAD" },
             })),
             ...cardMachinePayments.map((entry) => ({
               status: "Succeeded" as const,

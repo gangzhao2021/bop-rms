@@ -41,8 +41,13 @@ import {
   createMerchantDiningPaymentTimingChange,
   createMerchantDiningPaymentTimingRead,
 } from "../../apps/api/dist/merchant-dining-payment-timing.js";
+import {
+  createMerchantDiningTableBillRead,
+  createMerchantDiningTableSettle,
+} from "../../apps/api/dist/merchant-dining-table-checkout.js";
 import { createMerchantDiningTableClosePlan } from "../../apps/api/dist/merchant-dining-table-close-plan.js";
 import { createMerchantDiningOrderCloseCommand } from "../../apps/api/dist/merchant-dining-order-close-command.js";
+import { createMerchantDiningUnpaidDeparture } from "../../apps/api/dist/merchant-dining-unpaid-departure.js";
 import { createDiningOrderCloseConfiguration } from "../../apps/api/dist/dining-order-close-configuration.js";
 import { createPersistentMerchantTaskInbox } from "../../apps/api/dist/persistent-merchant-task-inbox.js";
 import { createMerchantDiningTaskSource } from "../../apps/api/dist/merchant-dining-task-source.js";
@@ -1076,6 +1081,18 @@ export async function createInternalMerchant(
     newReference: () => resources.credentials.reference(),
     audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
   });
+  // DEC-DINE-IN-PAY-LATER: a manager writes off a table that left without paying.
+  const orderUnpaidDeparture = createMerchantDiningUnpaidDeparture({
+    persistence,
+    authentication: service,
+    resolveConfiguration: createDiningOrderCloseConfiguration({
+      ...selected,
+      providerAccountReference,
+      environment: pilotProviderEnvironment(),
+    }),
+    newReference: () => resources.credentials.reference(),
+    audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+  });
   const orderAcceptance = await createInternalMerchantAcceptance(resources, persistence, service);
   const diningJoinState = createMerchantDiningJoinState({
     persistence,
@@ -1140,6 +1157,14 @@ export async function createInternalMerchant(
   const diningPaymentTimingChange = createMerchantDiningPaymentTimingChange({
     persistence,
     authentication: service,
+  });
+  // DEC-DINE-IN-PAY-LATER: a pay-later table's bill and its one payment (card machine or cash).
+  const diningTableBill = createMerchantDiningTableBillRead({ persistence, authentication: service });
+  const diningTableSettle = createMerchantDiningTableSettle({
+    persistence,
+    authentication: service,
+    environment: pilotProviderEnvironment(),
+    nextReference: () => resources.credentials.reference(),
   });
   // DEC-TABLE-CLOSE-GUESTS-LEFT: the close dialog's per-round plan (Owner, Store Manager).
   const diningTableClosePlan = createMerchantDiningTableClosePlan({
@@ -1569,6 +1594,9 @@ export async function createInternalMerchant(
       diningStaffCallAnswer,
       diningPaymentTimingRead,
       diningPaymentTimingChange,
+      diningTableBill,
+      diningTableSettle,
+      orderUnpaidDeparture,
       diningOrderProgress,
       diningTableClosePlan,
       diningItemService,

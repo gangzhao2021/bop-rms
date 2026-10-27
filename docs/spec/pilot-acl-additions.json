@@ -4544,6 +4544,60 @@
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER (Owner 2026-10-26 \"同意先点后付，按这个顺序做\")",
       "justification": "a round of a table opened pay later is sent to the kitchen when it is submitted: one append-only confirmation per round, never a payment"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_settlement",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER S2 (Owner 2026-10-26 \"同意先点后付，按这个顺序做\"; cash 2026-10-27 \"要支持现金，加进先点后付一起做\"): staff record a table's one payment (card machine or cash, split by round) and a manager records a table that left without paying"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_settlement",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER S2 (Owner 2026-10-26 \"同意先点后付，按这个顺序做\"; cash 2026-10-27 \"要支持现金，加进先点后付一起做\"): staff record a table's one payment (card machine or cash, split by round) and a manager records a table that left without paying"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_settlement_round",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER S2 (Owner 2026-10-26 \"同意先点后付，按这个顺序做\"; cash 2026-10-27 \"要支持现金，加进先点后付一起做\"): staff record a table's one payment (card machine or cash, split by round) and a manager records a table that left without paying"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_settlement_round",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER S2 (Owner 2026-10-26 \"同意先点后付，按这个顺序做\"; cash 2026-10-27 \"要支持现金，加进先点后付一起做\"): staff record a table's one payment (card machine or cash, split by round) and a manager records a table that left without paying"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "order_unpaid_write_off",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER S2 (Owner 2026-10-26 \"同意先点后付，按这个顺序做\"; cash 2026-10-27 \"要支持现金，加进先点后付一起做\"): staff record a table's one payment (card machine or cash, split by round) and a manager records a table that left without paying"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "order_unpaid_write_off",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER S2 (Owner 2026-10-26 \"同意先点后付，按这个顺序做\"; cash 2026-10-27 \"要支持现金，加进先点后付一起做\"): staff record a table's one payment (card machine or cash, split by round) and a manager records a table that left without paying"
     }
   ]
 }

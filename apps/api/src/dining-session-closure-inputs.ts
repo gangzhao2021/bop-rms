@@ -6,7 +6,10 @@ import {
   parseOrderingReference,
   parseOrderingInstant,
 } from "@rms/ordering";
-import { createPostgresOrderSettledFinalityStore } from "@rms/payment";
+import {
+  createPostgresDiningTableSettlementStore,
+  createPostgresOrderSettledFinalityStore,
+} from "@rms/payment";
 import { createDiningOrderClosureInputs } from "./dining-order-closure-inputs.js";
 type Options = Parameters<typeof createDiningOrderClosureInputs>[0];
 interface Query {
@@ -99,14 +102,45 @@ export function createDiningSessionClosureInputs(
                   finalityReference: closure.financialFinalityReference,
                   expectedOrderVersion: closure.orderVersion,
                 });
+          // WP-2423 DEC-DINE-IN-PAY-LATER: an Order closed on a manager's unpaid-departure
+          // write-off (Payment) instead of a settlement.
+          const writeOff =
+            closure.financialFinalityReference === null || finality !== null
+              ? null
+              : await createPostgresDiningTableSettlementStore({
+                  scope: options.diningScope,
+                  authorize: async (_tx, value) =>
+                    value.orderReference === entry.orderReference && (await authorize()) === true,
+                }).loadWriteOff(tx, String(closure.financialFinalityReference));
+          const historicalFinality =
+            finality ??
+            (writeOff === null
+              ? null
+              : Object.freeze({
+                  classification: "AuthorizedWriteOff" as const,
+                  tenantReference: writeOff.tenantReference,
+                  brandReference: writeOff.brandReference,
+                  storeReference: writeOff.storeReference,
+                  orderReference: writeOff.orderReference,
+                  orderVersion: writeOff.orderVersion,
+                  orderCheckpoint: writeOff.orderCheckpoint,
+                  finalityReference: writeOff.writeOffReference,
+                  decidedAt: writeOff.decidedAt,
+                  currencyCode: "CAD" as const,
+                  pricedOrderTotalMinor: writeOff.pricedOrderTotalMinor.toString(),
+                  capturedOrderAllocationMinor: writeOff.capturedOrderAllocationMinor.toString(),
+                  writtenOffMinor: writeOff.writtenOffMinor.toString(),
+                }));
           if (
             closure.status === "Closed" &&
-            (!finality || String(finality.orderCheckpoint) !== String(closure.orderCheckpoint))
+            (!historicalFinality ||
+              String(historicalFinality.orderCheckpoint) !== String(closure.orderCheckpoint) ||
+              (writeOff !== null &&
+                (writeOff.orderVersion !== closure.orderVersion ||
+                  writeOff.decidedAt > query.observedAt)))
           )
             return fail();
-          orders.push(
-            Object.freeze({ inventory: entry, closure, current, historicalFinality: finality }),
-          );
+          orders.push(Object.freeze({ inventory: entry, closure, current, historicalFinality }));
         }
         if ((await authorize()) !== true) return fail();
         return Object.freeze({ ...query, ...options.diningScope, orders: Object.freeze(orders) });

@@ -3,6 +3,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { createPostgresOrderPaymentAttemptPosition } from "./persistence/order-payment-attempt-position.js";
 import { createPostgresOrderPaymentRefundPosition } from "./order-payment-refund-position.js";
 import { createPostgresCardMachinePaymentStore } from "./persistence/card-machine-payment-store.js";
+import { createPostgresDiningTableSettlementStore } from "./persistence/dining-table-settlement-store.js";
 import { exactPaymentObject, parsePaymentInstant } from "../application/payment-intent-creation.js";
 import { parsePaymentReference } from "../application/payment-provider-adapter.js";
 const fail = (): never => {
@@ -268,7 +269,44 @@ export function createPostgresOrderFinancialPosition(options: {
           }),
         );
       }
-      if (capturedMinor + machineCapturedMinor > 9223372036854775807n) return fail();
+      // WP-2423 DEC-DINE-IN-PAY-LATER: a table that paid once at the end (card machine or cash),
+      // one line per round. Each line is a capture of its round's total (and the tip on the last
+      // line); cash rounding is the drawer's difference, not part of the Order's amounts.
+      const tableSettlements = (
+        await createPostgresDiningTableSettlementStore({
+          scope,
+          authorize: async (_tx, value) =>
+            value.orderReference === query.orderReference && (await authorize()),
+        }).listByOrders(tx, [query.orderReference])
+      ).filter((settlement) => settlement.recordedAt <= query.observedAt);
+      let tableOrderMinor = 0n,
+        tableTipMinor = 0n;
+      const tableCaptures = [];
+      for (const settlement of tableSettlements) {
+        if (
+          settlement.orderReference !== query.orderReference ||
+          settlement.environment !== environment
+        )
+          return fail();
+        for (const line of settlement.lines) {
+          tableOrderMinor += line.roundMinor;
+          tableTipMinor += line.tipMinor;
+          tableCaptures.push(
+            Object.freeze({
+              settlementReference: settlement.settlementReference,
+              method: settlement.method,
+              orderBatchReference: line.orderBatchReference,
+              capturedMinor: line.roundMinor + line.tipMinor,
+              orderAllocationMinor: line.roundMinor,
+              tipMinor: line.tipMinor,
+              roundingMinor: line.roundingMinor,
+            }),
+          );
+        }
+      }
+      const tableCapturedMinor = tableOrderMinor + tableTipMinor;
+      if (capturedMinor + machineCapturedMinor + tableCapturedMinor > 9223372036854775807n)
+        return fail();
       await authorize();
       const digest = createHash("sha256")
         .update(
@@ -295,6 +333,12 @@ export function createPostgresOrderFinancialPosition(options: {
             machineCapturedMinor.toString(),
             machineConfirmedRefundMinor.toString(),
             machinePendingRefundMinor.toString(),
+            tableCaptures.map((c) => [
+              c.settlementReference,
+              c.orderBatchReference,
+              c.capturedMinor.toString(),
+              c.roundingMinor.toString(),
+            ]),
           ]),
         )
         .digest("hex");
@@ -320,15 +364,18 @@ export function createPostgresOrderFinancialPosition(options: {
         captures: Object.freeze(captures),
         /** Card-machine payments of this Order and their refunds (not sent to a Provider). */
         cardMachineCaptures: Object.freeze(machineCaptures),
+        /** WP-2423 DEC-DINE-IN-PAY-LATER: the rounds a table paid with its one settlement. */
+        tableSettlementCaptures: Object.freeze(tableCaptures),
         /**
          * WP-2423 (B759): what the Order was paid and refunded across both tenders (online and
          * card machine). Settlement and financial finality read these; the fields above stay the
          * online payment alone (receipts, "Paid online").
          */
         settlement: Object.freeze({
-          capturedMinor: capturedMinor + machineCapturedMinor,
-          capturedOrderAllocationMinor: capturedOrderAllocationMinor + machineOrderMinor,
-          capturedTipMinor: capturedTipMinor + machineTipMinor,
+          capturedMinor: capturedMinor + machineCapturedMinor + tableCapturedMinor,
+          capturedOrderAllocationMinor:
+            capturedOrderAllocationMinor + machineOrderMinor + tableOrderMinor,
+          capturedTipMinor: capturedTipMinor + machineTipMinor + tableTipMinor,
           confirmedRefundMinor: confirmedRefundMinor + machineConfirmedRefundMinor,
           pendingRefundMinor: pendingRefundMinor + machinePendingRefundMinor,
           refundAllocation: Object.freeze({

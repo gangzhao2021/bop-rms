@@ -5665,4 +5665,52 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Today's earlier orders are on the next page.": "今天更早的订单在下一页。",
   "Hand over to guest": "交给顾客",
   Charge: "收款",
+  "Needs cleaning": "待清洁",
+  "Cleaned · ready for guests": "已清洁，可以入座",
+  "Your access doesn't allow this. Ask an Owner or Store Manager.":
+    "你的权限不能做这件事。请找老板或店长。",
+  "Start checkout first, so no more rounds are sent from this table.":
+    "请先开始结账，这样这桌就不能再下单了。",
+  "This table owes nothing.": "这桌没有要付的。",
+  "The bill changed (a round is still being sent, or something was changed). It has been read again: check it and try again.":
+    "账单有变化（有一轮还在送出，或有改动）。已重新读取，请核对后再试。",
+  "The cash received is less than the cash total.": "收到的现金少于现金应付。",
+  "This table has already paid.": "这桌已经付过了。",
+  "Every dish must be served or cancelled first.": "每道菜都要先上齐或取消。",
+  "We couldn't confirm the result. Check the connection and press the button again: it is never recorded twice.":
+    "没能确认结果。请检查网络后再按一次，不会重复记录。",
+  "This couldn't be done right now. Try again.": "现在无法完成，请再试一次。",
+  Checkout: "结账",
+  "This table pays once at the end. When the guests ask for the bill, start checkout: no more rounds can be sent from the table.":
+    "这桌最后一起结账。客人要买单时开始结账，之后这桌不能再下单。",
+  "Starting checkout…": "正在开始结账…",
+  "Start checkout": "开始结账",
+  "An Owner or Store Manager starts checkout.": "由老板或店长开始结账。",
+  "Reading the bill…": "正在读取账单…",
+  "Round {number}": "第 {number} 轮",
+  "Total with tax": "含税合计",
+  "A round is still being sent or was just changed. Wait a moment and read the bill again.":
+    "有一轮还在送出或刚有改动。请稍等后重新读取账单。",
+  "Read the bill again": "重新读取账单",
+  "Tip amount": "小费金额",
+  "How the table pays": "付款方式",
+  Cash: "现金",
+  "The approval or reference code on the card machine slip. Never the card number.":
+    "刷卡机小票上的授权码或参考号，不要填卡号。",
+  "Cash total {amount} (rounded to 5 cents)": "现金应付 {amount}（按 5 分取整）",
+  "Cash received": "实收现金",
+  "Change {amount}": "找零 {amount}",
+  "{amount} short": "还差 {amount}",
+  "Record payment": "记录付款",
+  "Cash received · {amount}": "已收现金 · {amount}",
+  "Guests left without paying": "客人未付离开",
+  "Record that the guests at table {table} left without paying {amount}? A manager decides this. It stays in the reports as written off.":
+    "确认 {table} 桌客人未付 {amount} 就离开？此项由经理决定，会作为核销留在报表中。",
+  "Yes, they left without paying": "确认，客人未付离开",
+  "Receipt for table {table}": "{table} 桌收据",
+  "Cash rounding": "现金取整",
+  "Total paid": "实付合计",
+  "Paid by": "付款方式",
+  "Paid in full. Close the table when the guests have left.": "已全部付清。客人离开后关台。",
+  "Print receipt": "打印收据",
 });

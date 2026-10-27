@@ -2337,6 +2337,15 @@ async function scanUnsupported(root, module, diagnostics) {
             owner: "payment",
             tables: ["card_machine_payment", "card_machine_refund"],
           },
+          // WP-2423 DEC-DINE-IN-PAY-LATER: a table's one payment split by round, and write-offs.
+          "src/infrastructure/persistence/dining-table-settlement-store.ts": {
+            owner: "payment",
+            tables: [
+              "dining_table_settlement",
+              "dining_table_settlement_round",
+              "order_unpaid_write_off",
+            ],
+          },
           // WP-2423 Q14: payments and refunds behind the Store sales reports (read only).
           "src/infrastructure/persistence/store-sales-payment-ledger.ts": {
             owner: "payment",

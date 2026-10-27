@@ -205,3 +205,140 @@
   background: var(--bop-color-surface-raised, #f2f2f2);
   color: var(--bop-color-text-muted);
 }
+
+/* DEC-DINE-IN-PAY-LATER: a pay-later table's checkout on Tables (v3: white, row hairlines only). */
+.table-checkout {
+  display: grid;
+  gap: 16px;
+  margin: 24px 0 0;
+}
+.table-checkout h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.table-checkout p {
+  margin: 0;
+}
+.table-checkout__rounds {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.table-checkout__rounds > li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider);
+  font-weight: 600;
+}
+.table-checkout__rounds ul {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.table-checkout__rounds ul li,
+.table-checkout__totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.table-checkout__totals {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+.table-checkout__totals dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.table-checkout__total {
+  font-size: 20px;
+  font-weight: 600;
+}
+.table-checkout fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.table-checkout legend {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.table-checkout fieldset label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.table-checkout__field {
+  display: grid;
+  gap: 4px;
+}
+.table-checkout__field input,
+.table-checkout__tip input:not([type="radio"]) {
+  min-height: 44px;
+  max-width: 240px;
+  font: inherit;
+}
+.table-checkout__field small,
+.table-checkout__cash-due {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.table-checkout__change {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.table-checkout__primary {
+  justify-self: start;
+  min-height: 48px;
+  padding: 0 24px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+  font-weight: 600;
+}
+.table-checkout__primary:disabled {
+  background: var(--bop-color-surface-raised, #f2f2f2);
+  color: var(--bop-color-text-muted);
+}
+.table-checkout__secondary {
+  justify-self: start;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-danger);
+  font: inherit;
+  text-decoration: underline;
+}
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .table-checkout,
+  .table-checkout * {
+    visibility: visible;
+  }
+  .table-checkout {
+    position: absolute;
+    inset: 0 auto auto 0;
+  }
+  .table-checkout button {
+    display: none;
+  }
+}

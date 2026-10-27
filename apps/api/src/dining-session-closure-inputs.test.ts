@@ -5,6 +5,7 @@ const mock = vi.hoisted(() => ({
   closure: vi.fn(),
   current: vi.fn(),
   finality: vi.fn(),
+  writeOff: vi.fn(),
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
@@ -14,6 +15,7 @@ vi.mock("@rms/ordering", async (original) => ({
 }));
 vi.mock("@rms/payment", () => ({
   createPostgresOrderSettledFinalityStore: () => ({ readFinality: mock.finality }),
+  createPostgresDiningTableSettlementStore: () => ({ loadWriteOff: mock.writeOff }),
 }));
 vi.mock("./dining-order-closure-inputs.js", () => ({
   createDiningOrderClosureInputs: () => ({ load: mock.current }),
@@ -67,6 +69,32 @@ it("preserves historical settlement separately from changed current balance", as
   expect(result.orders).toHaveLength(1);
   expect(result.orders[0]?.historicalFinality?.classification).toBe("Settled");
   expect(result.orders[0]?.current.settlement.classification).toBe("Unpaid");
+});
+it("DEC-DINE-IN-PAY-LATER: reads an Order closed on a manager's unpaid-departure write-off", async () => {
+  const f = setup();
+  mock.finality.mockResolvedValue(null);
+  mock.writeOff.mockResolvedValue({
+    tenantReference: id(1),
+    brandReference: id(2),
+    storeReference: id(3),
+    orderReference: id(5),
+    orderVersion: 3,
+    orderCheckpoint: id(8),
+    writeOffReference: id(9),
+    decidedAt: at,
+    pricedOrderTotalMinor: 2260n,
+    capturedOrderAllocationMinor: 0n,
+    writtenOffMinor: 2260n,
+  });
+  const result = await f.run();
+  expect(result.orders[0]?.historicalFinality).toMatchObject({
+    classification: "AuthorizedWriteOff",
+    finalityReference: id(9),
+    writtenOffMinor: "2260",
+  });
+  // A write-off of another Order version is not this closure's.
+  mock.writeOff.mockResolvedValue({ ...(await mock.writeOff()), orderVersion: 2 });
+  await expect(f.run()).rejects.toThrow();
 });
 it("does not discard a missing order from session inventory", async () => {
   const f = setup();

@@ -308,3 +308,5 @@ export {
   type StoreSalesRefundItemShare,
   type StoreSalesSettlementTotals,
 } from "./infrastructure/persistence/store-sales-payment-ledger.js";
+export * from "./domain/dining-table-settlement.js";
+export * from "./infrastructure/persistence/dining-table-settlement-store.js";

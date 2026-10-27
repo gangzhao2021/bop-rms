@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { URL } from "node:url";
 import pg from "pg";
-import { it } from "vitest";
+import { it, vi } from "vitest";
 import { loadOutboxEnvelope } from "../../bop/eventing/src/index.ts";
 import {
   createOrderNumberAllocation,
@@ -13,6 +13,19 @@ import {
 } from "../../rms/ordering/src/index.ts";
 import { createCustomerAdditionalDiningSubmissionStore } from "../../../apps/api/src/customer-additional-dining-submission-store.ts";
 import { createDiningPayLaterRound } from "../../../apps/api/src/dining-pay-later-round.ts";
+import {
+  createMerchantDiningTableBillRead,
+  createMerchantDiningTableSettle,
+} from "../../../apps/api/src/merchant-dining-table-checkout.ts";
+import { createMerchantDiningUnpaidDeparture } from "../../../apps/api/src/merchant-dining-unpaid-departure.ts";
+import { createMerchantDiningClosingCommand } from "../../../apps/api/src/merchant-dining-closing-command.ts";
+import { createDiningOrderCloseConfiguration } from "../../../apps/api/src/dining-order-close-configuration.ts";
+import {
+  assessOrderSettlement,
+  createPostgresOrderFinancialPosition,
+} from "../../rms/payment/src/index.ts";
+import { createPostgresOrderPricedAmountSource } from "../../rms/ordering/src/index.ts";
+import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedAcceptanceOrderHistory } from "../test-support/acceptance-order-history.mjs";
@@ -63,6 +76,7 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
     const api = "wp2423_plr_" + context.runId,
       worker = "wp2423_plr_w_" + context.runId;
     assert.match(api, /^wp2423_plr_[a-f0-9]+$/u);
+    vi.stubEnv("NODE_ENV", "development");
     try {
       for (const name of [api, worker])
         await admin.query(
@@ -492,6 +506,302 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
       const source2 = await kitchenSource(c2, event2);
       assert.ok(source2, "the kitchen resolves the later pay-later round");
       assert.equal(String(source2.orderBatchReference), R2.batch.orderBatchReference);
+
+      // ── S2: the table checks out and pays once (DEC-DINE-IN-PAY-LATER rules 3, 6).
+      const provider = id(0x1);
+      const staffPermissions = [
+        "ordering.order.create_staff",
+        "dining.operate",
+        "dining.session.close",
+        "order.close",
+      ];
+      const server = await seedMerchantAcceptanceSession({
+        admin,
+        runner: transactions(),
+        scope: ownerScope,
+        actor: id(0x700),
+        at: now(),
+        extraPermissions: staffPermissions,
+      });
+      const manager = await seedMerchantAcceptanceSession({
+        admin,
+        runner: transactions(),
+        scope: ownerScope,
+        actor: id(0x701),
+        at: now(),
+        extraPermissions: [...staffPermissions, "payment.refund.approve"],
+        referencePrefix: "01909966",
+        sessionReferencePrefix: "01909965",
+      });
+      const as = (who) => ({ sessionCookie: who.sessionCookie, csrf: who.csrf });
+      const persistenceOf = (who) => ({ ...who.persistence, now });
+      const bill = (who = server) =>
+        createMerchantDiningTableBillRead({
+          persistence: persistenceOf(who),
+          authentication: who.authentication,
+        })({ ...as(who), query: { diningSessionReference: sessionReference } });
+      const settleWith = (who, command) =>
+        createMerchantDiningTableSettle({
+          persistence: persistenceOf(who),
+          authentication: who.authentication,
+          environment: "Test",
+          nextReference: fresh,
+        })({
+          ...as(who),
+          command: {
+            operationReference: fresh(),
+            diningSessionReference: sessionReference,
+            method: "Cash",
+            tip: { kind: "Percent", percent: 15 },
+            tenderedMinor: "100000",
+            slipReference: null,
+            recordedAfterOutage: false,
+            takenAt: null,
+            ...command,
+          },
+        });
+      const departure = (who, expectedOrderVersion) =>
+        createMerchantDiningUnpaidDeparture({
+          persistence: persistenceOf(who),
+          authentication: who.authentication,
+          resolveConfiguration: createDiningOrderCloseConfiguration({
+            ...ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+          }),
+          newReference: fresh,
+          audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+        })({
+          ...as(who),
+          command: {
+            orderReference,
+            operationReference: fresh(),
+            expectedOrderVersion,
+            expectedClosureVersion: 0,
+          },
+        });
+
+      // Paying before checkout started is refused: rounds can still be added.
+      await assert.rejects(settleWith(server, {}), { code: "TABLE_CHECKOUT_NOT_STARTED" });
+      const sessionVersion = Number(
+        (
+          await rows("SELECT version FROM rms_dining.dining_session WHERE session_id=$1", [
+            sessionReference,
+          ])
+        )[0].version,
+      );
+      const begun = await createMerchantDiningClosingCommand({
+        persistence: persistenceOf(server),
+        authentication: server.authentication,
+        providerAccountReference: provider,
+        environment: "Test",
+        newReference: fresh,
+        retentionPolicyCode: "AUDIT_DEFAULT",
+        retentionPolicyVersion: 1,
+      })({
+        ...as(server),
+        command: {
+          action: "Begin",
+          diningSessionReference: sessionReference,
+          operationReference: fresh(),
+          expectedSessionVersion: sessionVersion,
+        },
+      });
+      assert.equal(begun.phase, "Closing");
+
+      // The bill: both rounds owed, each with its items, before tax, tax and total.
+      const round1Minor = items1.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n);
+      const round2Minor = items2.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n);
+      const open = await bill();
+      assert.equal(open.paymentTiming, "PayLater");
+      assert.equal(open.sessionPhase, "Closing");
+      assert.equal(open.consistent, true);
+      assert.deepEqual(
+        open.rounds.map((round) => [round.roundNumber, round.totalMinor, round.paid]),
+        [
+          [1, round1Minor.toString(), false],
+          [2, round2Minor.toString(), false],
+        ],
+      );
+      assert.equal(open.owed.totalMinor, (round1Minor + round2Minor).toString());
+      assert.equal(open.settlement, null);
+      const orderVersion = Number(
+        (
+          await rows(
+            "SELECT max(version)::int AS version FROM rms_ordering.order_revision WHERE order_id=$1",
+            [orderReference],
+          )
+        )[0].version,
+      );
+      // "Left without paying" is a manager's decision; a server is refused, nothing written.
+      await assert.rejects(departure(server, orderVersion), {
+        code: "UNPAID_DEPARTURE_PERMISSION_DENIED",
+      });
+      // A manager can't write off a table whose dishes are not all served or resolved yet.
+      await assert.rejects(departure(manager, orderVersion), (error) => {
+        assert.equal(error.code, "UNPAID_DEPARTURE_NOT_READY");
+        assert.ok(error.reasons.includes("EXECUTION_NOT_FINAL"), String(error.reasons));
+        return true;
+      });
+      assert.deepEqual(
+        await rows("SELECT 1 FROM rms_payment.order_unpaid_write_off WHERE order_id=$1", [
+          orderReference,
+        ]),
+        [],
+      );
+
+      // Cash short of the rounded total is refused; nothing recorded.
+      await assert.rejects(settleWith(server, { tenderedMinor: "100" }), {
+        code: "TABLE_CHECKOUT_TENDER_SHORT",
+      });
+      // Cash: 15 % tip on the bill before tax, rounded to 5 cents, change given.
+      const subtotalMinor = BigInt(open.owed.subtotalMinor);
+      const tipMinor = (subtotalMinor * 15n + 50n) / 100n;
+      const due = round1Minor + round2Minor + tipMinor;
+      const digit = due % 10n;
+      const rounding =
+        digit === 0n || digit === 5n
+          ? 0n
+          : digit <= 2n
+            ? -digit
+            : digit <= 7n
+              ? 5n - digit
+              : 10n - digit;
+      const operation = fresh();
+      const paid = await settleWith(server, { operationReference: operation });
+      assert.equal(paid.status, "Recorded");
+      assert.deepEqual(paid.bill.settlement, {
+        method: "Cash",
+        roundsMinor: (round1Minor + round2Minor).toString(),
+        tipMinor: tipMinor.toString(),
+        roundingMinor: rounding.toString(),
+        totalMinor: (due + rounding).toString(),
+        tenderedMinor: "100000",
+        changeMinor: (100000n - due - rounding).toString(),
+        recordedAt: paid.bill.settlement.recordedAt,
+        recordedAfterOutage: false,
+      });
+      assert.deepEqual(
+        paid.bill.rounds.map((round) => round.paid),
+        [true, true],
+      );
+      assert.equal(paid.bill.owed.totalMinor, "0");
+      // One payment, one line per round; the tip and the rounding on the last round.
+      assert.deepEqual(
+        await rows(
+          "SELECT r.line_number,r.order_batch_id::text AS batch,r.round_minor::text AS round,r.tip_minor::text AS tip,r.rounding_minor::text AS rounding FROM rms_payment.dining_table_settlement_round r JOIN rms_payment.dining_table_settlement s ON s.settlement_id=r.settlement_id WHERE s.order_id=$1 ORDER BY r.line_number",
+          [orderReference],
+        ),
+        [
+          {
+            line_number: 1,
+            batch: R1.batch.orderBatchReference,
+            round: round1Minor.toString(),
+            tip: "0",
+            rounding: "0",
+          },
+          {
+            line_number: 2,
+            batch: R2.batch.orderBatchReference,
+            round: round2Minor.toString(),
+            tip: tipMinor.toString(),
+            rounding: rounding.toString(),
+          },
+        ],
+      );
+      assert.deepEqual(
+        await rows(
+          "SELECT action_code,actor_reference::text AS actor,retention_policy_code FROM platform_audit.audit_record WHERE action_code='PAYMENT_DINING_TABLE_SETTLED' AND target_id=$1",
+          [orderReference],
+        ),
+        [
+          {
+            action_code: "PAYMENT_DINING_TABLE_SETTLED",
+            actor: id(0x700),
+            retention_policy_code: "FINANCIAL_COMPLIANCE",
+          },
+        ],
+      );
+      // The same command again returns that payment; another payment of the table is refused.
+      assert.equal(
+        (await settleWith(server, { operationReference: operation })).status,
+        "AlreadyRecorded",
+      );
+      await assert.rejects(settleWith(server, { method: "CardMachine", tenderedMinor: null }), {
+        code: "TABLE_CHECKOUT_ALREADY_PAID",
+      });
+      assert.equal(
+        (
+          await rows(
+            "SELECT count(*)::int AS n FROM rms_payment.dining_table_settlement WHERE order_id=$1",
+            [orderReference],
+          )
+        )[0].n,
+        1,
+      );
+      // Payment now counts both rounds and the tip as paid: the Order is Settled (rounding apart).
+      const settledNow = await transactions().run(async (tx) => {
+        const at = now();
+        const financial = await createPostgresOrderFinancialPosition({
+          scope: ownerScope,
+          providerAccountReference: provider,
+          environment: "Test",
+          authorize: async () => true,
+        })(tx, { orderReference, observedAt: at });
+        const priced = await createPostgresOrderPricedAmountSource({
+          ...scope,
+          authorize: async () => true,
+        })(tx, { orderReference, observedAt: at });
+        return assessOrderSettlement({
+          currencyCode: "CAD",
+          pricedOrderTotalMinor: priced.pricedTotalMinor,
+          capturedMinor: financial.settlement.capturedMinor,
+          capturedOrderAllocationMinor: financial.settlement.capturedOrderAllocationMinor,
+          capturedTipMinor: financial.settlement.capturedTipMinor,
+          confirmedRefundMinor: financial.settlement.confirmedRefundMinor,
+          refundAllocation: financial.settlement.refundAllocation,
+          pendingRefundMinor: financial.settlement.pendingRefundMinor,
+          unresolvedAttemptCount: financial.unresolvedAttemptCount,
+          pendingAmendmentCount: priced.pendingAmendmentCount,
+        });
+      });
+      assert.equal(settledNow.classification, "Settled");
+      // A round paid with the table can never be paid again on the card machine (trigger).
+      await assert.rejects(
+        admin.query(
+          "INSERT INTO rms_payment.dining_table_settlement_round (settlement_id,brand_id,store_id,order_id,order_batch_id,submission_id,line_number,round_minor,tip_minor,rounding_minor) SELECT settlement_id,brand_id,store_id,order_id,$2,$3,3,1,0,0 FROM rms_payment.dining_table_settlement WHERE order_id=$1",
+          [orderReference, R2.batch.orderBatchReference, R2.batch.submissionReference],
+        ),
+        /duplicate key|paid/u,
+      );
+      // A write-off must be exactly what is owed (Payment's own check), and is append-only.
+      await assert.rejects(
+        admin.query(
+          "INSERT INTO rms_payment.order_unpaid_write_off (write_off_id,tenant_id,brand_id,store_id,operation_id,dining_session_id,order_id,order_version,order_checkpoint,reason_code,currency_code,priced_order_total_minor,captured_order_allocation_minor,written_off_minor,requested_by_actor_id,approved_by_actor_id,order_evidence_digest,payment_evidence_digest,decided_at,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,2,$8,'GUEST_LEFT_UNPAID','CAD',1000,0,999,$9,$9,$10,$10,now(),$11)",
+          [
+            fresh(),
+            tenant,
+            scope.brandReference,
+            scope.storeReference,
+            fresh(),
+            sessionReference,
+            orderReference,
+            fresh(),
+            id(0x701),
+            "sha256:" + "b".repeat(64),
+            fresh(),
+          ],
+        ),
+        /order_unpaid_write_off_amount/u,
+      );
+      await assert.rejects(
+        admin.query("UPDATE rms_payment.dining_table_settlement SET tip_minor=0"),
+        /append-only/u,
+      );
+      await assert.rejects(
+        admin.query("DELETE FROM rms_payment.dining_table_settlement_round"),
+        /append-only/u,
+      );
 
       // ── A pay-later round is never closed as "not paid in time" (nor any accepted round).
       await assert.rejects(

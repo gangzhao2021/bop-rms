@@ -317,6 +317,8 @@ export function createMerchantDiningTables(options: {
                   capacity: table.capacity,
                   lifecycle: table.lifecycle,
                   operationalState: table.operationalState,
+                  // WP-2423: why a table is blocked (CLEANING after its guests left), for Tables.
+                  blockReasonCode: table.blockReasonCode,
                   aggregateVersion: table.aggregateVersion,
                   currentDiningSessionReference: table.activeDiningSessionReference,
                   elapsedMinutes:

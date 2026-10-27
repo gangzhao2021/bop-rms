@@ -51,6 +51,8 @@ export interface StaffDiningTable {
   capacity: number;
   lifecycle: "Draft" | "Published";
   operationalState: "Available" | "TemporarilyBlocked";
+  /** Why a blocked table is blocked (CLEANING once its guests left); null when available. */
+  blockReasonCode?: string | null;
   aggregateVersion: number;
   currentDiningSessionReference: string | null;
   elapsedMinutes: number | null;
@@ -322,6 +324,13 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           capacity: num(r.capacity),
           lifecycle: r.lifecycle,
           operationalState: r.operationalState,
+          blockReasonCode:
+            r.blockReasonCode === undefined || r.blockReasonCode === null
+              ? null
+              : typeof r.blockReasonCode === "string" &&
+                  /^[A-Z][A-Z0-9_-]{0,63}$/u.test(r.blockReasonCode)
+                ? r.blockReasonCode
+                : fail(),
           aggregateVersion: num(r.aggregateVersion),
           currentDiningSessionReference,
           elapsedMinutes,

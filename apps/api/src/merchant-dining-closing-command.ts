@@ -1,4 +1,5 @@
 import { createDiningExceptionTaskComposition } from "./dining-exception-task-composition.js";
+import { markDiningTableNeedsCleaning } from "./dining-table-needs-cleaning.js";
 import { createDiningTableReleaseComposition } from "./dining-table-release-composition.js";
 import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
@@ -160,13 +161,27 @@ export function createMerchantDiningClosingCommand(options: {
         retentionPolicyCode: options.retentionPolicyCode,
         retentionPolicyVersion: options.retentionPolicyVersion,
       });
-      const releaseClosedTable = (version: number) =>
-        release(tx, {
+      const releaseClosedTable = async (version: number) => {
+        await release(tx, {
           diningSessionReference: command.diningSessionReference,
           operationReference: command.operationReference,
           expectedSessionVersion: version,
           observedAt,
         });
+        // Handoff §25.3: the freed table waits for cleaning before it is seated again.
+        await markDiningTableNeedsCleaning(tx, {
+          scope,
+          actorReference: String(current.actorReference),
+          tableReference: String(session.tableReference),
+          operationReference: options.newReference(),
+          correlationReference: command.operationReference,
+          observedAt,
+          retentionPolicyCode: options.retentionPolicyCode,
+          retentionPolicyVersion: options.retentionPolicyVersion,
+          newReference: options.newReference,
+          authorize: guard,
+        });
+      };
       const fence = createPostgresDiningClosingFence({ scope, authorize: guard });
       const session = await fence(tx, {
         diningSessionReference: command.diningSessionReference,

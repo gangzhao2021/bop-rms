@@ -2667,6 +2667,24 @@ async function exerciseGuestsLeftOrderClose({
   );
   const finalized = finalizing.result;
   assert.deepEqual([finalized.status, finalized.phase], ["Applied", "Closed"]);
+  // Handoff §25.3: the freed table now waits for cleaning (a table block by the manager who
+  // closed it, with its own audit); staff mark it clean before it is seated again.
+  assert.deepEqual(
+    await one(
+      "SELECT table_snapshot->>'operationalState' AS state,table_snapshot->>'blockReasonCode' AS reason,table_snapshot->>'activeDiningSessionReference' AS session FROM rms_dining.dining_table WHERE table_id=$1",
+      [dining.table.tableReference],
+    ),
+    [{ state: "TemporarilyBlocked", reason: "CLEANING", session: null }],
+  );
+  assert.equal(
+    (
+      await one(
+        "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE action_code='DINING_TABLE_SETBLOCK' AND target_id=$1 AND reason_code='CLEANING'",
+        [dining.table.tableReference],
+      )
+    )[0].n,
+    1,
+  );
 
   // ── The manager's Order close permission is withdrawn: refused as such, before anything else.
   await admin.query(

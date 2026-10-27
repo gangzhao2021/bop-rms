@@ -1,3 +1,6 @@
+vi.mock("./dining-table-needs-cleaning.js", () => ({
+  markDiningTableNeedsCleaning: (tx: unknown, input: unknown) => mock.needsCleaning(tx, input),
+}));
 vi.mock("./dining-table-release-composition.js", () => ({
   createDiningTableReleaseComposition: () => mock.release,
 }));
@@ -13,6 +16,7 @@ vi.mock("./dining-settled-session-evidence.js", () => ({
 }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
+  needsCleaning: vi.fn(async (_tx: unknown, _input: unknown) => "Marked"),
   scope: vi.fn(),
   fence: vi.fn(),
   receipt: vi.fn(),
@@ -308,6 +312,13 @@ it("releases table only after Finalize with the resulting session version", asyn
   });
   expect(mock.finalize.mock.invocationCallOrder[0]).toBeLessThan(
     mock.release.mock.invocationCallOrder[0] ?? 0,
+  ); // Handoff §25.3: the freed table then waits for cleaning, by the staff member who closed it.
+  expect(mock.needsCleaning).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ correlationReference: id(6), observedAt: at }),
+  );
+  expect(mock.release.mock.invocationCallOrder[0]).toBeLessThan(
+    mock.needsCleaning.mock.invocationCallOrder[0] ?? 0,
   );
 });
 it("fails the outer command if table release fails", async () => {
