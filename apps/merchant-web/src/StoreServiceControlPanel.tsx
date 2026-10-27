@@ -1,3 +1,4 @@
+import { DiningPaymentTimingPanel } from "./DiningPaymentTimingPanel.js";
 import { serviceModeText, listSeparator, currentLanguage, systemText, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { StoreConfigurationEditor } from "./StoreConfigurationEditor.js";
@@ -383,6 +384,8 @@ export function StoreServiceControlPanel({ store, csrf }: { store: string; csrf:
           </>
         )}
       </section>
+      {/* WP-2423 DEC-DINE-IN-PAY-LATER: when dine-in guests pay (Owner, Store Manager). */}
+      <DiningPaymentTimingPanel csrf={csrf} />
     </WorkspacePage>
   );
 }

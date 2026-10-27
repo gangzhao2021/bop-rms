@@ -4,6 +4,10 @@ import type {
   createMerchantDiningStaffCallCount,
 } from "./merchant-dining-staff-calls.js";
 import type {
+  createMerchantDiningPaymentTimingChange,
+  createMerchantDiningPaymentTimingRead,
+} from "./merchant-dining-payment-timing.js";
+import type {
   AuthenticationSession,
   BrowserCookieMutation,
   RawBrowserCredential,
@@ -552,6 +556,9 @@ export interface MerchantBffRouterOptions {
   /** WP-2423 Q28: guests waiting for staff (navigation count) and answering a call. */
   readonly diningStaffCallCount?: ReturnType<typeof createMerchantDiningStaffCallCount>;
   readonly diningStaffCallAnswer?: ReturnType<typeof createMerchantDiningStaffCallAnswer>;
+  /** WP-2423 DEC-DINE-IN-PAY-LATER: the Store's dine-in payment timing. */
+  readonly diningPaymentTimingRead?: ReturnType<typeof createMerchantDiningPaymentTimingRead>;
+  readonly diningPaymentTimingChange?: ReturnType<typeof createMerchantDiningPaymentTimingChange>;
   readonly diningTableCommand?: ReturnType<typeof createMerchantDiningTableCommand>;
   /** WP-2423 Q11: table QR codes (DIN-TABLE-LIST). */
   readonly diningTableQr?: ReturnType<typeof createMerchantDiningTableQr>;

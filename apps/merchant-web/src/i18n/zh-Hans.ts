@@ -308,6 +308,22 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The table's order could not be read. It is read again with the table.":
     "读不到这桌的订单，会随桌台一起重新读取。",
   "This table's order": "这桌的订单",
+  "Someone changed it meanwhile. This is the current choice; choose again if needed.":
+    "其间有人改过了。这是现在的设置，需要的话请重新选择。",
+  "Saved. Tables opened from now on use it; tables already open keep theirs.":
+    "已保存。之后新开的桌按这个方式；已经开着的桌不变。",
+  "Not saved. Check your connection and save again.": "没有保存。请检查网络后再保存一次。",
+  "Dine-in payment": "堂食付款",
+  "The dine-in payment setting could not be read. Refresh to retry.":
+    "读不到堂食付款设置，请刷新重试。",
+  "When dine-in guests pay": "堂食客人什么时候付款",
+  "Pay at the end": "先点后付",
+  "Guests order rounds that go straight to the kitchen and pay once for the whole table: on their phone, on the card machine or in cash.":
+    "客人每一轮点的菜直接送到后厨，最后整桌一起付：用手机付、刷卡机或现金。",
+  "Pay before each round": "先付后做",
+  "Each round is paid before it goes to the kitchen.": "每一轮先付款，再送到后厨。",
+  "A change applies to tables opened after it; tables already open keep theirs.":
+    "改动只对之后新开的桌生效，已经开着的桌不变。",
   Accept: "接受",
   "Accept ": "接单 ",
   "Accept a Kitchen work item": "接受后厨工作项",

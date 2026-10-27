@@ -338,6 +338,50 @@ export function installMerchantDiningRoutes(
       .catch(() => denied(response));
   });
 
+  // WP-2423 DEC-DINE-IN-PAY-LATER: the Store's dine-in payment timing (Owner, Store Manager).
+  router.post("/dining/payment-timing", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningPaymentTimingRead) {
+      response.status(503).json({ error: "dining_payment_timing_unavailable" });
+      return;
+    }
+    void options
+      .diningPaymentTimingRead({ sessionCookie, csrf })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch(() => denied(response));
+  });
+  router.post("/dining/payment-timing/change", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningPaymentTimingChange) {
+      response.status(503).json({ error: "dining_payment_timing_unavailable" });
+      return;
+    }
+    void options
+      .diningPaymentTimingChange({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch(() => denied(response));
+  });
+
   router.post("/dining/tables/availability", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
       csrf = exactHeader(request, "x-bop-csrf");

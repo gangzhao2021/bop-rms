@@ -133,3 +133,75 @@
   display: grid;
   gap: 16px;
 }
+
+/* WP-2423 DEC-DINE-IN-PAY-LATER: the Store's dine-in payment choice (hours & service page). */
+.dining-payment-timing {
+  display: grid;
+  gap: 12px;
+  max-width: 40rem;
+  margin-top: 32px;
+}
+.dining-payment-timing h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.dining-payment-timing fieldset {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.dining-payment-timing__option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  min-height: 44px;
+  padding: 12px 0;
+  cursor: pointer;
+}
+.dining-payment-timing__option + .dining-payment-timing__option {
+  border-top: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.dining-payment-timing__option input {
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  accent-color: var(--bop-color-accent);
+}
+.dining-payment-timing__option > span {
+  display: grid;
+  gap: 2px;
+}
+.dining-payment-timing__option strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+.dining-payment-timing__option span span,
+.dining-payment-timing__note,
+.dining-payment-timing__message {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.dining-payment-timing__message:empty {
+  display: none;
+}
+.dining-payment-timing__save {
+  justify-self: start;
+  min-height: 44px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+.dining-payment-timing__save:disabled {
+  background: var(--bop-color-surface-raised, #f2f2f2);
+  color: var(--bop-color-text-muted);
+}

@@ -37,6 +37,10 @@ import {
   createMerchantDiningStaffCallCount,
 } from "../../apps/api/dist/merchant-dining-staff-calls.js";
 import { createMerchantDiningClosingCommand } from "../../apps/api/dist/merchant-dining-closing-command.js";
+import {
+  createMerchantDiningPaymentTimingChange,
+  createMerchantDiningPaymentTimingRead,
+} from "../../apps/api/dist/merchant-dining-payment-timing.js";
 import { createMerchantDiningTableClosePlan } from "../../apps/api/dist/merchant-dining-table-close-plan.js";
 import { createMerchantDiningOrderCloseCommand } from "../../apps/api/dist/merchant-dining-order-close-command.js";
 import { createDiningOrderCloseConfiguration } from "../../apps/api/dist/dining-order-close-configuration.js";
@@ -1128,6 +1132,15 @@ export async function createInternalMerchant(
     persistence,
     authentication: service,
   });
+  // WP-2423 DEC-DINE-IN-PAY-LATER: the Store's dine-in payment timing (Owner, Store Manager).
+  const diningPaymentTimingRead = createMerchantDiningPaymentTimingRead({
+    persistence,
+    authentication: service,
+  });
+  const diningPaymentTimingChange = createMerchantDiningPaymentTimingChange({
+    persistence,
+    authentication: service,
+  });
   // DEC-TABLE-CLOSE-GUESTS-LEFT: the close dialog's per-round plan (Owner, Store Manager).
   const diningTableClosePlan = createMerchantDiningTableClosePlan({
     persistence,
@@ -1554,6 +1567,8 @@ export async function createInternalMerchant(
       diningServeReady,
       diningStaffCallCount,
       diningStaffCallAnswer,
+      diningPaymentTimingRead,
+      diningPaymentTimingChange,
       diningOrderProgress,
       diningTableClosePlan,
       diningItemService,

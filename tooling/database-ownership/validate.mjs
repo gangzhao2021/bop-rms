@@ -2203,6 +2203,18 @@ async function scanUnsupported(root, module, diagnostics) {
               "additional_dining_batch_record",
             ],
           },
+          // Orders v2 (Owner 2026-10-26): what each listed Order is (items) and who (pickup name).
+          "src/infrastructure/persistence/merchant-order-list-summary.ts": {
+            owner: "ordering",
+            tables: [
+              "order_item",
+              "order_batch",
+              "order_submission_record",
+              "order_checkout_details_link",
+              "checkout_details_record",
+              "checkout_contact_redaction",
+            ],
+          },
           "src/infrastructure/persistence/merchant-order-index.ts": {
             owner: "ordering",
             tables: ["order_header", "order_submission_record", "order_batch"],
@@ -2781,6 +2793,14 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_staff_call_closure",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-staff-call-store.ts";
+        // WP-2423 DEC-DINE-IN-PAY-LATER: exact scoped Store dine-in payment timing and each Session's.
+        const acceptedDiningPaymentTimingAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          ["dining_session", "store_dining_payment_timing", "dining_session_payment_timing"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/dining-payment-timing-store.ts";
         // WP-2423 DEC-DINING-GUEST-INVITATION: exact scoped Host invitation (next join code) store.
         const acceptedDiningGuestInvitationAsset =
           module.packageName === "@rms/dining" &&
@@ -3725,6 +3745,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningHostTransferAsset &&
           !acceptedDiningGuestInvitationAsset &&
           !acceptedDiningStaffCallAsset &&
+          !acceptedDiningPaymentTimingAsset &&
           !acceptedDiningMoveAsset &&
           !acceptedDiningMovedJoinAsset &&
           !acceptedDiningAdmissionConsumptionAsset &&
