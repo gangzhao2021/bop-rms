@@ -12,6 +12,7 @@ const table: StaffDiningTable = {
   currentDiningSessionReference: null,
   elapsedMinutes: null,
   qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
+  paymentTiming: "PayFirst",
   staffRoundsAwaitingPayment: [],
   guestRoundsAwaitingPayment: [],
   roundsAwaitingAcceptance: [],

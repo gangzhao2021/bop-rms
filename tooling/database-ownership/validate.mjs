@@ -3069,6 +3069,24 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/order-item-inventory-link-reader.ts";
+        // WP-2423 DEC-DINE-IN-PAY-LATER: a pay-later round sent to the kitchen with its acceptance.
+        const acceptedOrderPayLaterConfirmationAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          [
+            "order_pay_later_confirmation",
+            "order_acceptance_record",
+            "order_revision",
+            "order_header",
+            "order_batch",
+            "order_submission_record",
+            "order_payment_disposition_record",
+            "order_payment_acceptance_wait",
+            "order_batch_checkout_cancellation",
+            "order_staff_cancellation",
+            "order_termination_record",
+          ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
+          moduleRelative === "src/infrastructure/persistence/order-pay-later-confirmation-store.ts";
         const acceptedOrderKitchenSourceAsset =
           module.packageName === "@rms/ordering" &&
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
@@ -3080,6 +3098,7 @@ async function scanUnsupported(root, module, diagnostics) {
             "order_submission_record",
             "order_acceptance_record",
             "order_termination_record",
+            "order_pay_later_confirmation",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/order-kitchen-source-store.ts";
         const acceptedPaymentReceiptCoverageAsset =
@@ -3746,6 +3765,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningGuestInvitationAsset &&
           !acceptedDiningStaffCallAsset &&
           !acceptedDiningPaymentTimingAsset &&
+          !acceptedOrderPayLaterConfirmationAsset &&
           !acceptedDiningMoveAsset &&
           !acceptedDiningMovedJoinAsset &&
           !acceptedDiningAdmissionConsumptionAsset &&

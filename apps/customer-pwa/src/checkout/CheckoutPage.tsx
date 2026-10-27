@@ -42,6 +42,14 @@ import {
   createCheckoutController,
   type CheckoutController,
 } from "./checkout-client.js";
+import {
+  createHttpDiningSessionClient,
+  type DiningSessionClient,
+} from "../dining/dining-session-client.js";
+import {
+  createSessionPaymentClient,
+  SessionPaymentClientError,
+} from "../payment/session-payment-client.js";
 
 const tipPresets = [0, 10, 15, 18] as const;
 type TipChoice = (typeof tipPresets)[number] | "custom";
@@ -58,7 +66,12 @@ export function CheckoutPage({
   store,
   menuContext,
   menuClient,
+  diningClient,
+  sendClient,
 }: {
+  /** DEC-DINE-IN-PAY-LATER: the table's payment timing (tests pass their own). */
+  readonly diningClient?: DiningSessionClient;
+  readonly sendClient?: Pick<ReturnType<typeof createSessionPaymentClient>, "sendToKitchen">;
   readonly controller?: CheckoutController;
   readonly now?: () => number;
   readonly store?: CustomerStoreContext | undefined;
@@ -100,7 +113,33 @@ export function CheckoutPage({
     readonly contact: PickupContactDraft;
   } | null>(null);
   const [continueRequested, setContinueRequested] = useState(false);
+  // DEC-DINE-IN-PAY-LATER: at a table that pays once at the end the round goes to the kitchen
+  // when sent: no tip and no payment here.
+  const [payLater, setPayLater] = useState(false);
+  const [sendClientValue] = useState(() => sendClient ?? createSessionPaymentClient());
+  const [sendState, setSendState] = useState<"idle" | "sending" | "failed" | "pay_first">("idle");
+  const sendRound = async (checkoutSessionReference: string, selectionReference: string) => {
+    setSendState("sending");
+    try {
+      await sendClientValue.sendToKitchen(checkoutSessionReference, selectionReference);
+      void navigate("/dine-in/session", { replace: true });
+    } catch (error) {
+      setSendState(
+        error instanceof SessionPaymentClientError && error.code === "pay_first_table"
+          ? "pay_first"
+          : "failed",
+      );
+    }
+  };
   useEffect(() => {
+    if (sessionState.status === "ready" && selectedTip.current && payLater) {
+      if (sendState === "idle")
+        void sendRound(
+          sessionState.session.checkoutSessionReference,
+          selectedTip.current.selectionReference,
+        );
+      return;
+    }
     if (sessionState.status === "ready" && selectedTip.current) {
       setCheckoutSessionReference(sessionState.session.checkoutSessionReference);
       setCheckoutTipSelection({
@@ -109,7 +148,7 @@ export function CheckoutPage({
       });
       void navigate("/checkout/payment");
     }
-  }, [navigate, sessionState]);
+  }, [navigate, sessionState, payLater]);
   useEffect(() => {
     const offline = () => sessionController.setOnline(false);
     const online = () => sessionController.setOnline(true);
@@ -143,6 +182,19 @@ export function CheckoutPage({
     };
   }, [controller]);
   const cart = "cart" in state ? state.cart : null;
+  const dineIn = cart?.cart.orderType === "DineIn";
+  useEffect(() => {
+    if (!dineIn) return;
+    const controller = new AbortController();
+    (diningClient ?? createHttpDiningSessionClient())
+      .load(controller.signal)
+      .then((view) => {
+        if (!controller.signal.aborted) setPayLater(view.paymentTiming === "PayLater");
+      })
+      // Unknown: the guest pays as before, and the server says if the table pays at the end.
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [dineIn, diningClient]);
   const quote = state.status === "ready" ? state.quote : null;
   const menu = usePublishedMenu(
     menuContext,
@@ -201,8 +253,9 @@ export function CheckoutPage({
     );
     return () => window.clearTimeout(timer);
   }, [now, quote, quoteExpired]);
-  const tipAmount =
-    tipChoice === "custom"
+  const tipAmount = payLater
+    ? "0"
+    : tipChoice === "custom"
       ? parseTipAmount(customTip)
       : quote === null
         ? "0"
@@ -259,6 +312,23 @@ export function CheckoutPage({
       setContinueRequested(false);
     }
   };
+  /** DEC-DINE-IN-PAY-LATER: send again, or — the table pays as it orders — pay with no tip. */
+  const retrySend = (session: string) => {
+    const selection = selectedTip.current?.selectionReference;
+    if (selection === undefined) return;
+    if (sendState !== "pay_first") {
+      void sendRound(session, selection);
+      return;
+    }
+    setPayLater(false);
+    setCheckoutSessionReference(session);
+    setCheckoutTipSelection({
+      checkoutSessionReference: session,
+      selectionReference: selection,
+      amountMinor: "0",
+    });
+    void navigate("/checkout/payment");
+  };
   const resolvedStore: CustomerStoreContext | undefined =
     store ??
     (cart
@@ -274,7 +344,7 @@ export function CheckoutPage({
       <PageHeading title={checkoutText.pageTitle} />
       <ol className="checkout-progress" aria-label={checkoutText.progressLabel}>
         <li aria-current="step">{checkoutText.progressReview}</li>
-        <li>{checkoutText.progressPay}</li>
+        <li>{payLater ? checkoutText.progressSend : checkoutText.progressPay}</li>
         <li>{checkoutText.progressDone}</li>
       </ol>
       {state.status === "loading" ? (
@@ -517,77 +587,86 @@ export function CheckoutPage({
               onSubmittableChange={setDetailsSubmittable}
             />
           ) : null}
-          <section
-            className="checkout-boundary checkout-tip"
-            aria-labelledby="checkout-tip-heading"
-          >
-            <h2 id="checkout-tip-heading">{checkoutText.tip}</h2>
-            <div
-              className="checkout-tip__choices"
-              role="group"
-              aria-label={checkoutText.tipAmountLabel}
+          {payLater ? null : (
+            <section
+              className="checkout-boundary checkout-tip"
+              aria-labelledby="checkout-tip-heading"
             >
-              {tipPresets.map((percent) => {
-                const amount =
-                  quote === null ? null : percentOfMinor(quote.subtotal.amountMinor, percent);
-                return (
-                  <button
-                    key={percent}
-                    type="button"
-                    aria-pressed={tipChoice === percent}
-                    disabled={sessionState.status !== "idle" || state.status !== "ready"}
-                    onClick={() => setTipChoice(percent)}
-                  >
-                    {percent === 0 ? checkoutText.noTip : checkoutText.tipPercent(percent)}
-                    {amount !== null && percent !== 0 ? (
-                      <span>{formatMoney(amount, quote?.subtotal.currency ?? "CAD")}</span>
-                    ) : null}
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                aria-pressed={tipChoice === "custom"}
-                disabled={sessionState.status !== "idle" || state.status !== "ready"}
-                onClick={() => {
-                  setTipChoice("custom");
-                  if (customTip === "" && quote !== null && tipChoice !== "custom")
-                    setCustomTip(
-                      minorToText(percentOfMinor(quote.subtotal.amountMinor, tipChoice) ?? "0"),
-                    );
-                }}
+              <h2 id="checkout-tip-heading">{checkoutText.tip}</h2>
+              <div
+                className="checkout-tip__choices"
+                role="group"
+                aria-label={checkoutText.tipAmountLabel}
               >
-                {checkoutText.tipOther}
-              </button>
-            </div>
-            <label htmlFor="checkout-tip" className={tipChoice === "custom" ? "" : "sr-only"}>
-              {checkoutText.tipCustomLabel(currencySymbol(quote?.subtotal.currency ?? "CAD"))}
-            </label>
-            <input
-              id="checkout-tip"
-              className={tipChoice === "custom" ? "" : "sr-only"}
-              inputMode="decimal"
-              autoComplete="off"
-              value={tipChoice === "custom" ? customTip : ""}
-              disabled={sessionState.status !== "idle" || state.status !== "ready"}
-              onChange={(event) => {
-                setTipChoice("custom");
-                setCustomTip(event.target.value);
-              }}
-              aria-invalid={tipChoice === "custom" && customTip !== "" && tipAmount === null}
-              aria-describedby="checkout-tip-help"
-            />
-            <p id="checkout-tip-help" className={tipChoice === "custom" ? "" : "sr-only"}>
-              {tipChoice === "custom" && customTip !== "" && tipAmount === null
-                ? checkoutText.tipInvalid
-                : checkoutText.tipHelp}
-            </p>
-          </section>
+                {tipPresets.map((percent) => {
+                  const amount =
+                    quote === null ? null : percentOfMinor(quote.subtotal.amountMinor, percent);
+                  return (
+                    <button
+                      key={percent}
+                      type="button"
+                      aria-pressed={tipChoice === percent}
+                      disabled={sessionState.status !== "idle" || state.status !== "ready"}
+                      onClick={() => setTipChoice(percent)}
+                    >
+                      {percent === 0 ? checkoutText.noTip : checkoutText.tipPercent(percent)}
+                      {amount !== null && percent !== 0 ? (
+                        <span>{formatMoney(amount, quote?.subtotal.currency ?? "CAD")}</span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  aria-pressed={tipChoice === "custom"}
+                  disabled={sessionState.status !== "idle" || state.status !== "ready"}
+                  onClick={() => {
+                    setTipChoice("custom");
+                    if (customTip === "" && quote !== null && tipChoice !== "custom")
+                      setCustomTip(
+                        minorToText(percentOfMinor(quote.subtotal.amountMinor, tipChoice) ?? "0"),
+                      );
+                  }}
+                >
+                  {checkoutText.tipOther}
+                </button>
+              </div>
+              <label htmlFor="checkout-tip" className={tipChoice === "custom" ? "" : "sr-only"}>
+                {checkoutText.tipCustomLabel(currencySymbol(quote?.subtotal.currency ?? "CAD"))}
+              </label>
+              <input
+                id="checkout-tip"
+                className={tipChoice === "custom" ? "" : "sr-only"}
+                inputMode="decimal"
+                autoComplete="off"
+                value={tipChoice === "custom" ? customTip : ""}
+                disabled={sessionState.status !== "idle" || state.status !== "ready"}
+                onChange={(event) => {
+                  setTipChoice("custom");
+                  setCustomTip(event.target.value);
+                }}
+                aria-invalid={tipChoice === "custom" && customTip !== "" && tipAmount === null}
+                aria-describedby="checkout-tip-help"
+              />
+              <p id="checkout-tip-help" className={tipChoice === "custom" ? "" : "sr-only"}>
+                {tipChoice === "custom" && customTip !== "" && tipAmount === null
+                  ? checkoutText.tipInvalid
+                  : checkoutText.tipHelp}
+              </p>
+            </section>
+          )}
         </div>
         <section className="checkout-continue" aria-label={checkoutText.paymentLabel}>
           {continueRequested ? <p role="status">{checkoutText.savingYourDetails}</p> : null}
           {sessionState.status === "pending" ? (
-            <p role="status">{checkoutText.preparingPayment}</p>
+            <p role="status">
+              {payLater ? checkoutText.sendingToKitchen : checkoutText.preparingPayment}
+            </p>
+          ) : null}
+          {sendState === "sending" ? <p role="status">{checkoutText.sendingToKitchen}</p> : null}
+          {sendState === "failed" ? <p role="alert">{checkoutText.sendToKitchenFailed}</p> : null}
+          {sendState === "pay_first" ? (
+            <p role="alert">{checkoutText.tablePaysAsItOrders}</p>
           ) : null}
           {sessionState.status === "item_short" || sessionState.status === "item_unavailable" ? (
             <p role="alert">
@@ -601,7 +680,19 @@ export function CheckoutPage({
           ) : sessionAlert !== null ? (
             <p role="alert">{sessionAlert}</p>
           ) : null}
-          {"canRetry" in sessionState && sessionState.canRetry ? (
+          {(sendState === "failed" || sendState === "pay_first") &&
+          sessionState.status === "ready" &&
+          selectedTip.current !== null ? (
+            <button
+              type="button"
+              className="checkout-continue__button"
+              onClick={() => retrySend(sessionState.session.checkoutSessionReference)}
+            >
+              {sendState === "pay_first"
+                ? checkoutText.continueToPayment
+                : checkoutText.sendToKitchen}
+            </button>
+          ) : "canRetry" in sessionState && sessionState.canRetry ? (
             <button
               type="button"
               onClick={() => void sessionController.retry()}
@@ -613,23 +704,31 @@ export function CheckoutPage({
             <button
               type="button"
               className="checkout-continue__button"
-              disabled={!canContinue || continueRequested}
+              disabled={!canContinue || continueRequested || sendState === "sending"}
               onClick={() => void requestContinue()}
             >
-              {quote && tipAmount !== null
-                ? checkoutText.continueToPaymentWithTotal(
-                    formatMoney(
-                      (BigInt(quote.total.amountMinor) + BigInt(tipAmount)).toString(),
-                      quote.total.currency,
-                    ),
-                  )
-                : checkoutText.continueToPayment}
+              {payLater
+                ? quote
+                  ? checkoutText.sendToKitchenWithTotal(
+                      formatMoney(quote.total.amountMinor, quote.total.currency),
+                    )
+                  : checkoutText.sendToKitchen
+                : quote && tipAmount !== null
+                  ? checkoutText.continueToPaymentWithTotal(
+                      formatMoney(
+                        (BigInt(quote.total.amountMinor) + BigInt(tipAmount)).toString(),
+                        quote.total.currency,
+                      ),
+                    )
+                  : checkoutText.continueToPayment}
             </button>
           )}
           <p className="checkout-continue__note">
-            {paymentConfiguration()?.mode === "simulation"
-              ? checkoutText.continueNoteSimulated
-              : checkoutText.continueNote}
+            {payLater
+              ? checkoutText.sendToKitchenNote
+              : paymentConfiguration()?.mode === "simulation"
+                ? checkoutText.continueNoteSimulated
+                : checkoutText.continueNote}
           </p>
         </section>
       </div>

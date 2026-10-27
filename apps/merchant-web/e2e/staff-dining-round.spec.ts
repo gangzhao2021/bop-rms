@@ -118,7 +118,7 @@ const table = {
   qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
 };
 
-async function signIn(page: Page) {
+async function signIn(page: Page, tableItem: Record<string, unknown> = table) {
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,
@@ -160,7 +160,7 @@ async function signIn(page: Page) {
   await page.route("**/merchant/dining/tables", (route) =>
     route.fulfill({
       headers,
-      json: { canOperateTables: false, items: [table], nextAfterTableReference: null },
+      json: { canOperateTables: false, items: [tableItem], nextAfterTableReference: null },
     }),
   );
 }
@@ -825,4 +825,66 @@ test("@production a table round the system could not send says so plainly, then 
   expect(operations).toHaveLength(3);
   expect(operations[1]).not.toBe(operations[0]);
   expect(operations[2]).toBe(operations[1]);
+});
+
+test("@production DEC-DINE-IN-PAY-LATER: a pay-later table's round goes to the kitchen with nothing to charge", async ({
+  page,
+}) => {
+  await signIn(page, { ...table, paymentTiming: "PayLater" });
+  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  const rounds: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/staff-rounds", (route) => {
+    rounds.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Placed",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "7",
+        orderVersion: 5,
+        tableLabel: "T4",
+        orderMinor: "2034",
+        tipMinor: "0",
+        totalMinor: "2034",
+        payBy: null,
+        payLater: true,
+        recordedAfterOutage: false,
+      },
+    });
+  });
+  let charged = false;
+  await page.route("**/merchant/orders/card-machine-payment", (route) => {
+    charged = true;
+    return route.abort();
+  });
+
+  await page.goto("/operations/order-entry?table=" + tableReference);
+  await expect(page.getByRole("heading", { level: 1, name: "Table T4 order" })).toBeVisible();
+  // The table chooses its tip once, when it pays at the end.
+  await expect(page.getByRole("group", { name: "Tip" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Add Gyoza" }).click();
+  await page.getByRole("button", { name: "Add to order" }).click();
+  await expect(
+    page.getByText(/goes on the table's bill; the table pays once at the end/u),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Table T4 round sent to the kitchen" }),
+  ).toBeVisible();
+  await expect(page.getByText("Nothing to charge now.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Paid on card machine/u })).toHaveCount(0);
+  expect(rounds.at(-1)).toMatchObject({ tip: { kind: "None" } });
+  expect(charged).toBe(false);
+  await expectNoInternalText(page);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/staff-dining-round-pay-later-${width}.png`,
+      fullPage: true,
+    });
+  }
 });

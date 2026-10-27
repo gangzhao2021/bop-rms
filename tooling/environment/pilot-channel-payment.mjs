@@ -66,6 +66,10 @@ export async function createInternalChannelPayment(
     async prepare(input) {
       return (await select(input)).prepare(input);
     },
+    // WP-2423 DEC-DINE-IN-PAY-LATER: submit a round of a pay-later table (no clock, no Provider).
+    async submitRound(input) {
+      return (await select(input)).submitRound(input);
+    },
     async resolveRequest(input) {
       return (await select(input)).resolveRequest(input);
     },

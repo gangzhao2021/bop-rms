@@ -3,6 +3,14 @@ const databaseAccessManifestInput = {
   module: { moduleName: "ordering", packageName: "@rms/ordering", layer: "RMS" },
   tables: [
     {
+      table: "order_pay_later_confirmation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "order_pickup_not_collected_fact",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },
@@ -1733,6 +1741,165 @@ const databaseAccessManifestInput = {
       principal: { kind: "module", id: "@rms/ordering" },
       readPattern: "owner-repository",
       source: "packages/rms/ordering/src/infrastructure/persistence/merchant-order-list-summary.ts",
+    },
+    {
+      id: "pay-later-confirmation.read.order_pay_later_confirmation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_pay_later_confirmation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.write.order_pay_later_confirmation",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_pay_later_confirmation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.write.order_acceptance_record",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_acceptance_record" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.read.order_acceptance_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_acceptance_record" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.write.order_revision",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_revision" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.read.order_revision",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_revision" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.read.order_header",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_header" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.read.order_batch",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_batch" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.read.order_item",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_item" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.read.order_submission_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_submission_record" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.read.order_payment_disposition_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_payment_disposition_record" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.read.order_payment_acceptance_wait",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_payment_acceptance_wait" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.read.order_batch_checkout_cancellation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_batch_checkout_cancellation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.read.order_staff_cancellation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_staff_cancellation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "pay-later-confirmation.read.order_termination_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_termination_record" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "kitchen-source.read.order_pay_later_confirmation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_pay_later_confirmation" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-kitchen-source-store.ts",
     },
   ],
 } as const;

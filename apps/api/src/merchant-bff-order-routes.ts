@@ -360,6 +360,7 @@ export function installMerchantOrderRoutes(
           tipMinor: result.tipMinor,
           totalMinor: result.totalMinor,
           payBy: result.payBy,
+          payLater: result.payLater,
           recordedAfterOutage: result.recordedAfterOutage,
         });
       })

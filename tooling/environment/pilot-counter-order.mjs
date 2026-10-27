@@ -41,6 +41,7 @@ import { createMerchantCounterMenu } from "../../apps/api/dist/merchant-counter-
 import { createMerchantCardMachinePayment } from "../../apps/api/dist/merchant-card-machine-payment.js";
 import { createMerchantCardMachineCancellationRefund } from "../../apps/api/dist/merchant-card-machine-refund.js";
 import { createMerchantStaffDiningRound } from "../../apps/api/dist/merchant-staff-dining-round.js";
+import { createDiningPayLaterRound } from "../../apps/api/dist/dining-pay-later-round.js";
 import {
   createStaffTableAbandonment,
   createStaffTableCode,
@@ -560,6 +561,27 @@ async function createInternalStaffDiningRound(
       pipeline,
       nextReference: reference,
       onUnexpected: (error) => reportUnexpected("INTERNAL_STAFF_DINING_ROUND_UNAVAILABLE", error),
+      // DEC-DINE-IN-PAY-LATER: rounds of a table opened pay later go to the kitchen unpaid, through
+      // the dining workflow's Accept for the System (only this pilot Store).
+      payLater: (selected) => {
+        if (
+          selected.tenantReference !== tenantReference ||
+          selected.brandReference !== scope.brandReference ||
+          selected.storeReference !== scope.storeReference
+        )
+          throw new Error("INTERNAL_STAFF_ROUND_ONLY");
+        return createDiningPayLaterRound({
+          scope: fullScope,
+          quoteVersion: 2,
+          workflow: {
+            purposeCode: saved.workflow.purposeCode,
+            applicabilityCode: saved.workflow.applicabilityCode,
+            workflowVersionReference: saved.workflow.payment.workflowVersionReference,
+          },
+          now,
+          generateReference: reference,
+        });
+      },
     }),
     /** The online payment admission of the round's kind, under this staff member's authority. */
     admission: ({ selected, preparation, kind, authorize }) => {

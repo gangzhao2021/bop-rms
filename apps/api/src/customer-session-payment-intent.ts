@@ -108,6 +108,40 @@ export function createCustomerSessionPaymentIntent(options: CustomerSessionPayme
         throw new CheckoutSessionServiceError("INTENT_CONFLICT");
       return preparation;
     },
+    /**
+     * WP-2423 DEC-DINE-IN-PAY-LATER: submit a round of a table opened "pay later" (no tip, no
+     * payment clock, no Provider); the caller then sends it to the kitchen. A payment already
+     * started for this checkout is refused, as for `prepare`.
+     */
+    async submitRound(value: unknown) {
+      const raw = readClosedRecord(value, [
+        "sessionCredential",
+        "csrfCredential",
+        "checkoutSessionReference",
+        "selectionReference",
+      ]);
+      const input = {
+        sessionCredential: parseGuestRawCredential(raw.sessionCredential),
+        csrfCredential: parseGuestRawCredential(raw.csrfCredential),
+        checkoutSessionReference: String(raw.checkoutSessionReference),
+      };
+      const session = parseCheckoutSession(await reader.read(input));
+      if ((await options.history.resolveOperation(session.paymentOperationReference)) !== null)
+        throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+      const submitted = await submitCustomerSessionRound(options, {
+        input,
+        session,
+        selectionReference: String(raw.selectionReference),
+      });
+      if (
+        JSON.stringify(parseCheckoutSession(await reader.read(input))) !== JSON.stringify(session)
+      )
+        throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+      return Object.freeze({
+        ...submitted,
+        guestSessionReference: session.validation.guestSessionReference,
+      });
+    },
     async create(value: unknown) {
       let input: {
         sessionCredential: string;
@@ -400,4 +434,64 @@ export async function prepareCustomerSessionPayment(
   )
     throw new CheckoutSessionServiceError("INTENT_CONFLICT");
   return preparation;
+}
+
+/**
+ * WP-2423 DEC-DINE-IN-PAY-LATER: submits a round of a table opened "pay later" — the same owner
+ * submission as `prepareCustomerSessionPayment`, with no payment clock and no payment preparation.
+ * A later round's submission names its tip selection, so it records a zero tip for the round: the
+ * table's tip is chosen once, when it pays. The caller then sends the round to the kitchen.
+ */
+export async function submitCustomerSessionRound(
+  options: Pick<
+    CustomerSessionPaymentIntentOptions,
+    "resolveSubmission" | "submissionKind" | "orders" | "tips"
+  >,
+  context: {
+    input: { sessionCredential: string; csrfCredential: string; checkoutSessionReference: string };
+    session: CheckoutSession;
+    selectionReference: string;
+  },
+): Promise<{ readonly submissionReference: string; readonly kind: "Initial" | "Additional" }> {
+  const { input, session, selectionReference } = context;
+  if (session.validation.orderType !== "DineIn")
+    throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+  const sameSession = (value: unknown) => {
+    if (JSON.stringify(parseCheckoutSession(value)) !== JSON.stringify(session))
+      throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+  };
+  const submission = options.resolveSubmission
+    ? await options.resolveSubmission(session)
+    : { kind: options.submissionKind ?? "Initial", orders: options.orders, tips: options.tips };
+  if (
+    !submission ||
+    (submission.kind !== "Initial" && submission.kind !== "Additional") ||
+    typeof submission.orders?.create !== "function" ||
+    typeof submission.tips?.select !== "function"
+  )
+    throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+  const kind = submission.kind;
+  if (kind === "Additional") {
+    const tip = createMoney({ amountMinor: 0n, currencyCode: "CAD" } as Money);
+    const selected = readClosedRecord(
+      await submission.tips.select({ ...input, selectionReference, tip }),
+      ["status", "record", "session"],
+    );
+    sameSession(selected.session);
+    const selection = parsePaymentTipSelection(selected.record);
+    if (
+      String(selection.selectionReference) !== selectionReference ||
+      String(selection.paymentOperationReference) !== session.paymentOperationReference ||
+      selection.tip.amountMinor !== 0n
+    )
+      throw new CheckoutSessionServiceError("INTENT_CONFLICT");
+  }
+  const submitted = readClosedRecord(
+    await submission.orders.create(
+      kind === "Additional" ? { ...input, tipSelectionReference: selectionReference } : input,
+    ),
+    ["status", "record", "session"],
+  );
+  sameSession(submitted.session);
+  return Object.freeze({ submissionReference: session.submissionReference, kind });
 }

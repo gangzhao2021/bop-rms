@@ -4524,6 +4524,26 @@
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER (Owner 2026-10-26 \"同意先点后付，按这个顺序做\")",
       "justification": "ordering and table checkout read the payment timing a table was opened with (recorded by the database when the Session starts)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_pay_later_confirmation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER (Owner 2026-10-26 \"同意先点后付，按这个顺序做\")",
+      "justification": "the kitchen takes a pay-later round from its confirmation, and Orders, Tables and the table checkout read which rounds went to the kitchen unpaid"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_pay_later_confirmation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER (Owner 2026-10-26 \"同意先点后付，按这个顺序做\")",
+      "justification": "a round of a table opened pay later is sent to the kitchen when it is submitted: one append-only confirmation per round, never a payment"
     }
   ]
 }

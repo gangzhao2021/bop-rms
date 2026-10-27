@@ -23,6 +23,7 @@ const table: StaffDiningTable = {
   currentDiningSessionReference: id(2),
   elapsedMinutes: 4 * 24 * 60,
   qrCodeValidUntil: null,
+  paymentTiming: "PayFirst",
   staffRoundsAwaitingPayment: [],
   guestRoundsAwaitingPayment: [],
   roundsAwaitingAcceptance: [],

@@ -1,4 +1,5 @@
 import { CustomerStoreClosedError } from "./customer-store-open-gate.js";
+import { CustomerDiningPayLaterError } from "./customer-dining-pay-later-round.js";
 import { GuestSessionError, readClosedRecord } from "@bop/identity";
 import {
   CartError,
@@ -32,8 +33,20 @@ export interface CustomerPaymentRetryInput {
   readonly csrfCredential: string;
   readonly checkoutSessionReference: string;
 }
+/** DEC-DINE-IN-PAY-LATER: send the checkout's round to the kitchen at a table that pays later. */
+export interface CustomerPayLaterRoundInput {
+  readonly sessionCredential: string;
+  readonly csrfCredential: string;
+  readonly checkoutSessionReference: string;
+  readonly selectionReference: string;
+}
 export interface CustomerPaymentIntentPort {
   create(input: CustomerPaymentIntentInput): Promise<unknown>;
+  sendToKitchen?(input: CustomerPayLaterRoundInput): Promise<{
+    readonly status: "Sent" | "AlreadySent";
+    readonly orderReference: string;
+    readonly totalMinor: bigint;
+  }>;
   retry?(input: CustomerPaymentRetryInput): Promise<unknown>;
   /** WP-2423 abandoned payment: the same guest returns to the checkout's open payment. */
   resume?(input: CustomerPaymentRetryInput): Promise<unknown>;
@@ -49,7 +62,11 @@ type ExplicitRejection =
   | "already_paid"
   | "window_ended"
   /** WP-2423: items ran out after checkout; no order was placed and nothing was charged. */
-  | "items_short";
+  | "items_short"
+  /** DEC-DINE-IN-PAY-LATER: this table pays at the end; rounds are sent, not paid. */
+  | "pay_later_table"
+  /** DEC-DINE-IN-PAY-LATER: this table pays each round as it is sent. */
+  | "pay_first_table";
 function reject(response: Response, status: number, explicit?: ExplicitRejection) {
   const code =
     explicit ??
@@ -88,7 +105,8 @@ function parse(
 ):
   | CustomerPaymentIntentInput
   | (CustomerPaymentRetryInput & { readonly retry: true })
-  | (CustomerPaymentRetryInput & { readonly resume: true }) {
+  | (CustomerPaymentRetryInput & { readonly resume: true })
+  | (CustomerPayLaterRoundInput & { readonly sendToKitchen: true }) {
   if (
     request.get("origin") !== origin ||
     request.get("sec-fetch-site") !== "same-origin" ||
@@ -127,6 +145,31 @@ function parse(
       throw new Error("invalid reference");
     return { ...readCredentials(request), checkoutSessionReference, resume: true };
   }
+  // DEC-DINE-IN-PAY-LATER: `{"sendToKitchen":true}` sends the round with no payment and no tip;
+  // the idempotency key names the attempt, as for a payment.
+  if (
+    request.body !== null &&
+    typeof request.body === "object" &&
+    Object.hasOwn(request.body as object, "sendToKitchen")
+  ) {
+    const body = readClosedRecord(request.body, ["sendToKitchen"]);
+    if (body.sendToKitchen !== true) throw new Error("invalid send");
+    const checkoutSessionReference = params.checkout_session_id;
+    const selectionReference = request.headers["idempotency-key"];
+    if (
+      typeof checkoutSessionReference !== "string" ||
+      !uuid.test(checkoutSessionReference) ||
+      typeof selectionReference !== "string" ||
+      !uuid.test(selectionReference)
+    )
+      throw new Error("invalid reference");
+    return {
+      ...readCredentials(request),
+      checkoutSessionReference,
+      selectionReference,
+      sendToKitchen: true,
+    };
+  }
   const body = readClosedRecord(request.body, ["tip"]);
   const tip = readClosedRecord(body.tip, ["amountMinor", "currency"]);
   if (
@@ -152,6 +195,10 @@ function parse(
 }
 function failure(error: unknown) {
   if (error instanceof GuestSessionError) return 404;
+  if (error instanceof CustomerDiningPayLaterError)
+    return (
+      { PayFirst: 409, PayLater: 409, NotJoined: 404, Invalid: 400, Unavailable: 503 } as const
+    )[error.code];
   if (error instanceof CheckoutSessionServiceError)
     return (
       {
@@ -233,6 +280,10 @@ function failure(error: unknown) {
  * before any payment is started), so the guest changes their cart; nothing was charged.
  */
 function stockRejection(error: unknown): ExplicitRejection | undefined {
+  if (error instanceof CustomerDiningPayLaterError && error.code === "PayLater")
+    return "pay_later_table";
+  if (error instanceof CustomerDiningPayLaterError && error.code === "PayFirst")
+    return "pay_first_table";
   if (
     (error instanceof CheckoutValidationError && error.code === "CHECKOUT_STOCK_SHORT") ||
     (error instanceof OrderCreationError && error.code === "ORDER_CREATE_STOCK_SHORT") ||
@@ -271,6 +322,47 @@ export class CustomerPaymentIntentHandler {
         return;
       }
       const retry = "retry" in input || "resume" in input;
+      if ("sendToKitchen" in input) {
+        if (this.#port.sendToKitchen === undefined) {
+          reject(response, 503);
+          return;
+        }
+        let sent: Awaited<ReturnType<NonNullable<CustomerPaymentIntentPort["sendToKitchen"]>>>;
+        try {
+          sent = await this.#port.sendToKitchen({
+            sessionCredential: input.sessionCredential,
+            csrfCredential: input.csrfCredential,
+            checkoutSessionReference: input.checkoutSessionReference,
+            selectionReference: input.selectionReference,
+          });
+        } catch (error) {
+          if (error instanceof CustomerStoreClosedError) {
+            reject(response, 409, "store_closed");
+            return;
+          }
+          reject(response, failure(error), stockRejection(error));
+          return;
+        }
+        if (
+          (sent.status !== "Sent" && sent.status !== "AlreadySent") ||
+          typeof sent.totalMinor !== "bigint" ||
+          sent.totalMinor <= 0n ||
+          !uuid.test(sent.orderReference)
+        ) {
+          reject(response, 503);
+          return;
+        }
+        response.status(sent.status === "Sent" ? 201 : 200).json({
+          schemaVersion: 1,
+          round: {
+            checkoutSessionReference: input.checkoutSessionReference,
+            orderReference: sent.orderReference,
+            status: sent.status,
+            total: { amountMinor: sent.totalMinor.toString(), currency: "CAD" },
+          },
+        });
+        return;
+      }
       let result: unknown;
       try {
         if ("resume" in input) {

@@ -494,6 +494,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Another administrator must approve this change.": "需由另一位管理员批准此更改。",
   "Another classification in use already has that name. Choose a different name.":
     "另一个使用中的税类已有这个名称。请换一个名称。",
+  "Sent to the kitchen. {totalMinor} with tax goes on the table's bill.":
+    "已送厨房。含税 {totalMinor} 记入本桌账单。",
+  "About {value} before tax. It goes on the table's bill; the table pays once at the end.":
+    "税前约 {value}。记入本桌账单，这桌最后一起结账。",
+  "Table {value} round sent to the kitchen": "{value} 桌这一轮已送厨房",
+  "Round total incl. tax": "本轮含税合计",
+  "Nothing to charge now. The round is on the table's bill; the table pays once at the end, tip included.":
+    "现在不用收款。这一轮已记入本桌账单，这桌最后一起结账，小费也在那时选。",
   "Another order for this table": "这张桌台的另一笔订单",
   "Another person with Owner access must approve this configuration. You cannot approve a change you made.":
     "需由另一位有店主权限的人批准此配置。你不能批准自己提出的更改。",
@@ -5462,6 +5470,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{store} · Dine-in · added to the table's order · paid on the store's card machine":
     "{store} · 堂食 · 加到该桌的订单 · 在门店刷卡机付款",
   "{store} · Pickup · paid on the store's card machine": "{store} · 自取 · 在门店刷卡机付款",
+  "{store} · Dine-in · added to the table's bill · the table pays at the end":
+    "{store} · 堂食 · 记入本桌账单 · 最后一起结账",
   "{subject} has a new round that is not accepted yet — accept it on Orders.":
     "{subject}有新的一轮尚未接单 — 请在订单页接单。",
   "{subject} is not accepted yet — accept it on Orders.": "{subject}尚未接单 — 请在订单页接单。",

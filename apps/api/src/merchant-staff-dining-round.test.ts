@@ -85,7 +85,14 @@ const id = (n: number) => `0198a7c0-0000-7000-8000-${n.toString(16).padStart(12,
 const guest = { sessionCredential: "a".repeat(43), csrfCredential: "b".repeat(43) };
 const table = id(30);
 
-function setup(clock = { at: "2026-10-15T18:00:00.000Z" }) {
+function setup(
+  clock = { at: "2026-10-15T18:00:00.000Z" },
+  payLater: {
+    sessions: Set<string>;
+    confirmed: string[];
+    confirm?: () => Promise<void>;
+  } | null = null,
+) {
   let sequence = 0x100;
   const calls: string[] = [];
   const pipeline = {
@@ -170,6 +177,21 @@ function setup(clock = { at: "2026-10-15T18:00:00.000Z" }) {
       });
       return { tip: { amountMinor: input.tip.amountMinor } } as never;
     }),
+    submitPayLater: vi.fn(async () => {
+      calls.push("submitPayLater");
+      state.batches.set(id(5), {
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        submissionReference: id(22),
+        orderNumber: "7",
+        orderVersion: 4,
+      });
+      return {
+        submissionReference: id(22),
+        kind: "Additional" as const,
+        guestSessionReference: id(5),
+      };
+    }),
   };
   const onUnexpected = vi.fn();
   const command = createMerchantStaffDiningRound({
@@ -181,6 +203,24 @@ function setup(clock = { at: "2026-10-15T18:00:00.000Z" }) {
     pipeline,
     nextReference: () => id(++sequence),
     onUnexpected,
+    ...(payLater === null
+      ? {}
+      : {
+          payLater: () =>
+            ({
+              isPayLater: async (_tx: unknown, session: string) => payLater.sessions.has(session),
+              confirm: async (_tx: unknown, input: { submissionReference: string }) => {
+                await payLater.confirm?.();
+                const status = payLater.confirmed.includes(input.submissionReference)
+                  ? "AlreadyConfirmed"
+                  : "Confirmed";
+                payLater.confirmed.push(input.submissionReference);
+                calls.push("confirm");
+                return { status, confirmation: { acceptedOrderVersion: 8 } };
+              },
+              roundTotalMinor: async () => 2260n,
+            }) as never,
+        }),
   });
   const send = (overrides: Record<string, unknown> = {}) =>
     command({
@@ -253,6 +293,7 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       tipMinor: "300",
       totalMinor: "2560",
       payBy: "2026-10-15T18:30:00.000Z",
+      payLater: false,
       recordedAfterOutage: false,
     });
     // The staff member, table, session and table guest are recorded once.
@@ -263,6 +304,59 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       guestSessionReference: id(5),
       recordedAfterOutage: false,
     });
+  });
+
+  it("DEC-DINE-IN-PAY-LATER: a pay-later table's round goes to the kitchen with nothing to charge", async () => {
+    const payLater = { sessions: new Set([id(31)]), confirmed: [] as string[] };
+    const { calls, send, pipeline } = setup(undefined, payLater);
+    const placed = await send();
+    expect(calls.slice(-2)).toEqual(["submitPayLater", "confirm"]);
+    expect(pipeline.preparePayment).not.toHaveBeenCalled();
+    expect(placed).toEqual({
+      status: "Placed",
+      orderReference: id(20),
+      orderBatchReference: id(21),
+      orderNumber: "7",
+      orderVersion: 8,
+      tableLabel: "T4",
+      orderMinor: "2260",
+      tipMinor: "0",
+      totalMinor: "2260",
+      payBy: null,
+      payLater: true,
+      recordedAfterOutage: false,
+    });
+    // A retry returns the same round; it is never sent to the kitchen twice.
+    const again = await send();
+    expect(again).toMatchObject({ status: "AlreadyPlaced", payLater: true, payBy: null });
+    expect(pipeline.submitPayLater).toHaveBeenCalledTimes(1);
+  });
+
+  it("DEC-DINE-IN-PAY-LATER: a round submitted but not yet sent to the kitchen is sent by the retry", async () => {
+    let cut = true;
+    const payLater = {
+      sessions: new Set([id(31)]),
+      confirmed: [] as string[],
+      confirm: async () => {
+        if (cut) {
+          cut = false;
+          throw new Error("connection lost");
+        }
+      },
+    };
+    const { send, pipeline } = setup(undefined, payLater);
+    await expect(send()).rejects.toMatchObject({ code: "STAFF_ROUND_IN_PROGRESS" });
+    const again = await send();
+    expect(again).toMatchObject({ status: "AlreadyPlaced", payLater: true, totalMinor: "2260" });
+    expect(payLater.confirmed).toEqual([id(22)]);
+    expect(pipeline.submitPayLater).toHaveBeenCalledTimes(1);
+  });
+
+  it("DEC-DINE-IN-PAY-LATER: a pay-first table still answers what to charge", async () => {
+    const { send, pipeline } = setup(undefined, { sessions: new Set(), confirmed: [] });
+    const placed = await send();
+    expect(placed).toMatchObject({ payLater: false, payBy: "2026-10-15T18:30:00.000Z" });
+    expect(pipeline.submitPayLater).not.toHaveBeenCalled();
   });
 
   it("returns the same round for a retry, never a second one", async () => {

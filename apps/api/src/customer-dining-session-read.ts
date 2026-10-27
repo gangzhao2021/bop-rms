@@ -8,7 +8,8 @@ import {
   readClosedRecord,
   type GuestSession,
 } from "@bop/identity";
-import { listDiningSessionTableLabels } from "@rms/dining";
+import { createHash } from "node:crypto";
+import { createPostgresDiningPaymentTimingStore, listDiningSessionTableLabels } from "@rms/dining";
 import { listOpenKitchenReworkItems } from "@rms/kitchen";
 import {
   createOrderStatusQueryService,
@@ -24,6 +25,7 @@ import {
   type CartQueryTransactionRunner,
   type OrderItemProgressPhase,
   createPostgresStaffDiningRoundEntryStore,
+  createPostgresOrderPayLaterConfirmationStore,
 } from "@rms/ordering";
 import {
   createPostgresCardMachinePaymentStore,
@@ -62,6 +64,8 @@ export interface CustomerDiningSessionFacts {
   readonly diningSessionReference: string;
   readonly tableLabel: string | null;
   readonly checkedAt: string;
+  /** DEC-DINE-IN-PAY-LATER: how this table pays, as it was opened (absent: pay first). */
+  readonly paymentTiming?: "PayFirst" | "PayLater";
   readonly order: null | {
     readonly orderNumber: string;
     readonly batches: readonly {
@@ -90,6 +94,11 @@ export interface CustomerDiningSessionFacts {
      * awaiting payment with none is cancelled automatically at its deadline, and guests are told.
      */
     readonly paymentStarted?: ReadonlySet<string>;
+    /**
+     * DEC-DINE-IN-PAY-LATER: rounds sent to the kitchen unpaid at a table that pays once at the
+     * end; they are owed (due) until the table is settled and are never cancelled for it.
+     */
+    readonly payLaterRounds?: ReadonlySet<string>;
     readonly unpaidCancellations: ReadonlySet<string>;
     readonly staffCancellations: ReadonlyMap<
       string,
@@ -139,12 +148,21 @@ export type DiningRoundStatus =
   | "Serving"
   | "Served";
 export type DiningRoundPayment =
-  "Paid" | "Awaiting" | "Failed" | "NotCharged" | "Refunded" | "RefundPending";
+  | "Paid"
+  | "Awaiting"
+  | "Failed"
+  | "NotCharged"
+  | "Refunded"
+  | "RefundPending"
+  /** DEC-DINE-IN-PAY-LATER: in the kitchen, paid with the table's bill at the end. */
+  | "OnTableBill";
 
 export interface CustomerDiningSessionView {
   readonly tableLabel: string | null;
   readonly orderNumber: string | null;
   readonly checkedAt: string;
+  /** DEC-DINE-IN-PAY-LATER: PayLater — rounds go to the kitchen when sent; the table pays at the end. */
+  readonly paymentTiming: "PayFirst" | "PayLater";
   readonly rounds: readonly {
     readonly roundNumber: number;
     /** WP-2423 Q7 slice 2: "Staff" for a round staff entered for the table. */
@@ -209,6 +227,7 @@ export function composeCustomerDiningSession(
       tableLabel: facts.tableLabel,
       orderNumber: null,
       checkedAt: facts.checkedAt,
+      paymentTiming: facts.paymentTiming ?? "PayFirst",
       rounds: Object.freeze([]),
       summary: null,
     });
@@ -294,6 +313,14 @@ export function composeCustomerDiningSession(
       payment = "Failed";
       cancelsAt = deadline;
       due += itemsTotal;
+    } else if (outcome === undefined && order.payLaterRounds?.has(reference) === true) {
+      // In the kitchen and owed until the table pays at the end; never cancelled for payment.
+      payment = "OnTableBill";
+      due += items.reduce(
+        (sum, item) => sum + (item.cancelled ? 0n : item.lineTotal.amountMinor),
+        0n,
+      );
+      status = kitchenStatus();
     } else if (outcome === undefined) {
       status = "AwaitingPayment";
       payment = "Awaiting";
@@ -302,11 +329,18 @@ export function composeCustomerDiningSession(
       due += itemsTotal;
     } else {
       payment = "Paid";
+      status = kitchenStatus();
+    }
+    function kitchenStatus(): DiningRoundStatus {
+      let status: DiningRoundStatus;
       const active = items.filter((item) => !item.cancelled);
       if (active.length === 0) {
         status = "StoreCancelled";
         const lines = batch.items.map((item) => itemCancellation(item.orderItemReference));
-        payment = lines.every((entry) => entry?.refunded === true) ? "Refunded" : "RefundPending";
+        // Nothing of an unpaid round was charged, so nothing is refunded.
+        if (payment === "Paid")
+          payment = lines.every((entry) => entry?.refunded === true) ? "Refunded" : "RefundPending";
+        else payment = "NotCharged";
       } else if (active.every((item) => item.phase === "Fulfilled")) status = "Served";
       else if (active.some((item) => item.servedQuantity > 0)) status = "Serving";
       else if (active.every((item) => item.phase === "Ready")) status = "Ready";
@@ -317,6 +351,7 @@ export function composeCustomerDiningSession(
       // WP-2423 Q26: a dish being made again is neither served nor ready yet.
       if (active.some((item) => item.beingRemade))
         status = status === "Served" ? "Serving" : status === "Ready" ? "Preparing" : status;
+      return status;
     }
     return Object.freeze({
       roundNumber: index + 1,
@@ -364,6 +399,7 @@ export function composeCustomerDiningSession(
     tableLabel: facts.tableLabel,
     orderNumber: order.orderNumber,
     checkedAt: facts.checkedAt,
+    paymentTiming: facts.paymentTiming ?? "PayFirst",
     rounds: Object.freeze(rounds),
     summary: Object.freeze({
       paid: money(paid),
@@ -456,6 +492,18 @@ function postgresDependencies(
         (await listDiningSessionTableLabels(transaction, scope, [diningSessionReference])).get(
           diningSessionReference,
         ) ?? null;
+      // DEC-DINE-IN-PAY-LATER: the table's payment timing, captured when it was opened.
+      const paymentTiming =
+        options.diningScope === undefined
+          ? undefined
+          : ((
+              await createPostgresDiningPaymentTimingStore({
+                scope: options.diningScope,
+                hashIntent: (value) => createHash("sha256").update(value).digest("hex"),
+                equals: (a, b) => a === b,
+              }).loadSessionTimings(transaction, [diningSessionReference])
+            ).get(diningSessionReference) ?? "PayFirst");
+      const timing = paymentTiming === undefined ? {} : { paymentTiming };
       const orderReference = await createPostgresDiningSessionOrderLookup({
         ...scope,
         authorize: async (_tx, query) =>
@@ -464,7 +512,7 @@ function postgresDependencies(
           (await stillAuthorized()),
       }).load(transaction, { diningSessionReference, guestSessionReference, observedAt: now() });
       if (orderReference === null)
-        return { diningSessionReference, tableLabel, checkedAt: now(), order: null };
+        return { diningSessionReference, tableLabel, checkedAt: now(), ...timing, order: null };
       if (options.diningScope === undefined || options.paymentScope === undefined)
         return unavailable();
       if (
@@ -720,10 +768,24 @@ function postgresDependencies(
         refunds.confirmedMinor += ordinary.confirmedMinor;
         refunds.pendingMinor += ordinary.pendingMinor;
       }
+      const payLaterRounds = new Set(
+        paymentTiming !== "PayLater"
+          ? []
+          : (
+              await createPostgresOrderPayLaterConfirmationStore({
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+                quoteVersion: 2,
+                sha256: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+                authorize: async () => stillAuthorized(),
+              }).listByOrders({ transaction, orderReferences: [orderReference] })
+            ).map((entry) => String(entry.orderBatchReference)),
+      );
       return {
         diningSessionReference,
         tableLabel,
         checkedAt: now(),
+        ...timing,
         order: {
           orderNumber: status.order.orderNumber,
           batches: status.order.batches.map((batch) => ({
@@ -746,6 +808,7 @@ function postgresDependencies(
           paymentOutcomes,
           paymentDeadlines,
           paymentStarted,
+          payLaterRounds,
           unpaidCancellations,
           staffCancellations,
           itemCancellations,

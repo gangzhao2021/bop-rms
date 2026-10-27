@@ -57,6 +57,12 @@ export interface StaffDiningTable {
   /** WP-2423 Q11: until when the table's printed code works; null when it has none. */
   qrCodeValidUntil: string | null;
   /**
+   * DEC-DINE-IN-PAY-LATER: whether rounds at this table are paid as they are sent (PayFirst) or
+   * the table pays once at the end (PayLater) — as an open table was opened, as a free one would
+   * be opened now. PayFirst from an older server.
+   */
+  paymentTiming: "PayFirst" | "PayLater";
+  /**
    * WP-2423 item 5: rounds staff entered for the party at this table that still wait for their
    * card-machine payment, each with the time it is cancelled if not recorded (oldest first).
    */
@@ -320,6 +326,12 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           currentDiningSessionReference,
           elapsedMinutes,
           qrCodeValidUntil,
+          paymentTiming:
+            r.paymentTiming === undefined || r.paymentTiming === "PayFirst"
+              ? "PayFirst"
+              : r.paymentTiming === "PayLater"
+                ? "PayLater"
+                : fail(),
           staffRoundsAwaitingPayment: Object.freeze(awaiting),
           guestRoundsAwaitingPayment: Object.freeze(guestAwaiting),
           roundsAwaitingAcceptance: Object.freeze(acceptanceAwaiting),

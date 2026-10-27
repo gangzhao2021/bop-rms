@@ -300,25 +300,35 @@ export interface PlacedCounterOrder {
   readonly orderMinor: string;
   readonly tipMinor: string;
   readonly totalMinor: string;
-  readonly payBy: string;
+  /** Null when the table pays later: nothing is charged now. */
+  readonly payBy: string | null;
+  /**
+   * DEC-DINE-IN-PAY-LATER: the round went to the kitchen unpaid and goes on the table's bill
+   * (no tip now; the table pays once at the end). Always false at the counter.
+   */
+  readonly payLater: boolean;
   readonly recordedAfterOutage: boolean;
   /** WP-2423 Q7 slice 2: the table a staff-entered round joined (null at the counter). */
   readonly tableLabel: string | null;
 }
 export function parsePlacedCounterOrder(value: unknown, table = false): PlacedCounterOrder {
-  const raw = record(value, [
-    ...(table ? ["tableLabel"] : []),
-    "status",
-    "orderReference",
-    "orderBatchReference",
-    "orderNumber",
-    "orderVersion",
-    "orderMinor",
-    "tipMinor",
-    "totalMinor",
-    "payBy",
-    "recordedAfterOutage",
-  ]);
+  const raw = record(
+    value,
+    [
+      ...(table ? ["tableLabel"] : []),
+      "status",
+      "orderReference",
+      "orderBatchReference",
+      "orderNumber",
+      "orderVersion",
+      "orderMinor",
+      "tipMinor",
+      "totalMinor",
+      "payBy",
+      "recordedAfterOutage",
+    ],
+    table ? ["payLater"] : [],
+  );
   if (
     (raw.status !== "Placed" && raw.status !== "AlreadyPlaced") ||
     !Number.isInteger(raw.orderVersion) ||
@@ -327,9 +337,17 @@ export function parsePlacedCounterOrder(value: unknown, table = false): PlacedCo
       (value) => typeof value === "string" && minorPattern.test(value),
     ) ||
     BigInt(raw.orderMinor as string) + BigInt(raw.tipMinor as string) !==
-      BigInt(raw.totalMinor as string) ||
-    typeof raw.payBy !== "string" ||
-    !Number.isFinite(Date.parse(raw.payBy))
+      BigInt(raw.totalMinor as string)
+  )
+    return invalid();
+  // Absent from an older server (it never sends a round unpaid).
+  const payLater = table && raw.payLater === true;
+  if (raw.payLater !== undefined && typeof raw.payLater !== "boolean") return invalid();
+  // A pay-later round has no payment window and no tip; any other has a window.
+  if (
+    payLater
+      ? raw.payBy !== null || raw.tipMinor !== "0"
+      : typeof raw.payBy !== "string" || !Number.isFinite(Date.parse(raw.payBy))
   )
     return invalid();
   return Object.freeze({
@@ -341,7 +359,8 @@ export function parsePlacedCounterOrder(value: unknown, table = false): PlacedCo
     orderMinor: raw.orderMinor as string,
     tipMinor: raw.tipMinor as string,
     totalMinor: raw.totalMinor as string,
-    payBy: raw.payBy,
+    payBy: payLater ? null : (raw.payBy as string),
+    payLater,
     recordedAfterOutage: raw.recordedAfterOutage,
     tableLabel: table && raw.tableLabel !== null ? text(raw.tableLabel, 120) : null,
   });

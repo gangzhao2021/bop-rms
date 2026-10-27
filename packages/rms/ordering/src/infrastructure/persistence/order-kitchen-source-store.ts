@@ -8,6 +8,7 @@ import {
 import { createOrderKitchenSourceFromSnapshot } from "../../application/order-kitchen-snapshot.js";
 import { createPostgresOrderCreationQueryStore } from "./order-creation-query-store.js";
 import { createPostgresOrderPaymentDispositionReader } from "./order-payment-disposition-store.js";
+import { createPostgresOrderPayLaterConfirmationStore } from "./order-pay-later-confirmation-store.js";
 import {
   acquireOrderDispositionFence,
   createPostgresOrderInitialExecutionReader,
@@ -56,6 +57,65 @@ export function createPostgresOrderKitchenSourceStore(options: {
     // command holding the header and waiting for the fence deadlocked a guest status read that
     // held the fence and waited for the header FOR SHARE (v15 2026-10-17: 40P01).
     await acquireOrderDispositionFence(tx, { ...scope, orderReference: query.orderReference });
+    // A paid round's confirmation (its payment disposition), or — DEC-DINE-IN-PAY-LATER — a round
+    // of a pay-later table sent to the kitchen with its automatic acceptance. Both name the
+    // submission, the checkpoint the kitchen checks (the acceptance), and the OrderConfirmed event.
+    const confirmedSource = async (
+      transaction: ConsumerTransaction,
+      request: {
+        orderReference: string;
+        orderBatchReference: string;
+        confirmationReference: string;
+        sourceEventReference: string;
+      },
+      paid: readonly Record<string, unknown>[],
+    ) => {
+      if (paid.length > 1) return null;
+      if (paid.length === 1) {
+        const stored = await createPostgresOrderPaymentDispositionReader(scope).loadByPaymentEvent({
+          transaction,
+          paymentEventReference: parseOrderingReference(paid[0]?.payment_event_id),
+        });
+        if (
+          !stored ||
+          !("disposition" in stored.record) ||
+          stored.record.disposition !== "Confirmed" ||
+          !stored.orderConfirmedEvent
+        )
+          return null;
+        return {
+          record: {
+            submissionReference: stored.record.submissionReference,
+            sourceCheckpoint: stored.record.sourceCheckpoint,
+            confirmationReference: stored.record.confirmationReference,
+            sourceSnapshotDigest: stored.record.sourceSnapshotDigest,
+          },
+          orderConfirmedEvent: stored.orderConfirmedEvent,
+        };
+      }
+      const later = await createPostgresOrderPayLaterConfirmationStore({
+        ...scope,
+        quoteVersion,
+        sha256: options.sha256,
+        authorize: async () => true,
+      }).loadConfirmed({
+        transaction,
+        orderReference: request.orderReference,
+        orderBatchReference: request.orderBatchReference,
+        confirmationReference: request.confirmationReference,
+        orderConfirmedEventReference: request.sourceEventReference,
+      });
+      if (later === null) return null;
+      return {
+        record: {
+          submissionReference: later.confirmation.submissionReference,
+          sourceCheckpoint: later.confirmation.acceptanceReference,
+          confirmationReference: later.confirmation.confirmationReference,
+          sourceSnapshotDigest: later.confirmation.sourceSnapshotDigest,
+        },
+        orderConfirmedEvent: later.orderConfirmedEvent,
+      };
+    };
     const source = createOrderKitchenSourceQueryService({
       authorization: { authorize: (request) => options.authorize(tx, request) },
       digests: { sha256: options.sha256 },
@@ -74,18 +134,9 @@ export function createPostgresOrderKitchenSourceStore(options: {
               request.sourceEventReference,
             ],
           );
-          if (found.rows.length !== 1) return null;
-          const stored = await createPostgresOrderPaymentDispositionReader(
-            scope,
-          ).loadByPaymentEvent({
-            transaction: tx,
-            paymentEventReference: parseOrderingReference(found.rows[0]?.payment_event_id),
-          });
+          const stored = await confirmedSource(tx, request, found.rows);
           if (
             !stored ||
-            !("disposition" in stored.record) ||
-            stored.record.disposition !== "Confirmed" ||
-            !stored.orderConfirmedEvent ||
             stored.record.confirmationReference !== request.confirmationReference ||
             stored.record.sourceSnapshotDigest !== request.sourceSnapshotDigest ||
             stored.orderConfirmedEvent.eventId !== request.sourceEventReference ||

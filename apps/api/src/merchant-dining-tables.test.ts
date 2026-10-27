@@ -29,12 +29,24 @@ vi.mock("@rms/payment", async (original) => ({
   listStoreOrderBatchesPaidOnline: mock.paidOnline,
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => mock.resolve }));
+const timing = vi.hoisted(() => ({
+  store: "PayFirst" as "PayFirst" | "PayLater",
+  sessions: new Map<string, "PayFirst" | "PayLater">(),
+}));
 vi.mock("@rms/dining", async (original) => ({
   ...(await original<typeof import("@rms/dining")>()),
   createPostgresDiningTableStore: mock.store,
   createPostgresDiningSessionReadStore: vi.fn(() => ({ loadSessions: mock.loadSessions })),
   createPostgresDiningTableQrStore: vi.fn(() => ({ loadLatestForTables: mock.codes })),
   createPostgresDiningStaffCallStore: vi.fn(() => ({ listOpen: mock.staffCalls })),
+  // DEC-DINE-IN-PAY-LATER: the Store opens tables pay first; no open table was opened otherwise.
+  createPostgresDiningPaymentTimingStore: vi.fn(() => ({
+    load: async () => ({ paymentTiming: timing.store }),
+    loadSessionTimings: async (_tx: unknown, sessions: string[]) =>
+      new Map(
+        sessions.flatMap((s) => (timing.sessions.has(s) ? [[s, timing.sessions.get(s)]] : [])),
+      ),
+  })),
 }));
 const id = (n: number) => "01909988-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 type Options = Parameters<typeof createMerchantDiningTables>[0];
@@ -180,6 +192,41 @@ it("adds elapsed minutes from the current scoped Active Session", async () => {
   // re-checked in full once before the reply only.
   expect(f.authorizeActions).toHaveBeenCalledOnce();
   expect(f.allowed).toHaveBeenCalledOnce();
+});
+it("DEC-DINE-IN-PAY-LATER: says how each table pays — an open one as opened, a free one as the Store opens tables now", async () => {
+  const f = setup();
+  const table = (n: number, session: string | null) => ({
+    tableReference: id(n),
+    stableLabel: "T" + n,
+    areaCode: "MAIN",
+    capacity: 4,
+    lifecycle: "Published",
+    operationalState: "Available",
+    aggregateVersion: 3,
+    activeDiningSessionReference: session,
+  });
+  mock.list.mockResolvedValueOnce({
+    items: [table(4, id(5)), table(6, null)],
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValueOnce([
+    {
+      diningSessionReference: id(5),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      startedAt: "2026-09-25T11:42:00.000Z",
+    },
+  ]);
+  timing.store = "PayLater";
+  timing.sessions = new Map([[id(5), "PayFirst"]]);
+  try {
+    const view = await f.read(f.input);
+    expect(view.items.map((item) => item.paymentTiming)).toEqual(["PayFirst", "PayLater"]);
+  } finally {
+    timing.store = "PayFirst";
+    timing.sessions = new Map();
+  }
 });
 it("does not return elapsed Session data if Store authority changes during the owner read", async () => {
   const f = setup();

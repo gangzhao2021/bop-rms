@@ -198,7 +198,15 @@ export function createStaffTableGuestPipeline(options: {
   details: Pick<CustomerCheckoutDetailsPort, "save">;
   checkout: { create(value: unknown): Promise<unknown> };
   /** The customer payment preparation (first round or later round), without a Provider. */
-  payment: { prepare(value: unknown): Promise<OrderPaymentPreparationEvidence> };
+  payment: {
+    prepare(value: unknown): Promise<OrderPaymentPreparationEvidence>;
+    /** DEC-DINE-IN-PAY-LATER: submit a round of a pay-later table (no clock, no Provider). */
+    submitRound?(value: unknown): Promise<{
+      readonly submissionReference: string;
+      readonly kind: "Initial" | "Additional";
+      readonly guestSessionReference: string;
+    }>;
+  };
   nextReference(): string;
   now(): string;
 }): StaffTableGuestPipeline {
@@ -357,6 +365,22 @@ export function createStaffTableGuestPipeline(options: {
               version = result.view.cart.version;
             }
             return "Removed" as const;
+          },
+        }),
+    ...(options.payment.submitRound === undefined
+      ? {}
+      : {
+          async submitPayLater(credentials, input) {
+            if (!(await options.takesOrder({ recordedAfterOutage: input.recordedAfterOutage })))
+              throw Object.assign(new Error("store closed"), { code: "STORE_CLOSED" });
+            const submit = options.payment.submitRound as NonNullable<
+              typeof options.payment.submitRound
+            >;
+            return submit({
+              ...credentials,
+              checkoutSessionReference: input.checkoutSessionReference,
+              selectionReference: input.selectionReference,
+            });
           },
         }),
     async preparePayment(credentials, input) {

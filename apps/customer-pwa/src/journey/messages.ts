@@ -529,6 +529,30 @@ export const checkoutText = Object.freeze({
     return t("Continue to payment");
   },
   continueToPaymentWithTotal: (total: string) => t("Continue to payment · {total}", { total }),
+  /** DEC-DINE-IN-PAY-LATER: a table that pays once at the end. */
+  sendToKitchenWithTotal: (total: string) => t("Send to the kitchen · {total}", { total }),
+  get sendToKitchen() {
+    return t("Send to the kitchen");
+  },
+  get sendToKitchenNote() {
+    return t(
+      "Nothing is charged now. Your table pays once at the end, and you choose any tip then.",
+    );
+  },
+  get progressSend() {
+    return t("Send");
+  },
+  get sendingToKitchen() {
+    return t("Sending your order to the kitchen…");
+  },
+  get sendToKitchenFailed() {
+    return t(
+      "We couldn’t confirm your order reached the kitchen. Send it again — it is never sent twice.",
+    );
+  },
+  get tablePaysAsItOrders() {
+    return t("This table pays for each round as it orders. Continue to payment instead.");
+  },
   get continueNote() {
     return t("You’ll enter your card on the next step. Nothing is charged until you confirm.");
   },

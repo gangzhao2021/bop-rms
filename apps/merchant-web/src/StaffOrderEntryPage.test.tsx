@@ -398,6 +398,17 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
       tableLabel: "T4",
       totalMinor: "2560",
     });
+    // DEC-DINE-IN-PAY-LATER: a round of a table that pays at the end has no payment window or tip.
+    expect(
+      parsePlacedCounterOrder(
+        { ...placed, tipMinor: "0", totalMinor: "2260", payBy: null, payLater: true },
+        true,
+      ),
+    ).toMatchObject({ payLater: true, payBy: null, totalMinor: "2260" });
+    expect(() =>
+      parsePlacedCounterOrder({ ...placed, payBy: null, payLater: false }, true),
+    ).toThrow();
+    expect(() => parsePlacedCounterOrder({ ...placed, payLater: true }, true)).toThrow();
     expect(fetcher).toHaveBeenCalledWith(
       "/merchant/dining/staff-rounds",
       expect.objectContaining({ method: "POST", body: JSON.stringify(command) }),

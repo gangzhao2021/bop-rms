@@ -22,7 +22,14 @@ export type DiningRoundStatus =
   | "Serving"
   | "Served";
 export type DiningRoundPayment =
-  "Paid" | "Awaiting" | "Failed" | "NotCharged" | "Refunded" | "RefundPending";
+  | "Paid"
+  | "Awaiting"
+  | "Failed"
+  | "NotCharged"
+  | "Refunded"
+  | "RefundPending"
+  /** DEC-DINE-IN-PAY-LATER: in the kitchen; paid with the table's bill at the end. */
+  | "OnTableBill";
 export type DiningCancellationReason =
   "CustomerRequest" | "SoldOut" | "StoreError" | "DuplicateOrder" | "GuestLeft";
 
@@ -56,6 +63,11 @@ export interface DiningSessionView {
   readonly tableLabel: string | null;
   readonly orderNumber: string | null;
   readonly checkedAt: string;
+  /**
+   * DEC-DINE-IN-PAY-LATER: PayLater — rounds go to the kitchen when sent and the table pays once
+   * at the end; PayFirst — each round is paid as it is sent (also from an older server).
+   */
+  readonly paymentTiming: "PayFirst" | "PayLater";
   readonly rounds: readonly DiningRound[];
   readonly summary: null | {
     readonly paid: DiningMoney;
@@ -105,6 +117,7 @@ const payments: readonly DiningRoundPayment[] = [
   "NotCharged",
   "Refunded",
   "RefundPending",
+  "OnTableBill",
 ];
 const reasons: readonly DiningCancellationReason[] = [
   "CustomerRequest",
@@ -160,10 +173,15 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T {
 export function parseDiningSessionView(value: unknown): DiningSessionView {
   const root = record(value, ["schemaVersion", "session"]);
   if (root.schemaVersion !== 1) return invalid();
+  const timed =
+    root.session !== null &&
+    typeof root.session === "object" &&
+    Object.hasOwn(root.session, "paymentTiming");
   const session = record(root.session, [
     "tableLabel",
     "orderNumber",
     "checkedAt",
+    ...(timed ? ["paymentTiming"] : []),
     "rounds",
     "summary",
   ]);
@@ -304,6 +322,9 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           ? session.orderNumber
           : invalid(),
     checkedAt: time(session.checkedAt),
+    paymentTiming: timed
+      ? oneOf(session.paymentTiming, ["PayFirst", "PayLater"] as const)
+      : "PayFirst",
     rounds: Object.freeze(rounds),
     summary,
   });
