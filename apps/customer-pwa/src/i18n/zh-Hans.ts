@@ -1124,4 +1124,36 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Item prices are before tax. ": "菜品价格为税前价格。",
   "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.":
     "这桌已在最后一起付清。现金按 5 分取整，刷卡不取整。",
+  "Ask a staff member for the bill first; then you can pay it here.":
+    "请先找店员要账单，然后就可以在这里付款。",
+  "This table has already been paid.": "这桌已经付过款了。",
+  "The bill just changed. It has been read again: check it and pay again.":
+    "账单刚刚有变动，已重新读取，请核对后再付款。",
+  "Someone else at your table is paying the bill right now.": "同桌的另一位客人正在付款。",
+  "Your payment is still being processed. Check again in a moment.":
+    "您的付款还在处理中，请稍后再查看。",
+  "This phone isn’t part of the table any more. Ask a staff member for help.":
+    "这部手机已不在这桌的名单里，请找店员帮忙。",
+  "We couldn’t reach the payment service. Check your connection and try again.":
+    "暂时连不上支付服务，请检查网络后再试。",
+  "Your table’s order": "本桌消费",
+  "Total paid": "实付合计",
+  "Paid by": "付款方式",
+  "Card on a guest’s phone": "客人手机刷卡",
+  "Card at the table": "桌边刷卡",
+  "Thank you! Your table is paid in full.": "谢谢！本桌已全部付清。",
+  "Pay the bill": "结账付款",
+  "Paying {amount} for the whole table, tip included.": "正在为整桌支付 {amount}（含小费）。",
+  "Decline simulated payment": "拒绝模拟付款",
+  "Confirming your payment…": "正在确认付款…",
+  "Preparing the secure card form…": "正在准备安全付款表单…",
+  "The payment didn’t go through. You can try again with another card.":
+    "付款没有成功，可以换一张卡再试。",
+  "Tip (once, for the whole table)": "小费（整桌只选一次）",
+  "{percent}% · {amount}": "{percent}% · {amount}",
+  "Starting your payment…": "正在发起付款…",
+  "Pay {amount}": "支付 {amount}",
+  Cash: "现金",
+  "Card payment isn’t available on this phone. Ask a staff member to take the payment.":
+    "这部手机暂时不能刷卡付款，请找店员收款。",
 });

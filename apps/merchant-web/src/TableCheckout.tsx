@@ -52,6 +52,10 @@ function errorText(error: unknown): string {
       return t("The cash received is less than the cash total.");
     case "AlreadyPaid":
       return t("This table has already paid.");
+    case "GuestPaying":
+      return t(
+        "A guest is paying the whole table on their phone right now. Wait for it, or stop the phone payment if they gave up.",
+      );
     case "NotReady":
       return t("Every dish must be served or cancelled first.");
     case "SessionChanged":
@@ -111,6 +115,7 @@ export function TableCheckout({
   // One operation per intent: a lost answer is resent with the same one.
   const operation = useRef<{ key: string; reference: string } | null>(null);
   const beginOperation = useRef<string | null>(null);
+  const guestPaid = useRef(false);
 
   useEffect(() => {
     if (session.phase !== "Closing") {
@@ -128,6 +133,24 @@ export function TableCheckout({
       });
     return () => controller.abort();
   }, [client, csrf, sessionReference, session.phase, session.version, reload]);
+
+  // S4: while a guest pays on their phone, the bill is read again until it ends.
+  const guestPaying = bill?.onlinePayment?.status === "InProgress";
+  useEffect(() => {
+    if (!guestPaying) return;
+    const timer = window.setInterval(() => setReload((value) => value + 1), 5000);
+    return () => window.clearInterval(timer);
+  }, [guestPaying]);
+  // …and once it is paid, the table's close check reads again.
+  const paidNow = bill?.settlement != null;
+  const notified = useRef(false);
+  useEffect(() => {
+    if (paidNow && guestPaid.current && !notified.current) {
+      notified.current = true;
+      onChanged();
+    }
+    guestPaid.current = guestPaying;
+  }, [paidNow, guestPaying, onChanged]);
 
   const subtotal = bill ? BigInt(bill.owed.subtotalMinor) : 0n;
   const owed = bill ? BigInt(bill.owed.totalMinor) : 0n;
@@ -197,6 +220,22 @@ export function TableCheckout({
       setProblem(errorText(error));
       if (error instanceof DiningSessionCloseClientError && error.code !== "OutcomeUnknown")
         onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // S4: stop a phone payment the guest gave up on (the Provider is asked first).
+  const stopPhone = async () => {
+    if (busy || locked) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      setBill(await client.stopOnlinePayment(csrf, sessionReference));
+      onChanged();
+    } catch (error) {
+      setProblem(errorText(error));
+      setReload((value) => value + 1);
     } finally {
       setBusy(false);
     }
@@ -324,7 +363,24 @@ export function TableCheckout({
               </li>
             ))}
           </ol>
-          {bill.writeOff !== null ? (
+          {bill.writeOff === null && bill.onlinePayment?.status === "InProgress" ? (
+            // DEC-DINE-IN-PAY-LATER S4: a guest is paying on their phone; nothing else is taken.
+            <div className="table-checkout__phone-payment" role="status">
+              <p>
+                {t("A guest is paying the whole table on their phone: {amount}.", {
+                  amount: cad(bill.onlinePayment.totalMinor),
+                })}
+              </p>
+              <p>
+                {t(
+                  "If the guest gave up, stop the phone payment to take it here. A payment they did finish is kept.",
+                )}
+              </p>
+              <button type="button" disabled={busy || locked} onClick={() => void stopPhone()}>
+                {busy ? t("Checking…") : t("Stop the phone payment")}
+              </button>
+            </div>
+          ) : bill.writeOff !== null ? (
             // DEC-DINE-IN-PAY-LATER (rule 14): the guests left without paying; nothing to take.
             <div className="table-checkout__written-off" role="status">
               <p>
@@ -538,7 +594,11 @@ export function TableCheckout({
           )}
         </>
       )}
-      {canStart && bill !== null && bill.settlement === null && bill.writeOff === null ? (
+      {canStart &&
+      bill !== null &&
+      bill.settlement === null &&
+      bill.writeOff === null &&
+      bill.onlinePayment?.status !== "InProgress" ? (
         // DEC-DINE-IN-PAY-LATER (rule 3): the guests want to order more — back to ordering.
         <p className="table-checkout__cancel">
           <button type="button" disabled={busy || locked} onClick={() => void cancelCheckout()}>
@@ -597,7 +657,13 @@ function TableReceipt({
         </div>
         <div>
           <dt>{t("Paid by")}</dt>
-          <dd>{paid.method === "Cash" ? t("Cash") : t("Card machine")}</dd>
+          <dd>
+            {paid.method === "Cash"
+              ? t("Cash")
+              : paid.method === "Online"
+                ? t("Guest's phone")
+                : t("Card machine")}
+          </dd>
         </div>
         {paid.tenderedMinor !== null ? (
           <div>

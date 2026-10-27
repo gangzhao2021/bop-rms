@@ -5782,4 +5782,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Guests left without paying (written off)": "客人未付离开（核销）",
   "A manager recorded that these guests left without paying. Not collected, so not in the takings above.":
     "经理登记了这些客人未付离开。这笔钱没有收到，所以不计入上面的收款。",
+  "A guest is paying the whole table on their phone right now. Wait for it, or stop the phone payment if they gave up.":
+    "有客人正在用手机为整桌付款。请等一等；如果客人放弃了，可以停止手机付款。",
+  "A guest is paying the whole table on their phone: {amount}.":
+    "有客人正在用手机为整桌付款：{amount}。",
+  "If the guest gave up, stop the phone payment to take it here. A payment they did finish is kept.":
+    "如果客人放弃了，停止手机付款后可以在这里收款。客人已经完成的付款会保留。",
+  "Stop the phone payment": "停止手机付款",
+  "Guest's phone": "客人手机",
+  "Paid at the table · guest's phone": "已在桌上付清 · 客人手机",
 });

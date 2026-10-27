@@ -3,6 +3,22 @@ const databaseAccessManifestInput = {
   module: { moduleName: "payment", packageName: "@rms/payment", layer: "RMS" },
   tables: [
     {
+      table: "dining_table_online_payment",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
+      table: "dining_table_online_payment_outcome",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
       table: "dining_table_cash_refund",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/payment" },
@@ -341,6 +357,76 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "dining-table-settlement.read.dining_table_online_payment",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_online_payment" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.write.dining_table_online_payment",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_online_payment" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "payment-reconciliation-candidates.read.dining_table_online_payment",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_online_payment" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/payment-reconciliation-candidates.ts",
+    },
+    {
+      id: "dining-table-settlement.read.dining_table_online_payment_outcome",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_online_payment_outcome" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.write.dining_table_online_payment_outcome",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_online_payment_outcome" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "payment-reconciliation-candidates.read.dining_table_online_payment_outcome",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_online_payment_outcome" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/payment-reconciliation-candidates.ts",
+    },
+    {
+      id: "provider-capture-exception.read.dining_table_online_payment",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_online_payment" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/provider-capture-exception-store.ts",
+    },
     {
       id: "dining-table-settlement.read.dining_table_cash_refund",
       operation: "read",

@@ -15,7 +15,10 @@ function parseTableBill(
   orderType: unknown,
 ): {
   readonly totalMinor: string;
-  readonly paid: { readonly amountMinor: string; readonly method: "CardMachine" | "Cash" } | null;
+  readonly paid: {
+    readonly amountMinor: string;
+    readonly method: "CardMachine" | "Cash" | "Online";
+  } | null;
 } | null {
   if (value === null) return null;
   const bill = exact(value, ["totalMinor", "paid"]);
@@ -30,7 +33,7 @@ function parseTableBill(
   if (
     typeof paid.amountMinor !== "string" ||
     !minorAmount.test(paid.amountMinor) ||
-    (paid.method !== "CardMachine" && paid.method !== "Cash")
+    (paid.method !== "CardMachine" && paid.method !== "Cash" && paid.method !== "Online")
   )
     return fail();
   return Object.freeze({

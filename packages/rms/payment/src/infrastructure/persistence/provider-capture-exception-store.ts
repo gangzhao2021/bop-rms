@@ -113,6 +113,16 @@ export function createPostgresProviderCaptureExceptionStore(options: {
           { brandReference: brand, storeReference: store },
           { now: () => evidence.observedAt, generateObservationReference: () => fail() },
         ).resolveOperation(evidence.paymentOperationReference);
+        // DEC-DINE-IN-PAY-LATER S4: a whole-table payment on a guest's phone is ours too.
+        const tableOperation =
+          operation === null
+            ? (((
+                await tx.query(
+                  "SELECT online_payment_id::text AS payment FROM rms_payment.dining_table_online_payment WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+                  [brand, store, String(evidence.paymentOperationReference)],
+                )
+              ).rows[0] as { payment?: string } | undefined) ?? null)
+            : null;
         await authorize();
         const prior = existing.rows[0];
         if (prior) {
@@ -163,6 +173,11 @@ export function createPostgresProviderCaptureExceptionStore(options: {
           return Object.freeze({
             status: "OperationPresent" as const,
             paymentIntentReference: operation.intent.paymentIntentReference,
+          });
+        if (tableOperation !== null)
+          return Object.freeze({
+            status: "OperationPresent" as const,
+            paymentIntentReference: String(tableOperation.payment),
           });
         const audit = validateAuditRecord(
           (await options.audit({

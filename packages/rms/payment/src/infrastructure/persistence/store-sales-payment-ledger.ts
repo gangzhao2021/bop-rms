@@ -421,8 +421,20 @@ export function createPostgresStoreSalesPaymentLedger(options: {
       else refundedPayments.push(payment);
     }
     if (refundedIntents.some((intent) => !seenIntents.has(intent))) return fail();
-    const onlineTotal = payments.reduce((sum, payment) => sum + payment.totalMinor, 0n);
-    if (payments.length !== captured.captureCount || onlineTotal !== captured.capturedAmountMinor)
+    // S4: the online captures also hold tables a guest paid on their phone (one each).
+    const onlineTables = table.settlements.filter(
+      (settlement) =>
+        settlement.method === "Online" &&
+        settlement.takenAt >= startsAt &&
+        settlement.takenAt < endsAt,
+    );
+    const onlineTotal =
+      payments.reduce((sum, payment) => sum + payment.totalMinor, 0n) +
+      onlineTables.reduce((sum, settlement) => sum + settlement.totalMinor, 0n);
+    if (
+      payments.length + onlineTables.length !== captured.captureCount ||
+      onlineTotal !== captured.capturedAmountMinor
+    )
       return fail();
     for (const payment of cardMachine.payments) {
       const record = Object.freeze({
@@ -446,15 +458,23 @@ export function createPostgresStoreSalesPaymentLedger(options: {
     for (const settlement of table.settlements) {
       const inWindow = settlement.takenAt >= startsAt && settlement.takenAt < endsAt;
       if (inWindow) {
-        const totals = settlement.method === "Cash" ? cashTaken : tableCard;
-        totals.count++;
-        totals.amountMinor += settlement.totalMinor;
-        totals.tipMinor += settlement.tipMinor;
-        if (settlement.method === "Cash") cashTaken.roundingMinor += settlement.roundingMinor;
+        // S4: a table paid on a guest's phone is in the online captures (capture window source).
+        if (settlement.method !== "Online") {
+          const totals = settlement.method === "Cash" ? cashTaken : tableCard;
+          totals.count++;
+          totals.amountMinor += settlement.totalMinor;
+          totals.tipMinor += settlement.tipMinor;
+          if (settlement.method === "Cash") cashTaken.roundingMinor += settlement.roundingMinor;
+        }
       }
       for (const [index, line] of settlement.lines.entries()) {
         const record = Object.freeze({
-          channel: settlement.method === "Cash" ? ("Cash" as const) : ("CardMachine" as const),
+          channel:
+            settlement.method === "Cash"
+              ? ("Cash" as const)
+              : settlement.method === "Online"
+                ? ("Online" as const)
+                : ("CardMachine" as const),
           paymentIntentReference: lineKey(settlement.settlementReference, line.lineNumber),
           orderReference: settlement.orderReference,
           orderBatchReference: line.orderBatchReference,
@@ -491,6 +511,7 @@ export function createPostgresStoreSalesPaymentLedger(options: {
       /** Online refunds sent but not yet confirmed by the Provider (not counted anywhere yet). */
       unresolvedOnlineRefundCount: ordinary.unresolvedOperationCount,
       settlement: Object.freeze({
+        // Online captures read by the capture window source include tables paid on a phone.
         onlineCaptured: { count: captured.captureCount, amountMinor: captured.capturedAmountMinor },
         onlineRefunded: {
           count: ordinary.refundCount + compensationInWindow.count,

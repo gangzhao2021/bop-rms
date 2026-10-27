@@ -40,6 +40,7 @@ export async function startInternalCustomerServer({
   createInternalChannelPayment,
   createInternalSimulatedProvider,
   createInternalPaymentTerminal,
+  registerInternalDiningTablePayment,
   loadProfile,
   keyFile,
   certificateFile,
@@ -130,6 +131,8 @@ export async function startInternalCustomerServer({
       items.catalogCartItems,
     );
     const terminal = createInternalPaymentTerminal(resources, checkout, intents, simulator);
+    // DEC-DINE-IN-PAY-LATER S4: a guest pays the whole table on their phone.
+    registerInternalDiningTablePayment?.(app, { resources, checkout, simulator, origin });
     const merchant = await createInternalMerchant(resources);
     // WP-2423 DEC-COGNITO-STORE-STAFF: the TEST-ONLY staff sign-in page is not served when staff
     // sign in with their own Cognito account.

@@ -38,6 +38,8 @@ export type UnpaidDepartureErrorCode =
   | "UNPAID_DEPARTURE_NOT_READY"
   | "UNPAID_DEPARTURE_VERSION_CONFLICT"
   | "UNPAID_DEPARTURE_ALREADY_CLOSED"
+  /** S4: a guest is paying the whole table on their phone right now. */
+  | "UNPAID_DEPARTURE_GUEST_PAYING"
   | "UNPAID_DEPARTURE_UNAVAILABLE";
 export class UnpaidDepartureError extends Error {
   constructor(
@@ -202,6 +204,12 @@ export function createMerchantDiningUnpaidDeparture(options: {
                 writtenOffMinor: prior.writtenOffMinor.toString(),
               });
             }
+            if (
+              (await payment.listOnlinePaymentsByOrders(tx, [command.orderReference])).some(
+                (attempt) => attempt.outcome === null,
+              )
+            )
+              return refuse("UNPAID_DEPARTURE_GUEST_PAYING");
             const [session] = await createPostgresDiningSessionReadStore(
               { run: (work) => work(tx) },
               scope,

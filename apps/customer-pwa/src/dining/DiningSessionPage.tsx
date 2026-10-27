@@ -15,6 +15,7 @@ import {
   type DiningSessionView,
 } from "./dining-session-client.js";
 import { DiningInvitationPanel } from "./DiningInvitationPanel.js";
+import { TablePayPanel } from "./TablePayPanel.js";
 import { subscribeCustomerCsrfContext } from "../session/customer-transaction-context.js";
 import { DiningStaffCallPanel } from "./DiningStaffCallPanel.js";
 import type { DiningStaffCallClient } from "./dining-staff-call-client.js";
@@ -551,6 +552,8 @@ export function DiningSessionScreen({
         </section>
       ) : null}
       {view ? <TableSummary view={view} /> : null}
+      {/* DEC-DINE-IN-PAY-LATER S4: the guest pays the whole table here once checkout started. */}
+      {view?.paymentTiming === "PayLater" ? <TablePayPanel /> : null}
       {view && view.rounds.length > 0 ? (
         <section className="order-status__batches" aria-labelledby="dining-rounds-heading">
           <h2 id="dining-rounds-heading">{t("Rounds")}</h2>

@@ -324,3 +324,58 @@ test("@production DEC-DINE-IN-PAY-LATER: a table the guests left without paying 
   await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
+
+test("@production DEC-DINE-IN-PAY-LATER S4: while a guest pays on their phone staff take nothing else, and can stop a payment the guest gave up on", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state);
+  let stopped = false;
+  const stops: unknown[] = [];
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: ["ORDER_BALANCE_UNPAID"],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  const billNow = () => ({
+    ...unpaidBill("Closing", 7),
+    onlinePayment: {
+      status: stopped ? "Cancelled" : "InProgress",
+      totalMinor: "3843",
+      tipMinor: "450",
+      startedAt: "2026-10-15T19:01:00.000Z",
+    },
+  });
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: billNow() }),
+  );
+  await page.route("**/merchant/dining/table-online-payment/stop", (route) => {
+    stops.push(route.request().postDataJSON());
+    stopped = true;
+    return route.fulfill({ headers, json: { status: "Stopped", bill: billNow() } });
+  });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await expect(checkout).toContainText("A guest is paying the whole table on their phone: $38.43.");
+  // Nothing else to take, and no way back to ordering, while the guest pays.
+  await expect(checkout.getByRole("radio", { name: "Cash" })).toHaveCount(0);
+  await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
+  await checkout.getByRole("button", { name: "Stop the phone payment" }).click();
+  expect(stops).toEqual([{ diningSessionReference: id(2) }]);
+  // Stopped: the table is paid here as usual.
+  await expect(checkout.getByRole("radio", { name: "Cash" })).toBeVisible();
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});

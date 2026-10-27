@@ -44,9 +44,13 @@ const changed = (): never => {
  * been paid or written off for the table — a paid table pays once, and its payment never changes.
  */
 export class DiningCheckoutAlreadyPaidError extends Error {
-  readonly code = "DINING_CHECKOUT_ALREADY_PAID" as const;
-  constructor() {
-    super("DINING_CHECKOUT_ALREADY_PAID");
+  /** S4: "GUEST_PAYING" — a guest is paying the whole table on their phone right now. */
+  constructor(
+    readonly code:
+      | "DINING_CHECKOUT_ALREADY_PAID"
+      | "DINING_CHECKOUT_GUEST_PAYING" = "DINING_CHECKOUT_ALREADY_PAID",
+  ) {
+    super(code);
     this.name = "DiningCheckoutAlreadyPaidError";
   }
 }
@@ -239,6 +243,12 @@ export function createMerchantDiningClosingCommand(options: {
             (await payments.listWriteOffsByOrders(tx, [order])).length > 0
           )
             throw new DiningCheckoutAlreadyPaidError();
+          if (
+            (await payments.listOnlinePaymentsByOrders(tx, [order])).some(
+              (attempt) => attempt.outcome === null,
+            )
+          )
+            throw new DiningCheckoutAlreadyPaidError("DINING_CHECKOUT_GUEST_PAYING");
         }
         reversible = true;
       }

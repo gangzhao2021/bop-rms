@@ -49,6 +49,8 @@ import { createMerchantDiningTableClosePlan } from "../../apps/api/dist/merchant
 import { createMerchantDiningOrderCloseCommand } from "../../apps/api/dist/merchant-dining-order-close-command.js";
 import { createMerchantDiningUnpaidDeparture } from "../../apps/api/dist/merchant-dining-unpaid-departure.js";
 import { createMerchantDiningUnpaidItemRemoval } from "../../apps/api/dist/merchant-dining-unpaid-item-removal.js";
+import { createMerchantDiningTableOnlinePaymentStop } from "../../apps/api/dist/merchant-dining-table-online-payment.js";
+import { createInternalDiningTablePayments } from "./pilot-dining-table-payment.mjs";
 import {
   createMerchantDiningTableCashRefund,
   createMerchantDiningTablePaymentRead,
@@ -148,6 +150,7 @@ export async function createInternalMerchant(
     loadPricingCurrencyMetadata,
     refundUnmatchedCapture,
     cancellationRefundProvider,
+    tableOnlinePaymentProvider,
     staffTotpVerifier,
     createInternalCounterOrder,
     createInternalStaffStockShortage,
@@ -1198,6 +1201,18 @@ export async function createInternalMerchant(
     environment: pilotProviderEnvironment(),
     nextReference: () => resources.credentials.reference(),
   });
+  // DEC-DINE-IN-PAY-LATER S4: stop a phone payment a guest gave up on (the Provider is asked).
+  const diningTableOnlinePaymentStop =
+    tableOnlinePaymentProvider === undefined
+      ? undefined
+      : createMerchantDiningTableOnlinePaymentStop({
+          persistence,
+          authentication: service,
+          payments: () =>
+            createInternalDiningTablePayments(resources, tableOnlinePaymentProvider, {
+              providerAccountReference,
+            }),
+        });
   // DEC-TABLE-CLOSE-GUESTS-LEFT: the close dialog's per-round plan (Owner, Store Manager).
   const diningTableClosePlan = createMerchantDiningTableClosePlan({
     persistence,
@@ -1628,6 +1643,7 @@ export async function createInternalMerchant(
       diningPaymentTimingChange,
       diningTableBill,
       diningTableSettle,
+      ...(diningTableOnlinePaymentStop === undefined ? {} : { diningTableOnlinePaymentStop }),
       orderUnpaidDeparture,
       tablePayment,
       tableCashRefund,

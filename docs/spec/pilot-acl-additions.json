@@ -4616,6 +4616,42 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER S3 (cash, Owner 2026-10-27 \"要支持现金，加进先点后付一起做\"): a manager records cash given back from a table's cash payment; settlement and reports read it"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_online_payment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER S4 (Owner 2026-10-26 \"同意先点后付，按这个顺序做\"): a guest pays the whole table on their phone; the attempt and its Provider outcome are recorded and read by the bill, reports and reconciliation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_online_payment",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER S4 (Owner 2026-10-26 \"同意先点后付，按这个顺序做\"): a guest pays the whole table on their phone; the attempt and its Provider outcome are recorded and read by the bill, reports and reconciliation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_online_payment_outcome",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER S4 (Owner 2026-10-26 \"同意先点后付，按这个顺序做\"): a guest pays the whole table on their phone; the attempt and its Provider outcome are recorded and read by the bill, reports and reconciliation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_online_payment_outcome",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER S4 (Owner 2026-10-26 \"同意先点后付，按这个顺序做\"): a guest pays the whole table on their phone; the attempt and its Provider outcome are recorded and read by the bill, reports and reconciliation"
     }
   ]
 }

@@ -121,6 +121,20 @@ export function composeMerchantDependencies(
       }),
     // WP-2423 Q6 step 2a: TEST-ONLY internal simulator for item cancellation refunds (dispatch
     // through the ordinary refund journal; an unknown result is only looked up).
+    // DEC-DINE-IN-PAY-LATER S4: the Provider staff ask when they stop a guest's phone payment.
+    tableOnlinePaymentProvider: Object.fromEntries(
+      ["createIntent", "retrieveIntent", "cancelIntent"].map((operation) => [
+        operation,
+        async (request) => {
+          const simulator = await provider();
+          try {
+            return await simulator.adapter[operation](request);
+          } finally {
+            simulator.close();
+          }
+        },
+      ]),
+    ),
     cancellationRefundProvider: {
       refundPayment: async (request) => {
         const simulator = await provider();

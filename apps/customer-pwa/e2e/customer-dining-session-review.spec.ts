@@ -386,3 +386,137 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expect(main.getByRole("heading", { name: "We couldn’t load your table" })).toHaveCount(0);
   });
 });
+
+// A stand-in for Stripe's script: its secure card component mounts and confirms (test only).
+const syntheticStripe = `window.Stripe = function() { return {
+  elements: function() { return {
+    create: function() {
+      var handlers = {}, host;
+      return {
+        on: function(event, callback) { handlers[event] = callback; },
+        mount: function(target) {
+          host = target; host.textContent = "Synthetic secure card component";
+          queueMicrotask(function() { handlers.ready(); });
+        },
+        destroy: function() { if (host) host.textContent = ""; }
+      };
+    },
+    submit: async function() { return {}; }
+  }; },
+  confirmPayment: async function() { return { paymentIntent: { status: "succeeded" } }; }
+}; };`;
+
+test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole table", () => {
+  test.use({ serviceWorkers: "block" });
+
+  test("chooses the tip once, pays with a card and gets the whole table's receipt", async ({
+    page,
+  }) => {
+    await page.route("**/bff/customer/payment-configuration", (route) =>
+      route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          mode: "stripe",
+          publishableKey: "pk_test_SyntheticBrowserOnly",
+          returnUrl: "https://synthetic-return.invalid/return",
+          wallets: false,
+          internalTestEntry: false,
+        },
+      }),
+    );
+    await page.route("https://js.stripe.com/**", (route) =>
+      route.fulfill({ contentType: "application/javascript", body: syntheticStripe }),
+    );
+    const payLater = {
+      schemaVersion: 1,
+      session: {
+        ...session.session,
+        paymentTiming: "PayLater",
+        rounds: [{ ...session.session.rounds[0], payment: "OnTableBill" }],
+      },
+    };
+    const base = {
+      tableLabel: "12",
+      checkingOut: true,
+      rounds: [
+        {
+          roundNumber: 1,
+          items: [{ displayName: "Synthetic tonkotsu ramen", subtotalMinor: "1800" }],
+          totalMinor: "2034",
+        },
+      ],
+      owed: { subtotalMinor: "1800", taxMinor: "234", totalMinor: "2034" },
+      consistent: true,
+    };
+    let state: "NotPaid" | "Paying" | "Paid" = "NotPaid";
+    let handedOff = false;
+    const starts: unknown[] = [];
+    const answer = () => ({
+      schemaVersion: 1,
+      payment: {
+        ...base,
+        state,
+        attempt: state === "Paying" ? { totalMinor: "2304", tipMinor: "270" } : null,
+        receipt:
+          state === "Paid"
+            ? {
+                method: "Online",
+                roundsMinor: "2034",
+                tipMinor: "270",
+                roundingMinor: "0",
+                totalMinor: "2304",
+                paidAt: "2026-10-13T18:30:00.000Z",
+              }
+            : null,
+      },
+    });
+    await page.route("**/api/v1/dine-in/table-payment", (route) => {
+      const body = route.request().postDataJSON() as { action: string };
+      if (body.action === "Start") {
+        starts.push(body);
+        state = "Paying";
+      }
+      // The Provider reports the card payment once the guest confirmed it.
+      else if (state === "Paying" && handedOff) state = "Paid";
+      return route.fulfill({
+        status: 200,
+        headers: { "cache-control": "no-store" },
+        json: answer(),
+      });
+    });
+    await page.route("**/api/v1/dine-in/table-payment/handoff", (route) => {
+      handedOff = true;
+      return route.fulfill({
+        status: 200,
+        headers: { "cache-control": "no-store" },
+        json: { schemaVersion: 1, clientSecret: "pi_SYNTHETIC_secret_SYNTHETIC" },
+      });
+    });
+    await enterTable(page, () => ({ status: 200, json: payLater }));
+    const pay = page.getByRole("region", { name: "Pay the bill" });
+    await expect(pay).toBeVisible();
+    // The tip is chosen once for the whole table: 15% of the bill before tax.
+    await pay.getByRole("radio", { name: /15% · \$2\.70/u }).check();
+    await pay.getByRole("button", { name: "Pay $23.04" }).click();
+    await expect(pay).toContainText("Paying $23.04 for the whole table, tip included.");
+    // The browser sends only the tip chosen and its own operation (never an amount).
+    expect(starts).toEqual([
+      {
+        action: "Start",
+        operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+        tip: { kind: "Percent", percent: 15 },
+      },
+    ]);
+    await pay.getByRole("button", { name: "Pay securely" }).click();
+    const receipt = page.getByRole("region", { name: "Receipt" });
+    await expect(receipt).toContainText("$23.04", { timeout: 10000 });
+    await expect(receipt).toContainText("Card on a guest’s phone");
+    await expect(receipt).toContainText("$2.70");
+    for (const width of [390, 1024]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expectNoHorizontalOverflow(page);
+    }
+    await expectNoInternalText(page);
+  });
+});

@@ -447,7 +447,7 @@ export function createPersistentMerchantOrderQueue(options: {
             string,
             {
               totalMinor: string;
-              paid: { amountMinor: string; method: "CardMachine" | "Cash" } | null;
+              paid: { amountMinor: string; method: "CardMachine" | "Cash" | "Online" } | null;
             }
           >();
           const unpaidRemoved = new Map<string, string[]>();

@@ -231,6 +231,8 @@ export function createPersistentMerchantSettlement(options: {
         };
         for (const settlement of listed.settlements) {
           if (settlement.takenAt < window.startsAt || settlement.takenAt >= window.endsAt) continue;
+          // S4: a table paid on a guest's phone is in the online captures (capture window source).
+          if (settlement.method === "Online") continue;
           const totals = settlement.method === "Cash" ? cash : card;
           totals.count++;
           totals.amountMinor += settlement.totalMinor;

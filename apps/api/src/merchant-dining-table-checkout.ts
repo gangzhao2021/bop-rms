@@ -47,6 +47,8 @@ export const diningTableCheckoutErrorCodes = [
   "TABLE_CHECKOUT_BILL_CHANGED",
   "TABLE_CHECKOUT_TENDER_SHORT",
   "TABLE_CHECKOUT_ALREADY_PAID",
+  /** S4: a guest is paying the whole table on their phone right now. */
+  "TABLE_CHECKOUT_GUEST_PAYING",
   "TABLE_CHECKOUT_IDEMPOTENCY_CONFLICT",
   "TABLE_CHECKOUT_UNAVAILABLE",
 ] as const;
@@ -107,7 +109,7 @@ export interface DiningTableBill {
   /** False while a round is still being sent: the bill would not match the Order (refresh). */
   readonly consistent: boolean;
   readonly settlement: null | {
-    readonly method: "CardMachine" | "Cash";
+    readonly method: "CardMachine" | "Cash" | "Online";
     readonly roundsMinor: string;
     readonly tipMinor: string;
     readonly roundingMinor: string;
@@ -124,6 +126,16 @@ export interface DiningTableBill {
   readonly writeOff: null | {
     readonly amountMinor: string;
     readonly decidedAt: string;
+  };
+  /**
+   * S4: the guests' latest attempt to pay the whole table on their phone. "InProgress" (no
+   * Provider outcome yet) holds the table: staff can't take another payment until it ends.
+   */
+  readonly onlinePayment: null | {
+    readonly status: "InProgress" | "Captured" | "Failed" | "Cancelled";
+    readonly totalMinor: string;
+    readonly tipMinor: string;
+    readonly startedAt: string;
   };
 }
 
@@ -179,6 +191,7 @@ export async function readDiningTableBill(
       consistent: true,
       settlement: null,
       writeOff: null,
+      onlinePayment: null,
       settlementRecord: null,
     });
   const allowed = async () => (await input.authorize()) === true;
@@ -209,6 +222,7 @@ export async function readDiningTableBill(
   });
   const settlements = await payments.listByOrders(tx, [orderReference]);
   const [writeOff] = await payments.listWriteOffsByOrders(tx, [orderReference]);
+  const onlinePayment = (await payments.listOnlinePaymentsByOrders(tx, [orderReference])).at(-1);
   const settlement = settlements[0] ?? null;
   const paidBatches = new Set(settlement?.lines.map((line) => line.orderBatchReference) ?? []);
   let owedSubtotal = 0n,
@@ -290,17 +304,28 @@ export async function readDiningTableBill(
             amountMinor: writeOff.writtenOffMinor.toString(),
             decidedAt: writeOff.decidedAt,
           }),
+    onlinePayment:
+      onlinePayment === undefined
+        ? null
+        : Object.freeze({
+            status: onlinePayment.outcome?.status ?? ("InProgress" as const),
+            totalMinor: onlinePayment.totalMinor.toString(),
+            tipMinor: onlinePayment.tipMinor.toString(),
+            startedAt: onlinePayment.createdAt,
+          }),
     settlementRecord: settlement,
   });
 }
 
-const publicBill = (bill: Awaited<ReturnType<typeof readDiningTableBill>>): DiningTableBill => {
+export const publicBill = (
+  bill: Awaited<ReturnType<typeof readDiningTableBill>>,
+): DiningTableBill => {
   const { settlementRecord, ...rest } = bill;
   void settlementRecord;
   return Object.freeze(rest);
 };
 
-const scopeOf = (current: {
+export const scopeOf = (current: {
   selected: { tenantReference: unknown };
   context: { brand: { brandReference: unknown } };
   store: { storeReference: unknown };
@@ -516,6 +541,9 @@ export function createMerchantDiningTableSettle(options: {
             // Paid, or written off when the guests left: never a (second) payment.
             if (bill.settlement !== null || bill.writeOff !== null)
               return fail("TABLE_CHECKOUT_ALREADY_PAID");
+            // S4: a guest is paying the whole table on their phone right now.
+            if (bill.onlinePayment?.status === "InProgress")
+              return fail("TABLE_CHECKOUT_GUEST_PAYING");
             if (!bill.consistent || bill.orderReference === null)
               return fail(
                 bill.orderReference === null

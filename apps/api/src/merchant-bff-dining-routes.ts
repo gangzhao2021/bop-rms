@@ -449,6 +449,33 @@ export function installMerchantDiningRoutes(
       .catch((error: unknown) => checkoutFailure(response, error));
   });
 
+  // S4: stop a phone payment a guest gave up on, so the table can be paid another way.
+  router.post(
+    "/dining/table-online-payment/stop",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant"),
+        csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.diningTableOnlinePaymentStop) {
+        response.status(503).json({ error: "dining_table_online_payment_unavailable" });
+        return;
+      }
+      void options
+        .diningTableOnlinePaymentStop({ sessionCookie, csrf, command: request.body })
+        .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+        .catch((error: unknown) => checkoutFailure(response, error));
+    },
+  );
+
   router.post("/dining/tables/availability", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
       csrf = exactHeader(request, "x-bop-csrf");
@@ -793,16 +820,18 @@ export function installMerchantDiningRoutes(
         const [status, body] =
           code === "DINING_CHECKOUT_ALREADY_PAID"
             ? ([409, "table_already_paid"] as const)
-            : code === "DINING_CLOSING_PERMISSION_DENIED"
-              ? ([403, "dining_closing_permission_denied"] as const)
-              : code === "DINING_CLOSING_VERSION_CONFLICT" ||
-                  code === "DINING_CLOSING_PHASE_CONFLICT" ||
-                  code === "DINING_CLOSING_IDEMPOTENCY_CONFLICT"
-                ? ([409, "dining_session_changed"] as const)
-                : code === "DINING_CLOSING_TASK_REQUIRED" ||
-                    code === "DINING_CLOSING_BATCH_NOT_TERMINAL"
-                  ? ([409, "dining_session_not_ready"] as const)
-                  : ([503, "dining_closing_unavailable"] as const);
+            : code === "DINING_CHECKOUT_GUEST_PAYING"
+              ? ([409, "table_guest_paying"] as const)
+              : code === "DINING_CLOSING_PERMISSION_DENIED"
+                ? ([403, "dining_closing_permission_denied"] as const)
+                : code === "DINING_CLOSING_VERSION_CONFLICT" ||
+                    code === "DINING_CLOSING_PHASE_CONFLICT" ||
+                    code === "DINING_CLOSING_IDEMPOTENCY_CONFLICT"
+                  ? ([409, "dining_session_changed"] as const)
+                  : code === "DINING_CLOSING_TASK_REQUIRED" ||
+                      code === "DINING_CLOSING_BATCH_NOT_TERMINAL"
+                    ? ([409, "dining_session_not_ready"] as const)
+                    : ([503, "dining_closing_unavailable"] as const);
         response.status(status).set("Cache-Control", NO_STORE).json({ error: body });
       });
   });
