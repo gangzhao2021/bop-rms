@@ -239,6 +239,8 @@ const dineIn = {
   canRecordCardMachinePayment: true,
   canViewPayments: true,
   counter: null,
+  // DEC-DINE-IN-PAY-LATER: the table's bill on the Orders row (v15 2026-10-27: it was dropped).
+  tableBill: { totalMinor: "8000", paid: { amountMinor: "9200", method: "Cash" } },
   paidOnline: { amountMinor: "8000", currencyCode: "CAD" },
   paymentPosition: { refundedMinor: "500", refundPendingMinor: "0" },
   heldStock: null,
@@ -266,6 +268,9 @@ const dineIn = {
       paymentDue: null,
       staffCancellation: null,
       staffRound: null,
+      // DEC-DINE-IN-PAY-LATER (rule 19): dishes that can come off / came off the unpaid bill.
+      unpaidRemovableItems: [id(0x9037)],
+      unpaidRemovedItems: [id(0x9038)],
     },
     {
       orderBatchReference: id(0x9032),
@@ -280,6 +285,8 @@ const dineIn = {
       paymentDue: null,
       staffCancellation: null,
       staffRound: null,
+      unpaidRemovableItems: [],
+      unpaidRemovedItems: [],
     },
     {
       orderBatchReference: id(0x9033),
@@ -293,6 +300,8 @@ const dineIn = {
       paymentDue: { status: "Failed", cancelsAt: at(40) },
       staffCancellation: null,
       staffRound: { recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: "1200" },
+      unpaidRemovableItems: [],
+      unpaidRemovedItems: [],
     },
     {
       orderBatchReference: id(0x9034),
@@ -316,6 +325,8 @@ const dineIn = {
         paidOnCardMachine: { amountMinor: "900", takenAt: at(10), refundedMinor: "0" },
         amountDueMinor: null,
       },
+      unpaidRemovableItems: [],
+      unpaidRemovedItems: [],
     },
   ],
 } satisfies QueueItem;
@@ -348,6 +359,7 @@ const heldPickup = {
   awaitingPayment: false,
   canRecordCardMachinePayment: true,
   canViewPayments: true,
+  tableBill: null,
   counter: null,
   paidOnline: { amountMinor: "2400", currencyCode: "CAD" },
   paymentPosition: null,
@@ -376,6 +388,8 @@ const heldPickup = {
       paymentDue: null,
       staffCancellation: null,
       staffRound: null,
+      unpaidRemovableItems: [],
+      unpaidRemovedItems: [],
     },
   ],
 } satisfies QueueItem;
@@ -399,6 +413,7 @@ const earlierCounterPickup = {
   awaitingPayment: false,
   canRecordCardMachinePayment: true,
   canViewPayments: false,
+  tableBill: null,
   counter: {
     recordedAfterOutage: false,
     paidOnCardMachine: {
@@ -442,6 +457,8 @@ const earlierCounterPickup = {
       paymentDue: null,
       staffCancellation: null,
       staffRound: null,
+      unpaidRemovableItems: [],
+      unpaidRemovedItems: [],
     },
   ],
 } satisfies QueueItem;
@@ -692,6 +709,16 @@ const settlementView = {
     recordedAfterOutageCount: 1,
     refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" },
   },
+  // DEC-DINE-IN-PAY-LATER: tables paid in cash, and bills written off when guests left unpaid.
+  cash: {
+    received: { count: 1, amountMinor: "1045", currencyCode: "CAD" },
+    tipMinor: "0",
+    roundingMinor: "-1",
+    refunded: { count: 1, amountMinor: "200", currencyCode: "CAD" },
+    netMinor: "845",
+    recordedAfterOutageCount: 0,
+  },
+  unpaidWriteOffs: { count: 1, amountMinor: "537", currencyCode: "CAD" },
   unmatchedProviderCharges: {
     captured: { count: 0, amountMinor: "0", currencyCode: "CAD" },
     refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" },

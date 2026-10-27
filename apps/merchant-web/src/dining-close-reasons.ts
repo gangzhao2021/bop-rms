@@ -52,7 +52,26 @@ const fallback = t(
   "Something on this order still needs attention. Check the order on the Orders page.",
 );
 
+/** DEC-DINE-IN-PAY-LATER: a table that pays once at the end pays here, with staff. */
+const payLaterTexts: Readonly<Record<string, string>> = {
+  ORDER_BALANCE_UNPAID: t(
+    "The table hasn't paid yet. Take the payment in Checkout above, or, if the guests left without paying, ask a manager to record it there.",
+  ),
+};
+
 /** One line per distinct thing to do, in the order the server listed the reasons. */
-export function closeReasonTexts(codes: readonly string[]): readonly string[] {
-  return [...new Set(codes.map((code) => texts[code] ?? fallback))];
+export function closeReasonTexts(
+  codes: readonly string[],
+  paymentTiming: "PayFirst" | "PayLater" = "PayFirst",
+): readonly string[] {
+  return [
+    ...new Set(
+      codes.map(
+        (code) =>
+          (paymentTiming === "PayLater" ? payLaterTexts[code] : undefined) ??
+          texts[code] ??
+          fallback,
+      ),
+    ),
+  ];
 }

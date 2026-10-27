@@ -104,6 +104,14 @@ function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
   if (summary.unmatchedMinor !== "0")
     lines.push([t("Paid but not matched to items"), money(summary.unmatchedMinor)]);
   lines.push([t("Total collected"), money(summary.collectedMinor), true]);
+  // DEC-DINE-IN-PAY-LATER (decision 4): never collected, kept on its own line.
+  if (summary.unpaidWriteOffCount > 0)
+    lines.push([
+      t("Guests left without paying (written off) · {tables}", {
+        tables: countOf(summary.unpaidWriteOffCount, "table"),
+      }),
+      money(summary.unpaidWriteOffMinor),
+    ]);
   lines.push([
     t("Refunds ({refundCount})", { refundCount: countOf(summary.refundCount, "refund") }),
     "−" + money(summary.refundsMinor),

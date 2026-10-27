@@ -4,7 +4,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { OrderStatusProjectionError } from "@rms/ordering";
 import { createApp } from "./app.js";
 import { CustomerDiningSessionHandler } from "./customer-dining-session.js";
-import type { CustomerDiningSessionView } from "./customer-dining-session-read.js";
+import {
+  DiningOrderStillProcessingError,
+  type CustomerDiningSessionView,
+} from "./customer-dining-session-read.js";
 
 const servers: Server[] = [];
 afterEach(async () => {
@@ -226,4 +229,37 @@ it("Owner 2026-10-23: asks item names in the guest's chosen language and refuses
   for (const query of ["?locale=zh_CN", "?locale=zh-Hans-CA&table=7"])
     expect((await f.send({}, query)).status).toBe(400);
   expect(f.read).not.toHaveBeenCalled();
+});
+
+it("v15 2026-10-27: a table whose first round's order is still being prepared waits, never 'not joined'", async () => {
+  const f = await setup();
+  f.read.mockRejectedValue(new DiningOrderStillProcessingError());
+  const response = await f.send();
+  expect(response.status).toBe(503);
+  expect(response.headers.get("retry-after")).toBe("2");
+  expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+    "dining_session_order_processing",
+  );
+});
+
+it("DEC-DINE-IN-PAY-LATER: a paid table's summary carries its tip and cash rounding", async () => {
+  const f = await setup();
+  const paid = view();
+  f.read.mockResolvedValue({
+    ...paid,
+    paymentTiming: "PayLater",
+    summary: {
+      paid: cad(544n),
+      refunded: cad(0n),
+      refundPending: cad(0n),
+      due: cad(0n),
+      tableTip: cad(64n),
+      cashRounding: cad(-1n),
+    },
+  });
+  const body = (await (await f.send()).json()) as {
+    session: { summary: { tableTip: unknown; cashRounding: unknown } };
+  };
+  expect(body.session.summary.tableTip).toEqual({ amountMinor: "64", currencyCode: "CAD" });
+  expect(body.session.summary.cashRounding).toEqual({ amountMinor: "-1", currencyCode: "CAD" });
 });

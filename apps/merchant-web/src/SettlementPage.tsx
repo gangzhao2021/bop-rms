@@ -369,6 +369,35 @@ export function SettlementReport({
           </p>
         </section>
       )}
+      {/* DEC-DINE-IN-PAY-LATER (decision 4): never collected, kept in the day's summary. */}
+      {view.unpaidWriteOffs === undefined ? null : view.unpaidWriteOffs === null ? (
+        <p className="bop-muted" role="status">
+          {t("Tables written off could not be read.")}
+        </p>
+      ) : view.unpaidWriteOffs.count === 0 ? null : (
+        <section
+          className="store-card settlement__write-offs"
+          aria-labelledby="settlement-write-offs"
+        >
+          <header>
+            <h3 id="settlement-write-offs">{t("Guests left without paying (written off)")}</h3>
+          </header>
+          <ul className="overview-counts settlement__totals" aria-label={t("Written off")}>
+            <li>
+              <span className="overview-count__label">{t("Written off")}</span>
+              <strong className="overview-count__value">{money(view.unpaidWriteOffs)}</strong>
+              <span className="overview-count__detail">
+                {countOf(view.unpaidWriteOffs.count, "table")}
+              </span>
+            </li>
+          </ul>
+          <p className="bop-muted">
+            {t(
+              "A manager recorded that these guests left without paying. Not collected, so not in the takings above.",
+            )}
+          </p>
+        </section>
+      )}
       {view.currentDaySelfApprovedRefunds !== null &&
       view.currentDaySelfApprovedRefunds.count > 0 ? (
         <p role="status" className="settlement__self-approved-today">

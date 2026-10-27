@@ -86,7 +86,8 @@ export interface DiningSessionView {
   };
 }
 
-export type DiningSessionClientErrorCode = "not-joined" | "unavailable";
+/** "processing": the table's first round was just sent and its order is still being prepared. */
+export type DiningSessionClientErrorCode = "not-joined" | "processing" | "unavailable";
 export class DiningSessionClientError extends Error {
   constructor(readonly code: DiningSessionClientErrorCode) {
     super("dining session is " + code);
@@ -365,6 +366,13 @@ export function createHttpDiningSessionClient(
     if (!current()) throw new DiningSessionClientError("not-joined");
     if (response.status === 404 || response.status === 403 || response.status === 401)
       throw new DiningSessionClientError("not-joined");
+    if (response.status === 503) {
+      const body = (await response.json().catch(() => null)) as {
+        error?: { code?: unknown };
+      } | null;
+      if (body?.error?.code === "dining_session_order_processing")
+        throw new DiningSessionClientError("processing");
+    }
     if (response.status !== 200) throw new DiningSessionClientError("unavailable");
     let payload: unknown;
     try {

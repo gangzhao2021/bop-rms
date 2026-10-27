@@ -281,3 +281,46 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
       .map((v) => v.id),
   ).toEqual([]);
 });
+
+test("@production DEC-DINE-IN-PAY-LATER: a table the guests left without paying shows it was written off and offers no payment", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state);
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: [],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        ...unpaidBill("Closing", 7),
+        writeOff: { amountMinor: "3393", decidedAt: "2026-10-15T19:05:00.000Z" },
+      },
+    }),
+  );
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await expect(checkout.getByRole("heading", { name: "Written off" })).toBeVisible();
+  await expect(checkout).toContainText("A manager wrote off $33.93");
+  // Nothing to take, no second decision and no way back to ordering.
+  await expect(checkout.getByRole("radio", { name: "Cash" })).toHaveCount(0);
+  await expect(checkout.getByRole("button", { name: "Guests left without paying" })).toHaveCount(0);
+  await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});

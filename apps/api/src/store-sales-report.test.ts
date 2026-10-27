@@ -376,10 +376,10 @@ describe("store sales report (WP-2423 Q14)", () => {
     expect(summary.startsWith("﻿")).toBe(true);
     const lines = summary.slice(1).trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "business_date,day_status,payments,orders,gross_sales,discounts,net_sales,service_charges,tax_synthetic_tax,tax_total,tips,total_collected,refunds,net_collected,online_collected,card_machine_collected,cash_collected,online_refunds,card_machine_refunds,cash_refunds,cash_rounding,currency",
+      "business_date,day_status,payments,orders,gross_sales,discounts,net_sales,service_charges,tax_synthetic_tax,tax_total,tips,total_collected,refunds,net_collected,online_collected,card_machine_collected,cash_collected,online_refunds,card_machine_refunds,cash_refunds,cash_rounding,unpaid_write_offs,unpaid_write_off_amount,currency",
     );
     expect(lines[1]).toBe(
-      "2026-10-14,open (so far),5,4,33.00,1.00,32.00,0.00,4.17,4.17,3.50,39.67,19.22,20.45,30.69,8.98,0.00,15.26,3.96,0.00,0.00,CAD",
+      "2026-10-14,open (so far),5,4,33.00,1.00,32.00,0.00,4.17,4.17,3.50,39.67,19.22,20.45,30.69,8.98,0.00,15.26,3.96,0.00,0.00,0,0.00,CAD",
     );
     const items = storeSalesReportCsv(view, "items").slice(1).trimEnd().split("\r\n");
     expect(items[0]).toBe(
@@ -435,6 +435,31 @@ describe("store sales report (WP-2423 Q14)", () => {
     expect(() => businessDatesBetween("2026-09-01", "2026-10-14", 31)).toThrow();
   });
 
+  it("DEC-DINE-IN-PAY-LATER (decision 4): a table written off unpaid stays on its own line, never collected", () => {
+    const view = computeStoreSalesReport({
+      ...today,
+      unpaidWriteOffs: [{ amountMinor: 537n, decidedAt: "2026-10-14T21:00:00.000Z" }],
+    });
+    const plain = computeStoreSalesReport(today);
+    expect(view.summary.unpaidWriteOffCount).toBe(1);
+    expect(view.summary.unpaidWriteOffMinor).toBe("537");
+    expect(view.days[0]?.summary.unpaidWriteOffMinor).toBe("537");
+    expect(
+      view.byOrderType.find((entry) => entry.orderType === "DineIn")?.unpaidWriteOffMinor,
+    ).toBe("537");
+    // Not collected: takings, sales and the settlement match are unchanged.
+    expect(view.summary.collectedMinor).toBe(plain.summary.collectedMinor);
+    expect(view.summary.grossSalesMinor).toBe(plain.summary.grossSalesMinor);
+    const csv = storeSalesReportCsv(view, "summary").slice(1).trimEnd().split("\r\n");
+    expect(csv[1]?.endsWith(",1,5.37,CAD")).toBe(true);
+    // A write-off outside the period's days is refused (never silently dropped).
+    expect(() =>
+      computeStoreSalesReport({
+        ...today,
+        unpaidWriteOffs: [{ amountMinor: 1n, decidedAt: "2020-01-01T00:00:00.000Z" }],
+      }),
+    ).toThrow();
+  });
   it("DEC-DINE-IN-PAY-LATER: a table paid in cash is one payment over its rounds, rounding apart", () => {
     const tableOrder = order(900, "DineIn", "Qr", [p0Items, c1Items]);
     const key = (line: number) => ref(950) + ":" + String(line);

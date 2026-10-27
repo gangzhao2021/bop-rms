@@ -39,6 +39,9 @@ export interface StoreReportSummary {
   readonly tipsMinor: string;
   /** DEC-DINE-IN-PAY-LATER: cash rounding to 5 cents collected (may be negative). */
   readonly cashRoundingMinor: string;
+  /** DEC-DINE-IN-PAY-LATER: tables written off when the guests left without paying. */
+  readonly unpaidWriteOffCount: number;
+  readonly unpaidWriteOffMinor: string;
   readonly unmatchedMinor: string;
   readonly unmatchedPaymentCount: number;
   readonly collectedMinor: string;
@@ -127,6 +130,8 @@ const summaryKeys = [
   "cashRoundingMinor",
   "unmatchedMinor",
   "unmatchedPaymentCount",
+  "unpaidWriteOffCount",
+  "unpaidWriteOffMinor",
   "collectedMinor",
   "refundCount",
   "refundsMinor",
@@ -158,6 +163,8 @@ function summary(value: Record<string, unknown>): StoreReportSummary {
     cashRoundingMinor: signed(value.cashRoundingMinor),
     unmatchedMinor: minor(value.unmatchedMinor),
     unmatchedPaymentCount: count(value.unmatchedPaymentCount),
+    unpaidWriteOffCount: count(value.unpaidWriteOffCount),
+    unpaidWriteOffMinor: minor(value.unpaidWriteOffMinor),
     collectedMinor: minor(value.collectedMinor),
     refundCount: count(value.refundCount),
     refundsMinor: minor(value.refundsMinor),

@@ -475,6 +475,16 @@ export function createPostgresStoreSalesPaymentLedger(options: {
       endsAt,
       observedAt,
       currencyCode: "CAD" as const,
+      /** DEC-DINE-IN-PAY-LATER: tables written off when the guests left without paying. */
+      unpaidWriteOffs: Object.freeze(
+        table.writeOffs.map((writeOff) =>
+          Object.freeze({
+            orderReference: writeOff.orderReference,
+            amountMinor: writeOff.writtenOffMinor,
+            decidedAt: writeOff.decidedAt,
+          }),
+        ),
+      ),
       payments: Object.freeze(payments),
       refundedPayments: Object.freeze(refundedPayments),
       refunds: Object.freeze(refunds.sort((a, b) => a.refundedAt.localeCompare(b.refundedAt))),

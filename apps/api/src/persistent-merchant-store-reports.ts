@@ -166,6 +166,7 @@ export function createPersistentMerchantStoreReports(options: {
             refunds: ledger.refunds,
             settlement: ledger.settlement,
             unresolvedOnlineRefundCount: ledger.unresolvedOnlineRefundCount,
+            unpaidWriteOffs: ledger.unpaidWriteOffs,
             orders,
             mayExport,
             generatedAt: persistence.now(),

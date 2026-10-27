@@ -117,6 +117,14 @@ export interface DiningTableBill {
     readonly recordedAt: string;
     readonly recordedAfterOutage: boolean;
   };
+  /**
+   * DEC-DINE-IN-PAY-LATER (rule 14): the guests left without paying and a manager wrote the
+   * table's bill off (the Order is closed on it). Never paid as well (one or the other).
+   */
+  readonly writeOff: null | {
+    readonly amountMinor: string;
+    readonly decidedAt: string;
+  };
 }
 
 interface Scope {
@@ -170,6 +178,7 @@ export async function readDiningTableBill(
       owed: zero,
       consistent: true,
       settlement: null,
+      writeOff: null,
       settlementRecord: null,
     });
   const allowed = async () => (await input.authorize()) === true;
@@ -194,10 +203,12 @@ export async function readDiningTableBill(
   const prices = (await listOrderItemPrices(tx, owner, orderReference)).filter(
     (item) => !removed.has(String(item.orderItemReference)),
   );
-  const settlements = await createPostgresDiningTableSettlementStore({
+  const payments = createPostgresDiningTableSettlementStore({
     scope,
     authorize: async (_tx, value) => value.orderReference === orderReference && (await allowed()),
-  }).listByOrders(tx, [orderReference]);
+  });
+  const settlements = await payments.listByOrders(tx, [orderReference]);
+  const [writeOff] = await payments.listWriteOffsByOrders(tx, [orderReference]);
   const settlement = settlements[0] ?? null;
   const paidBatches = new Set(settlement?.lines.map((line) => line.orderBatchReference) ?? []);
   let owedSubtotal = 0n,
@@ -271,6 +282,13 @@ export async function readDiningTableBill(
             changeMinor: settlement.changeMinor?.toString() ?? null,
             recordedAt: settlement.recordedAt,
             recordedAfterOutage: settlement.recordingReason === "RecordedAfterOutage",
+          }),
+    writeOff:
+      writeOff === undefined
+        ? null
+        : Object.freeze({
+            amountMinor: writeOff.writtenOffMinor.toString(),
+            decidedAt: writeOff.decidedAt,
           }),
     settlementRecord: settlement,
   });
@@ -495,7 +513,9 @@ export function createMerchantDiningTableSettle(options: {
             });
             if (bill.paymentTiming !== "PayLater") return fail("TABLE_CHECKOUT_NOT_PAY_LATER");
             if (bill.sessionPhase !== "Closing") return fail("TABLE_CHECKOUT_NOT_STARTED");
-            if (bill.settlement !== null) return fail("TABLE_CHECKOUT_ALREADY_PAID");
+            // Paid, or written off when the guests left: never a (second) payment.
+            if (bill.settlement !== null || bill.writeOff !== null)
+              return fail("TABLE_CHECKOUT_ALREADY_PAID");
             if (!bill.consistent || bill.orderReference === null)
               return fail(
                 bill.orderReference === null

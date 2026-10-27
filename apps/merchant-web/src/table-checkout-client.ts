@@ -60,6 +60,8 @@ export interface TableBill {
     readonly recordedAt: string;
     readonly recordedAfterOutage: boolean;
   };
+  /** DEC-DINE-IN-PAY-LATER: written off by a manager when the guests left (null from older). */
+  readonly writeOff: null | { readonly amountMinor: string; readonly decidedAt: string };
 }
 
 const minor = /^-?(?:0|[1-9][0-9]{0,18})$/u;
@@ -151,7 +153,17 @@ export function parseTableBill(value: unknown): TableBill {
             recordedAt: text(settlement.recordedAt),
             recordedAfterOutage: settlement.recordedAfterOutage === true,
           }),
+    writeOff: writeOffOf(raw.writeOff),
   });
+}
+
+function writeOffOf(value: unknown): TableBill["writeOff"] {
+  if (value === undefined || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.amountMinor !== "string" || !minor.test(raw.amountMinor))
+    throw new TableCheckoutError("OutcomeUnknown");
+  if (typeof raw.decidedAt !== "string") throw new TableCheckoutError("OutcomeUnknown");
+  return Object.freeze({ amountMinor: raw.amountMinor, decidedAt: raw.decidedAt });
 }
 
 /** Canada's cash rounding (as the server applies it): to the nearest 5 cents by the last digit. */

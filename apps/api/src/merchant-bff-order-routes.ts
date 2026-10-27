@@ -64,6 +64,8 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
     // WP-2423 (v15 751dd768): what this person may do with the order's payment.
     canRecordCardMachinePayment: item.canRecordCardMachinePayment,
     canViewPayments: item.canViewPayments,
+    // DEC-DINE-IN-PAY-LATER: a pay-later table's bill (owed, or what it paid).
+    tableBill: item.tableBill,
     // WP-2423: what the Order was paid online (null for counter or unpaid orders).
     paidOnline: item.paidOnline,
     // WP-2423: refunds of that online payment (the detail's position) when it has any.
@@ -98,6 +100,10 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
       awaitingAcceptanceSince: batch.awaitingAcceptanceSince,
       // Orders v3 (Owner 2026-10-26): when the round was sent, shown with its items.
       submittedAt: batch.submittedAt,
+      // DEC-DINE-IN-PAY-LATER (rule 19): dishes that can come off this unpaid round's bill,
+      // and those taken off it.
+      unpaidRemovableItems: batch.unpaidRemovableItems,
+      unpaidRemovedItems: batch.unpaidRemovedItems,
     })),
     currentPhase: item.currentPhase,
     currentVersion: item.currentVersion,

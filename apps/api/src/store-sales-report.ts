@@ -28,6 +28,14 @@ export interface StoreSalesReportInput {
   readonly refunds: readonly StoreSalesRefund[];
   readonly settlement: StoreSalesSettlementTotals;
   readonly unresolvedOnlineRefundCount: number;
+  /**
+   * DEC-DINE-IN-PAY-LATER (decision 4): tables written off when the guests left without paying,
+   * by when the manager decided. Never collected; listed on their own line (absent: none).
+   */
+  readonly unpaidWriteOffs?: readonly {
+    readonly amountMinor: bigint;
+    readonly decidedAt: string;
+  }[];
   readonly orders: readonly StoreSalesOrder[];
   readonly mayExport: boolean;
   readonly generatedAt: string;
@@ -56,6 +64,9 @@ interface Totals {
   refundedServiceChargeMinor: bigint;
   /** Whole-payment refunds that could not be split by item (should be none). */
   refundedUnallocatedMinor: bigint;
+  /** DEC-DINE-IN-PAY-LATER: tables written off unpaid (not collected, not in the sums above). */
+  writeOffCount: number;
+  writeOffMinor: bigint;
 }
 const totals = (): Totals => ({
   paymentCount: 0,
@@ -68,6 +79,8 @@ const totals = (): Totals => ({
   tipMinor: 0n,
   collectedMinor: 0n,
   roundingMinor: 0n,
+  writeOffCount: 0,
+  writeOffMinor: 0n,
   unmatchedMinor: 0n,
   unmatchedCount: 0,
   refundCount: 0,
@@ -161,6 +174,17 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
       ?.items ?? null;
   const itemKey = (item: { skuReference: string; name: string }) =>
     item.skuReference + "\u0000" + item.name;
+
+  // DEC-DINE-IN-PAY-LATER: a table written off when the guests left (dine-in, no channel).
+  for (const writeOff of input.unpaidWriteOffs ?? []) {
+    const day = dayOf(writeOff.decidedAt);
+    if (day === null) return fail();
+    const f = facts.get(day.businessDate) ?? fail();
+    for (const t of [f.all, f.kinds.get("DineIn") ?? fail()]) {
+      t.writeOffCount++;
+      t.writeOffMinor += writeOff.amountMinor;
+    }
+  }
 
   // Sales: each payment taken in the range, with the priced items of the Batch it paid for.
   const matchedIntents = new Set<string>();
@@ -345,6 +369,7 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
   // Range totals.
   const merge = (target: Totals, source: Totals) => {
     target.paymentCount += source.paymentCount;
+    target.writeOffCount += source.writeOffCount;
     for (const order of source.orders) target.orders.add(order);
     for (const key of [
       "grossMinor",
@@ -354,6 +379,7 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
       "tipMinor",
       "collectedMinor",
       "roundingMinor",
+      "writeOffMinor",
       "unmatchedMinor",
       "refundedMinor",
       "refundedNetMinor",
@@ -465,6 +491,8 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
       cashRoundingMinor: s(t.roundingMinor),
       unmatchedMinor: s(t.unmatchedMinor),
       unmatchedPaymentCount: t.unmatchedCount,
+      unpaidWriteOffCount: t.writeOffCount,
+      unpaidWriteOffMinor: s(t.writeOffMinor),
       collectedMinor: s(t.collectedMinor),
       refundCount: t.refundCount,
       refundsMinor: s(t.refundedMinor),
@@ -662,6 +690,8 @@ export function storeSalesReportCsv(
       "card_machine_refunds",
       "cash_refunds",
       "cash_rounding",
+      "unpaid_write_offs",
+      "unpaid_write_off_amount",
       "currency",
     ];
     return csv([
@@ -694,6 +724,8 @@ export function storeSalesReportCsv(
           money(byChannel("CardMachine").refundsMinor),
           money(byChannel("Cash").refundsMinor),
           money(sum.cashRoundingMinor),
+          sum.unpaidWriteOffCount,
+          money(sum.unpaidWriteOffMinor),
           view.currencyCode,
         ];
       }),
