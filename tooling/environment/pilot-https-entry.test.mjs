@@ -142,6 +142,7 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "refundUnmatchedCapture",
       // WP-2423 Q5: TEST-ONLY authenticator step-up verifier over the private runtime directory.
       "staffTotpVerifier",
+      "tableOnlinePaymentProvider",
       // WP-2423 Q11: table QR codes signed with the TEST-ONLY local QR key.
       "createInternalTableQr",
       // WP-2423 Q18 option A: TEST-ONLY derived staff PIN pepper and shared-tablet key.

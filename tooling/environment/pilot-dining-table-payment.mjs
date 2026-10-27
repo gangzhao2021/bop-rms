@@ -1,11 +1,10 @@
 // WP-2423 DEC-DINE-IN-PAY-LATER S4: the guest pays the whole table on their phone, through this
 // installation's Provider (Stripe test mode, or the TEST-ONLY simulator in InternalTest, whose
-// confirm/decline buttons stand in for the card form).
-import express from "express";
+// confirm/decline buttons stand in for the card form). The routes come from the API package
+// (its handlers own the HTTP parsing), never from a package imported here.
 import {
   CustomerDiningTablePaymentHandler,
   createCustomerDiningTablePayment,
-  customerTablePaymentBody,
 } from "../../apps/api/dist/customer-dining-table-payment.js";
 import { createDiningTableOnlinePayments } from "../../apps/api/dist/dining-table-online-payment.js";
 import { createRetrieveIntentRequest } from "../../packages/rms/payment/src/index.ts";
@@ -51,39 +50,30 @@ export function registerInternalDiningTablePayment(
   app.post(ROUTE, ...handler.handler());
   if (isStripeProvider(simulator)) app.post(ROUTE + "/handoff", ...handler.handoffHandler());
   // TEST-ONLY simulator: finish the guest's own open payment, approved or declined.
-  for (const [path, confirmation] of simulator.simulation === true
-    ? [
-        ["simulation-confirm", "SIMULATE_CAPTURE"],
-        ["simulation-fail", "SIMULATE_FAILURE"],
-      ]
-    : [])
-    app.post(ROUTE + "/" + path, express.json({ limit: "1kb", strict: true }), async (req, res) => {
-      res.setHeader("Cache-Control", "no-store");
-      const credentials = handler.credentials(req);
-      if (credentials === null || req.headers["x-bop-simulation-confirmation"] !== confirmation)
-        return res.status(400).json({ code: "SIMULATION_CONFIRMATION_REQUIRED" });
-      try {
-        const attempt = await port.ownAttempt(credentials);
-        if (attempt === null) return res.status(409).json({ code: "SIMULATION_NOTHING_OPEN" });
-        const request = createRetrieveIntentRequest({
-          operation: "RetrieveIntent",
-          purpose: "RetrievePaymentIntent",
-          context: {
-            provider: "Stripe",
-            environment: pilotProviderEnvironment(),
-            brandReference: resources.scope.brandReference,
-            storeReference: resources.scope.storeReference,
-            paymentAttemptReference: attempt.onlinePaymentReference,
-            operationReference: attempt.operationReference,
-          },
-          providerIntentReference: attempt.providerIntentReference,
-        });
-        if (confirmation === "SIMULATE_CAPTURE")
-          await simulator.simulateCapture(request, confirmation);
-        else await simulator.simulateFailure(request, confirmation);
-        res.status(200).json(customerTablePaymentBody(await port.read(credentials)));
-      } catch (error) {
-        handler.failure(res, error);
-      }
-    });
+  if (simulator.simulation === true)
+    for (const [path, confirmation] of [
+      ["simulation-confirm", "SIMULATE_CAPTURE"],
+      ["simulation-fail", "SIMULATE_FAILURE"],
+    ])
+      app.post(
+        ROUTE + "/" + path,
+        ...handler.simulationHandler(confirmation, async (attempt) => {
+          const request = createRetrieveIntentRequest({
+            operation: "RetrieveIntent",
+            purpose: "RetrievePaymentIntent",
+            context: {
+              provider: "Stripe",
+              environment: pilotProviderEnvironment(),
+              brandReference: resources.scope.brandReference,
+              storeReference: resources.scope.storeReference,
+              paymentAttemptReference: attempt.onlinePaymentReference,
+              operationReference: attempt.operationReference,
+            },
+            providerIntentReference: attempt.providerIntentReference,
+          });
+          if (confirmation === "SIMULATE_CAPTURE")
+            await simulator.simulateCapture(request, confirmation);
+          else await simulator.simulateFailure(request, confirmation);
+        }),
+      );
 }

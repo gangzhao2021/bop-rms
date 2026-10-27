@@ -303,6 +303,42 @@ export class CustomerDiningTablePaymentHandler {
       },
     ];
   }
+  /**
+   * TEST-ONLY simulator (InternalTest): finish this guest's own open payment, approved or
+   * declined. The caller supplies the simulator's action; the request must carry the explicit
+   * simulation confirmation header.
+   */
+  simulationHandler(
+    confirmation: "SIMULATE_CAPTURE" | "SIMULATE_FAILURE",
+    simulate: (attempt: {
+      onlinePaymentReference: string;
+      operationReference: string;
+      providerIntentReference: string;
+    }) => Promise<void>,
+  ): RequestHandler[] {
+    return [
+      express.json({ limit: "1kb", strict: true }),
+      async (request, response) => {
+        protect(response);
+        const credentials = this.credentials(request);
+        if (credentials === null || request.get("x-bop-simulation-confirmation") !== confirmation) {
+          response.status(400).json({ code: "SIMULATION_CONFIRMATION_REQUIRED" });
+          return;
+        }
+        try {
+          const attempt = await this.#port.ownAttempt(credentials);
+          if (attempt === null) {
+            response.status(409).json({ code: "SIMULATION_NOTHING_OPEN" });
+            return;
+          }
+          await simulate(attempt);
+          response.status(200).json(customerTablePaymentBody(await this.#port.read(credentials)));
+        } catch (error) {
+          this.failure(response, error);
+        }
+      },
+    ];
+  }
   handoffHandler(): RequestHandler[] {
     return [
       express.json({ limit: "1kb", strict: true }),

@@ -46,6 +46,7 @@ it("passes all existing customer routes and configured resources to the API runt
             "paymentChannel",
             // DEC-PILOT-MAINTENANCE-PAGE: hosting.json customerOrigin (default the local entry).
             "publicOrigin",
+            "registerInternalDiningTablePayment",
           ].sort(),
         );
         expect(deps.publicOrigin).toBe("https://127.0.0.1:4443");
