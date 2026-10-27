@@ -1017,7 +1017,12 @@ export function DiningSessionWorkspace({
                   timeZone={timeZone}
                   refreshKey={String(loadedAt.current)}
                   locked={locked || paused}
-                  onChanged={() => void loadRef.current(false, true)}
+                  onChanged={() => {
+                    // A dish served (or cancelled) here changes what still stops the table
+                    // from closing: the close check reads again.
+                    setCheckoutRevision((value) => value + 1);
+                    void loadRef.current(false, true);
+                  }}
                 />
               ) : null}
               {selected.currentDiningSessionReference !== null &&

@@ -260,6 +260,8 @@ export function TableCheckout({
       });
       operation.current = null;
       setLeaving(false);
+      // The table's session is unchanged by a write-off: read the bill again here as well.
+      setReload((value) => value + 1);
       onChanged();
     } catch (error) {
       if (!(error instanceof TableCheckoutError) || error.code !== "OutcomeUnknown")
@@ -297,7 +299,9 @@ export function TableCheckout({
   if (session.phase !== "Closing") return null;
   return (
     <section aria-label={t("Checkout")} className="table-checkout">
-      <h3 id="table-checkout-title">{bill?.settlement ? t("Paid") : t("Checkout")}</h3>
+      <h3 id="table-checkout-title">
+        {bill?.writeOff ? t("Written off") : bill?.settlement ? t("Paid") : t("Checkout")}
+      </h3>
       {bill === null ? (
         problem ? null : (
           <p role="status">{t("Reading the bill…")}</p>
@@ -320,7 +324,18 @@ export function TableCheckout({
               </li>
             ))}
           </ol>
-          {bill.settlement === null ? (
+          {bill.writeOff !== null ? (
+            // DEC-DINE-IN-PAY-LATER (rule 14): the guests left without paying; nothing to take.
+            <div className="table-checkout__written-off" role="status">
+              <p>
+                {t(
+                  "The guests left without paying. A manager wrote off {amount}; it stays in the day's sales.",
+                  { amount: cad(bill.writeOff.amountMinor) },
+                )}
+              </p>
+              <p>{t("Close the table when it has been cleared.")}</p>
+            </div>
+          ) : bill.settlement === null ? (
             <>
               <dl className="table-checkout__totals">
                 <div>
@@ -523,7 +538,7 @@ export function TableCheckout({
           )}
         </>
       )}
-      {canStart && bill !== null && bill.settlement === null ? (
+      {canStart && bill !== null && bill.settlement === null && bill.writeOff === null ? (
         // DEC-DINE-IN-PAY-LATER (rule 3): the guests want to order more — back to ordering.
         <p className="table-checkout__cancel">
           <button type="button" disabled={busy || locked} onClick={() => void cancelCheckout()}>

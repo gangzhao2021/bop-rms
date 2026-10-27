@@ -5767,4 +5767,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "On the table's bill": "记入本桌账单",
   "Paid at the table · cash": "已在桌上付清 · 现金",
   "Paid at the table · card machine": "已在桌上付清 · 刷卡机",
+  "Written off": "已核销",
+  "The guests left without paying. A manager wrote off {amount}; it stays in the day's sales.":
+    "客人未付离开，经理已核销 {amount}，这笔仍计入当天销售。",
+  "Close the table when it has been cleared.": "收拾好以后关台。",
+  "The table hasn't paid yet. Take the payment in Checkout above, or, if the guests left without paying, ask a manager to record it there.":
+    "这桌还没付款。请在上方的结账里收款；如果客人未付离开，请经理在那里登记。",
+  "1 item is still being sent to the kitchen. Check again in a moment.":
+    "有 1 道菜还在送往后厨，请稍后再查看。",
+  "{count} items are still being sent to the kitchen. Check again in a moment.":
+    "有 {count} 道菜还在送往后厨，请稍后再查看。",
+  "Guests left without paying (written off) · {tables}": "客人未付离开（核销）· {tables}",
+  "Tables written off could not be read.": "无法读取核销的桌。",
+  "Guests left without paying (written off)": "客人未付离开（核销）",
+  "A manager recorded that these guests left without paying. Not collected, so not in the takings above.":
+    "经理登记了这些客人未付离开。这笔钱没有收到，所以不计入上面的收款。",
 });

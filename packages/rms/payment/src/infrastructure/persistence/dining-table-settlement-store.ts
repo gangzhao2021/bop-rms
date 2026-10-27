@@ -402,9 +402,13 @@ export function createPostgresDiningTableSettlementStore(options: {
         "((s.taken_at>=$3 AND s.taken_at<$4) OR s.settlement_id=ANY($5::uuid[])) ORDER BY s.taken_at,s.settlement_id LIMIT 100001",
         [from, to, [...new Set(refunds.map((refund) => refund.settlementReference))]],
       );
+      // DEC-DINE-IN-PAY-LATER (decision 4): bills written off when the guests left, by when the
+      // manager decided — never paid, but kept in the day's summary and reconciliation.
+      const writtenOff = await writeOffs(tx, "w.decided_at>=$3 AND w.decided_at<$4", [from, to]);
       return Object.freeze({
         settlements: Object.freeze(taken),
         cashRefunds: Object.freeze(refunds),
+        writeOffs: Object.freeze(writtenOff),
       });
     },
 

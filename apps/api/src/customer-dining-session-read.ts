@@ -209,6 +209,9 @@ export interface CustomerDiningSessionView {
     readonly refunded: CustomerMoney;
     readonly refundPending: CustomerMoney;
     readonly due: CustomerMoney;
+    /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment, once paid. */
+    readonly tableTip?: CustomerMoney;
+    readonly cashRounding?: CustomerMoney;
     /**
      * WP-2423 D5: what the table ordered (rounds never cancelled for non-payment): items before
      * tax, tax and the total including tax. Present when every item's price is known.
@@ -224,6 +227,17 @@ export interface CustomerDiningSessionView {
 const unavailable = (): never => {
   throw new OrderStatusProjectionError("ORDER_STATUS_DEPENDENCY_UNAVAILABLE");
 };
+/**
+ * v15 2026-10-27: a guest of the table whose first round was just sent — the Order exists but its
+ * status view is still being built (an event consumer does it, within seconds). Not "not joined":
+ * the page waits a moment and reads again.
+ */
+export class DiningOrderStillProcessingError extends Error {
+  constructor() {
+    super("the table's order is still being prepared");
+    this.name = "DiningOrderStillProcessingError";
+  }
+}
 const denied = (): never => {
   throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
 };
@@ -575,7 +589,16 @@ function postgresDependencies(
           load: (reference) => projections.load({ transaction, orderReference: reference }),
           list: async () => denied(),
         },
-      }).getDiningParticipant({ orderReference, observedAt: now() });
+      })
+        .getDiningParticipant({ orderReference, observedAt: now() })
+        .catch((error: unknown) => {
+          if (
+            error instanceof OrderStatusProjectionError &&
+            error.code === "ORDER_STATUS_NOT_FOUND"
+          )
+            throw new DiningOrderStillProcessingError();
+          throw error;
+        });
       const delivery = await createDiningOrderDeliveryProgress({
         ...scope,
         diningScope: options.diningScope,
@@ -987,6 +1010,7 @@ export function createCustomerDiningSessionRead(
         });
       } catch (error) {
         if (error instanceof OrderStatusProjectionError) throw error;
+        if (error instanceof DiningOrderStillProcessingError) throw error;
         if (error instanceof GuestSessionError)
           throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
         throw withFailureCause(

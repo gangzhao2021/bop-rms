@@ -200,6 +200,7 @@ export function createPersistentMerchantSettlement(options: {
         refundCount: number;
         refundedMinor: bigint;
       };
+      readonly writeOffs: { count: number; amountMinor: bigint };
     }
     const tableWindow = (
       tx: ConsumerTransaction,
@@ -241,7 +242,12 @@ export function createPersistentMerchantSettlement(options: {
           cash.refundCount++;
           cash.refundedMinor += refund.amountMinor;
         }
-        return Object.freeze({ card, cash });
+        const writeOffs = { count: 0, amountMinor: 0n };
+        for (const writeOff of listed.writeOffs) {
+          writeOffs.count++;
+          writeOffs.amountMinor += writeOff.writtenOffMinor;
+        }
+        return Object.freeze({ card, cash, writeOffs });
       })();
       tableWindows.set(key, loaded);
       return loaded;
@@ -391,6 +397,16 @@ export function createPersistentMerchantSettlement(options: {
               amountMinor: summary.refundedMinor.toString(),
               currencyCode: "CAD" as const,
             },
+          };
+        }),
+      // DEC-DINE-IN-PAY-LATER (decision 4): bills written off when the guests left unpaid.
+      unpaidWriteOffs: (tx, scope, window) =>
+        optional(async () => {
+          const { writeOffs } = await tableWindow(tx, scope, window);
+          return {
+            count: writeOffs.count,
+            amountMinor: writeOffs.amountMinor.toString(),
+            currencyCode: "CAD" as const,
           };
         }),
       // DEC-DINE-IN-PAY-LATER (cash): tables paid in cash, cash given back, net and rounding.

@@ -6,6 +6,10 @@ import type { StaffOrderCancellationRecord } from "../../application/staff-order
 import { readStaffOrderCancellations } from "./staff-order-cancellation-store.js";
 import type { StaffItemCancellationRecord } from "../../application/staff-item-cancellation.js";
 import { readStaffItemCancellations } from "./staff-item-cancellation-store.js";
+import {
+  createPostgresPayLaterItemCancellationStore,
+  type PayLaterItemCancellationRecord,
+} from "./pay-later-item-cancellation-store.js";
 
 type Options = Parameters<typeof createPostgresDiningOrderPreparationSource>[0] & {
   /**
@@ -142,12 +146,29 @@ export function createPostgresDiningOrderItemStateReader(options: Options) {
         staffCancellations.set(record.orderBatchReference, record);
       }
       // WP-2423 Q6 step 2a: whole lines staff cancelled before preparation; the Batch stays active.
-      const itemCancellations = new Map<string, StaffItemCancellationRecord>();
-      const itemRecords = await readStaffItemCancellations(input.transaction, state, [
-        state.orderReference,
-      ]).catch(() => {
-        throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
-      });
+      const itemCancellations = new Map<
+        string,
+        StaffItemCancellationRecord | PayLaterItemCancellationRecord
+      >();
+      // DEC-DINE-IN-PAY-LATER (rule 19): dishes taken off an unpaid pay-later bill are cancelled
+      // lines too (the same append-only record, on the 'PayLater' basis).
+      const itemRecords = [
+        ...(await readStaffItemCancellations(input.transaction, state, [
+          state.orderReference,
+        ]).catch(() => {
+          throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
+        })),
+        ...(await createPostgresPayLaterItemCancellationStore({
+          brandReference: state.brandReference,
+          storeReference: state.storeReference,
+          // Read under the caller's Order fence, as the paid cancellations above.
+          authorize: async () => true,
+        })
+          .listByOrders(input.transaction, [state.orderReference])
+          .catch(() => {
+            throw new Error("ORDER_ITEM_STATE_UNAVAILABLE");
+          })),
+      ];
       for (const record of itemRecords) {
         const members = batches.get(record.orderBatchReference);
         if (

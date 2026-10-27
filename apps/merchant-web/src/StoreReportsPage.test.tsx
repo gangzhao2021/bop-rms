@@ -137,6 +137,18 @@ describe("WP-2423 Q14 store reports page", () => {
     expect(html).toContain('href="/app/operations/payment-reconciliation"');
     expect(html).toContain("2 online refunds");
   });
+  it("DEC-DINE-IN-PAY-LATER: lists tables written off when guests left without paying", () => {
+    const view = storeReportsViewFixture();
+    const summary = view.summary as Record<string, unknown>;
+    summary.unpaidWriteOffCount = 1;
+    summary.unpaidWriteOffMinor = "537";
+    const html = render(view);
+    expect(html).toContain("Guests left without paying (written off) · 1 table");
+    expect(html).toContain("$5.37");
+    // None in the period: no line.
+    expect(render(storeReportsViewFixture())).not.toContain("written off");
+  });
+
   it("offers downloads only with the export permission", () => {
     const html = render({ ...storeReportsViewFixture(), permissions: { mayExport: false } });
     expect(html).not.toContain("Download CSV");

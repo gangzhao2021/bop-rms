@@ -102,6 +102,11 @@ export interface SettlementView {
   readonly cardMachine?: SettlementCardMachine | null;
   /** DEC-DINE-IN-PAY-LATER: tables paid in cash; null when unreadable, undefined from older servers. */
   readonly cash?: SettlementCash | null;
+  /**
+   * DEC-DINE-IN-PAY-LATER (decision 4): bills written off when the guests left without paying —
+   * never collected; null when unreadable, undefined from older servers.
+   */
+  readonly unpaidWriteOffs?: SettlementAmount | null;
   /** WP-2423: Provider charges matching no order, and their refunds, in the day; null when not
    * read, undefined when the server does not report them. */
   readonly unmatchedProviderCharges?: {
@@ -161,6 +166,9 @@ export function parseSettlementView(value: unknown): SettlementView {
       : []),
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "cash")
       ? ["cash"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "unpaidWriteOffs")
+      ? ["unpaidWriteOffs"]
       : []),
     ...(value !== null &&
     typeof value === "object" &&
@@ -416,6 +424,7 @@ export function parseSettlementView(value: unknown): SettlementView {
             });
           })(),
         }),
+    ...(raw.unpaidWriteOffs === undefined ? {} : { unpaidWriteOffs: amount(raw.unpaidWriteOffs) }),
     ...(raw.unmatchedProviderCharges === undefined
       ? {}
       : {

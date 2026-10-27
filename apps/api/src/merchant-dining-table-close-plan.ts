@@ -11,6 +11,7 @@ import {
 } from "@rms/ordering";
 import {
   createPostgresCardMachinePaymentStore,
+  createPostgresDiningTableSettlementStore,
   listStoreOrderBatchPaymentOutcomes,
   listStoreOrderBatchesWithOnlinePayment,
   readPaymentRemainingRefundable,
@@ -415,7 +416,21 @@ async function readCloseBlockers(
       includeCancelled: true,
     }).readiness({ ...input.input, ...scope });
     await tx.query("RELEASE SAVEPOINT table_close_readiness", []);
-    return Object.freeze([...(readiness?.reasons ?? [])]);
+    // DEC-DINE-IN-PAY-LATER (rule 14): a manager wrote the bill off when the guests left — it
+    // is not "unpaid" any more; the table closes as usual.
+    const writtenOff =
+      (
+        await createPostgresDiningTableSettlementStore({
+          scope,
+          authorize: async (_tx, value) =>
+            value.orderReference === input.input.orderReference && (await authorize()),
+        }).listWriteOffsByOrders(tx, [input.input.orderReference])
+      ).length > 0;
+    return Object.freeze(
+      (readiness?.reasons ?? []).filter(
+        (reason) => !(writtenOff && reason === "ORDER_BALANCE_UNPAID"),
+      ),
+    );
   } catch {
     await tx.query("ROLLBACK TO SAVEPOINT table_close_readiness", []);
     await tx.query("RELEASE SAVEPOINT table_close_readiness", []);

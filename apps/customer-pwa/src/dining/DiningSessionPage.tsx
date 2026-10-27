@@ -375,6 +375,10 @@ export function DiningSessionPage({
   const [client] = useState(() => provided ?? createHttpDiningSessionClient());
   const [state, setState] = useState<DiningSessionState>({ status: "loading" });
   const pending = useRef<AbortController | null>(null);
+  // v15 2026-10-27: right after the first round the order is prepared within seconds; the page
+  // waits and reads again (a bounded number of times) instead of saying "join your table".
+  const processingRetries = useRef(0);
+  const [retryTick, setRetryTick] = useState(0);
   const load = useCallback(async () => {
     if (pending.current) return;
     const controller = new AbortController();
@@ -388,9 +392,19 @@ export function DiningSessionPage({
     );
     try {
       const view = await client.load(controller.signal);
+      processingRetries.current = 0;
       if (!controller.signal.aborted) setState({ status: "ready", view, refreshing: false });
     } catch (error) {
       if (controller.signal.aborted) return;
+      if (
+        error instanceof DiningSessionClientError &&
+        error.code === "processing" &&
+        processingRetries.current < 15
+      ) {
+        processingRetries.current += 1;
+        setRetryTick((value) => value + 1);
+        return;
+      }
       if (error instanceof DiningSessionClientError && error.code === "not-joined")
         setState({ status: "not-joined" });
       // Keep the last loaded table on screen; say it may be out of date.
@@ -404,6 +418,11 @@ export function DiningSessionPage({
       if (pending.current === controller) pending.current = null;
     }
   }, [client]);
+  useEffect(() => {
+    if (retryTick === 0) return;
+    const timer = window.setTimeout(() => void load(), 2000);
+    return () => window.clearTimeout(timer);
+  }, [retryTick, load]);
   // Owner 2026-10-23: item names come from the Store in the chosen language.
   useReloadOnLanguageChange(() => void load());
   // A replaced session credential (the visit refreshed after a round was sent) reads the table

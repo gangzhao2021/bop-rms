@@ -4,7 +4,11 @@ import type { RequestHandler, Response } from "express";
 import { customerFailureCode } from "./customer-failure-diagnostic.js";
 import { markRequestFailure } from "./request-correlation.js";
 import { customerDisplayLocale } from "./customer-display-locale.js";
-import type { CustomerDiningSessionView, CustomerMoney } from "./customer-dining-session-read.js";
+import {
+  DiningOrderStillProcessingError,
+  type CustomerDiningSessionView,
+  type CustomerMoney,
+} from "./customer-dining-session-read.js";
 
 /** WP-2423 Q8 (CUST-DINE-IN-SESSION): the guest's own table; the browser never names a session. */
 export const customerDiningSessionRoute = "/api/v1/dine-in/session";
@@ -128,6 +132,13 @@ export class CustomerDiningSessionHandler {
                   refunded: money(view.summary.refunded),
                   refundPending: money(view.summary.refundPending),
                   due: money(view.summary.due),
+                  // DEC-DINE-IN-PAY-LATER: the table's one payment's tip and cash rounding.
+                  ...(view.summary.cashRounding === undefined || view.summary.tableTip === undefined
+                    ? {}
+                    : {
+                        tableTip: money(view.summary.tableTip),
+                        cashRounding: money(view.summary.cashRounding),
+                      }),
                   ...(view.summary.ordered === undefined
                     ? {}
                     : {
@@ -141,6 +152,19 @@ export class CustomerDiningSessionHandler {
         };
         response.status(200).json({ schemaVersion: 1, session });
       } catch (error) {
+        // v15 2026-10-27: the first round's Order is still being prepared — read again shortly.
+        if (error instanceof DiningOrderStillProcessingError) {
+          protect(response);
+          response.setHeader("Retry-After", "2");
+          response.status(503).json({
+            schemaVersion: 1,
+            error: {
+              code: "dining_session_order_processing",
+              messageKey: "customer.dining.session.order_processing",
+            },
+          });
+          return;
+        }
         const status =
           error instanceof GuestSessionError ||
           (error instanceof OrderStatusProjectionError &&

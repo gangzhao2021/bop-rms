@@ -26,7 +26,8 @@ import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session
  * (every round served or cancelled, the Order paid and closed) and refuse otherwise.
  */
 export function tableCloseBlockers(
-  table: Pick<StaffDiningTable, "staffRoundsAwaitingPayment">,
+  table: Pick<StaffDiningTable, "staffRoundsAwaitingPayment"> &
+    Partial<Pick<StaffDiningTable, "paymentTiming">>,
   progress: Pick<DiningProgress, "items"> | null,
 ): readonly string[] {
   const blockers: string[] = [];
@@ -47,7 +48,16 @@ export function tableCloseBlockers(
   const unserved = open.filter((item) =>
     ["Accepted", "InProgress", "Ready"].includes(item.phase),
   ).length;
-  if (waiting > 0)
+  if (waiting > 0 && table.paymentTiming === "PayLater")
+    // DEC-DINE-IN-PAY-LATER: a round just sent is on its way to the kitchen (nothing to pay now).
+    blockers.push(
+      waiting === 1
+        ? t("1 item is still being sent to the kitchen. Check again in a moment.")
+        : t("{count} items are still being sent to the kitchen. Check again in a moment.", {
+            count: waiting,
+          }),
+    );
+  else if (waiting > 0)
     blockers.push(
       waiting === 1
         ? t(
@@ -231,7 +241,9 @@ export function TableSessionClose({
       ? [
           ...tableCloseBlockers(table, progress),
           // WP-2423 (B759): when no round is left to close out, the close evaluation's own reasons.
-          ...(plan && plan.open === 0 ? closeReasonTexts(plan.blockers) : []),
+          ...(plan && plan.open === 0
+            ? closeReasonTexts(plan.blockers, table.paymentTiming ?? "PayFirst")
+            : []),
         ]
       : [];
   const guestsLeft =
