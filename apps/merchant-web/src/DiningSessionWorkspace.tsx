@@ -1031,6 +1031,7 @@ export function DiningSessionWorkspace({
                   session={selected.session}
                   csrf={csrf}
                   canStart={canCloseSessions}
+                  timeZone={timeZone}
                   locked={locked || paused}
                   onChanged={() => {
                     // The close check reads the table again once it is paid (or written off).

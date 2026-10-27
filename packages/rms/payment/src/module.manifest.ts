@@ -55,6 +55,7 @@ const moduleManifestInput =
         "dining_table_settlement",
         "dining_table_settlement_round",
         "order_unpaid_write_off",
+        "dining_table_cash_refund",
         "store_payment_configuration_version",
         "store_payment_configuration_operation",
         "reconciliation_follow_up_history",

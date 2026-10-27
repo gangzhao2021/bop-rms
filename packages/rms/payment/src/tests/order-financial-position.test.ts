@@ -4,9 +4,13 @@ const mock = vi.hoisted(() => ({
   refund: vi.fn(),
   machine: vi.fn(),
   table: vi.fn(async () => [] as unknown[]),
+  cashRefunds: vi.fn(async () => [] as unknown[]),
 }));
 vi.mock("../infrastructure/persistence/dining-table-settlement-store.js", () => ({
-  createPostgresDiningTableSettlementStore: () => ({ listByOrders: mock.table }),
+  createPostgresDiningTableSettlementStore: () => ({
+    listByOrders: mock.table,
+    listCashRefundsByOrders: mock.cashRefunds,
+  }),
 }));
 vi.mock("../infrastructure/persistence/card-machine-payment-store.js", () => ({
   createPostgresCardMachinePaymentStore: () => ({ listByOrder: mock.machine }),
@@ -281,6 +285,9 @@ it("DEC-DINE-IN-PAY-LATER: a table settlement pays its rounds and tip; cash roun
       method: "Cash",
       environment: "Test",
       recordedAt: at,
+      roundsMinor: 3390n,
+      tipMinor: 512n,
+      totalMinor: 3900n,
       lines: [
         { orderBatchReference: id(81), roundMinor: 2260n, tipMinor: 0n, roundingMinor: 0n },
         { orderBatchReference: id(82), roundMinor: 1130n, tipMinor: 512n, roundingMinor: -2n },
@@ -294,6 +301,41 @@ it("DEC-DINE-IN-PAY-LATER: a table settlement pays its rounds and tip; cash roun
     capturedTipMinor: 512n,
   });
   expect(result.tableSettlementCaptures.map((c) => c.roundingMinor)).toEqual([0n, -2n]);
+});
+it("DEC-DINE-IN-PAY-LATER: cash given back counts as refunded, the Order's share first, then the tip", async () => {
+  onlineOnlyRefunds();
+  mock.refund.mockResolvedValue(noRefund);
+  mock.machine.mockResolvedValue([]);
+  mock.table.mockResolvedValueOnce([
+    {
+      settlementReference: id(80),
+      orderReference: id(4),
+      method: "Cash",
+      environment: "Test",
+      recordedAt: at,
+      roundsMinor: 3390n,
+      tipMinor: 512n,
+      totalMinor: 3900n,
+      lines: [
+        { orderBatchReference: id(81), roundMinor: 3390n, tipMinor: 512n, roundingMinor: -2n },
+      ],
+    },
+  ]);
+  mock.cashRefunds.mockResolvedValueOnce([
+    {
+      cashRefundReference: id(90),
+      settlementReference: id(80),
+      amountMinor: 3500n,
+      recordedAt: at,
+    },
+  ]);
+  const result = await setup().read();
+  expect(result.settlement.confirmedRefundMinor).toBe(3500n);
+  expect(result.settlement.refundAllocation).toEqual({
+    orderMinor: 3390n,
+    tipMinor: 110n,
+    unallocatedMinor: 0n,
+  });
 });
 it("B759: a cancelled card-machine round refunded in full is reversed in full, tip included", async () => {
   onlineOnlyRefunds();

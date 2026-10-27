@@ -20,6 +20,7 @@ import {
   staffCancellationReasonLabel,
   staffCancellationSummary,
 } from "./StaffOrderCancelAction.js";
+import { TablePaymentPanel } from "./TablePaymentPanel.js";
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import { HeldStockReleaseAction, heldStockReleasedText } from "./HeldStockNotice.js";
 import {
@@ -2018,6 +2019,14 @@ export function CurrentOrderDetails({
             )}
           </p>
         </details>
+      ) : null}
+      {/* DEC-DINE-IN-PAY-LATER: a table that paid once at the end, and cash given back. */}
+      {order.orderType === "DineIn" ? (
+        <TablePaymentPanel
+          orderReference={order.orderReference}
+          csrf={csrf}
+          {...(fetcher ? { fetcher } : {})}
+        />
       ) : null}
       {/* WP-2423 (v15 751dd768): offered only to people the server lets read payments. */}
       {order.canViewPayments ? (

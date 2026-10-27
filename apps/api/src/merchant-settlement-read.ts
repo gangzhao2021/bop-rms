@@ -37,6 +37,20 @@ export interface MerchantSettlementCardMachine {
   readonly recordedAfterOutageCount: number;
   readonly refunded: MerchantSettlementAmount;
 }
+/**
+ * DEC-DINE-IN-PAY-LATER (cash): what the Store took in cash for tables in the day (rounding to 5
+ * cents included), cash given back, the net it should have from us, and the rounding. The till
+ * also holds cash from the Store's own register, so this is what our side expects, not a count.
+ */
+export interface MerchantSettlementCash {
+  readonly received: MerchantSettlementAmount;
+  readonly tipMinor: string;
+  readonly roundingMinor: string;
+  readonly refunded: MerchantSettlementAmount;
+  readonly netMinor: string;
+  /** Cash payments entered afterwards from paper during an outage. */
+  readonly recordedAfterOutageCount: number;
+}
 export interface MerchantSettlementView {
   readonly screenId: "PAY-RECONCILIATION";
   readonly storeLabel: string;
@@ -55,6 +69,8 @@ export interface MerchantSettlementView {
   readonly reconciliation: MerchantSettlementReconciliation | null;
   /** Null when the source could not answer or is not composed. */
   readonly cardMachine: MerchantSettlementCardMachine | null;
+  /** DEC-DINE-IN-PAY-LATER: tables paid in cash; null when not read. */
+  readonly cash: MerchantSettlementCash | null;
   /**
    * WP-2423: charges the payment provider took in the day that match no Order, and refunds of such
    * charges in the day. The settlement statement counts both on the store's side; the Captured and
@@ -137,6 +153,11 @@ export function createMerchantSettlementRead(options: {
     scope: MerchantSettlementScope,
     window: MerchantSettlementWindow,
   ): Promise<MerchantSettlementCardMachine | null>;
+  cash?(
+    tx: ConsumerTransaction,
+    scope: MerchantSettlementScope,
+    window: MerchantSettlementWindow,
+  ): Promise<MerchantSettlementCash | null>;
   unmatchedProviderCharges?(
     tx: ConsumerTransaction,
     scope: MerchantSettlementScope,
@@ -204,6 +225,7 @@ export function createMerchantSettlementRead(options: {
           : null;
       const cardMachine =
         options.cardMachine === undefined ? null : await options.cardMachine(tx, scope, window);
+      const cash = options.cash === undefined ? null : await options.cash(tx, scope, window);
       const unmatchedProviderCharges =
         options.unmatchedProviderCharges === undefined
           ? null
@@ -234,6 +256,7 @@ export function createMerchantSettlementRead(options: {
                 differenceCount: reconciliation.differenceCount,
               }),
         cardMachine,
+        cash,
         unmatchedProviderCharges,
         projectedAt: options.now(),
       });

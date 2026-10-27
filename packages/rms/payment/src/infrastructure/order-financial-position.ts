@@ -272,13 +272,25 @@ export function createPostgresOrderFinancialPosition(options: {
       // WP-2423 DEC-DINE-IN-PAY-LATER: a table that paid once at the end (card machine or cash),
       // one line per round. Each line is a capture of its round's total (and the tip on the last
       // line); cash rounding is the drawer's difference, not part of the Order's amounts.
-      const tableSettlements = (
-        await createPostgresDiningTableSettlementStore({
-          scope,
-          authorize: async (_tx, value) =>
-            value.orderReference === query.orderReference && (await authorize()),
-        }).listByOrders(tx, [query.orderReference])
-      ).filter((settlement) => settlement.recordedAt <= query.observedAt);
+      const tableStore = createPostgresDiningTableSettlementStore({
+        scope,
+        authorize: async (_tx, value) =>
+          value.orderReference === query.orderReference && (await authorize()),
+      });
+      const tableSettlements = (await tableStore.listByOrders(tx, [query.orderReference])).filter(
+        (settlement) => settlement.recordedAt <= query.observedAt,
+      );
+      // Cash given back from a table's cash payment: the Order's share first, then the tip; what
+      // is left (the cash rounding) is not the Order's and stays unallocated.
+      const tableCashRefunds = (
+        tableSettlements.some((settlement) => settlement.method === "Cash")
+          ? await tableStore.listCashRefundsByOrders(tx, [query.orderReference])
+          : []
+      ).filter((refund) => refund.recordedAt <= query.observedAt);
+      let tableRefundedMinor = 0n,
+        tableRefundedOrderMinor = 0n,
+        tableRefundedTipMinor = 0n,
+        tableRefundedUnallocatedMinor = 0n;
       let tableOrderMinor = 0n,
         tableTipMinor = 0n;
       const tableCaptures = [];
@@ -304,6 +316,28 @@ export function createPostgresOrderFinancialPosition(options: {
           );
         }
       }
+      for (const settlement of tableSettlements) {
+        const refunded = tableCashRefunds
+          .filter((refund) => refund.settlementReference === settlement.settlementReference)
+          .reduce((sum, refund) => sum + refund.amountMinor, 0n);
+        if (refunded > settlement.totalMinor) return fail();
+        const toOrder = refunded < settlement.roundsMinor ? refunded : settlement.roundsMinor;
+        const rest = refunded - toOrder;
+        const toTip = rest < settlement.tipMinor ? rest : settlement.tipMinor;
+        tableRefundedMinor += refunded;
+        tableRefundedOrderMinor += toOrder;
+        tableRefundedTipMinor += toTip;
+        tableRefundedUnallocatedMinor += rest - toTip;
+      }
+      if (
+        tableCashRefunds.some(
+          (refund) =>
+            !tableSettlements.some(
+              (settlement) => settlement.settlementReference === refund.settlementReference,
+            ),
+        )
+      )
+        return fail();
       const tableCapturedMinor = tableOrderMinor + tableTipMinor;
       if (capturedMinor + machineCapturedMinor + tableCapturedMinor > 9223372036854775807n)
         return fail();
@@ -339,6 +373,7 @@ export function createPostgresOrderFinancialPosition(options: {
               c.capturedMinor.toString(),
               c.roundingMinor.toString(),
             ]),
+            tableCashRefunds.map((r) => [r.cashRefundReference, r.amountMinor.toString()]),
           ]),
         )
         .digest("hex");
@@ -376,12 +411,16 @@ export function createPostgresOrderFinancialPosition(options: {
           capturedOrderAllocationMinor:
             capturedOrderAllocationMinor + machineOrderMinor + tableOrderMinor,
           capturedTipMinor: capturedTipMinor + machineTipMinor + tableTipMinor,
-          confirmedRefundMinor: confirmedRefundMinor + machineConfirmedRefundMinor,
+          confirmedRefundMinor:
+            confirmedRefundMinor + machineConfirmedRefundMinor + tableRefundedMinor,
           pendingRefundMinor: pendingRefundMinor + machinePendingRefundMinor,
           refundAllocation: Object.freeze({
-            orderMinor: refundedOrderMinor + machineRefundedOrderMinor,
-            tipMinor: refundedTipMinor + machineRefundedTipMinor,
-            unallocatedMinor: unallocatedRefundMinor + machineUnallocatedRefundMinor,
+            orderMinor: refundedOrderMinor + machineRefundedOrderMinor + tableRefundedOrderMinor,
+            tipMinor: refundedTipMinor + machineRefundedTipMinor + tableRefundedTipMinor,
+            unallocatedMinor:
+              unallocatedRefundMinor +
+              machineUnallocatedRefundMinor +
+              tableRefundedUnallocatedMinor,
           }),
         }),
         snapshotDigest: "sha256:" + digest,

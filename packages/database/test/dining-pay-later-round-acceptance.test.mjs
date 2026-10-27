@@ -25,6 +25,11 @@ import {
   createPostgresOrderFinancialPosition,
 } from "../../rms/payment/src/index.ts";
 import { createPostgresOrderPricedAmountSource } from "../../rms/ordering/src/index.ts";
+import { createPostgresStoreSalesPaymentLedger } from "../../rms/payment/src/index.ts";
+import {
+  createMerchantDiningTableCashRefund,
+  createMerchantDiningTablePaymentRead,
+} from "../../../apps/api/src/merchant-dining-table-payment.ts";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -774,6 +779,83 @@ it("sends each round of a pay-later table to the kitchen unpaid, once", async ()
         ),
         /duplicate key|paid/u,
       );
+      // ── S3: cash given back from the table's cash payment (a manager's decision).
+      const cashRefund = (who, amountMinor, operationReference = fresh()) =>
+        createMerchantDiningTableCashRefund({
+          persistence: persistenceOf(who),
+          authentication: who.authentication,
+          nextReference: fresh,
+        })({
+          ...as(who),
+          command: { orderReference, operationReference, amountMinor, reasonCode: "FOOD_ISSUE" },
+        });
+      await assert.rejects(cashRefund(server, "500"), { code: "TABLE_PAYMENT_PERMISSION_DENIED" });
+      const refundOperation = fresh();
+      const refunded = await cashRefund(manager, "500", refundOperation);
+      assert.equal(refunded.status, "Recorded");
+      assert.equal(refunded.payment.refundableMinor, (due + rounding - 500n).toString());
+      assert.equal((await cashRefund(manager, "500", refundOperation)).status, "AlreadyRecorded");
+      await assert.rejects(cashRefund(manager, String(due + rounding)), {
+        code: "TABLE_PAYMENT_TOO_MUCH",
+      });
+      assert.deepEqual(
+        (
+          await createMerchantDiningTablePaymentRead({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+          })({ ...as(server), query: { orderReference } })
+        ).payment.cashRefunds.map((refund) => [refund.amountMinor, refund.reasonCode]),
+        [["500", "FOOD_ISSUE"]],
+      );
+      assert.deepEqual(
+        await rows(
+          "SELECT action_code,actor_reference::text AS actor FROM platform_audit.audit_record WHERE action_code='PAYMENT_DINING_TABLE_CASH_REFUNDED' AND target_id=$1",
+          [orderReference],
+        ),
+        [{ action_code: "PAYMENT_DINING_TABLE_CASH_REFUNDED", actor: id(0x701) }],
+      );
+      await assert.rejects(
+        admin.query("UPDATE rms_payment.dining_table_cash_refund SET amount_minor=1"),
+        /append-only/u,
+      );
+      // The day's reports count the table's cash payment once, its rounds, tip, rounding and the
+      // cash given back — never hidden from them (AGENTS.md: no sales suppression).
+      const ledger = await transactions().run((tx) =>
+        createPostgresStoreSalesPaymentLedger({
+          scope: { ...ownerScope, providerAccountReference: provider, environment: "Test" },
+          authorize: async () => true,
+        })(tx, {
+          startsAt: time(-minutes(120)),
+          endsAt: new Date(Date.now() + 1000).toISOString(),
+          observedAt: new Date(Date.now() + 1000).toISOString(),
+        }),
+      );
+      const cashLines = ledger.payments.filter((payment) => payment.channel === "Cash");
+      assert.deepEqual(
+        cashLines.map((line) => [
+          line.orderBatchReference,
+          line.orderAllocationMinor,
+          line.tipMinor,
+          line.roundingMinor,
+          line.paymentCount,
+        ]),
+        [
+          [R1.batch.orderBatchReference, round1Minor, 0n, 0n, 1],
+          [R2.batch.orderBatchReference, round2Minor, tipMinor, rounding, 0],
+        ],
+      );
+      assert.deepEqual(ledger.settlement.cashTaken, {
+        count: 1,
+        amountMinor: due + rounding,
+        tipMinor,
+        roundingMinor: rounding,
+      });
+      assert.deepEqual(ledger.settlement.cashRefunded, { count: 1, amountMinor: 500n });
+      assert.deepEqual(
+        ledger.refunds.filter((refund) => refund.channel === "Cash").map((r) => r.amountMinor),
+        [500n],
+      );
+
       // A write-off must be exactly what is owed (Payment's own check), and is append-only.
       await assert.rejects(
         admin.query(

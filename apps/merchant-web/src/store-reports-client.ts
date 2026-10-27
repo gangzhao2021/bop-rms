@@ -23,7 +23,7 @@ const date = (value: unknown): string => {
 const list = <T>(value: unknown, max: number, parse: (item: unknown) => T): readonly T[] =>
   Array.isArray(value) && value.length <= max ? Object.freeze(value.map(parse)) : fail();
 
-export type StoreReportChannel = "Online" | "CardMachine";
+export type StoreReportChannel = "Online" | "CardMachine" | "Cash";
 export type StoreReportOrderType = "DineIn" | "Pickup" | "Counter";
 export type StoreReportExportKind = "summary" | "items" | "hourly" | "tips";
 
@@ -37,6 +37,8 @@ export interface StoreReportSummary {
   readonly taxMinor: string;
   readonly taxes: readonly { readonly label: string; readonly amountMinor: string }[];
   readonly tipsMinor: string;
+  /** DEC-DINE-IN-PAY-LATER: cash rounding to 5 cents collected (may be negative). */
+  readonly cashRoundingMinor: string;
   readonly unmatchedMinor: string;
   readonly unmatchedPaymentCount: number;
   readonly collectedMinor: string;
@@ -122,6 +124,7 @@ const summaryKeys = [
   "taxMinor",
   "taxes",
   "tipsMinor",
+  "cashRoundingMinor",
   "unmatchedMinor",
   "unmatchedPaymentCount",
   "collectedMinor",
@@ -152,6 +155,7 @@ function summary(value: Record<string, unknown>): StoreReportSummary {
       return Object.freeze({ label: text(tax.label, 64), amountMinor: minor(tax.amountMinor) });
     }),
     tipsMinor: minor(value.tipsMinor),
+    cashRoundingMinor: signed(value.cashRoundingMinor),
     unmatchedMinor: minor(value.unmatchedMinor),
     unmatchedPaymentCount: count(value.unmatchedPaymentCount),
     collectedMinor: minor(value.collectedMinor),
@@ -168,7 +172,7 @@ function summary(value: Record<string, unknown>): StoreReportSummary {
     netCollectedMinor: signed(value.netCollectedMinor),
   });
 }
-const channels: readonly StoreReportChannel[] = ["Online", "CardMachine"];
+const channels: readonly StoreReportChannel[] = ["Online", "CardMachine", "Cash"];
 const orderTypes: readonly StoreReportOrderType[] = ["DineIn", "Pickup", "Counter"];
 const itemRow = (value: unknown): StoreReportItemRow => {
   const row = exact(value, [

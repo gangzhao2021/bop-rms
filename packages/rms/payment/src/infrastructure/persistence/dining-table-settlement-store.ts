@@ -71,6 +71,57 @@ export interface DiningTableSettlementRecord {
   }[];
 }
 
+export type DiningTableCashRefundReason =
+  "FOOD_ISSUE" | "CUSTOMER_REQUEST" | "OVERCHARGED" | "STORE_ERROR";
+export const diningTableCashRefundReasons: readonly DiningTableCashRefundReason[] = [
+  "FOOD_ISSUE",
+  "CUSTOMER_REQUEST",
+  "OVERCHARGED",
+  "STORE_ERROR",
+];
+/** Cash given back from a table's cash payment (manager-approved; compensating, append-only). */
+export interface DiningTableCashRefundRecord {
+  readonly cashRefundReference: string;
+  readonly operationReference: string;
+  readonly intentDigest: string;
+  readonly settlementReference: string;
+  readonly orderReference: string;
+  readonly amountMinor: bigint;
+  readonly reasonCode: DiningTableCashRefundReason;
+  readonly approvedByActorReference: string;
+  readonly refundedAt: string;
+  readonly recordedAt: string;
+  readonly auditReference: string;
+}
+const cashRefundSelect = `SELECT r.cash_refund_id::text AS refund,r.tenant_id::text AS tenant,r.operation_id::text AS operation,
+ r.intent_digest,r.settlement_id::text AS settlement,r.order_id::text AS "order",r.amount_minor::text AS amount,
+ r.reason_code,r.approved_by_actor_id::text AS approved_by,${instant("r.refunded_at")} AS refunded_at,
+ ${instant("r.recorded_at")} AS recorded_at,r.audit_id::text AS audit
+ FROM rms_payment.dining_table_cash_refund r WHERE r.brand_id=$1 AND r.store_id=$2`;
+function cashRefundFrom(row: Record<string, unknown>): DiningTableCashRefundRecord {
+  const reason = diningTableCashRefundReasons.includes(
+    row.reason_code as DiningTableCashRefundReason,
+  )
+    ? (row.reason_code as DiningTableCashRefundReason)
+    : fail();
+  return Object.freeze({
+    cashRefundReference: ref(row.refund),
+    operationReference: ref(row.operation),
+    intentDigest:
+      typeof row.intent_digest === "string" && /^sha256:[0-9a-f]{64}$/u.test(row.intent_digest)
+        ? row.intent_digest
+        : fail(),
+    settlementReference: ref(row.settlement),
+    orderReference: ref(row.order),
+    amountMinor: minor(row.amount, 1n),
+    reasonCode: reason,
+    approvedByActorReference: ref(row.approved_by),
+    refundedAt: String(parsePaymentInstant(row.refunded_at)),
+    recordedAt: String(parsePaymentInstant(row.recorded_at)),
+    auditReference: ref(row.audit),
+  });
+}
+
 export interface OrderUnpaidWriteOffRecord {
   readonly writeOffReference: string;
   readonly tenantReference: string;
@@ -218,7 +269,7 @@ export function createPostgresDiningTableSettlementStore(options: {
     const found = rows(
       await tx.query(`${settlementSelect} AND ${where}`, [brand, store, ...values]),
     );
-    if (found.length > 500) return fail();
+    if (found.length > 100000) return fail();
     return found.map((row) => {
       const record = settlementFrom(row);
       if (record.tenantReference !== tenant) return fail();
@@ -235,7 +286,128 @@ export function createPostgresDiningTableSettlementStore(options: {
       return record;
     });
   };
+  const cashRefunds = async (tx: AuditTransaction, where: string, values: readonly unknown[]) => {
+    await context(tx);
+    const found = rows(
+      await tx.query(
+        `${cashRefundSelect} AND ${where} ORDER BY r.refunded_at,r.cash_refund_id LIMIT 10001`,
+        [brand, store, ...values],
+      ),
+    );
+    if (found.length > 10000) return fail();
+    return found.map((row) => {
+      if (ref(row.tenant) !== tenant) return fail();
+      return cashRefundFrom(row);
+    });
+  };
   return Object.freeze({
+    /** Cash given back from these Orders' table payments, oldest first. */
+    async listCashRefundsByOrders(tx: AuditTransaction, orderReferences: readonly string[]) {
+      if (orderReferences.length === 0) return Object.freeze([]);
+      if (orderReferences.length > 200) return fail();
+      const orders = orderReferences.map(ref);
+      for (const order of orders) await allowed(tx, order);
+      return Object.freeze(await cashRefunds(tx, "r.order_id=ANY($3::uuid[])", [orders]));
+    },
+
+    /**
+     * Records cash given back from a table's cash payment (the caller has the manager's approval).
+     * A retry with the same operation and intent returns the same record.
+     */
+    async recordCashRefund(
+      tx: AuditTransaction,
+      input: Omit<DiningTableCashRefundRecord, never> & { readonly correlationReference: string },
+    ) {
+      const order = ref(input.orderReference);
+      await allowed(tx, order);
+      if (
+        !diningTableCashRefundReasons.includes(input.reasonCode) ||
+        input.amountMinor <= 0n ||
+        !/^sha256:[0-9a-f]{64}$/u.test(input.intentDigest)
+      )
+        return fail();
+      await context(tx);
+      const prior = await cashRefunds(tx, "r.operation_id=$3", [ref(input.operationReference)]);
+      if (prior.length > 0) {
+        const same = prior[0] as DiningTableCashRefundRecord;
+        if (same.intentDigest !== input.intentDigest || same.orderReference !== order)
+          return fail("DINING_TABLE_SETTLEMENT_IDEMPOTENCY_CONFLICT");
+        return Object.freeze({ status: "AlreadyRecorded" as const, refund: same });
+      }
+      const refundedAt = String(parsePaymentInstant(input.refundedAt)),
+        recordedAt = String(parsePaymentInstant(input.recordedAt));
+      await tx.query(
+        `INSERT INTO rms_payment.dining_table_cash_refund (cash_refund_id,tenant_id,brand_id,store_id,operation_id,
+ intent_digest,settlement_id,order_id,amount_minor,currency_code,reason_code,approved_by_actor_id,refunded_at,recorded_at,audit_id)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'CAD',$10,$11,$12,$13,$14)`,
+        [
+          ref(input.cashRefundReference),
+          tenant,
+          brand,
+          store,
+          ref(input.operationReference),
+          input.intentDigest,
+          ref(input.settlementReference),
+          order,
+          input.amountMinor.toString(),
+          input.reasonCode,
+          ref(input.approvedByActorReference),
+          refundedAt,
+          recordedAt,
+          ref(input.auditReference),
+        ],
+      );
+      await appendAuditRecordInTransaction(tx, {
+        auditId: ref(input.auditReference),
+        brandId: brand,
+        storeId: store,
+        actor: { type: "User", reference: ref(input.approvedByActorReference) },
+        actionCode: "PAYMENT_DINING_TABLE_CASH_REFUNDED",
+        targetType: "Order",
+        targetId: order,
+        afterSummary: {
+          amountMinor: input.amountMinor.toString(),
+          settlement: ref(input.settlementReference),
+        },
+        reasonCode: input.reasonCode,
+        correlationId: ref(input.correlationReference),
+        occurredAt: recordedAt,
+        sourceChannel: "MERCHANT_WEB",
+        dataClassification: "Restricted",
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      });
+      const [saved] = await cashRefunds(tx, "r.cash_refund_id=$3", [
+        ref(input.cashRefundReference),
+      ]);
+      if (saved === undefined) return fail();
+      return Object.freeze({ status: "Recorded" as const, refund: saved });
+    },
+
+    /**
+     * The Store's table payments taken and cash given back in a window, by when the money moved
+     * (the day-end settlement's rule): every table settlement taken in the window, every cash
+     * refund made in it, and the settlements those refunds belong to. Store-level read: the
+     * caller's Store authority applies (no per-Order check).
+     */
+    async listWindow(tx: AuditTransaction, window: { from: string; to: string }) {
+      const from = String(parsePaymentInstant(window.from)),
+        to = String(parsePaymentInstant(window.to));
+      if (from >= to) return fail();
+      if ((await options.authorize(tx, { orderReference: "" })) !== true)
+        return fail("DINING_TABLE_SETTLEMENT_PERMISSION_DENIED");
+      const refunds = await cashRefunds(tx, "r.refunded_at>=$3 AND r.refunded_at<$4", [from, to]);
+      const taken = await settlements(
+        tx,
+        "((s.taken_at>=$3 AND s.taken_at<$4) OR s.settlement_id=ANY($5::uuid[])) ORDER BY s.taken_at,s.settlement_id LIMIT 100001",
+        [from, to, [...new Set(refunds.map((refund) => refund.settlementReference))]],
+      );
+      return Object.freeze({
+        settlements: Object.freeze(taken),
+        cashRefunds: Object.freeze(refunds),
+      });
+    },
+
     /** The settlements of these Orders (a table Order has at most one). */
     async listByOrders(tx: AuditTransaction, orderReferences: readonly string[]) {
       if (orderReferences.length === 0) return Object.freeze([]);
@@ -494,4 +666,3 @@ export function createPostgresDiningTableSettlementStore(options: {
     },
   });
 }
-

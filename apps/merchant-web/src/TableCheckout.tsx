@@ -4,6 +4,7 @@ import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { createDiningSessionCloseClient } from "./dining-session-close-client.js";
 import { createDiningProgressClient } from "./dining-progress-client.js";
+import { paidAtInstant } from "./counter-payment.js";
 import {
   cashTotalMinor,
   createTableCheckoutClient,
@@ -64,7 +65,10 @@ export function TableCheckout({
   canStart,
   onChanged,
   fetcher,
+  timeZone,
 }: {
+  /** The Store's time zone (a paper payment's time is Store time). */
+  readonly timeZone?: string | undefined;
   readonly table: StaffDiningTable;
   readonly session: StaffDiningTableSession;
   readonly csrf: string;
@@ -86,6 +90,10 @@ export function TableCheckout({
   const [slip, setSlip] = useState("");
   const [received, setReceived] = useState("");
   const [leaving, setLeaving] = useState(false);
+  // Operating continuity: a table paid while the system was down is entered afterwards from paper.
+  const [paper, setPaper] = useState(false);
+  const [paidAt, setPaidAt] = useState("");
+  const paperInstant = paper ? paidAtInstant(paidAt, Date.now(), timeZone) : null;
   // One operation per intent: a lost answer is resent with the same one.
   const operation = useRef<{ key: string; reference: string } | null>(null);
   const beginOperation = useRef<string | null>(null);
@@ -124,7 +132,8 @@ export function TableCheckout({
     due !== null &&
     !busy &&
     !locked &&
-    (method === "CardMachine" ? slipValid : change !== null && change >= 0n);
+    (method === "CardMachine" ? slipValid : change !== null && change >= 0n) &&
+    (!paper || paperInstant !== null);
 
   const start = async () => {
     if (busy || locked) return;
@@ -151,7 +160,14 @@ export function TableCheckout({
 
   const pay = async () => {
     if (!canPay || bill === null || tipMinor === null) return;
-    const intent = JSON.stringify([method, tip, tipMinor.toString(), received, slip.trim()]);
+    const intent = JSON.stringify([
+      method,
+      tip,
+      tipMinor.toString(),
+      received,
+      slip.trim(),
+      paperInstant,
+    ]);
     if (operation.current?.key !== intent)
       operation.current = { key: intent, reference: serviceOperationReference() };
     setBusy(true);
@@ -169,6 +185,7 @@ export function TableCheckout({
               : { kind: "Percent", percent: Number(tip) as 10 | 15 | 18 },
         tenderedMinor: method === "Cash" ? String(receivedMinor) : null,
         slipReference: method === "CardMachine" && slip.trim() !== "" ? slip.trim() : null,
+        takenAt: paper ? paperInstant : null,
       });
       operation.current = null;
       setBill(result.bill);
@@ -381,6 +398,29 @@ export function TableCheckout({
                   ) : null}
                 </>
               )}
+              <fieldset className="table-checkout__paper" disabled={busy || locked}>
+                <legend>{t("Paper payment")}</legend>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={paper}
+                    onChange={(event) => setPaper(event.currentTarget.checked)}
+                  />
+                  {t("Paid while the system was down (enter it from paper now)")}
+                </label>
+                {paper ? (
+                  <label className="table-checkout__field">
+                    {t("Paid at (store time)")}
+                    <input
+                      type="datetime-local"
+                      value={paidAt}
+                      aria-invalid={paperInstant === null}
+                      onChange={(event) => setPaidAt(event.currentTarget.value)}
+                    />
+                    <small>{t("Within the last 3 days. It counts on the day it was paid.")}</small>
+                  </label>
+                ) : null}
+              </fieldset>
               <button
                 type="button"
                 className="table-checkout__primary"

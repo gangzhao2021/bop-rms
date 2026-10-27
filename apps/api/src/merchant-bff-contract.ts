@@ -9,6 +9,10 @@ import type {
 } from "./merchant-dining-payment-timing.js";
 import type { createMerchantDiningUnpaidDeparture } from "./merchant-dining-unpaid-departure.js";
 import type {
+  createMerchantDiningTableCashRefund,
+  createMerchantDiningTablePaymentRead,
+} from "./merchant-dining-table-payment.js";
+import type {
   createMerchantDiningTableBillRead,
   createMerchantDiningTableSettle,
 } from "./merchant-dining-table-checkout.js";
@@ -568,6 +572,8 @@ export interface MerchantBffRouterOptions {
   readonly diningTableBill?: ReturnType<typeof createMerchantDiningTableBillRead>;
   readonly diningTableSettle?: ReturnType<typeof createMerchantDiningTableSettle>;
   readonly orderUnpaidDeparture?: ReturnType<typeof createMerchantDiningUnpaidDeparture>;
+  readonly tablePayment?: ReturnType<typeof createMerchantDiningTablePaymentRead>;
+  readonly tableCashRefund?: ReturnType<typeof createMerchantDiningTableCashRefund>;
   readonly diningTableCommand?: ReturnType<typeof createMerchantDiningTableCommand>;
   /** WP-2423 Q11: table QR codes (DIN-TABLE-LIST). */
   readonly diningTableQr?: ReturnType<typeof createMerchantDiningTableQr>;

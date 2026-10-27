@@ -2344,6 +2344,7 @@ async function scanUnsupported(root, module, diagnostics) {
               "dining_table_settlement",
               "dining_table_settlement_round",
               "order_unpaid_write_off",
+              "dining_table_cash_refund",
             ],
           },
           // WP-2423 Q14: payments and refunds behind the Store sales reports (read only).

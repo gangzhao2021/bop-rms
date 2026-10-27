@@ -310,6 +310,65 @@ export function SettlementReport({
           </p>
         </section>
       )}
+      {/* DEC-DINE-IN-PAY-LATER: cash the Store took for tables, to compare with the till. */}
+      {view.cash === undefined ? null : view.cash === null ? (
+        <p className="bop-muted" role="status">
+          {t("Cash payments could not be read.")}
+        </p>
+      ) : view.cash.received.count === 0 && view.cash.refunded.count === 0 ? null : (
+        <section className="store-card settlement__cash" aria-labelledby="settlement-cash">
+          <header>
+            <h3 id="settlement-cash">{t("Cash")}</h3>
+          </header>
+          <ul className="overview-counts settlement__totals" aria-label={t("Cash totals")}>
+            <li>
+              <span className="overview-count__label">{t("Cash received")}</span>
+              <strong className="overview-count__value">{money(view.cash.received)}</strong>
+              <span className="overview-count__detail">
+                {t("{count} table{value} · tips {tipMinor}", {
+                  count: view.cash.received.count,
+                  value: view.cash.received.count === 1 ? "" : "s",
+                  tipMinor: formatSettlementMoney(view.cash.tipMinor),
+                })}
+              </span>
+            </li>
+            <li>
+              <span className="overview-count__label">{t("Cash refunds")}</span>
+              <strong className="overview-count__value">{money(view.cash.refunded)}</strong>
+              <span className="overview-count__detail">
+                {t("{count} refund{value}", {
+                  count: view.cash.refunded.count,
+                  value: view.cash.refunded.count === 1 ? "" : "s",
+                })}
+              </span>
+            </li>
+            <li>
+              <span className="overview-count__label">{t("Net cash")}</span>
+              <strong className="overview-count__value">
+                {formatSettlementMoney(view.cash.netMinor)}
+              </strong>
+              <span className="overview-count__detail">
+                {t("Cash rounding {roundingMinor}", {
+                  roundingMinor: formatSettlementMoney(view.cash.roundingMinor),
+                })}
+              </span>
+            </li>
+          </ul>
+          {view.cash.recordedAfterOutageCount > 0 ? (
+            <p role="note">
+              {t(
+                "{recordedAfterOutageCount} cash payment(s) were recorded after an outage; they count on the day they were paid.",
+                { recordedAfterOutageCount: view.cash.recordedAfterOutageCount },
+              )}
+            </p>
+          ) : null}
+          <p className="bop-muted">
+            {t(
+              "Cash our system recorded for tables. The till also holds cash from your own register, so compare this part only.",
+            )}
+          </p>
+        </section>
+      )}
       {view.currentDaySelfApprovedRefunds !== null &&
       view.currentDaySelfApprovedRefunds.count > 0 ? (
         <p role="status" className="settlement__self-approved-today">

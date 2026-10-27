@@ -14,9 +14,9 @@ import type { MerchantBusinessDayWindow } from "./merchant-business-day-window.j
  *   as refunds.
  * - Tips belong to the payment; the system does not record which staff member earned them.
  */
-export type StoreSalesChannel = "Online" | "CardMachine";
+export type StoreSalesChannel = "Online" | "CardMachine" | "Cash";
 export type StoreSalesOrderKind = "DineIn" | "Pickup" | "Counter";
-export const storeSalesChannels: readonly StoreSalesChannel[] = ["Online", "CardMachine"];
+export const storeSalesChannels: readonly StoreSalesChannel[] = ["Online", "CardMachine", "Cash"];
 export const storeSalesOrderKinds: readonly StoreSalesOrderKind[] = ["DineIn", "Pickup", "Counter"];
 
 export interface StoreSalesReportInput {
@@ -43,6 +43,8 @@ interface Totals {
   taxes: Map<string, bigint>;
   tipMinor: bigint;
   collectedMinor: bigint;
+  /** DEC-DINE-IN-PAY-LATER: cash rounding to 5 cents collected (not sales, tax or tips). */
+  roundingMinor: bigint;
   /** Payments whose priced items could not be matched to the amount taken (should be none). */
   unmatchedMinor: bigint;
   unmatchedCount: number;
@@ -65,6 +67,7 @@ const totals = (): Totals => ({
   taxes: new Map(),
   tipMinor: 0n,
   collectedMinor: 0n,
+  roundingMinor: 0n,
   unmatchedMinor: 0n,
   unmatchedCount: 0,
   refundCount: 0,
@@ -175,10 +178,12 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
     const groups = [f.all, f.channels.get(payment.channel) ?? fail()];
     if (kind !== null) groups.push(f.kinds.get(kind) ?? fail());
     for (const t of groups) {
-      t.paymentCount++;
+      // A table paid at the end is one payment over several round lines.
+      t.paymentCount += payment.paymentCount;
       t.orders.add(payment.orderReference);
       t.tipMinor += payment.tipMinor;
-      t.collectedMinor += payment.totalMinor;
+      t.collectedMinor += payment.totalMinor + payment.roundingMinor;
+      t.roundingMinor += payment.roundingMinor;
       if (!matched) {
         t.unmatchedMinor += payment.orderAllocationMinor;
         t.unmatchedCount++;
@@ -204,9 +209,9 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
       collectedMinor: 0n,
     };
     f.hours.set(hour, h);
-    h.paymentCount++;
+    h.paymentCount += payment.paymentCount;
     h.tipMinor += payment.tipMinor;
-    h.collectedMinor += payment.totalMinor;
+    h.collectedMinor += payment.totalMinor + payment.roundingMinor;
     if (!matched) continue;
     for (const item of items) {
       h.netSalesMinor += item.subtotalMinor - item.discountMinor;
@@ -348,6 +353,7 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
       "taxMinor",
       "tipMinor",
       "collectedMinor",
+      "roundingMinor",
       "unmatchedMinor",
       "refundedMinor",
       "refundedNetMinor",
@@ -410,7 +416,8 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
   // Reconciliation with the day-end settlement's own totals for the same window.
   const channel = (c: StoreSalesChannel) => range.channels.get(c) ?? fail();
   const online = channel("Online"),
-    machine = channel("CardMachine");
+    machine = channel("CardMachine"),
+    cash = channel("Cash");
   const checks = [
     online.collectedMinor === input.settlement.onlineCaptured.amountMinor,
     online.paymentCount === input.settlement.onlineCaptured.count,
@@ -421,11 +428,21 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
     machine.tipMinor === input.settlement.cardMachineTaken.tipMinor,
     machine.refundedMinor === input.settlement.cardMachineRefunded.amountMinor,
     machine.refundCount === input.settlement.cardMachineRefunded.count,
+    cash.collectedMinor === input.settlement.cashTaken.amountMinor,
+    cash.paymentCount === input.settlement.cashTaken.count,
+    cash.tipMinor === input.settlement.cashTaken.tipMinor,
+    cash.roundingMinor === input.settlement.cashTaken.roundingMinor,
+    cash.refundedMinor === input.settlement.cashRefunded.amountMinor,
+    cash.refundCount === input.settlement.cashRefunded.count,
   ];
   const settlementCollected =
-    input.settlement.onlineCaptured.amountMinor + input.settlement.cardMachineTaken.amountMinor;
+    input.settlement.onlineCaptured.amountMinor +
+    input.settlement.cardMachineTaken.amountMinor +
+    input.settlement.cashTaken.amountMinor;
   const settlementRefunded =
-    input.settlement.onlineRefunded.amountMinor + input.settlement.cardMachineRefunded.amountMinor;
+    input.settlement.onlineRefunded.amountMinor +
+    input.settlement.cardMachineRefunded.amountMinor +
+    input.settlement.cashRefunded.amountMinor;
 
   const summary = (t: Totals) => {
     const netSales = t.grossMinor - t.discountMinor;
@@ -445,6 +462,7 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
           ),
       ),
       tipsMinor: s(t.tipMinor),
+      cashRoundingMinor: s(t.roundingMinor),
       unmatchedMinor: s(t.unmatchedMinor),
       unmatchedPaymentCount: t.unmatchedCount,
       collectedMinor: s(t.collectedMinor),
@@ -470,6 +488,7 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
         t.serviceChargeMinor +
         t.taxMinor +
         t.tipMinor +
+        t.roundingMinor +
         t.unmatchedMinor !==
       t.collectedMinor
     )
@@ -608,6 +627,7 @@ const csv = (rows: readonly (readonly (string | number)[])[]) =>
 const channelLabel: Record<StoreSalesChannel, string> = {
   Online: "Online",
   CardMachine: "Store card machine",
+  Cash: "Cash",
 };
 
 /** One CSV per report: a header row, one row per business day (and item or hour), no customer data. */
@@ -637,8 +657,11 @@ export function storeSalesReportCsv(
       "net_collected",
       "online_collected",
       "card_machine_collected",
+      "cash_collected",
       "online_refunds",
       "card_machine_refunds",
+      "cash_refunds",
+      "cash_rounding",
       "currency",
     ];
     return csv([
@@ -666,8 +689,11 @@ export function storeSalesReportCsv(
           money(sum.netCollectedMinor),
           money(byChannel("Online").collectedMinor),
           money(byChannel("CardMachine").collectedMinor),
+          money(byChannel("Cash").collectedMinor),
           money(byChannel("Online").refundsMinor),
           money(byChannel("CardMachine").refundsMinor),
+          money(byChannel("Cash").refundsMinor),
+          money(sum.cashRoundingMinor),
           view.currencyCode,
         ];
       }),

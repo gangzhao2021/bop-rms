@@ -100,6 +100,8 @@ export interface SettlementView {
   /** WP-2423 Q7: the Store's own card machine, apart from online payments; null when unreadable,
    * undefined when the server does not report it. */
   readonly cardMachine?: SettlementCardMachine | null;
+  /** DEC-DINE-IN-PAY-LATER: tables paid in cash; null when unreadable, undefined from older servers. */
+  readonly cash?: SettlementCash | null;
   /** WP-2423: Provider charges matching no order, and their refunds, in the day; null when not
    * read, undefined when the server does not report them. */
   readonly unmatchedProviderCharges?: {
@@ -108,6 +110,17 @@ export interface SettlementView {
   } | null;
   readonly projectedAt: string;
 }
+export interface SettlementCash {
+  readonly received: SettlementAmount;
+  readonly tipMinor: string;
+  /** Cash rounding to 5 cents (may be negative). */
+  readonly roundingMinor: string;
+  readonly refunded: SettlementAmount;
+  readonly netMinor: string;
+  readonly recordedAfterOutageCount: number;
+}
+const signedMinor = (value: unknown) =>
+  typeof value === "string" && /^-?(?:0|[1-9][0-9]{0,18})$/u.test(value) ? value : fail();
 export interface SettlementCardMachine {
   readonly taken: SettlementAmount;
   readonly tipMinor: string;
@@ -145,6 +158,9 @@ export function parseSettlementView(value: unknown): SettlementView {
     "reconciliation",
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "cardMachine")
       ? ["cardMachine"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "cash")
+      ? ["cash"]
       : []),
     ...(value !== null &&
     typeof value === "object" &&
@@ -371,6 +387,32 @@ export function parseSettlementView(value: unknown): SettlementView {
               tipMinor: minor(c.tipMinor),
               recordedAfterOutageCount: count(c.recordedAfterOutageCount),
               refunded,
+            });
+          })(),
+        }),
+    ...(raw.cash === undefined
+      ? {}
+      : {
+          cash: (() => {
+            if (raw.cash === null) return null;
+            const c = exact(raw.cash, [
+              "received",
+              "tipMinor",
+              "roundingMinor",
+              "refunded",
+              "netMinor",
+              "recordedAfterOutageCount",
+            ]);
+            const received = amount(c.received),
+              refunded = amount(c.refunded);
+            if (received === null || refunded === null) return fail();
+            return Object.freeze({
+              received,
+              tipMinor: minor(c.tipMinor),
+              roundingMinor: signedMinor(c.roundingMinor),
+              refunded,
+              netMinor: signedMinor(c.netMinor),
+              recordedAfterOutageCount: count(c.recordedAfterOutageCount),
             });
           })(),
         }),
