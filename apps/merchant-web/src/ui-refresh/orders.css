@@ -1438,3 +1438,75 @@
     display: none;
   }
 }
+
+/* Live check 2026-10-26 (2): the opened order's groups sit exactly 24px apart and each heading 8px
+   above its content — the groups carry no padding of their own. */
+.orders-page .order-workbench-detail {
+  row-gap: 24px;
+}
+.orders-page .order-workbench-detail > :is(section, .order-payment-links) {
+  padding-block: 0;
+}
+.orders-page .order-workbench-detail :is(.order-panel__section, .order-round, .order-lines) h3 {
+  margin: 0 0 8px;
+}
+.orders-page
+  .order-workbench-detail
+  > :is(.order-payment-links, .order-refund-howto, .order-panel__page-link) {
+  margin-top: -16px;
+}
+
+/* Live check 2026-10-26 (2), phones: every amount ends on the same right edge. The row's next step
+   takes the second line's right end, under the amount, instead of a column of its own. */
+@container order-list (max-width: 512px) {
+  .orders-page .order-row {
+    position: relative;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "num status amount"
+      "what what next";
+    column-gap: 10px;
+    row-gap: 2px;
+    align-items: start;
+    padding: 10px 0;
+  }
+  .orders-page .order-row__summary {
+    display: contents;
+  }
+  .orders-page .order-row__number {
+    grid-area: num;
+  }
+  /* The whole row is the target, so the number keeps its text height and lines up with the status. */
+  .orders-page .order-row__number .order-row__open {
+    min-height: 0;
+  }
+  .orders-page .order-row__status {
+    grid-area: status;
+  }
+  .orders-page .order-workbench-amount {
+    grid-area: amount;
+    justify-self: end;
+    text-align: end;
+  }
+  .orders-page .order-row__what {
+    grid-area: what;
+  }
+  .orders-page .order-workbench-next {
+    grid-area: next;
+    align-self: end;
+    justify-self: end;
+  }
+  .orders-page .order-row:has(.order-row__open:focus-visible) {
+    outline: 3px solid var(--bop-color-focus);
+    outline-offset: -3px;
+  }
+}
+/* Without a Payment section the payment links start their own group. */
+.orders-page
+  .order-workbench-detail:not(:has(> .order-panel__section .order-panel__payment))
+  > :is(.order-payment-links, .order-refund-howto) {
+  margin-top: 0;
+}
+.orders-page .order-workbench-detail > .order-panel__next {
+  padding-top: 0;
+}
