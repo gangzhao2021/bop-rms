@@ -1111,6 +1111,7 @@ export function createCurrentOrderQueueClient(fetcher: typeof fetch = fetch) {
     },
   });
 }
+export const orderQueueMaximumResponseBytes = 1048576;
 async function get<T>(
   fetcher: typeof fetch,
   path: string,
@@ -1142,7 +1143,9 @@ async function get<T>(
     )
       return fail();
     const text = await response.text();
-    if (controller.signal.aborted || text.length > 65536) return fail();
+    // A full page (50 Orders, each with its rounds and up to three summary lines) passes 64 KiB on
+    // an ordinary busy day (v15 2026-10-27: 67,530 bytes); the bound only stops a runaway body.
+    if (controller.signal.aborted || text.length > orderQueueMaximumResponseBytes) return fail();
     return parse(JSON.parse(text) as unknown);
   } catch (error) {
     if (error instanceof CurrentOrderQueueError) throw error;
