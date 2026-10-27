@@ -287,6 +287,27 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Start all": "全部开始做",
   Finished: "做好了",
   "Mark {displayName} finished": "{displayName}做好了",
+  "All served": "全部上了",
+  "{text} · {count} ready to serve": "{text} · {count} 道可上",
+  "{count} ready to serve": "{count} 道可上",
+  "We could not confirm it was recorded. Tap it again: the same request is sent, so nothing is served twice.":
+    "没能确认是否已记下。请再点一次：会发送同一个请求，不会重复记为已上。",
+  "Nothing was marked served. Your access may have changed.": "没有记为已上。你的权限可能已变更。",
+  "Nothing was marked served. This table has changed; check it and try again.":
+    "没有记为已上。这桌的情况有变化，请看一下再试。",
+  "Serving progress could not be read. It is read again with the order.":
+    "暂时读不到上菜进度，会随订单一起重新读取。",
+  " · {served} of {ordered} served": " · 已上 {served}/{ordered}",
+  "Remaking — don't serve it until the kitchen marks the remake done.":
+    "重做中——等后厨做好后再上。",
+  "Mark {quantity} × {displayName} served": "{quantity} × {displayName} 已上",
+  "Served {served}/{ordered}": "已上 {served}/{ordered}",
+  "Serve the {count} ready": "这 {count} 道都上了",
+  "Mark served": "已上",
+  "Reading the table's order…": "正在读取这桌的订单…",
+  "The table's order could not be read. It is read again with the table.":
+    "读不到这桌的订单，会随桌台一起重新读取。",
+  "This table's order": "这桌的订单",
   Accept: "接受",
   "Accept ": "接单 ",
   "Accept a Kitchen work item": "接受后厨工作项",

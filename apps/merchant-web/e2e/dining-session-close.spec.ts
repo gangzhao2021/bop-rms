@@ -136,7 +136,7 @@ test("@production session closing advances both steps and recovers a lost finali
     });
   });
   await page.goto("/operations/orders");
-  await page.getByRole("button", { name: "View serving progress", exact: true }).click();
+  // Orders v3: the table's rounds and close steps are read with the order (no switch).
   const confirm = page.getByRole("checkbox", {
     name: "I confirm this dining session is ready for the next closing step",
     exact: true,

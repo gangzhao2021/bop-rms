@@ -119,29 +119,23 @@ test("@production serving retains its intent after a lost response and locks ref
     return route.fulfill({ headers, json: { status: "AlreadyCommitted", itemServiceVersion: 1 } });
   });
   await page.goto("/operations/orders");
-  await page.getByRole("button", { name: "View serving progress", exact: true }).click();
-  const submit = page.getByRole("button", { name: "Confirm served quantity", exact: true });
-  await expect(submit).toBeDisabled();
-  const quantity = page.getByRole("spinbutton");
-  // WP-2423 item 7: defaults to everything still to serve; staff can lower it.
-  await expect(quantity).toHaveValue("2");
-  await quantity.fill("1");
-  await quantity.fill("2");
-  await page
-    .getByRole("checkbox", { name: "I confirm 2 × Meal delivered to table T1", exact: true })
-    .check();
-  await submit.click();
-  const retry = page.getByRole("button", { name: "Retry same serving request", exact: true });
-  await expect(retry).toBeEnabled();
-  await expect(quantity).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeDisabled();
-  await expect(
-    page.getByRole("button", { name: "Refresh serving progress", exact: true }),
-  ).toBeDisabled();
-  await retry.click();
-  await expect(
-    page.getByText("Served · Ordered 2 · Served 2 · Remaining 0", { exact: true }),
-  ).toBeVisible();
+  // Orders v3 (Owner 2026-10-26): serving progress is under the round, read with the order — no
+  // switch to open it — and serving is one tap, with no quantity box or confirmation (not money).
+  await expect(page.getByRole("button", { name: "View serving progress" })).toHaveCount(0);
+  const round = page.getByRole("region", { name: "Round 1", exact: true });
+  await expect(round.getByText("Served 0/2")).toBeVisible();
+  await expect(round.getByText("Ready to serve", { exact: true })).toBeVisible();
+  await expect(round.getByRole("checkbox")).toHaveCount(0);
+  await expect(round.getByRole("spinbutton")).toHaveCount(0);
+  // Everything still to serve, in one tap.
+  const served = round.getByRole("button", { name: "Mark 2 × Meal served", exact: true });
+  await served.click();
+  // The answer was lost: the same button offers the same request again; nothing else moves.
+  await expect(served).toHaveText("Try again");
+  await expect(served).toBeEnabled();
+  await served.click();
+  await expect(round.getByText("Served 2/2")).toBeVisible();
+  await expect(served).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeEnabled();
   // WP-2423: the order's status is reread as soon as the item is served (before the 10 s poll).
   await expect(page.locator(".order-workbench-phase")).toHaveText("Served", { timeout: 5_000 });
@@ -263,23 +257,23 @@ test("@production WP-2423 (2026-10-18): a dish the kitchen is remaking says so a
     }),
   );
   await page.goto("/operations/orders");
-  await page.getByRole("button", { name: "View serving progress", exact: true }).click();
-  const progress = page.getByRole("region", { name: "Dining serving progress" });
+  // Orders v3: the round lists its dishes and serving state without a switch to open.
+  const progress = page.getByRole("region", { name: "Round 1", exact: true });
   const soup = progress.getByRole("listitem").filter({ hasText: "Beef noodle soup" });
-  await expect(soup.getByText("Remaking — kitchen is making it again")).toBeVisible();
+  await expect(soup.getByText("Being remade")).toBeVisible();
   await expect(
-    soup.getByText("Don't serve it until the kitchen marks the remake done", { exact: false }),
+    soup.getByText("Remaking — don't serve it until the kitchen marks the remake done."),
   ).toBeVisible();
   // Only the tea can be served; the soup has no serving control.
-  await expect(soup.getByRole("spinbutton")).toHaveCount(0);
+  await expect(soup.getByRole("button")).toHaveCount(0);
   await expect(
-    progress.getByRole("listitem").filter({ hasText: "Green tea" }).getByRole("spinbutton"),
+    progress.getByRole("listitem").filter({ hasText: "Green tea" }).getByRole("button"),
   ).toHaveCount(1);
   await expect(progress).not.toContainText("NOT_READY");
   await expectNoInternalText(page);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-    const remaking = soup.getByText("Remaking — kitchen is making it again");
+    const remaking = soup.getByText("Being remade");
     await remaking.scrollIntoViewIfNeeded();
     await expect(remaking).toBeInViewport();
     expect(

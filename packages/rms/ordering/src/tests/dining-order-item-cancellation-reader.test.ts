@@ -91,6 +91,7 @@ function readerFixture() {
       quantity: 1,
       submission_kind: "Initial",
       batch_sequence: null,
+      submitted_at: new Date("2026-10-26T23:00:00.000Z"),
     },
     {
       order_item_id: id(18),
@@ -98,6 +99,7 @@ function readerFixture() {
       quantity: 1,
       submission_kind: "Additional",
       batch_sequence: 2,
+      submitted_at: "2026-10-26T23:20:00.000Z",
     },
   ];
   let staff: unknown[] = [];
@@ -145,6 +147,11 @@ it("retains cancellation on exactly its Batch and member items", async () => {
       ?.cancellationReference,
   ).toBe(f.f.record.cancellationReference);
   expect(result?.items.find((item) => item.orderItemReference === id(20))?.cancellation).toBe(null);
+  // Orders v3 (Owner 2026-10-26): each round says when it was sent.
+  expect(result?.batches.map((batch) => [batch.sequence, batch.submittedAt])).toEqual([
+    [1, "2026-10-26T23:00:00.000Z"],
+    [2, "2026-10-26T23:20:00.000Z"],
+  ]);
 });
 it.each(["membership", "version", "scope"])(
   "refuses inconsistent cancellation %s",

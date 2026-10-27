@@ -296,11 +296,12 @@ test("@production acceptance retries the same operation after a lost response", 
     .getByRole("button", { name: "Retry acceptance for ORD-1 · round 2", exact: true })
     .first()
     .click();
+  // Orders v3: an accepted round no longer says it waits for acceptance.
   await expect(
     page
       .getByRole("region", { name: "Round 2" })
-      .getByText("Acceptance: Accepted", { exact: true }),
-  ).toBeVisible();
+      .getByText("Acceptance: Not accepted", { exact: true }),
+  ).toHaveCount(0);
   expect(bodies).toHaveLength(2);
   expect(JSON.parse(bodies[0] ?? "{}")).toMatchObject({
     orderBatchReference: id(91),
@@ -422,11 +423,12 @@ test("@production refresh after rejected acceptance uses current order version",
   await expect(page.getByText("Acceptance was not confirmed.", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Refresh orders", exact: true }).click();
   await page.getByRole("button", { name: "Accept ORD-1 · round 2", exact: true }).first().click();
+  // Orders v3: an accepted round no longer says it waits for acceptance.
   await expect(
     page
       .getByRole("region", { name: "Round 2" })
-      .getByText("Acceptance: Accepted", { exact: true }),
-  ).toBeVisible();
+      .getByText("Acceptance: Not accepted", { exact: true }),
+  ).toHaveCount(0);
   expect(bodies).toHaveLength(2);
   const first = JSON.parse(bodies[0] ?? "{}"),
     second = JSON.parse(bodies[1] ?? "{}");

@@ -93,6 +93,8 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
       // WP-2423 (v15 2026-10-16): when this paid dine-in round, still waiting for staff, was
       // paid; Orders, Home and Tables warn at 5 and 10 minutes (it is never refunded on its own).
       awaitingAcceptanceSince: batch.awaitingAcceptanceSince,
+      // Orders v3 (Owner 2026-10-26): when the round was sent, shown with its items.
+      submittedAt: batch.submittedAt,
     })),
     currentPhase: item.currentPhase,
     currentVersion: item.currentVersion,

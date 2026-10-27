@@ -1,8 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
 import { createDiningServeClient } from "./dining-serve-client.js";
-import { DiningServeAction } from "./DiningServeAction.js";
-import { parseDiningProgress } from "./dining-progress-client.js";
 const id = (n: number) => "01909988-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const command = () => ({
   operationReference: id(1),
@@ -52,94 +49,4 @@ it("treats mismatched success version as unknown and permission denial as denied
   const op = createDiningServeClient(fetcher).prepare(command());
   await expect(op.execute("A".repeat(43))).rejects.toMatchObject({ code: "OutcomeUnknown" });
   await expect(op.execute("A".repeat(43))).rejects.toMatchObject({ code: "PermissionDenied" });
-});
-const view = () =>
-  parseDiningProgress(
-    {
-      orderReference: id(2),
-      orderVersion: 4,
-      sessionVersion: 2,
-      diningSessionReference: id(55),
-      sessionPhase: "Active",
-      tableAssignmentVersion: 3,
-      closureStatus: "Open",
-      closureVersion: 0,
-      currentOrderVersion: 4,
-      tableLabel: "T1",
-      phase: "Ready",
-      observedAt: "2026-09-20T11:00:00.000Z",
-      items: [
-        {
-          orderItemReference: id(3),
-          orderBatchReference: id(4),
-          displayName: "Meal",
-          batchSequence: 2,
-          itemOrdinal: 1,
-          phase: "Ready",
-          orderedQuantity: 2,
-          deliveredQuantity: 1,
-          remainingQuantity: 1,
-          itemServiceVersion: 1,
-        },
-      ],
-    },
-    id(2),
-  );
-it("requires quantity/table confirmation and only renders for remaining Ready work", () => {
-  const current = view();
-  const item = current.items[0];
-  if (!item) throw new Error("fixture item missing");
-  const render = (entry: typeof item) =>
-    renderToStaticMarkup(
-      <DiningServeAction
-        view={current}
-        item={entry}
-        csrf={"A".repeat(43)}
-        locked={false}
-        onBusy={() => undefined}
-        onServed={() => undefined}
-      />,
-    );
-  const html = render(item);
-  expect(html).toContain("delivered to table T1");
-  expect(html).toContain("Confirm served quantity");
-  expect(html).toContain("disabled");
-  expect(render({ ...item, phase: "Fulfilled", remainingQuantity: 0 })).toBe("");
-  expect(render({ ...item, phase: "InProgress" })).toBe("");
-});
-
-it("WP-2423 item 7: offers the whole remaining quantity by default", () => {
-  const current = view();
-  const item = current.items[0];
-  if (!item) throw new Error("fixture item missing");
-  const html = renderToStaticMarkup(
-    <DiningServeAction
-      view={current}
-      item={{ ...item, orderedQuantity: 3, deliveredQuantity: 1, remainingQuantity: 2 }}
-      csrf={"A".repeat(43)}
-      locked={false}
-      onBusy={() => undefined}
-      onServed={() => undefined}
-    />,
-  );
-  expect(html).toContain('value="2"');
-  expect(html).toContain("I confirm 2 × Meal delivered to table T1");
-});
-
-it("never offers serving for a closed order even if stale item data remains Ready", () => {
-  const current = { ...view(), closureStatus: "Closed" as const, closureVersion: 1 };
-  const item = current.items[0];
-  if (!item) throw new Error("fixture item missing");
-  expect(
-    renderToStaticMarkup(
-      <DiningServeAction
-        view={current}
-        item={item}
-        csrf={"A".repeat(43)}
-        locked={false}
-        onBusy={() => undefined}
-        onServed={() => undefined}
-      />,
-    ),
-  ).toBe("");
 });

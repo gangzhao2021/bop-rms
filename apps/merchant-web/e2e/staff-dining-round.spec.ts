@@ -489,7 +489,8 @@ test("@production the order queue marks a round entered by staff and its card-ma
     await row.locator(".order-row__open").click();
   const entry = orderPanel(page);
   await expect(
-    entry.getByRole("heading", { name: "Round 2 · Added round · Entered by staff" }),
+    // Orders v3: each round is headed by its number, staff entry and time.
+    entry.getByRole("heading", { name: /^Round 2 · Entered by staff/u }),
   ).toBeVisible();
   // WP-2423 D5: the order shows the card-machine total apart from what was paid online.
   const payment = entry.locator(".order-panel__payment");
@@ -510,8 +511,10 @@ test("@production the order queue marks a round entered by staff and its card-ma
   await expectNoInternalText(page);
   // WP-2423 D5: the unpaid staff round is recorded as paid from Orders.
   await page.setViewportSize({ width: 1440, height: 900 });
-  // The list carries no amount; opening the form reads it for this one order.
-  await entry.getByRole("button", { name: "Record card-machine payment", exact: true }).click();
+  // Orders v3: the round under its items already knows its amount (read with the order's items).
+  await entry
+    .getByRole("button", { name: "Record card-machine payment · $16.95", exact: true })
+    .click();
   await expect(
     entry.getByText("Charge $16.95 on the card machine first", { exact: false }),
   ).toBeVisible();

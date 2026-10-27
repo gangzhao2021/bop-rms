@@ -1510,3 +1510,9 @@
 .orders-page .order-workbench-detail > .order-panel__next {
   padding-top: 0;
 }
+/* Phones: the open row's accent bar sits beside its number, never over it. */
+@container order-list (max-width: 512px) {
+  .orders-page .order-row[data-open="true"] {
+    padding-left: 12px;
+  }
+}

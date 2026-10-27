@@ -33,6 +33,7 @@ function row(
       {
         orderBatchReference: batchReference,
         sequence: 1,
+        submittedAt: "2026-08-12T11:45:00.000Z",
         acceptanceStatus: awaiting ? "NotAccepted" : "Accepted",
         canRequestAcceptance: awaiting,
         canCancel: phase === "Accepted",

@@ -16,6 +16,7 @@ import { serviceOperationReference } from "./service-control-client.js";
 import { storeTime } from "./StoreTime.js";
 import { newOperationReference } from "./operation-reference.js";
 import { TableSessionClose } from "./TableSessionClose.js";
+import { TableOrderRounds } from "./TableOrderRounds.js";
 import {
   browserOffline,
   StaleReadNotice,
@@ -997,6 +998,18 @@ export function DiningSessionWorkspace({
                   </section>
                 );
               })()}
+              {selected.session?.orderReference ? (
+                // Orders v3 (Owner 2026-10-26): the table's rounds and dishes, served from here.
+                <TableOrderRounds
+                  key={selected.session.orderReference}
+                  orderReference={selected.session.orderReference}
+                  csrf={csrf}
+                  timeZone={timeZone}
+                  refreshKey={String(loadedAt.current)}
+                  locked={locked || paused}
+                  onChanged={() => void loadRef.current(false, true)}
+                />
+              ) : null}
               {selected.currentDiningSessionReference !== null &&
               canCloseSessions &&
               selected.session ? (

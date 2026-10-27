@@ -1,0 +1,135 @@
+/*
+ * Orders v3 (Owner 2026-10-26): a table's order round by round, on Orders and on Tables. Each
+ * round: its number and time, "Served x/y" and its state in grey, its amount on the right; its
+ * dishes under it with their state in grey and "Served" in accent words; "All served" under the
+ * round. Rounds are parted by space and the row hairline, no boxes (v3 system).
+ */
+.order-round.order-round--lines {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.order-round--lines + .order-round--lines {
+  padding-top: 16px;
+  border-top: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.order-round--lines .order-round__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title amount"
+    "progress progress";
+  align-items: baseline;
+  gap: 2px 16px;
+}
+.order-round--lines .order-round__head h3,
+.orders-page .order-round--lines .order-round__head h3 {
+  grid-area: title;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  margin: 0;
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 600;
+}
+.order-round--lines .order-round__time {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.order-round--lines .order-round__amount {
+  grid-area: amount;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.order-round--lines .dining-round__progress {
+  grid-area: progress;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.order-round--lines .dining-round__state::before {
+  content: "· ";
+}
+.order-round--lines ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.order-round--lines li {
+  display: grid;
+  grid-template-columns: 2.5em minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  padding: 8px 0;
+  border: 0;
+}
+.order-round--lines li + li {
+  border-top: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+/* The dish's serving state sits under its name, "Served" at the right of that line. */
+.order-round--lines .dining-round-item {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.order-round--lines .dining-round-item[data-phase="Ready"] .dining-round-item__state {
+  color: var(--bop-color-text-default);
+  font-weight: 600;
+}
+.order-round--lines .dining-round-item .dining-progress-remaking {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-danger);
+  font-weight: 600;
+}
+.dining-round-item__serve,
+.dining-round__serve-all {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.dining-round__serve-all {
+  justify-self: start;
+}
+:is(.dining-round-item__serve, .dining-round__serve-all):disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+.dining-rounds__status:empty {
+  display: none;
+}
+.dining-rounds__status {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.table-order-rounds {
+  display: grid;
+  gap: 16px;
+}
+.table-order-rounds .order-lines {
+  display: grid;
+  gap: 16px;
+}

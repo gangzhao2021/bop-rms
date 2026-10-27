@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 
-test("@production serve all ready items of a round with one confirmation, retrying a lost answer", async ({
+test("@production serve all ready items of a round in one tap, retrying a lost answer", async ({
   page,
 }) => {
   const id = (n: number) => "01909968-3333-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -163,41 +163,29 @@ test("@production serve all ready items of a round with one confirmation, retryi
     });
   });
   await page.goto("/operations/orders");
-  await page.getByRole("button", { name: "View serving progress", exact: true }).click();
-  // The serving progress in staff words: store time, table state, each line's options and note.
-  await expect(page.getByText("Table open", { exact: true })).toBeVisible();
-  await expect(page.getByText("Checked Sep 13, 8:01 PM", { exact: true })).toBeVisible();
-  await expect(
-    page.locator(".dining-progress-lines").getByText("Note: Cup 3", { exact: true }),
-  ).toBeVisible();
+  // Orders v3 (Owner 2026-10-26): each round lists its dishes with their options and note, read
+  // with the order; "All served" marks the round's ready dishes in one tap, no confirmation.
+  const round = page.getByRole("region", { name: "Round 1", exact: true });
+  await expect(round.getByText("Note: Cup 3", { exact: true })).toBeVisible();
+  await expect(round.getByText("Served 0/10")).toBeVisible();
   await expectNoInternalText(page);
-  await page
-    .getByRole("button", { name: "Serve all 5 ready items in round 1", exact: true })
-    .click();
-  const dialog = page.getByRole("dialog", { name: "Mark 5 items served for round 1 at table T1?" });
-  await expect(dialog).toBeVisible();
-  const listed = dialog.getByRole("listitem");
-  await expect(listed).toHaveCount(4);
-  await expect(listed.nth(2)).toHaveText("2 × SoupBowlNote: Cup 3");
-  await expect(listed.nth(3)).toHaveText("4 × Flat WhiteSmall (8 oz)");
-  await expect(dialog.getByText("Note: Cup 3", { exact: true })).toBeVisible();
-  await expectNoInternalText(page);
-  await dialog.getByRole("button", { name: "Mark 5 items served", exact: true }).click();
-  const retry = dialog.getByRole("button", { name: "Retry the same request", exact: true });
-  await expect(retry).toBeEnabled();
-  await expect(page.getByRole("button", { name: "Refresh orders", exact: true })).toBeDisabled();
-  await retry.click();
-  await expect(dialog).toBeHidden();
+  const all = round.getByRole("button", { name: "All served", exact: true });
+  await all.click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  // The answer was lost: the same button sends the same request again.
+  await expect(all).toHaveCount(0);
+  const again = round.getByRole("button", { name: "Try again", exact: true });
+  await expect(again).toBeEnabled();
+  await again.click();
   await expect(
     page.getByText(
       "4 served. 1 could not be served because it changed (cancelled, partly served or the table moved). Check it and try again.",
       { exact: true },
     ),
   ).toBeVisible();
-  await expect(
-    page.getByText("Served · Ordered 2 · Served 2 · Remaining 0", { exact: true }),
-  ).toHaveCount(4);
-  await expect(page.getByRole("button", { name: /Serve all .* ready items/u })).toHaveCount(0);
+  // The soup changed (cancelled): it leaves the count.
+  await expect(round.getByText("Served 8/8")).toBeVisible();
+  await expect(round.getByRole("button", { name: /All served|Serve the/u })).toHaveCount(0);
   expect(bodies).toHaveLength(2);
   expect(bodies[1]).toBe(bodies[0]);
   expect(JSON.parse(bodies[0] ?? "{}")).toMatchObject({
