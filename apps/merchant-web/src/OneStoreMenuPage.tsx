@@ -11,7 +11,10 @@ import {
   filterRows,
   menuFilters,
   listingPending,
+  listingUnderway,
   menuRows,
+  readListingMarker,
+  writeListingMarker,
   newSectionCode,
   orderKey,
   sectionInputs,
@@ -100,6 +103,11 @@ export function OneStoreMenuPage({
   };
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
+  // v15 finding e: a listing in progress — this tab's request, or one started before a reload.
+  const [listingSince, setListingSince] = useState<number | null>(() =>
+    readListingMarker(menuReference, Date.now()),
+  );
+  const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
     let active = true;
     void Promise.all([client.load(menuReference), availability.load()])
@@ -140,6 +148,36 @@ export function OneStoreMenuPage({
         ),
       );
   });
+  // While a listing started before a reload (or the server shows one part-way) is in progress,
+  // read the menu again every few seconds until it is listed.
+  const polling = (listingSince !== null || (view !== null && listingUnderway(view))) && !busy;
+  useEffect(() => {
+    if (!polling) return;
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setClock(now);
+      if (readListingMarker(menuReference, now) === null) {
+        setListingSince(null);
+        writeListingMarker(menuReference, null);
+      }
+      reload();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [polling, menuReference, reload]);
+  useEffect(() => {
+    if (busy && listingSince !== null) {
+      const timer = setInterval(() => setClock(Date.now()), 1000);
+      return () => clearInterval(timer);
+    }
+    return undefined;
+  }, [busy, listingSince]);
+  useEffect(() => {
+    // Finished elsewhere (the server says listed): stop showing progress.
+    if (view !== null && listingSince !== null && !busy && !listingPending(view)) {
+      setListingSince(null);
+      writeListingMarker(menuReference, null);
+    }
+  }, [view, listingSince, busy, menuReference]);
   const shown = useMemo(() => filterRows(rows, search, filters), [rows, search, filters]);
   const unplaced = useMemo(
     () => (view === null || stock === null ? [] : dishesNotOnMenu(view, stock.items)),
@@ -162,6 +200,8 @@ export function OneStoreMenuPage({
         <p role="status">{t("Reading the menu…")}</p>
       </WorkspacePage>
     );
+  const underway = listingUnderway(view);
+  const listingInProgress = listingSince !== null || (busy && listing !== null);
   const narrowing = search.trim() !== "" || filters.size > 0;
   const reordering = !narrowing && view.permissions.mayEdit;
   const changedOrder = orderKey(rows) !== saved;
@@ -239,6 +279,9 @@ export function OneStoreMenuPage({
     if (client.command === undefined || busy) return;
     setBusy(true);
     setProblem(null);
+    const started = Date.now();
+    setListingSince(started);
+    writeListingMarker(menuReference, started);
     try {
       const operationReference = listing ?? newListing();
       // The open price book and waiting choice prices are listed with the menu.
@@ -246,10 +289,18 @@ export function OneStoreMenuPage({
         await client.oneStore({ action: "ListAll", operationReference, menuReference });
       else await client.command({ action: "List", operationReference, menuReference });
       setListing(null);
+      setListingSince(null);
+      writeListingMarker(menuReference, null);
       setProblem(t("Listed. Guests see the menu as it is now."));
       reload();
     } catch (error) {
-      if (!(error instanceof MenuPageError) || error.code !== "Offline") setListing(null);
+      // No answer (offline, or the page is going away): the listing may still be running on the
+      // server, so it stays shown in progress until the menu says listed (or three minutes pass).
+      if (!(error instanceof MenuPageError) || error.code !== "Offline") {
+        setListing(null);
+        setListingSince(null);
+        writeListingMarker(menuReference, null);
+      }
       setProblem(
         error instanceof MenuPageError
           ? error.problem !== null
@@ -659,14 +710,31 @@ export function OneStoreMenuPage({
       {narrowing && view.permissions.mayEdit ? (
         <p className="one-menu__note">{t("Clear the search and filters to reorder dishes.")}</p>
       ) : null}
-      {orderPending || changedOrder ? (
+      {listingInProgress && !changedOrder ? (
+        <div className="one-menu__pending" role="status">
+          <p>
+            {t(
+              "Listing… Prices, choices and the menu go live together; this can take up to a minute. Guests see the changes when it finishes.",
+            )}{" "}
+            {listingSince !== null
+              ? t("{seconds} s", {
+                  seconds: Math.max(0, Math.round((clock - listingSince) / 1000)),
+                })
+              : null}
+          </p>
+        </div>
+      ) : orderPending || changedOrder ? (
         <div className="one-menu__pending" role="status">
           <p>
             {changedOrder
               ? t("You moved dishes. Save the new order; guests see it when the menu is listed.")
-              : view.latestRelease === null
-                ? t("This menu has not been listed yet. Guests do not see it.")
-                : t("There are saved changes not listed yet. Guests still see the listed menu.")}
+              : underway
+                ? t(
+                    "A listing is under way or stopped part-way. Guests still see the menu as it was. If nothing changes in a minute, continue it.",
+                  )
+                : view.latestRelease === null
+                  ? t("This menu has not been listed yet. Guests do not see it.")
+                  : t("There are saved changes not listed yet. Guests still see the listed menu.")}
           </p>
           {changedOrder ? (
             <div className="one-menu__pending-actions">
@@ -690,7 +758,7 @@ export function OneStoreMenuPage({
                 disabled={busy}
                 onClick={() => void listMenu()}
               >
-                {busy ? t("Listing…") : t("List it")}
+                {underway ? t("Continue listing") : t("List it")}
               </button>
             </div>
           ) : (

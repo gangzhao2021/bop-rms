@@ -6184,4 +6184,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sizes of {item}": "{item} 的规格",
   "Back in stock: {item}": "恢复供应：{item}",
   "Sold out today: {item}": "今日售罄：{item}",
+  "Listing… Prices, choices and the menu go live together; this can take up to a minute. Guests see the changes when it finishes.":
+    "正在上架… 价格、加价和菜单会一起生效，可能需要一分钟。完成后客人才看到改动。",
+  "{seconds} s": "{seconds} 秒",
+  "A listing is under way or stopped part-way. Guests still see the menu as it was. If nothing changes in a minute, continue it.":
+    "上架正在进行或中途停止。客人仍看到原来的菜单。如果一分钟后仍没有变化，请继续上架。",
+  "Continue listing": "继续上架",
 });

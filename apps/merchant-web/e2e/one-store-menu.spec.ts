@@ -839,3 +839,105 @@ test("@production a dish with sizes is one row: its sizes inside, hidden togethe
     ],
   });
 });
+
+test("@production a listing in progress shows as such, also after a reload, until it is live", async ({
+  page,
+}) => {
+  released = null;
+  refuseListing = false;
+  let underway = false;
+  await session(page);
+  await page.route("**/merchant/commerce/menus/query", (route) => {
+    const body = route.request().postDataJSON() as { menuReference: string | null };
+    const view = {
+      ...builder(3, [
+        [30, 31],
+        [32, 33],
+      ]),
+      ...(underway && released === null ? { listingStep: "Approve" } : {}),
+    };
+    if (body.menuReference !== null) return route.fulfill({ headers, json: view });
+    return route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-MENU-LIST",
+        sourceAsOf: at,
+        viewer: id(50),
+        permissions: view.permissions,
+        menus: [
+          {
+            menuReference: MENU,
+            internalCode: "MAIN",
+            aggregateVersion: 3,
+            currentVersionReference: id(2),
+            localizedNames: { "en-CA": "TEST menu" },
+            placements: 4,
+            publication: null,
+            latestRelease: null,
+          },
+        ],
+      },
+    });
+  });
+  const listings: Record<string, unknown>[] = [];
+  // The listing takes 5 s on the server; it finishes even if the page that asked is reloaded.
+  await page.route("**/merchant/commerce/one-store-dishes/command", async (route) => {
+    listings.push(route.request().postDataJSON() as Record<string, unknown>);
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    released = id(8);
+    await route
+      .fulfill({ headers, json: { status: "Listed", menuReference: MENU } })
+      .catch(() => undefined);
+  });
+  await page.route("**/merchant/commerce/availability/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-AVAILABILITY",
+        sourceAsOf: at,
+        viewer: id(50),
+        timeZone: scope.timeZone,
+        permissions: { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true },
+        items: [30, 31, 32, 33].map((n) => ({
+          skuReference: id(n),
+          skuCode: "SKU_" + n,
+          productName: "x",
+          sizeName: "x",
+          status: "Available",
+          soldOutUntil: null,
+        })),
+      },
+    }),
+  );
+
+  await page.goto("/app/commerce/menus");
+  await page.getByRole("button", { name: "List it" }).click();
+  await expect(
+    page.getByText("Listing… Prices, choices and the menu go live together", { exact: false }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "List it" })).toHaveCount(0);
+  // A reload during the listing still shows it in progress, with no second "List it".
+  await page.reload();
+  await expect(
+    page.getByText("Listing… Prices, choices and the menu go live together", { exact: false }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "List it" })).toHaveCount(0);
+  await expect(
+    page.getByText("There are saved changes not listed yet.", { exact: false }),
+  ).toHaveCount(0);
+  // When the server has it live, the page says nothing is waiting.
+  await expect(page.getByText("Listing…", { exact: false })).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "List it" })).toHaveCount(0);
+  expect(listings).toHaveLength(1);
+
+  // The server shows a listing part-way (in review), started elsewhere or stopped: the page
+  // says so and offers to continue it, never a fresh "List it".
+  released = null;
+  underway = true;
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await expect(
+    page.getByText("A listing is under way or stopped part-way.", { exact: false }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue listing" })).toBeVisible();
+});
