@@ -34,7 +34,7 @@ const id = (n) => "01909a2e-0000-7000-8000-" + n.toString(16).padStart(12, "0");
  * 2. someone without menu approval (catalog permission) cannot list, even their own submission;
  * 3. a second store (even a draft one) turns the exception off at once — in the application and
  *    in the database (a mark written directly is refused); archiving it turns it back on;
- * 4. marks are append-only and scoped to their Brand.
+ * 4. marks are append-only and scoped to their Brand; a version is listed once.
  */
 it("single store: the submitter lists alone; no catalog permission or a second store refuses", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_ss_menu" }, async (context) => {
@@ -286,6 +286,27 @@ it("single store: the submitter lists alone; no catalog permission or a second s
         },
       ]);
       assert.deepEqual(await approved(first), [{ actor: owner }]);
+      // v15 2026-10-28 finding a: the version is listed once — a second listing record of it, even
+      // under a new operation and approval evidence, is refused (2000_114).
+      const againAt = await dbNow(admin);
+      await assert.rejects(
+        run((tx) =>
+          recordMenuSingleStoreListing(tx, {
+            brandReference,
+            storeReference,
+            approvalEvidenceReference: id(0x9800),
+            operationReference: id(0x9801),
+            menuReference: first.menu,
+            menuVersionReference: first.version,
+            lifecycleReference: first.lifecycle,
+            actorReference: owner,
+            listedAt: againAt,
+            auditReference: id(0x9802),
+          }),
+        ),
+        /menu_single_store_listing_version_once/u,
+      );
+      assert.equal((await marks()).length, 1);
 
       // ── 2. No catalog permission: Kai (kitchen) cannot list, even their own submission.
       const kais = await submit(cook);

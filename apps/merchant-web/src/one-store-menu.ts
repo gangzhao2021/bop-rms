@@ -164,3 +164,19 @@ export function newSectionCode(name: string, taken: readonly string[]): string {
   while (taken.includes(code)) code = `${base}-${n++}`;
   return code;
 }
+
+/**
+ * Whether the menu as saved is not what guests see (never listed, changed since, or a listing not
+ * finished). The server's listing step decides; older views fall back to comparing versions.
+ */
+export function listingPending(
+  view: Pick<MenuBuilderView, "listingStep" | "latestRelease" | "menu" | "publication">,
+): boolean {
+  if (view.listingStep !== undefined) return view.listingStep !== "Listed";
+  const state = view.publication?.state ?? null;
+  return (
+    view.latestRelease === null ||
+    view.latestRelease.menuVersionReference !== view.menu.versionReference ||
+    (state !== null && state !== "Published")
+  );
+}

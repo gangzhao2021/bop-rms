@@ -77,10 +77,13 @@ function builder(version: number, order: number[][]) {
       })),
     },
     publication: null,
+    // As on v15 (2026-10-28 finding a): the release names the menu's current version, which is
+    // not the draft version id the builder shows; the server's listing step decides.
     latestRelease:
       released === null
         ? null
         : { releaseReference: id(7), sequence: 1, menuVersionReference: released, createdAt: at },
+    listingStep: released === null ? "Submit" : "Listed",
     submittedBy: null,
     soleOperator: null,
     sellables: [
@@ -167,7 +170,7 @@ test("@production a single store's menu on one page: search, filters, sold out, 
     if (body.action === "List") {
       if (refuseListing)
         return route.fulfill({ status: 409, headers, json: { error: "NotSingleStore" } });
-      released = id(2);
+      released = id(8);
       return route.fulfill({ headers, json: { status: "Listed", menuReference: MENU } });
     }
     const sections = body.sections as { items: { skuReference: string }[] }[] | undefined;
@@ -188,7 +191,7 @@ test("@production a single store's menu on one page: search, filters, sold out, 
         headers,
         json: { error: "NotSingleStore", part: "Menu" },
       });
-    released = id(2);
+    released = id(8);
     return route.fulfill({ headers, json: { status: "Listed", menuReference: MENU } });
   });
   await page.route("**/merchant/commerce/availability/query", (route) =>
@@ -330,6 +333,13 @@ test("@production a single store's menu on one page: search, filters, sold out, 
   await page.getByRole("button", { name: "List it" }).click();
   await expect(page.getByText("Listed. Guests see the menu as it is now.")).toBeVisible();
   await expect(page.getByRole("button", { name: "List it" })).toHaveCount(0);
+  // Still listed after a reload: no "List it", no "saved changes not listed".
+  await page.reload();
+  await expect(page.locator(".one-menu__dish").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "List it" })).toHaveCount(0);
+  await expect(
+    page.getByText("There are saved changes not listed yet.", { exact: false }),
+  ).toHaveCount(0);
   const listings = menuCommands.filter((command) => command.action === "List");
   expect(listings).toHaveLength(2);
   expect(Object.keys(listings[1] ?? {}).sort()).toEqual([

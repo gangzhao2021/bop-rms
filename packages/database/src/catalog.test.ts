@@ -755,6 +755,7 @@ describe("migration catalog", () => {
       "2000_111_alter_recipe_review_single_store_listing",
       "2000_112_alter_allergen_declaration_staff_source",
       "2000_113_create_staff_declared_allergen_source",
+      "2000_114_alter_menu_single_store_listing_once",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

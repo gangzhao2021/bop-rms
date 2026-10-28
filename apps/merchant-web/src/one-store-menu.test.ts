@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  listingPending,
   dishMatches,
   dishesNotOnMenu,
   filterRows,
@@ -192,5 +193,22 @@ describe("WP-2423 item 8 ⑥ one-page menu", () => {
         row.dishes.map((d) => d.name),
       ),
     ).toEqual(["Siu mai (TEST)", "Dan dan noodles (TEST)"]);
+  });
+
+  it("takes the server's listing step: listed stays listed whatever version ids the view shows", () => {
+    const base = view();
+    const released = {
+      ...base,
+      latestRelease: {
+        releaseReference: id(7),
+        sequence: 1,
+        menuVersionReference: id(8),
+        createdAt: "2026-10-28T19:24:48.000Z",
+      },
+    };
+    expect(listingPending({ ...released, listingStep: "Listed" })).toBe(false);
+    expect(listingPending({ ...released, listingStep: "Submit" })).toBe(true);
+    // Older views without the step compare versions.
+    expect(listingPending(released)).toBe(true);
   });
 });

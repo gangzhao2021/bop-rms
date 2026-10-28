@@ -10,6 +10,7 @@ import {
   dishesNotOnMenu,
   filterRows,
   menuFilters,
+  listingPending,
   menuRows,
   newSectionCode,
   orderKey,
@@ -165,10 +166,7 @@ export function OneStoreMenuPage({
   const changedOrder = orderKey(rows) !== saved;
   const stage = menuStage(view.publication);
   // The menu as saved is not what guests see: never listed, edited since, or listing unfinished.
-  const orderPending =
-    view.latestRelease === null ||
-    view.latestRelease.menuVersionReference !== view.menu.versionReference ||
-    (stage !== "Editing" && stage !== "Published");
+  const orderPending = listingPending(view);
 
   const availabilityCommand = async (command: AvailabilityCommand, done: string) => {
     if (availability.command === undefined || busy) return;

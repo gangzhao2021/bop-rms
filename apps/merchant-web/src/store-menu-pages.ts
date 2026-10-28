@@ -291,6 +291,9 @@ export interface MenuBuilderView extends MenuViewBase {
   readonly allergenRegistry: boolean;
   /** WP-2423: present once the version is frozen for review; absent from older views. */
   readonly customerView?: MenuCustomerView | null;
+  /** WP-2423 item 8 ⑥: where "List it" would go on from, as the server decides it ("Listed":
+   * guests already see this version). Absent from older views. */
+  readonly listingStep?: "Listed" | "Submit" | "Approve" | "Publish" | "Stuck";
   /** WP-2423 item 8 ⑥: the Brand's allergen list staff declare from (absent: none). */
   readonly allergenChoices?: readonly AllergenChoice[];
   /** WP-2423 item 8 ⑥: the Brand keeps stock: declared allergens should become real recipes. */

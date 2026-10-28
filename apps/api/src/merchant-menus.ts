@@ -832,6 +832,9 @@ export function createMerchantMenus(options: {
             menu: menuView(loaded.aggregate),
             publication: summary.publication,
             latestRelease: summary.latestRelease,
+            // WP-2423 item 8 ⑥ (v15 2026-10-28 finding a): where "List it" would go on from, as
+            // the server decides it — "Listed" when guests already see this version.
+            listingStep: nextMenuListingStep(summary),
             submittedBy: typeof submitter === "string" ? submitter : null,
             soleOperator:
               gate === null
