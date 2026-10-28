@@ -86,7 +86,7 @@ test("@production staff see the phones at a table, pause joining by scan and rem
       {
         participantReference: id(11),
         phoneNumber: 1,
-        joinedAt: ago(40),
+        joinedAt: ago(5),
         left: false,
         removed: false,
       },
@@ -132,20 +132,25 @@ test("@production staff see the phones at a table, pause joining by scan and rem
   expect(axe.violations).toEqual([]);
   await expectNoInternalText(page, ["Mark unavailable"]);
 
-  // Pause from the new-phone notice: new guests then need a code.
-  await phones.getByRole("note").getByRole("button", { name: "Pause joining by scan" }).click();
+  // v15 2026-10-28 b: with two phones just joined, every control is shown once — the notices
+  // only point them out; pausing is in the heading, each phone's remove is in its row.
+  await expect(phones.getByRole("note")).toHaveCount(2);
+  await expect(phones.getByRole("note").getByRole("button")).toHaveCount(0);
+  const names = (await phones.getByRole("button").allTextContents()).map((name) => name.trim());
+  expect(names.length).toBe(new Set(names).size);
+  await expect(phones.getByRole("button", { name: "Pause joining by scan" })).toHaveCount(1);
+  // Pause: new guests then need a code.
+  await phones.getByRole("button", { name: "Pause joining by scan" }).click();
   await expect(phones).toContainText("Joining by scan is paused. New guests need a table code");
   await expect(phones.getByRole("button", { name: "Resume joining by scan" })).toBeVisible();
 
   // Remove phone 2 (asked once more first).
-  // Each remove button names its phone (a screen reader can tell them apart): phone 1 once (its
-  // row), phone 2 in its row and in the "just joined" notice (the same action).
+  // Each remove button names its phone (a screen reader can tell them apart), once each.
   const removeNames = await phones
     .getByRole("button", { name: /^Remove phone \d+ from this table$/u })
     .allTextContents();
   expect(removeNames.sort()).toEqual([
     "Remove phone 1 from this table",
-    "Remove phone 2 from this table",
     "Remove phone 2 from this table",
   ]);
   await expect(phones.getByRole("button", { name: "Remove from this table" })).toHaveCount(0);

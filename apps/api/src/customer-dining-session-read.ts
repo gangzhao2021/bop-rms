@@ -674,6 +674,26 @@ function postgresDependencies(
           quantity: item.quantity,
         })),
       );
+      // v15 2026-10-28 a: a round Ordering already has (just sent, or held for staff) is added to
+      // the status view by its event consumer within seconds. Until then the view lacks whole
+      // rounds the delivery read has: the table's order is still being prepared (the page reads
+      // again), not unavailable. Anything else that disagrees stays unavailable.
+      const projected = new Set(members.map((member) => member.orderBatchReference));
+      if (
+        delivery &&
+        delivery.items.some((item) => !projected.has(item.orderBatchReference)) &&
+        delivery.items.filter((item) => projected.has(item.orderBatchReference)).length ===
+          members.length &&
+        members.every((member) =>
+          delivery.items.some(
+            (item) =>
+              item.orderItemReference === member.orderItemReference &&
+              item.orderBatchReference === member.orderBatchReference &&
+              item.orderedQuantity === member.quantity,
+          ),
+        )
+      )
+        throw new DiningOrderStillProcessingError();
       if (
         !delivery ||
         delivery.items.length !== members.length ||

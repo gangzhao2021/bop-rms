@@ -24,8 +24,8 @@ export function newPhones(phones: readonly TablePhone[], now: number): readonly 
 
 /**
  * WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN (decisions 2–4): on the table page, the phones at the
- * table, numbered in the order they joined. A phone that just joined is pointed out, with
- * "Remove phone N from this table" and "Pause joining by scan" right there. Staff can pause or resume
+ * table, numbered in the order they joined. A phone that just joined is pointed out (its row
+ * has "Remove phone N from this table"; the heading has "Pause joining by scan"). Staff can pause or resume
  * joining by scan at any time; while paused, new guests need a code from staff or the host.
  */
 export function TablePanelPhones({
@@ -121,26 +121,13 @@ export function TablePanelPhones({
   const atTable = state.phones.filter((phone) => !phone.left).length;
   return (
     <section className="table-phones" aria-label={t("Phones at this table")}>
+      {/* v15 2026-10-28 b: the notice only points the new phone out; its one "Remove" is in its
+          row below and "Pause joining by scan" is once, in the heading (no repeated controls). */}
       {fresh.map((phone) => (
-        <div key={phone.participantReference} className="table-phones__new" role="note">
-          <p>{t("Phone {number} just joined.", { number: String(phone.phoneNumber) })}</p>
-          {confirming === phone.participantReference ? null : (
-            <div className="table-phones__actions">
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={() => setConfirming(phone.participantReference)}
-              >
-                {t("Remove phone {number} from this table", { number: String(phone.phoneNumber) })}
-              </button>
-              {state.paused ? null : (
-                <button type="button" disabled={disabled} onClick={() => pause(true)}>
-                  {t("Pause joining by scan")}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+        <p key={phone.participantReference} className="table-phones__new" role="note">
+          <strong>{t("Phone {number} just joined.", { number: String(phone.phoneNumber) })}</strong>{" "}
+          {t("Check it belongs to this table. If not, remove it below or pause joining by scan.")}
+        </p>
       ))}
       <header className="table-phones__head">
         <h3>

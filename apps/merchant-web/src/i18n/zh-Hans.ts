@@ -6085,4 +6085,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "只用于最后结账的桌。短时间大量下单总会先等确认：同一台手机 10 分钟内第 4 轮，或同一桌第 7 轮。",
   "A manager changes this.": "由经理修改。",
   "Remove phone {number} from this table": "把手机 {number} 移出这桌",
+  "Check it belongs to this table. If not, remove it below or pause joining by scan.":
+    "看看是不是这桌的客人；不是的话，在下面移出，或暂停扫码加入。",
 });

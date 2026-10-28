@@ -37,7 +37,10 @@ import { createCustomerAdditionalDiningSubmissionStore } from "../../../apps/api
 import { createDiningCheckoutExpiryDispatcher } from "../../../apps/api/src/dining-checkout-expiry-dispatcher.ts";
 import { createCustomerOrderStatusRead } from "../../../apps/api/src/customer-order-status-read.ts";
 import { createCustomerReceiptRead } from "../../../apps/api/src/customer-receipt-read.ts";
-import { createCustomerDiningSessionRead } from "../../../apps/api/src/customer-dining-session-read.ts";
+import {
+  createCustomerDiningSessionRead,
+  DiningOrderStillProcessingError,
+} from "../../../apps/api/src/customer-dining-session-read.ts";
 import { CustomerDiningSessionHandler } from "../../../apps/api/src/customer-dining-session.ts";
 import { parseDiningSessionView } from "../../../apps/customer-pwa/src/dining/dining-session-client.ts";
 import { createPostgresKitchenReworkStore } from "../../rms/kitchen/src/index.ts";
@@ -2019,6 +2022,13 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       });
       await delay(300);
 
+      // v15 2026-10-28 a: round 3 is in Ordering but the projection consumer has not taken it yet
+      // (it does within seconds). The table view says "still being prepared" (the page reads again)
+      // — not 503 ORDER_STATUS_DEPENDENCY_UNAVAILABLE, which showed "We couldn't load your table".
+      await assert.rejects(
+        tableOf(tableGuestP),
+        (error) => error instanceof DiningOrderStillProcessingError,
+      );
       // ── 4c. The projection consumer takes round 3 (after the cancellation revision).
       const event3 = submittedEvents.get(R3.batch.orderBatchReference);
       assert.deepEqual(await consume(event3), { status: "processed" });

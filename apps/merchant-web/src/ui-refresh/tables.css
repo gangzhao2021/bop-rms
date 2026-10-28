@@ -1188,18 +1188,10 @@
   font-size: 14px;
 }
 .tables-v3 .table-phones__new {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px 16px;
-  margin-bottom: 12px;
+  margin: 0 0 12px;
   padding: 8px 0 8px 12px;
   border-left: 3px solid var(--bop-color-accent);
-}
-.tables-v3 .table-phones__new p {
-  margin: 0;
-  font-weight: 600;
+  font-size: 15px;
 }
 .tables-v3 .table-phones__actions,
 .tables-v3 .table-phones__confirm {
