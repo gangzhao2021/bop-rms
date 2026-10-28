@@ -111,6 +111,29 @@ export function contentName(names: Readonly<Record<string, string>>): string | u
 }
 
 /**
+ * WP-2423 item 8 ③ (Owner decision 8): kitchen tickets show a dish's Chinese name whenever it has
+ * one, whatever language the screen is in (the kitchen of a Chinese restaurant reads Chinese),
+ * with its English name under it for staff who read English. Without a Chinese name, the name in
+ * the screen's language as elsewhere.
+ */
+export function kitchenDishNames(names: Readonly<Record<string, string>>): {
+  readonly displayName: string | undefined;
+  readonly otherName: string | null;
+} {
+  const usable = (value: string | undefined) =>
+    typeof value === "string" && value.trim().length > 0 ? value : undefined;
+  const chinese =
+    usable(names[CHINESE_LOCALE]) ??
+    usable(Object.entries(names).find(([key]) => key.startsWith("zh"))?.[1]);
+  if (chinese === undefined) return { displayName: contentName(names), otherName: null };
+  const english = usable(names["en-CA"]) ?? usable(names.en);
+  return {
+    displayName: chinese,
+    otherName: english === undefined || english === chinese ? null : english,
+  };
+}
+
+/**
  * Owner 2026-10-24: the Canadian priority allergens in Simplified Chinese, by registry code (as on
  * the customer side). Used while Chinese is chosen unless the registry already names it in Chinese.
  */
