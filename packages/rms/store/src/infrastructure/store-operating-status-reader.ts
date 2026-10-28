@@ -7,6 +7,7 @@ import { createPostgresStorePauseHistorySource } from "./persistence/pause-histo
 import { parseStoreOperatingContent } from "../contracts/store-operating-status.js";
 import { resolveStoreOperatingLocalFields } from "../application/store-operating-status-service.js";
 import { evaluateStoreOperatingStatus } from "../domain/evaluate-store-operating-status.js";
+import { describeStoreUpcomingHours } from "../domain/describe-store-upcoming-hours.js";
 
 type DateOptions = Parameters<typeof createPostgresStoreBusinessDateSource>[0];
 type WeekOptions = Parameters<typeof createPostgresStoreWeeklyScheduleSource>[0];
@@ -113,6 +114,15 @@ export function createPostgresStoreOperatingStatusReader(
           Object.freeze({ startLocalTime, endLocalTime, endsNextDay }),
         ),
       );
+      // WP-2423 item 8 ③ (decision 16): today's holiday or special hours, last orders, the next
+      // 7 days' holidays and special hours, and the next opening, from the same published facts.
+      const upcomingHours = describeStoreUpcomingHours({
+        localDate: local.localDate,
+        localTime: local.localTime,
+        weeklySchedule,
+        exceptions,
+        days: 7,
+      });
       return Object.freeze({
         businessDate,
         evaluatedAt: at,
@@ -120,6 +130,7 @@ export function createPostgresStoreOperatingStatusReader(
         ...evaluation,
         scheduledServiceModes,
         todayHours,
+        upcomingHours,
       });
     } catch {
       throw new Error("STORE_OPERATING_STATUS_UNAVAILABLE");

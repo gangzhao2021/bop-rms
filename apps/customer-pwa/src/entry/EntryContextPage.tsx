@@ -9,6 +9,8 @@ import {
   type StoreProfileLoader,
 } from "../store/store-profile-client.js";
 import { StoreIdentityCard } from "../store/StoreIdentity.js";
+import { nextOpeningText } from "../store/store-hours-text.js";
+import { endSentence } from "../journey/format.js";
 import type {
   CustomerEntryClient,
   CustomerEntryEstablishedContext,
@@ -347,22 +349,33 @@ function EntryState({
             ? t(
                 "Online ordering is paused for a short while. Try again in a few minutes, or order with a staff member.",
               )
-            : t("The store is closed now.")}
+            : state.todayKind === "Holiday" && state.todayHours.length === 0
+              ? t("The store is closed today for a holiday.")
+              : state.todayKind !== null && state.todayHours.length === 0
+                ? t("The store is closed today.")
+                : t("The store is closed now.")}
         </p>
-        <p>
-          {state.todayHours.length === 0
-            ? t("Closed today.")
-            : t("Today’s hours: ") +
-              state.todayHours
-                .map(
-                  (interval) =>
-                    entryClock(interval.start) +
-                    "–" +
-                    entryClock(interval.end) +
-                    (interval.endsNextDay ? t(" (next day)") : ""),
-                )
-                .join(listSeparator())}
-        </p>
+        {state.paused || state.nextOpening === null ? null : (
+          <p className="entry-state__next">
+            {endSentence(nextOpeningText(state.nextOpening, state.localDate))}
+          </p>
+        )}
+        {state.todayKind !== null && state.todayHours.length === 0 ? null : (
+          <p>
+            {state.todayHours.length === 0
+              ? t("Closed today.")
+              : t("Today’s hours: ") +
+                state.todayHours
+                  .map(
+                    (interval) =>
+                      entryClock(interval.start) +
+                      "–" +
+                      entryClock(interval.end) +
+                      (interval.endsNextDay ? t(" (next day)") : ""),
+                  )
+                  .join(listSeparator())}
+          </p>
+        )}
         <RetryAction onRetry={onRetry} />
       </div>
     );

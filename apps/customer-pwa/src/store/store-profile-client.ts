@@ -1,3 +1,4 @@
+import type { StoreDayKind } from "./store-hours-text.js";
 import { boundedFetch } from "../network/bounded-fetch.js";
 
 /**
@@ -26,12 +27,28 @@ export interface StoreProfile {
     readonly todayHours: readonly StoreHoursInterval[];
     readonly closesAt: string | null;
     readonly opensAt: string | null;
+    /**
+     * WP-2423 item 8 ③ (Owner decision 16): the Store's local date; today's holiday, special hours
+     * or closure; when the kitchen stops taking orders (while open, if the Store set a cut-off);
+     * the next opening (while not open); the holidays and special hours in the next 7 days.
+     */
+    readonly localDate: string | null;
+    readonly todayKind: StoreDayKind | null;
+    readonly lastOrdersAt: string | null;
+    readonly nextOpening: { readonly localDate: string; readonly startLocalTime: string } | null;
+    readonly upcoming: readonly {
+      readonly localDate: string;
+      readonly kind: StoreDayKind;
+      readonly intervals: readonly StoreHoursInterval[];
+    }[];
   } | null;
 }
 
 /** The current Store profile; null when it can't be read. */
 export type StoreProfileLoader = () => Promise<StoreProfile | null>;
 
+const localDate = /^\d{4}-\d{2}-\d{2}$/u;
+const kinds: readonly StoreDayKind[] = ["Holiday", "TemporaryClosure", "Override"];
 const localTime = /^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?$/u;
 const e164 = /^\+[1-9][0-9]{6,14}$/u;
 
@@ -54,6 +71,32 @@ function text(value: unknown, max: number): string {
   )
     throw new TypeError("store profile invalid");
   return value;
+}
+
+function date(value: unknown): string {
+  if (typeof value !== "string" || !localDate.test(value))
+    throw new TypeError("store profile invalid");
+  return value;
+}
+
+function kind(value: unknown): StoreDayKind {
+  if (!kinds.includes(value as StoreDayKind)) throw new TypeError("store profile invalid");
+  return value as StoreDayKind;
+}
+
+function intervals(value: unknown, maximum: number): readonly StoreHoursInterval[] {
+  if (!Array.isArray(value) || value.length > maximum) throw new TypeError("store profile invalid");
+  return Object.freeze(
+    value.map((entry: unknown) => {
+      const interval = record(entry, ["startLocalTime", "endLocalTime", "endsNextDay"]);
+      if (typeof interval.endsNextDay !== "boolean") throw new TypeError("store profile invalid");
+      return Object.freeze({
+        startLocalTime: time(interval.startLocalTime),
+        endLocalTime: time(interval.endLocalTime),
+        endsNextDay: interval.endsNextDay,
+      });
+    }),
+  );
 }
 
 function time(value: unknown): string {
@@ -93,29 +136,48 @@ export function parseStoreProfile(value: unknown): StoreProfile {
   if (store.phone !== null && (typeof store.phone !== "string" || !e164.test(store.phone)))
     throw new TypeError("store profile invalid");
   const hours = nullable(store.hours, (raw) => {
-    const value = record(raw, ["status", "todayHours", "closesAt", "opensAt"]);
+    const value = record(raw, [
+      "status",
+      "todayHours",
+      "closesAt",
+      "opensAt",
+      "localDate",
+      "todayKind",
+      "lastOrdersAt",
+      "nextOpening",
+      "upcoming",
+    ]);
     if (
       (value.status !== "Open" && value.status !== "Closed" && value.status !== "Paused") ||
-      !Array.isArray(value.todayHours) ||
-      value.todayHours.length > 12
+      !Array.isArray(value.upcoming) ||
+      value.upcoming.length > 7
     )
       throw new TypeError("store profile invalid");
     return Object.freeze({
       status: value.status,
-      todayHours: Object.freeze(
-        value.todayHours.map((entry: unknown) => {
-          const interval = record(entry, ["startLocalTime", "endLocalTime", "endsNextDay"]);
-          if (typeof interval.endsNextDay !== "boolean")
-            throw new TypeError("store profile invalid");
+      todayHours: intervals(value.todayHours, 12),
+      closesAt: nullable(value.closesAt, time),
+      opensAt: nullable(value.opensAt, time),
+      localDate: nullable(value.localDate, date),
+      todayKind: nullable(value.todayKind, kind),
+      lastOrdersAt: nullable(value.lastOrdersAt, time),
+      nextOpening: nullable(value.nextOpening, (next) => {
+        const entry = record(next, ["localDate", "startLocalTime"]);
+        return Object.freeze({
+          localDate: date(entry.localDate),
+          startLocalTime: time(entry.startLocalTime),
+        });
+      }),
+      upcoming: Object.freeze(
+        value.upcoming.map((day: unknown) => {
+          const entry = record(day, ["localDate", "kind", "intervals"]);
           return Object.freeze({
-            startLocalTime: time(interval.startLocalTime),
-            endLocalTime: time(interval.endLocalTime),
-            endsNextDay: interval.endsNextDay,
+            localDate: date(entry.localDate),
+            kind: kind(entry.kind),
+            intervals: intervals(entry.intervals, 16),
           });
         }),
       ),
-      closesAt: nullable(value.closesAt, time),
-      opensAt: nullable(value.opensAt, time),
     });
   });
   text(store.brandDisplayName, 160);

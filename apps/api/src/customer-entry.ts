@@ -53,6 +53,12 @@ export interface CustomerEntryNotAccepting {
     readonly endLocalTime: string;
     readonly endsNextDay: boolean;
   }[];
+  /** WP-2423 item 8 ③ (decision 16): today's holiday, special hours or closure, when it is one. */
+  readonly todayKind: "Holiday" | "TemporaryClosure" | "Override" | null;
+  /** The Store's next opening within 7 days (its local date and time), when one is published. */
+  readonly nextOpening: { readonly localDate: string; readonly startLocalTime: string } | null;
+  /** The Store's local date now, so "tomorrow" can be said. */
+  readonly localDate: string | null;
 }
 
 /** WP-2423 Q11: a genuine table code that staff replaced or turned off; no Session is issued. */
@@ -360,7 +366,15 @@ function parsePortResult(
     return Object.freeze({ status: "QrRetired", reason: raw.reason });
   }
   if (status === "NotAccepting") {
-    const raw = closedRecord(value, ["status", "storeDisplayName", "operatingState", "todayHours"]);
+    const raw = closedRecord(value, [
+      "status",
+      "storeDisplayName",
+      "operatingState",
+      "todayHours",
+      "todayKind",
+      "nextOpening",
+      "localDate",
+    ]);
     const time = /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u;
     if (
       typeof raw.storeDisplayName !== "string" ||
@@ -386,11 +400,36 @@ function parsePortResult(
         endsNextDay: interval.endsNextDay,
       });
     });
+    const date = /^\d{4}-\d{2}-\d{2}$/u;
+    if (
+      (raw.todayKind !== null &&
+        !["Holiday", "TemporaryClosure", "Override"].includes(String(raw.todayKind))) ||
+      (raw.localDate !== null && (typeof raw.localDate !== "string" || !date.test(raw.localDate)))
+    )
+      throw new TypeError("invalid not-accepting result");
+    let nextOpening: CustomerEntryNotAccepting["nextOpening"] = null;
+    if (raw.nextOpening !== null) {
+      const next = closedRecord(raw.nextOpening, ["localDate", "startLocalTime"]);
+      if (
+        typeof next.localDate !== "string" ||
+        !date.test(next.localDate) ||
+        typeof next.startLocalTime !== "string" ||
+        !time.test(next.startLocalTime)
+      )
+        throw new TypeError("invalid next opening");
+      nextOpening = Object.freeze({
+        localDate: next.localDate,
+        startLocalTime: next.startLocalTime,
+      });
+    }
     return Object.freeze({
       status: "NotAccepting",
       storeDisplayName: raw.storeDisplayName,
       operatingState: raw.operatingState as CustomerEntryNotAccepting["operatingState"],
       todayHours: Object.freeze(todayHours),
+      todayKind: raw.todayKind as CustomerEntryNotAccepting["todayKind"],
+      nextOpening,
+      localDate: raw.localDate as string | null,
     });
   }
   throw new TypeError("unknown Customer-entry result");
@@ -527,6 +566,9 @@ export class CustomerEntryHandler {
               storeDisplayName: result.storeDisplayName,
               operatingState: result.operatingState,
               todayHours: result.todayHours,
+              todayKind: result.todayKind,
+              nextOpening: result.nextOpening,
+              localDate: result.localDate,
             },
           });
           return;

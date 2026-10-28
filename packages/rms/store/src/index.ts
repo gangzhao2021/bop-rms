@@ -88,3 +88,5 @@ export * from "./contracts/public-store-profile-edit.js";
 export * from "./infrastructure/public-store-profile-publisher.js";
 // WP-2423 DEC-PICKUP-CAPACITY-SCHEDULE: published hours laid out ahead for capacity planning.
 export * from "./domain/expand-store-service-calendar.js";
+// WP-2423 item 8 ③ (decision 16): today's holiday, last orders, the next 7 days, next opening.
+export * from "./domain/describe-store-upcoming-hours.js";

@@ -2621,17 +2621,13 @@
   min-height: 1.75rem;
   font-size: 0.9375rem;
 }
-.store-strip__details summary {
+.store-strip__line {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0 var(--bop-space-2);
   min-height: 1.75rem;
-  list-style: none;
-  cursor: pointer;
-}
-.store-strip__details summary::-webkit-details-marker {
-  display: none;
+  margin: 0;
 }
 .store-strip__label {
   font-weight: 650;
@@ -2644,17 +2640,29 @@
   color: var(--bop-color-danger);
 }
 .store-strip__more {
-  color: var(--bop-color-text-muted);
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  color: var(--bop-color-accent);
+  text-decoration: none;
 }
-.store-strip__panel {
+/* WP-2423 item 8 ③ (decision 16): the Store at the bottom of the menu, apart by one hairline. */
+.customer-page .store-info {
+  margin-top: var(--bop-space-8, 2rem);
+  padding-top: var(--bop-space-6, 1.5rem);
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.store-identity__upcoming h3 {
+  margin: 0 0 var(--bop-space-1);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.store-identity__upcoming ul {
   display: grid;
-  gap: var(--bop-space-2);
-  margin-top: var(--bop-space-2);
-  padding: var(--bop-space-3) var(--bop-space-4);
-  border: 1px solid var(--bop-color-border-default);
-  border-radius: var(--bop-radius-card);
+  gap: var(--bop-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.store-identity__upcoming span {
+  font-weight: 600;
 }
 .customer-page .store-identity h2 {
   margin: 0 0 var(--bop-space-1);

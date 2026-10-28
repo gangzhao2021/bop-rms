@@ -43,7 +43,7 @@ import {
   createStoreProfileClient,
   type StoreProfileLoader,
 } from "../store/store-profile-client.js";
-import { StoreStatusStrip } from "../store/StoreIdentity.js";
+import { StoreInfoSection, StoreStatusStrip } from "../store/StoreIdentity.js";
 import { cartLinePrices, cartLinesSubtotal } from "./menu-line-prices.js";
 import type {
   CustomerMenuClient,
@@ -457,6 +457,12 @@ export function MenuScreen({
               where the arriving item would push it down. */}
           {mode === "detail" && state.kind !== "PermissionDenied" && state.kind !== "Loading" ? (
             <AllergenHelp />
+          ) : null}
+          {/* WP-2423 item 8 ③ (decision 16): the Store's hours, holidays, address and phone. */}
+          {mode === "browse" && context !== undefined ? (
+            <StoreInfoSection
+              load={storeProfile === undefined ? browserStoreProfile : storeProfile}
+            />
           ) : null}
         </div>
         {withCart ? (

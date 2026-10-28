@@ -503,6 +503,16 @@ async function prove(context) {
       assert.equal(entryStatus.state, "Closed");
       assert.equal(entryStatus.evaluatedAt, now);
       assert.equal(Object.hasOwn(entryStatus, "releaseReference"), false);
+      // WP-2423 item 8 ③ (decision 16): read from the same published hours under the restricted
+      // role — Sunday 04:00, closed; Monday's 09:00 period is the next opening; the December
+      // holiday and closure are beyond the next 7 days.
+      assert.equal(entryStatus.localDate, "2026-08-16");
+      assert.deepEqual(JSON.parse(JSON.stringify(entryStatus.upcomingHours)), {
+        todayKind: null,
+        lastOrdersAt: null,
+        upcoming: [],
+        nextOpening: { localDate: "2026-08-17", startLocalTime: "09:00:00" },
+      });
       assert.equal(
         await entryOperating.readCurrent({ ...query, publicStoreReference: id(93) }),
         null,

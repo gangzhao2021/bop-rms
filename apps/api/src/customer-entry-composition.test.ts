@@ -400,6 +400,9 @@ it.each(["closed", "paused", "mode", "scope", "time", "missing"])(
             operatingState:
               kind === "closed" ? "Closed" : kind === "paused" ? "TemporarilyClosed" : "Open",
             todayHours: [],
+            todayKind: null,
+            nextOpening: null,
+            localDate: null,
           }
         : { status: "EntryUnavailable" },
     );

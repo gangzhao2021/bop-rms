@@ -63,6 +63,8 @@ export function createPersistentEntryOperatingReader(options: {
           availableServiceModes: status.availableServiceModes,
           todayHours: status.todayHours,
           localTime: String(status.localTime),
+          localDate: String(status.localDate),
+          upcomingHours: status.upcomingHours,
         });
       } catch {
         return null;

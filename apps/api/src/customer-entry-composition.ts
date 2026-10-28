@@ -20,6 +20,7 @@ import {
   type PublicStoreProfilePorts,
   type StoreOperatingStatusPorts,
   type StoreOperatingStatus,
+  type StoreUpcomingHours,
 } from "@rms/store";
 import type { CustomerEntryPort, CustomerEntryPortInput } from "./customer-entry.js";
 
@@ -47,6 +48,10 @@ export interface CustomerEntryOperatingReader {
         }[];
         /** The Store's local time ("HH:MM:SS") at `evaluatedAt`, when the reader provides it. */
         localTime?: string;
+        /** The Store's local date at `evaluatedAt`, when the reader provides it. */
+        localDate?: string;
+        /** WP-2423 item 8 ③ (decision 16): holidays, last orders and the next opening. */
+        upcomingHours?: StoreUpcomingHours;
       })
     | null
   >;
@@ -128,6 +133,8 @@ export function createCustomerEntryComposition(
           endLocalTime: string;
           endsNextDay: boolean;
         }[] = [];
+        let upcoming: StoreUpcomingHours | null = null;
+        let localDate: string | null = null;
         if ("operatingReader" in options) {
           const current = await options.operatingReader.readCurrent({
             ...scope,
@@ -138,6 +145,8 @@ export function createCustomerEntryComposition(
             return unavailable;
           operatingStatus = current;
           todayHours = current.todayHours ?? [];
+          upcoming = current.upcomingHours ?? null;
+          localDate = current.localDate ?? null;
         } else {
           const operating = await createStoreOperatingStatusService({
             ...options.operating,
@@ -160,6 +169,9 @@ export function createCustomerEntryComposition(
             storeDisplayName: profile.profile.storeDisplayName,
             operatingState: operatingStatus.state,
             todayHours,
+            todayKind: upcoming?.todayKind ?? null,
+            nextOpening: upcoming?.nextOpening ?? null,
+            localDate,
           });
 
         const admitted = parseGuestAdmissionEvidence(
