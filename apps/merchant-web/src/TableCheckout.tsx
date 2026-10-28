@@ -15,6 +15,7 @@ import {
   type TableBill,
 } from "./table-checkout-client.js";
 import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session-client.js";
+import { compedText } from "./ItemCompAction.js";
 
 const cad = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
@@ -366,7 +367,17 @@ export function TableCheckout({
                 <ul>
                   {round.items.map((item, index) => (
                     <li key={index}>
-                      <span>{item.displayName}</span>
+                      <span>
+                        {item.displayName}
+                        {item.reduction ? (
+                          // WP-2423 item 8 ① segment 2: what a manager took off this dish.
+                          <span className="table-checkout__comp">
+                            {" · "}
+                            {compedText(item.reduction.kind, item.reduction.percent)} −
+                            {cad(item.reduction.amountMinor)}
+                          </span>
+                        ) : null}
+                      </span>
                       <span>{cad(item.subtotalMinor)}</span>
                     </li>
                   ))}

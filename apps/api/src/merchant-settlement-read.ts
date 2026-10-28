@@ -77,6 +77,12 @@ export interface MerchantSettlementView {
    */
   readonly unpaidWriteOffs: MerchantSettlementAmount | null;
   /**
+   * WP-2423 item 8 ① segment 2: comps and discounts managers decided in the day (by dish), off
+   * the tables' bills before they paid — not money taken or given back, listed on their own line.
+   * Null when not read.
+   */
+  readonly comps: MerchantSettlementAmount | null;
+  /**
    * WP-2423: charges the payment provider took in the day that match no Order, and refunds of such
    * charges in the day. The settlement statement counts both on the store's side; the Captured and
    * Refunded totals above (the store's own orders) do not. Null when not read.
@@ -168,6 +174,11 @@ export function createMerchantSettlementRead(options: {
     scope: MerchantSettlementScope,
     window: MerchantSettlementWindow,
   ): Promise<MerchantSettlementAmount | null>;
+  comps?(
+    tx: ConsumerTransaction,
+    scope: MerchantSettlementScope,
+    window: MerchantSettlementWindow,
+  ): Promise<MerchantSettlementAmount | null>;
   unmatchedProviderCharges?(
     tx: ConsumerTransaction,
     scope: MerchantSettlementScope,
@@ -240,6 +251,7 @@ export function createMerchantSettlementRead(options: {
         options.unpaidWriteOffs === undefined
           ? null
           : await options.unpaidWriteOffs(tx, scope, window);
+      const comps = options.comps === undefined ? null : await options.comps(tx, scope, window);
       const unmatchedProviderCharges =
         options.unmatchedProviderCharges === undefined
           ? null
@@ -272,6 +284,7 @@ export function createMerchantSettlementRead(options: {
         cardMachine,
         cash,
         unpaidWriteOffs,
+        comps,
         unmatchedProviderCharges,
         projectedAt: options.now(),
       });

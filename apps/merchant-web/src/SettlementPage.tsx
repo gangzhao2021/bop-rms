@@ -369,6 +369,30 @@ export function SettlementReport({
           </p>
         </section>
       )}
+      {/* WP-2423 item 8 ① segment 2: comps and discounts, their own line (never hidden). */}
+      {view.comps === undefined ? null : view.comps === null ? (
+        <p className="bop-muted" role="status">
+          {t("Comps and discounts could not be read.")}
+        </p>
+      ) : view.comps.count === 0 ? null : (
+        <section className="store-card settlement__comps" aria-labelledby="settlement-comps">
+          <header>
+            <h3 id="settlement-comps">{t("Comps and discounts by a manager")}</h3>
+          </header>
+          <ul className="overview-counts settlement__totals" aria-label={t("Comps and discounts")}>
+            <li>
+              <span className="overview-count__label">{t("Taken off bills")}</span>
+              <strong className="overview-count__value">{money(view.comps)}</strong>
+              <span className="overview-count__detail">{countOf(view.comps.count, "dish")}</span>
+            </li>
+          </ul>
+          <p className="bop-muted">
+            {t(
+              "Decided today by a manager, with a reason, before the table paid. Not collected, so not in the takings above.",
+            )}
+          </p>
+        </section>
+      )}
       {/* DEC-DINE-IN-PAY-LATER (decision 4): never collected, kept in the day's summary. */}
       {view.unpaidWriteOffs === undefined ? null : view.unpaidWriteOffs === null ? (
         <p className="bop-muted" role="status">

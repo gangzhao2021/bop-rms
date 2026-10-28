@@ -96,6 +96,22 @@ describe("WP-2423 P1 settlement report", () => {
     ).not.toContain("written off");
   });
 
+  it("WP-2423 item 8 ① segment 2: lists the day's comps and discounts on their own line", () => {
+    const html = render({
+      ...settlementViewFixture(),
+      comps: { count: 2, amountMinor: "2830", currencyCode: "CAD" },
+    });
+    expect(html).toContain("Comps and discounts by a manager");
+    expect(html).toContain("$28.30");
+    expect(html).toContain("2 dishes");
+    expect(
+      render({
+        ...settlementViewFixture(),
+        comps: { count: 0, amountMinor: "0", currencyCode: "CAD" },
+      }),
+    ).not.toContain("Comps and discounts by a manager");
+  });
+
   it("names a statement difference and a truncated list", () => {
     const view = settlementViewFixture();
     Object.assign(view.reconciliation.settlement.checks[0] ?? {}, {

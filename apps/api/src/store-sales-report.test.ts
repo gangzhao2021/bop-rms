@@ -28,6 +28,7 @@ function item(skuReference: string, quantity: number, subtotal: number, discount
     name: names[skuReference] ?? "",
     subtotalMinor: BigInt(subtotal),
     discountMinor: BigInt(discount),
+    compMinor: 0n,
     taxMinor: BigInt(tax),
     feeMinor: 0n,
     totalMinor: BigInt(subtotal - discount + tax),
@@ -234,6 +235,7 @@ describe("store sales report (WP-2423 Q14)", () => {
         quantitySold: 3,
         grossSalesMinor: "1500",
         discountsMinor: "0",
+        compsMinor: "0",
         netSalesMinor: "1500",
         refundedQuantity: 2,
         refundsMinor: "1000",
@@ -244,6 +246,7 @@ describe("store sales report (WP-2423 Q14)", () => {
         quantitySold: 4,
         grossSalesMinor: "1400",
         discountsMinor: "100",
+        compsMinor: "0",
         netSalesMinor: "1300",
         refundedQuantity: 2,
         refundsMinor: "700",
@@ -254,6 +257,7 @@ describe("store sales report (WP-2423 Q14)", () => {
         quantitySold: 1,
         grossSalesMinor: "400",
         discountsMinor: "0",
+        compsMinor: "0",
         netSalesMinor: "400",
         refundedQuantity: 0,
         refundsMinor: "0",
@@ -376,16 +380,16 @@ describe("store sales report (WP-2423 Q14)", () => {
     expect(summary.startsWith("﻿")).toBe(true);
     const lines = summary.slice(1).trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "business_date,day_status,payments,orders,gross_sales,discounts,net_sales,service_charges,tax_synthetic_tax,tax_total,tips,total_collected,refunds,net_collected,online_collected,card_machine_collected,cash_collected,online_refunds,card_machine_refunds,cash_refunds,cash_rounding,unpaid_write_offs,unpaid_write_off_amount,currency",
+      "business_date,day_status,payments,orders,gross_sales,discounts,comps_and_discounts_by_manager,comps_and_discounts_count,net_sales,service_charges,tax_synthetic_tax,tax_total,tips,total_collected,refunds,net_collected,online_collected,card_machine_collected,cash_collected,online_refunds,card_machine_refunds,cash_refunds,cash_rounding,unpaid_write_offs,unpaid_write_off_amount,currency",
     );
     expect(lines[1]).toBe(
-      "2026-10-14,open (so far),5,4,33.00,1.00,32.00,0.00,4.17,4.17,3.50,39.67,19.22,20.45,30.69,8.98,0.00,15.26,3.96,0.00,0.00,0,0.00,CAD",
+      "2026-10-14,open (so far),5,4,33.00,1.00,0.00,0,32.00,0.00,4.17,4.17,3.50,39.67,19.22,20.45,30.69,8.98,0.00,15.26,3.96,0.00,0.00,0,0.00,CAD",
     );
     const items = storeSalesReportCsv(view, "items").slice(1).trimEnd().split("\r\n");
     expect(items[0]).toBe(
-      "business_date,item,quantity_sold,gross_sales,discounts,net_sales,refunded_quantity,refunds,net_after_refunds,currency",
+      "business_date,item,quantity_sold,gross_sales,discounts,comps_and_discounts_by_manager,net_sales,refunded_quantity,refunds,net_after_refunds,currency",
     );
-    expect(items).toContain("2026-10-14,Latte — Large,3,15.00,0.00,15.00,2,10.00,5.00,CAD");
+    expect(items).toContain("2026-10-14,Latte — Large,3,15.00,0.00,0.00,15.00,2,10.00,5.00,CAD");
     const hourly = storeSalesReportCsv(view, "hourly").slice(1).trimEnd().split("\r\n");
     expect(hourly[1]).toBe("2026-10-14,11:00,1,13.50,1.76,2.00,17.26,CAD");
     const tips = storeSalesReportCsv(view, "tips").slice(1).trimEnd().split("\r\n");
@@ -547,5 +551,66 @@ describe("store sales report (WP-2423 Q14)", () => {
       }).reconciliation.matchesSettlement,
     ).toBe(false);
     expect(storeSalesReportCsv(view, "summary").split("\r\n")[0]).toContain("cash_collected");
+  });
+  it("WP-2423 item 8 ① segment 2: a manager's comp is its own line, off net sales and tax, in the export", () => {
+    // Two dishes; the second (10.00 + 1.30 tax) comped in full before the table paid in cash.
+    const kept = item(sku.latteLarge, 1, 1000);
+    const comped = {
+      ...item(sku.muffin, 1, 1000),
+      compMinor: 1000n,
+      taxMinor: 0n,
+      totalMinor: 0n,
+      taxComponents: [{ code: "SYNTHETIC_TAX", amountMinor: 0n }],
+    };
+    const tableOrder = order(901, "DineIn", "Qr", [[kept, comped]]);
+    const paid = kept.totalMinor;
+    const view = computeStoreSalesReport({
+      ...today,
+      orders: [tableOrder],
+      payments: [
+        {
+          channel: "Cash",
+          paymentIntentReference: ref(951) + ":1",
+          orderReference: ref(901),
+          orderBatchReference: ref(911),
+          orderAllocationMinor: paid,
+          tipMinor: 0n,
+          totalMinor: paid,
+          roundingMinor: 0n,
+          paymentCount: 1,
+          takenAt: "2026-10-14T20:00:00.000Z",
+        },
+      ],
+      refundedPayments: [],
+      refunds: [],
+      settlement: {
+        onlineCaptured: { count: 0, amountMinor: 0n },
+        onlineRefunded: { count: 0, amountMinor: 0n },
+        cardMachineTaken: { count: 0, amountMinor: 0n, tipMinor: 0n },
+        cardMachineRefunded: { count: 0, amountMinor: 0n },
+        cashTaken: { count: 1, amountMinor: paid, tipMinor: 0n, roundingMinor: 0n },
+        cashRefunded: { count: 0, amountMinor: 0n },
+      },
+    });
+    expect(view.summary).toMatchObject({
+      grossSalesMinor: "2000",
+      compCount: 1,
+      compsMinor: "1000",
+      netSalesMinor: "1000",
+      taxMinor: kept.taxMinor.toString(),
+      collectedMinor: paid.toString(),
+      unmatchedPaymentCount: 0,
+    });
+    expect(view.reconciliation.matchesSettlement).toBe(true);
+    const muffin = view.items.find((row) => row.compsMinor === "1000");
+    expect(muffin).toMatchObject({ grossSalesMinor: "1000", netSalesMinor: "0" });
+    const [header, row] = storeSalesReportCsv(view, "summary").split("\r\n");
+    const columns = (header ?? "").split(",");
+    const values = (row ?? "").split(",");
+    expect(values[columns.indexOf("comps_and_discounts_by_manager")]).toBe("10.00");
+    expect(values[columns.indexOf("comps_and_discounts_count")]).toBe("1");
+    expect(storeSalesReportCsv(view, "items").split("\r\n")[0]).toContain(
+      "comps_and_discounts_by_manager",
+    );
   });
 });

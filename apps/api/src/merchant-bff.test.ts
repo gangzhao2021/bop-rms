@@ -2323,6 +2323,7 @@ describe("WP-2423 P1 merchant settlement read route", () => {
     },
     cash: null,
     unpaidWriteOffs: null,
+    comps: null,
     unmatchedProviderCharges: null,
     projectedAt: "2026-09-22T09:00:00.000Z",
   };

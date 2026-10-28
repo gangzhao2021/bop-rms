@@ -107,6 +107,11 @@ export interface SettlementView {
    * never collected; null when unreadable, undefined from older servers.
    */
   readonly unpaidWriteOffs?: SettlementAmount | null;
+  /**
+   * WP-2423 item 8 ① segment 2: comps and discounts managers decided in the day (by dish); null
+   * when unreadable, undefined from older servers.
+   */
+  readonly comps?: SettlementAmount | null;
   /** WP-2423: Provider charges matching no order, and their refunds, in the day; null when not
    * read, undefined when the server does not report them. */
   readonly unmatchedProviderCharges?: {
@@ -169,6 +174,9 @@ export function parseSettlementView(value: unknown): SettlementView {
       : []),
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "unpaidWriteOffs")
       ? ["unpaidWriteOffs"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "comps")
+      ? ["comps"]
       : []),
     ...(value !== null &&
     typeof value === "object" &&
@@ -425,6 +433,7 @@ export function parseSettlementView(value: unknown): SettlementView {
           })(),
         }),
     ...(raw.unpaidWriteOffs === undefined ? {} : { unpaidWriteOffs: amount(raw.unpaidWriteOffs) }),
+    ...(raw.comps === undefined ? {} : { comps: amount(raw.comps) }),
     ...(raw.unmatchedProviderCharges === undefined
       ? {}
       : {

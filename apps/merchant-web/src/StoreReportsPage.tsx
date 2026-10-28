@@ -91,8 +91,16 @@ function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
   const lines: [string, string, boolean?][] = [
     [t("Gross sales"), money(summary.grossSalesMinor)],
     [t("Discounts"), "−" + money(summary.discountsMinor)],
-    [t("Net sales"), money(summary.netSalesMinor), true],
   ];
+  // WP-2423 item 8 ① segment 2: comps and discounts a manager decided, always on their own line.
+  if (summary.compCount > 0)
+    lines.push([
+      t("Comps and discounts by a manager · {dishes}", {
+        dishes: countOf(summary.compCount, "dish"),
+      }),
+      "−" + money(summary.compsMinor),
+    ]);
+  lines.push([t("Net sales"), money(summary.netSalesMinor), true]);
   if (summary.serviceChargesMinor !== "0")
     lines.push([t("Service charges"), money(summary.serviceChargesMinor)]);
   for (const tax of summary.taxes)
@@ -384,6 +392,7 @@ export function StoreReports({
             t("Sold"),
             t("Gross sales"),
             t("Discounts"),
+            t("Comps"),
             t("Net sales"),
             t("Refunded"),
             t("Refunds"),
@@ -395,6 +404,7 @@ export function StoreReports({
             row.quantitySold,
             money(row.grossSalesMinor),
             money(row.discountsMinor),
+            money(row.compsMinor),
             money(row.netSalesMinor),
             row.refundedQuantity,
             money(row.refundsMinor),

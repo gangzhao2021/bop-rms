@@ -43,7 +43,11 @@ function fixture() {
   const rows: (typeof row)[] = [row];
   // DEC-DINE-IN-PAY-LATER: no dish was taken off an unpaid bill in these cases.
   const query = vi.fn(async (sql: string) =>
-    sql.includes("basis='PayLater'") ? { rows: [], rowCount: 0 } : { rows, rowCount: rows.length },
+    sql.includes("basis='PayLater'") ||
+    sql.includes("order_item_price_reduction") ||
+    sql.includes("set_config")
+      ? { rows: [], rowCount: 0 }
+      : { rows, rowCount: rows.length },
   );
   const tx = { query: query as typeof query & ConsumerTransaction["query"] };
   const authorize = vi.fn(async () => true);

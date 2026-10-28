@@ -19,6 +19,8 @@ import {
   type MerchantOrderListSummary,
   type OrderAcceptanceHold,
   type StaffOrderCancellationRecord,
+  listOrderPriceReductions,
+  orderPriceReductionPermission,
 } from "@rms/ordering";
 import { listStoreKitchenOrderItemStates, listStoreStartedKitchenBatches } from "@rms/kitchen";
 import { listDiningSessionTableLabels } from "@rms/dining";
@@ -129,6 +131,8 @@ export function createPersistentMerchantOrderQueue(options: {
               counterOrderPermission,
               "payment.refund.request",
               "payment.refund.approve",
+              // WP-2423 item 8 ① segment 2: comps and discounts are offered to managers only.
+              orderPriceReductionPermission,
             ]);
             if (decisions.get("ordering.operate")?.effect !== "Allow") return unavailable();
             return Object.freeze({
@@ -139,6 +143,7 @@ export function createPersistentMerchantOrderQueue(options: {
                 decisions.get("order.accept")?.effect === "Allow",
               // WP-2423 Q6: staff cancellation is offered only to holders of ordering.order.cancel.
               cancelAllowed: decisions.get(staffOrderCancellationPermission)?.effect === "Allow",
+              compAllowed: decisions.get(orderPriceReductionPermission)?.effect === "Allow",
               // The card-machine payment record (counter orders and staff-entered table rounds).
               cardMachinePaymentAllowed: decisions.get(counterOrderPermission)?.effect === "Allow",
               // Payments and refunds are read by refund requesters (Manager) and approvers
@@ -157,6 +162,7 @@ export function createPersistentMerchantOrderQueue(options: {
             resolved,
             acceptanceAllowed,
             cancelAllowed,
+            compAllowed,
             cardMachinePaymentAllowed,
             paymentsAllowed,
           } = authority.scope;
@@ -451,6 +457,18 @@ export function createPersistentMerchantOrderQueue(options: {
             }
           >();
           const unpaidRemoved = new Map<string, string[]>();
+          // WP-2423 item 8 ① segment 2: dishes a manager may comp or discount on an unpaid
+          // pay-later round (started in the kitchen), and those comped or discounted.
+          const compable = new Map<string, string[]>();
+          const comped = new Map<
+            string,
+            {
+              orderItemReference: string;
+              kind: "Comp" | "Percent" | "Amount";
+              percent: number | null;
+              amountMinor: string;
+            }[]
+          >();
           if (scoped !== null && orderReferences.length > 0) {
             for (const record of await createPostgresStaffOrderCancellationReader(
               scoped,
@@ -726,6 +744,25 @@ export function createPersistentMerchantOrderQueue(options: {
               const paid = new Set(
                 settlements.map((settlement) => String(settlement.orderReference)),
               );
+              if (!(await stillAllowed())) return unavailable();
+              const reductions = await listOrderPriceReductions(
+                businessTransaction,
+                scoped,
+                payLaterOrders,
+              );
+              const reduced = new Map(
+                reductions.map((record) => [record.orderItemReference, record]),
+              );
+              for (const record of reductions)
+                comped.set(record.orderBatchReference, [
+                  ...(comped.get(record.orderBatchReference) ?? []),
+                  {
+                    orderItemReference: record.orderItemReference,
+                    kind: record.kind,
+                    percent: record.percent,
+                    amountMinor: record.totalMinor.toString(),
+                  },
+                ]);
               // The table's bill on the Orders list: what it paid, else what its rounds come to.
               for (const order of payLaterOrders) {
                 const settlement = settlements.find(
@@ -752,10 +789,16 @@ export function createPersistentMerchantOrderQueue(options: {
                       sent.has(String(price.orderBatchReference)) &&
                       !removed.has(String(price.orderItemReference)),
                   )
-                  .reduce((sum, price) => sum + price.total.amountMinor, 0n);
+                  .reduce(
+                    (sum, price) =>
+                      sum +
+                      price.total.amountMinor -
+                      (reduced.get(String(price.orderItemReference))?.totalMinor ?? 0n),
+                    0n,
+                  );
                 tableBills.set(order, { totalMinor: owed.toString(), paid: null });
               }
-              if (!cancelAllowed) continue;
+              if (!cancelAllowed && !compAllowed) continue;
               for (const round of rounds) {
                 if (paid.has(String(round.orderReference))) continue;
                 const batch = String(round.orderBatchReference);
@@ -763,9 +806,17 @@ export function createPersistentMerchantOrderQueue(options: {
                   businessTransaction,
                   scoped,
                   [batch],
-                ))
-                  if (state === "NotStarted" && !removed.has(line))
+                )) {
+                  if (cancelAllowed && state === "NotStarted" && !removed.has(line))
                     unpaidRemovable.set(batch, [...(unpaidRemovable.get(batch) ?? []), line]);
+                  if (
+                    compAllowed &&
+                    state === "Started" &&
+                    !removed.has(line) &&
+                    !reduced.has(line)
+                  )
+                    compable.set(batch, [...(compable.get(batch) ?? []), line]);
+                }
               }
             }
           }
@@ -1090,6 +1141,17 @@ export function createPersistentMerchantOrderQueue(options: {
                         ),
                         unpaidRemovedItems: Object.freeze(
                           unpaidRemoved.get(batch.orderBatchReference) ?? [],
+                        ),
+                        // WP-2423 item 8 ① segment 2: comps and discounts on this round.
+                        compableItems: Object.freeze(
+                          closed === null && item.currentVersion !== null
+                            ? (compable.get(batch.orderBatchReference) ?? [])
+                            : [],
+                        ),
+                        compedItems: Object.freeze(
+                          (comped.get(batch.orderBatchReference) ?? []).map((entry) =>
+                            Object.freeze(entry),
+                          ),
                         ),
                       });
                     }),

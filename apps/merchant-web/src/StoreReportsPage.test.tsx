@@ -149,6 +149,17 @@ describe("WP-2423 Q14 store reports page", () => {
     expect(render(storeReportsViewFixture())).not.toContain("written off");
   });
 
+  it("WP-2423 item 8 ① segment 2: lists a manager's comps and discounts on their own line", () => {
+    const view = storeReportsViewFixture();
+    const summary = view.summary as Record<string, unknown>;
+    summary.compCount = 2;
+    summary.compsMinor = "2830";
+    const html = render(view);
+    expect(html).toContain("Comps and discounts by a manager · 2 dishes");
+    expect(html).toContain("−$28.30");
+    expect(render(storeReportsViewFixture())).not.toContain("Comps and discounts by a manager");
+  });
+
   it("offers downloads only with the export permission", () => {
     const html = render({ ...storeReportsViewFixture(), permissions: { mayExport: false } });
     expect(html).not.toContain("Download CSV");

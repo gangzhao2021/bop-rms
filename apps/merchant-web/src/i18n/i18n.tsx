@@ -81,6 +81,7 @@ const COUNTED: Readonly<Record<string, readonly [plural: string, chinese: string
   charge: ["charges", "笔扣款"],
   run: ["runs", "次运行"],
   item: ["items", "项"],
+  dish: ["dishes", "道菜"],
 };
 export type CountedNoun = keyof typeof COUNTED;
 export function countOf(count: number, noun: CountedNoun): string {

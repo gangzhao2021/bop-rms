@@ -57,8 +57,12 @@
  * dining.session.close (start and cancel a table's checkout, close a table that is paid or written
  * off) and ordering.order.close (close that table's settled Order). Both refuse anything unpaid:
  * write-offs, cancellations, refunds and comps keep their own manager permissions.
+ * v19 (2026-10-27, WP-2423 item 8 ① segment 2, Owner decision 2 "后厨已开始做的菜由经理免单或折让"):
+ * ordering.order.comp comps or discounts dishes the kitchen started or the table was served,
+ * before the table pays (an append-only compensating record). Owner and Store Manager hold it
+ * (Store Manager through the `ordering.order.` prefix); Front of House does not.
  */
-export const storePermissionCatalogVersion = 18 as const;
+export const storePermissionCatalogVersion = 19 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -296,6 +300,8 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     ["ordering.order.amend", "Amend an order under policy", "Medium"],
     ["ordering.order.cancel", "Cancel an order or batch under policy", "High"],
     ["ordering.order.close", "Close an order", "Medium"],
+    // v19 (WP-2423 item 8 ①): money off a table's bill, so a manager's and High.
+    ["ordering.order.comp", "Comp or discount dishes before the table pays", "High"],
     ["ordering.order.fulfill", "Mark an order fulfilled", "Medium"],
   ]),
   ...define("kitchen", [

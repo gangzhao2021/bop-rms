@@ -163,6 +163,19 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
     for (const role of ["kitchen", "inventory-manager"] as const)
       expect(storeRoleTemplateActions(role), role).not.toContain("dining.session.close");
   });
+  it("lets only Store Manager and Owner comp or discount dishes (v19)", () => {
+    for (const role of ["store-manager", "owner"] as const)
+      expect(storeRoleTemplateActions(role), role).toContain("ordering.order.comp");
+    for (const role of ["front-of-house", "kitchen", "inventory-manager"] as const)
+      expect(storeRoleTemplateActions(role), role).not.toContain("ordering.order.comp");
+    for (const [role, codes] of Object.entries(brandRoleTemplates))
+      expect(codes, role).not.toContain("ordering.order.comp");
+    for (const replacements of Object.values(legacyPermissionReplacements))
+      expect(replacements).not.toContain("ordering.order.comp");
+    expect(
+      storePermissionCatalog().find((entry) => entry.code === "ordering.order.comp"),
+    ).toMatchObject({ module: "ordering", risk: "High", specified: false });
+  });
   it("lets the Brand Owner and Menu Manager read fee classification choices (v14)", () => {
     for (const role of ["brand-owner", "menu-manager"] as const)
       expect(brandRoleTemplateActions(role), role).toContain("catalog.tax-classification.read");

@@ -39,6 +39,12 @@ export interface TableBill {
       readonly displayName: string;
       readonly subtotalMinor: string;
       readonly totalMinor: string;
+      /** WP-2423 item 8 ① segment 2: a manager's comp or discount (tax included), or null. */
+      readonly reduction: null | {
+        readonly kind: "Comp" | "Percent" | "Amount";
+        readonly percent: number | null;
+        readonly amountMinor: string;
+      };
     }[];
     readonly subtotalMinor: string;
     readonly taxMinor: string;
@@ -128,6 +134,7 @@ export function parseTableBill(value: unknown): TableBill {
                 displayName: text(item.displayName),
                 subtotalMinor: amount(item.subtotalMinor),
                 totalMinor: amount(item.totalMinor),
+                reduction: reductionOf(item.reduction),
               }),
             ),
           ),
@@ -218,6 +225,23 @@ const codes: Readonly<Record<string, TableCheckoutErrorCode>> = {
   version_conflict: "BillChanged",
   already_closed: "AlreadyPaid",
 };
+
+function reductionOf(value: unknown) {
+  // Absent from an older server: no comps then.
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "object") return invalid();
+  const entry = value as Record<string, unknown>;
+  if (
+    (entry.kind !== "Comp" && entry.kind !== "Percent" && entry.kind !== "Amount") ||
+    (entry.kind === "Percent" ? typeof entry.percent !== "number" : entry.percent !== null)
+  )
+    return invalid();
+  return Object.freeze({
+    kind: entry.kind,
+    percent: entry.percent as number | null,
+    amountMinor: amount(entry.amountMinor),
+  });
+}
 
 export function createTableCheckoutClient(fetcher: typeof fetch = fetch) {
   const post = async (path: string, csrf: string, body: unknown, signal?: AbortSignal) => {
