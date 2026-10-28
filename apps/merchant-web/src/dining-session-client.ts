@@ -363,6 +363,8 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
         canTransferHost: data.canTransferHost !== false,
         /** WP-2423 abandoned payment: the staff member may cancel unpaid rounds here. */
         canCancelUnpaidRounds: data.canCancelUnpaidRounds === true,
+        /** WP-2423 item 8 ①: a manager may record that the guests left without paying. */
+        canWriteOff: data.canWriteOff === true,
       };
     },
     prepareAvailability(

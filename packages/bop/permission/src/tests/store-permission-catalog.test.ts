@@ -144,6 +144,38 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
       storePermissionCatalog().find((entry) => entry.code === "payment.settlement.read"),
     ).toMatchObject({ module: "payment", risk: "Medium", specified: false });
   });
+  it("lets Front of House start checkout and close a paid table, but not write off, cancel or refund (v18)", () => {
+    const floor = storeRoleTemplateActions("front-of-house");
+    for (const code of ["dining.session.close", "ordering.order.close", "order.close"])
+      expect(floor, code).toContain(code);
+    for (const code of [
+      "payment.refund.approve",
+      "payment.refund.request",
+      "payment.refund.execute",
+      "ordering.order.cancel",
+      "operations.order_exception.manage",
+      "task.create",
+    ])
+      expect(floor, code).not.toContain(code);
+    for (const role of ["store-manager", "owner"] as const)
+      for (const code of ["dining.session.close", "ordering.order.close"])
+        expect(storeRoleTemplateActions(role), role + ":" + code).toContain(code);
+    for (const role of ["kitchen", "inventory-manager"] as const)
+      expect(storeRoleTemplateActions(role), role).not.toContain("dining.session.close");
+  });
+  it("lets only Store Manager and Owner comp or discount dishes (v19)", () => {
+    for (const role of ["store-manager", "owner"] as const)
+      expect(storeRoleTemplateActions(role), role).toContain("ordering.order.comp");
+    for (const role of ["front-of-house", "kitchen", "inventory-manager"] as const)
+      expect(storeRoleTemplateActions(role), role).not.toContain("ordering.order.comp");
+    for (const [role, codes] of Object.entries(brandRoleTemplates))
+      expect(codes, role).not.toContain("ordering.order.comp");
+    for (const replacements of Object.values(legacyPermissionReplacements))
+      expect(replacements).not.toContain("ordering.order.comp");
+    expect(
+      storePermissionCatalog().find((entry) => entry.code === "ordering.order.comp"),
+    ).toMatchObject({ module: "ordering", risk: "High", specified: false });
+  });
   it("lets the Brand Owner and Menu Manager read fee classification choices (v14)", () => {
     for (const role of ["brand-owner", "menu-manager"] as const)
       expect(brandRoleTemplateActions(role), role).toContain("catalog.tax-classification.read");

@@ -32,6 +32,9 @@ export interface StoreReportSummary {
   readonly orderCount: number;
   readonly grossSalesMinor: string;
   readonly discountsMinor: string;
+  /** WP-2423 item 8 ① segment 2: comps and discounts a manager decided, on their own line. */
+  readonly compCount: number;
+  readonly compsMinor: string;
   readonly netSalesMinor: string;
   readonly serviceChargesMinor: string;
   readonly taxMinor: string;
@@ -62,6 +65,7 @@ export interface StoreReportItemRow {
   readonly quantitySold: number;
   readonly grossSalesMinor: string;
   readonly discountsMinor: string;
+  readonly compsMinor: string;
   readonly netSalesMinor: string;
   readonly refundedQuantity: number;
   readonly refundsMinor: string;
@@ -122,6 +126,8 @@ const summaryKeys = [
   "orderCount",
   "grossSalesMinor",
   "discountsMinor",
+  "compCount",
+  "compsMinor",
   "netSalesMinor",
   "serviceChargesMinor",
   "taxMinor",
@@ -152,6 +158,8 @@ function summary(value: Record<string, unknown>): StoreReportSummary {
     orderCount: count(value.orderCount),
     grossSalesMinor: minor(value.grossSalesMinor),
     discountsMinor: minor(value.discountsMinor),
+    compCount: count(value.compCount),
+    compsMinor: minor(value.compsMinor),
     netSalesMinor: signed(value.netSalesMinor),
     serviceChargesMinor: minor(value.serviceChargesMinor),
     taxMinor: minor(value.taxMinor),
@@ -187,6 +195,7 @@ const itemRow = (value: unknown): StoreReportItemRow => {
     "quantitySold",
     "grossSalesMinor",
     "discountsMinor",
+    "compsMinor",
     "netSalesMinor",
     "refundedQuantity",
     "refundsMinor",
@@ -197,6 +206,7 @@ const itemRow = (value: unknown): StoreReportItemRow => {
     quantitySold: count(row.quantitySold),
     grossSalesMinor: minor(row.grossSalesMinor),
     discountsMinor: minor(row.discountsMinor),
+    compsMinor: minor(row.compsMinor),
     netSalesMinor: signed(row.netSalesMinor),
     refundedQuantity: count(row.refundedQuantity),
     refundsMinor: minor(row.refundsMinor),

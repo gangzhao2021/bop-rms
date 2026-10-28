@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createPostgresOrderRevisionPosition } from "./order-revision-position.js";
 import { createPostgresSubmittedOrderAmountSource } from "./submitted-order-amount-source.js";
+import { listOrderPriceReductions } from "./order-item-price-reduction-store.js";
 import { parseOrderingReference, parseOrderingInstant } from "../../domain/cart.js";
 import {
   decodeConfiguredOrderItemSnapshot,
@@ -105,9 +106,26 @@ export function createPostgresOrderCancelledAmountSource(options: Options) {
           amountMinor: item.pricing.total.amountMinor.toString(),
         });
       });
+      // WP-2423 item 8 ① segment 2: comps and discounts a manager decided before the table paid
+      // (append-only compensating records): the dish stays sold, the reduction leaves the total.
+      const reductions = (
+        await listOrderPriceReductions(
+          tx as Parameters<typeof listOrderPriceReductions>[0],
+          { brandReference: brand, storeReference: store },
+          [query.orderReference],
+          query.observedAt,
+        )
+      ).map((record) =>
+        Object.freeze({
+          reductionReference: record.reductionReference,
+          orderItemReference: record.orderItemReference,
+          amountMinor: record.totalMinor.toString(),
+        }),
+      );
       const cancelledTotalMinor =
         evidence.reduce((sum, row) => sum + BigInt(row.amountMinor), 0n) +
-        voidedEvidence.reduce((sum, row) => sum + BigInt(row.amountMinor), 0n);
+        voidedEvidence.reduce((sum, row) => sum + BigInt(row.amountMinor), 0n) +
+        reductions.reduce((sum, row) => sum + BigInt(row.amountMinor), 0n);
       if (
         cancelledTotalMinor > base.totalMinor ||
         (await options.authorize(tx, {
@@ -131,6 +149,7 @@ export function createPostgresOrderCancelledAmountSource(options: Options) {
                 position?.snapshotDigest ?? null,
                 evidence,
                 voidedEvidence,
+                reductions,
               ]),
             )
             .digest("hex"),

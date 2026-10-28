@@ -97,20 +97,18 @@ test("@production staff see guests asking for staff and mark a call handled", as
   await page.goto("/operations/dining");
   const navigation = page.getByRole("navigation", { name: "Workspace" });
   await expect(navigation.getByRole("link", { name: "Tables 2 waiting" })).toBeVisible();
-  const list = page.getByRole("alert").filter({ hasText: "Guests asking for staff" });
-  await expect(list).toBeVisible();
-  const items = list.getByRole("listitem");
-  // Oldest first, urgent after 5 minutes.
+  // WP-2423 item 8 ①: a guest's call is the first thing on the list (oldest first), with its
+  // one step, "Handled"; urgent (in red) after 5 minutes.
+  const items = page.locator(".table-row");
   await expect(items.nth(0)).toContainText("Table T1");
-  await expect(items.nth(0)).toContainText("7 min ago · Something for the table");
-  await expect(items.nth(0)).toHaveAttribute("data-tier", "urgent");
+  await expect(items.nth(0)).toContainText("Asked for staff7 min ago · Something for the table");
+  await expect(items.nth(0)).toHaveAttribute("data-urgent", "true");
   await expect(items.nth(1)).toContainText("1 min ago · A question");
-  await expect(page.locator(".dining-table-tile").first()).toContainText("Guest asked for staff");
   await items.nth(0).getByRole("button", { name: "Handled" }).click();
   await expect(page.getByText("Table T1: marked as handled.")).toBeVisible();
   expect(answered).toHaveLength(1);
   expect(answered[0]).toMatchObject({ callReference: id(31) });
-  await expect(list.getByRole("listitem")).toHaveCount(1);
+  await expect(items.filter({ hasText: "Asked for staff" })).toHaveCount(1);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await expect

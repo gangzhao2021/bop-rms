@@ -46,6 +46,9 @@ interface Totals {
   orders: Set<string>;
   grossMinor: bigint;
   discountMinor: bigint;
+  /** WP-2423 item 8 ① segment 2: comps and discounts a manager took off before the table paid. */
+  compMinor: bigint;
+  compCount: number;
   serviceChargeMinor: bigint;
   taxMinor: bigint;
   taxes: Map<string, bigint>;
@@ -73,6 +76,8 @@ const totals = (): Totals => ({
   orders: new Set(),
   grossMinor: 0n,
   discountMinor: 0n,
+  compMinor: 0n,
+  compCount: 0,
   serviceChargeMinor: 0n,
   taxMinor: 0n,
   taxes: new Map(),
@@ -96,6 +101,7 @@ interface ItemTotals {
   quantity: number;
   grossMinor: bigint;
   discountMinor: bigint;
+  compMinor: bigint;
   refundedQuantity: number;
   refundedNetMinor: bigint;
 }
@@ -216,6 +222,8 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
       for (const item of items) {
         t.grossMinor += item.subtotalMinor;
         t.discountMinor += item.discountMinor;
+        t.compMinor += item.compMinor;
+        if (item.compMinor > 0n) t.compCount++;
         t.serviceChargeMinor += item.feeMinor;
         t.taxMinor += item.taxMinor;
         for (const component of item.taxComponents)
@@ -238,7 +246,7 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
     h.collectedMinor += payment.totalMinor + payment.roundingMinor;
     if (!matched) continue;
     for (const item of items) {
-      h.netSalesMinor += item.subtotalMinor - item.discountMinor;
+      h.netSalesMinor += item.subtotalMinor - item.discountMinor - item.compMinor;
       h.taxMinor += item.taxMinor;
       const key = itemKey(item);
       const row = f.items.get(key) ?? {
@@ -246,6 +254,7 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
         quantity: 0,
         grossMinor: 0n,
         discountMinor: 0n,
+        compMinor: 0n,
         refundedQuantity: 0,
         refundedNetMinor: 0n,
       };
@@ -253,6 +262,7 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
       row.quantity += item.quantity;
       row.grossMinor += item.subtotalMinor;
       row.discountMinor += item.discountMinor;
+      row.compMinor += item.compMinor;
     }
   }
 
@@ -298,7 +308,7 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
         const share: (typeof shares)[number] = [
           item,
           item.quantity - before.units,
-          item.subtotalMinor - item.discountMinor - before.net,
+          item.subtotalMinor - item.discountMinor - item.compMinor - before.net,
           item.taxMinor - before.tax,
           item.feeMinor - before.fee,
           0n,
@@ -357,6 +367,7 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
         quantity: 0,
         grossMinor: 0n,
         discountMinor: 0n,
+        compMinor: 0n,
         refundedQuantity: 0,
         refundedNetMinor: 0n,
       };
@@ -370,10 +381,12 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
   const merge = (target: Totals, source: Totals) => {
     target.paymentCount += source.paymentCount;
     target.writeOffCount += source.writeOffCount;
+    target.compCount += source.compCount;
     for (const order of source.orders) target.orders.add(order);
     for (const key of [
       "grossMinor",
       "discountMinor",
+      "compMinor",
       "serviceChargeMinor",
       "taxMinor",
       "tipMinor",
@@ -412,6 +425,7 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
         quantity: 0,
         grossMinor: 0n,
         discountMinor: 0n,
+        compMinor: 0n,
         refundedQuantity: 0,
         refundedNetMinor: 0n,
       };
@@ -419,6 +433,7 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
       target.quantity += row.quantity;
       target.grossMinor += row.grossMinor;
       target.discountMinor += row.discountMinor;
+      target.compMinor += row.compMinor;
       target.refundedQuantity += row.refundedQuantity;
       target.refundedNetMinor += row.refundedNetMinor;
     }
@@ -471,12 +486,15 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
     input.settlement.cashRefunded.amountMinor;
 
   const summary = (t: Totals) => {
-    const netSales = t.grossMinor - t.discountMinor;
+    const netSales = t.grossMinor - t.discountMinor - t.compMinor;
     return Object.freeze({
       paymentCount: t.paymentCount,
       orderCount: t.orders.size,
       grossSalesMinor: s(t.grossMinor),
       discountsMinor: s(t.discountMinor),
+      // WP-2423 item 8 ① segment 2: its own line, never folded into discounts or hidden.
+      compCount: t.compCount,
+      compsMinor: s(t.compMinor),
       netSalesMinor: s(netSales),
       serviceChargesMinor: s(t.serviceChargeMinor),
       taxMinor: s(t.taxMinor),
@@ -512,7 +530,8 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
   for (const t of [range.all, ...range.channels.values(), ...range.kinds.values()])
     if (
       t.grossMinor -
-        t.discountMinor +
+        t.discountMinor -
+        t.compMinor +
         t.serviceChargeMinor +
         t.taxMinor +
         t.tipMinor +
@@ -528,8 +547,10 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
   const itemRows = (map: Map<string, ItemTotals>) =>
     [...map.values()]
       .sort((a, b) =>
-        b.grossMinor - b.discountMinor !== a.grossMinor - a.discountMinor
-          ? b.grossMinor - b.discountMinor > a.grossMinor - a.discountMinor
+        b.grossMinor - b.discountMinor - b.compMinor !==
+        a.grossMinor - a.discountMinor - a.compMinor
+          ? b.grossMinor - b.discountMinor - b.compMinor >
+            a.grossMinor - a.discountMinor - a.compMinor
             ? 1
             : -1
           : a.name.localeCompare(b.name),
@@ -540,10 +561,13 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
           quantitySold: row.quantity,
           grossSalesMinor: s(row.grossMinor),
           discountsMinor: s(row.discountMinor),
-          netSalesMinor: s(row.grossMinor - row.discountMinor),
+          compsMinor: s(row.compMinor),
+          netSalesMinor: s(row.grossMinor - row.discountMinor - row.compMinor),
           refundedQuantity: row.refundedQuantity,
           refundsMinor: s(row.refundedNetMinor),
-          netAfterRefundsMinor: s(row.grossMinor - row.discountMinor - row.refundedNetMinor),
+          netAfterRefundsMinor: s(
+            row.grossMinor - row.discountMinor - row.compMinor - row.refundedNetMinor,
+          ),
         }),
       );
   const hourRows = (map: Map<number, HourTotals>) =>
@@ -675,6 +699,8 @@ export function storeSalesReportCsv(
       "orders",
       "gross_sales",
       "discounts",
+      "comps_and_discounts_by_manager",
+      "comps_and_discounts_count",
       "net_sales",
       "service_charges",
       ...taxLabels.map((label) => "tax_" + label.toLowerCase().replace(/[^a-z0-9]+/gu, "_")),
@@ -707,6 +733,8 @@ export function storeSalesReportCsv(
           sum.orderCount,
           money(sum.grossSalesMinor),
           money(sum.discountsMinor),
+          money(sum.compsMinor),
+          sum.compCount,
           money(sum.netSalesMinor),
           money(sum.serviceChargesMinor),
           ...taxLabels.map((label) =>
@@ -739,6 +767,7 @@ export function storeSalesReportCsv(
         "quantity_sold",
         "gross_sales",
         "discounts",
+        "comps_and_discounts_by_manager",
         "net_sales",
         "refunded_quantity",
         "refunds",
@@ -752,6 +781,7 @@ export function storeSalesReportCsv(
           row.quantitySold,
           money(row.grossSalesMinor),
           money(row.discountsMinor),
+          money(row.compsMinor),
           money(row.netSalesMinor),
           row.refundedQuantity,
           money(row.refundsMinor),

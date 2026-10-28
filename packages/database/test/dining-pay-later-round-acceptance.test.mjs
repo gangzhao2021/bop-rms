@@ -20,6 +20,7 @@ import {
 } from "../../../apps/api/src/merchant-dining-table-checkout.ts";
 import { createMerchantDiningUnpaidDeparture } from "../../../apps/api/src/merchant-dining-unpaid-departure.ts";
 import { createMerchantDiningUnpaidItemRemoval } from "../../../apps/api/src/merchant-dining-unpaid-item-removal.ts";
+import { createMerchantDiningItemComp } from "../../../apps/api/src/merchant-dining-item-comp.ts";
 import { createMerchantDiningServeCommand } from "../../../apps/api/src/merchant-dining-serve-command.ts";
 import { createDiningTableOnlinePayments } from "../../../apps/api/src/dining-table-online-payment.ts";
 import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
@@ -36,7 +37,11 @@ import {
   createPostgresOrderFinancialPosition,
   createPostgresPaymentCaptureWindowSource,
 } from "../../rms/payment/src/index.ts";
-import { createPostgresOrderPricedAmountSource } from "../../rms/ordering/src/index.ts";
+import {
+  createPostgresOrderPricedAmountSource,
+  createPostgresStoreSalesOrderSource,
+  listStorePriceReductionsDecided,
+} from "../../rms/ordering/src/index.ts";
 import { createPostgresStoreSalesPaymentLedger } from "../../rms/payment/src/index.ts";
 import {
   createMerchantDiningTableCashRefund,
@@ -96,6 +101,12 @@ it("a table the guests left without paying is written off and closes", () => jou
 it("a guest pays the whole table on their phone, once, split by round", () =>
   journey("PaidOnline"));
 
+// WP-2423 item 8 ① segment 2 (Owner decision 2): a manager comps or discounts dishes the kitchen
+// started or the table was served, before it pays; the bill, the payment, the Order's settlement,
+// the reports and the day-end settlement all follow, and nothing can be deleted.
+it("a manager comps and discounts served dishes before the table pays; it stays on record", () =>
+  journey("Comped"));
+
 async function journey(ending) {
   await withIsolatedDatabase(
     {
@@ -104,7 +115,9 @@ async function journey(ending) {
           ? "wp2423_paylater"
           : ending === "WrittenOff"
             ? "wp2423_plwo"
-            : "wp2423_plon",
+            : ending === "Comped"
+              ? "wp2423_plcomp"
+              : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -445,7 +458,7 @@ async function journey(ending) {
           scope: ownerScope,
           actor: id(0x701),
           at: now(),
-          extraPermissions: [...staffPermissions, "payment.refund.approve"],
+          extraPermissions: [...staffPermissions, "payment.refund.approve", "ordering.order.comp"],
           referencePrefix: "01909966",
           sessionReferencePrefix: "01909965",
         });
@@ -844,7 +857,11 @@ async function journey(ending) {
          * and the Order closes on it — the bill and the close check say so, and the table closes
          * and waits for cleaning. The table can never be paid as well (2000_101).
          */
-        async function writtenOffEnding() {
+        /**
+         * The kitchen makes round 1 (accepts, starts and completes each dish through the pilot
+         * kitchen lifecycle) and staff serve it; round 2 came off the bill. Returns the progress.
+         */
+        async function cookAndServeRound1() {
           // ── Kitchen: round 1's ticket, one queued work item per dish (test-only owner seed, as
           // the dine-in item cancellation acceptance seeds it), whose source evidence is the real
           // Ordering kitchen source of the pay-later round as it is now.
@@ -1111,6 +1128,10 @@ async function journey(ending) {
               [2, "Cancelled"],
             ],
           );
+          return served;
+        }
+        async function writtenOffEnding() {
+          const served = await cookAndServeRound1();
 
           // A write-off is exactly what is owed (Payment's own check), never a guess.
           await assert.rejects(
@@ -1211,6 +1232,233 @@ async function journey(ending) {
          * (Stripe's normalized answers; the test decides each outcome); everything else is the
          * real composition under the restricted role.
          */
+        async function compedEnding() {
+          const comp = (who, command) =>
+            createMerchantDiningItemComp({
+              persistence: persistenceOf(who),
+              authentication: who.authentication,
+              nextReference: fresh,
+              installContext: async (tx, selected) => {
+                await tx.query(
+                  "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+                  [selected.tenantReference, selected.brandReference, selected.storeReference],
+                );
+              },
+            })({
+              ...as(who),
+              command: {
+                orderReference,
+                orderItemReferences: [String(items1[0].orderItemReference)],
+                kind: "Comp",
+                percent: null,
+                amountOffMinor: null,
+                reasonCode: "QUALITY",
+                operationReference: fresh(),
+                ...command,
+              },
+            });
+          // Before the kitchen starts a dish it is taken off the bill instead (the kitchen stops it).
+          await assert.rejects(comp(manager, {}), { code: "ITEM_COMP_NOT_STARTED" });
+          const served = await cookAndServeRound1();
+          assert.ok(served.items.filter((item) => item.batchSequence === 1).length > 0);
+          // A server (no comp permission) is refused; nothing is written.
+          await assert.rejects(comp(server, {}), { code: "ITEM_COMP_PERMISSION_DENIED" });
+          // The browser never sets the money: an amount off the whole dish or more is refused.
+          const price = (item) => ({
+            net: item.pricing.subtotal.amountMinor - item.pricing.discount.amountMinor,
+            tax: item.pricing.tax.amountMinor,
+            fee: item.pricing.fee.amountMinor,
+            total: item.pricing.total.amountMinor,
+          });
+          const first = price(items1[0]);
+          await assert.rejects(
+            comp(manager, { kind: "Amount", amountOffMinor: String(first.net) }),
+            {
+              code: "ITEM_COMP_INVALID_AMOUNT",
+            },
+          );
+          assert.deepEqual(
+            await rows("SELECT 1 FROM rms_ordering.order_item_price_reduction WHERE order_id=$1", [
+              orderReference,
+            ]),
+            [],
+          );
+          // The database checks the money itself: 1.00 off with 0.05 tax is not this dish's rule.
+          await assert.rejects(
+            admin.query(
+              "INSERT INTO rms_ordering.order_item_price_reduction (reduction_id,operation_id,brand_id,store_id,order_id,order_batch_id,order_item_id,kind,percent,net_minor,tax_minor,fee_minor,total_minor,currency_code,reason_code,actor_id,permission_code,audit_id,decided_at) VALUES ($1,$2,$3,$4,$5,$6,$7,'Amount',NULL,1,5,0,6,'CAD','GOODWILL',$8,'ordering.order.comp',$9,date_trunc('milliseconds',now()))",
+              [
+                fresh(),
+                fresh(),
+                scope.brandReference,
+                scope.storeReference,
+                orderReference,
+                R1.batch.orderBatchReference,
+                String(items1[items1.length - 1].orderItemReference),
+                id(0x701),
+                fresh(),
+              ],
+            ),
+            /price reduction amount mismatch/u,
+          );
+          // The manager takes 50 % off the dish (the guests waited too long): net off its price,
+          // tax and fee in proportion, half up to the cent — the database's own rule.
+          const discountNet = (first.net * 50n + 50n) / 100n;
+          const share = (amount) => (amount * discountNet * 2n + first.net) / (2n * first.net);
+          const compMinor = discountNet + share(first.tax) + share(first.fee);
+          const compOperation = fresh();
+          const discounted = await comp(manager, {
+            kind: "Percent",
+            percent: 50,
+            reasonCode: "LONG_WAIT",
+            operationReference: compOperation,
+          });
+          assert.equal(discounted.status, "Recorded");
+          assert.deepEqual(
+            discounted.reductions.map((entry) => [
+              entry.kind,
+              entry.percent,
+              entry.amountMinor,
+              entry.reasonCode,
+            ]),
+            [["Percent", 50, compMinor.toString(), "LONG_WAIT"]],
+          );
+          // The same request again is that discount; a second decision on the dish is refused.
+          assert.equal(
+            (
+              await comp(manager, {
+                kind: "Percent",
+                percent: 50,
+                reasonCode: "LONG_WAIT",
+                operationReference: compOperation,
+              })
+            ).status,
+            "AlreadyRecorded",
+          );
+          await assert.rejects(comp(manager, {}), { code: "ITEM_COMP_ALREADY_COMPED" });
+          // Every record is kept (append-only).
+          await assert.rejects(
+            admin.query("UPDATE rms_ordering.order_item_price_reduction SET total_minor=1"),
+            /append-only/u,
+          );
+          await assert.rejects(
+            admin.query("DELETE FROM rms_ordering.order_item_price_reduction"),
+            /append-only/u,
+          );
+          assert.deepEqual(
+            await rows(
+              "SELECT action_code,actor_reference::text AS actor,reason_code FROM platform_audit.audit_record WHERE action_code IN ('ORDER_ITEM_COMPED','ORDER_ITEM_DISCOUNTED')",
+            ),
+            [{ action_code: "ORDER_ITEM_DISCOUNTED", actor: id(0x701), reason_code: "LONG_WAIT" }],
+          );
+          // The bill drops by exactly what was comped; the dishes stay on it with what came off.
+          const owedNow = await bill();
+          assert.equal(owedNow.consistent, true);
+          assert.equal(owedNow.owed.totalMinor, (round1Minor - compMinor).toString());
+          assert.deepEqual(owedNow.rounds[0].items[0].reduction, {
+            kind: "Percent",
+            percent: 50,
+            amountMinor: compMinor.toString(),
+          });
+          // The table pays what is left (cash, 15 % tip on the bill as it now is).
+          const paid = await settleWith(server, {});
+          assert.equal(paid.status, "Recorded");
+          assert.equal(paid.bill.settlement.roundsMinor, (round1Minor - compMinor).toString());
+          // A paid table is refunded instead: no comp after payment (the paid check comes before
+          // the dish's own; a fresh dish of the paid table is refused the same way).
+          await assert.rejects(comp(manager, {}), { code: "ITEM_COMP_ALREADY_PAID" });
+          // The Order is settled at its priced total less the comps (closing can follow).
+          const settledNow = await transactions().run(async (tx) => {
+            const at = now();
+            const financial = await createPostgresOrderFinancialPosition({
+              scope: ownerScope,
+              providerAccountReference: provider,
+              environment: "Test",
+              authorize: async () => true,
+            })(tx, { orderReference, observedAt: at });
+            const priced = await createPostgresOrderPricedAmountSource({
+              ...scope,
+              authorize: async () => true,
+            })(tx, { orderReference, observedAt: at });
+            assert.equal(priced.pricedTotalMinor, round1Minor - compMinor);
+            return assessOrderSettlement({
+              currencyCode: "CAD",
+              pricedOrderTotalMinor: priced.pricedTotalMinor,
+              capturedMinor: financial.settlement.capturedMinor,
+              capturedOrderAllocationMinor: financial.settlement.capturedOrderAllocationMinor,
+              capturedTipMinor: financial.settlement.capturedTipMinor,
+              confirmedRefundMinor: financial.settlement.confirmedRefundMinor,
+              refundAllocation: financial.settlement.refundAllocation,
+              pendingRefundMinor: financial.settlement.pendingRefundMinor,
+              unresolvedAttemptCount: financial.unresolvedAttemptCount,
+              pendingAmendmentCount: priced.pendingAmendmentCount,
+            });
+          });
+          assert.equal(settledNow.classification, "Settled");
+          // Reports: the dishes as sold, the comp on its own, and they add up to the payment
+          // (the report's match), read as the pilot API role.
+          const sales = await transactions().run((tx) =>
+            createPostgresStoreSalesOrderSource({
+              ...scope,
+              locale: "en-CA",
+              authorize: async () => true,
+            })(tx, [orderReference]),
+          );
+          const round1Lines = sales[0].batches.find(
+            (batch) => batch.orderBatchReference === R1.batch.orderBatchReference,
+          ).items;
+          assert.equal(
+            round1Lines.reduce((sum, line) => sum + line.compMinor, 0n),
+            discountNet,
+          );
+          assert.equal(
+            round1Lines.reduce((sum, line) => sum + line.subtotalMinor, 0n),
+            items1.reduce((sum, item) => sum + item.pricing.subtotal.amountMinor, 0n),
+          );
+          const ledger = await transactions().run((tx) =>
+            createPostgresStoreSalesPaymentLedger({
+              scope: { ...ownerScope, providerAccountReference: provider, environment: "Test" },
+              authorize: async () => true,
+            })(tx, {
+              startsAt: time(-minutes(120)),
+              endsAt: new Date(Date.now() + 1000).toISOString(),
+              observedAt: new Date(Date.now() + 1000).toISOString(),
+            }),
+          );
+          const line = ledger.payments.find(
+            (payment) => payment.orderBatchReference === R1.batch.orderBatchReference,
+          );
+          assert.equal(
+            round1Lines.reduce((sum, item) => sum + item.totalMinor, 0n),
+            line.orderAllocationMinor,
+          );
+          // The day-end settlement's line: what managers took off today, by dish.
+          const decided = await transactions().run((tx) =>
+            listStorePriceReductionsDecided(tx, scope, {
+              startsAt: time(-minutes(120)),
+              endsAt: new Date(Date.now() + 1000).toISOString(),
+            }),
+          );
+          assert.equal(decided.length, 1);
+          assert.equal(
+            decided.reduce((sum, record) => sum + record.totalMinor, 0n),
+            compMinor,
+          );
+          // Another Store of the Brand sees none of it (row security).
+          assert.deepEqual(
+            await transactions().run((tx) =>
+              listStorePriceReductionsDecided(
+                tx,
+                { brandReference: scope.brandReference, storeReference: id(0x7ff) },
+                {
+                  startsAt: time(-minutes(120)),
+                  endsAt: new Date(Date.now() + 1000).toISOString(),
+                },
+              ),
+            ),
+            [],
+          );
+        }
         async function paidOnlineEnding() {
           const intents = new Map();
           let created = 0;
@@ -1455,6 +1703,10 @@ async function journey(ending) {
         }
         if (ending === "WrittenOff") {
           await writtenOffEnding();
+          return;
+        }
+        if (ending === "Comped") {
+          await compedEnding();
           return;
         }
         if (ending === "PaidOnline") {

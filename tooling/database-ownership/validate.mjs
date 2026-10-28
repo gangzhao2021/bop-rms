@@ -2299,6 +2299,22 @@ async function scanUnsupported(root, module, diagnostics) {
               "order_payment_disposition_record",
             ],
           },
+          // WP-2423 item 8 ① segment 2: manager comps and discounts before the table pays.
+          "src/infrastructure/persistence/order-item-price-reduction-store.ts": {
+            owner: "ordering",
+            tables: [
+              "order_header",
+              "order_batch",
+              "order_item",
+              "order_item_price_reduction",
+              "order_item_staff_cancellation",
+              "order_staff_cancellation",
+              "order_batch_checkout_cancellation",
+              "order_termination_record",
+              "order_closure_version",
+              "order_pay_later_confirmation",
+            ],
+          },
           // WP-2423 DEC-DINE-IN-PAY-LATER: dishes taken off an unpaid pay-later bill.
           "src/infrastructure/persistence/pay-later-item-cancellation-store.ts": {
             owner: "ordering",

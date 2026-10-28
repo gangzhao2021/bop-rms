@@ -9,6 +9,7 @@ import {
   createPostgresSoleOperatorRefundSummaryReader,
   createPostgresUnmatchedCaptureRefundStore,
 } from "@rms/payment";
+import { listStorePriceReductionsDecided } from "@rms/ordering";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
@@ -408,6 +409,22 @@ export function createPersistentMerchantSettlement(options: {
           return {
             count: writeOffs.count,
             amountMinor: writeOffs.amountMinor.toString(),
+            currencyCode: "CAD" as const,
+          };
+        }),
+      // WP-2423 item 8 ① segment 2: comps and discounts managers decided in the day (by dish).
+      comps: (tx, scope, window) =>
+        optional(async () => {
+          if (!(await guard(scope)(tx))) return null;
+          const decided = await listStorePriceReductionsDecided(
+            tx,
+            { brandReference: scope.brandReference, storeReference: scope.storeReference },
+            window,
+          );
+          if (!(await guard(scope)(tx))) return null;
+          return {
+            count: decided.length,
+            amountMinor: decided.reduce((sum, record) => sum + record.totalMinor, 0n).toString(),
             currencyCode: "CAD" as const,
           };
         }),

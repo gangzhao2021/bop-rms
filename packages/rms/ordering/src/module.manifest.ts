@@ -71,6 +71,8 @@ const moduleManifestInput =
         "counter_order_entry",
         "staff_dining_round_entry",
         "order_item_staff_cancellation",
+        // WP-2423 item 8 ① segment 2: manager comps and discounts before the table pays.
+        "order_item_price_reduction",
         "order_fulfillment_completion_record",
         "digital_receipt_record",
         "order_payment_failure_record",

@@ -13,6 +13,7 @@ import {
   createPostgresOrderPayLaterConfirmationStore,
   createPostgresOrderPricedAmountSource,
   listOrderItemPrices,
+  listOrderPriceReductions,
   listStoreDiningSessionOrders,
 } from "@rms/ordering";
 import {
@@ -94,6 +95,15 @@ export interface DiningTableBill {
       readonly displayName: string;
       readonly subtotalMinor: string;
       readonly totalMinor: string;
+      /**
+       * WP-2423 item 8 ① segment 2: a manager's comp or discount on this dish (tax included),
+       * already taken off `totalMinor` and the round; null when none.
+       */
+      readonly reduction: null | {
+        readonly kind: "Comp" | "Percent" | "Amount";
+        readonly percent: number | null;
+        readonly amountMinor: string;
+      };
     }[];
     readonly subtotalMinor: string;
     readonly taxMinor: string;
@@ -216,6 +226,13 @@ export async function readDiningTableBill(
   const prices = (await listOrderItemPrices(tx, owner, orderReference)).filter(
     (item) => !removed.has(String(item.orderItemReference)),
   );
+  // Comps and discounts a manager decided (append-only): the dish stays on the bill at its price,
+  // with what came off it.
+  const reductions = new Map(
+    (await listOrderPriceReductions(tx, owner, [orderReference], input.observedAt)).map(
+      (record) => [record.orderItemReference, record],
+    ),
+  );
   const payments = createPostgresDiningTableSettlementStore({
     scope,
     authorize: async (_tx, value) => value.orderReference === orderReference && (await allowed()),
@@ -232,9 +249,20 @@ export async function readDiningTableBill(
   const rounds = confirmations.map((confirmation, index) => {
     const batch = String(confirmation.orderBatchReference);
     const items = prices.filter((item) => String(item.orderBatchReference) === batch);
-    const subtotal = items.reduce((sum, item) => sum + item.subtotal.amountMinor, 0n);
-    const tax = items.reduce((sum, item) => sum + item.tax.amountMinor, 0n);
-    const total = items.reduce((sum, item) => sum + item.total.amountMinor, 0n);
+    const off = (item: (typeof items)[number]) =>
+      reductions.get(String(item.orderItemReference)) ?? null;
+    const subtotal = items.reduce(
+      (sum, item) => sum + item.subtotal.amountMinor - (off(item)?.netMinor ?? 0n),
+      0n,
+    );
+    const tax = items.reduce(
+      (sum, item) => sum + item.tax.amountMinor - (off(item)?.taxMinor ?? 0n),
+      0n,
+    );
+    const total = items.reduce(
+      (sum, item) => sum + item.total.amountMinor - (off(item)?.totalMinor ?? 0n),
+      0n,
+    );
     const paid = paidBatches.has(batch);
     // A round whose every dish was taken off owes nothing (and is never a payment line).
     if (total === 0n) {
@@ -254,7 +282,17 @@ export async function readDiningTableBill(
           Object.freeze({
             displayName: item.displayName,
             subtotalMinor: item.subtotal.amountMinor.toString(),
-            totalMinor: item.total.amountMinor.toString(),
+            totalMinor: (item.total.amountMinor - (off(item)?.totalMinor ?? 0n)).toString(),
+            reduction:
+              off(item) === null
+                ? null
+                : Object.freeze({
+                    kind: (off(item) as NonNullable<ReturnType<typeof off>>).kind,
+                    percent: (off(item) as NonNullable<ReturnType<typeof off>>).percent,
+                    amountMinor: (
+                      off(item) as NonNullable<ReturnType<typeof off>>
+                    ).totalMinor.toString(),
+                  }),
           }),
         ),
       ),

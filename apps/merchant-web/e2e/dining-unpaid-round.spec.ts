@@ -90,10 +90,11 @@ test("@production WP-2423: Tables warns about a guest round nobody paid for and 
   });
   await page.goto("/operations/dining");
   const tile = page
-    .locator(".dining-table-tile")
+    .locator(".table-row")
     .filter({ has: page.getByRole("button", { name: "Select DEMO-02", exact: true }) });
-  // Last 10 minutes: urgent, with the minutes left and what to do.
-  await expect(tile).toContainText(/\d+ min left: Round 1 isn't paid/u);
+  // Last 10 minutes: urgent on the list, with the minutes left; the panel says what to do.
+  await expect(tile).toContainText(/Round not paid yet\s*\d+ min left/u);
+  await expect(tile).toHaveAttribute("data-urgent", "true");
   await tile.getByRole("button", { name: "Select DEMO-02", exact: true }).click();
   const unpaid = page.getByRole("region", { name: "Unpaid rounds" });
   await expect(unpaid).toContainText("If the guest won't pay for it, cancel it now.");
@@ -114,7 +115,7 @@ test("@production WP-2423: Tables warns about a guest round nobody paid for and 
   const dialog = page.getByRole("dialog", { name: "Cancel unpaid round 1 of table DEMO-02?" });
   await dialog.getByRole("button", { name: "Cancel round 1", exact: true }).click();
   await expect(page.getByRole("region", { name: "Unpaid rounds" })).toHaveCount(0);
-  await expect(tile).not.toContainText("isn't paid");
+  await expect(tile).not.toContainText("Round not paid yet");
   expect(posts).toEqual([
     {
       orderReference: id(20),
@@ -217,16 +218,18 @@ test("@production WP-2423: Tables hands an unconfirmed card payment to the manag
   });
   await page.goto("/operations/dining");
   const tile = page
-    .locator(".dining-table-tile")
+    .locator(".table-row")
     .filter({ has: page.getByRole("button", { name: "Select DEMO-03", exact: true }) });
-  await expect(tile).toContainText(
+  await expect(tile).toContainText("Payment not confirmedask the guest");
+  await tile.getByRole("button", { name: "Select DEMO-03", exact: true }).click();
+  await expect(page.getByRole("complementary", { name: "Selected table details" })).toContainText(
     "Round 1: the card provider couldn't confirm the guest's payment",
   );
-  await tile.getByRole("button", { name: "Select DEMO-03", exact: true }).click();
   const unpaid = page.getByRole("region", { name: "Unpaid rounds" });
-  await expect(unpaid).toContainText("Ask the guest whether their card was charged.");
+  const details = page.getByRole("complementary", { name: "Selected table details" });
+  await expect(details).toContainText("Ask the guest whether their card was charged.");
   // The notice already says to cancel once the guest confirms; no generic sentence repeats it.
-  await expect(unpaid).not.toContainText("If the guest won't pay for it");
+  await expect(details).not.toContainText("If the guest won't pay for it");
   await expect(unpaid).not.toContainText(/[0-9a-f]{8}-[0-9a-f]{4}-7|_[A-Z]|UNPAID/u);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });

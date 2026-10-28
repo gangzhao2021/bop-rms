@@ -646,6 +646,8 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
       assert.deepEqual(byChannel, {
         Online: [3, "3012", "300", "0"],
         CardMachine: [2, "841", "50", "791"],
+        // DEC-DINE-IN-PAY-LATER (33ba39a4): tables paid in cash have their own channel (none here).
+        Cash: [0, "0", "0", "0"],
       });
       const byType = Object.fromEntries(
         view.byOrderType.map((entry) => [
@@ -698,6 +700,7 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
           channels: [
             { channel: "Online", tipsMinor: "300", refundedMinor: "0", netMinor: "300" },
             { channel: "CardMachine", tipsMinor: "50", refundedMinor: "0", netMinor: "50" },
+            { channel: "Cash", tipsMinor: "0", refundedMinor: "0", netMinor: "0" },
           ],
         },
       ]);
@@ -750,6 +753,7 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
           quantitySold: 2,
           grossSalesMinor: "800",
           discountsMinor: "0",
+          compsMinor: "0",
           netSalesMinor: "800",
           refundedQuantity: 1,
           refundsMinor: "400",
@@ -803,20 +807,23 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
       const rows = items.body.slice(1).trimEnd().split("\r\n");
       assert.equal(
         rows[0],
-        "business_date,item,quantity_sold,gross_sales,discounts,net_sales,refunded_quantity,refunds,net_after_refunds,currency",
+        "business_date,item,quantity_sold,gross_sales,discounts,comps_and_discounts_by_manager,net_sales,refunded_quantity,refunds,net_after_refunds,currency",
       );
       assert.ok(
-        rows.includes(`${yesterday},Synthetic latte — Small,1,4.00,0.00,4.00,0,0.00,4.00,CAD`),
+        rows.includes(`${yesterday},Synthetic latte — Small,1,4.00,0.00,0.00,4.00,0,0.00,4.00,CAD`),
       );
-      assert.ok(rows.includes(`${today},Synthetic latte — Small,1,4.00,0.00,4.00,1,4.00,0.00,CAD`));
-      assert.ok(rows.includes(`${today},Synthetic muffin,4,12.00,0.00,12.00,1,3.00,9.00,CAD`));
+      assert.ok(
+        rows.includes(`${today},Synthetic latte — Small,1,4.00,0.00,0.00,4.00,1,4.00,0.00,CAD`),
+      );
+      assert.ok(rows.includes(`${today},Synthetic muffin,4,12.00,0.00,0.00,12.00,1,3.00,9.00,CAD`));
       const summaryCsv = (
         await reports.export({ sessionCookie: cookie, from: today, to: today, report: "summary" })
       ).body;
       assert.match(
         summaryCsv,
         new RegExp(
-          `\\r\\n${today},open \\(so far\\),5,4,31\\.00,0\\.00,31\\.00,0\\.00,4\\.03,4\\.03,3\\.50,38\\.53,7\\.91,30\\.62,30\\.12,8\\.41,0\\.00,7\\.91,CAD\\r\\n$`,
+          // Comps (none) after discounts; cash and written-off tables (none) after the channels.
+          `\\r\\n${today},open \\(so far\\),5,4,31\\.00,0\\.00,0\\.00,0,31\\.00,0\\.00,4\\.03,4\\.03,3\\.50,38\\.53,7\\.91,30\\.62,30\\.12,8\\.41,0\\.00,0\\.00,7\\.91,0\\.00,0\\.00,0,0\\.00,CAD\\r\\n$`,
           "u",
         ),
       );

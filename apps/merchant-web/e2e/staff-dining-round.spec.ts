@@ -552,8 +552,12 @@ test("@production the Tables page warns before a staff round's payment time ends
     }),
   );
   await page.goto("/operations/dining");
-  const tile = page.locator("article.dining-table-tile").first();
-  await expect(tile.getByRole("alert")).toHaveText(
+  // WP-2423 item 8 ①: the list row counts down (red); the table's panel says what to do.
+  const tile = page.locator(".table-row").first();
+  await expect(tile).toContainText(/Round not paid yet\s*5 min left/u);
+  await expect(tile).toHaveAttribute("data-urgent", "true");
+  await tile.getByRole("button", { name: /^Select /u }).click();
+  await expect(page.getByRole("complementary", { name: "Selected table details" })).toContainText(
     "5 min left: record the card-machine payment for the round entered by staff by 12:30, or it is cancelled.",
   );
   for (const width of [1440, 1024, 390]) {
@@ -594,18 +598,13 @@ test("@production a table without a QR code can't take a staff order; staff are 
   await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
   await page.goto("/operations/dining");
   await page.getByRole("button", { name: "Select T5", exact: true }).click();
-  const section = page.getByRole("region", { name: "Take an order for this table" });
+  const section = page.getByRole("region", { name: "Open this table" });
   await expect(section).toContainText(
-    "Orders can't be taken for table T5 yet: it has no table QR code. Ask a manager to create one on the Table QR codes page, then take the order.",
+    "Table T5 has no table QR code yet, so guests can't join it and orders can't be taken for it. Ask a manager to create one on the Table QR codes page.",
   );
-  await expect(section.getByRole("link", { name: /Take order for table/u })).toHaveCount(0);
-  // WP-2423 item 7: no dining session is offered either: guests join by scanning the table's QR.
-  await expect(page.getByRole("button", { name: "Start dining session", exact: true })).toHaveCount(
-    0,
-  );
-  await expect(page.getByRole("region", { name: "Dining session action" })).toContainText(
-    "A dining session can't be started for table T5 yet: it has no table QR code, so guests can't join. Ask a manager to create one on the Table QR codes page.",
-  );
+  await expect(page.getByRole("link", { name: /Take order for table/u })).toHaveCount(0);
+  // WP-2423 item 7: the table isn't opened either: guests join by scanning the table's QR.
+  await expect(page.getByRole("button", { name: "Open table", exact: true })).toHaveCount(0);
   await expectNoInternalText(page);
   // Opened directly (old bookmark): the order page says the same before anything is sent.
   await page.goto(`/operations/order-entry?table=${id(77)}`);
@@ -669,7 +668,7 @@ test("@production a table without a QR code can't take a staff order; staff are 
   await page.getByRole("button", { name: "Select T5", exact: true }).click();
   await expect(
     page
-      .getByRole("region", { name: "Dining session action" })
+      .getByRole("region", { name: "Open this table" })
       .getByRole("link", { name: "Table QR codes", exact: true }),
   ).toBeVisible();
   await expectNoInternalText(page);

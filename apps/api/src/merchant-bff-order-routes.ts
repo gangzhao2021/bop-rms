@@ -26,6 +26,7 @@ import { OrderCloseCommandError } from "./merchant-dining-order-close-command.js
 import { UnpaidDepartureError } from "./merchant-dining-unpaid-departure.js";
 import { TablePaymentError } from "./merchant-dining-table-payment.js";
 import { UnpaidItemRemovalError } from "./merchant-dining-unpaid-item-removal.js";
+import { ItemCompError } from "./merchant-dining-item-comp.js";
 import { MerchantOrderAcceptanceError } from "./merchant-order-acceptance-command.js";
 
 type MerchantOrderQueueItem = Awaited<
@@ -104,6 +105,9 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
       // and those taken off it.
       unpaidRemovableItems: batch.unpaidRemovableItems,
       unpaidRemovedItems: batch.unpaidRemovedItems,
+      // WP-2423 item 8 ① segment 2: dishes a manager may comp or discount, and those comped.
+      compableItems: batch.compableItems,
+      compedItems: batch.compedItems,
     })),
     currentPhase: item.currentPhase,
     currentVersion: item.currentVersion,
@@ -577,6 +581,32 @@ export function installMerchantOrderRoutes(
           .status(error.code === "UNPAID_ITEM_REMOVAL_INPUT_INVALID" ? 400 : 409)
           .set("Cache-Control", NO_STORE)
           .json({ error: error.code.replace(/^UNPAID_ITEM_REMOVAL_/u, "").toLowerCase() });
+      });
+  });
+  // WP-2423 item 8 ① segment 2: a manager comps or discounts dishes before the table pays.
+  router.post("/orders/comp-items", sameOriginMutation(options), (request, response) => {
+    const auth = mutation(request, response);
+    if (auth === null) return;
+    if (!options.itemComp) {
+      response.status(503).json({ error: "item_comp_unavailable" });
+      return;
+    }
+    void options
+      .itemComp({ ...auth, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        if (!(error instanceof ItemCompError) || error.code === "ITEM_COMP_UNAVAILABLE") {
+          response.status(503).set("Cache-Control", NO_STORE).json({ error: "unavailable" });
+          return;
+        }
+        if (error.code === "ITEM_COMP_PERMISSION_DENIED") {
+          denied(response);
+          return;
+        }
+        response
+          .status(error.code === "ITEM_COMP_INPUT_INVALID" ? 400 : 409)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: error.code.replace(/^ITEM_COMP_/u, "").toLowerCase() });
       });
   });
   // WP-2423 DEC-DINE-IN-PAY-LATER: a table left without paying; a manager records it and its Order

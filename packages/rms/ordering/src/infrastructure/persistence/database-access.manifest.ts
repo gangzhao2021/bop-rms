@@ -51,6 +51,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      table: "order_item_price_reduction",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "order_staff_cancellation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },
@@ -409,6 +417,26 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "order-item-price-reduction.read.order_item_price_reduction",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_item_price_reduction" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-item-price-reduction-store.ts",
+    },
+    {
+      id: "order-item-price-reduction.write.order_item_price_reduction",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_item_price_reduction" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-item-price-reduction-store.ts",
+    },
     {
       id: "pay-later-item-cancellation.read.order_item_staff_cancellation",
       operation: "read",

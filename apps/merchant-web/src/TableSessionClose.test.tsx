@@ -148,7 +148,7 @@ it("WP-2423 D4: a lost result is retried with the same requests; confirmed steps
   ).rejects.toMatchObject({ code: "Conflict" });
 });
 
-it("WP-2423 D4: offers closing a table nobody ordered at, behind a confirmation", () => {
+it("WP-2423 D4 / item 8 ①: offers closing a table nobody ordered at in one tap (no checkbox)", () => {
   const html = renderToStaticMarkup(
     <MemoryRouter>
       <TableSessionClose
@@ -162,9 +162,11 @@ it("WP-2423 D4: offers closing a table nobody ordered at, behind a confirmation"
       />
     </MemoryRouter>,
   );
-  expect(html).toContain("The guests at table T12 have left");
+  // Owner decision 2 (2026-10-27): closing is an everyday step, said in its result, not confirmed.
+  expect(html).not.toContain("have left</label>");
+  expect(html).not.toContain('type="checkbox"');
   expect(html).toContain("Close table T12");
-  expect(html).toContain("disabled");
+  expect(html).not.toContain("disabled");
   // With an order, its rounds are checked before anything is offered.
   const checking = renderToStaticMarkup(
     <MemoryRouter>

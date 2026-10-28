@@ -15,6 +15,7 @@ import {
   type TableBill,
 } from "./table-checkout-client.js";
 import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session-client.js";
+import { compedText } from "./ItemCompAction.js";
 
 const cad = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
@@ -81,10 +82,13 @@ export function TableCheckout({
   csrf,
   locked,
   canStart,
+  canWriteOff = false,
   onChanged,
   fetcher,
   timeZone,
 }: {
+  /** WP-2423 item 8 ①: may record that the guests left without paying (a manager). */
+  readonly canWriteOff?: boolean;
   /** The Store's time zone (a paper payment's time is Store time). */
   readonly timeZone?: string | undefined;
   readonly table: StaffDiningTable;
@@ -102,7 +106,10 @@ export function TableCheckout({
   const [reload, setReload] = useState(0);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tip, setTip] = useState<Tip>("0");
+  // WP-2423 item 8 ① (Owner 2026-10-27): no tip is chosen for the guests; staff ask and choose.
+  const [tip, setTip] = useState<Tip | null>(null);
+  // Money is confirmed: the amounts are shown once more before the payment is recorded.
+  const [reviewing, setReviewing] = useState(false);
   const [otherTip, setOtherTip] = useState("");
   const [method, setMethod] = useState<"CardMachine" | "Cash">("CardMachine");
   const [slip, setSlip] = useState("");
@@ -155,7 +162,11 @@ export function TableCheckout({
   const subtotal = bill ? BigInt(bill.owed.subtotalMinor) : 0n;
   const owed = bill ? BigInt(bill.owed.totalMinor) : 0n;
   const tipMinor =
-    tip === "Other" ? dollarsToMinor(otherTip) : (subtotal * BigInt(tip) + 50n) / 100n;
+    tip === null
+      ? null
+      : tip === "Other"
+        ? dollarsToMinor(otherTip)
+        : (subtotal * BigInt(tip) + 50n) / 100n;
   const due = tipMinor === null ? null : owed + tipMinor;
   const cashDue = due === null ? null : cashTotalMinor(due);
   const receivedMinor = dollarsToMinor(received);
@@ -243,6 +254,7 @@ export function TableCheckout({
 
   const pay = async () => {
     if (!canPay || bill === null || tipMinor === null) return;
+    setReviewing(false);
     const intent = JSON.stringify([
       method,
       tip,
@@ -261,7 +273,7 @@ export function TableCheckout({
         diningSessionReference: sessionReference,
         method,
         tip:
-          tip === "0"
+          tip === "0" || tip === null
             ? { kind: "None" }
             : tip === "Other"
               ? { kind: "Amount", amountMinor: tipMinor.toString() }
@@ -355,7 +367,17 @@ export function TableCheckout({
                 <ul>
                   {round.items.map((item, index) => (
                     <li key={index}>
-                      <span>{item.displayName}</span>
+                      <span>
+                        {item.displayName}
+                        {item.reduction ? (
+                          // WP-2423 item 8 ① segment 2: what a manager took off this dish.
+                          <span className="table-checkout__comp">
+                            {" · "}
+                            {compedText(item.reduction.kind, item.reduction.percent)} −
+                            {cad(item.reduction.amountMinor)}
+                          </span>
+                        ) : null}
+                      </span>
                       <span>{cad(item.subtotalMinor)}</span>
                     </li>
                   ))}
@@ -536,21 +558,91 @@ export function TableCheckout({
                   </label>
                 ) : null}
               </fieldset>
-              <button
-                type="button"
-                className="table-checkout__primary"
-                disabled={!canPay}
-                onClick={() => void pay()}
-              >
-                {busy
-                  ? t("Recording…")
-                  : due === null
-                    ? t("Record payment")
-                    : method === "Cash"
-                      ? t("Cash received · {amount}", { amount: cad(cashDue ?? due) })
-                      : t("Paid on card machine · {amount}", { amount: cad(due) })}
-              </button>
-              {canStart ? (
+              {reviewing && canPay && due !== null && tipMinor !== null ? (
+                // Money is confirmed (Owner decision 2): the amounts once more, then record.
+                <div
+                  role="alertdialog"
+                  aria-labelledby="table-checkout-confirm"
+                  className="table-checkout__confirm"
+                >
+                  <h4 id="table-checkout-confirm">{t("Confirm the payment")}</h4>
+                  <dl className="table-checkout__totals">
+                    <div>
+                      <dt>{t("Table {table}", { table: table.stableLabel })}</dt>
+                      <dd>{method === "Cash" ? t("Cash") : t("Card machine")}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("Bill")}</dt>
+                      <dd>{cad(owed)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("Tip")}</dt>
+                      <dd>{cad(tipMinor)}</dd>
+                    </div>
+                    {method === "Cash" && cashDue !== null && change !== null ? (
+                      <>
+                        <div className="table-checkout__total">
+                          <dt>{t("Cash due (rounded to 5 cents)")}</dt>
+                          <dd>{cad(cashDue)}</dd>
+                        </div>
+                        <div>
+                          <dt>{t("Cash received")}</dt>
+                          <dd>{cad(receivedMinor ?? 0n)}</dd>
+                        </div>
+                        <div className="table-checkout__total">
+                          <dt>{t("Change to give")}</dt>
+                          <dd>{cad(change)}</dd>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="table-checkout__total">
+                        <dt>{t("Charged on the card machine")}</dt>
+                        <dd>{cad(due)}</dd>
+                      </div>
+                    )}
+                  </dl>
+                  <p>
+                    {method === "Cash"
+                      ? t("Count the cash first. Once recorded, only a manager can refund it.")
+                      : t(
+                          "Check the card machine shows Approved first. Once recorded, only a manager can refund it.",
+                        )}
+                  </p>
+                  <div className="table-checkout__confirm-actions">
+                    <button type="button" onClick={() => setReviewing(false)}>
+                      {t("Back")}
+                    </button>
+                    <button
+                      type="button"
+                      className="table-checkout__primary"
+                      disabled={!canPay}
+                      onClick={() => void pay()}
+                    >
+                      {method === "Cash"
+                        ? t("Confirm {amount} cash received", { amount: cad(cashDue ?? due) })
+                        : t("Confirm {amount} paid", { amount: cad(due) })}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="table-checkout__primary"
+                  disabled={!canPay}
+                  onClick={() => setReviewing(true)}
+                >
+                  {busy
+                    ? t("Recording…")
+                    : tip === null
+                      ? t("Choose a tip to take payment")
+                      : due === null
+                        ? t("Record payment")
+                        : method === "Cash"
+                          ? t("Cash received · {amount}", { amount: cad(cashDue ?? due) })
+                          : t("Paid on card machine · {amount}", { amount: cad(due) })}
+                </button>
+              )}
+              {canWriteOff ? (
                 leaving ? (
                   <div
                     role="group"

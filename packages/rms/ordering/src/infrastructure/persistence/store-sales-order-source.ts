@@ -4,6 +4,7 @@ import {
   decodeConfiguredOrderItemSnapshot,
   decodeOrderItemSnapshot,
 } from "../../domain/order-item-snapshot-codec.js";
+import { listOrderPriceReductions } from "./order-item-price-reduction-store.js";
 
 /** One priced line as the customer was charged for it (immutable snapshot, minor units). */
 export interface StoreSalesOrderItem {
@@ -15,6 +16,12 @@ export interface StoreSalesOrderItem {
   readonly name: string;
   readonly subtotalMinor: bigint;
   readonly discountMinor: bigint;
+  /**
+   * WP-2423 item 8 ① segment 2: what a manager comped or discounted off the net before the table
+   * paid (0 when none). `taxMinor`, `feeMinor`, `totalMinor` and `taxComponents` are as charged,
+   * after it; `subtotalMinor` and `discountMinor` stay as sold.
+   */
+  readonly compMinor: bigint;
   readonly taxMinor: bigint;
   readonly feeMinor: bigint;
   readonly totalMinor: bigint;
@@ -75,6 +82,15 @@ export function createPostgresStoreSalesOrderSource(options: {
         [brand, store, chunk],
       );
       if (items.rows.length > 200000) return fail();
+      const reductions = new Map(
+        (
+          await listOrderPriceReductions(
+            tx,
+            { brandReference: brand, storeReference: store },
+            chunk,
+          )
+        ).map((record) => [record.orderItemReference, record]),
+      );
       const byOrder = new Map<string, Map<string, StoreSalesOrderItem[]>>();
       for (const row of items.rows as readonly Record<string, unknown>[]) {
         const snapshot =
@@ -107,6 +123,27 @@ export function createPostgresStoreSalesOrderSource(options: {
         byOrder.set(String(row.order_id), batches);
         const lines = batches.get(String(row.batch_id)) ?? [];
         batches.set(String(row.batch_id), lines);
+        const off = reductions.get(String(snapshot.orderItemReference)) ?? null;
+        const taxOff = off?.taxMinor ?? 0n;
+        // The tax taken off is spread over the tax lines in proportion; the last line takes the
+        // remainder, so they still add up to the tax charged.
+        let spread = 0n;
+        const components = pricing.taxComponents.map((component, index, all) => {
+          const share =
+            index === all.length - 1
+              ? taxOff - spread
+              : pricing.tax.amountMinor === 0n
+                ? 0n
+                : (component.taxAmount.amountMinor * taxOff * 2n + pricing.tax.amountMinor) /
+                  (2n * pricing.tax.amountMinor);
+          spread += share;
+          return Object.freeze({
+            code: component.taxComponentCode,
+            amountMinor: component.taxAmount.amountMinor - share,
+          });
+        });
+        if (off !== null && (components.some((c) => c.amountMinor < 0n) || spread !== taxOff))
+          return fail();
         lines.push(
           Object.freeze({
             orderItemReference: String(snapshot.orderItemReference),
@@ -116,17 +153,11 @@ export function createPostgresStoreSalesOrderSource(options: {
             name,
             subtotalMinor: pricing.subtotal.amountMinor,
             discountMinor: pricing.discount.amountMinor,
-            taxMinor: pricing.tax.amountMinor,
-            feeMinor: pricing.fee.amountMinor,
-            totalMinor: pricing.total.amountMinor,
-            taxComponents: Object.freeze(
-              pricing.taxComponents.map((component) =>
-                Object.freeze({
-                  code: component.taxComponentCode,
-                  amountMinor: component.taxAmount.amountMinor,
-                }),
-              ),
-            ),
+            compMinor: off?.netMinor ?? 0n,
+            taxMinor: pricing.tax.amountMinor - taxOff,
+            feeMinor: pricing.fee.amountMinor - (off?.feeMinor ?? 0n),
+            totalMinor: pricing.total.amountMinor - (off?.totalMinor ?? 0n),
+            taxComponents: Object.freeze(components),
           }),
         );
       }

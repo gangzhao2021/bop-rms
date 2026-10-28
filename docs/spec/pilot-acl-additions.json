@@ -4652,6 +4652,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINE-IN-PAY-LATER S4 (Owner 2026-10-26 \"同意先点后付，按这个顺序做\"): a guest pays the whole table on their phone; the attempt and its Provider outcome are recorded and read by the bill, reports and reconciliation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_item_price_reduction",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ① segment 2 (Owner decision 2, 2026-10-27 \"后厨已开始做的菜由经理免单或折让…经理确认并选原因，作为补偿记录；报表单列'免单/折让'，不能删除\"): a manager comps or discounts started or served dishes before the table pays; the append-only record is read by the bill, the priced total, the order list, reports and the day-end settlement"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_item_price_reduction",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ① segment 2 (Owner decision 2, 2026-10-27 \"后厨已开始做的菜由经理免单或折让…经理确认并选原因，作为补偿记录；报表单列'免单/折让'，不能删除\"): a manager comps or discounts started or served dishes before the table pays; the append-only record is read by the bill, the priced total, the order list, reports and the day-end settlement"
     }
   ]
 }

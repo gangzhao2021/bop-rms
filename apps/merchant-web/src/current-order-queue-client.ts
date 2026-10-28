@@ -600,6 +600,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       // DEC-DINE-IN-PAY-LATER (rule 2): absent from an older server (no removal then).
       const withUnpaidRemoval =
         value !== null && typeof value === "object" && Object.hasOwn(value, "unpaidRemovableItems");
+      // WP-2423 item 8 ① segment 2: absent from an older server (no comps then).
+      const withComps =
+        value !== null && typeof value === "object" && Object.hasOwn(value, "compableItems");
       const batch = exact(value, [
         "orderBatchReference",
         "sequence",
@@ -614,6 +617,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         ...(withCancelUnpaid ? ["canCancelUnpaid"] : []),
         ...(withWaitingSince ? ["awaitingAcceptanceSince"] : []),
         ...(withUnpaidRemoval ? ["unpaidRemovableItems", "unpaidRemovedItems"] : []),
+        ...(withComps ? ["compableItems", "compedItems"] : []),
       ]);
       const references = (list: unknown) =>
         Array.isArray(list) && list.length <= 500
@@ -634,6 +638,36 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         (unpaidRemovedItems.length > 0 && item.orderType !== "DineIn") ||
         unpaidRemovableItems.some((line) => unpaidRemovedItems.includes(line))
       )
+        return fail();
+      const compableItems = withComps ? references(batch.compableItems) : Object.freeze([]);
+      const compedItems = withComps
+        ? Array.isArray(batch.compedItems) && batch.compedItems.length <= 500
+          ? Object.freeze(
+              batch.compedItems.map((entry: unknown) => {
+                const comp = exact(entry, ["orderItemReference", "kind", "percent", "amountMinor"]);
+                if (
+                  (comp.kind !== "Comp" && comp.kind !== "Percent" && comp.kind !== "Amount") ||
+                  (comp.kind === "Percent"
+                    ? typeof comp.percent !== "number" ||
+                      !Number.isInteger(comp.percent) ||
+                      comp.percent < 1 ||
+                      comp.percent > 99
+                    : comp.percent !== null) ||
+                  typeof comp.amountMinor !== "string" ||
+                  !/^[1-9][0-9]{0,15}$/u.test(comp.amountMinor)
+                )
+                  return fail();
+                return Object.freeze({
+                  orderItemReference: reference(comp.orderItemReference),
+                  kind: comp.kind as "Comp" | "Percent" | "Amount",
+                  percent: comp.percent as number | null,
+                  amountMinor: comp.amountMinor,
+                });
+              }),
+            )
+          : fail()
+        : Object.freeze([]);
+      if ((compableItems.length > 0 || compedItems.length > 0) && item.orderType !== "DineIn")
         return fail();
       const awaitingAcceptanceSince = withWaitingSince ? batch.awaitingAcceptanceSince : null;
       const canCancelUnpaid = withCancelUnpaid ? batch.canCancelUnpaid : false;
@@ -737,6 +771,10 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         unpaidRemovableItems,
         /** DEC-DINE-IN-PAY-LATER: dishes taken off this round's bill before the table paid. */
         unpaidRemovedItems,
+        /** WP-2423 item 8 ① segment 2: dishes a manager may comp or discount now. */
+        compableItems,
+        /** Comps and discounts on this round (tax included), never removed. */
+        compedItems,
       });
     });
     const counter = parseCounter(item.counter, item.sourceChannel);

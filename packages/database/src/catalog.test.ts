@@ -744,6 +744,7 @@ describe("migration catalog", () => {
       "2000_100_alter_item_cancellation_pay_later",
       "2000_101_create_dining_table_paid_or_written_off",
       "2000_102_create_dining_table_online_payment",
+      "2000_103_create_order_item_price_reduction",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

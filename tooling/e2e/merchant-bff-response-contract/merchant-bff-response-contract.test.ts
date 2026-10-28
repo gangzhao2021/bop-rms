@@ -612,6 +612,7 @@ const tablesView = {
   canCloseSessions: true,
   canTransferHost: true,
   canCancelUnpaidRounds: true,
+  canWriteOff: true,
   items: [
     {
       tableReference: id(0x501),
@@ -719,6 +720,7 @@ const settlementView = {
     recordedAfterOutageCount: 0,
   },
   unpaidWriteOffs: { count: 1, amountMinor: "537", currencyCode: "CAD" },
+  comps: { count: 2, amountMinor: "2830", currencyCode: "CAD" },
   unmatchedProviderCharges: {
     captured: { count: 0, amountMinor: "0", currencyCode: "CAD" },
     refunded: { count: 0, amountMinor: "0", currencyCode: "CAD" },

@@ -228,6 +228,12 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
   // Not paid: the table can't be closed yet.
   await expect(page.getByRole("button", { name: "Close table T2", exact: true })).toHaveCount(0);
 
+  // WP-2423 item 8 ① (Owner 2026-10-27): no tip is chosen for the guests; staff ask first.
+  await expect(checkout.getByRole("radio", { name: /15%/u })).not.toBeChecked();
+  await expect(checkout.getByRole("radio", { name: "No tip" })).not.toBeChecked();
+  await expect(
+    checkout.getByRole("button", { name: "Choose a tip to take payment" }),
+  ).toBeDisabled();
   await checkout.getByRole("radio", { name: /15%/u }).check();
   await checkout.getByRole("radio", { name: "Cash" }).check();
   // 33.93 + tip 4.50 = 38.43 → 38.45 in cash.
@@ -237,6 +243,14 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
   // "Temporarily unavailable" is the Tables state filter's own wording.
   await expectNoInternalText(page, ["Temporarily unavailable"]);
   await checkout.getByRole("button", { name: "Cash received · $38.45" }).click();
+  // Money is confirmed: cash due (rounded), received and change, once more, before it is recorded.
+  const confirm = checkout.getByRole("alertdialog", { name: "Confirm the payment" });
+  await expect(confirm).toContainText("Cash due (rounded to 5 cents)$38.45");
+  await expect(confirm).toContainText("Cash received$50.00");
+  await expect(confirm).toContainText("Change to give$11.55");
+  expect(settles).toEqual([]);
+  await page.screenshot({ path: "test-results/dining-table-checkout-confirm.png", fullPage: true });
+  await confirm.getByRole("button", { name: "Confirm $38.45 cash received" }).click();
   // The browser sends intent only: method, tip choice and the cash handed over — never totals.
   expect(settles).toEqual([
     {
