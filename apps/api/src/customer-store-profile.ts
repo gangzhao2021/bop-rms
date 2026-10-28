@@ -1,4 +1,8 @@
-import { createPublicStoreProfileService, parseGetPublicStoreRequest } from "@rms/store";
+import {
+  createPublicStoreProfileService,
+  parseGetPublicStoreRequest,
+  type StoreUpcomingHours,
+} from "@rms/store";
 import {
   GuestSessionError,
   GuestSessionService,
@@ -42,6 +46,17 @@ export interface CustomerStoreHours {
   readonly closesAt: string | null;
   /** Local "HH:MM:SS" of the next opening later today, when the Store is closed until then. */
   readonly opensAt: string | null;
+  /**
+   * WP-2423 item 8 ③ (Owner decision 16). The Store's local date now; today's holiday, special
+   * hours or closure; when the kitchen stops taking orders in the current period (while open and
+   * only when the Store set a cut-off); the next opening within 7 days (while not open); and the
+   * holidays and special hours in the next 7 days.
+   */
+  readonly localDate: string | null;
+  readonly todayKind: StoreUpcomingHours["todayKind"];
+  readonly lastOrdersAt: string | null;
+  readonly nextOpening: StoreUpcomingHours["nextOpening"];
+  readonly upcoming: StoreUpcomingHours["upcoming"];
 }
 
 export interface CustomerStoreProfileView {
@@ -75,6 +90,8 @@ export function describeCustomerStoreHours(input: {
   readonly servesChannel: boolean;
   readonly localTime: string | null;
   readonly todayHours: readonly CustomerStoreHoursInterval[];
+  readonly localDate?: string | null;
+  readonly upcoming?: StoreUpcomingHours | null;
 }): CustomerStoreHours {
   const todayHours = Object.freeze(
     input.todayHours
@@ -102,7 +119,16 @@ export function describeCustomerStoreHours(input: {
     input.localTime !== null && localTimePattern.test(input.localTime)
       ? seconds(input.localTime)
       : null;
-  if (now === null) return Object.freeze({ status, todayHours, closesAt: null, opensAt: null });
+  const ahead = input.upcoming ?? null;
+  const known = {
+    localDate: input.localDate ?? null,
+    todayKind: ahead?.todayKind ?? null,
+    lastOrdersAt: status === "Open" ? (ahead?.lastOrdersAt ?? null) : null,
+    nextOpening: status === "Open" ? null : (ahead?.nextOpening ?? null),
+    upcoming: ahead?.upcoming ?? Object.freeze([]),
+  };
+  if (now === null)
+    return Object.freeze({ status, todayHours, closesAt: null, opensAt: null, ...known });
   const current = todayHours.find(
     (interval) =>
       seconds(interval.startLocalTime) <= now &&
@@ -114,6 +140,7 @@ export function describeCustomerStoreHours(input: {
     todayHours,
     closesAt: status === "Open" && current !== undefined ? current.endLocalTime : null,
     opensAt: status === "Closed" && next !== undefined ? next.startLocalTime : null,
+    ...known,
   });
 }
 
@@ -181,6 +208,8 @@ export function createCustomerStoreProfileRead(options: CustomerStoreProfileRead
               servesChannel: current.availableServiceModes.includes(guest.channel),
               localTime: current.localTime ?? null,
               todayHours: current.todayHours ?? [],
+              localDate: current.localDate ?? null,
+              upcoming: current.upcomingHours ?? null,
             });
         } catch {
           hours = null;
@@ -233,6 +262,19 @@ export function customerStoreProfileJson(view: CustomerStoreProfileView) {
               })),
               closesAt: view.hours.closesAt,
               opensAt: view.hours.opensAt,
+              localDate: view.hours.localDate,
+              todayKind: view.hours.todayKind,
+              lastOrdersAt: view.hours.lastOrdersAt,
+              nextOpening: view.hours.nextOpening,
+              upcoming: view.hours.upcoming.map((day) => ({
+                localDate: day.localDate,
+                kind: day.kind,
+                intervals: day.intervals.map((interval) => ({
+                  startLocalTime: interval.startLocalTime,
+                  endLocalTime: interval.endLocalTime,
+                  endsNextDay: interval.endsNextDay,
+                })),
+              })),
             },
     },
   };

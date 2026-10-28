@@ -1159,4 +1159,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Choose a tip to pay": "请选择小费后付款",
   "Your table is checking out. To add dishes, ask a staff member.":
     "这桌正在结账，要加菜请找店员。",
+  Closed: "不营业",
+  "closed today": "今天不营业",
+  today: "今天",
+  tomorrow: "明天",
+  "last orders {time}": "厨房 {time} 停止接单",
+  "Holidays this week": "本周节假日",
+  "Holidays and special hours this week": "未来 7 天的节假日和特殊营业时间",
+  "Opens {day} at {time}": "{day} {time} 开门",
+  "opens {day} at {time}": "{day} {time} 开门",
+  "Holiday · closed": "节假日 · 不营业",
+  "Holiday hours": "节假日营业时间",
+  "Special hours": "特殊营业时间",
+  "The store is closed today for a holiday.": "今天是节假日，门店不营业。",
+  "The store is closed today.": "门店今天不营业。",
 });

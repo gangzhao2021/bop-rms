@@ -26,6 +26,19 @@ export const syntheticStoreProfile = Object.freeze({
       todayHours: [{ startLocalTime: "07:00:00", endLocalTime: "22:00:00", endsNextDay: false }],
       closesAt: "22:00:00",
       opensAt: null,
+      localDate: "2026-12-22",
+      todayKind: null,
+      lastOrdersAt: "21:30:00",
+      nextOpening: null,
+      // WP-2423 item 8 ③ (decision 16): a holiday and special hours in the next 7 days.
+      upcoming: [
+        {
+          localDate: "2026-12-24",
+          kind: "Override",
+          intervals: [{ startLocalTime: "11:00:00", endLocalTime: "16:00:00", endsNextDay: false }],
+        },
+        { localDate: "2026-12-25", kind: "Holiday", intervals: [] },
+      ],
     },
   },
 });

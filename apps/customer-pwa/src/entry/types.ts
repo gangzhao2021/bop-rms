@@ -27,6 +27,10 @@ export type CustomerEntryScreenState =
       storeDisplayName: string;
       paused: boolean;
       todayHours: readonly Readonly<{ start: string; end: string; endsNextDay: boolean }>[];
+      /** WP-2423 item 8 ③ (decision 16): today's holiday or closure, and the next opening. */
+      todayKind: "Holiday" | "TemporaryClosure" | "Override" | null;
+      nextOpening: Readonly<{ localDate: string; startLocalTime: string }> | null;
+      localDate: string | null;
     }>
   | Readonly<{ kind: "ServiceUnavailable" }>
   | Readonly<{ kind: "RateLimited"; retryAfterSeconds: number }>

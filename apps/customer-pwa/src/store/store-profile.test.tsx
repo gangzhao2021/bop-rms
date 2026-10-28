@@ -29,6 +29,18 @@ const body = () => ({
       todayHours: [{ startLocalTime: "07:00:00", endLocalTime: "18:00:00", endsNextDay: false }],
       closesAt: "18:00:00",
       opensAt: null,
+      localDate: "2026-12-22",
+      todayKind: null,
+      lastOrdersAt: "17:30:00",
+      nextOpening: null,
+      upcoming: [
+        {
+          localDate: "2026-12-24",
+          kind: "Override",
+          intervals: [{ startLocalTime: "11:00:00", endLocalTime: "16:00:00", endsNextDay: false }],
+        },
+        { localDate: "2026-12-25", kind: "Holiday", intervals: [] },
+      ],
     },
   },
 });
@@ -91,6 +103,11 @@ describe("WP-2423 store status wording", () => {
     todayHours: [{ startLocalTime: "07:00:00", endLocalTime: "18:00:00", endsNextDay: false }],
     closesAt: null,
     opensAt: null,
+    localDate: "2026-12-22",
+    todayKind: null,
+    lastOrdersAt: null,
+    nextOpening: null,
+    upcoming: [],
     ...value,
   });
   it("says open until, closed and opening at, and a pause in plain words", () => {
@@ -123,5 +140,37 @@ describe("WP-2423 store status wording", () => {
       '<section class="store-strip" aria-label="Store hours and address"></section>',
     );
     expect(renderToStaticMarkup(<StoreStatusStrip load={null} />)).toBe("");
+  });
+});
+
+describe("WP-2423 item 8 ③ decision 16: the Store at the bottom of the menu", () => {
+  it("says the kitchen's last orders while open and the next opening while closed", () => {
+    const hours = parseStoreProfile(body()).hours;
+    if (hours === null) throw new Error("hours expected");
+    expect(storeStatusLine(hours)).toEqual({
+      label: "Open now",
+      detail: `until ${formatStoreLocalTime("18:00:00")} · last orders ${formatStoreLocalTime("17:30:00")}`,
+    });
+    const closed = {
+      ...hours,
+      status: "Closed" as const,
+      todayHours: [],
+      todayKind: "Holiday" as const,
+      lastOrdersAt: null,
+      nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+    };
+    expect(storeStatusLine(closed).detail).toBe(
+      `opens tomorrow at ${formatStoreLocalTime("11:00:00")}`,
+    );
+  });
+  it("rejects an unknown day kind or a malformed next opening", () => {
+    const withHours = (hours: Record<string, unknown>) => ({
+      ...body(),
+      store: { ...body().store, hours: { ...body().store.hours, ...hours } },
+    });
+    expect(() => parseStoreProfile(withHours({ todayKind: "Party" }))).toThrow();
+    expect(() =>
+      parseStoreProfile(withHours({ nextOpening: { localDate: "tomorrow" } })),
+    ).toThrow();
   });
 });

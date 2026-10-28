@@ -24,7 +24,39 @@ describe("WP-2423 today's hours for the store identity", () => {
         localTime: "09:30:00",
         todayHours: day,
       }),
-    ).toEqual({ status: "Open", todayHours: day, closesAt: "11:00:00", opensAt: null });
+    ).toEqual({
+      status: "Open",
+      todayHours: day,
+      closesAt: "11:00:00",
+      opensAt: null,
+      localDate: null,
+      todayKind: null,
+      lastOrdersAt: null,
+      nextOpening: null,
+      upcoming: [],
+    });
+  });
+  it("WP-2423 item 8 ③ decision 16: last orders only while open, the next opening only while not", () => {
+    const upcoming = {
+      todayKind: "Override" as const,
+      lastOrdersAt: "10:30:00",
+      nextOpening: { localDate: "2026-12-23", startLocalTime: "07:00:00" },
+      upcoming: [{ localDate: "2026-12-25", kind: "Holiday" as const, intervals: [] }],
+    };
+    const input = { servesChannel: true, localTime: "09:30:00", todayHours: day, upcoming };
+    expect(
+      describeCustomerStoreHours({ ...input, state: "Open", localDate: "2026-12-22" }),
+    ).toMatchObject({
+      localDate: "2026-12-22",
+      todayKind: "Override",
+      lastOrdersAt: "10:30:00",
+      nextOpening: null,
+      upcoming: upcoming.upcoming,
+    });
+    expect(describeCustomerStoreHours({ ...input, state: "Closed" })).toMatchObject({
+      lastOrdersAt: null,
+      nextOpening: upcoming.nextOpening,
+    });
   });
   it("says when a closed Store opens later today, and nothing when it doesn't", () => {
     expect(
@@ -114,7 +146,24 @@ const view: CustomerStoreProfileView = {
     countryCode: "CA",
   },
   phone: "+15555550100",
-  hours: { status: "Open", todayHours: day, closesAt: "11:00:00", opensAt: null },
+  hours: {
+    status: "Open",
+    todayHours: day,
+    closesAt: "11:00:00",
+    opensAt: null,
+    localDate: "2026-12-22",
+    todayKind: null,
+    lastOrdersAt: "10:30:00",
+    nextOpening: null,
+    upcoming: [
+      {
+        localDate: "2026-12-24",
+        kind: "Override",
+        intervals: [{ startLocalTime: "07:00:00", endLocalTime: "12:00:00", endsNextDay: false }],
+      },
+      { localDate: "2026-12-25", kind: "Holiday", intervals: [] },
+    ],
+  },
 };
 
 async function setup(read = vi.fn().mockResolvedValue(view), enabled = true) {
@@ -169,7 +218,7 @@ describe("GET /api/v1/customer/store", () => {
           countryCode: "CA",
         },
         phone: "+15555550100",
-        hours: { status: "Open", todayHours: day, closesAt: "11:00:00", opensAt: null },
+        hours: view.hours,
       },
     });
   });

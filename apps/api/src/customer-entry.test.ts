@@ -379,6 +379,10 @@ describe("WP-1004 Customer-entry contract", () => {
       storeDisplayName: "Synthetic Store",
       operatingState: "Closed",
       todayHours: [{ startLocalTime: "11:00:00", endLocalTime: "21:30:00", endsNextDay: false }],
+      // Decision 16: a holiday today, and when the Store opens next.
+      todayKind: "Holiday",
+      nextOpening: { localDate: "2026-12-26", startLocalTime: "11:00:00" },
+      localDate: "2026-12-25",
     };
     const response = await post(await listen(customerEntry(port)));
     expect(response.status).toBe(409);
@@ -392,6 +396,9 @@ describe("WP-1004 Customer-entry contract", () => {
         storeDisplayName: "Synthetic Store",
         operatingState: "Closed",
         todayHours: [{ startLocalTime: "11:00:00", endLocalTime: "21:30:00", endsNextDay: false }],
+        todayKind: "Holiday",
+        nextOpening: { localDate: "2026-12-26", startLocalTime: "11:00:00" },
+        localDate: "2026-12-25",
       },
     });
     port.result = { ...(port.result as object), storeDisplayName: "<script>" };

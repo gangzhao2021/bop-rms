@@ -125,19 +125,52 @@ describe("WP-2423 Q4 not accepting orders", () => {
       storeDisplayName: "Synthetic Store",
       paused: false,
       todayHours: [{ start: "11:00:00", end: "21:30:00", endsNextDay: false }],
+      todayKind: null,
+      nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+      localDate: "2026-12-22",
     });
     expect(closed).toContain("Synthetic Store isn’t taking orders right now");
     expect(closed).toContain("The store is closed now.");
     expect(closed).toContain("Today’s hours: 11:00 AM–9:30 PM");
     expect(closed).not.toContain("can’t be used");
+    // Decision 16: when the Store opens next.
+    expect(closed).toContain("Opens tomorrow at 11:00 a.m.");
     const paused = render({
       kind: "NotAccepting",
       storeDisplayName: "Synthetic Store",
       paused: true,
       todayHours: [],
+      todayKind: null,
+      nextOpening: null,
+      localDate: null,
     });
     expect(paused).toContain("Online ordering is paused for a short while.");
     expect(paused).toContain("Closed today.");
+  });
+  it("WP-2423 item 8 ③ decision 16: a holiday says so once and gives the next opening", () => {
+    const holiday = render({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: false,
+      todayHours: [],
+      todayKind: "Holiday",
+      nextOpening: { localDate: "2026-12-26", startLocalTime: "11:00:00" },
+      localDate: "2026-12-25",
+    });
+    expect(holiday).toContain("The store is closed today for a holiday.");
+    expect(holiday).toContain("Opens tomorrow at 11:00 a.m.");
+    expect(holiday).not.toContain("Closed today.");
+    const later = render({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: false,
+      todayHours: [],
+      todayKind: "TemporaryClosure",
+      nextOpening: { localDate: "2026-12-29", startLocalTime: "17:00:00" },
+      localDate: "2026-12-25",
+    });
+    expect(later).toContain("The store is closed today.");
+    expect(later).toContain("Opens Tuesday, Dec 29 at 5:00 p.m.");
   });
 });
 

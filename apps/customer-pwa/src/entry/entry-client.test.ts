@@ -141,6 +141,9 @@ describe("customer entry browser boundary", () => {
         storeDisplayName: "Synthetic Store",
         operatingState,
         todayHours: [{ startLocalTime: "11:00:00", endLocalTime: "21:30:00", endsNextDay: false }],
+        todayKind: null,
+        nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+        localDate: "2026-12-22",
       },
     });
     const fetch = vi
@@ -164,6 +167,9 @@ describe("customer entry browser boundary", () => {
       storeDisplayName: "Synthetic Store",
       paused: false,
       todayHours: [{ start: "11:00:00", end: "21:30:00", endsNextDay: false }],
+      todayKind: null,
+      nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+      localDate: "2026-12-22",
     });
     await expect(start()).resolves.toMatchObject({ kind: "NotAccepting", paused: true });
     // A malformed body is a failed command, never a guessed Store state.

@@ -147,7 +147,15 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
 function parseNotAccepting(value: unknown): CustomerEntryScreenState {
   const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery", "store"]);
   const recovery = exact(raw.recovery, ["action", "storeSelection"]);
-  const store = exact(raw.store, ["storeDisplayName", "operatingState", "todayHours"]);
+  const store = exact(raw.store, [
+    "storeDisplayName",
+    "operatingState",
+    "todayHours",
+    "todayKind",
+    "nextOpening",
+    "localDate",
+  ]);
+  const date = /^\d{4}-\d{2}-\d{2}$/u;
   const time = /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u;
   if (
     raw.schemaVersion !== 1 ||
@@ -156,7 +164,11 @@ function parseNotAccepting(value: unknown): CustomerEntryScreenState {
     recovery.storeSelection !== "Hidden" ||
     !["Closed", "TemporarilyClosed", "Open"].includes(String(store.operatingState)) ||
     !Array.isArray(store.todayHours) ||
-    store.todayHours.length > 12
+    store.todayHours.length > 12 ||
+    (store.todayKind !== null &&
+      !["Holiday", "TemporaryClosure", "Override"].includes(String(store.todayKind))) ||
+    (store.localDate !== null &&
+      (typeof store.localDate !== "string" || !date.test(store.localDate)))
   )
     return Object.freeze({ kind: "ServiceUnavailable" });
   try {
@@ -176,12 +188,30 @@ function parseNotAccepting(value: unknown): CustomerEntryScreenState {
         endsNextDay: interval.endsNextDay,
       });
     });
+    let nextOpening: { localDate: string; startLocalTime: string } | null = null;
+    if (store.nextOpening !== null) {
+      const next = exact(store.nextOpening, ["localDate", "startLocalTime"]);
+      if (
+        typeof next.localDate !== "string" ||
+        !date.test(next.localDate) ||
+        typeof next.startLocalTime !== "string" ||
+        !time.test(next.startLocalTime)
+      )
+        throw new TypeError("invalid next opening");
+      nextOpening = Object.freeze({
+        localDate: next.localDate,
+        startLocalTime: next.startLocalTime,
+      });
+    }
     return Object.freeze({
       kind: "NotAccepting",
       storeDisplayName: publicLabel(store.storeDisplayName),
       // Open with this service unavailable, or temporarily closed, is a pause, not closing time.
       paused: store.operatingState !== "Closed",
       todayHours: Object.freeze(todayHours),
+      todayKind: store.todayKind as "Holiday" | "TemporaryClosure" | "Override" | null,
+      nextOpening,
+      localDate: store.localDate as string | null,
     });
   } catch {
     return Object.freeze({ kind: "ServiceUnavailable" });
