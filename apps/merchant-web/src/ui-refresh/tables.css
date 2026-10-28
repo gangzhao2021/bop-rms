@@ -1057,3 +1057,111 @@
 .tables-v3 .last-orders-notice[data-tone="past"]::before {
   background: var(--bop-color-danger-mark);
 }
+
+/* WP-2423 item 8 ④ (Figma "分单 / AA · v3"): how the table pays — tabs in accent words, the
+   parts as rows under hairlines with a status dot, "Collect this part" as accent words. */
+.tables-v3 .table-split {
+  margin: 16px 0;
+}
+.tables-v3 .table-split h4 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.tables-v3 .table-split__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+}
+.tables-v3 .table-split__modes button,
+.tables-v3 .table-split__collect,
+.tables-v3 .table-split__apply,
+.tables-v3 .table-split__people button {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.tables-v3 .table-split__modes button[aria-pressed="true"] {
+  border-bottom-color: var(--bop-color-accent);
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.tables-v3 .table-split__collect,
+.tables-v3 .table-split__apply,
+.tables-v3 .table-split__people button {
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.tables-v3 .table-split__people {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.tables-v3 .table-split__people output {
+  min-width: 2ch;
+  font-weight: 600;
+  text-align: center;
+}
+.tables-v3 .table-split__rounds ul,
+.tables-v3 .table-split__parts {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+.tables-v3 .table-split__rounds li,
+.tables-v3 .table-split__parts li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.tables-v3 .table-split__parts li > div {
+  display: grid;
+  gap: 2px;
+}
+.tables-v3 .table-split__parts li[data-selected="true"] strong {
+  color: var(--bop-color-accent);
+}
+.tables-v3 .table-split__status {
+  font-size: 14px;
+}
+.tables-v3 .table-split__status::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-border-control);
+  vertical-align: 0.1em;
+}
+.tables-v3 .table-split__status[data-tone="done"]::before {
+  background: var(--bop-color-success-mark);
+}
+.tables-v3 .table-split__status[data-tone="waiting"]::before {
+  background: var(--bop-color-warning);
+}
+.tables-v3 .table-split__progress {
+  margin: 4px 0;
+  font-weight: 600;
+}
+.tables-v3 .table-split__hint {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+.tables-v3 .table-checkout__part-title {
+  margin: 16px 0 4px;
+  font-size: 16px;
+}
+.tables-v3 .table-split__locked {
+  margin: 0;
+  font-weight: 600;
+}

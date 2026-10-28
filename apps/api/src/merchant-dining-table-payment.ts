@@ -67,13 +67,17 @@ async function view(
     authorize: async (_tx, value) =>
       value.orderReference === orderReference && (await allowed()) === true,
   });
-  const [settlement] = await store.listByOrders(tx, [orderReference]);
-  if (settlement === undefined) return Object.freeze({ orderReference, payment: null });
-  const refunds = await store.listCashRefundsByOrders(tx, [orderReference]);
-  const refunded = refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
-  return Object.freeze({
-    orderReference,
-    payment: Object.freeze({
+  const settlements = await store.listByOrders(tx, [orderReference]);
+  const allRefunds = await store.listCashRefundsByOrders(tx, [orderReference]);
+  // WP-2423 item 8 ④: each payment of the table — the whole table's, or one per part of a split
+  // bill — with its own cash refunds; a refund comes from one payment's cash.
+  const describe = (settlement: (typeof settlements)[number]) => {
+    const refunds = allRefunds.filter(
+      (refund) => refund.settlementReference === settlement.settlementReference,
+    );
+    const refunded = refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
+    return Object.freeze({
+      partNumber: settlement.part?.partNumber ?? null,
       method: settlement.method,
       roundsMinor: settlement.roundsMinor.toString(),
       tipMinor: settlement.tipMinor.toString(),
@@ -94,7 +98,18 @@ async function view(
         ? settlement.totalMinor - refunded
         : 0n
       ).toString(),
-    }),
+    });
+  };
+  const whole = settlements.find((settlement) => settlement.part === null);
+  return Object.freeze({
+    orderReference,
+    payment: whole === undefined ? null : describe(whole),
+    parts: Object.freeze(
+      settlements
+        .filter((settlement) => settlement.part !== null)
+        .sort((a, b) => (a.part?.partNumber ?? 0) - (b.part?.partNumber ?? 0))
+        .map(describe),
+    ),
   });
 }
 
@@ -150,14 +165,29 @@ export function createMerchantDiningTableCashRefund(options: {
       operationReference: string;
       amountMinor: bigint;
       reasonCode: DiningTableCashRefundReason;
+      partNumber: number | null;
     };
     try {
-      const raw = readClosedRecord(input.command, [
+      const value = input.command;
+      const raw = readClosedRecord(value, [
         "orderReference",
         "operationReference",
         "amountMinor",
         "reasonCode",
+        ...(value !== null && typeof value === "object" && Object.hasOwn(value, "partNumber")
+          ? ["partNumber"]
+          : []),
       ]);
+      if (
+        raw.partNumber !== undefined &&
+        raw.partNumber !== null &&
+        !(
+          Number.isSafeInteger(raw.partNumber) &&
+          (raw.partNumber as number) >= 1 &&
+          (raw.partNumber as number) <= 20
+        )
+      )
+        throw new Error();
       if (
         typeof raw.amountMinor !== "string" ||
         !/^[1-9][0-9]{0,8}$/u.test(raw.amountMinor) ||
@@ -169,6 +199,7 @@ export function createMerchantDiningTableCashRefund(options: {
         operationReference: reference(raw.operationReference),
         amountMinor: BigInt(raw.amountMinor),
         reasonCode: raw.reasonCode as DiningTableCashRefundReason,
+        partNumber: (raw.partNumber as number | null | undefined) ?? null,
       };
     } catch {
       return fail("TABLE_PAYMENT_INPUT_INVALID");
@@ -182,6 +213,7 @@ export function createMerchantDiningTableCashRefund(options: {
             orderReference: command.orderReference,
             amountMinor: command.amountMinor.toString(),
             reasonCode: command.reasonCode,
+            ...(command.partNumber === null ? {} : { partNumber: command.partNumber }),
           }),
         )
         .digest("hex");
@@ -213,16 +245,19 @@ export function createMerchantDiningTableCashRefund(options: {
               authorize: async (_tx, value) =>
                 value.orderReference === command.orderReference && (await guard()) === true,
             });
-            const [settlement] = await store.listByOrders(tx, [command.orderReference]);
+            // The whole table's payment, or the part's (WP-2423 item 8 ④) — only from that cash.
+            const settlement = (await store.listByOrders(tx, [command.orderReference])).find(
+              (entry) => (entry.part?.partNumber ?? null) === command.partNumber,
+            );
             if (settlement === undefined) return fail("TABLE_PAYMENT_NOT_PAID");
             if (settlement.method !== "Cash") return fail("TABLE_PAYMENT_NOT_CASH");
             const prior = (await store.listCashRefundsByOrders(tx, [command.orderReference])).find(
               (refund) => refund.operationReference === command.operationReference,
             );
             if (prior === undefined) {
-              const refunded = (
-                await store.listCashRefundsByOrders(tx, [command.orderReference])
-              ).reduce((sum, refund) => sum + refund.amountMinor, 0n);
+              const refunded = (await store.listCashRefundsByOrders(tx, [command.orderReference]))
+                .filter((refund) => refund.settlementReference === settlement.settlementReference)
+                .reduce((sum, refund) => sum + refund.amountMinor, 0n);
               if (refunded + command.amountMinor > settlement.totalMinor)
                 return fail("TABLE_PAYMENT_TOO_MUCH");
             }

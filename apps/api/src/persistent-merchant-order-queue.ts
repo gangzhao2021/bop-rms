@@ -453,7 +453,11 @@ export function createPersistentMerchantOrderQueue(options: {
             string,
             {
               totalMinor: string;
-              paid: { amountMinor: string; method: "CardMachine" | "Cash" | "Online" } | null;
+              paid: {
+                amountMinor: string;
+                /** WP-2423 item 8 ④: "Split" — paid part by part (any methods), every part paid. */
+                method: "CardMachine" | "Cash" | "Online" | "Split";
+              } | null;
             }
           >();
           const unpaidRemoved = new Map<string, string[]>();
@@ -737,10 +741,28 @@ export function createPersistentMerchantOrderQueue(options: {
               const payLaterOrders = [
                 ...new Set(rounds.map((round) => String(round.orderReference))),
               ];
-              const settlements = await createPostgresDiningTableSettlementStore({
+              const tableStore = createPostgresDiningTableSettlementStore({
                 scope: { tenantReference, ...scoped },
                 authorize: async () => stillAllowed(),
-              }).listByOrders(businessTransaction, payLaterOrders);
+              });
+              const settlements = await tableStore.listByOrders(
+                businessTransaction,
+                payLaterOrders,
+              );
+              // WP-2423 item 8 ④: a split bill counts as paid once every part of its split is.
+              const splitOrders = [
+                ...new Set(
+                  settlements
+                    .filter((entry) => entry.part !== null)
+                    .map((entry) => String(entry.orderReference)),
+                ),
+              ];
+              const splitPlans = new Map(
+                (splitOrders.length === 0
+                  ? []
+                  : await tableStore.listSplitPlans(businessTransaction, splitOrders)
+                ).map((plan) => [String(plan.orderReference), plan] as const),
+              );
               const paid = new Set(
                 settlements.map((settlement) => String(settlement.orderReference)),
               );
@@ -766,8 +788,34 @@ export function createPersistentMerchantOrderQueue(options: {
               // The table's bill on the Orders list: what it paid, else what its rounds come to.
               for (const order of payLaterOrders) {
                 const settlement = settlements.find(
-                  (entry) => String(entry.orderReference) === order,
+                  (entry) => String(entry.orderReference) === order && entry.part === null,
                 );
+                const parts = settlements.filter(
+                  (entry) => String(entry.orderReference) === order && entry.part !== null,
+                );
+                const plan = splitPlans.get(order);
+                if (
+                  settlement === undefined &&
+                  plan !== undefined &&
+                  plan.mode !== "Whole" &&
+                  plan.parts.length > 0 &&
+                  plan.parts.every((part) =>
+                    parts.some((entry) => entry.part?.partNumber === part.partNumber),
+                  )
+                ) {
+                  tableBills.set(order, {
+                    totalMinor: parts
+                      .reduce((sum, entry) => sum + entry.roundsMinor, 0n)
+                      .toString(),
+                    paid: {
+                      amountMinor: parts
+                        .reduce((sum, entry) => sum + entry.totalMinor, 0n)
+                        .toString(),
+                      method: "Split",
+                    },
+                  });
+                  continue;
+                }
                 if (settlement !== undefined) {
                   tableBills.set(order, {
                     totalMinor: settlement.roundsMinor.toString(),

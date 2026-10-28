@@ -1299,7 +1299,9 @@ export function orderAmountNote(
         ? t("Paid at the table · cash")
         : order.tableBill.paid.method === "Online"
           ? t("Paid at the table · guest's phone")
-          : t("Paid at the table · card machine");
+          : order.tableBill.paid.method === "Split"
+            ? t("Paid at the table · split bill")
+            : t("Paid at the table · card machine");
   // Only an order known to be waiting for its payment says "Not paid"; no payment on the list is
   // otherwise just not known here.
   if (orderAmountTaken(order) === null)

@@ -6000,4 +6000,43 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{time} 停止接单。之后客人不能再用手机下单；你仍可以替客人加一轮。",
   "Guests stopped ordering from their phones at {time} (last orders). You can still add a round for a table.":
     "{time} 已停止接单，客人不能再用手机下单。你仍可以替客人加一轮。",
+  "Paid at the table · split bill": "已在桌上付清 · 分单",
+  cash: "现金",
+  "guest's phone": "客人手机",
+  "card machine": "刷卡机",
+  "All together": "整桌一起",
+  "Split evenly": "平均分",
+  "Each pays own rounds": "各付各点",
+  People: "人数",
+  "Fewer people": "减少人数",
+  "More people": "增加人数",
+  "Split again": "重新分",
+  "Split in {count}": "分成 {count} 份",
+  "Each phone pays the rounds it sent; move a round to another part if needed.":
+    "每台手机付自己点的轮次；需要时可以把某一轮挪到别的份。",
+  "entered by staff": "店员替桌下",
+  "phone {number}": "手机 {number}",
+  "Part for round {number}": "第 {number} 轮归哪一份",
+  "Part {number}": "第 {number} 份",
+  "Split by rounds": "按轮次分",
+  "Use at least two parts, each with a round.": "至少分两份，每份至少一轮。",
+  "The bill changed after it was split. Split it again before taking payments.":
+    "分单以后账单有变化，请重新分再收款。",
+  Parts: "各份",
+  "Paid {amount} · {method}": "已付 {amount} · {method}",
+  "A guest is paying on their phone": "客人正在手机上付",
+  "To collect": "待收",
+  "Collect this part": "收这一份",
+  "{paid} of {count} parts paid · {amount} to go": "已付 {paid}/{count} 份 · 还差 {amount}",
+  "The table closes when every part is paid. If the network is down, take each part as usual, note the part number on paper and record it later.":
+    "每一份都付清才能关台。断网时照常收，在纸上记下份号，恢复后逐份补录。",
+  "A part is already paid or a guest is paying, so the split can't change now.":
+    "已经有一份付了或客人正在付，现在不能改分法。",
+  "The bill couldn't be split. Read the bill again and try once more.":
+    "没能分单，请重新读取账单再试一次。",
+  "Collect part {number} of {count}": "收第 {number} 份，共 {count} 份",
+  "This part with tax": "这一份含税",
+  "Split evenly · {count} parts": "平均分 · {count} 份",
+  "Each pays own rounds · {count} parts": "各付各点 · {count} 份",
+  "Split the bill": "分单",
 });
