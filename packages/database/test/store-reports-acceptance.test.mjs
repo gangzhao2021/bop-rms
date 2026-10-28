@@ -727,6 +727,38 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
         BigInt(view.summary.refundsMinor),
       );
 
+      // ── WP-2423 item 8 ② (closing summary): tonight is today's report itself — the same
+      // sources and computation — so it matches the day-end settlement for the day.
+      const tonight = await reports.tonight({ sessionCookie: cookie });
+      // An open day ends at the moment it is read: compare everything else.
+      const figures = (value) =>
+        JSON.parse(
+          JSON.stringify(value, (key, entry) =>
+            key === "endsAt" || key === "generatedAt" ? undefined : entry,
+          ),
+        );
+      assert.deepEqual(
+        figures(tonight.report),
+        figures(await reports.read({ sessionCookie: cookie, from: null, to: null })),
+      );
+      const tonightChannel = Object.fromEntries(
+        tonight.report.byChannel.map((entry) => [entry.channel, entry]),
+      );
+      assert.equal(tonightChannel.Online.collectedMinor, day.captured.amountMinor);
+      assert.equal(tonightChannel.Online.refundsMinor, day.refunded.amountMinor);
+      assert.equal(tonightChannel.CardMachine.collectedMinor, day.cardMachine.taken.amountMinor);
+      assert.equal(tonightChannel.CardMachine.tipsMinor, day.cardMachine.tipMinor);
+      assert.equal(tonightChannel.CardMachine.refundsMinor, day.cardMachine.refunded.amountMinor);
+      assert.equal(tonight.report.reconciliation.matchesSettlement, true);
+      // No table is open and nothing was cancelled in this seeded day.
+      assert.deepEqual(tonight.openTables, []);
+      assert.equal(tonight.openTablesOwedMinor, "0");
+      assert.deepEqual(tonight.cancelled, {
+        removedBeforePayment: { dishCount: 0, amountMinor: "0" },
+        cancelledAfterPayment: { dishCount: 0, amountMinor: "0" },
+        cancelledUnpaid: { roundCount: 0, dishCount: 0, amountMinor: "0" },
+      });
+
       // ── Yesterday and the two-day range, each matching that day's settlement.
       const before = await reports.read({ sessionCookie: cookie, from: yesterday, to: yesterday });
       assert.equal(before.includesOpenDay, false);

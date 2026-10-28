@@ -624,7 +624,7 @@ describe("store sales report (WP-2423 Q14)", () => {
       taxComponents: [{ code: "SYNTHETIC_TAX", amountMinor: 0n }],
     };
     const tableOrder = order(902, "DineIn", "Qr", [[latte], [mocha]]);
-    const input = {
+    const input: StoreSalesReportInput = {
       ...today,
       orders: [tableOrder],
       payments: [

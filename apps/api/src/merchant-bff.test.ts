@@ -2435,6 +2435,10 @@ describe("WP-2423 Q14 store reports routes", () => {
     const view = { screenId: "RPT-OPS-DASHBOARD", from: "2026-10-13", to: "2026-10-14" };
     return {
       read: vi.fn(async () => view as unknown as Awaited<ReturnType<Reports["read"]>>),
+      tonight: vi.fn(
+        async () =>
+          ({ report: view, openTables: [] }) as unknown as Awaited<ReturnType<Reports["tonight"]>>,
+      ),
       export: vi.fn(async () => ({
         fileName: "items-2026-10-13-to-2026-10-14.csv",
         body: "﻿business_date,item\r\n2026-10-14,Muffin\r\n",
@@ -2454,6 +2458,19 @@ describe("WP-2423 Q14 store reports routes", () => {
       from: "2026-10-13",
       to: "2026-10-14",
     });
+  });
+  it("WP-2423 item 8 ②: reads tonight's closing summary with the session cookie and no caching", async () => {
+    const reports = fake();
+    const root = await serveReports(reports);
+    const tonight = await request(root, "/merchant/reports/tonight", { headers });
+    expect(tonight.status).toBe(200);
+    expect(tonight.headers.get("cache-control")).toBe("no-store");
+    expect(reports.tonight).toHaveBeenLastCalledWith({ sessionCookie });
+    // Tonight is always the Store's current business day: no range or other parameter.
+    expect(
+      (await request(root, "/merchant/reports/tonight?from=2026-10-13", { headers })).status,
+    ).toBe(403);
+    expect(reports.tonight).toHaveBeenCalledOnce();
   });
   it("downloads one report as a UTF-8 CSV attachment under the export permission", async () => {
     const reports = fake();

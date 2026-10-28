@@ -108,6 +108,22 @@ export function installMerchantReportRoutes(
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
       .catch(reportFailure(response));
   });
+  // WP-2423 item 8 ② (Figma 47-2): the closing summary — today so far, with the open tables.
+  router.get("/reports/tonight", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (sessionCookie === null || Object.keys(request.query).length > 0) {
+      denied(response);
+      return;
+    }
+    if (!options.storeReports) {
+      response.status(503).set("Cache-Control", NO_STORE).json({ error: "reports_unavailable" });
+      return;
+    }
+    void options.storeReports
+      .tonight({ sessionCookie })
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch(reportFailure(response));
+  });
   router.get("/reports/export", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
     const range = reportRange(request, ["report"]);

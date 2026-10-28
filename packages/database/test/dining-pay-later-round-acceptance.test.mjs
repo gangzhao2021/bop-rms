@@ -23,6 +23,7 @@ import { createMerchantDiningUnpaidItemRemoval } from "../../../apps/api/src/mer
 import { createMerchantDiningItemComp } from "../../../apps/api/src/merchant-dining-item-comp.ts";
 import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/merchant-dining-order-close-command.ts";
 import { loadStoreSalesReportSources } from "../../../apps/api/src/persistent-merchant-store-reports.ts";
+import { readTonightFacts } from "../../../apps/api/src/merchant-tonight-summary.ts";
 import {
   computeStoreSalesReport,
   storeSalesReportCsv,
@@ -1328,6 +1329,19 @@ async function journey(ending) {
               generatedAt: new Date().toISOString(),
             });
           });
+        /** WP-2423 item 8 ②: the closing summary's open tables and cancellations, as the API role. */
+        const tonightFacts = () =>
+          transactions().run((tx) =>
+            readTonightFacts(tx, {
+              scope: ownerScope,
+              window: {
+                startsAt: time(-minutes(120)),
+                endsAt: new Date(Date.now() + 1000).toISOString(),
+              },
+              observedAt: new Date().toISOString(),
+              authorize: async () => true,
+            }),
+          );
         const round2 = { c: c2, event: event2, batch: R2.batch, items: items2 };
         const round1 = { c: c1, event: event1, batch: R1.batch, items: items1 };
         /**
@@ -1442,6 +1456,19 @@ async function journey(ending) {
             percent: null,
             amountMinor: second.total.toString(),
           });
+          // Closing summary: the table is open, checking out, and owes exactly its bill.
+          const beforePaying = await tonightFacts();
+          assert.deepEqual(
+            beforePaying.openTables.map((table) => [
+              table.phase,
+              table.paymentTiming,
+              table.owedMinor,
+            ]),
+            [["Closing", "PayLater", (round1Minor - discountMinor).toString()]],
+          );
+          assert.ok(beforePaying.openTables[0].openedMinutes >= 0);
+          assert.equal(beforePaying.openTablesOwedMinor, (round1Minor - discountMinor).toString());
+          assert.equal(beforePaying.cancelled.removedBeforePayment.dishCount, 0);
           // The table pays what is left, in cash; round 2 is never a payment line.
           const paid = await settleWith(server, {});
           assert.equal(paid.status, "Recorded");
@@ -1455,6 +1482,11 @@ async function journey(ending) {
           );
           // A paid table is refunded instead: no comp after payment.
           await assert.rejects(comp(manager, {}), { code: "ITEM_COMP_ALREADY_PAID" });
+          // Paid and still seated: the closing summary lists it with nothing left to take.
+          assert.deepEqual(
+            (await tonightFacts()).openTables.map((table) => table.owedMinor),
+            ["0"],
+          );
           // The Order is settled at its priced total less the comps (closing can follow).
           const settledNow = await transactions().run(async (tx) => {
             const at = now();
@@ -1552,6 +1584,13 @@ async function journey(ending) {
          */
         async function compedWholeEnding() {
           await cookAndServeRound1();
+          // Closing summary: round 2's dish, taken off the bill before payment, is listed (never sold).
+          assert.deepEqual((await tonightFacts()).cancelled.removedBeforePayment, {
+            dishCount: items2.reduce((sum, item) => sum + item.quantity, 0),
+            amountMinor: items2
+              .reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n)
+              .toString(),
+          });
           const comped = await comp(manager, {
             orderItemReferences: items1.map((item) => String(item.orderItemReference)),
           });
@@ -1606,6 +1645,8 @@ async function journey(ending) {
             [sessionReference],
           );
           assert.deepEqual(table, { reason: "CLEANING" });
+          // Closed: no longer an open table in the closing summary.
+          assert.deepEqual((await tonightFacts()).openTables, []);
           // The comped dishes are still sold in the day's report, all of it comped, nothing taken.
           const report = await salesReport();
           const subtotal = items1.reduce(

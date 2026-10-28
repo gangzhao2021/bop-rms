@@ -182,7 +182,11 @@ describe("WP-2423 Q14 store reports page", () => {
             endsAt: "2026-10-15T08:00:00.000Z",
           }}
         >
-          <StoreReportsPage storeLabel="Synthetic Store" fetcher={vi.fn() as typeof fetch} />
+          <StoreReportsPage
+            storeLabel="Synthetic Store"
+            fetcher={vi.fn() as typeof fetch}
+            initialTab="Period"
+          />
         </StoreBusinessDayContext.Provider>
       </MemoryRouter>,
     );
@@ -190,5 +194,15 @@ describe("WP-2423 Q14 store reports page", () => {
     expect(html).toContain('max="2026-10-14"');
     expect(html).toContain("Last 7 days");
     expect(shiftDate("2026-11-01", -6)).toBe("2026-10-26");
+  });
+  it("WP-2423 item 8 ②: opens on tonight's closing summary", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <StoreReportsPage storeLabel="Synthetic Store" fetcher={vi.fn() as typeof fetch} />
+      </MemoryRouter>,
+    );
+    expect(html).toContain('aria-pressed="true">Tonight');
+    expect(html).toContain("Reading tonight&#x27;s figures…");
+    expect(html).not.toContain("Last 7 days");
   });
 });

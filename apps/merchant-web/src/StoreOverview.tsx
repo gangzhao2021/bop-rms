@@ -19,6 +19,7 @@ import {
 import { createPickupClient } from "./pickup-client.js";
 import { parsePickupQueueView } from "./pickup.js";
 import { storeTime } from "./StoreTime.js";
+import { ClosingReminder } from "./ClosingReminder.js";
 import { OperationsAlerts } from "./OperationsAlerts.js";
 import {
   createDiningSessionClient,
@@ -1016,6 +1017,8 @@ export function StoreOverview({
       {/* WP-2423 Q13: store system alerts. The server decides who may read them (Owner, Store
           Manager); for other roles it answers "not permitted" and the card renders nothing. */}
       <OperationsAlerts timeZone={timeZone} fetcher={fetcher} />
+      {/* WP-2423 item 8 ②: in the evening, what is still open before closing. */}
+      <ClosingReminder screens={screens} fetcher={fetcher} />
       <OverviewToday
         state={state}
         timeZone={timeZone}

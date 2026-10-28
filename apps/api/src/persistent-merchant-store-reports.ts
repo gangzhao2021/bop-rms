@@ -8,6 +8,7 @@ import { createMerchantBusinessDayWindows } from "./merchant-business-day-window
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { readTonightFacts, type TonightFacts } from "./merchant-tonight-summary.js";
 import {
   computeStoreSalesReport,
   storeSalesReportCsv,
@@ -67,7 +68,9 @@ export function createPersistentMerchantStoreReports(options: {
     readonly from: string | null;
     readonly to: string | null;
     readonly permission: typeof storeReportsReadPermission | typeof storeReportsExportPermission;
-  }): Promise<StoreSalesReportView> =>
+    /** WP-2423 item 8 ②: also read tonight's open tables and cancellations (today only). */
+    readonly tonight?: boolean;
+  }): Promise<{ readonly view: StoreSalesReportView; readonly tonight: TonightFacts | null }> =>
     persistence.transactions.run(async (original) => {
       const tx: ConsumerTransaction = {
         async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
@@ -154,7 +157,7 @@ export function createPersistentMerchantStoreReports(options: {
           const mayExport =
             input.permission === storeReportsExportPermission ||
             (await value.authorizeAction(storeReportsExportPermission))?.effect === "Allow";
-          return computeStoreSalesReport({
+          const view = computeStoreSalesReport({
             storeLabel,
             timeZone,
             days,
@@ -169,6 +172,16 @@ export function createPersistentMerchantStoreReports(options: {
             mayExport,
             generatedAt: persistence.now(),
           });
+          if (input.tonight !== true) return { view, tonight: null };
+          // The closing summary is today's report (the same sources and computation, above) with
+          // the tables still open and tonight's cancellations, read in this same transaction.
+          const tonight = await readTonightFacts(tx, {
+            scope,
+            window: { startsAt: first.startsAt, endsAt: last.endsAt },
+            observedAt: persistence.now(),
+            authorize: sameTransaction,
+          });
+          return { view, tonight };
         },
       );
     });
@@ -192,8 +205,25 @@ export function createPersistentMerchantStoreReports(options: {
     }
   };
   return Object.freeze({
-    read: (input: { sessionCookie: unknown; from: string | null; to: string | null }) =>
-      retrying(() => read({ ...input, permission: storeReportsReadPermission })),
+    read: async (input: { sessionCookie: unknown; from: string | null; to: string | null }) =>
+      (await retrying(() => read({ ...input, permission: storeReportsReadPermission }))).view,
+    /**
+     * WP-2423 item 8 ② (Figma 47-2): the closing summary — today's sales report so far (the same
+     * figures as the reports page and, once the day closes, the day-end settlement) with the
+     * tables still open and tonight's cancellations.
+     */
+    tonight: async (input: { sessionCookie: unknown }) => {
+      const read_ = await retrying(() =>
+        read({
+          ...input,
+          from: null,
+          to: null,
+          permission: storeReportsReadPermission,
+          tonight: true,
+        }),
+      );
+      return Object.freeze({ report: read_.view, ...(read_.tonight as TonightFacts) });
+    },
     /** The CSV for one report, under the export permission; a file name without Store data. */
     export: async (input: {
       sessionCookie: unknown;
@@ -201,7 +231,7 @@ export function createPersistentMerchantStoreReports(options: {
       to: string | null;
       report: StoreSalesReportExportKind;
     }) => {
-      const view = await retrying(() =>
+      const { view } = await retrying(() =>
         read({ ...input, permission: storeReportsExportPermission }),
       );
       const fileName = String(

@@ -16,6 +16,7 @@ import {
 import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness, storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
+import { TonightReport } from "./TonightSummary.js";
 
 const money = formatCad;
 export const channelLabel: Record<StoreReportChannel, string> = {
@@ -479,7 +480,10 @@ type State =
 export function StoreReportsPage({
   storeLabel,
   fetcher,
+  initialTab = "Tonight",
 }: {
+  /** WP-2423 item 8 ②: the page opens on tonight's closing summary. */
+  readonly initialTab?: "Tonight" | "Period";
   readonly storeLabel: string;
   readonly fetcher?: typeof fetch | undefined;
 }) {
@@ -494,6 +498,8 @@ export function StoreReportsPage({
   const [downloading, setDownloading] = useState<StoreReportExportKind | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const active = useRef<AbortController | null>(null);
+  // WP-2423 item 8 ② (Figma 47-2): the page opens on tonight's closing summary.
+  const [tab, setTab] = useState<"Tonight" | "Period">(initialTab);
   useEffect(() => {
     if (range === null && today !== null) {
       setRange({ from: today, to: today });
@@ -521,10 +527,10 @@ export function StoreReportsPage({
     [client],
   );
   useEffect(() => {
-    if (range === null) return;
+    if (range === null || tab !== "Period") return;
     load(range);
     return () => active.current?.abort();
-  }, [load, range, revision]);
+  }, [load, range, revision, tab]);
   useEffect(() => {
     if (state.kind !== "Busy") {
       if (state.kind === "Ready") setBusyRetries(0);
@@ -581,103 +587,129 @@ export function StoreReportsPage({
     <WorkspacePage
       title={t("Reports")}
       meta={storeLabel}
-      status={view ? <Freshness status="Fresh" at={view.generatedAt} /> : null}
+      className="store-reports-page"
+      status={tab === "Period" && view ? <Freshness status="Fresh" at={view.generatedAt} /> : null}
       actions={
         <button
           type="button"
           onClick={() => setRevision((value) => value + 1)}
-          disabled={range === null}
+          disabled={tab === "Period" && range === null}
         >
           {t("Refresh")}
         </button>
       }
     >
-      <form
-        className="list-filters store-reports__picker"
-        aria-label={t("Report period")}
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!invalid) show(draft.from, draft.to);
-        }}
-      >
-        <label>
-          {t("From")}
-          <input
-            type="date"
-            name="from"
-            value={draft.from}
-            max={today ?? undefined}
-            onChange={(event) => setDraft({ ...draft, from: event.currentTarget.value })}
-          />
-        </label>
-        <label>
-          {t("To")}
-          <input
-            type="date"
-            name="to"
-            value={draft.to}
-            max={today ?? undefined}
-            onChange={(event) => setDraft({ ...draft, to: event.currentTarget.value })}
-          />
-        </label>
-        <button type="submit" disabled={invalid}>
-          {t("Show")}
-        </button>
-        {today === null ? null : (
-          <div className="store-reports__presets" role="group" aria-label={t("Quick periods")}>
-            <button type="button" onClick={() => show(today, today)}>
-              {t("Today")}
+      <nav className="store-reports__tabs" aria-label={t("Reports")}>
+        {(
+          [
+            ["Tonight", t("Tonight")],
+            ["Period", t("Sales by period")],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={tab === value}
+            onClick={() => setTab(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      {tab === "Tonight" ? <TonightReport client={client} revision={revision} /> : null}
+      {tab === "Tonight" ? null : (
+        <>
+          <form
+            className="list-filters store-reports__picker"
+            aria-label={t("Report period")}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!invalid) show(draft.from, draft.to);
+            }}
+          >
+            <label>
+              {t("From")}
+              <input
+                type="date"
+                name="from"
+                value={draft.from}
+                max={today ?? undefined}
+                onChange={(event) => setDraft({ ...draft, from: event.currentTarget.value })}
+              />
+            </label>
+            <label>
+              {t("To")}
+              <input
+                type="date"
+                name="to"
+                value={draft.to}
+                max={today ?? undefined}
+                onChange={(event) => setDraft({ ...draft, to: event.currentTarget.value })}
+              />
+            </label>
+            <button type="submit" disabled={invalid}>
+              {t("Show")}
             </button>
-            <button type="button" onClick={() => show(shiftDate(today, -1), shiftDate(today, -1))}>
-              {t("Yesterday")}
-            </button>
-            <button type="button" onClick={() => show(shiftDate(today, -6), today)}>
-              {t("Last 7 days")}
-            </button>
-          </div>
-        )}
-        {invalid && draft.from !== "" && draft.to !== "" ? (
-          <p className="bop-muted store-reports__hint" role="status">
-            {t("Choose up to 31 days, ending no later than today's business day.")}
-          </p>
-        ) : null}
-      </form>
-      {downloadError === null ? null : (
-        <p role="alert" className="command-error">
-          {downloadError}
-        </p>
-      )}
-      {state.kind === "Loading" ? (
-        <StatePanel heading={t("Loading")} tone="neutral" status>
-          <p>{t("Reading the store's sales…")}</p>
-        </StatePanel>
-      ) : state.kind === "PermissionDenied" ? (
-        <StatePanel heading={noAccessHeading} tone="error" status>
-          <p>{pageAccessDeniedText}</p>
-        </StatePanel>
-      ) : state.kind === "Busy" ? (
-        <StatePanel heading={t("Busy for a moment")} tone="neutral" status>
-          <p>
-            {busyRetries >= 3
-              ? t(
-                  "The store's records are still busy with orders and payments. Refresh in a minute.",
-                )
-              : t(
-                  "The store's records are busy with orders and payments. Trying again in a few seconds…",
-                )}
-          </p>
-        </StatePanel>
-      ) : state.kind === "Unavailable" ? (
-        <StatePanel heading={t("Reports unavailable")} tone="error" status>
-          <p>
-            {t(
-              "The reports could not be read. Check your connection and refresh. A period before the Store's setup took effect cannot be shown.",
+            {today === null ? null : (
+              <div className="store-reports__presets" role="group" aria-label={t("Quick periods")}>
+                <button type="button" onClick={() => show(today, today)}>
+                  {t("Today")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => show(shiftDate(today, -1), shiftDate(today, -1))}
+                >
+                  {t("Yesterday")}
+                </button>
+                <button type="button" onClick={() => show(shiftDate(today, -6), today)}>
+                  {t("Last 7 days")}
+                </button>
+              </div>
             )}
-          </p>
-        </StatePanel>
-      ) : view ? (
-        <StoreReports view={view} onDownload={download} downloading={downloading} />
-      ) : null}
+            {invalid && draft.from !== "" && draft.to !== "" ? (
+              <p className="bop-muted store-reports__hint" role="status">
+                {t("Choose up to 31 days, ending no later than today's business day.")}
+              </p>
+            ) : null}
+          </form>
+          {downloadError === null ? null : (
+            <p role="alert" className="command-error">
+              {downloadError}
+            </p>
+          )}
+          {state.kind === "Loading" ? (
+            <StatePanel heading={t("Loading")} tone="neutral" status>
+              <p>{t("Reading the store's sales…")}</p>
+            </StatePanel>
+          ) : state.kind === "PermissionDenied" ? (
+            <StatePanel heading={noAccessHeading} tone="error" status>
+              <p>{pageAccessDeniedText}</p>
+            </StatePanel>
+          ) : state.kind === "Busy" ? (
+            <StatePanel heading={t("Busy for a moment")} tone="neutral" status>
+              <p>
+                {busyRetries >= 3
+                  ? t(
+                      "The store's records are still busy with orders and payments. Refresh in a minute.",
+                    )
+                  : t(
+                      "The store's records are busy with orders and payments. Trying again in a few seconds…",
+                    )}
+              </p>
+            </StatePanel>
+          ) : state.kind === "Unavailable" ? (
+            <StatePanel heading={t("Reports unavailable")} tone="error" status>
+              <p>
+                {t(
+                  "The reports could not be read. Check your connection and refresh. A period before the Store's setup took effect cannot be shown.",
+                )}
+              </p>
+            </StatePanel>
+          ) : view ? (
+            <StoreReports view={view} onDownload={download} downloading={downloading} />
+          ) : null}
+        </>
+      )}
     </WorkspacePage>
   );
 }

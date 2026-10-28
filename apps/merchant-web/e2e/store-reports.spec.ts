@@ -96,6 +96,12 @@ test("@production Reports show sales, items, hours and tips for a period, downlo
       .getByRole("link", { name: "Reports" })
       .first(),
   ).toHaveAttribute("aria-current", "page");
+  // WP-2423 item 8 ②: the page opens on tonight's summary; the period reports are one tab over.
+  await expect(page.getByRole("button", { name: "Tonight", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.getByRole("button", { name: "Sales by period" }).click();
   // Opens on the Store's current business day.
   await expect.poll(() => requested[0]).toBe("2026-10-14..2026-10-14");
   // v15 store-day L6: the range includes today's open day, so it is checked at day end.

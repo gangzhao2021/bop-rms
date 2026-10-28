@@ -432,3 +432,94 @@ export function createPostgresPayLaterItemCancellationStore(options: {
     },
   });
 }
+
+/**
+ * WP-2423 item 8 ② (the closing summary): dishes and rounds that left the Store's sales in a
+ * window, by when they were cancelled — listed for the evening, never counted as sales. Dishes
+ * taken off an unpaid bill (pay later), paid dishes and rounds staff cancelled (refunded), and
+ * rounds cancelled unpaid when their payment window closed. Amounts are the dishes' charged
+ * totals (tax included) from their frozen snapshots. The caller authorizes the Store.
+ */
+export interface StoreCancelledDishes {
+  readonly removedBeforePayment: { readonly dishCount: number; readonly amountMinor: bigint };
+  readonly cancelledAfterPayment: { readonly dishCount: number; readonly amountMinor: bigint };
+  readonly cancelledUnpaid: {
+    readonly roundCount: number;
+    readonly dishCount: number;
+    readonly amountMinor: bigint;
+  };
+}
+export async function listStoreCancelledDishes(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  window: { readonly startsAt: string; readonly endsAt: string },
+): Promise<StoreCancelledDishes> {
+  const brand = String(parseOrderingReference(scope.brandReference)),
+    store = String(parseOrderingReference(scope.storeReference));
+  const from = String(parseOrderingInstant(window.startsAt)),
+    to = String(parseOrderingInstant(window.endsAt));
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const sum = (rows: readonly Record<string, unknown>[]) => {
+    const row = rows[0] ?? unavailable();
+    const count = Number(row.dishes ?? 0),
+      rounds = Number(row.rounds ?? 0);
+    if (!Number.isSafeInteger(count) || !Number.isSafeInteger(rounds)) return unavailable();
+    return {
+      dishCount: count,
+      roundCount: rounds,
+      amountMinor: BigInt(String(row.amount ?? "0")),
+    };
+  };
+  const items = (table: string, where: string) =>
+    "SELECT count(DISTINCT c.order_batch_id)::int AS rounds,COALESCE(sum(i.quantity),0)::int AS dishes," +
+    "COALESCE(sum((i.transaction_snapshot_json->'pricing'->'total'->>'amountMinor')::bigint),0)::text AS amount " +
+    `FROM rms_ordering.${table} c JOIN rms_ordering.order_item i ON i.brand_id=c.brand_id AND i.store_id=c.store_id ` +
+    "AND i.order_id=c.order_id AND i.order_batch_id=c.order_batch_id AND i.order_item_id=ANY(c.order_item_ids) " +
+    `WHERE c.brand_id=$1 AND c.store_id=$2 AND c.cancelled_at>=$3 AND c.cancelled_at<$4${where}`;
+  const removed = sum(
+    (
+      await tx.query(items("order_item_staff_cancellation", " AND c.basis='PayLater'"), [
+        brand,
+        store,
+        from,
+        to,
+      ])
+    ).rows as Record<string, unknown>[],
+  );
+  const paidItems = sum(
+    (
+      await tx.query(items("order_item_staff_cancellation", " AND c.basis='Paid'"), [
+        brand,
+        store,
+        from,
+        to,
+      ])
+    ).rows as Record<string, unknown>[],
+  );
+  const paidRounds = sum(
+    (await tx.query(items("order_staff_cancellation", ""), [brand, store, from, to]))
+      .rows as Record<string, unknown>[],
+  );
+  const unpaid = sum(
+    (await tx.query(items("order_batch_checkout_cancellation", ""), [brand, store, from, to]))
+      .rows as Record<string, unknown>[],
+  );
+  return Object.freeze({
+    removedBeforePayment: Object.freeze({
+      dishCount: removed.dishCount,
+      amountMinor: removed.amountMinor,
+    }),
+    cancelledAfterPayment: Object.freeze({
+      dishCount: paidItems.dishCount + paidRounds.dishCount,
+      amountMinor: paidItems.amountMinor + paidRounds.amountMinor,
+    }),
+    cancelledUnpaid: Object.freeze({
+      roundCount: unpaid.roundCount,
+      dishCount: unpaid.dishCount,
+      amountMinor: unpaid.amountMinor,
+    }),
+  });
+}

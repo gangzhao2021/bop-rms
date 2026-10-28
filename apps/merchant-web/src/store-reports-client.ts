@@ -340,6 +340,84 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
   });
 }
 
+/**
+ * WP-2423 item 8 ② (Figma 47-2): the closing summary — today's report so far (the same figures as
+ * the reports page and, once the day closes, the day-end settlement), the tables still open with
+ * what each still owes, and tonight's cancellations (listed, not sales).
+ */
+export interface TonightSummary {
+  readonly report: StoreReportsView;
+  readonly openTables: readonly {
+    readonly tableLabel: string;
+    readonly phase: "Active" | "Closing";
+    readonly paymentTiming: "PayFirst" | "PayLater";
+    readonly owedMinor: string;
+    readonly openedMinutes: number;
+  }[];
+  readonly openTablesOwedMinor: string;
+  readonly cancelled: {
+    readonly removedBeforePayment: { readonly dishCount: number; readonly amountMinor: string };
+    readonly cancelledAfterPayment: { readonly dishCount: number; readonly amountMinor: string };
+    readonly cancelledUnpaid: {
+      readonly roundCount: number;
+      readonly dishCount: number;
+      readonly amountMinor: string;
+    };
+  };
+}
+export function parseTonightSummary(value: unknown): TonightSummary {
+  const raw = exact(value, ["report", "openTables", "openTablesOwedMinor", "cancelled"]);
+  const report = parseStoreReportsView(raw.report);
+  if (report.days.length !== 1) return fail();
+  const openTables = list(raw.openTables, 500, (entry) => {
+    const table = exact(entry, [
+      "tableLabel",
+      "phase",
+      "paymentTiming",
+      "owedMinor",
+      "openedMinutes",
+    ]);
+    return Object.freeze({
+      tableLabel: text(table.tableLabel, 120),
+      phase: oneOf(table.phase, ["Active", "Closing"] as const),
+      paymentTiming: oneOf(table.paymentTiming, ["PayFirst", "PayLater"] as const),
+      owedMinor: minor(table.owedMinor),
+      openedMinutes: count(table.openedMinutes),
+    });
+  });
+  const owed = minor(raw.openTablesOwedMinor);
+  // The total is the tables' own amounts added up, never a separate figure.
+  if (openTables.reduce((sum, table) => sum + BigInt(table.owedMinor), 0n) !== BigInt(owed))
+    return fail();
+  const cancelled = exact(raw.cancelled, [
+    "removedBeforePayment",
+    "cancelledAfterPayment",
+    "cancelledUnpaid",
+  ]);
+  const dishes = (value: unknown) => {
+    const entry = exact(value, ["dishCount", "amountMinor"]);
+    return Object.freeze({
+      dishCount: count(entry.dishCount),
+      amountMinor: minor(entry.amountMinor),
+    });
+  };
+  const unpaid = exact(cancelled.cancelledUnpaid, ["roundCount", "dishCount", "amountMinor"]);
+  return Object.freeze({
+    report,
+    openTables,
+    openTablesOwedMinor: owed,
+    cancelled: Object.freeze({
+      removedBeforePayment: dishes(cancelled.removedBeforePayment),
+      cancelledAfterPayment: dishes(cancelled.cancelledAfterPayment),
+      cancelledUnpaid: Object.freeze({
+        roundCount: count(unpaid.roundCount),
+        dishCount: count(unpaid.dishCount),
+        amountMinor: minor(unpaid.amountMinor),
+      }),
+    }),
+  });
+}
+
 const query = (from: string, to: string) =>
   "from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
 const validRange = (from: string, to: string) =>
@@ -402,6 +480,25 @@ export function createStoreReportsClient(fetcher: typeof fetch = fetch) {
         const body = await response.text();
         if (body.length > 4_194_304) return fail();
         return parseStoreReportsView(JSON.parse(body) as unknown);
+      } catch (error) {
+        if (error instanceof StoreReportsClientError) throw error;
+        return fail();
+      }
+    },
+    /** WP-2423 item 8 ②: the closing summary for the Store's current business day. */
+    async tonight(signal: AbortSignal): Promise<TonightSummary> {
+      const response = await request(
+        fetcher,
+        "/merchant/reports/tonight",
+        "application/json",
+        signal,
+      );
+      try {
+        if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/json"))
+          return fail();
+        const body = await response.text();
+        if (body.length > 4_194_304) return fail();
+        return parseTonightSummary(JSON.parse(body) as unknown);
       } catch (error) {
         if (error instanceof StoreReportsClientError) throw error;
         return fail();

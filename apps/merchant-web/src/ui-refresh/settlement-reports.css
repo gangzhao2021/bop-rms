@@ -440,3 +440,242 @@
   font-size: 28px;
   font-weight: 600;
 }
+
+/*
+ * WP-2423 item 8 ② (Figma 47-2): tonight's closing summary and the Home closing reminder, in the
+ * frozen v3 visuals — white, no boxes, hairlines between rows, one accent, amounts at the right.
+ */
+.store-reports-page .store-reports__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 28px;
+  margin: 0 0 16px;
+}
+.store-reports-page .store-reports__tabs button {
+  min-height: 44px;
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 16px;
+}
+.store-reports-page .store-reports__tabs button[aria-pressed="true"] {
+  border-bottom-color: var(--bop-color-accent);
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.tonight {
+  display: grid;
+  max-width: 40rem;
+  gap: 4px;
+  font-size: 14px;
+}
+.tonight__head h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.tonight__head p {
+  margin: 4px 0 0;
+}
+.tonight__status::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-success-mark);
+}
+.tonight__status[data-open="true"]::before {
+  background: var(--bop-color-accent);
+}
+.tonight__detail {
+  margin-left: 8px;
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+}
+.tonight__section {
+  padding-top: 20px;
+}
+.tonight__section h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.tonight__section h3 .tonight__detail {
+  font-size: 14px;
+}
+.tonight dl {
+  display: grid;
+  margin: 0;
+}
+.tonight__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+}
+.tonight__row dt,
+.tonight__row dd {
+  margin: 0;
+}
+.tonight__row dd {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tonight__row[data-strong="true"] {
+  border-top: 1px solid var(--bop-color-row-divider);
+  font-size: 16px;
+  font-weight: 600;
+}
+.tonight__row[data-muted="true"] {
+  color: var(--bop-color-text-muted);
+}
+.tonight__row[data-tone="action"] dt::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+}
+.tonight__cash {
+  padding-left: 16px;
+}
+.tonight__methods {
+  width: 100%;
+  border-collapse: collapse;
+}
+.tonight__methods th,
+.tonight__methods td {
+  padding: 6px 0;
+  font-weight: 400;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tonight__methods thead th {
+  color: var(--bop-color-text-muted);
+}
+.tonight__methods :is(th, td):first-child {
+  text-align: left;
+}
+.tonight__methods :is(th, td) + :is(th, td) {
+  padding-left: 16px;
+}
+.tonight__checks {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: var(--bop-color-text-muted);
+}
+.tonight__links {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+.tonight__links :is(a, button) {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+}
+.tonight__offline {
+  max-width: 40rem;
+  margin: 0 0 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--bop-color-row-divider);
+}
+.tonight__offline p {
+  margin: 4px 0 0;
+  color: var(--bop-color-text-muted);
+}
+.tonight__offline .tonight__offline-title {
+  color: var(--bop-color-text-default);
+  font-weight: 600;
+}
+.tonight__offline-title::before,
+.closing-reminder__title[data-tone="action"]::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+}
+.closing-reminder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin: 0 0 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--bop-color-row-divider);
+  border-bottom: 1px solid var(--bop-color-row-divider);
+  font-size: 14px;
+}
+.closing-reminder p {
+  margin: 0;
+}
+.closing-reminder__title {
+  font-weight: 600;
+}
+.closing-reminder__detail {
+  margin-top: 4px !important;
+  color: var(--bop-color-text-muted);
+}
+.closing-reminder__open {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  padding: 0 16px;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font-weight: 600;
+  text-decoration: none;
+}
+@media print {
+  .store-reports__tabs,
+  .tonight__links {
+    display: none;
+  }
+}
+/* The shared description-list and table styles lay facts out in columns and caps; not here. */
+.store-reports-page .tonight dl {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+.store-reports-page .tonight .tonight__row {
+  width: 100%;
+  min-width: 0;
+}
+.store-reports-page .tonight .tonight__row dt {
+  min-width: 0;
+}
+.store-reports-page .tonight__methods :is(th, td) {
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 14px;
+}
+.store-reports-page .tonight__head p,
+.store-reports-page .tonight__section p,
+.store-reports-page .tonight__checks {
+  padding-left: 0;
+}
+.store-reports-page .tonight__checks {
+  padding-left: 20px;
+}
