@@ -371,8 +371,7 @@ export const allergenDeclarationSources = [
  * (2000_112), labelled as such; never offered as an ingredient's supplier source. */
 export const staffAllergenDeclarationSource = "StaffDeclaration" as const;
 type DeclarationSource =
-  | (typeof allergenDeclarationSources)[number]
-  | typeof staffAllergenDeclarationSource;
+  (typeof allergenDeclarationSources)[number] | typeof staffAllergenDeclarationSource;
 export interface IngredientAllergenDeclaration {
   readonly evidenceReference: string;
   readonly itemReference: string;
