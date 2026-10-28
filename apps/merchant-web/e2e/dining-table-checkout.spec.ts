@@ -462,6 +462,8 @@ test("@production split bill: staff collect one part in cash while the others ar
   await expect(parts).toContainText("Paid $35.84 · card machine");
   await expect(parts).toContainText("A guest is paying on their phone");
   await expect(checkout).toContainText("1 of 3 parts paid · $63.28 to go");
+  // v15 2026-10-28: a part is paid, so checkout can't be cancelled.
+  await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
   // v15 2026-10-28 b: with parts unpaid, the write-off is offered for those parts only.
   await checkout.getByRole("button", { name: "Guests left without paying the rest" }).click();
   await expect(checkout.getByRole("group", { name: "Guests left without paying" })).toContainText(
@@ -515,6 +517,7 @@ test("@production split bill: staff collect one part in cash while the others ar
   await page.reload();
   await page.getByRole("button", { name: "Select T2", exact: true }).click();
   await expect(checkout.getByRole("heading", { name: "Paid" })).toBeVisible();
+  await expect(checkout.getByRole("button", { name: "Cancel checkout" })).toHaveCount(0);
   await expect(checkout.getByRole("button", { name: /Guests left without paying/u })).toHaveCount(
     0,
   );

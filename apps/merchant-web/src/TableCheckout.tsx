@@ -753,7 +753,11 @@ export function TableCheckout({
       bill !== null &&
       bill.settlement === null &&
       bill.writeOff === null &&
-      bill.onlinePayment?.status !== "InProgress" ? (
+      bill.onlinePayment?.status !== "InProgress" &&
+      // v15 2026-10-28: a split table that paid (or is paying) a part can't go back either; the
+      // server refuses it too.
+      (bill.split === null ||
+        (bill.split.paidParts === 0 && !bill.split.parts.some((part) => part.guestPaying))) ? (
         // DEC-DINE-IN-PAY-LATER (rule 3): the guests want to order more — back to ordering.
         <p className="table-checkout__cancel">
           <button type="button" disabled={busy || locked} onClick={() => void cancelCheckout()}>

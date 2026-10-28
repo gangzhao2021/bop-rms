@@ -2096,6 +2096,8 @@ async function journey(ending) {
           assert.equal(card.bill.split.paidParts, 1);
           // Locked once a part is paid; a part is paid once.
           await assert.rejects(splitWith({ people: 2 }), { code: "TABLE_CHECKOUT_SPLIT_LOCKED" });
+          // v15 2026-10-28: once a part is paid, checkout can't be cancelled (back to ordering).
+          await assert.rejects(closing(server, "Cancel"), { code: "DINING_CHECKOUT_ALREADY_PAID" });
           await assert.rejects(
             settleWith(server, { partNumber: 1, method: "CardMachine", tenderedMinor: null }),
             { code: "TABLE_CHECKOUT_ALREADY_PAID" },
