@@ -29,6 +29,8 @@ export function tableCloseBlockers(
   table: Pick<StaffDiningTable, "staffRoundsAwaitingPayment"> &
     Partial<Pick<StaffDiningTable, "paymentTiming">>,
   progress: Pick<DiningProgress, "items"> | null,
+  /** The unserved dishes are already explained by the close plan (rounds paid with the table). */
+  { unservedExplained = false }: { readonly unservedExplained?: boolean } = {},
 ): readonly string[] {
   const blockers: string[] = [];
   const awaiting = table.staffRoundsAwaitingPayment.length;
@@ -68,7 +70,7 @@ export function tableCloseBlockers(
             { count: waiting },
           ),
     );
-  if (unserved > 0)
+  if (unserved > 0 && !unservedExplained)
     blockers.push(
       unserved === 1
         ? t("1 item hasn't been served yet. Mark it served or cancel it on the Orders page.")
@@ -231,7 +233,13 @@ export function TableSessionClose({
   // DEC-TABLE-CLOSE-GUESTS-LEFT: rounds still open and what else stops the Order closing, from the
   // server's close evaluation (undefined while read, null when unknown).
   const [plan, setPlan] = useState<
-    { readonly open: number; readonly blockers: readonly string[] } | null | undefined
+    | {
+        readonly open: number;
+        readonly blockers: readonly string[];
+        readonly paidWithTable?: boolean;
+      }
+    | null
+    | undefined
   >(orderReference === null ? { open: 0, blockers: [] } : undefined);
   // A re-check reads the plan again: never show the previous answer meanwhile.
   useEffect(() => {
@@ -241,7 +249,11 @@ export function TableSessionClose({
   const blockers =
     check.kind === "Ready"
       ? [
-          ...tableCloseBlockers(table, progress),
+          // v15 2026-10-28: dishes of rounds paid with the table can't be cancelled on Orders;
+          // the plan's "Dishes still to serve" says what to do, so the generic line is left out.
+          ...tableCloseBlockers(table, progress, {
+            unservedExplained: plan?.paidWithTable === true,
+          }),
           // WP-2423 (B759): when no round is left to close out, the close evaluation's own reasons.
           ...(plan && plan.open === 0
             ? closeReasonTexts(plan.blockers, table.paymentTiming ?? "PayFirst")

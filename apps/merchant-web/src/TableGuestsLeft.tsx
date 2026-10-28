@@ -197,7 +197,13 @@ export function TableGuestsLeft({
    * How many rounds still keep the table open and what else stops its Order closing (server codes
    * of the close evaluation); null: unknown, the plan could not be read.
    */
-  readonly onPlan: (plan: { open: number; blockers: readonly string[] } | null) => void;
+  /**
+   * The plan's open rounds and other reasons, and (v15 2026-10-28) whether every open round was
+   * paid with the table, whose own guidance replaces the generic "serve or cancel" line.
+   */
+  readonly onPlan: (
+    plan: { open: number; blockers: readonly string[]; paidWithTable: boolean } | null,
+  ) => void;
   /** After rounds were cancelled: re-check the table. */
   readonly onResolved: () => void;
   readonly fetcher?: typeof fetch | undefined;
@@ -225,7 +231,12 @@ export function TableGuestsLeft({
         if (controller.signal.aborted) return;
         setPreviews(next);
         setLoad({ kind: "Ready", plan });
-        onPlanRef.current({ open: plan.rounds.length, blockers: plan.closeBlockers });
+        onPlanRef.current({
+          open: plan.rounds.length,
+          blockers: plan.closeBlockers,
+          paidWithTable:
+            plan.rounds.length > 0 && plan.rounds.every((round) => round.state === "PaidWithTable"),
+        });
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;

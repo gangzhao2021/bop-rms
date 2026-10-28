@@ -84,6 +84,15 @@ it("WP-2423 D4: explains what stops a table from closing, in staff words, with w
   for (const text of blockers) expect(text).not.toMatch(/[0-9a-f]{8}-|Submitted|Accepted|Batch/u);
 });
 
+it("v15 2026-10-28: a round paid with the table gets only its own guidance, not 'cancel on Orders'", () => {
+  const cooking = { items: [item("Accepted", 1, 3)] };
+  const payLater = { staffRoundsAwaitingPayment: [], paymentTiming: "PayLater" as const };
+  expect(tableCloseBlockers(payLater, cooking)).toEqual([
+    "1 item hasn't been served yet. Mark it served or cancel it on the Orders page.",
+  ]);
+  expect(tableCloseBlockers(payLater, cooking, { unservedExplained: true })).toEqual([]);
+});
+
 it("WP-2423 D4: stops ordering, closes the completed order and releases the table, in order", async () => {
   const fetcher = vi
     .fn<typeof fetch>()
