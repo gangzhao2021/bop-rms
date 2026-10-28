@@ -5,6 +5,7 @@ import {
   decodeOrderItemSnapshot,
 } from "../../domain/order-item-snapshot-codec.js";
 import { listOrderPriceReductions } from "./order-item-price-reduction-store.js";
+import { createPostgresPayLaterItemCancellationStore } from "./pay-later-item-cancellation-store.js";
 
 /** One priced line as the customer was charged for it (immutable snapshot, minor units). */
 export interface StoreSalesOrderItem {
@@ -82,6 +83,17 @@ export function createPostgresStoreSalesOrderSource(options: {
         [brand, store, chunk],
       );
       if (items.rows.length > 200000) return fail();
+      // DEC-DINE-IN-PAY-LATER (rule 2): dishes taken off an unpaid table's bill were never sold or
+      // charged (the kitchen stopped them), so they are not lines of the sale.
+      const removals = createPostgresPayLaterItemCancellationStore({
+        brandReference: brand,
+        storeReference: store,
+        authorize: async (t) => (await options.authorize(t)) === true,
+      });
+      const removed = new Set<string>();
+      for (let part = 0; part < chunk.length; part += 200)
+        for (const record of await removals.listByOrders(tx, chunk.slice(part, part + 200)))
+          for (const line of record.orderItemReferences) removed.add(line);
       const reductions = new Map(
         (
           await listOrderPriceReductions(
@@ -123,6 +135,7 @@ export function createPostgresStoreSalesOrderSource(options: {
         byOrder.set(String(row.order_id), batches);
         const lines = batches.get(String(row.batch_id)) ?? [];
         batches.set(String(row.batch_id), lines);
+        if (removed.has(String(snapshot.orderItemReference))) continue;
         const off = reductions.get(String(snapshot.orderItemReference)) ?? null;
         const taxOff = off?.taxMinor ?? 0n;
         // The tax taken off is spread over the tax lines in proportion; the last line takes the

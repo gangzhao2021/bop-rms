@@ -5935,4 +5935,5 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Start checkout, check the bill matches the paper, choose the tip, tick Paid while the system was down with the time, and record the payment.":
     "开始结账，核对账单和纸单一致，选小费，勾选“断网时已收款”并填时间，再记下收款。",
   "Close the table, then mark it cleaned.": "关台，清洁后点“已清洁”。",
+  "To pay after comps": "减免后应付",
 });

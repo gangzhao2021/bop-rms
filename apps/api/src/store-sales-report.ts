@@ -37,6 +37,16 @@ export interface StoreSalesReportInput {
     readonly decidedAt: string;
   }[];
   readonly orders: readonly StoreSalesOrder[];
+  /**
+   * WP-2423 item 8 ① segment 2: comps and discounts managers decided in the range (and their
+   * Orders are in `orders`). A round whose every dish was comped owes nothing, so it has no
+   * payment line: its dishes and comps count on the day the (last) comp was decided.
+   */
+  readonly priceReductions?: readonly {
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    readonly decidedAt: string;
+  }[];
   readonly mayExport: boolean;
   readonly generatedAt: string;
 }
@@ -248,6 +258,64 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
     for (const item of items) {
       h.netSalesMinor += item.subtotalMinor - item.discountMinor - item.compMinor;
       h.taxMinor += item.taxMinor;
+      const key = itemKey(item);
+      const row = f.items.get(key) ?? {
+        name: item.name,
+        quantity: 0,
+        grossMinor: 0n,
+        discountMinor: 0n,
+        compMinor: 0n,
+        refundedQuantity: 0,
+        refundedNetMinor: 0n,
+      };
+      f.items.set(key, row);
+      row.quantity += item.quantity;
+      row.grossMinor += item.subtotalMinor;
+      row.discountMinor += item.discountMinor;
+      row.compMinor += item.compMinor;
+    }
+  }
+
+  // Rounds comped in full: sold at their price, all of it comped, nothing collected (no payment
+  // line). Never left out of the sales (AGENTS.md: no sales suppression).
+  const paidBatches = new Set(
+    [...input.payments, ...input.refundedPayments].map((payment) => payment.orderBatchReference),
+  );
+  const compedRounds = new Map<string, { orderReference: string; decidedAt: string }>();
+  for (const reduction of input.priceReductions ?? []) {
+    const prior = compedRounds.get(reduction.orderBatchReference);
+    if (prior === undefined || reduction.decidedAt > prior.decidedAt)
+      compedRounds.set(reduction.orderBatchReference, {
+        orderReference: reduction.orderReference,
+        decidedAt: reduction.decidedAt,
+      });
+  }
+  for (const [orderBatchReference, round] of compedRounds) {
+    if (paidBatches.has(orderBatchReference)) continue;
+    const order = orders.get(round.orderReference);
+    const items = batchItems(round.orderReference, orderBatchReference);
+    if (
+      order === undefined ||
+      items === null ||
+      items.length === 0 ||
+      items.reduce((sum, item) => sum + item.totalMinor, 0n) !== 0n
+    )
+      continue;
+    const day = dayOf(round.decidedAt);
+    if (day === null) continue;
+    const f = facts.get(day.businessDate) ?? fail();
+    for (const t of [f.all, f.kinds.get(kindOf(order)) ?? fail()]) {
+      t.orders.add(round.orderReference);
+      for (const item of items) {
+        t.grossMinor += item.subtotalMinor;
+        t.discountMinor += item.discountMinor;
+        t.compMinor += item.compMinor;
+        if (item.compMinor > 0n) t.compCount++;
+        t.serviceChargeMinor += item.feeMinor;
+        t.taxMinor += item.taxMinor;
+      }
+    }
+    for (const item of items) {
       const key = itemKey(item);
       const row = f.items.get(key) ?? {
         name: item.name,
