@@ -15,7 +15,7 @@ import {
   type DiningSessionView,
 } from "./dining-session-client.js";
 import { DiningInvitationPanel } from "./DiningInvitationPanel.js";
-import { TablePayPanel } from "./TablePayPanel.js";
+import { TablePayPanel, type TablePayStatus } from "./TablePayPanel.js";
 import { subscribeCustomerCsrfContext } from "../session/customer-transaction-context.js";
 import { DiningStaffCallPanel } from "./DiningStaffCallPanel.js";
 import type { DiningStaffCallClient } from "./dining-staff-call-client.js";
@@ -489,6 +489,8 @@ export function DiningSessionScreen({
   /** WP-2423 Q28 DEC-DINING-STAFF-CALL: "Need a staff member?". */
   readonly staffCall?: ReactNode;
 }) {
+  // DEC-DINE-IN-PAY-LATER: whether the table is checking out or paid, from its pay panel.
+  const [tablePay, setTablePay] = useState<TablePayStatus | null>(null);
   const view = state.status === "ready" || state.status === "unavailable" ? state.view : null;
   const active = isDiningSessionActive(view);
   return (
@@ -553,7 +555,15 @@ export function DiningSessionScreen({
       ) : null}
       {view ? <TableSummary view={view} /> : null}
       {/* DEC-DINE-IN-PAY-LATER S4: the guest pays the whole table here once checkout started. */}
-      {view?.paymentTiming === "PayLater" ? <TablePayPanel /> : null}
+      {view?.paymentTiming === "PayLater" ? (
+        <TablePayPanel
+          onStatus={(status) => {
+            setTablePay(status);
+            // The table's total and rounds are read again (paid in full, or checkout started).
+            onRefresh();
+          }}
+        />
+      ) : null}
       {view && view.rounds.length > 0 ? (
         <section className="order-status__batches" aria-labelledby="dining-rounds-heading">
           <h2 id="dining-rounds-heading">{t("Rounds")}</h2>
@@ -580,9 +590,16 @@ export function DiningSessionScreen({
           <p>{t("Tell a staff member before you eat. They can check any dish for you.")}</p>
         </aside>
       ) : null}
-      <Link className="order-status__back" to="/menu">
-        {t("Order more from the menu")}
-      </Link>
+      {/* DEC-DINE-IN-PAY-LATER: during checkout no more rounds are sent; paid, nothing to add. */}
+      {tablePay?.paid ? null : tablePay?.checkingOut ? (
+        <p className="order-status__back" role="note">
+          {t("Your table is checking out. To add dishes, ask a staff member.")}
+        </p>
+      ) : (
+        <Link className="order-status__back" to="/menu">
+          {t("Order more from the menu")}
+        </Link>
+      )}
     </CustomerPage>
   );
 }

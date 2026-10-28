@@ -493,11 +493,42 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
         json: { schemaVersion: 1, clientSecret: "pi_SYNTHETIC_secret_SYNTHETIC" },
       });
     });
-    await enterTable(page, () => ({ status: 200, json: payLater }));
+    const paidSession = {
+      ...payLater,
+      session: {
+        ...payLater.session,
+        summary: { ...payLater.session.summary, paid: cad("2304"), due: cad("0") },
+      },
+    };
+    await enterTable(page, () => ({
+      status: 200,
+      json: state === "Paid" ? paidSession : payLater,
+    }));
     const pay = page.getByRole("region", { name: "Pay the bill" });
     await expect(pay).toBeVisible();
+    // No tip is chosen for the guest: every option, "No tip" included, alike; choose to pay.
+    for (const name of ["No tip", /10% · /u, /15% · /u, /18% · /u])
+      await expect(pay.getByRole("radio", { name })).not.toBeChecked();
+    await expect(pay.getByRole("button", { name: "Choose a tip to pay" })).toBeDisabled();
+    // Checking out: no more rounds from the phone; staff add dishes.
+    await expect(page.getByRole("link", { name: "Order more from the menu" })).toHaveCount(0);
+    await expect(
+      page.getByText("Your table is checking out. To add dishes, ask a staff member."),
+    ).toBeVisible();
     // The tip is chosen once for the whole table: 15% of the bill before tax.
     await pay.getByRole("radio", { name: /15% · \$2\.70/u }).check();
+    // Leaving the table page and coming back keeps the choice for this checkout.
+    await page
+      .getByRole("navigation", { name: "Customer journey" })
+      .getByRole("link", { name: "Menu" })
+      .click();
+    await page
+      .getByRole("navigation", { name: "Customer journey" })
+      .getByRole("link", { name: "Your table" })
+      .click();
+    await expect(
+      page.getByRole("region", { name: "Pay the bill" }).getByRole("radio", { name: /15% · /u }),
+    ).toBeChecked();
     await pay.getByRole("button", { name: "Pay $23.04" }).click();
     await expect(pay).toContainText("Paying $23.04 for the whole table, tip included.");
     // The browser sends only the tip chosen and its own operation (never an amount).
@@ -513,6 +544,12 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
     await expect(receipt).toContainText("$23.04", { timeout: 10000 });
     await expect(receipt).toContainText("Card on a guest’s phone");
     await expect(receipt).toContainText("$2.70");
+    // Paid in full: the table's total says so (read again), and nothing more is offered to order.
+    await expect(
+      page.getByRole("region", { name: "Table total" }).getByText("$23.04", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Your table is checking out.")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Order more from the menu" })).toHaveCount(0);
     for (const width of [390, 1024]) {
       await page.setViewportSize({ width, height: 900 });
       await expectNoHorizontalOverflow(page);

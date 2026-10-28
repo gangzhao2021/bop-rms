@@ -1156,4 +1156,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Cash: "现金",
   "Card payment isn’t available on this phone. Ask a staff member to take the payment.":
     "这部手机暂时不能刷卡付款，请找店员收款。",
+  "Choose a tip to pay": "请选择小费后付款",
+  "Your table is checking out. To add dishes, ask a staff member.":
+    "这桌正在结账，要加菜请找店员。",
 });
