@@ -2618,16 +2618,25 @@
 /* ---------- WP-2423 store identity (start and menu pages) ---------- */
 /* One line on the menu, its height kept from the first render so nothing moves when it arrives. */
 .store-strip {
-  min-height: 1.75rem;
+  /* Two lines reserved from the first render (status; last orders and holidays). */
+  min-height: 3rem;
   font-size: 0.9375rem;
 }
 .store-strip__line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 var(--bop-space-2);
+  display: block;
   min-height: 1.75rem;
   margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.store-strip__line--more > * + * {
+  margin-inline-start: var(--bop-space-3);
+}
+.store-strip__line--more {
+  min-height: 1.25rem;
+  color: var(--bop-color-text-muted);
+  font-size: 0.875rem;
 }
 .store-strip__label {
   font-weight: 650;

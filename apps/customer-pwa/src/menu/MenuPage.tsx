@@ -465,8 +465,10 @@ export function MenuScreen({
             {mode === "detail" && state.kind !== "PermissionDenied" && state.kind !== "Loading" ? (
               <AllergenHelp />
             ) : null}
-            {/* WP-2423 item 8 ③ (decision 16): the Store's hours, holidays, address and phone. */}
-            {mode === "browse" && context !== undefined ? (
+            {/* WP-2423 item 8 ③ (decision 16): the Store's hours, holidays, address and phone,
+                once the menu has loaded or failed (when its phone matters most), never above a
+                loading menu that would then push it down. */}
+            {mode === "browse" && context !== undefined && state.kind !== "Loading" ? (
               <StoreInfoSection
                 load={storeProfile === undefined ? browserStoreProfile : storeProfile}
               />

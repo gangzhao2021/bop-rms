@@ -1181,4 +1181,5 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "One more {name} is in your cart.": "已把一份{name}加入你的购物车。",
   "This table already ordered {count} of these.": "这桌已经点过 {count} 份。",
   "Your table ordered {count}": "这桌已点 {count} 份",
+  "Last orders {time}": "厨房 {time} 停止接单",
 });

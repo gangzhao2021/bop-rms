@@ -6,6 +6,7 @@ import { App } from "./App.js";
 import { loadLocalCustomerDemo } from "./customer-demo-entry.js";
 import "./customer-demo.css";
 import "./styles.css";
+import "./customer-v3.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Application root is missing");

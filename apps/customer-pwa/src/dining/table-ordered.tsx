@@ -15,6 +15,9 @@ import {
 export type TableOrderedCounts = ReadonlyMap<string, number>;
 
 const TableOrdered = createContext<TableOrderedCounts>(new Map());
+// The last counts read on this page, so the menu shows them at once when the guest comes back to
+// it (nothing moves when the read arrives); the read follows each time.
+let lastCounts: TableOrderedCounts = new Map();
 
 /** How many of each menu item the table ordered, by menu item. */
 export function tableOrderedCounts(view: DiningSessionView): TableOrderedCounts {
@@ -41,14 +44,18 @@ export function TableOrderedProvider({
   readonly initial?: TableOrderedCounts | undefined;
   readonly children: ReactNode;
 }) {
-  const [counts, setCounts] = useState<TableOrderedCounts>(() => initial ?? new Map());
+  const [counts, setCounts] = useState<TableOrderedCounts>(
+    () => initial ?? (enabled ? lastCounts : new Map()),
+  );
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
     (client ?? createHttpDiningSessionClient())
       .load(controller.signal)
       .then((view) => {
-        if (!controller.signal.aborted) setCounts(tableOrderedCounts(view));
+        if (controller.signal.aborted) return;
+        lastCounts = tableOrderedCounts(view);
+        setCounts(lastCounts);
       })
       .catch(() => {
         /* Not known: the menu says nothing rather than a guessed count. */

@@ -1,0 +1,158 @@
+/*
+ * WP-2423 item 8 ③: the customer pages in the v3 system the staff pages use (Owner 2026-10-26,
+ * "Square style", frozen 2026-10-26 in the product definition). Loaded after styles.css.
+ * - White, black text, one accent (#1f63e0) for what can be clicked: the one next step is an
+ *   accent button, every other action is accent words; the current tab and the focus ring too.
+ * - Three status meanings, each a dot with words (styles.css): open or done green, closed or a
+ *   problem red, waiting grey.
+ * - Four type sizes: 28 page title, 20 section, 16 body, 14 secondary.
+ */
+.customer-page {
+  --bop-color-brand-primary: var(--bop-color-accent);
+  --bop-color-on-primary: var(--bop-color-on-accent-fill);
+  --bop-color-border-strong: var(--bop-color-accent);
+  font-size: 16px;
+}
+
+/* Type: 28 / 20 / 16 / 14. */
+.customer-page.customer-page .order-status__summary h2 {
+  font-size: 20px;
+  line-height: 1.3;
+}
+.customer-page .customer-heading h2 {
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.customer-page .bop-shell__main :where(h2:not(.sr-only)) {
+  font-size: 20px;
+  line-height: 1.3;
+}
+.customer-page .bop-shell__main h3 {
+  font-size: 16px;
+}
+/* Menu section names are the page's sections (20); help notes beside the menu are body text. */
+.customer-page .menu-content h3:not(.sr-only) {
+  font-size: 20px;
+  line-height: 1.3;
+}
+.customer-page .menu-content .menu-card h4 {
+  font-size: 16px;
+}
+.customer-page .bop-shell__main .menu-help h2 {
+  font-size: 16px;
+}
+.customer-page .bop-eyebrow,
+.customer-page .customer-heading p,
+.customer-page .menu-card__description,
+.customer-page .menu-card__allergens,
+.customer-page .menu-card__price,
+.customer-page .store-identity__address,
+.customer-page .configure-status p {
+  font-size: 14px;
+}
+
+/* The one next step: accent fill. */
+.customer-page .menu-action,
+.customer-page .cart-checkout-link,
+.customer-page .cart-primary-link,
+.customer-page .checkout-continue__button,
+.customer-page .payment-page__pay,
+.customer-page .entry-action,
+.customer-page .order-status__retry,
+.customer-page .shell-action,
+.customer-page .dining-session__pay {
+  border-color: var(--bop-color-accent);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+}
+
+/* Every other action: accent words, no box (doubled class: these replace the older outlined
+   secondary buttons in styles.css). */
+.customer-page.customer-page
+  :is(
+    .checkout-details-form__save,
+    .receipt-page__toolbar button,
+    .order-status__actions button,
+    .payment-retry__secondary,
+    .entry-secondary-action,
+    .dining-invitation__action--secondary,
+    .cart-item__actions button
+  ):not(:disabled) {
+  padding-inline: 4px;
+  border-color: transparent;
+  background: none;
+  box-shadow: none;
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.customer-page .bop-shell__main a:not([class]),
+.customer-page .order-status__back,
+.customer-page .store-identity__links a,
+.customer-page .menu-navigation__links a,
+.customer-page .configure-status a:not(.menu-action) {
+  color: var(--bop-color-accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+.customer-page .bop-shell__main a:not([class]):hover,
+.customer-page .order-status__back:hover,
+.customer-page .store-identity__links a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* A disabled action stays readable grey, never a faded accent. */
+.customer-page button:disabled,
+.customer-page .checkout-continue__button:disabled {
+  border-color: var(--bop-color-border-default);
+  background: var(--bop-color-surface-raised);
+  color: var(--bop-color-text-muted);
+}
+
+/* The current page in the journey and the current menu section: accent words and underline. */
+.customer-page .bop-shell__nav > [aria-current="page"],
+.menu-sections a[aria-current="true"] {
+  border-bottom-color: var(--bop-color-accent);
+  color: var(--bop-color-accent);
+}
+.customer-page .language-switch {
+  border-color: var(--bop-color-border-control);
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+
+/* The Store at the bottom of the menu: a section under a hairline, aligned with the menu. */
+.customer-page.customer-page .store-info {
+  padding: var(--bop-space-6, 1.5rem) 0 0;
+  border: 0;
+  border-top: 1px solid var(--bop-color-border-default);
+  border-radius: 0;
+}
+
+/* Cards are rows on white: no boxes, a hairline between rows (as on the staff pages). */
+.customer-page .order-status__card,
+.customer-page .store-contact,
+.customer-page .dining-admission {
+  border: 0;
+  border-top: 1px solid var(--bop-color-border-default);
+  border-radius: 0;
+  padding-inline: 0;
+}
+
+:where(.customer-page) :focus-visible {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+
+/* A chosen tip is a selected filter: accent outline and accent words on white. */
+.customer-page .checkout-tip__choices button[aria-pressed="true"],
+.customer-page.checkout-page .checkout-tip__choices button[aria-pressed="true"] {
+  border: 2px solid var(--bop-color-accent);
+  background: var(--bop-color-surface-canvas);
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.customer-page.customer-page .store-info h2 {
+  font-size: 20px;
+}
