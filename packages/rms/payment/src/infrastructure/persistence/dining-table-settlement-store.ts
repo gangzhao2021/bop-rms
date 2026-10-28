@@ -4,6 +4,7 @@ import {
   type DiningTableSettlementMethod,
   type DiningTableSettlementRound,
 } from "../../domain/dining-table-settlement.js";
+import type { DiningTableSplit, DiningTableSplitMode } from "../../domain/dining-table-split.js";
 import { parsePaymentReference } from "../../application/payment-provider-adapter.js";
 import { parsePaymentInstant } from "../../application/payment-intent-creation.js";
 
@@ -62,6 +63,8 @@ export interface DiningTableSettlementRecord {
   readonly auditReference: string;
   /** S4: the guest's online payment this settlement records (method Online only). */
   readonly onlinePaymentReference: string | null;
+  /** WP-2423 item 8 ④: the part of the table's split plan this payment is (null: the whole table). */
+  readonly part: DiningTableSplitPartReference | null;
   /** One line per round the table owed; the tip and rounding are on the last line. */
   readonly lines: readonly {
     readonly orderBatchReference: string;
@@ -128,6 +131,101 @@ function cashRefundFrom(row: Record<string, unknown>): DiningTableCashRefundReco
  * S4 (DEC-DINE-IN-PAY-LATER decisions 3-5): a guest's attempt to pay the whole table on their
  * phone — one Provider transaction — and, once the Provider reports it, its outcome.
  */
+/** WP-2423 item 8 ④: one part of a table's split plan. */
+export interface DiningTableSplitPartReference {
+  readonly splitPlanReference: string;
+  readonly partNumber: number;
+}
+const partFrom = (plan: unknown, number: unknown): DiningTableSplitPartReference | null => {
+  if (plan === null && number === null) return null;
+  const partNumber = Number(number);
+  if (!Number.isSafeInteger(partNumber) || partNumber < 1 || partNumber > 20) return fail();
+  return Object.freeze({ splitPlanReference: ref(plan), partNumber });
+};
+
+/** WP-2423 item 8 ④: a recorded split plan (the latest version is the table's current split). */
+export interface DiningTableSplitPlanRecord {
+  readonly splitPlanReference: string;
+  readonly operationReference: string;
+  readonly intentDigest: string;
+  readonly diningSessionReference: string;
+  readonly orderReference: string;
+  readonly planVersion: number;
+  /** "Whole": back to one payment for the table (no parts). */
+  readonly mode: "Whole" | DiningTableSplitMode;
+  readonly billMinor: bigint;
+  readonly recordedAt: string;
+  readonly actorReference: string;
+  readonly parts: readonly {
+    readonly partNumber: number;
+    readonly amountMinor: bigint;
+    readonly subtotalMinor: bigint;
+    readonly taxMinor: bigint;
+    readonly slices: readonly {
+      readonly orderBatchReference: string;
+      readonly roundMinor: bigint;
+      readonly subtotalMinor: bigint;
+      readonly taxMinor: bigint;
+    }[];
+  }[];
+}
+const splitPlanSelect = `SELECT p.split_plan_id::text AS plan,p.tenant_id::text AS tenant,p.operation_id::text AS operation,
+ p.intent_digest,p.dining_session_id::text AS session,p.order_id::text AS "order",p.plan_version,p.mode,
+ p.part_count,p.bill_minor::text AS bill,${instant("p.recorded_at")} AS recorded_at,p.actor_id::text AS actor,
+ (SELECT coalesce(jsonb_agg(jsonb_build_object('part',x.part_number,'amount',x.amount_minor::text,
+   'subtotal',x.subtotal_minor::text,'tax',x.tax_minor::text,
+   'slices',(SELECT coalesce(jsonb_agg(jsonb_build_object('batch',r.order_batch_id,'round',r.round_minor::text,
+     'subtotal',r.subtotal_minor::text,'tax',r.tax_minor::text) ORDER BY r.order_batch_id),'[]'::jsonb)
+     FROM rms_payment.dining_table_split_part_round r WHERE r.split_plan_id=x.split_plan_id
+     AND r.part_number=x.part_number AND r.brand_id=x.brand_id AND r.store_id=x.store_id))
+   ORDER BY x.part_number),'[]'::jsonb) FROM rms_payment.dining_table_split_part x
+   WHERE x.split_plan_id=p.split_plan_id AND x.brand_id=p.brand_id AND x.store_id=p.store_id) AS parts
+ FROM rms_payment.dining_table_split_plan p WHERE p.brand_id=$1 AND p.store_id=$2`;
+function splitPlanFrom(row: Record<string, unknown>): DiningTableSplitPlanRecord {
+  const mode =
+    row.mode === "Whole" || row.mode === "Even" || row.mode === "ByRounds" ? row.mode : fail();
+  const version = Number(row.plan_version);
+  const parts = row.parts;
+  if (!Number.isSafeInteger(version) || version < 1 || !Array.isArray(parts)) return fail();
+  if (parts.length !== Number(row.part_count)) return fail();
+  return Object.freeze({
+    splitPlanReference: ref(row.plan),
+    operationReference: ref(row.operation),
+    intentDigest:
+      typeof row.intent_digest === "string" && /^sha256:[0-9a-f]{64}$/u.test(row.intent_digest)
+        ? row.intent_digest
+        : fail(),
+    diningSessionReference: ref(row.session),
+    orderReference: ref(row.order),
+    planVersion: version,
+    mode,
+    billMinor: minor(row.bill, 1n),
+    recordedAt: String(parsePaymentInstant(row.recorded_at)),
+    actorReference: ref(row.actor),
+    parts: Object.freeze(
+      parts.map((part: Record<string, unknown>) => {
+        if (!Array.isArray(part.slices)) return fail();
+        return Object.freeze({
+          partNumber: Number(part.part),
+          amountMinor: minor(part.amount, 1n),
+          subtotalMinor: minor(part.subtotal),
+          taxMinor: minor(part.tax),
+          slices: Object.freeze(
+            part.slices.map((slice: Record<string, unknown>) =>
+              Object.freeze({
+                orderBatchReference: ref(slice.batch),
+                roundMinor: minor(slice.round, 1n),
+                subtotalMinor: minor(slice.subtotal),
+                taxMinor: minor(slice.tax),
+              }),
+            ),
+          ),
+        });
+      }),
+    ),
+  });
+}
+
 export interface DiningTableOnlinePaymentRecord {
   readonly onlinePaymentReference: string;
   readonly operationReference: string;
@@ -142,6 +240,8 @@ export interface DiningTableOnlinePaymentRecord {
   readonly environment: "Test" | "Live";
   readonly providerIntentReference: string;
   readonly createdAt: string;
+  /** WP-2423 item 8 ④: the part this payment is for (null: the whole table). */
+  readonly part: DiningTableSplitPartReference | null;
   readonly outcome: null | {
     readonly status: "Captured" | "Failed" | "Cancelled";
     readonly capturedMinor: bigint | null;
@@ -154,7 +254,8 @@ const onlinePaymentSelect = `SELECT p.online_payment_id::text AS payment,p.tenan
  p.operation_id::text AS operation,p.intent_digest,p.dining_session_id::text AS session,p.order_id::text AS "order",
  p.guest_session_id::text AS guest,p.rounds_minor::text AS rounds,p.tip_minor::text AS tip,
  p.total_minor::text AS total,p.provider_account_id::text AS account,p.payment_environment AS environment,
- p.provider_intent_reference AS intent,${instant("p.created_at")} AS created_at,o.status,
+ p.provider_intent_reference AS intent,${instant("p.created_at")} AS created_at,
+ p.split_plan_id::text AS split_plan,p.part_number,o.status,
  o.captured_minor::text AS captured,o.provider_transaction_reference AS transaction,
  ${instant("o.occurred_at")} AS occurred_at,${instant("o.recorded_at")} AS outcome_recorded_at
  FROM rms_payment.dining_table_online_payment p LEFT JOIN rms_payment.dining_table_online_payment_outcome o
@@ -189,6 +290,7 @@ function onlinePaymentFrom(row: Record<string, unknown>): DiningTableOnlinePayme
         ? row.intent
         : fail(),
     createdAt: String(parsePaymentInstant(row.created_at)),
+    part: partFrom(row.split_plan, row.part_number),
     outcome:
       status === null
         ? null
@@ -231,6 +333,7 @@ const settlementSelect = `SELECT s.settlement_id::text AS settlement,s.tenant_id
  s.tendered_minor::text AS tendered,s.change_minor::text AS change,s.payment_environment AS environment,
  s.slip_reference,s.recording_reason,${instant("s.taken_at")} AS taken_at,${instant("s.recorded_at")} AS recorded_at,
  s.actor_id::text AS actor,s.audit_id::text AS audit,s.online_payment_id::text AS online_payment,
+ s.split_plan_id::text AS split_plan,s.part_number,
  (SELECT coalesce(jsonb_agg(jsonb_build_object('batch',r.order_batch_id,'submission',r.submission_id,
    'line',r.line_number,'round',r.round_minor::text,'tip',r.tip_minor::text,'rounding',r.rounding_minor::text)
    ORDER BY r.line_number),'[]'::jsonb) FROM rms_payment.dining_table_settlement_round r
@@ -286,6 +389,7 @@ function settlementFrom(row: Record<string, unknown>): DiningTableSettlementReco
     actorReference: ref(row.actor),
     auditReference: ref(row.audit),
     onlinePaymentReference: row.online_payment === null ? null : ref(row.online_payment),
+    part: partFrom(row.split_plan, row.part_number),
     lines: Object.freeze(
       lines.map((value: Record<string, unknown>) =>
         Object.freeze({
@@ -515,6 +619,172 @@ export function createPostgresDiningTableSettlementStore(options: {
     },
 
     /**
+     * WP-2423 item 8 ④: the current split plan of each of these Orders (the latest version), or
+     * none for an Order that was never split.
+     */
+    async listSplitPlans(tx: AuditTransaction, orderReferences: readonly string[]) {
+      if (orderReferences.length === 0) return Object.freeze([]);
+      if (orderReferences.length > 200) return fail();
+      const orders = orderReferences.map(ref);
+      for (const order of orders) await allowed(tx, order);
+      await context(tx);
+      const found = rows(
+        await tx.query(
+          `${splitPlanSelect} AND p.order_id=ANY($3::uuid[]) AND p.plan_version=(SELECT max(q.plan_version)
+ FROM rms_payment.dining_table_split_plan q WHERE q.brand_id=p.brand_id AND q.store_id=p.store_id AND q.order_id=p.order_id)`,
+          [brand, store, orders],
+        ),
+      );
+      return Object.freeze(
+        found.map((row) => {
+          if (ref(row.tenant) !== tenant) return fail();
+          return splitPlanFrom(row);
+        }),
+      );
+    },
+
+    /**
+     * WP-2423 item 8 ④: records how the table's bill is split (or that it is paid whole again), as
+     * the Order's next plan version. The parts come from splitDiningTableBill over the Order's own
+     * rounds. Refused (by the database too) once anything was paid, written off or started on a
+     * guest's phone. A retry with the same operation and intent returns the same plan.
+     */
+    async recordSplitPlan(
+      tx: AuditTransaction,
+      input: {
+        readonly splitPlanReference: string;
+        readonly operationReference: string;
+        readonly intentDigest: string;
+        readonly diningSessionReference: string;
+        readonly orderReference: string;
+        readonly split: DiningTableSplit | { readonly mode: "Whole"; readonly billMinor: bigint };
+        readonly recordedAt: string;
+        readonly actorReference: string;
+        readonly auditReference: string;
+        readonly correlationReference: string;
+      },
+    ) {
+      const order = ref(input.orderReference);
+      await allowed(tx, order);
+      if (!/^sha256:[0-9a-f]{64}$/u.test(input.intentDigest)) return fail();
+      const bill = minor(String(input.split.billMinor), 1n);
+      const parts = input.split.mode === "Whole" ? [] : input.split.parts;
+      if (input.split.mode !== "Whole" && (parts.length < 2 || parts.length > 20)) return fail();
+      await context(tx);
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        "DiningTablePaidOrWrittenOff:" + brand + ":" + store + ":" + order,
+      ]);
+      const prior = rows(
+        await tx.query(`${splitPlanSelect} AND p.operation_id=$3`, [
+          brand,
+          store,
+          ref(input.operationReference),
+        ]),
+      ).map(splitPlanFrom);
+      if (prior.length > 0) {
+        const same = prior[0] as DiningTableSplitPlanRecord;
+        if (same.intentDigest !== input.intentDigest || same.orderReference !== order)
+          return fail("DINING_TABLE_SETTLEMENT_IDEMPOTENCY_CONFLICT");
+        return Object.freeze({ status: "AlreadyRecorded" as const, plan: same });
+      }
+      if (
+        (await settlements(tx, "s.order_id=$3", [order])).length > 0 ||
+        (await writeOffs(tx, "w.order_id=$3", [order])).length > 0
+      )
+        return fail("DINING_TABLE_SETTLEMENT_ALREADY_PAID");
+      const versions = rows(
+        await tx.query(
+          "SELECT coalesce(max(plan_version),0) AS version FROM rms_payment.dining_table_split_plan WHERE brand_id=$1 AND store_id=$2 AND order_id=$3",
+          [brand, store, order],
+        ),
+      );
+      const version = Number(versions[0]?.version ?? 0) + 1;
+      const recordedAt = String(parsePaymentInstant(input.recordedAt));
+      const plan = ref(input.splitPlanReference);
+      await tx.query(
+        `INSERT INTO rms_payment.dining_table_split_plan (split_plan_id,tenant_id,brand_id,store_id,operation_id,
+ intent_digest,dining_session_id,order_id,plan_version,mode,part_count,bill_minor,currency_code,recorded_at,actor_id,audit_id)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'CAD',$13,$14,$15)`,
+        [
+          plan,
+          tenant,
+          brand,
+          store,
+          ref(input.operationReference),
+          input.intentDigest,
+          ref(input.diningSessionReference),
+          order,
+          version,
+          input.split.mode,
+          parts.length,
+          bill.toString(),
+          recordedAt,
+          ref(input.actorReference),
+          ref(input.auditReference),
+        ],
+      );
+      for (const part of parts) {
+        await tx.query(
+          `INSERT INTO rms_payment.dining_table_split_part (split_plan_id,brand_id,store_id,order_id,part_number,
+ amount_minor,subtotal_minor,tax_minor) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [
+            plan,
+            brand,
+            store,
+            order,
+            part.partNumber,
+            part.amountMinor.toString(),
+            part.subtotalMinor.toString(),
+            part.taxMinor.toString(),
+          ],
+        );
+        for (const slice of part.slices)
+          await tx.query(
+            `INSERT INTO rms_payment.dining_table_split_part_round (split_plan_id,part_number,brand_id,store_id,
+ order_id,order_batch_id,round_minor,subtotal_minor,tax_minor) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+            [
+              plan,
+              part.partNumber,
+              brand,
+              store,
+              order,
+              ref(slice.orderBatchReference),
+              slice.roundMinor.toString(),
+              slice.subtotalMinor.toString(),
+              slice.taxMinor.toString(),
+            ],
+          );
+      }
+      await appendAuditRecordInTransaction(tx, {
+        auditId: ref(input.auditReference),
+        brandId: brand,
+        storeId: store,
+        actor: { type: "User", reference: ref(input.actorReference) },
+        actionCode: "PAYMENT_DINING_TABLE_SPLIT_PLANNED",
+        targetType: "Order",
+        targetId: order,
+        afterSummary: {
+          mode: input.split.mode,
+          parts: parts.length,
+          billMinor: bill.toString(),
+          planVersion: version,
+        },
+        reasonCode: input.split.mode === "Whole" ? "PAY_WHOLE_TABLE" : "SPLIT_BILL",
+        correlationId: ref(input.correlationReference),
+        occurredAt: recordedAt,
+        sourceChannel: "MERCHANT_WEB",
+        dataClassification: "Restricted",
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      });
+      const saved = rows(
+        await tx.query(`${splitPlanSelect} AND p.split_plan_id=$3`, [brand, store, plan]),
+      ).map(splitPlanFrom);
+      if (saved[0] === undefined) return fail();
+      return Object.freeze({ status: "Recorded" as const, plan: saved[0] });
+    },
+
+    /**
      * Records one table payment, split by round. A retry with the same operation and intent returns
      * the same settlement; a second payment for the Order is refused.
      */
@@ -540,6 +810,8 @@ export function createPostgresDiningTableSettlementStore(options: {
         readonly correlationReference: string;
         /** S4: method Online only — the captured guest payment this settlement records. */
         readonly onlinePaymentReference?: string;
+        /** WP-2423 item 8 ④: this payment is one part of the current split plan (`rounds` its slices). */
+        readonly part?: DiningTableSplitPartReference;
       },
     ) {
       const order = ref(input.orderReference);
@@ -565,7 +837,18 @@ export function createPostgresDiningTableSettlementStore(options: {
           return fail("DINING_TABLE_SETTLEMENT_IDEMPOTENCY_CONFLICT");
         return Object.freeze({ status: "AlreadyRecorded" as const, settlement: same });
       }
-      if ((await settlements(tx, "s.order_id=$3", [order])).length > 0)
+      // The whole table is paid once; a part once (the database checks both, and the plan).
+      const paid = await settlements(tx, "s.order_id=$3", [order]);
+      if (
+        input.part === undefined
+          ? paid.length > 0
+          : paid.some(
+              (entry) =>
+                entry.part === null ||
+                (entry.part.splitPlanReference === ref(input.part?.splitPlanReference) &&
+                  entry.part.partNumber === input.part?.partNumber),
+            )
+      )
         return fail("DINING_TABLE_SETTLEMENT_ALREADY_PAID");
       const recordedAt = String(parsePaymentInstant(input.recordedAt)),
         takenAt = String(parsePaymentInstant(input.takenAt));
@@ -573,8 +856,8 @@ export function createPostgresDiningTableSettlementStore(options: {
         `INSERT INTO rms_payment.dining_table_settlement (settlement_id,tenant_id,brand_id,store_id,operation_id,
  intent_digest,dining_session_id,order_id,method,rounds_minor,tip_minor,rounding_minor,total_minor,tendered_minor,
  change_minor,currency_code,payment_environment,slip_reference,recording_reason,taken_at,recorded_at,actor_id,audit_id,
- online_payment_id)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'CAD',$16,$17,$18,$19,$20,$21,$22,$23)`,
+ online_payment_id,split_plan_id,part_number)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'CAD',$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
         [
           ref(input.settlementReference),
           tenant,
@@ -599,6 +882,8 @@ export function createPostgresDiningTableSettlementStore(options: {
           ref(input.actorReference),
           ref(input.auditReference),
           input.onlinePaymentReference === undefined ? null : ref(input.onlinePaymentReference),
+          input.part === undefined ? null : ref(input.part.splitPlanReference),
+          input.part === undefined ? null : input.part.partNumber,
         ],
       );
       for (const [index, line] of plan.lines.entries())
@@ -636,6 +921,7 @@ export function createPostgresDiningTableSettlementStore(options: {
           tipMinor: plan.tipMinor.toString(),
           roundingMinor: plan.roundingMinor.toString(),
           rounds: plan.lines.length,
+          ...(input.part === undefined ? {} : { partNumber: input.part.partNumber }),
         },
         reasonCode:
           input.recordingReason === "AtTable"
@@ -698,6 +984,8 @@ export function createPostgresDiningTableSettlementStore(options: {
         readonly providerIntentReference: string;
         readonly createdAt: string;
         readonly auditReference: string;
+        /** WP-2423 item 8 ④: the part of the current split plan this payment is for. */
+        readonly part?: DiningTableSplitPartReference;
       },
     ) {
       const order = ref(input.orderReference);
@@ -723,8 +1011,8 @@ export function createPostgresDiningTableSettlementStore(options: {
       await tx.query(
         `INSERT INTO rms_payment.dining_table_online_payment (online_payment_id,tenant_id,brand_id,store_id,operation_id,
  intent_digest,dining_session_id,order_id,guest_session_id,rounds_minor,tip_minor,total_minor,currency_code,
- provider_account_id,payment_environment,provider_intent_reference,created_at,audit_id)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'CAD',$13,$14,$15,$16,$17)`,
+ provider_account_id,payment_environment,provider_intent_reference,created_at,audit_id,split_plan_id,part_number)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'CAD',$13,$14,$15,$16,$17,$18,$19)`,
         [
           ref(input.onlinePaymentReference),
           tenant,
@@ -743,6 +1031,8 @@ export function createPostgresDiningTableSettlementStore(options: {
           input.providerIntentReference,
           createdAt,
           ref(input.auditReference),
+          input.part === undefined ? null : ref(input.part.splitPlanReference),
+          input.part === undefined ? null : input.part.partNumber,
         ],
       );
       await appendAuditRecordInTransaction(tx, {

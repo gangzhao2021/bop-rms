@@ -20,7 +20,9 @@ import {
   createPostgresDiningTableSettlementStore,
   DiningTableSettlementError,
   DiningTableSettlementStoreError,
+  splitDiningTableBill,
   type DiningTableSettlementRecord,
+  type DiningTableSplitPlanRecord,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -51,6 +53,8 @@ export const diningTableCheckoutErrorCodes = [
   /** S4: a guest is paying the whole table on their phone right now. */
   "TABLE_CHECKOUT_GUEST_PAYING",
   "TABLE_CHECKOUT_IDEMPOTENCY_CONFLICT",
+  /** WP-2423 item 8 ④: the split can't change once a part was paid or a guest started paying. */
+  "TABLE_CHECKOUT_SPLIT_LOCKED",
   "TABLE_CHECKOUT_UNAVAILABLE",
 ] as const;
 export type DiningTableCheckoutErrorCode = (typeof diningTableCheckoutErrorCodes)[number];
@@ -109,6 +113,11 @@ export interface DiningTableBill {
     readonly taxMinor: string;
     readonly totalMinor: string;
     readonly paid: boolean;
+    /**
+     * WP-2423 item 8 ④: which phone at the table sent the round (1, 2, … in the order they first
+     * ordered; no name), or null for a round staff entered for the table.
+     */
+    readonly orderedBy: number | null;
   }[];
   /** Still owed: the rounds not yet paid, before tax, tax and total. */
   readonly owed: {
@@ -138,6 +147,38 @@ export interface DiningTableBill {
     readonly decidedAt: string;
   };
   /**
+   * WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL: how the bill is split (null: paid whole). Each part is
+   * paid once, by any method; the table closes when every part is paid (or written off). `stale`:
+   * the bill changed before anything was paid (a dish taken off or comped) — split it again.
+   */
+  readonly split: null | {
+    readonly mode: "Even" | "ByRounds";
+    readonly stale: boolean;
+    readonly parts: readonly {
+      readonly partNumber: number;
+      readonly amountMinor: string;
+      readonly subtotalMinor: string;
+      readonly taxMinor: string;
+      /** The rounds this part takes from (by round number). */
+      readonly roundNumbers: readonly number[];
+      readonly payment: null | {
+        readonly method: "CardMachine" | "Cash" | "Online";
+        readonly tipMinor: string;
+        readonly roundingMinor: string;
+        readonly totalMinor: string;
+        readonly tenderedMinor: string | null;
+        readonly changeMinor: string | null;
+        readonly recordedAt: string;
+        readonly recordedAfterOutage: boolean;
+      };
+      /** A guest is paying this part on their phone now. */
+      readonly guestPaying: boolean;
+    }[];
+    readonly paidParts: number;
+    /** What the parts still unpaid come to. */
+    readonly remainingMinor: string;
+  };
+  /**
    * S4: the guests' latest attempt to pay the whole table on their phone. "InProgress" (no
    * Provider outcome yet) holds the table: staff can't take another payment until it ends.
    */
@@ -164,7 +205,13 @@ export async function readDiningTableBill(
     readonly observedAt: string;
     authorize(): Promise<boolean>;
   },
-): Promise<DiningTableBill & { readonly settlementRecord: DiningTableSettlementRecord | null }> {
+): Promise<
+  DiningTableBill & {
+    readonly settlementRecord: DiningTableSettlementRecord | null;
+    /** The current split plan (not "Whole"), for paying a part. */
+    readonly splitPlanRecord: DiningTableSplitPlanRecord | null;
+  }
+> {
   const session = String(parseDiningReference(input.diningSessionReference));
   const owner = { brandReference: scope.brandReference, storeReference: scope.storeReference };
   const [found] = await createPostgresDiningSessionReadStore(
@@ -200,9 +247,11 @@ export async function readDiningTableBill(
       owed: zero,
       consistent: true,
       settlement: null,
+      split: null,
       writeOff: null,
       onlinePayment: null,
       settlementRecord: null,
+      splitPlanRecord: null,
     });
   const allowed = async () => (await input.authorize()) === true;
   const confirmations = [
@@ -239,9 +288,43 @@ export async function readDiningTableBill(
   });
   const settlements = await payments.listByOrders(tx, [orderReference]);
   const [writeOff] = await payments.listWriteOffsByOrders(tx, [orderReference]);
-  const onlinePayment = (await payments.listOnlinePaymentsByOrders(tx, [orderReference])).at(-1);
-  const settlement = settlements[0] ?? null;
+  const onlinePayments = await payments.listOnlinePaymentsByOrders(tx, [orderReference]);
+  const onlinePayment = onlinePayments.filter((entry) => entry.part === null).at(-1);
+  // The whole-table payment, if the table paid at once.
+  const settlement = settlements.find((entry) => entry.part === null) ?? null;
+  const [latestPlan] = await payments.listSplitPlans(tx, [orderReference]);
+  const plan = latestPlan !== undefined && latestPlan.mode !== "Whole" ? latestPlan : null;
+  const partPayments = new Map(
+    settlements
+      .filter(
+        (entry) =>
+          entry.part !== null && entry.part.splitPlanReference === plan?.splitPlanReference,
+      )
+      .map((entry) => [entry.part?.partNumber as number, entry]),
+  );
+  // A round is paid once all of it is: by the whole-table payment, or by its slices' parts.
   const paidBatches = new Set(settlement?.lines.map((line) => line.orderBatchReference) ?? []);
+  if (plan !== null) {
+    const unpaidBatches = new Set(
+      plan.parts
+        .filter((part) => !partPayments.has(part.partNumber))
+        .flatMap((part) => part.slices.map((slice) => slice.orderBatchReference)),
+    );
+    for (const part of plan.parts)
+      for (const slice of part.slices)
+        if (!unpaidBatches.has(slice.orderBatchReference))
+          paidBatches.add(slice.orderBatchReference);
+  }
+  // Which phone sent each round (in the order they first ordered); staff rounds have none.
+  const phoneOf = new Map<string, number>();
+  const orderedByOf = (batch: string): number | null => {
+    const participant = prices.find(
+      (item) => String(item.orderBatchReference) === batch,
+    )?.addedByParticipantReference;
+    if (participant === null || participant === undefined) return null;
+    if (!phoneOf.has(participant)) phoneOf.set(participant, phoneOf.size + 1);
+    return phoneOf.get(participant) as number;
+  };
   let owedSubtotal = 0n,
     owedTax = 0n,
     owedTotal = 0n,
@@ -300,8 +383,112 @@ export async function readDiningTableBill(
       taxMinor: tax.toString(),
       totalMinor: total.toString(),
       paid,
+      orderedBy: orderedByOf(batch),
     });
   });
+  // A split's parts: what each was paid with, and what is still owed by the parts unpaid.
+  let split: DiningTableBill["split"] = null;
+  if (plan !== null) {
+    const roundNumberOf = new Map(
+      rounds.map((round) => [round.orderBatchReference, round.roundNumber]),
+    );
+    const owing = rounds.filter((round) => round.totalMinor !== "0");
+    // Before anything is paid the plan must still be the bill (a comp or a dish taken off changes
+    // it): recomputed the same way, it must give the same parts and slices.
+    let stale = false;
+    if (partPayments.size === 0) {
+      try {
+        const splitRounds = owing.map((round) => ({
+          orderBatchReference: round.orderBatchReference,
+          submissionReference: round.submissionReference,
+          sequence: round.roundNumber,
+          roundMinor: BigInt(round.totalMinor),
+          subtotalMinor: BigInt(round.subtotalMinor),
+          taxMinor: BigInt(round.taxMinor),
+        }));
+        const again =
+          plan.mode === "Even"
+            ? splitDiningTableBill({ mode: "Even", rounds: splitRounds, people: plan.parts.length })
+            : splitDiningTableBill({
+                mode: "ByRounds",
+                rounds: splitRounds,
+                partOf: new Map(
+                  plan.parts.flatMap((part) =>
+                    part.slices.map(
+                      (slice) => [slice.orderBatchReference, part.partNumber] as const,
+                    ),
+                  ),
+                ),
+              });
+        const shape = (
+          parts: readonly {
+            amountMinor: bigint;
+            slices: readonly { orderBatchReference: string; roundMinor: bigint }[];
+          }[],
+        ) =>
+          JSON.stringify(
+            parts.map((part) => [
+              part.amountMinor.toString(),
+              [...part.slices]
+                .map((slice) => `${slice.orderBatchReference}:${slice.roundMinor}`)
+                .sort(),
+            ]),
+          );
+        stale = shape(again.parts) !== shape(plan.parts);
+      } catch {
+        stale = true;
+      }
+    }
+    const open = (partNumber: number) =>
+      onlinePayments.some(
+        (entry) =>
+          entry.outcome === null &&
+          entry.part?.splitPlanReference === plan.splitPlanReference &&
+          entry.part.partNumber === partNumber,
+      );
+    const parts = plan.parts.map((part) => {
+      const paidWith = partPayments.get(part.partNumber) ?? null;
+      return Object.freeze({
+        partNumber: part.partNumber,
+        amountMinor: part.amountMinor.toString(),
+        subtotalMinor: part.subtotalMinor.toString(),
+        taxMinor: part.taxMinor.toString(),
+        roundNumbers: Object.freeze(
+          part.slices
+            .map((slice) => roundNumberOf.get(slice.orderBatchReference) ?? 0)
+            .sort((a, b) => a - b),
+        ),
+        payment:
+          paidWith === null
+            ? null
+            : Object.freeze({
+                method: paidWith.method,
+                tipMinor: paidWith.tipMinor.toString(),
+                roundingMinor: paidWith.roundingMinor.toString(),
+                totalMinor: paidWith.totalMinor.toString(),
+                tenderedMinor: paidWith.tenderedMinor?.toString() ?? null,
+                changeMinor: paidWith.changeMinor?.toString() ?? null,
+                recordedAt: paidWith.recordedAt,
+                recordedAfterOutage: paidWith.recordingReason === "RecordedAfterOutage",
+              }),
+        guestPaying: open(part.partNumber),
+      });
+    });
+    const unpaid = plan.parts.filter((part) => !partPayments.has(part.partNumber));
+    paidAllocation = plan.parts
+      .filter((part) => partPayments.has(part.partNumber))
+      .reduce((sum, part) => sum + part.amountMinor, 0n);
+    owedTotal = unpaid.reduce((sum, part) => sum + part.amountMinor, 0n);
+    owedSubtotal = unpaid.reduce((sum, part) => sum + part.subtotalMinor, 0n);
+    owedTax = unpaid.reduce((sum, part) => sum + part.taxMinor, 0n);
+    split = Object.freeze({
+      mode: plan.mode as "Even" | "ByRounds",
+      stale,
+      parts: Object.freeze(parts),
+      paidParts: partPayments.size,
+      remainingMinor: owedTotal.toString(),
+    });
+  }
   // The Order's priced total (Ordering) is what the rounds must come to: a round still being sent
   // (submitted, not yet in the kitchen) or a change to the Order makes the bill inconsistent.
   const priced = await createPostgresOrderPricedAmountSource({ ...owner, authorize: allowed })(tx, {
@@ -311,7 +498,8 @@ export async function readDiningTableBill(
   const consistent =
     priced.pendingAmendmentCount === 0 &&
     priced.pricedTotalMinor === paidAllocation + owedTotal &&
-    (settlement === null || settlement.roundsMinor === paidAllocation);
+    (settlement === null || settlement.roundsMinor === paidAllocation) &&
+    split?.stale !== true;
   return Object.freeze({
     ...base,
     rounds: Object.freeze(rounds),
@@ -335,6 +523,7 @@ export async function readDiningTableBill(
             recordedAt: settlement.recordedAt,
             recordedAfterOutage: settlement.recordingReason === "RecordedAfterOutage",
           }),
+    split,
     writeOff:
       writeOff === undefined
         ? null
@@ -352,14 +541,16 @@ export async function readDiningTableBill(
             startedAt: onlinePayment.createdAt,
           }),
     settlementRecord: settlement,
+    splitPlanRecord: plan,
   });
 }
 
 export const publicBill = (
   bill: Awaited<ReturnType<typeof readDiningTableBill>>,
 ): DiningTableBill => {
-  const { settlementRecord, ...rest } = bill;
+  const { settlementRecord, splitPlanRecord, ...rest } = bill;
   void settlementRecord;
+  void splitPlanRecord;
   return Object.freeze(rest);
 };
 
@@ -441,8 +632,20 @@ export function parseDiningTableSettleCommand(value: unknown) {
       "slipReference",
       "recordedAfterOutage",
       "takenAt",
+      ...(value !== null && typeof value === "object" && Object.hasOwn(value, "partNumber")
+        ? ["partNumber"]
+        : []),
     ]);
     const method = raw.method === "Cash" || raw.method === "CardMachine" ? raw.method : null;
+    // WP-2423 item 8 ④: the part of a split bill this payment is (absent or null: the whole table).
+    const partNumber =
+      raw.partNumber === undefined || raw.partNumber === null
+        ? null
+        : Number.isSafeInteger(raw.partNumber) &&
+            (raw.partNumber as number) >= 1 &&
+            (raw.partNumber as number) <= 20
+          ? (raw.partNumber as number)
+          : fail("TABLE_CHECKOUT_INPUT_INVALID");
     if (method === null || typeof raw.recordedAfterOutage !== "boolean")
       return fail("TABLE_CHECKOUT_INPUT_INVALID");
     const tipRaw = readClosedRecord(raw.tip, Object.keys(raw.tip as object));
@@ -494,6 +697,7 @@ export function parseDiningTableSettleCommand(value: unknown) {
       slipReference: slip,
       recordedAfterOutage: raw.recordedAfterOutage,
       takenAt,
+      partNumber,
     });
   } catch (error) {
     if (error instanceof DiningTableCheckoutError) throw error;
@@ -520,6 +724,7 @@ export function createMerchantDiningTableSettle(options: {
         tenderedMinor: command.tenderedMinor?.toString() ?? null,
         slipReference: command.slipReference,
         takenAt: command.takenAt,
+        ...(command.partNumber === null ? {} : { partNumber: command.partNumber }),
       }),
     );
     try {
@@ -579,6 +784,19 @@ export function createMerchantDiningTableSettle(options: {
             // Paid, or written off when the guests left: never a (second) payment.
             if (bill.settlement !== null || bill.writeOff !== null)
               return fail("TABLE_CHECKOUT_ALREADY_PAID");
+            // WP-2423 item 8 ④: a split bill is paid part by part; a whole bill at once.
+            const part =
+              bill.split === null || command.partNumber === null
+                ? null
+                : (bill.split.parts.find((entry) => entry.partNumber === command.partNumber) ??
+                  null);
+            if (
+              (bill.split === null) !== (command.partNumber === null) ||
+              (bill.split !== null && part === null)
+            )
+              return fail("TABLE_CHECKOUT_INPUT_INVALID");
+            if (part?.payment !== null && part !== null) return fail("TABLE_CHECKOUT_ALREADY_PAID");
+            if (part?.guestPaying === true) return fail("TABLE_CHECKOUT_GUEST_PAYING");
             // S4: a guest is paying the whole table on their phone right now.
             if (bill.onlinePayment?.status === "InProgress")
               return fail("TABLE_CHECKOUT_GUEST_PAYING");
@@ -590,20 +808,54 @@ export function createMerchantDiningTableSettle(options: {
               );
             const owed = bill.rounds.filter((round) => !round.paid && round.totalMinor !== "0");
             if (owed.length === 0) return fail("TABLE_CHECKOUT_NOTHING_OWED");
-            const tipMinor = tableTipMinor(command.tip, BigInt(bill.owed.subtotalMinor));
+            const planPart =
+              part === null || bill.splitPlanRecord === null
+                ? null
+                : (bill.splitPlanRecord.parts.find(
+                    (entry) => entry.partNumber === part.partNumber,
+                  ) ?? fail("TABLE_CHECKOUT_BILL_CHANGED"));
+            const sequenceOf = new Map(
+              bill.rounds.map((round) => [round.orderBatchReference, round] as const),
+            );
+            // A part's tip is on its own share of the bill before tax.
+            const tipMinor = tableTipMinor(
+              command.tip,
+              planPart === null ? BigInt(bill.owed.subtotalMinor) : planPart.subtotalMinor,
+            );
             await store.record(tx, {
+              ...(planPart === null || bill.splitPlanRecord === null
+                ? {}
+                : {
+                    part: {
+                      splitPlanReference: bill.splitPlanRecord.splitPlanReference,
+                      partNumber: planPart.partNumber,
+                    },
+                  }),
               settlementReference: options.nextReference(),
               operationReference: command.operationReference,
               intentDigest,
               diningSessionReference: command.diningSessionReference,
               orderReference: bill.orderReference,
               method: command.method,
-              rounds: owed.map((round) => ({
-                orderBatchReference: round.orderBatchReference,
-                submissionReference: round.submissionReference,
-                sequence: round.roundNumber,
-                roundMinor: BigInt(round.totalMinor),
-              })),
+              rounds:
+                planPart === null
+                  ? owed.map((round) => ({
+                      orderBatchReference: round.orderBatchReference,
+                      submissionReference: round.submissionReference,
+                      sequence: round.roundNumber,
+                      roundMinor: BigInt(round.totalMinor),
+                    }))
+                  : planPart.slices.map((slice) => {
+                      const round =
+                        sequenceOf.get(slice.orderBatchReference) ??
+                        fail("TABLE_CHECKOUT_BILL_CHANGED");
+                      return {
+                        orderBatchReference: slice.orderBatchReference,
+                        submissionReference: round.submissionReference,
+                        sequence: round.roundNumber,
+                        roundMinor: slice.roundMinor,
+                      };
+                    }),
               tipMinor,
               tenderedMinor: command.tenderedMinor,
               environment: options.environment,
@@ -638,6 +890,203 @@ export function createMerchantDiningTableSettle(options: {
         return fail(
           error.code === "DINING_TABLE_SETTLEMENT_ALREADY_PAID"
             ? "TABLE_CHECKOUT_ALREADY_PAID"
+            : error.code === "DINING_TABLE_SETTLEMENT_IDEMPOTENCY_CONFLICT"
+              ? "TABLE_CHECKOUT_IDEMPOTENCY_CONFLICT"
+              : error.code === "DINING_TABLE_SETTLEMENT_PERMISSION_DENIED"
+                ? "TABLE_CHECKOUT_PERMISSION_DENIED"
+                : "TABLE_CHECKOUT_UNAVAILABLE",
+        );
+      return fail("TABLE_CHECKOUT_UNAVAILABLE");
+    }
+  };
+}
+
+/**
+ * WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL: staff split a pay-later table's bill at checkout —
+ * evenly by people (2–20), or by rounds (each round to a part) — or go back to one payment. The
+ * browser sends only the choice; the parts are computed from the Order's own rounds. Allowed at
+ * checkout until a part is paid or a guest is paying (then the split is locked).
+ */
+export function parseDiningTableSplitCommand(value: unknown) {
+  try {
+    const raw = readClosedRecord(value, [
+      "operationReference",
+      "diningSessionReference",
+      "mode",
+      "people",
+      "rounds",
+    ]);
+    const mode =
+      raw.mode === "Whole" || raw.mode === "Even" || raw.mode === "ByRounds" ? raw.mode : null;
+    if (mode === null) return fail("TABLE_CHECKOUT_INPUT_INVALID");
+    const people =
+      mode === "Even" &&
+      Number.isSafeInteger(raw.people) &&
+      (raw.people as number) >= 2 &&
+      (raw.people as number) <= 20
+        ? (raw.people as number)
+        : raw.people === null && mode !== "Even"
+          ? null
+          : fail("TABLE_CHECKOUT_INPUT_INVALID");
+    let rounds: { roundNumber: number; partNumber: number }[] | null = null;
+    if (mode === "ByRounds") {
+      if (!Array.isArray(raw.rounds) || raw.rounds.length < 2 || raw.rounds.length > 200)
+        return fail("TABLE_CHECKOUT_INPUT_INVALID");
+      rounds = raw.rounds.map((entry: unknown) => {
+        const item = readClosedRecord(entry, ["roundNumber", "partNumber"]);
+        if (
+          !Number.isSafeInteger(item.roundNumber) ||
+          (item.roundNumber as number) < 1 ||
+          !Number.isSafeInteger(item.partNumber) ||
+          (item.partNumber as number) < 1 ||
+          (item.partNumber as number) > 20
+        )
+          return fail("TABLE_CHECKOUT_INPUT_INVALID");
+        return { roundNumber: item.roundNumber as number, partNumber: item.partNumber as number };
+      });
+    } else if (raw.rounds !== null) return fail("TABLE_CHECKOUT_INPUT_INVALID");
+    return Object.freeze({
+      operationReference: String(parseDiningReference(raw.operationReference)),
+      diningSessionReference: String(parseDiningReference(raw.diningSessionReference)),
+      mode,
+      people,
+      rounds,
+    });
+  } catch (error) {
+    if (error instanceof DiningTableCheckoutError) throw error;
+    return fail("TABLE_CHECKOUT_INPUT_INVALID");
+  }
+}
+
+export function createMerchantDiningTableSplit(options: {
+  persistence: PersistentMerchantBffOptions;
+  authentication: Pick<MerchantBffService, "authorize">;
+  nextReference(): string;
+}) {
+  const resolve = createMerchantStoreScope(options.persistence);
+  return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
+    const authenticated = await options.authentication.authorize(input);
+    const command = parseDiningTableSplitCommand(input.command);
+    const intentDigest = sha256(
+      canonicalizeRfc8785({
+        kind: "DiningTableSplit/v1",
+        diningSessionReference: command.diningSessionReference,
+        mode: command.mode,
+        people: command.people,
+        rounds: command.rounds,
+      }),
+    );
+    try {
+      return await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const current = await resolve(
+                transaction,
+                input.sessionCookie,
+                diningTableCheckoutPermission,
+                authenticated.sessionReference,
+              ).catch(() => fail("TABLE_CHECKOUT_PERMISSION_DENIED"));
+              const decisions = await current.authorizeActions([
+                diningTableCheckoutPermission,
+                staffDiningRoundPermission,
+              ]);
+              if (
+                decisions.get(diningTableCheckoutPermission)?.effect !== "Allow" ||
+                decisions.get(staffDiningRoundPermission)?.effect !== "Allow"
+              )
+                return fail("TABLE_CHECKOUT_PERMISSION_DENIED");
+              return current;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied: () => fail("TABLE_CHECKOUT_PERMISSION_DENIED"),
+          },
+          async (authority) => {
+            const tx = transaction as unknown as ConsumerTransaction;
+            const scope = scopeOf(authority.scope);
+            const guard = () => authority.guard();
+            const store = createPostgresDiningTableSettlementStore({
+              scope,
+              authorize: async () => (await guard()) === true,
+            });
+            const observedAt = instant(options.persistence.now());
+            const read = () =>
+              readDiningTableBill(tx, scope, {
+                diningSessionReference: command.diningSessionReference,
+                observedAt,
+                authorize: guard,
+              });
+            const bill = await read();
+            if (bill.paymentTiming !== "PayLater") return fail("TABLE_CHECKOUT_NOT_PAY_LATER");
+            if (bill.sessionPhase !== "Closing") return fail("TABLE_CHECKOUT_NOT_STARTED");
+            if (bill.orderReference === null) return fail("TABLE_CHECKOUT_NOTHING_OWED");
+            if (
+              bill.settlement !== null ||
+              bill.writeOff !== null ||
+              (bill.split?.paidParts ?? 0) > 0 ||
+              bill.split?.parts.some((part) => part.guestPaying) === true ||
+              bill.onlinePayment?.status === "InProgress"
+            )
+              return fail("TABLE_CHECKOUT_SPLIT_LOCKED");
+            // A stale split is exactly what a new split corrects; any other mismatch is not.
+            if (!bill.consistent && bill.split?.stale !== true)
+              return fail("TABLE_CHECKOUT_BILL_CHANGED");
+            const owing = bill.rounds.filter((round) => round.totalMinor !== "0");
+            if (owing.length === 0) return fail("TABLE_CHECKOUT_NOTHING_OWED");
+            const splitRounds = owing.map((round) => ({
+              orderBatchReference: round.orderBatchReference,
+              submissionReference: round.submissionReference,
+              sequence: round.roundNumber,
+              roundMinor: BigInt(round.totalMinor),
+              subtotalMinor: BigInt(round.subtotalMinor),
+              taxMinor: BigInt(round.taxMinor),
+            }));
+            const billMinor = splitRounds.reduce((sum, round) => sum + round.roundMinor, 0n);
+            const split =
+              command.mode === "Whole"
+                ? { mode: "Whole" as const, billMinor }
+                : command.mode === "Even"
+                  ? splitDiningTableBill({
+                      mode: "Even",
+                      rounds: splitRounds,
+                      people: command.people as number,
+                    })
+                  : splitDiningTableBill({
+                      mode: "ByRounds",
+                      rounds: splitRounds,
+                      partOf: new Map(
+                        (command.rounds ?? []).map((entry) => {
+                          const round =
+                            owing.find((value) => value.roundNumber === entry.roundNumber) ??
+                            fail("TABLE_CHECKOUT_INPUT_INVALID");
+                          return [round.orderBatchReference, entry.partNumber] as const;
+                        }),
+                      ),
+                    });
+            const result = await store.recordSplitPlan(tx, {
+              splitPlanReference: options.nextReference(),
+              operationReference: command.operationReference,
+              intentDigest,
+              diningSessionReference: command.diningSessionReference,
+              orderReference: bill.orderReference,
+              split,
+              recordedAt: observedAt,
+              actorReference: String(authority.scope.actorReference),
+              auditReference: options.nextReference(),
+              correlationReference: command.operationReference,
+            });
+            return Object.freeze({ status: result.status, bill: publicBill(await read()) });
+          },
+        ),
+      );
+    } catch (error) {
+      if (error instanceof DiningTableCheckoutError) throw error;
+      if (error instanceof DiningTableSettlementError) return fail("TABLE_CHECKOUT_INPUT_INVALID");
+      if (error instanceof DiningTableSettlementStoreError)
+        return fail(
+          error.code === "DINING_TABLE_SETTLEMENT_ALREADY_PAID"
+            ? "TABLE_CHECKOUT_SPLIT_LOCKED"
             : error.code === "DINING_TABLE_SETTLEMENT_IDEMPOTENCY_CONFLICT"
               ? "TABLE_CHECKOUT_IDEMPOTENCY_CONFLICT"
               : error.code === "DINING_TABLE_SETTLEMENT_PERMISSION_DENIED"

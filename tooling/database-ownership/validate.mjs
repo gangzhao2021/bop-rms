@@ -2381,6 +2381,10 @@ async function scanUnsupported(root, module, diagnostics) {
               "dining_table_cash_refund",
               "dining_table_online_payment",
               "dining_table_online_payment_outcome",
+              // WP-2423 item 8 ④: the table's split plan, its parts and their round slices.
+              "dining_table_split_plan",
+              "dining_table_split_part",
+              "dining_table_split_part_round",
             ],
           },
           // WP-2423 Q14: payments and refunds behind the Store sales reports (read only).
