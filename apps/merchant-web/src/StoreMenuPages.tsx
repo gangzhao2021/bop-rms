@@ -9,6 +9,7 @@ import { Link, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
 import { moveTo, useDragReorder } from "./reorder.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
+import { OneStoreMenuPage } from "./OneStoreMenuPage.js";
 import {
   MenuPageError,
   channelText,
@@ -134,12 +135,27 @@ function Failure({ code }: { readonly code: MenuErrorCode | "Loading" }) {
 
 export function StoreMenuListPage({
   client = unavailableMenuClient,
+  availability,
 }: {
   readonly client?: MenuClient;
+  /** WP-2423 item 8 ⑥: with it, a single store's one menu opens as the one-page menu. */
+  readonly availability?: AvailabilityClient;
 }) {
   const { state } = useMenuView(client, null, parseMenuListView);
+  const [multiStore, setMultiStore] = useState(false);
+  const showList = useCallback(() => setMultiStore(true), []);
   if (state.kind !== "Found") return <Failure code={state.kind} />;
   const view: MenuListView = state.view;
+  const only = view.menus.length === 1 ? view.menus[0] : undefined;
+  if (only !== undefined && availability !== undefined && !multiStore)
+    return (
+      <OneStoreMenuPage
+        menuReference={only.menuReference}
+        client={client}
+        availability={availability}
+        onMultiStore={showList}
+      />
+    );
   return (
     <WorkspacePage
       title={t("Menus")}

@@ -524,6 +524,8 @@ export function createMerchantMenus(options: {
         skuReference: sku.skuReference,
         skuCode: sku.skuCode,
         productName: name(sku.productLocalizedNames, ""),
+        // WP-2423 item 8 ⑥: the dish's Chinese name ("" when none), for the one-page menu.
+        productNameZh: chineseOf(sku.productLocalizedNames),
         sizeName: name(sku.localizedNames, sku.skuCode),
         active: sku.active,
         priceMinor: prices.get(sku.skuReference) ?? null,

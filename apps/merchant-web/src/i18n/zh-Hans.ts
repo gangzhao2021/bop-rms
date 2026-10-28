@@ -6087,4 +6087,36 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Remove phone {number} from this table": "把手机 {number} 移出这桌",
   "Check it belongs to this table. If not, remove it below or pause joining by scan.":
     "看看是不是这桌的客人；不是的话，在下面移出，或暂停扫码加入。",
+  Hidden: "已隐藏",
+  "Missing a name": "缺中文名或英文名",
+  "You do not have permission to see the menu.": "你没有查看菜单的权限。",
+  "The menu could not be read. Check the connection and try again.": "读不到菜单。检查网络后再试。",
+  "Reading the menu…": "正在读取菜单…",
+  "Offline. Nothing was confirmed; try again when you are back online.":
+    "已断网，没有生效；联网后再试。",
+  "That didn't go through. Read the menu again and retry.": "没有完成。请重新读取菜单后再试。",
+  "New order saved. Guests see it when the menu is listed.": "新顺序已保存，菜单上架后客人看到。",
+  "Someone changed the menu meanwhile. Read it again, then move the dishes again.":
+    "这期间有人改了菜单。请重新读取，再调整顺序。",
+  "{item} shows to guests again.": "{item}重新对客人显示。",
+  "{item} is hidden from guests.": "{item}已对客人隐藏。",
+  "Show to guests": "对客人显示",
+  Hide: "隐藏",
+  "Drag to move this dish": "拖动调整这道菜的位置",
+  "No English name": "没有英文名",
+  "No Chinese name": "没有中文名",
+  "Move {item} up": "把{item}上移",
+  "Move {item} down": "把{item}下移",
+  "Search dishes": "搜索菜品",
+  "English or Chinese name": "中文名或英文名",
+  "Show only": "只看",
+  "Clear the search and filters to reorder dishes.": "清空搜索和筛选后才能调整顺序。",
+  "You moved dishes. Save the new order; guests see it when the menu is listed.":
+    "你调整了顺序。保存后，菜单上架时客人看到。",
+  "A new order is saved and not listed yet. Guests still see the listed menu.":
+    "新顺序已保存，还没上架；客人看到的仍是已上架的菜单。",
+  "Save order": "保存顺序",
+  "Open the menu to list it": "打开菜单去上架",
+  "No dishes match.": "没有符合的菜。",
+  "Not on the menu": "不在菜单上",
 });

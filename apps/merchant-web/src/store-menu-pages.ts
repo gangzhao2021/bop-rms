@@ -183,6 +183,8 @@ export interface MenuSellable {
   readonly skuReference: string;
   readonly skuCode: string;
   readonly productName: string;
+  /** WP-2423 item 8 ⑥: the Chinese name ("" or absent when none). */
+  readonly productNameZh?: string;
   readonly sizeName: string;
   readonly active: boolean;
   readonly priceMinor: string | null;

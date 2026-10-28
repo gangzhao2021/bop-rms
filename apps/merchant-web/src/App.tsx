@@ -1045,6 +1045,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                       <StoreMenuListPage
                         key={state.workspace.selectedScope.storeReference + state.csrf}
                         client={clients.createMenuClient(state.csrf)}
+                        availability={clients.createAvailabilityClient(state.csrf)}
                       />
                     )}
                   </WithModule>
