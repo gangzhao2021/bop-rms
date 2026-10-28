@@ -232,6 +232,7 @@
 }
 .one-menu .one-menu__filters button,
 .one-menu .one-menu__actions button,
+.one-menu .one-menu__sizes button,
 .one-menu .one-menu__pending-actions button {
   min-height: 44px;
   margin: 0;
@@ -308,6 +309,7 @@
   grid-template-columns: auto minmax(0, 1fr) auto auto;
   grid-template-areas:
     "handle names price state"
+    "handle sizes sizes sizes"
     "handle allergens allergens allergens"
     "handle actions actions actions"
     "handle editor editor editor";
@@ -475,4 +477,29 @@
 .one-menu .dish-editor__choice-price input {
   width: 6em;
   min-height: 44px;
+}
+
+/* v15 2026-10-28 finding b: a dish's sizes inside its row. */
+.one-menu .one-menu__sizes {
+  grid-area: sizes;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.one-menu .one-menu__sizes li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 16px;
+  min-height: 44px;
+}
+.one-menu .one-menu__size-name {
+  flex: 1 1 120px;
+}
+.one-menu .one-menu__size-price {
+  font-variant-numeric: tabular-nums;
+}
+.one-menu .one-menu__size-state {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
 }

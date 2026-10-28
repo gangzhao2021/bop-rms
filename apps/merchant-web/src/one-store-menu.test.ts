@@ -10,6 +10,7 @@ import {
 } from "./one-store-menu.js";
 import { moveTo } from "./reorder.js";
 import { allergenSummary } from "./DishAllergenEditor.js";
+import type { MenuSectionRow } from "./one-store-menu.js";
 import type { MenuBuilderView } from "./store-menu-pages.js";
 import type { AvailabilityItem } from "./store-availability-page.js";
 
@@ -210,5 +211,78 @@ describe("WP-2423 item 8 ⑥ one-page menu", () => {
     expect(listingPending({ ...released, listingStep: "Submit" })).toBe(true);
     // Older views without the step compare versions.
     expect(listingPending(released)).toBe(true);
+  });
+
+  it("shows a dish once, with its sizes inside, as guests see it (v15 finding b)", () => {
+    const latte = (n: number, size: string, price: string) => ({
+      skuReference: id(n),
+      skuCode: "L" + n,
+      productReference: id(70),
+      productName: "Latte (TEST)",
+      productNameZh: "拿铁",
+      sizeName: size,
+      active: true,
+      priceMinor: price,
+      offeredHere: n !== 42,
+    });
+    const base = view();
+    const withLatte = {
+      ...base,
+      menu: {
+        ...base.menu,
+        sections: [
+          {
+            sectionReference: id(12),
+            code: "COFFEE",
+            name: "Coffee",
+            nameZh: "咖啡",
+            items: [
+              { placementReference: id(80), skuReference: id(40), featured: false },
+              { placementReference: id(81), skuReference: id(34), featured: false },
+              // A size placed apart still joins its dish, at the dish's first place.
+              { placementReference: id(82), skuReference: id(41), featured: false },
+              { placementReference: id(83), skuReference: id(42), featured: false },
+            ],
+          },
+        ],
+      },
+      sellables: [
+        ...base.sellables,
+        latte(40, "Small", "450"),
+        latte(41, "Regular", "495"),
+        latte(42, "Large", "550"),
+      ],
+    } as unknown as MenuBuilderView;
+    const soldOutLarge: AvailabilityItem[] = [
+      { ...(stock[0] as AvailabilityItem), skuReference: id(41), status: "SoldOut" },
+    ];
+    const [row] = menuRows(withLatte, soldOutLarge);
+    expect(row?.dishes.map((d) => [d.name, d.sizes.map((x) => x.sizeName)])).toEqual([
+      ["Latte (TEST)", ["Small", "Regular", "Large"]],
+      ["Mango pudding (TEST)", [null]],
+    ]);
+    const latteDish = row?.dishes[0];
+    expect(latteDish?.sizes.map((x) => [x.priceMinor, x.soldOut, x.hidden])).toEqual([
+      ["450", false, false],
+      ["495", true, false],
+      ["550", false, true],
+    ]);
+    // The dish is sold out or hidden only when every size is; filters find any size.
+    expect([latteDish?.soldOut, latteDish?.hidden]).toEqual([false, false]);
+    const names = (filter: string) =>
+      filterRows([row as MenuSectionRow], "", new Set([filter as never])).flatMap((r) =>
+        r.dishes.map((d) => d.name),
+      );
+    expect(names("SoldOut")).toEqual(["Latte (TEST)"]);
+    expect(names("Hidden")).toEqual(["Latte (TEST)"]);
+    // Moving the dish moves its sizes together, in their order.
+    const moved = [{ ...(row as MenuSectionRow), dishes: moveTo(row?.dishes ?? [], 0, 1) }];
+    expect(sectionInputs(moved)[0]?.items.map((i) => i.skuReference)).toEqual([
+      id(34),
+      id(40),
+      id(41),
+      id(42),
+    ]);
+    expect(orderKey(moved)).not.toBe(orderKey([row as MenuSectionRow]));
   });
 });

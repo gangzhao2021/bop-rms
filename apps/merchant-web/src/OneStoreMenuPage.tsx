@@ -16,6 +16,7 @@ import {
   orderKey,
   sectionInputs,
   type MenuDish,
+  type MenuSize,
   type MenuFilter,
   type MenuSectionRow,
 } from "./one-store-menu.js";
@@ -168,12 +169,17 @@ export function OneStoreMenuPage({
   // The menu as saved is not what guests see: never listed, edited since, or listing unfinished.
   const orderPending = listingPending(view);
 
-  const availabilityCommand = async (command: AvailabilityCommand, done: string) => {
+  // One or more commands (a dish's sizes), one after another.
+  const availabilityCommand = async (
+    command: AvailabilityCommand | readonly AvailabilityCommand[],
+    done: string,
+  ) => {
     if (availability.command === undefined || busy) return;
     setBusy(true);
     setProblem(null);
     try {
-      await availability.command(command);
+      for (const each of Array.isArray(command) ? command : [command])
+        await availability.command(each as AvailabilityCommand);
       setProblem(done);
       reload();
     } catch (error) {
@@ -317,6 +323,48 @@ export function OneStoreMenuPage({
       setBusy(false);
     }
   };
+  // `named`: a size inside a dish row says which size it is to assistive technology.
+  const soldOutButton = (size: MenuSize, label: string, named = false) =>
+    !permissions.mayMarkSoldOut || size.hidden ? null : size.soldOut ? (
+      <button
+        key={"back-" + size.skuReference}
+        type="button"
+        disabled={busy}
+        {...(named ? { "aria-label": t("Back in stock: {item}", { item: label }) } : {})}
+        onClick={() =>
+          void availabilityCommand(
+            {
+              action: "BackInStock",
+              operationReference: newOperationReference(),
+              skuReference: size.skuReference,
+            },
+            t("{item} is back in stock.", { item: label }),
+          )
+        }
+      >
+        {t("Back in stock")}
+      </button>
+    ) : (
+      <button
+        key={"soldout-" + size.skuReference}
+        type="button"
+        disabled={busy}
+        {...(named ? { "aria-label": t("Sold out today: {item}", { item: label }) } : {})}
+        onClick={() =>
+          void availabilityCommand(
+            {
+              action: "SoldOut",
+              operationReference: newOperationReference(),
+              skuReference: size.skuReference,
+              until: "EndOfDay",
+            },
+            t("{item} is sold out for today.", { item: label }),
+          )
+        }
+      >
+        {t("Sold out today")}
+      </button>
+    );
   const dishActions = (dish: MenuDish) => {
     const label = dish.nameZh ? `${dish.name} ${dish.nameZh}` : dish.name;
     const actions = [];
@@ -334,47 +382,12 @@ export function OneStoreMenuPage({
           {t("Edit")}
         </button>,
       );
-    if (permissions.mayMarkSoldOut && !dish.hidden)
-      actions.push(
-        dish.soldOut ? (
-          <button
-            key="back"
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              void availabilityCommand(
-                {
-                  action: "BackInStock",
-                  operationReference: newOperationReference(),
-                  skuReference: dish.skuReference,
-                },
-                t("{item} is back in stock.", { item: label }),
-              )
-            }
-          >
-            {t("Back in stock")}
-          </button>
-        ) : (
-          <button
-            key="soldout"
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              void availabilityCommand(
-                {
-                  action: "SoldOut",
-                  operationReference: newOperationReference(),
-                  skuReference: dish.skuReference,
-                  until: "EndOfDay",
-                },
-                t("{item} is sold out for today.", { item: label }),
-              )
-            }
-          >
-            {t("Sold out today")}
-          </button>
-        ),
-      );
+    // One size: sold out on the dish; several: on each size inside the row.
+    const only = dish.sizes.length === 1 ? dish.sizes[0] : undefined;
+    if (only !== undefined) {
+      const button = soldOutButton(only, label);
+      if (button !== null) actions.push(button);
+    }
     if (permissions.mayOffer)
       actions.push(
         <button
@@ -383,11 +396,14 @@ export function OneStoreMenuPage({
           disabled={busy}
           onClick={() =>
             void availabilityCommand(
-              {
-                action: dish.hidden ? "Offer" : "StopOffering",
-                operationReference: newOperationReference(),
-                skuReference: dish.skuReference,
-              },
+              // Hide and show act on the whole dish: every size.
+              dish.sizes
+                .filter((size) => size.hidden === dish.hidden)
+                .map((size) => ({
+                  action: dish.hidden ? ("Offer" as const) : ("StopOffering" as const),
+                  operationReference: newOperationReference(),
+                  skuReference: size.skuReference,
+                })),
               dish.hidden
                 ? t("{item} shows to guests again.", { item: label })
                 : t("{item} is hidden from guests.", { item: label }),
@@ -424,15 +440,43 @@ export function OneStoreMenuPage({
           {dish.nameZh || <em>{t("No Chinese name")}</em>}
         </span>
       </span>
-      <span className="one-menu__price">
-        {price(dish.priceMinor) ?? t("No price")}
-        {dish.pendingPriceMinor !== null ? (
-          <span className="one-menu__pending-price">
-            {" "}
-            {t("→ {price} when listed", { price: price(dish.pendingPriceMinor) ?? "" })}
-          </span>
-        ) : null}
-      </span>
+      {dish.sizes.length === 1 ? (
+        <span className="one-menu__price">
+          {price(dish.priceMinor) ?? t("No price")}
+          {dish.pendingPriceMinor !== null ? (
+            <span className="one-menu__pending-price">
+              {" "}
+              {t("→ {price} when listed", { price: price(dish.pendingPriceMinor) ?? "" })}
+            </span>
+          ) : null}
+        </span>
+      ) : (
+        <ul className="one-menu__sizes" aria-label={t("Sizes of {item}", { item: dish.name })}>
+          {dish.sizes.map((size) => {
+            const sizeLabel = `${dish.name} — ${size.sizeName ?? ""}`;
+            return (
+              <li key={size.skuReference}>
+                <span className="one-menu__size-name">{size.sizeName}</span>
+                <span className="one-menu__size-price">
+                  {price(size.priceMinor) ?? t("No price")}
+                  {size.pendingPriceMinor !== null ? (
+                    <span className="one-menu__pending-price">
+                      {" "}
+                      {t("→ {price} when listed", {
+                        price: price(size.pendingPriceMinor) ?? "",
+                      })}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="one-menu__size-state">
+                  {size.hidden ? t("Hidden") : size.soldOut ? t("Sold out today") : ""}
+                </span>
+                {soldOutButton(size, sizeLabel, true)}
+              </li>
+            );
+          })}
+        </ul>
+      )}
       <span className="one-menu__allergens">{allergenSummary(dish, choices)}</span>
       <span className="one-menu__state">
         {dish.hidden ? t("Hidden") : dish.soldOut ? t("Sold out today") : ""}

@@ -686,3 +686,156 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
     }),
   ).toBeVisible();
 });
+
+test("@production a dish with sizes is one row: its sizes inside, hidden together, sold out per size", async ({
+  page,
+}) => {
+  released = null;
+  refuseListing = false;
+  await session(page);
+  const status = new Map<string, string>();
+  const stockCommands: Record<string, unknown>[] = [];
+  const menuCommands: Record<string, unknown>[] = [];
+  let order = [[40, 41, 30, 42], [32]];
+  const latte = (n: number, size: string, price: string) => ({
+    ...sellable(n, "Latte (TEST)", "拿铁", price),
+    sizeName: size,
+    productReference: id(70),
+  });
+  const view = () => {
+    const base = builder(3, order);
+    return {
+      ...base,
+      sellables: [
+        { ...sellable(30, "Har gow (TEST)", "虾饺", "788"), productReference: id(71) },
+        { ...sellable(32, "Dan dan noodles (TEST)", "担担面", "1288"), productReference: id(72) },
+        latte(40, "Small", "450"),
+        latte(41, "Regular", "495"),
+        latte(42, "Large", "550"),
+      ],
+    };
+  };
+  await page.route("**/merchant/commerce/menus/query", (route) => {
+    const body = route.request().postDataJSON() as { menuReference: string | null };
+    if (body.menuReference !== null) return route.fulfill({ headers, json: view() });
+    return route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-MENU-LIST",
+        sourceAsOf: at,
+        viewer: id(50),
+        permissions: view().permissions,
+        menus: [
+          {
+            menuReference: MENU,
+            internalCode: "MAIN",
+            aggregateVersion: 3,
+            currentVersionReference: id(2),
+            localizedNames: { "en-CA": "TEST menu" },
+            placements: 5,
+            publication: null,
+            latestRelease: null,
+          },
+        ],
+      },
+    });
+  });
+  await page.route("**/merchant/commerce/menus/command", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    menuCommands.push(body);
+    const sections = body.sections as { items: { skuReference: string }[] }[] | undefined;
+    if (sections)
+      order = sections.map((section) =>
+        section.items.map((item) => Number.parseInt(item.skuReference.slice(-12), 16)),
+      );
+    return route.fulfill({ headers, json: { ok: true } });
+  });
+  await page.route("**/merchant/commerce/availability/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-AVAILABILITY",
+        sourceAsOf: at,
+        viewer: id(50),
+        timeZone: scope.timeZone,
+        permissions: { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true },
+        items: [30, 32, 40, 41, 42].map((n) => ({
+          skuReference: id(n),
+          skuCode: "SKU_" + n,
+          productName: "x",
+          sizeName: "x",
+          status: status.get(id(n)) ?? "Available",
+          soldOutUntil: status.get(id(n)) === "SoldOut" ? "2026-10-29T08:00:00.000Z" : null,
+        })),
+      },
+    }),
+  );
+  await page.route("**/merchant/commerce/availability/command", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    stockCommands.push(body);
+    status.set(
+      String(body.skuReference),
+      body.action === "SoldOut"
+        ? "SoldOut"
+        : body.action === "StopOffering"
+          ? "NotOffered"
+          : "Available",
+    );
+    return route.fulfill({ headers, json: { ok: true } });
+  });
+
+  await page.goto("/app/commerce/menus");
+  const dishes = page.locator(".one-menu__dish .one-menu__name");
+  // Latte once, with its three sizes and prices inside; the other dishes as before.
+  await expect(dishes).toHaveText(["Latte (TEST)", "Har gow (TEST)", "Dan dan noodles (TEST)"]);
+  const latteRow = page.locator(".one-menu__dish").filter({ hasText: "Latte" });
+  await expect(
+    latteRow.getByRole("list", { name: "Sizes of Latte (TEST)" }).getByRole("listitem"),
+  ).toHaveText([/Small\s*\$4\.50/u, /Regular\s*\$4\.95/u, /Large\s*\$5\.50/u]);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/dish-sizes-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const axe = await new AxeBuilder({ page }).include(".one-menu").analyze();
+  expect(axe.violations).toEqual([]);
+
+  // Sold out per size, inside the row.
+  await latteRow.getByRole("button", { name: "Sold out today: Latte (TEST) — Large" }).click();
+  await expect(latteRow.getByRole("listitem").filter({ hasText: "Large" })).toContainText(
+    "Sold out today",
+  );
+  expect(stockCommands.at(-1)).toMatchObject({ action: "SoldOut", skuReference: id(42) });
+  // Hide acts on the whole dish: every size.
+  await latteRow.getByRole("button", { name: "Hide" }).click();
+  await expect(latteRow.getByRole("button", { name: "Show to guests" })).toBeVisible();
+  expect(stockCommands.slice(-3).map((c) => [c.action, c.skuReference])).toEqual([
+    ["StopOffering", id(40)],
+    ["StopOffering", id(41)],
+    ["StopOffering", id(42)],
+  ]);
+
+  // Moving the dish moves its sizes together; the draft keeps them in their order.
+  await page.getByRole("button", { name: "Move Latte (TEST) down" }).click();
+  await expect(dishes).toHaveText(["Har gow (TEST)", "Latte (TEST)", "Dan dan noodles (TEST)"]);
+  await page.getByRole("button", { name: "Save order" }).click();
+  await expect(page.getByText("New order saved.", { exact: false })).toBeVisible();
+  expect(menuCommands.at(-1)).toMatchObject({
+    action: "SaveDraft",
+    sections: [
+      {
+        code: "DIM",
+        items: [
+          { skuReference: id(30) },
+          { skuReference: id(40) },
+          { skuReference: id(41) },
+          { skuReference: id(42) },
+        ],
+      },
+      { code: "NOODLE", items: [{ skuReference: id(32) }] },
+    ],
+  });
+});

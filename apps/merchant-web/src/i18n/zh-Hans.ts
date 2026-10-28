@@ -6181,4 +6181,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这个分类已不在菜单上。请重新读取菜单，再选择分类。",
   "This dish has more than one size. Change it on the Products page.":
     "这道菜有多个规格。请在“商品”页修改。",
+  "Sizes of {item}": "{item} 的规格",
+  "Back in stock: {item}": "恢复供应：{item}",
+  "Sold out today: {item}": "今日售罄：{item}",
 });

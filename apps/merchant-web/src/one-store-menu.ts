@@ -22,6 +22,21 @@ export const menuFilters: readonly MenuFilter[] = [
   "NoAllergens",
 ];
 
+/** One size of a dish, with its own price and state at this store. */
+export interface MenuSize {
+  readonly skuReference: string;
+  /** The size's own name ("Large"); null when it is the dish's name. */
+  readonly sizeName: string | null;
+  readonly priceMinor: string | null;
+  readonly pendingPriceMinor: string | null;
+  readonly soldOut: boolean;
+  readonly hidden: boolean;
+  readonly featured: boolean;
+}
+/**
+ * One dish as guests see it (v15 2026-10-28 finding b): its sizes inside it, in menu order. The
+ * dish's own fields are its first size's; sold out and hidden hold when every size is.
+ */
 export interface MenuDish {
   readonly skuReference: string;
   readonly name: string;
@@ -38,6 +53,7 @@ export interface MenuDish {
   readonly featured: boolean;
   /** Where its allergens come from: declared by staff here, a real recipe, or not yet. */
   readonly allergens: DishAllergens;
+  readonly sizes: readonly MenuSize[];
 }
 export interface MenuSectionRow {
   readonly sectionReference: string;
@@ -59,11 +75,46 @@ export function menuRows(
     code: section.code,
     name: section.name,
     nameZh: section.nameZh ?? "",
-    dishes: section.items.flatMap((item) => {
-      const sku = sellables.get(item.skuReference);
-      return sku === undefined ? [] : [dishOf(sku, status.get(item.skuReference), item.featured)];
-    }),
+    dishes: groupDishes(
+      section.items.flatMap((item) => {
+        const sku = sellables.get(item.skuReference);
+        return sku === undefined ? [] : [dishOf(sku, status.get(item.skuReference), item.featured)];
+      }),
+    ),
   }));
+}
+
+/** Sizes of one product become one dish, at its first size's place (sizes keep their order). */
+function groupDishes(sizes: readonly MenuDish[]): readonly MenuDish[] {
+  const dishes: MenuDish[] = [];
+  const at = new Map<string, number>();
+  for (const size of sizes) {
+    const key = size.productReference ?? size.skuReference;
+    const index = at.get(key);
+    if (index === undefined) {
+      at.set(key, dishes.length);
+      dishes.push(size);
+      continue;
+    }
+    const dish = dishes[index] as MenuDish;
+    const merged = [...dish.sizes, ...size.sizes];
+    dishes[index] = {
+      ...dish,
+      sizes: merged,
+      soldOut: merged.every((x) => x.soldOut),
+      hidden: merged.every((x) => x.hidden),
+    };
+  }
+  return dishes.map((dish) =>
+    dish.sizes.length > 1
+      ? {
+          ...dish,
+          sizeName: null,
+          // Every size has its own name inside the dish.
+          sizes: dish.sizes.map((x) => ({ ...x, sizeName: x.sizeName ?? dish.name })),
+        }
+      : dish,
+  );
 }
 
 function dishOf(
@@ -84,6 +135,17 @@ function dishOf(
     hidden: sku.offeredHere === false || status === "NotOffered" || status === "Unavailable",
     featured,
     allergens: sku.allergens ?? { source: "None", declared: [] },
+    sizes: [
+      {
+        skuReference: sku.skuReference,
+        sizeName: sku.sizeName === sku.productName || sku.sizeName === "" ? null : sku.sizeName,
+        priceMinor: sku.priceMinor,
+        pendingPriceMinor: sku.pendingPriceMinor ?? null,
+        soldOut: status === "SoldOut",
+        hidden: sku.offeredHere === false || status === "NotOffered" || status === "Unavailable",
+        featured,
+      },
+    ],
   };
 }
 
@@ -94,9 +156,11 @@ export function dishesNotOnMenu(
 ): readonly MenuDish[] {
   const placed = new Set(view.menu.sections.flatMap((s) => s.items.map((i) => i.skuReference)));
   const status = new Map(availability.map((item) => [item.skuReference, item.status]));
-  return view.sellables
-    .filter((sku) => sku.active && !placed.has(sku.skuReference))
-    .map((sku) => dishOf(sku, status.get(sku.skuReference), false));
+  return groupDishes(
+    view.sellables
+      .filter((sku) => sku.active && !placed.has(sku.skuReference))
+      .map((sku) => dishOf(sku, status.get(sku.skuReference), false)),
+  );
 }
 
 const fold = (value: string) => value.normalize("NFKC").toLocaleLowerCase();
@@ -110,9 +174,10 @@ export function dishMatches(
   const query = fold(search.trim());
   if (query !== "" && !fold(dish.name).includes(query) && !fold(dish.nameZh).includes(query))
     return false;
-  if (filters.has("SoldOut") && !dish.soldOut) return false;
-  if (filters.has("NoPrice") && dish.priceMinor !== null) return false;
-  if (filters.has("Hidden") && !dish.hidden) return false;
+  // A dish shows under a filter when any of its sizes is sold out, unpriced or hidden.
+  if (filters.has("SoldOut") && !dish.sizes.some((x) => x.soldOut)) return false;
+  if (filters.has("NoPrice") && !dish.sizes.some((x) => x.priceMinor === null)) return false;
+  if (filters.has("Hidden") && !dish.sizes.some((x) => x.hidden)) return false;
   if (filters.has("MissingName") && dish.name.trim() !== "" && dish.nameZh.trim() !== "")
     return false;
   if (filters.has("NoAllergens") && dish.allergens.source !== "None") return false;
@@ -138,14 +203,21 @@ export function sectionInputs(rows: readonly MenuSectionRow[]): readonly MenuSec
     code: row.code,
     name: row.name,
     nameZh: row.nameZh,
-    items: row.dishes.map((dish) => ({ skuReference: dish.skuReference, featured: dish.featured })),
+    items: row.dishes.flatMap((dish) =>
+      dish.sizes.map((size) => ({ skuReference: size.skuReference, featured: size.featured })),
+    ),
   }));
 }
 
 /** The order of sections and dishes, to tell whether it changed since it was read. */
 export function orderKey(rows: readonly MenuSectionRow[]): string {
   return rows
-    .map((row) => row.code + ":" + row.dishes.map((d) => d.skuReference).join(","))
+    .map(
+      (row) =>
+        row.code +
+        ":" +
+        row.dishes.map((d) => d.sizes.map((x) => x.skuReference).join("+")).join(","),
+    )
     .join("|");
 }
 
