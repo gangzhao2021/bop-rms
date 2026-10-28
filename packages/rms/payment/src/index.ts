@@ -309,4 +309,6 @@ export {
   type StoreSalesSettlementTotals,
 } from "./infrastructure/persistence/store-sales-payment-ledger.js";
 export * from "./domain/dining-table-settlement.js";
+// WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL: a table bill split into parts paid one by one.
+export * from "./domain/dining-table-split.js";
 export * from "./infrastructure/persistence/dining-table-settlement-store.js";
