@@ -1182,4 +1182,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This table already ordered {count} of these.": "这桌已经点过 {count} 份。",
   "Your table ordered {count}": "这桌已点 {count} 份",
   "Last orders {time}": "厨房 {time} 停止接单",
+  "Kitchen stopped taking orders at {time}": "厨房 {time} 已停止接单",
+  "Last orders": "停止接单",
+  "The kitchen has stopped taking orders for today.": "厨房今天已停止接单。",
+  "You can’t send a new order from your phone now. To add something, ask a staff member.":
+    "现在不能用手机下新单。要加菜请找店员。",
+  "The store isn’t taking new orders right now — it’s closed, or the kitchen has stopped taking orders for today — so you haven’t been charged. To add something, ask a staff member.":
+    "门店现在不接新单（已打烊，或厨房今天已停止接单），你没有被扣款。要加菜请找店员。",
+  "The store stopped taking orders before payment started (it closed, or the kitchen stopped taking orders for today), so you haven’t been charged. To add something, ask a staff member.":
+    "付款开始前门店已停止接单（已打烊，或厨房今天已停止接单），你没有被扣款。要加菜请找店员。",
+  "The kitchen stopped taking orders at {time}": "厨房 {time} 已停止接单",
+  "kitchen stopped taking orders at {time}": "厨房 {time} 已停止接单",
 });

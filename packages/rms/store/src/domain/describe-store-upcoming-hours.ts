@@ -48,6 +48,13 @@ export interface StoreUpcomingHours {
    * ends (a cut-off is set); null otherwise or when the Store is not in a period now.
    */
   readonly lastOrdersAt: string | null;
+  /** The same cut-off with its local date (it can fall after midnight). */
+  readonly lastOrders: { readonly localDate: string; readonly localTime: string } | null;
+  /**
+   * WP-2423 item 8 ③ follow-up (v15 2026-10-28): the current period's last orders have passed —
+   * guests can't send new orders or rounds until the next period; staff still can.
+   */
+  readonly pastLastOrders: boolean;
   /** The dated exceptions after today and within `days`, in date order. */
   readonly upcoming: readonly {
     readonly localDate: string;
@@ -104,16 +111,35 @@ export function describeStoreUpcomingHours(input: StoreUpcomingHoursInput): Stor
   const today = intervalsOn(input.localDate);
   const yesterday = intervalsOn(shiftDate(input.localDate, -1));
   // The period the Store is in now: one of today's, or yesterday's that runs past midnight.
-  const current =
-    today.find(
-      (interval) =>
-        seconds(interval.startLocalTime) <= now &&
-        (interval.endsNextDay || now < seconds(interval.endLocalTime)),
-    ) ?? yesterday.find((interval) => interval.endsNextDay && now < seconds(interval.endLocalTime));
-  const lastOrdersAt =
+  const fromToday = today.find(
+    (interval) =>
+      seconds(interval.startLocalTime) <= now &&
+      (interval.endsNextDay || now < seconds(interval.endLocalTime)),
+  );
+  const fromYesterday =
+    fromToday === undefined
+      ? yesterday.find((interval) => interval.endsNextDay && now < seconds(interval.endLocalTime))
+      : undefined;
+  const current = fromToday ?? fromYesterday;
+  // Counted in seconds from the start of the day the period began, so a cut-off after midnight
+  // lands on the right date and "now" compares with it across midnight.
+  const startDate = fromYesterday === undefined ? input.localDate : shiftDate(input.localDate, -1);
+  const cutoff =
     current === undefined || current.orderCutoffSeconds <= 0
       ? null
-      : clock(seconds(current.endLocalTime) - current.orderCutoffSeconds);
+      : seconds(current.endLocalTime) +
+        (current.endsNextDay ? 86_400 : 0) -
+        current.orderCutoffSeconds;
+  const lastOrdersAt = cutoff === null ? null : clock(cutoff);
+  const lastOrders =
+    cutoff === null
+      ? null
+      : Object.freeze({
+          localDate: shiftDate(startDate, Math.floor(cutoff / 86_400)),
+          localTime: clock(cutoff),
+        });
+  const pastLastOrders =
+    cutoff !== null && now + (fromYesterday === undefined ? 0 : 86_400) >= cutoff;
   const last = shiftDate(input.localDate, input.days);
   const upcoming = Object.freeze(
     input.exceptions
@@ -139,6 +165,8 @@ export function describeStoreUpcomingHours(input: StoreUpcomingHoursInput): Stor
   return Object.freeze({
     todayKind: exception(input.localDate)?.kind ?? null,
     lastOrdersAt,
+    lastOrders,
+    pastLastOrders,
     upcoming,
     nextOpening,
   });

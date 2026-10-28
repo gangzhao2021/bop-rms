@@ -55,6 +55,11 @@ export interface CustomerStoreHours {
   readonly localDate: string | null;
   readonly todayKind: StoreUpcomingHours["todayKind"];
   readonly lastOrdersAt: string | null;
+  /**
+   * Follow-up (v15 2026-10-28): open, but past last orders — guests can't send new orders or
+   * rounds now (the checkout and payment gates refuse them); staff still can.
+   */
+  readonly ordersStopped: boolean;
   readonly nextOpening: StoreUpcomingHours["nextOpening"];
   readonly upcoming: StoreUpcomingHours["upcoming"];
 }
@@ -124,6 +129,7 @@ export function describeCustomerStoreHours(input: {
     localDate: input.localDate ?? null,
     todayKind: ahead?.todayKind ?? null,
     lastOrdersAt: status === "Open" ? (ahead?.lastOrdersAt ?? null) : null,
+    ordersStopped: status === "Open" && ahead?.pastLastOrders === true,
     nextOpening: status === "Open" ? null : (ahead?.nextOpening ?? null),
     upcoming: ahead?.upcoming ?? Object.freeze([]),
   };
@@ -265,6 +271,7 @@ export function customerStoreProfileJson(view: CustomerStoreProfileView) {
               localDate: view.hours.localDate,
               todayKind: view.hours.todayKind,
               lastOrdersAt: view.hours.lastOrdersAt,
+              ordersStopped: view.hours.ordersStopped,
               nextOpening: view.hours.nextOpening,
               upcoming: view.hours.upcoming.map((day) => ({
                 localDate: day.localDate,

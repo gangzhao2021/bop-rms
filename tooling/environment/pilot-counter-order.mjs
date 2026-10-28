@@ -479,7 +479,8 @@ async function createInternalStaffDiningRound(
   };
   const pipeline = createStaffTableGuestPipeline({
     takesOrder: async (input) =>
-      input.recordedAfterOutage || storeTakesOrder(await operatingNow(), "SeatedDineIn"),
+      // Staff open tables and send rounds after last orders too (recorded as their action).
+      input.recordedAfterOutage || storeTakesOrder(await operatingNow(), "SeatedDineIn", "Staff"),
     openTable: createStaffTableCode({
       loadTable: (tableReference) =>
         transactions.run(async (tx) => {

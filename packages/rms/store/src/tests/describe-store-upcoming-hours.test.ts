@@ -83,4 +83,34 @@ describe("WP-2423 item 8 ③ decision 16: the Store's hours ahead", () => {
     expect(late.lastOrdersAt).toBe("01:15:00");
     expect(late.nextOpening).toEqual({ localDate: "2026-12-23", startLocalTime: "18:00:00" });
   });
+  it("follow-up: says when last orders have passed, across midnight too", () => {
+    expect(at("2026-12-22", "21:29:59")).toMatchObject({
+      pastLastOrders: false,
+      lastOrders: { localDate: "2026-12-22", localTime: "21:30:00" },
+    });
+    expect(at("2026-12-22", "21:30:00").pastLastOrders).toBe(true);
+    expect(at("2026-12-22", "21:59:00").pastLastOrders).toBe(true);
+    // Between periods, and in a period without a cut-off, nothing has passed.
+    expect(at("2026-12-22", "15:00:00").pastLastOrders).toBe(false);
+    expect(at("2026-12-24", "15:00:00")).toMatchObject({ pastLastOrders: false, lastOrders: null });
+    const overnight = (localDate: string, localTime: string) =>
+      describeStoreUpcomingHours({
+        localDate,
+        localTime,
+        weeklySchedule: weeklySchedule.map((day) => ({
+          ...day,
+          intervals: [period("18:00:00", "02:00:00", 45, true)],
+        })),
+        exceptions: [],
+        days: 7,
+      });
+    expect(overnight("2026-12-22", "23:30:00")).toMatchObject({
+      pastLastOrders: false,
+      lastOrders: { localDate: "2026-12-23", localTime: "01:15:00" },
+    });
+    expect(overnight("2026-12-23", "01:20:00")).toMatchObject({
+      pastLastOrders: true,
+      lastOrders: { localDate: "2026-12-23", localTime: "01:15:00" },
+    });
+  });
 });

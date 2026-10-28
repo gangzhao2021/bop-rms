@@ -7,7 +7,12 @@ import {
   storeDirectionsUrl,
   type StoreProfile,
 } from "./store-profile-client.js";
-import { StoreStatusStrip, storeStatusLine, todayHoursText } from "./StoreIdentity.js";
+import {
+  OrdersStoppedNotice,
+  StoreStatusStrip,
+  storeStatusLine,
+  todayHoursText,
+} from "./StoreIdentity.js";
 import { formatStoreLocalTime } from "../journey/format.js";
 
 const body = () => ({
@@ -32,6 +37,7 @@ const body = () => ({
       localDate: "2026-12-22",
       todayKind: null,
       lastOrdersAt: "17:30:00",
+      ordersStopped: false,
       nextOpening: null,
       upcoming: [
         {
@@ -106,6 +112,7 @@ describe("WP-2423 store status wording", () => {
     localDate: "2026-12-22",
     todayKind: null,
     lastOrdersAt: null,
+    ordersStopped: false,
     nextOpening: null,
     upcoming: [],
     ...value,
@@ -157,6 +164,7 @@ describe("WP-2423 item 8 ③ decision 16: the Store at the bottom of the menu", 
       todayHours: [],
       todayKind: "Holiday" as const,
       lastOrdersAt: null,
+      ordersStopped: false,
       nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
     };
     expect(storeStatusLine(closed).detail).toBe(
@@ -172,5 +180,27 @@ describe("WP-2423 item 8 ③ decision 16: the Store at the bottom of the menu", 
     expect(() =>
       parseStoreProfile(withHours({ nextOpening: { localDate: "tomorrow" } })),
     ).toThrow();
+  });
+});
+
+describe("WP-2423 item 8 ③ follow-up: after last orders", () => {
+  const loaderOf = (ordersStopped: boolean) => {
+    const parsed = parseStoreProfile(body());
+    const profile = {
+      ...parsed,
+      hours: parsed.hours === null ? null : { ...parsed.hours, ordersStopped },
+    };
+    return Object.assign(async () => profile, { last: () => profile });
+  };
+  it("tells the guest the kitchen stopped taking orders and to ask staff", () => {
+    const stopped = renderToStaticMarkup(<OrdersStoppedNotice load={loaderOf(true)} />);
+    expect(stopped).toContain(
+      `The kitchen stopped taking orders at ${formatStoreLocalTime("17:30:00")}`,
+    );
+    expect(stopped).toContain("To add something, ask a staff member.");
+    expect(renderToStaticMarkup(<OrdersStoppedNotice load={loaderOf(false)} />)).toBe("");
+    expect(renderToStaticMarkup(<StoreStatusStrip load={loaderOf(true)} />)).toContain(
+      `Kitchen stopped taking orders at ${formatStoreLocalTime("17:30:00")}`,
+    );
   });
 });

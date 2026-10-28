@@ -1,6 +1,6 @@
 import { listSeparator, t } from "../i18n/i18n.js";
 import { useEffect, useState } from "react";
-import { formatLocalityLine, formatStoreLocalTime } from "../journey/format.js";
+import { endSentence, formatLocalityLine, formatStoreLocalTime } from "../journey/format.js";
 import { formatStorePhone } from "../journey/StoreContact.js";
 import {
   storeDirectionsUrl,
@@ -53,7 +53,11 @@ export function storeStatusLine(
           // WP-2423 item 8 ③ (decision 16): the kitchen's last orders, when the Store set them.
           hours.lastOrdersAt === null || !lastOrders
             ? null
-            : t("last orders {time}", { time: formatStoreLocalTime(hours.lastOrdersAt) }),
+            : hours.ordersStopped
+              ? t("kitchen stopped taking orders at {time}", {
+                  time: formatStoreLocalTime(hours.lastOrdersAt),
+                })
+              : t("last orders {time}", { time: formatStoreLocalTime(hours.lastOrdersAt) }),
         ]
           .filter((part) => part !== null)
           .join(" · ") || null,
@@ -164,8 +168,12 @@ export function StoreStatusStrip({ load }: { readonly load: StoreProfileLoader |
           </p>
           <p className="store-strip__line store-strip__line--more">
             {hours.status === "Open" && hours.lastOrdersAt !== null ? (
-              <span>
-                {t("Last orders {time}", { time: formatStoreLocalTime(hours.lastOrdersAt) })}
+              <span className={hours.ordersStopped ? "store-strip__stopped" : undefined}>
+                {hours.ordersStopped
+                  ? t("Kitchen stopped taking orders at {time}", {
+                      time: formatStoreLocalTime(hours.lastOrdersAt),
+                    })
+                  : t("Last orders {time}", { time: formatStoreLocalTime(hours.lastOrdersAt) })}
               </span>
             ) : null}
             {hours.upcoming.length > 0 ? (
@@ -231,6 +239,33 @@ export function StoreIdentityCard({ load }: { readonly load: StoreProfileLoader 
         </p>
       )}
       <StoreDetails profile={profile} />
+    </section>
+  );
+}
+
+/**
+ * WP-2423 item 8 ③ follow-up (v15 2026-10-28): after last orders the menu says so above the dishes
+ * — guests can't send new orders or rounds now (checkout refuses them), and a staff member can
+ * still add something for them. Nothing otherwise.
+ */
+export function OrdersStoppedNotice({ load }: { readonly load: StoreProfileLoader | null }) {
+  const profile = useStoreProfile(load);
+  const hours = profile?.hours ?? null;
+  if (hours === null || !hours.ordersStopped) return null;
+  return (
+    <section className="orders-stopped" role="status" aria-label={t("Last orders")}>
+      <p>
+        <strong>
+          {hours.lastOrdersAt === null
+            ? t("The kitchen has stopped taking orders for today.")
+            : endSentence(
+                t("The kitchen stopped taking orders at {time}", {
+                  time: formatStoreLocalTime(hours.lastOrdersAt),
+                }),
+              )}
+        </strong>{" "}
+        {t("You can’t send a new order from your phone now. To add something, ask a staff member.")}
+      </p>
     </section>
   );
 }

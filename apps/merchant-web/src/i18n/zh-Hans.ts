@@ -5996,4 +5996,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{name}: paid with the table, {openItemCount} not served yet. Serve them when they're ready, then close the table. If the guests left without them, a manager gives the money back from the table's payment.":
     "{name}：已随整桌付清，还有 {openItemCount}没上桌。做好后上桌，再关台。如果客人没等到就走了，由经理从这桌的付款里退钱。",
   "Dishes still to serve": "还没上的菜",
+  "Last orders at {time}. After that guests can't order from their phones; you can still add a round for a table.":
+    "{time} 停止接单。之后客人不能再用手机下单；你仍可以替客人加一轮。",
+  "Guests stopped ordering from their phones at {time} (last orders). You can still add a round for a table.":
+    "{time} 已停止接单，客人不能再用手机下单。你仍可以替客人加一轮。",
 });

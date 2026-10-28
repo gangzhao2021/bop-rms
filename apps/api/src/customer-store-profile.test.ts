@@ -32,6 +32,7 @@ describe("WP-2423 today's hours for the store identity", () => {
       localDate: null,
       todayKind: null,
       lastOrdersAt: null,
+      ordersStopped: false,
       nextOpening: null,
       upcoming: [],
     });
@@ -40,6 +41,8 @@ describe("WP-2423 today's hours for the store identity", () => {
     const upcoming = {
       todayKind: "Override" as const,
       lastOrdersAt: "10:30:00",
+      lastOrders: { localDate: "2026-12-22", localTime: "10:30:00" },
+      pastLastOrders: false,
       nextOpening: { localDate: "2026-12-23", startLocalTime: "07:00:00" },
       upcoming: [{ localDate: "2026-12-25", kind: "Holiday" as const, intervals: [] }],
     };
@@ -57,6 +60,19 @@ describe("WP-2423 today's hours for the store identity", () => {
       lastOrdersAt: null,
       nextOpening: upcoming.nextOpening,
     });
+  });
+  it("follow-up: open but past last orders says orders stopped, only while open", () => {
+    const upcoming = {
+      todayKind: null,
+      lastOrdersAt: "10:30:00",
+      lastOrders: { localDate: "2026-12-22", localTime: "10:30:00" },
+      pastLastOrders: true,
+      nextOpening: null,
+      upcoming: [],
+    };
+    const input = { servesChannel: true, localTime: "10:40:00", todayHours: day, upcoming };
+    expect(describeCustomerStoreHours({ ...input, state: "Open" }).ordersStopped).toBe(true);
+    expect(describeCustomerStoreHours({ ...input, state: "Closed" }).ordersStopped).toBe(false);
   });
   it("says when a closed Store opens later today, and nothing when it doesn't", () => {
     expect(
@@ -154,6 +170,7 @@ const view: CustomerStoreProfileView = {
     localDate: "2026-12-22",
     todayKind: null,
     lastOrdersAt: "10:30:00",
+    ordersStopped: false,
     nextOpening: null,
     upcoming: [
       {

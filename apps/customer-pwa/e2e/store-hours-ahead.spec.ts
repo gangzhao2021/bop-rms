@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
-import { routeStorefrontReads } from "./storefront-reads";
+import { routeStorefrontReads, syntheticStoreProfile } from "./storefront-reads";
 
 // WP-2423: every page with a Store context reads the Store's identity (and the menu for
 // cart lines not yet priced); spec routes registered later still answer first.
@@ -83,6 +83,39 @@ test.describe("@production the Store's hours ahead", () => {
     await expect(info).toContainText("节假日 · 不营业");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: "test-results/store-info-zh-390.png", fullPage: true });
+  });
+
+  test("after last orders the menu says the kitchen stopped and to ask staff", async ({ page }) => {
+    // Follow-up (v15 2026-10-28): the checkout and payment gates refuse guests after this time.
+    await page.route("**/api/v1/customer/store", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { "cache-control": "private, max-age=30" },
+        json: {
+          ...syntheticStoreProfile,
+          store: {
+            ...syntheticStoreProfile.store,
+            hours: { ...syntheticStoreProfile.store.hours, ordersStopped: true },
+          },
+        },
+      }),
+    );
+    await enterOpen(page);
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await expect(page.getByRole("heading", { name: "Synthetic Store", exact: true })).toBeVisible();
+    await page.evaluate(() => {
+      history.pushState(null, "", "/menu");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    const notice = page.getByRole("status", { name: "Last orders" });
+    await expect(notice).toContainText("The kitchen stopped taking orders at 9:30 p.m.");
+    await expect(notice).toContainText("To add something, ask a staff member.");
+    await expect(page.getByRole("region", { name: "Store hours and address" })).toContainText(
+      "Kitchen stopped taking orders at 9:30 p.m.",
+    );
+    await expectNoInternalText(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: "test-results/orders-stopped-390.png" });
   });
 
   test("a guest who scans on a holiday is told so and when the Store opens next", async ({

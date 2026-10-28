@@ -35,6 +35,8 @@ export interface StoreProfile {
     readonly localDate: string | null;
     readonly todayKind: StoreDayKind | null;
     readonly lastOrdersAt: string | null;
+    /** Open, but past last orders: guests can't send new orders now (staff still can). */
+    readonly ordersStopped: boolean;
     readonly nextOpening: { readonly localDate: string; readonly startLocalTime: string } | null;
     readonly upcoming: readonly {
       readonly localDate: string;
@@ -150,11 +152,13 @@ export function parseStoreProfile(value: unknown): StoreProfile {
       "localDate",
       "todayKind",
       "lastOrdersAt",
+      "ordersStopped",
       "nextOpening",
       "upcoming",
     ]);
     if (
       (value.status !== "Open" && value.status !== "Closed" && value.status !== "Paused") ||
+      typeof value.ordersStopped !== "boolean" ||
       !Array.isArray(value.upcoming) ||
       value.upcoming.length > 7
     )
@@ -167,6 +171,7 @@ export function parseStoreProfile(value: unknown): StoreProfile {
       localDate: nullable(value.localDate, date),
       todayKind: nullable(value.todayKind, kind),
       lastOrdersAt: nullable(value.lastOrdersAt, time),
+      ordersStopped: value.ordersStopped,
       nextOpening: nullable(value.nextOpening, (next) => {
         const entry = record(next, ["localDate", "startLocalTime"]);
         return Object.freeze({
