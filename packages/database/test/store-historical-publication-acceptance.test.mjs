@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import path from "node:path";
+import { setTimeout } from "node:timers";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
@@ -19,6 +20,7 @@ import {
 } from "../../../tooling/environment/pilot-settlement-window.mjs";
 import { createDailySettlementBacklog } from "../../../tooling/environment/pilot-daily-settlement-backlog.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { withTransactionConflictWait } from "../../../tooling/environment/pilot-transaction-conflict-wait.mjs";
 
 // Synthetic Store/Live Gate facts written as owner; actual Publishing writer and the
 // actual Store/Publishing/settlement readers executed under a NOBYPASSRLS role.
@@ -739,3 +741,147 @@ async function proveManyEdits(context) {
 it("settles a business day with 80 published hours edits (more than 63 change points)", async () => {
   await withIsolatedDatabase({ caseId: "store_many_edits", root }, proveManyEdits);
 }, 300_000);
+
+// WP-2423 v15 (2026-10-28 finding c): during a menu listing the daily settlement failed one cycle
+// with 55P03. The settlement's store-publication proof locks the Publishing history table in
+// SHARE mode; a listing's Publishing write (Submit, Approve, Publish) holds ROW EXCLUSIVE on it
+// until it commits, past the 2 s lock timeout. Both at once, each under a NOBYPASSRLS role on its
+// own connection: the settlement window read (actual pilot composition, real lock timeout) waits
+// out a 3 s Publishing write and resolves the day; without the wait it fails as on v15.
+async function proveListingBesideSettlement(context) {
+  const admin = new Client(context.clientConfig),
+    listing = new Client(context.clientConfig),
+    role = `wp2423l_${context.runId}`;
+  await admin.connect();
+  await listing.connect();
+  try {
+    const v1 = configuration(1);
+    await insertStoreVersion(admin, v1);
+    await publish(admin, v1, {
+      sequence: 1,
+      previous: null,
+      savedAt: v1At,
+      approvedAt: v1At,
+      publishedAt: v1At,
+    });
+    await admin.query(
+      "INSERT INTO bop_publishing.live_gate_version VALUES ($1,'SYNTHETIC-STORE-LIVE-GATE',$2,$3,$4,1,'Production','Approved',$5,$6,$5,$7,$8,$8,'ConfigurationMetadata')",
+      [id(80), tenant, brand, store, id(11), id(10), id(14), v1At],
+    );
+    await admin.query(
+      "INSERT INTO bop_publishing.live_gate_requirement VALUES ($1,$2,$3,$4,1,'SYNTHETIC_TEST','SYNTHETIC_STORE_READY',$5,true,'Accepted',$6,1,$7,NULL,'ConfigurationMetadata')",
+      [id(82), brand, store, id(80), id(11), id(83), validUntil],
+    );
+    await admin.query(
+      `CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS`,
+    );
+    await admin.query(`GRANT ${role} TO CURRENT_USER`).catch(() => undefined);
+    await admin.query(`GRANT USAGE ON SCHEMA rms_store,bop_publishing,platform_helpers TO ${role}`);
+    await admin.query(
+      `GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ${role}`,
+    );
+    await admin.query(`GRANT SELECT ON ALL TABLES IN SCHEMA rms_store TO ${role}`);
+    await admin.query(
+      `GRANT UPDATE ON rms_store.store_configuration_authoring_operation,rms_store.store_configuration_version,rms_store.store_configuration_publication_content,rms_store.store_configuration_operation,rms_store.store_service_pause_content,rms_store.store_service_resume_content,rms_store.store_weekly_service_period,rms_store.store_service_exception,rms_store.store_service_exception_content,rms_store.store_service_exception_interval TO ${role}`,
+    );
+    await admin.query(
+      `GRANT SELECT,UPDATE ON bop_publishing.publishing_mutation_record,bop_publishing.live_gate_version,bop_publishing.live_gate_requirement TO ${role}`,
+    );
+    // The settlement's transactions as the tenant runner opens them: 2 s lock timeout, and a
+    // query that hit a lock or serialization conflict makes the whole transaction a conflict
+    // (TENANT_DATABASE_TRANSACTION_CONFLICT) whatever the reader made of it.
+    const transactions = {
+      async run(work) {
+        let conflicted = false;
+        await admin.query("BEGIN");
+        try {
+          await admin.query("SET LOCAL ROLE " + role);
+          await admin.query("SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '2s'");
+          const value = await work({
+            query: (sql, values) =>
+              admin.query(sql, [...values]).catch((error) => {
+                if (["55P03", "40001", "40P01"].includes(error?.code)) conflicted = true;
+                throw error;
+              }),
+          });
+          if (conflicted)
+            throw Object.assign(Error("conflict"), {
+              code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+            });
+          return value;
+        } catch (error) {
+          if (conflicted)
+            throw Object.assign(Error("conflict"), {
+              code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+            });
+          throw error;
+        } finally {
+          await admin.query("ROLLBACK");
+        }
+      },
+    };
+    const operating = {
+      tenantReference: tenant,
+      brandReference: brand,
+      storeReference: store,
+      configurationType: "STORE_CONFIGURATION",
+      purposeCode: "STORE_CONFIGURATION",
+      requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
+      timeZone: "America/Toronto",
+      hashContent,
+      authorize: async () => true,
+    };
+    const windowWith = (runner) =>
+      createInternalClosedSettlementWindow({
+        resources: {
+          scope: { brandReference: brand, storeReference: store },
+          operating,
+          transactions: runner,
+          now: () => "2026-09-25T12:00:00.000Z",
+        },
+        active: async () => true,
+      });
+    /** A listing's Publishing write, held `ms` before it commits (its own connection and role). */
+    const listingWrite = async (ms) => {
+      await listing.query("BEGIN");
+      await listing.query("SET LOCAL ROLE " + role);
+      await listing.query(
+        "LOCK TABLE bop_publishing.publishing_mutation_record IN ROW EXCLUSIVE MODE",
+      );
+      return new Promise((resolve) =>
+        setTimeout(() => void listing.query("COMMIT").then(resolve), ms),
+      );
+    };
+    const day = { endingAt: "2026-09-21T08:00:00.000Z" };
+    const expected = await windowWith(transactions)(day);
+    assert.equal(expected.businessDate, "2026-09-20");
+
+    // Without the wait: the read times out on the lock, as on v15.
+    let committed = listingWrite(3000);
+    await assert.rejects(windowWith(transactions)(day), (error) => {
+      assert.equal(error?.code, "TENANT_DATABASE_TRANSACTION_CONFLICT");
+      return true;
+    });
+    await committed;
+
+    // The settlement composition waits it out and resolves the same day.
+    committed = listingWrite(3000);
+    const started = Date.now();
+    assert.deepEqual(await windowWith(withTransactionConflictWait(transactions))(day), expected);
+    assert.ok(Date.now() - started >= 2000, "the read waited for the listing write");
+    await committed;
+  } finally {
+    await listing.query("ROLLBACK").catch(() => undefined);
+    await listing.end();
+    await admin.query("RESET ROLE").catch(() => undefined);
+    await admin.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);
+    await admin.end();
+  }
+}
+
+it("the daily settlement read waits out a menu listing's Publishing write instead of failing", async () => {
+  await withIsolatedDatabase(
+    { caseId: "store_settle_listing", root },
+    proveListingBesideSettlement,
+  );
+}, 120_000);
