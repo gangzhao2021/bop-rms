@@ -1,5 +1,12 @@
 import { dateLocale, t, useReloadOnLanguageChange } from "../i18n/i18n.js";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { Link } from "react-router";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { endSentence, formatClockTime, formatMoney } from "../journey/format.js";
@@ -20,6 +27,9 @@ import { subscribeCustomerCsrfContext } from "../session/customer-transaction-co
 import { DiningStaffCallPanel } from "./DiningStaffCallPanel.js";
 import type { DiningStaffCallClient } from "./dining-staff-call-client.js";
 import type { DiningInvitationClient } from "./dining-invitation-client.js";
+import { createBrowserCustomerCartClient, type CustomerCartClient } from "../cart/cart-client.js";
+import { createConfigureController, type ConfigureController } from "../menu/configure-state.js";
+import { ConfigureStatus } from "../menu/MenuPage.js";
 
 /**
  * WP-2423 D5: when a round was sent. Today's rounds show the time; a round from another day (a
@@ -176,7 +186,63 @@ function AwaitingPaymentNote({ round }: { readonly round: DiningRound }) {
   );
 }
 
-function RoundCard({ round }: { readonly round: DiningRound }) {
+type DiningItem = DiningRound["items"][number];
+
+/**
+ * WP-2423 item 8 ③ (Owner decision 13, "再来一份"): one more of a dish anyone at the table ordered,
+ * with the same choices, goes into this guest's own cart (never the other guest's note). The
+ * menu checks it again; if the dish or a choice is no longer offered, the guest picks it from the
+ * menu instead.
+ */
+function OrderAgainStatus({
+  controller,
+  item,
+}: {
+  readonly controller: ConfigureController;
+  readonly item: DiningItem | null;
+}) {
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    controller.getState,
+    controller.getState,
+  );
+  if (item === null || state.status === "idle") return null;
+  if (state.status === "validation" && item.orderAgain !== undefined)
+    return (
+      <div className="configure-status" role="alert">
+        <p>
+          {t("{name} can’t be added as it was ordered — the menu has changed.", {
+            name: item.displayName,
+          })}
+        </p>
+        <Link to={`/menu/items/${item.orderAgain.sellableReference}`}>
+          {t("Choose it from the menu")}
+        </Link>
+      </div>
+    );
+  if (state.status === "added")
+    return (
+      <div className="configure-status configure-status--success" role="status">
+        <p>{t("One more {name} is in your cart.", { name: item.displayName })}</p>
+        <Link className="menu-action" to="/cart">
+          {t("View cart")}
+        </Link>
+      </div>
+    );
+  return <ConfigureStatus state={state} controller={controller} />;
+}
+
+function RoundCard({
+  round,
+  onOrderAgain,
+  againStatus,
+}: {
+  readonly round: DiningRound;
+  /** Absent when the table can't add dishes now (checking out, paid or closed). */
+  readonly onOrderAgain?: ((item: DiningItem, key: string) => void) | undefined;
+  /** What happened to the dish last ordered again, shown under it (by "round:item" key). */
+  readonly againStatus?: { readonly key: string; readonly node: ReactNode } | undefined;
+}) {
   const headingId = `dining-round-${round.roundNumber}`;
   return (
     <article className="order-status__card order-status__batch" aria-labelledby={headingId}>
@@ -218,6 +284,17 @@ function RoundCard({ round }: { readonly round: DiningRound }) {
                 {t("Served")} {item.servedQuantity} {t("of")} {item.quantity}
               </span>
             ) : null}
+            {onOrderAgain !== undefined && !item.cancelled && item.orderAgain !== undefined ? (
+              <button
+                className="dining-session__order-again"
+                type="button"
+                aria-label={t("Order one more {name}", { name: item.displayName })}
+                onClick={() => onOrderAgain(item, `${round.roundNumber}:${index}`)}
+              >
+                {t("Order again")}
+              </button>
+            ) : null}
+            {againStatus?.key === `${round.roundNumber}:${index}` ? againStatus.node : null}
           </li>
         ))}
       </ul>
@@ -365,9 +442,12 @@ export function DiningSessionPage({
   client: provided,
   invitationClient,
   staffCallClient,
+  cartClient,
 }: {
   readonly store?: CustomerStoreContext | undefined;
   readonly client?: DiningSessionClient | undefined;
+  /** WP-2423 item 8 ③ (decision 13): the guest's own cart for "Order again" (tests inject). */
+  readonly cartClient?: CustomerCartClient | undefined;
   /** WP-2423 DEC-DINING-GUEST-INVITATION (tests inject; the page uses HTTP by default). */
   readonly invitationClient?: DiningInvitationClient | undefined;
   /** WP-2423 Q28 DEC-DINING-STAFF-CALL (tests inject; the page uses HTTP by default). */
@@ -455,6 +535,7 @@ export function DiningSessionPage({
     <DiningSessionScreen
       state={state}
       store={store}
+      cartClient={cartClient}
       onRefresh={() => void load()}
       invitation={
         // Stays mounted while a table is shown (also during a failed refresh), so a code on
@@ -480,7 +561,9 @@ export function DiningSessionScreen({
   onRefresh,
   invitation = null,
   staffCall = null,
+  cartClient,
 }: {
+  readonly cartClient?: CustomerCartClient | undefined;
   readonly state: DiningSessionState;
   readonly store?: CustomerStoreContext | undefined;
   readonly onRefresh: () => void;
@@ -493,6 +576,14 @@ export function DiningSessionScreen({
   const [tablePay, setTablePay] = useState<TablePayStatus | null>(null);
   const view = state.status === "ready" || state.status === "unavailable" ? state.view : null;
   const active = isDiningSessionActive(view);
+  const [orderAgain] = useState(() =>
+    createConfigureController({ client: cartClient ?? createBrowserCustomerCartClient() }),
+  );
+  const [again, setAgain] = useState<{ key: string; item: DiningItem } | null>(null);
+  // Dishes can be added while the table orders: not while it checks out, after it paid, or once
+  // everything is closed.
+  const canOrderAgain =
+    state.status === "ready" && active && tablePay?.paid !== true && tablePay?.checkingOut !== true;
   return (
     <CustomerPage step="table" store={store} className="order-status dining-session">
       <PageHeading
@@ -568,7 +659,31 @@ export function DiningSessionScreen({
         <section className="order-status__batches" aria-labelledby="dining-rounds-heading">
           <h2 id="dining-rounds-heading">{t("Rounds")}</h2>
           {view.rounds.map((round) => (
-            <RoundCard key={round.roundNumber} round={round} />
+            <RoundCard
+              key={round.roundNumber}
+              round={round}
+              againStatus={
+                again === null
+                  ? undefined
+                  : {
+                      key: again.key,
+                      node: <OrderAgainStatus controller={orderAgain} item={again.item} />,
+                    }
+              }
+              onOrderAgain={
+                canOrderAgain
+                  ? (item, key) => {
+                      if (item.orderAgain === undefined) return;
+                      setAgain({ key, item });
+                      void orderAgain.submit(item.orderAgain.sellableReference, {
+                        quantity: 1,
+                        customerNote: null,
+                        optionSelections: item.orderAgain.optionSelections,
+                      });
+                    }
+                  : undefined
+              }
+            />
           ))}
         </section>
       ) : null}

@@ -1173,4 +1173,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Special hours": "特殊营业时间",
   "The store is closed today for a holiday.": "今天是节假日，门店不营业。",
   "The store is closed today.": "门店今天不营业。",
+  "Order again": "再来一份",
+  "Order one more {name}": "再来一份{name}",
+  "{name} can’t be added as it was ordered — the menu has changed.":
+    "{name}无法按原样再点，菜单已有变化。",
+  "Choose it from the menu": "去菜单里重新选",
+  "One more {name} is in your cart.": "已把一份{name}加入你的购物车。",
+  "This table already ordered {count} of these.": "这桌已经点过 {count} 份。",
+  "Your table ordered {count}": "这桌已点 {count} 份",
 });

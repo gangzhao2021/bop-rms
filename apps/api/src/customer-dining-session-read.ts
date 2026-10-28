@@ -61,6 +61,15 @@ export type DiningStoreCancellationReason =
   "CustomerRequest" | "SoldOut" | "StoreError" | "DuplicateOrder" | "GuestLeft";
 export type DiningItemPhase = OrderItemProgressPhase;
 
+/** The published menu item and options of a dish the table ordered (public menu references). */
+export interface CustomerDiningOrderAgain {
+  readonly sellableReference: string;
+  readonly optionSelections: readonly {
+    readonly optionReference: string;
+    readonly quantity: number;
+  }[];
+}
+
 /** Owner facts for one dining session, as read in one transaction. References stay server-side. */
 export interface CustomerDiningSessionFacts {
   readonly diningSessionReference: string;
@@ -126,6 +135,11 @@ export interface CustomerDiningSessionFacts {
     }[];
     /** WP-2423 Q26: Order items the kitchen is remaking (Kitchen's public Query). */
     readonly remakes?: ReadonlySet<string>;
+    /**
+     * WP-2423 item 8 ③ (Owner decision 13): per Order item, the menu item and chosen options a
+     * guest adds to their own cart with "Order again" (never the note or who added it).
+     */
+    readonly orderAgain?: ReadonlyMap<string, CustomerDiningOrderAgain>;
     /**
      * WP-2423 D5: each item's frozen price before tax and its tax (Ordering's own order items),
      * for every shown item or absent, so the table prints item prices, subtotal, tax and total
@@ -197,6 +211,8 @@ export interface CustomerDiningSessionView {
       readonly priceBeforeTax?: CustomerMoney;
       /** WP-2423 Q26: present (true) only while the kitchen is making this item again. */
       readonly beingRemade?: true;
+      /** WP-2423 item 8 ③ (decision 13): what "Order again" adds, when it can be read. */
+      readonly orderAgain?: CustomerDiningOrderAgain;
     }[];
     /** WP-2423 D5: the round's items before tax and their tax (with priceBeforeTax). */
     readonly subtotal?: CustomerMoney;
@@ -306,6 +322,7 @@ export function composeCustomerDiningSession(
         price: prices?.get(item.orderItemReference),
         phase: delivery.phase,
         beingRemade: !cancelled && order.remakes?.has(item.orderItemReference) === true,
+        orderAgain: order.orderAgain?.get(item.orderItemReference),
         notCharged: itemCancellation(item.orderItemReference)?.notCharged === true,
       });
     });
@@ -414,6 +431,7 @@ export function composeCustomerDiningSession(
               ? {}
               : { priceBeforeTax: money(item.price.subtotal.amountMinor) }),
             ...(item.beingRemade ? { beingRemade: true as const } : {}),
+            ...(item.orderAgain === undefined ? {} : { orderAgain: item.orderAgain }),
           }),
         ),
       ),
@@ -756,6 +774,8 @@ function postgresDependencies(
         | undefined;
       // Owner 2026-10-23: item names in the guest's chosen language, by Order item.
       let chosenNames: Map<string, string> | undefined;
+      // WP-2423 item 8 ③ (decision 13): what "Order again" adds, by Order item.
+      let orderAgain: Map<string, CustomerDiningOrderAgain> | undefined;
       if (await stillAuthorized()) {
         const shown = new Map(
           status.order.batches.flatMap((batch) =>
@@ -771,6 +791,15 @@ function postgresDependencies(
             displayLocale === undefined ? undefined : [displayLocale, String(guest.locale)],
           );
           await transaction.query("RELEASE SAVEPOINT customer_dining_item_prices", []);
+          orderAgain = new Map(
+            found.map((price) => [
+              price.orderItemReference,
+              Object.freeze({
+                sellableReference: price.sellableReference,
+                optionSelections: price.optionSelections,
+              }),
+            ]),
+          );
           if (displayLocale !== undefined)
             chosenNames = new Map(
               found.map((price) => [price.orderItemReference, price.displayName] as const),
@@ -903,6 +932,7 @@ function postgresDependencies(
           staffCancellations,
           itemCancellations,
           remakes,
+          ...(orderAgain === undefined ? {} : { orderAgain }),
           ...(itemPrices === undefined ? {} : { itemPrices }),
           payments: [
             ...payments.map((projection) => ({

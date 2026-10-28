@@ -146,6 +146,15 @@ export interface OrderItemPrice {
    * added every item). Callers show a note only to the guest who wrote it, as the cart does.
    */
   readonly addedByParticipantReference: string | null;
+  /**
+   * WP-2423 item 8 ③ (Owner decision 13, "再来一份"): the menu item and the options chosen, as
+   * frozen, so a guest can add the same dish to their own cart (the menu checks it again).
+   */
+  readonly sellableReference: string;
+  readonly optionSelections: readonly {
+    readonly optionReference: string;
+    readonly quantity: number;
+  }[];
 }
 
 /**
@@ -206,6 +215,15 @@ export async function listOrderItemPrices(
             snapshot.addedByParticipantReference === null
               ? null
               : String(snapshot.addedByParticipantReference),
+          sellableReference: String(snapshot.catalog.sellableReference),
+          optionSelections: Object.freeze(
+            snapshot.catalog.options.map((option) =>
+              Object.freeze({
+                optionReference: String(option.optionReference),
+                quantity: option.quantity,
+              }),
+            ),
+          ),
         });
       }),
     );

@@ -52,11 +52,54 @@ export interface DiningRound {
     readonly priceBeforeTax?: DiningMoney;
     /** WP-2423 Q26: the kitchen is making this item again. */
     readonly beingRemade?: boolean;
+    /**
+     * WP-2423 item 8 ③ (Owner decision 13): the published menu item and options "Order again"
+     * adds to this guest's own cart; absent when it can't be read.
+     */
+    readonly orderAgain?: DiningOrderAgain;
   }[];
   /** WP-2423 D5: the round's items before tax and their tax (with priceBeforeTax). */
   readonly subtotal?: DiningMoney;
   readonly tax?: DiningMoney;
   readonly itemsTotal: DiningMoney;
+}
+
+export interface DiningOrderAgain {
+  readonly sellableReference: string;
+  readonly optionSelections: readonly {
+    readonly optionReference: string;
+    readonly quantity: number;
+  }[];
+}
+
+const menuReference = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+function orderAgain(value: unknown): DiningOrderAgain {
+  const entry = record(value, ["sellableReference", "optionSelections"]);
+  if (
+    typeof entry.sellableReference !== "string" ||
+    !menuReference.test(entry.sellableReference) ||
+    !Array.isArray(entry.optionSelections) ||
+    entry.optionSelections.length > 50
+  )
+    return invalid();
+  return Object.freeze({
+    sellableReference: entry.sellableReference,
+    optionSelections: Object.freeze(
+      entry.optionSelections.map((raw: unknown) => {
+        const option = record(raw, ["optionReference", "quantity"]);
+        if (
+          typeof option.optionReference !== "string" ||
+          !menuReference.test(option.optionReference)
+        )
+          return invalid();
+        return Object.freeze({
+          optionReference: option.optionReference,
+          quantity: count(option.quantity, 1),
+        });
+      }),
+    ),
+  });
 }
 
 export interface DiningSessionView {
@@ -212,6 +255,8 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       round.items.map((value: unknown) => {
         const remade =
           value !== null && typeof value === "object" && Object.hasOwn(value, "beingRemade");
+        const again =
+          value !== null && typeof value === "object" && Object.hasOwn(value, "orderAgain");
         const item = record(value, [
           "displayName",
           "quantity",
@@ -220,6 +265,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           "lineTotal",
           ...(priced ? ["priceBeforeTax"] : []),
           ...(remade ? ["beingRemade"] : []),
+          ...(again ? ["orderAgain"] : []),
         ]);
         if (remade && item.beingRemade !== true) return invalid();
         const quantity = count(item.quantity, 1);
@@ -241,6 +287,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           lineTotal,
           ...(priceBeforeTax === null ? {} : { priceBeforeTax }),
           ...(remade ? { beingRemade: true } : {}),
+          ...(again ? { orderAgain: orderAgain(item.orderAgain) } : {}),
         });
       }),
     );

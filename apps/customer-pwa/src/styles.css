@@ -3045,3 +3045,35 @@
   padding-inline: 0;
   background: none;
 }
+
+/* WP-2423 item 8 ③ (decision 13): "Order again" on the table page and "already ordered" on the
+   menu — accent words, no box; the hint is quiet text under the price. */
+.dining-session__order-again {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.dining-session__order-again:focus-visible {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.menu-card__table-ordered,
+.configure-table-ordered {
+  color: var(--bop-color-text-muted);
+  font-size: 0.875rem;
+}
+.configure-table-ordered {
+  margin: var(--bop-space-3) 0 0;
+}
+.order-status__batch li > .dining-session__order-again {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+.order-status__batch li > .configure-status {
+  grid-column: 1 / -1;
+}

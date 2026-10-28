@@ -118,6 +118,19 @@ export class CustomerDiningSessionHandler {
                 : { priceBeforeTax: money(item.priceBeforeTax) }),
               // WP-2423 Q26: only while the kitchen is making this item again (as on pickup).
               ...(item.beingRemade === true ? { beingRemade: true } : {}),
+              // WP-2423 item 8 ③ (decision 13): the published menu item and options "Order
+              // again" adds to this guest's own cart; public menu references only.
+              ...(item.orderAgain === undefined
+                ? {}
+                : {
+                    orderAgain: {
+                      sellableReference: item.orderAgain.sellableReference,
+                      optionSelections: item.orderAgain.optionSelections.map((option) => ({
+                        optionReference: option.optionReference,
+                        quantity: option.quantity,
+                      })),
+                    },
+                  }),
             })),
             ...(round.subtotal === undefined || round.tax === undefined
               ? {}
