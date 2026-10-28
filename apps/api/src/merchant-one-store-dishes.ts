@@ -1,4 +1,5 @@
 import { derivedReference } from "./merchant-products.js";
+import type { createMerchantAvailability } from "./merchant-availability.js";
 import type { createMerchantDishAllergens } from "./merchant-dish-allergens.js";
 import type { createMerchantMenus } from "./merchant-menus.js";
 import type { createMerchantOptionPrices } from "./merchant-option-prices.js";
@@ -224,8 +225,40 @@ export function createMerchantOneStoreDishes(options: {
   readonly menus: ReturnType<typeof createMerchantMenus>;
   readonly dishAllergens: ReturnType<typeof createMerchantDishAllergens>;
   readonly optionRecipes: ReturnType<typeof createMerchantOptionRecipes>;
+  readonly availability: Pick<ReturnType<typeof createMerchantAvailability>, "query" | "command">;
   readonly now: () => string;
 }) {
+  /**
+   * v15 2026-10-28 finding d: guests at the store see a size only once it is offered there (an
+   * availability rule); a size never decided at the store ("NotOffered", no rule) stays off the
+   * guest menu whatever the menu says. A size staff hid keeps its stopped offer (decided here) and
+   * is left alone.
+   */
+  const offerUndecided = async (
+    session: Session,
+    skuReferences: ReadonlySet<string>,
+    step: (purpose: string) => string,
+  ) => {
+    const items = (
+      (await options.availability.query(session)) as unknown as {
+        items: readonly { skuReference: string; status: string; decidedHere?: boolean }[];
+      }
+    ).items;
+    for (const item of items)
+      if (
+        skuReferences.has(item.skuReference) &&
+        item.status === "NotOffered" &&
+        item.decidedHere === false
+      )
+        await options.availability.command({
+          ...session,
+          body: {
+            action: "Offer",
+            operationReference: step("offer-" + item.skuReference.slice(-12)),
+            skuReference: item.skuReference,
+          },
+        });
+  };
   const loadMenu = async (session: Session, menuReference: string) =>
     (await options.menus.query({ ...session, menuReference })) as unknown as MenuBuilder;
   /** Opens the menu's draft when it was listed (the listed one stays for guests). */
@@ -343,6 +376,8 @@ export function createMerchantOneStoreDishes(options: {
         },
       });
     const sku = size.skuReference;
+    // A new dish is offered at the store (one store: the store it was made for).
+    if (body.productReference === null) await offerUndecided(session, new Set([sku]), step);
 
     // 2. The price, in the store's open price book draft (published by "List it").
     const books = (await options.prices.query({ ...session, priceBookReference: null })) as {
@@ -632,6 +667,13 @@ export function createMerchantOneStoreDishes(options: {
           approvalMode: "SingleStoreListing",
         },
       });
+    // Every dish on the menu that was never decided at the store is offered with it.
+    const menu = await loadMenu(session, body.menuReference);
+    await offerUndecided(
+      session,
+      new Set(menu.menu.sections.flatMap((s) => s.items.map((item) => item.skuReference))),
+      step,
+    );
     return options.menus.command({
       ...session,
       body: { action: "List", operationReference: step("menu"), menuReference: body.menuReference },

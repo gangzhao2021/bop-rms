@@ -184,12 +184,12 @@ export function parseCatchUpArguments(argv) {
 }
 
 async function main() {
-  const { createConfiguredPilotResources } = await import("./pilot-configured-resources.mjs");
+  const { createBackgroundPilotResources } = await import("./pilot-configured-resources.mjs");
   let resources;
   try {
     if (!isPilotRuntime()) throw new Error("UNAVAILABLE");
     const { directory, dryRun } = parseCatchUpArguments(process.argv.slice(2));
-    resources = await createConfiguredPilotResources(path.resolve(directory));
+    resources = await createBackgroundPilotResources(path.resolve(directory));
     const report = await catchUpOrderKitchenProgress({
       resources,
       dryRun,

@@ -3,7 +3,7 @@ import console from "node:console";
 import { URL, fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
-import { createConfiguredPilotResources } from "./pilot-configured-resources.mjs";
+import { createBackgroundPilotResources } from "./pilot-configured-resources.mjs";
 import process from "node:process";
 import { startWorkerRuntime } from "../../apps/worker/dist/index.js";
 import {
@@ -118,7 +118,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       directory,
       operational: true,
       providerCaptureReview: true,
-      createResources: () => createConfiguredPilotResources(directory),
+      createResources: () => createBackgroundPilotResources(directory),
     });
   } catch {
     console.error("RECONCILIATION_WORKER_START_UNAVAILABLE");

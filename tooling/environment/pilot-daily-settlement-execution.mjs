@@ -12,14 +12,9 @@ import {
   withDailySettlementRecheck,
 } from "./pilot-daily-settlement-recheck.mjs";
 import { createPostgresPaymentReconciliationRunSource } from "../../packages/rms/payment/src/index.ts";
-import { withTransactionConflictWait } from "./pilot-transaction-conflict-wait.mjs";
-export async function createConfiguredDailySettlementExecution(directory, configured) {
-  // WP-2423 (v15 2026-10-28 finding c): a menu listing in flight delays the settlement's reads
-  // instead of failing its cycle.
-  const resources = {
-    ...configured,
-    transactions: withTransactionConflictWait(configured.transactions),
-  };
+// WP-2423 (v15 2026-10-28 finding c): `resources` are a background worker's
+// (createBackgroundPilotResources): a menu listing in flight delays these reads, never fails them.
+export async function createConfiguredDailySettlementExecution(directory, resources) {
   const installation = await loadPilotInstallation(directory),
     config = await installation.loadCustomerRuntime(),
     coverage = await installation.loadDailySettlementCoverage();

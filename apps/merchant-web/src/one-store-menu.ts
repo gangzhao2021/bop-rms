@@ -252,3 +252,34 @@ export function listingPending(
     (state !== null && state !== "Published")
   );
 }
+
+/** The menu is part-way through a listing on the server (in review or approved, not yet live). */
+export function listingUnderway(view: Pick<MenuBuilderView, "listingStep">): boolean {
+  return view.listingStep === "Approve" || view.listingStep === "Publish";
+}
+
+/**
+ * v15 2026-10-28 finding e: a listing started from this browser, kept so a reload during the first
+ * steps (prices, offers — before the menu's own state shows it) still shows it in progress. Kept
+ * at most three minutes; best effort (private windows may not keep it).
+ */
+export const listingMarkerMaximumMs = 3 * 60_000;
+const markerKey = (menuReference: string) => `bop.menu-listing.${menuReference}`;
+export function readListingMarker(menuReference: string, now: number): number | null {
+  try {
+    const started = Number(globalThis.localStorage?.getItem(markerKey(menuReference)));
+    return Number.isFinite(started) && started > 0 && now - started < listingMarkerMaximumMs
+      ? started
+      : null;
+  } catch {
+    return null;
+  }
+}
+export function writeListingMarker(menuReference: string, started: number | null): void {
+  try {
+    if (started === null) globalThis.localStorage?.removeItem(markerKey(menuReference));
+    else globalThis.localStorage?.setItem(markerKey(menuReference), String(started));
+  } catch {
+    // Not kept: the server's state still shows the later steps.
+  }
+}

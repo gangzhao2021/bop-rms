@@ -61,10 +61,29 @@ function fakes() {
     published: true,
     declared: null as unknown,
     optionRecipes: new Map<string, { published: boolean; reviews: string[] }>(),
+    // Store availability by size: absent = never decided here (NotOffered).
+    offered: new Map<string, string>([[id(12), "Hidden"]]),
   };
   const record = (name: string, body: Record<string, unknown>) =>
     calls.push(name + ":" + String(body.action));
   const services = {
+    availability: {
+      query: async () => ({
+        items: [id(11), id(12)].map((sku) => ({
+          skuReference: sku,
+          status:
+            state.offered.get(sku) === "Hidden"
+              ? "NotOffered"
+              : (state.offered.get(sku) ?? "NotOffered"),
+          decidedHere: state.offered.has(sku),
+        })),
+      }),
+      command: async ({ body }: { body: Record<string, unknown> }) => {
+        record("availability", body);
+        state.offered.set(String(body.skuReference), "Available");
+        return {};
+      },
+    },
     products: {
       query: async () => ({ product: state.product }),
       command: async ({ body }: { body: Record<string, unknown> }) => {
@@ -280,6 +299,7 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
       "product:Create",
       "product:SaveDraft",
       "product:StartSelling",
+      "availability:Offer",
       "price:CreateDraft",
       "price:SaveDraft",
       "optionPrice:SetPrices",
@@ -323,6 +343,7 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
       "menu:List",
     ]);
     expect(state.assigned).toBe(id(20));
+    expect(state.offered.get(id(11))).toBe("Available");
     expect(state.optionPrices.get(HOT)).toEqual({ price: "50", pending: null });
     // A price change after listing opens a new draft copied from the charged book.
     calls.length = 0;
@@ -350,5 +371,22 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
       save({ choiceGroups: [{ optionSetReference: SPICE, options: [] }] }),
     ])
       expect(() => parseOneStoreDishBody(bad)).toThrow(MerchantOneStoreDishError);
+  });
+
+  it("lists a dish no one decided at the store as offered, and leaves a hidden one hidden", async () => {
+    const { calls, state, dishes } = fakes();
+    await dishes.command({ ...session, body: save() });
+    // The size was placed on the menu without being offered (e.g. made on the product page),
+    // and another size on the menu was hidden by staff.
+    state.offered.delete(id(11));
+    state.menu.sections[0]?.items.push({ skuReference: id(12), featured: false });
+    calls.length = 0;
+    await dishes.command({
+      ...session,
+      body: { action: "ListAll", operationReference: id(103), menuReference: MENU },
+    });
+    expect(calls.filter((c) => c.startsWith("availability"))).toEqual(["availability:Offer"]);
+    expect(state.offered.get(id(11))).toBe("Available");
+    expect(state.offered.get(id(12))).toBe("Hidden");
   });
 });
