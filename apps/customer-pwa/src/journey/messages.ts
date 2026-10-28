@@ -522,7 +522,7 @@ export const checkoutText = Object.freeze({
   },
   get storeClosed() {
     return t(
-      "The store isn’t taking orders right now, so you haven’t been charged. Try again when the store reopens, or ask staff.",
+      "The store isn’t taking new orders right now — it’s closed, or the kitchen has stopped taking orders for today — so you haven’t been charged. To add something, ask a staff member.",
     );
   },
   get checkoutUnconfirmed() {

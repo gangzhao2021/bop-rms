@@ -43,7 +43,7 @@ import {
   createStoreProfileClient,
   type StoreProfileLoader,
 } from "../store/store-profile-client.js";
-import { StoreInfoSection, StoreStatusStrip } from "../store/StoreIdentity.js";
+import { OrdersStoppedNotice, StoreInfoSection, StoreStatusStrip } from "../store/StoreIdentity.js";
 import { TableOrderedProvider, useTableOrderedCount } from "../dining/table-ordered.js";
 import type { DiningSessionClient } from "../dining/dining-session-client.js";
 import { cartLinePrices, cartLinesSubtotal } from "./menu-line-prices.js";
@@ -399,6 +399,12 @@ export function MenuScreen({
           <div className="menu-layout__main">
             {mode === "browse" && context !== undefined ? (
               <StoreStatusStrip
+                load={storeProfile === undefined ? browserStoreProfile : storeProfile}
+              />
+            ) : null}
+            {/* Follow-up: after last orders, said before the guest chooses anything. */}
+            {mode !== "search" && context !== undefined ? (
+              <OrdersStoppedNotice
                 load={storeProfile === undefined ? browserStoreProfile : storeProfile}
               />
             ) : null}

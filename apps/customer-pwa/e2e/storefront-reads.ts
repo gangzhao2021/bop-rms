@@ -29,6 +29,7 @@ export const syntheticStoreProfile = Object.freeze({
       localDate: "2026-12-22",
       todayKind: null,
       lastOrdersAt: "21:30:00",
+      ordersStopped: false,
       nextOpening: null,
       // WP-2423 item 8 ③ (decision 16): a holiday and special hours in the next 7 days.
       upcoming: [

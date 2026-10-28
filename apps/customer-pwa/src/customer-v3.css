@@ -156,3 +156,23 @@
 .customer-page.customer-page .store-info h2 {
   font-size: 20px;
 }
+
+/* Follow-up (v15 2026-10-28): after last orders — a red dot and words, no box. */
+.customer-page .orders-stopped p {
+  margin: 0;
+  font-size: 16px;
+}
+.customer-page .orders-stopped strong::before,
+.customer-page .store-strip__stopped::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.1em;
+}
+.customer-page .store-strip__stopped {
+  color: var(--bop-color-text-default);
+}

@@ -202,3 +202,83 @@ test("@production Tables keeps the last tables read-only after a failed refresh 
   await expect(notice).toHaveCount(0, { timeout: 5_000 });
   await expect(select).toBeEnabled();
 });
+
+/**
+ * WP-2423 item 8 ③ follow-up (v15 2026-10-28): guests can't order from their phones after last
+ * orders; servers see it coming on Tables, and after it that they can still add a round.
+ */
+test("@production Tables warns servers before guests' last orders and says staff can still add rounds", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  const evening = Date.parse("2026-10-29T01:10:00.000Z"); // 21:10 in Toronto
+  await page.clock.install({ time: evening });
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: { ...scope, timeZone: "America/Toronto" },
+          authorizedStores: [scope],
+          businessDate: "2026-10-28",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "DIN-FLOOR-BOARD",
+              label: "Tables",
+              href: "/operations/dining",
+              permission: "dining.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/business-day", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        businessDate: "2026-10-28",
+        startsAt: "2026-10-28T08:00:00.000Z",
+        endsAt: "2026-10-29T08:00:00.000Z",
+        timeZone: "America/Toronto",
+        observedAt: "2026-10-29T01:10:00.000Z",
+        lastOrdersAt: "2026-10-29T01:30:00.000Z",
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/tables", (route) =>
+    route.fulfill({
+      headers,
+      json: { canOperateTables: false, items: [], nextAfterTableReference: null },
+    }),
+  );
+  await page.goto("/operations/dining");
+  const notice = page.locator(".last-orders-notice");
+  await expect(notice).toHaveText(
+    "Last orders at 9:30 PM. After that guests can't order from their phones; you can still add a round for a table.",
+  );
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/last-orders-${width}.png` });
+  }
+  await page.clock.fastForward("21:00");
+  await expect(notice).toHaveText(
+    "Guests stopped ordering from their phones at 9:30 PM (last orders). You can still add a round for a table.",
+  );
+  await expect(notice).toHaveAttribute("data-tone", "past");
+});

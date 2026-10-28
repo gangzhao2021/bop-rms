@@ -14,3 +14,21 @@ it("WP-2423 Q4: pickup needs the Store open for pickup; a seated party only need
   expect(storeTakesOrder(paused, "SeatedDineIn")).toBe(true);
   expect(storeTakesOrder(closed, "SeatedDineIn")).toBe(false);
 });
+
+it("follow-up: after last orders a guest can't order, staff still can", () => {
+  const past = {
+    state: "Open" as const,
+    availableServiceModes: ["DineIn", "Pickup"],
+    upcomingHours: { pastLastOrders: true },
+  };
+  const before = { ...past, upcomingHours: { pastLastOrders: false } };
+  expect(storeTakesOrder(past, "Pickup")).toBe(false);
+  expect(storeTakesOrder(past, "SeatedDineIn")).toBe(false);
+  expect(storeTakesOrder(past, "SeatedDineIn", "Staff")).toBe(true);
+  expect(storeTakesOrder(past, "Pickup", "Staff")).toBe(true);
+  expect(storeTakesOrder(before, "SeatedDineIn")).toBe(true);
+  // Closed is closed for staff too (as before).
+  expect(storeTakesOrder({ ...past, state: "Closed" as const }, "SeatedDineIn", "Staff")).toBe(
+    false,
+  );
+});

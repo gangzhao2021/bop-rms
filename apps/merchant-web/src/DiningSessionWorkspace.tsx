@@ -32,6 +32,7 @@ import { serviceOperationReference } from "./service-control-client.js";
 import { storeTime } from "./StoreTime.js";
 import { newOperationReference } from "./operation-reference.js";
 import { TableSessionClose } from "./TableSessionClose.js";
+import { LastOrdersNotice } from "./LastOrdersNotice.js";
 import { TableCheckout } from "./TableCheckout.js";
 import { TableOrderRounds } from "./TableOrderRounds.js";
 import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
@@ -1013,6 +1014,8 @@ export function DiningSessionWorkspace({
         </>
       }
     >
+      {/* WP-2423 item 8 ③ follow-up: guests' last orders coming, or passed (staff still can). */}
+      <LastOrdersNotice timeZone={timeZone} />
       {stale ? <StaleReadNotice stale={stale} /> : null}
       {/* Operating continuity: what servers do while the page can't reach the store system. */}
       {stale ? <TablesOfflineGuide /> : null}

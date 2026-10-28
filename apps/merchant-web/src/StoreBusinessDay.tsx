@@ -30,9 +30,20 @@ export function parseStoreBusinessDay(value: unknown): StoreBusinessDay & {
   readonly endsAt: string;
   readonly timeZone: string;
   readonly observedAt: string;
+  /** WP-2423 item 8 ③ follow-up: when guests stop ordering in the current period, or null. */
+  readonly lastOrdersAt: string | null;
 } {
-  const keys = ["businessDate", "startsAt", "endsAt", "timeZone", "observedAt"];
   const raw = value as Record<string, unknown> | null;
+  const keys = [
+    "businessDate",
+    "startsAt",
+    "endsAt",
+    "timeZone",
+    "observedAt",
+    ...(raw !== null && typeof raw === "object" && Object.hasOwn(raw, "lastOrdersAt")
+      ? ["lastOrdersAt"]
+      : []),
+  ];
   if (
     raw === null ||
     typeof raw !== "object" ||
@@ -46,6 +57,7 @@ export function parseStoreBusinessDay(value: unknown): StoreBusinessDay & {
     typeof raw.timeZone !== "string" ||
     raw.timeZone.length === 0 ||
     raw.timeZone.length > 64 ||
+    (raw.lastOrdersAt !== undefined && raw.lastOrdersAt !== null && !isInstant(raw.lastOrdersAt)) ||
     !(raw.startsAt <= raw.observedAt && raw.observedAt < raw.endsAt) ||
     // A business day lasts 23 to 25 hours (daylight-saving changes included).
     Date.parse(raw.endsAt) - Date.parse(raw.startsAt) < 23 * 3_600_000 ||
@@ -58,6 +70,7 @@ export function parseStoreBusinessDay(value: unknown): StoreBusinessDay & {
     endsAt: raw.endsAt,
     timeZone: raw.timeZone,
     observedAt: raw.observedAt,
+    lastOrdersAt: (raw.lastOrdersAt as string | null | undefined) ?? null,
   });
 }
 

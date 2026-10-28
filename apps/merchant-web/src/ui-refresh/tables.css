@@ -1037,3 +1037,23 @@
   font-size: 16px;
   font-weight: 600;
 }
+
+/* WP-2423 item 8 ③ follow-up: guests' last orders — words with a dot, no box (amber before it,
+   red after it). */
+.tables-v3 .last-orders-notice {
+  margin: 0 0 16px;
+  font-size: 15px;
+}
+.tables-v3 .last-orders-notice::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: 10px;
+  border-radius: 50%;
+  background: var(--bop-color-warning);
+  vertical-align: 0.1em;
+}
+.tables-v3 .last-orders-notice[data-tone="past"]::before {
+  background: var(--bop-color-danger-mark);
+}

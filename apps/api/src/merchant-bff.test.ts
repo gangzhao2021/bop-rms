@@ -2540,6 +2540,8 @@ describe("WP-2423 Q21 merchant business-day read route", () => {
     endsAt: "2026-10-15T08:00:00.000Z",
     timeZone: "America/Toronto",
     observedAt: "2026-10-15T05:30:00.000Z",
+    // WP-2423 item 8 ③ follow-up: when guests stop ordering in this period.
+    lastOrdersAt: "2026-10-15T01:30:00.000Z",
   };
   const headers = {
     cookie: "__Host-bop-merchant=" + sessionCookie,

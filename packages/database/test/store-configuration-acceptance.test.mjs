@@ -1,3 +1,4 @@
+import { storeTakesOrder } from "../../../apps/api/src/customer-store-open-gate.ts";
 import { createPersistentEntryOperatingReader } from "../../../apps/api/src/persistent-entry-operating.ts";
 import { createPostgresPublishedStoreOperatingStatusReader } from "../../rms/store/src/index.ts";
 import { createMerchantOrdinaryRefundBusinessDate } from "../../../apps/api/src/merchant-ordinary-refund-business-date.ts";
@@ -261,7 +262,16 @@ async function prove(context) {
       (await admin.query("DELETE FROM rms_store.store_configuration_publication_content")).rowCount,
       0,
     );
-    await seedStorePublication(admin, id, publicationContent, publicationDigest);
+    // Valid through Monday evening, so the last-orders check below reads the same publication.
+    await seedStorePublication(
+      admin,
+      id,
+      publicationContent,
+      publicationDigest,
+      undefined,
+      undefined,
+      "2026-08-19T00:00:00.000Z",
+    );
     await admin.query(`CREATE ROLE ${role} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`);
     await admin.query(`GRANT USAGE ON SCHEMA rms_store,platform_helpers TO ${role}`);
     await admin.query(
@@ -510,6 +520,8 @@ async function prove(context) {
       assert.deepEqual(JSON.parse(JSON.stringify(entryStatus.upcomingHours)), {
         todayKind: null,
         lastOrdersAt: null,
+        lastOrders: null,
+        pastLastOrders: false,
         upcoming: [],
         nextOpening: { localDate: "2026-08-17", startLocalTime: "09:00:00" },
       });
@@ -523,6 +535,29 @@ async function prove(context) {
       await assert.rejects(publishedOperating(tx, now), /STORE_OPERATING_STATUS_UNAVAILABLE/);
       contentReadAllowed = true;
     });
+    // WP-2423 item 8 ③ follow-up (v15 2026-10-28): read under the restricted role, Monday's
+    // 09:00–22:00 period stops taking guest orders 15 minutes early (21:45 Toronto). Just before,
+    // a seated guest may still order; just after, the guest gate refuses and staff still may.
+    for (const [instant, past] of [
+      ["2026-08-18T01:44:00.000Z", false],
+      ["2026-08-18T01:46:00.000Z", true],
+    ]) {
+      await readAt(instant, async (tx, now) => {
+        await tx.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [id(2), id(3)],
+        );
+        const status = await publishedOperating(tx, now);
+        assert.equal(status.state, "Open");
+        assert.equal(status.upcomingHours.pastLastOrders, past);
+        assert.deepEqual(status.upcomingHours.lastOrders, {
+          localDate: "2026-08-17",
+          localTime: "21:45:00",
+        });
+        assert.equal(storeTakesOrder(status, "SeatedDineIn"), !past);
+        assert.equal(storeTakesOrder(status, "SeatedDineIn", "Staff"), true);
+      });
+    }
 
     const refundDateOptions = { ...currentPublicationOptions, timeZone: "America/Toronto" };
     const refundDateQuery = {

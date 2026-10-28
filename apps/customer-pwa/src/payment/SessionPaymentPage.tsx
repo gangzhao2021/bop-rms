@@ -252,7 +252,7 @@ function PreparedSessionPaymentPage({
       {status === "closed" ? (
         <p role="alert">
           {t(
-            "The store stopped taking orders before payment started, so you haven’t been charged. Check the store’s hours or ask staff.",
+            "The store stopped taking orders before payment started (it closed, or the kitchen stopped taking orders for today), so you haven’t been charged. To add something, ask a staff member.",
           )}
         </p>
       ) : null}

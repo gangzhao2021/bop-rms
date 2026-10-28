@@ -23,7 +23,7 @@ const day = {
 
 describe("WP-2423 Q21: the Store business day read", () => {
   it("accepts the Store's day with its boundaries and refuses anything else", () => {
-    expect(parseStoreBusinessDay(day)).toEqual(day);
+    expect(parseStoreBusinessDay(day)).toEqual({ ...day, lastOrdersAt: null });
     // A 25-hour day (clocks fall back) and a 23-hour day (spring forward) are real days.
     expect(
       parseStoreBusinessDay({

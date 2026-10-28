@@ -133,6 +133,8 @@ export function installMerchantOperationsRoutes(
           endsAt: day.endsAt,
           timeZone: day.timeZone,
           observedAt: day.observedAt,
+          // WP-2423 item 8 ③ follow-up: when guests stop ordering in this period (or null).
+          lastOrdersAt: day.lastOrdersAt ?? null,
         }),
       )
       .catch(() => denied(response));
