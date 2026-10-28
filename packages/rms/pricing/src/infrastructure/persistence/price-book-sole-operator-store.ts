@@ -117,3 +117,57 @@ export async function recordOptionPriceSoleOperatorApproval(
   );
   return "Created";
 }
+
+/**
+ * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU: the mark of a price book or option price published by
+ * its own draft author at a single store ("List it", no review), for a Publish operation already
+ * committed in this transaction. The database refuses it unless the Brand has exactly one store
+ * (not archived), the one named. Exact replay returns the existing mark; anything else conflicts.
+ */
+export async function recordPricingSingleStoreListing(
+  tx: PriceBookSoleOperatorTransaction,
+  input: {
+    readonly subject: "PriceBook" | "OptionPrice";
+    readonly brandReference: string;
+    readonly storeReference: string;
+    /** The price book, or the option price rule. */
+    readonly targetReference: string;
+    readonly operationReference: string;
+    readonly actorReference: string;
+    readonly listedAt: string;
+    readonly auditReference: string;
+  },
+): Promise<"Created" | "AlreadyCommitted"> {
+  const table =
+    input.subject === "PriceBook"
+      ? { name: "price_book_single_store_listing", target: "price_book_id" }
+      : { name: "option_price_single_store_listing", target: "option_price_rule_id" };
+  const value = {
+    brand: String(parsePricingReference(input.brandReference)),
+    store: String(parsePricingReference(input.storeReference)),
+    target: String(parsePricingReference(input.targetReference)),
+    operation: String(parsePricingReference(input.operationReference)),
+    actor: String(parsePricingReference(input.actorReference)),
+    audit: String(parsePricingReference(input.auditReference)),
+    at: instant(input.listedAt),
+  };
+  // Brand-scoped mark; the Store scope stays as the command set it, since its own Store-scoped
+  // rows (an option price's authoring operation) are still checked before commit.
+  await tx.query("SELECT set_config('bop.brand_id',$1,true)", [value.brand]);
+  const prior = rows(
+    await tx.query(
+      `SELECT ${table.target}::text target,actor_id::text actor,audit_id::text audit FROM rms_pricing.${table.name} WHERE operation_id=$1 AND brand_id=$2`,
+      [value.operation, value.brand],
+    ),
+  )[0];
+  if (prior !== undefined) {
+    if (prior.target !== value.target || prior.actor !== value.actor || prior.audit !== value.audit)
+      return conflict();
+    return "AlreadyCommitted";
+  }
+  await tx.query(
+    `INSERT INTO rms_pricing.${table.name} (operation_id,brand_id,${table.target},approval_mode,listing_store_id,actor_id,listed_at,audit_id) VALUES ($1,$2,$3,'SingleStoreListing',$4,$5,$6,$7)`,
+    [value.operation, value.brand, value.target, value.store, value.actor, value.at, value.audit],
+  );
+  return "Created";
+}

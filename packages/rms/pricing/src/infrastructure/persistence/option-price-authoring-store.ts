@@ -108,6 +108,9 @@ export interface OptionPriceAuthoringStoreOptions {
    * minutes old) and records the mark of each such publication before commit (the database
    * refuses an author's own publication without it). Otherwise approver = author is refused. */
   readonly soleOperatorApproval?: boolean;
+  /** WP-2423 item 8 ⑥: the caller verified the author may publish their own draft at a single
+   * store ("List it") and records its SingleStoreListing mark before commit. */
+  readonly singleStoreListing?: boolean;
   readonly publicationSource?: {
     /** This callback must retain its actual owner locks and COMMIT guards.
      * Acquire Publishing before the Pricing writer lock to preserve lock order. */
@@ -1103,7 +1106,7 @@ export function createPostgresOptionPriceAuthoringStore(options: OptionPriceAuth
               current.draft.snapshotDigest,
               current.draftAuthorActorReference,
               policyFamily,
-              options.soleOperatorApproval === true,
+              options.soleOperatorApproval === true || options.singleStoreListing === true,
             );
             if (proof.observedAt < startedAt) return fail();
             tighten(proof.validUntil);

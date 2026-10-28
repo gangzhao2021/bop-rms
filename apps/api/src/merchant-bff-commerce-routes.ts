@@ -227,6 +227,7 @@ export function installMerchantCommerceRoutes(
     Invalid: 400,
     SoleOperatorNotInEffect: 409,
     NeedsReverification: 409,
+    NotSingleStore: 409,
   } as const;
   const priceFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantPriceError)) {
@@ -583,6 +584,7 @@ export function installMerchantCommerceRoutes(
     Invalid: 400,
     SoleOperatorNotInEffect: 409,
     NeedsReverification: 409,
+    NotSingleStore: 409,
   } as const;
   const optionPriceFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantOptionPriceError)) {

@@ -22,6 +22,7 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import {
   merchantBrandSoleOperatorGate,
+  MerchantSingleStoreListingError,
   MerchantSoleOperatorGateError,
 } from "./merchant-sole-operator.js";
 
@@ -48,6 +49,8 @@ export class MerchantPriceError extends Error {
       | "Invalid"
       /** WP-2423 Q19: the author asked to publish alone, but sole operator is not in effect. */
       | "SoleOperatorNotInEffect"
+      /** WP-2423 item 8 ⑥: publishing without review needs a Brand with exactly one store. */
+      | "NotSingleStore"
       /** WP-2423 Q19: publishing alone needs a second-factor check in the last 15 minutes. */
       | "NeedsReverification",
     readonly sellableReferences: readonly string[] = [],
@@ -95,7 +98,8 @@ export type PriceCommandBody =
       readonly priceBookReference: string;
       readonly expectedAggregateVersion: number;
       /** WP-2423 Q19: the author publishes alone as sole operator (explicitly confirmed). */
-      readonly approvalMode?: "SoleOperator";
+      /** WP-2423 item 8 ⑥: SingleStoreListing — the author publishes at a single store. */
+      readonly approvalMode?: "SoleOperator" | "SingleStoreListing";
     }
   | {
       readonly action: "AssignToStore";
@@ -153,14 +157,14 @@ export function parsePriceCommandBody(value: unknown): PriceCommandBody {
   if (
     r.action === "Publish" &&
     keys === "action,approvalMode,expectedAggregateVersion,operationReference,priceBookReference" &&
-    r.approvalMode === "SoleOperator"
+    (r.approvalMode === "SoleOperator" || r.approvalMode === "SingleStoreListing")
   )
     return {
       action: "Publish",
       operationReference: ref(r.operationReference),
       priceBookReference: ref(r.priceBookReference),
       expectedAggregateVersion: version(r.expectedAggregateVersion),
-      approvalMode: "SoleOperator",
+      approvalMode: r.approvalMode,
     };
   if (r.action === "AssignToStore" && keys === "action,operationReference,priceBookReference")
     return {
@@ -611,8 +615,8 @@ export function createMerchantPrices(options: {
           csrf: input.csrf,
           action: prepared.action,
           input: prepared.transport,
-          ...(body.action === "Publish" && body.approvalMode === "SoleOperator"
-            ? { approvalMode: "SoleOperator" as const }
+          ...(body.action === "Publish" && body.approvalMode !== undefined
+            ? { approvalMode: body.approvalMode }
             : {}),
         });
         return {
@@ -624,6 +628,8 @@ export function createMerchantPrices(options: {
       } catch (error) {
         if (error instanceof PriceBookWorkflowError)
           return fail(workflowErrors[error.code] ?? "Invalid");
+        if (error instanceof MerchantSingleStoreListingError)
+          return fail(error.code === "NotSingleStore" ? "NotSingleStore" : "PermissionDenied");
         if (error instanceof MerchantSoleOperatorGateError)
           return fail(
             error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification",

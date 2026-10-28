@@ -441,6 +441,12 @@ export async function requireMerchantBrandSingleStore(
 ): Promise<void> {
   if (!(await input.allowed())) throw new MerchantSingleStoreListingError("NotPermitted");
   const holders = await merchantBrandApprovalHolders(tx, input);
+  // The Brand-level holder read leaves the transaction without a Store; the command's writes are
+  // the selected Store's again.
+  await (tx as { query(sql: string, values: unknown[]): Promise<unknown> }).query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [input.brandReference, input.storeReference],
+  );
   if (!holders.includes(input.actorReference))
     throw new MerchantSingleStoreListingError("NotPermitted");
   if (

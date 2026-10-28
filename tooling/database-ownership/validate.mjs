@@ -1090,6 +1090,8 @@ async function scanUnsupported(root, module, diagnostics) {
           module.packageName === "@rms/pricing" &&
           module.manifest.ownedDatabase?.schema === "rms_pricing" &&
           module.manifest.ownedDatabase?.tables?.includes("price_book_sole_operator_approval") &&
+          module.manifest.ownedDatabase?.tables?.includes("price_book_single_store_listing") &&
+          module.manifest.ownedDatabase?.tables?.includes("option_price_single_store_listing") &&
           moduleRelative === "src/infrastructure/persistence/price-book-sole-operator-store.ts";
         // WP-2423 (Owner decision 2026-10-16): Store configuration sole-operator approval mark.
         const acceptedStoreConfigurationSoleOperatorAsset =

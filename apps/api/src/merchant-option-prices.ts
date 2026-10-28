@@ -8,6 +8,7 @@ import {
   createPostgresOptionPriceAuthoringStore,
   OptionPriceAuthoringError,
   recordOptionPriceSoleOperatorApproval,
+  recordPricingSingleStoreListing,
   type CurrencyMetadataSnapshot,
   type OptionPriceAuthoringState,
   type OptionPriceRuleSnapshot,
@@ -21,7 +22,9 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import {
   merchantBrandSoleOperatorGate,
+  MerchantSingleStoreListingError,
   MerchantSoleOperatorGateError,
+  requireMerchantBrandSingleStore,
   requireMerchantBrandSoleOperator,
 } from "./merchant-sole-operator.js";
 
@@ -47,6 +50,8 @@ export class MerchantOptionPriceError extends Error {
       | "Invalid"
       /** The author asked to publish alone, but sole operator is not in effect for them. */
       | "SoleOperatorNotInEffect"
+      /** WP-2423 item 8 ⑥: publishing without review needs a Brand with exactly one store. */
+      | "NotSingleStore"
       /** Publishing alone needs a second-factor check in the last 15 minutes. */
       | "NeedsReverification",
   ) {
@@ -99,7 +104,7 @@ export type OptionPriceCommandBody =
         readonly expectedAggregateVersion: number;
       }[];
       /** WP-2423: the author publishes their own prices alone as sole operator (confirmed). */
-      readonly approvalMode?: "SoleOperator";
+      readonly approvalMode?: "SoleOperator" | "SingleStoreListing";
     };
 export function parseOptionPriceCommandBody(value: unknown): OptionPriceCommandBody {
   const r = value as Record<string, unknown> | null;
@@ -134,7 +139,8 @@ export function parseOptionPriceCommandBody(value: unknown): OptionPriceCommandB
       r,
       sole ? "action,approvalMode,operationReference,rules" : "action,operationReference,rules",
     );
-    if (sole && r.approvalMode !== "SoleOperator") return fail("Invalid");
+    if (sole && r.approvalMode !== "SoleOperator" && r.approvalMode !== "SingleStoreListing")
+      return fail("Invalid");
     if (!Array.isArray(r.rules) || r.rules.length < 1 || r.rules.length > 100)
       return fail("Invalid");
     const rules = r.rules.map((candidate: unknown) => {
@@ -151,7 +157,7 @@ export function parseOptionPriceCommandBody(value: unknown): OptionPriceCommandB
       action: "Publish",
       operationReference: ref(r.operationReference),
       rules,
-      ...(sole ? { approvalMode: "SoleOperator" as const } : {}),
+      ...(sole ? { approvalMode: r.approvalMode as "SoleOperator" | "SingleStoreListing" } : {}),
     };
   }
   return fail("Invalid");
@@ -259,6 +265,8 @@ export function createMerchantOptionPrices(options: {
     operation: string,
     mode: "Read" | "Write",
     soleOperator = false,
+    /** WP-2423 item 8 ⑥: the author's own publication at a single store. */
+    singleStoreListing = false,
   ) {
     const observedAt = options.persistence.now();
     const validUntil = new Date(Date.parse(observedAt) + 5000).toISOString();
@@ -290,6 +298,7 @@ export function createMerchantOptionPrices(options: {
       },
       publicationPolicyFamilyReference: pilotPolicy.family,
       ...(soleOperator ? { soleOperatorApproval: true } : {}),
+      ...(singleStoreListing ? { singleStoreListing: true } : {}),
       publicationSource: {
         async withCurrentAuthorization(_tx, input, work) {
           if (!s.permissions.mayApprove || input.state.draftAuthorActorReference === null)
@@ -359,6 +368,9 @@ export function createMerchantOptionPrices(options: {
             // The author's own publication as sole operator says so.
             ...(soleOperator && m !== "Abandon" && command.action === "Publish"
               ? { afterSummary: { approvalMode: "SoleOperator" } }
+              : {}),
+            ...(singleStoreListing && m !== "Abandon" && command.action === "Publish"
+              ? { afterSummary: { approvalMode: "SingleStoreListing" } }
               : {}),
           }) as never,
       },
@@ -523,6 +535,26 @@ export function createMerchantOptionPrices(options: {
             fail("PermissionDenied");
           const products = await productOptions(tx, s);
           const sole = body.action === "Publish" && body.approvalMode === "SoleOperator";
+          const single = body.action === "Publish" && body.approvalMode === "SingleStoreListing";
+          // WP-2423 item 8 ⑥: the author's own publication at a single store ("List it"): they
+          // hold price approval and the Brand has exactly one store (held until this commits).
+          if (single)
+            try {
+              await requireMerchantBrandSingleStore(tx as never, {
+                brandReference: s.brand,
+                storeReference: s.store,
+                actorReference: s.actor,
+                permissionCode: "pricing.price-book.approve",
+                observedAt: options.persistence.now(),
+                allowed: s.mayApproveNow,
+              });
+            } catch (error) {
+              if (error instanceof MerchantSingleStoreListingError)
+                return fail(
+                  error.code === "NotSingleStore" ? "NotSingleStore" : "PermissionDenied",
+                );
+              throw error;
+            }
           // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the author's own publication only while sole
           // operator is in effect for them, read in this transaction, with a second factor at most
           // 15 minutes old. Read before the writer starts its few-second window.
@@ -548,7 +580,14 @@ export function createMerchantOptionPrices(options: {
               throw error;
             }
           }
-          const { store, beforeCommit } = priceStore(tx, s, body.operationReference, "Write", sole);
+          const { store, beforeCommit } = priceStore(
+            tx,
+            s,
+            body.operationReference,
+            "Write",
+            sole,
+            single,
+          );
           const results: { ruleReference: string; aggregateVersion: number; status: string }[] = [];
           try {
             if (body.action === "SetPrices") {
@@ -639,6 +678,17 @@ export function createMerchantOptionPrices(options: {
                   optionReference: null,
                   content: null,
                 });
+                if (single && result.outcome === "Committed")
+                  await recordPricingSingleStoreListing(tx as never, {
+                    subject: "OptionPrice",
+                    brandReference: s.brand,
+                    storeReference: s.store,
+                    targetReference: rule.ruleReference,
+                    operationReference,
+                    actorReference: s.actor,
+                    listedAt: result.occurredAt,
+                    auditReference: String(result.auditReference),
+                  });
                 if (soleOperatorMfaAt !== null && result.outcome === "Committed")
                   await recordOptionPriceSoleOperatorApproval(tx as never, {
                     brandReference: s.brand,

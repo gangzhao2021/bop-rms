@@ -468,9 +468,13 @@ function validateSql(
       !(
         // WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU: the single-store listing guard calls the
         // Organization owner's database read of the Brand's stores (2000_108), never its table.
-        file === "migrations/2000-release-001/2000_109_create_menu_single_store_listing.sql" &&
-        metadata.owner === "@rms/catalog" &&
-        metadata.schema === "rms_catalog" &&
+        ((file === "migrations/2000-release-001/2000_109_create_menu_single_store_listing.sql" &&
+          metadata.owner === "@rms/catalog" &&
+          metadata.schema === "rms_catalog") ||
+          (file ===
+            "migrations/2000-release-001/2000_110_create_pricing_single_store_listing.sql" &&
+            metadata.owner === "@rms/pricing" &&
+            metadata.schema === "rms_pricing")) &&
         match[1] === "bop_tenant" &&
         match[2] === "brand_has_single_store" &&
         /^\s*\(/u.test(body.slice(match.index + match[0].length))

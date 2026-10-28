@@ -12,6 +12,7 @@ import {
   parsePricingReference,
   PriceBookWorkflowError,
   recordPriceBookSoleOperatorApproval,
+  recordPricingSingleStoreListing,
   type CurrencyMetadataSnapshot,
   type PriceBookAction,
   type PriceBookSnapshot,
@@ -20,7 +21,10 @@ import {
 import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { createPriceBookDraftAuthorSource } from "./price-book-draft-author-source.js";
-import { requireMerchantBrandSoleOperator } from "./merchant-sole-operator.js";
+import {
+  requireMerchantBrandSingleStore,
+  requireMerchantBrandSoleOperator,
+} from "./merchant-sole-operator.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
@@ -69,7 +73,8 @@ export interface MerchantPriceBookCommandRequest {
   action: PriceBookAction;
   input: unknown;
   /** WP-2423 Q19: the draft's author publishes it alone as sole operator (explicitly confirmed). */
-  approvalMode?: "SoleOperator";
+  /** WP-2423 item 8 ⑥: SingleStoreListing — the author publishes at a single store ("List it"). */
+  approvalMode?: "SoleOperator" | "SingleStoreListing";
 }
 
 export function createMerchantPriceBookCommands(options: {
@@ -93,7 +98,11 @@ export function createMerchantPriceBookCommands(options: {
     });
     if (!Object.hasOwn(methods, request.action)) return fail("PRICE_BOOK_INPUT_INVALID");
     const sole = request.approvalMode === "SoleOperator";
-    if ((request.approvalMode !== undefined && !sole) || (sole && request.action !== "Publish"))
+    const single = request.approvalMode === "SingleStoreListing";
+    if (
+      (request.approvalMode !== undefined && !sole && !single) ||
+      ((sole || single) && request.action !== "Publish")
+    )
       return fail("PRICE_BOOK_INPUT_INVALID");
     const decoded = transport
       ? parseMerchantPriceBookTransport(request.action, request.input)
@@ -227,6 +236,27 @@ export function createMerchantPriceBookCommands(options: {
         // WP-2423 Q19: the author's own publication only while sole operator is in effect for them,
         // read in this transaction, with a second factor at most 15 minutes old.
         let soleOperatorMfaAt: string | null = null;
+        // WP-2423 item 8 ⑥: the author's own publication at a single store (no review): they hold
+        // price approval, and the Brand has exactly one store (held until this commits).
+        let singleStoreListed = false;
+        if (single && prior === null) {
+          const provenance = await author.load(transaction, book);
+          if (
+            provenance === null ||
+            String(provenance.actorReference) !== String(scope.actorReference)
+          )
+            return fail("PRICE_BOOK_APPROVAL_REQUIRED");
+          await requireMerchantBrandSingleStore(transaction, {
+            brandReference: brand,
+            storeReference: String(scope.selectedStoreReference),
+            actorReference: String(scope.actorReference),
+            permissionCode: "pricing.price-book.approve",
+            observedAt: String(raw.requestedAt),
+            allowed: async () => (await permission("pricing.price-book.approve")) !== null,
+          });
+          singleStoreListed = true;
+          await brandScope();
+        }
         if (sole && prior === null) {
           const approver = await permission("pricing.price-book.approve");
           await brandScope();
@@ -273,7 +303,9 @@ export function createMerchantPriceBookCommands(options: {
                 permission: manage,
                 approvalPermission: approval,
                 draftAuthorActorReference: provenance?.actorReference ?? null,
+                // The domain lets the draft's own author publish only with this evidence.
                 ...(soleOperatorMfaAt === null ? {} : { soleOperatorApproval: true }),
+                ...(singleStoreListed ? { singleStoreListing: true } : {}),
                 audit: {
                   auditId: parsePricingReference(options.auditReference(input.operationReference)),
                   brandId: brand,
@@ -291,6 +323,9 @@ export function createMerchantPriceBookCommands(options: {
                   ...(soleOperatorMfaAt === null
                     ? {}
                     : { afterSummary: { approvalMode: "SoleOperator" } }),
+                  ...(singleStoreListed
+                    ? { afterSummary: { approvalMode: "SingleStoreListing" } }
+                    : {}),
                 },
               };
             },
@@ -299,6 +334,19 @@ export function createMerchantPriceBookCommands(options: {
         const result = await service[methods[request.action]](
           request.action === "Publish" ? { ...raw, coverageContexts: contexts } : raw,
         );
+        if (singleStoreListed && result.status === "Applied") {
+          await recordPricingSingleStoreListing(transaction, {
+            subject: "PriceBook",
+            brandReference: brand,
+            storeReference: String(scope.selectedStoreReference),
+            targetReference: book,
+            operationReference: operation,
+            actorReference: String(scope.actorReference),
+            listedAt: String(raw.requestedAt),
+            auditReference: parsePricingReference(options.auditReference(operation)),
+          });
+          await brandScope();
+        }
         if (soleOperatorMfaAt !== null && result.status === "Applied") {
           await recordPriceBookSoleOperatorApproval(transaction, {
             brandReference: brand,

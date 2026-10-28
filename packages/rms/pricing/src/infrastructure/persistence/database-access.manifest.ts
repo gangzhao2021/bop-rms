@@ -7,6 +7,22 @@ const databaseAccessManifestInput = {
   },
   tables: [
     {
+      table: "price_book_single_store_listing",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "option_price_single_store_listing",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       // WP-2423 Q19: sole-operator approval mark (append-only).
       table: "price_book_sole_operator_approval",
       classification: "append-only-record",
@@ -469,6 +485,46 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "price-book-single-store-listing.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "price_book_single_store_listing" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "price-book-single-store-listing.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "price_book_single_store_listing" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "option-price-single-store-listing.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_single_store_listing" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "option-price-single-store-listing.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_single_store_listing" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
     {
       id: "tax-config-candidate.read.tax_config_publication_candidate",
       operation: "read",

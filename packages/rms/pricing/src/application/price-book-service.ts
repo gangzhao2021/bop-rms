@@ -117,13 +117,18 @@ async function authorize(
       audit.occurredAt !== at
     )
       throw new Error("denied");
-    const soleOperatorApproval = evidence.soleOperatorApproval === true;
-    // WP-2423 Q19: a sole-operator publication says so in its Audit; any other carries no summary.
+    const sole = evidence.soleOperatorApproval === true;
+    const single = evidence.singleStoreListing === true;
+    // WP-2423 Q19 / item 8 ⑥: a sole-operator or single-store publication says so in its Audit;
+    // any other carries no summary.
+    const summary = JSON.stringify(audit.afterSummary);
     if (
-      soleOperatorApproval !==
-      (JSON.stringify(audit.afterSummary) === JSON.stringify({ approvalMode: "SoleOperator" }))
+      (sole && single) ||
+      sole !== (summary === JSON.stringify({ approvalMode: "SoleOperator" })) ||
+      single !== (summary === JSON.stringify({ approvalMode: "SingleStoreListing" }))
     )
       throw new Error("denied");
+    const soleOperatorApproval = sole || single;
     const approvalAllowed =
       evidence.approvalPermission?.effect === "Allow" &&
       evidence.approvalPermission.action === "pricing.price-book.approve" &&
