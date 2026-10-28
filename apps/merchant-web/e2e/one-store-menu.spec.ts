@@ -515,6 +515,34 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   await page.route("**/merchant/commerce/option-prices/query", (route) =>
     route.fulfill({ headers, json: { screenId: "PRICE-OPTION-LIST", products: [] } }),
   );
+  // A simple choice group made from the dish editor (saved directly, as the choice groups page).
+  const groupCommands: Record<string, unknown>[] = [];
+  await page.route("**/merchant/commerce/option-sets/command", (route) => {
+    const body = route.request().postDataJSON() as {
+      name: string;
+      options: { name: string }[];
+    } & Record<string, unknown>;
+    groupCommands.push(body);
+    const optionSetReference = id(80 + groupCommands.length);
+    groups.push({
+      optionSetReference,
+      name: body.name,
+      archived: false,
+      displayStyle: "SingleChoice",
+      minimum: 0,
+      maximum: 1,
+      perOptionMaximum: 1,
+      options: body.options.map((o, n) => ({
+        optionReference: id(90 + n),
+        name: o.name,
+        offered: true,
+      })),
+    });
+    return route.fulfill({
+      headers,
+      json: { status: "Applied", optionSet: { optionSetReference } },
+    });
+  });
   await page.route("**/merchant/commerce/one-store-dishes/command", (route) => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     dishCommands.push(body);
@@ -675,6 +703,37 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   await page.getByRole("button", { name: "List it" }).click();
   await expect(page.getByText("Listed. Guests see the menu as it is now.")).toBeVisible();
   expect(dishCommands.at(-1)).toMatchObject({ action: "ListAll", menuReference: MENU });
+
+  // 加饭 made from the editor: at most one, optional; it is chosen for the dish at once.
+  await page.getByRole("button", { name: "Edit Dan dan noodles (TEST)" }).click();
+  const noodles = page.getByRole("form", { name: "Dan dan noodles (TEST)" });
+  await noodles.getByRole("button", { name: "New choice group" }).click();
+  const made = noodles.getByRole("group", { name: "New choice group" });
+  await made.getByLabel("Group name (English)").fill("Add rice (TEST)");
+  await made.getByLabel("Group name (Chinese)").fill("加饭");
+  await made.getByLabel("Required; the first choice is the default").uncheck();
+  await made.getByLabel("Choice 1 (English)").fill("Steamed rice");
+  await made.getByLabel("Choice 1 (Chinese)").fill("加一碗白饭");
+  await made.getByLabel("Choice 2 (English)").fill("Egg fried rice");
+  await made.getByLabel("Choice 2 (Chinese)").fill("加一份蛋炒饭");
+  await made.getByRole("button", { name: "Make the group" }).click();
+  await expect(noodles.getByRole("checkbox", { name: "Add rice (TEST)" })).toBeChecked();
+  await noodles.getByLabel("Extra ($) for Steamed rice").fill("2.50");
+  expect(groupCommands[0]).toMatchObject({
+    action: "Create",
+    name: "Add rice (TEST)",
+    nameZh: "加饭",
+    kind: "One",
+    minimum: 0,
+    maximum: 1,
+    options: [
+      { name: "Steamed rice", nameZh: "加一碗白饭", defaultChoice: false },
+      { name: "Egg fried rice", nameZh: "加一份蛋炒饭", defaultChoice: false },
+    ],
+  });
+  const axeGroups = await new AxeBuilder({ page }).include(".one-menu").analyze();
+  expect(axeGroups.violations).toEqual([]);
+  await noodles.getByRole("button", { name: "Close" }).last().click();
 
   // Once the store keeps stock, staff are asked to replace declared allergens with a recipe.
   keepsStock = true;

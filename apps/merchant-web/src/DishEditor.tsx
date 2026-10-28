@@ -2,6 +2,7 @@ import { t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { AllergenFields, type AllergenAnswer } from "./DishAllergenEditor.js";
+import { NewChoiceGroupForm } from "./NewChoiceGroupForm.js";
 import { newOperationReference } from "./operation-reference.js";
 import type { MenuDish, MenuSectionRow } from "./one-store-menu.js";
 import {
@@ -138,6 +139,26 @@ export function DishEditor({
   );
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [makingGroup, setMakingGroup] = useState(false);
+  /** After a group is made here: read the groups again (what staff typed stays) and choose it. */
+  const groupMade = async (optionSetReference: string | null) => {
+    setMakingGroup(false);
+    if (client.loadDish === undefined) return;
+    try {
+      const found = dishEditorSource(productReference, await client.loadDish(productReference));
+      setSource((current) => (current === null ? found : { ...current, groups: found.groups }));
+      const group = found.groups.find((g) => g.optionSetReference === optionSetReference);
+      if (group !== undefined)
+        setChosen((current) =>
+          new Map(current).set(
+            group.optionSetReference,
+            new Map(group.options.filter((o) => o.offered).map((o) => [o.optionReference, "0.00"])),
+          ),
+        );
+    } catch {
+      setProblem(t("The dish could not be read. Check the connection and try again."));
+    }
+  };
   // One reference per intended save, kept until it is answered (a retry continues it).
   const [operation, setOperation] = useState<string | null>(null);
   useEffect(() => {
@@ -336,10 +357,7 @@ export function DishEditor({
       <fieldset>
         <legend>{t("Choice groups")}</legend>
         {source.groups.length === 0 ? (
-          <p className="dish-editor__note">
-            {t("No choice groups yet.")}{" "}
-            <Link to="/app/commerce/option-sets">{t("Add choice groups")}</Link>
-          </p>
+          <p className="dish-editor__note">{t("No choice groups yet.")}</p>
         ) : null}
         {source.groups.map((group) => {
           const options = chosen.get(group.optionSetReference);
@@ -416,6 +434,23 @@ export function DishEditor({
             </div>
           );
         })}
+        {client.createChoiceGroup === undefined ? (
+          <p className="dish-editor__note">
+            <Link to="/app/commerce/option-sets">{t("Add choice groups")}</Link>
+          </p>
+        ) : makingGroup ? (
+          <NewChoiceGroupForm
+            client={client}
+            onCreated={(reference) => void groupMade(reference)}
+            onClose={() => setMakingGroup(false)}
+          />
+        ) : (
+          <div className="dish-editor__actions">
+            <button type="button" onClick={() => setMakingGroup(true)}>
+              {t("New choice group")}
+            </button>
+          </div>
+        )}
       </fieldset>
       <fieldset>
         <legend>{t("Allergens declared by staff")}</legend>

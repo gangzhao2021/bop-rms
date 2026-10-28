@@ -365,6 +365,26 @@ export interface MenuClient {
   loadDish?(productReference: string | null): Promise<{ product: unknown; optionPrices: unknown }>;
   /** WP-2423 item 8 ⑥: one dish saved, or everything listed. */
   oneStore?(command: SaveDishCommand | ListAllCommand): Promise<unknown>;
+  /** WP-2423 item 8 ⑥ (v15 finding g): a simple choice group made from the dish editor. */
+  createChoiceGroup?(command: NewChoiceGroupCommand): Promise<unknown>;
+}
+/** A choice group as the choice groups page creates it (saved directly, no review). */
+export interface NewChoiceGroupCommand {
+  readonly action: "Create";
+  readonly operationReference: string;
+  readonly name: string;
+  readonly nameZh: string;
+  readonly kind: "One" | "Any";
+  readonly minimum: number;
+  readonly maximum: number | null;
+  readonly perOptionMaximum: 1;
+  readonly options: readonly {
+    readonly optionReference: null;
+    readonly name: string;
+    readonly nameZh: string;
+    readonly offered: true;
+    readonly defaultChoice: boolean;
+  }[];
 }
 const object = (value: unknown) =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -668,6 +688,7 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
       return { product, optionPrices };
     },
     oneStore: (command) => post("/merchant/commerce/one-store-dishes/command", command),
+    createChoiceGroup: (command) => post("/merchant/commerce/option-sets/command", command),
   };
 }
 

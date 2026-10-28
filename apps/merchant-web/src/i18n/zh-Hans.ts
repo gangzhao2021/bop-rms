@@ -6190,4 +6190,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A listing is under way or stopped part-way. Guests still see the menu as it was. If nothing changes in a minute, continue it.":
     "上架正在进行或中途停止。客人仍看到原来的菜单。如果一分钟后仍没有变化，请继续上架。",
   "Continue listing": "继续上架",
+  "New choice group": "新建规格组",
+  "Give the group a name and at least one choice, each with its own name.":
+    "请给规格组起名，并至少填一个选项，每个选项名字不同。",
+  "You do not have permission to make choice groups.": "你没有新建规格组的权限。",
+  "Group name (English)": "规格组名（英文）",
+  "Group name (Chinese)": "规格组名（中文）",
+  "Guests choose": "客人选择",
+  One: "选一个",
+  "Any number, or none": "可多选，也可不选",
+  "Required; the first choice is the default": "必选；第一个选项为默认",
+  "Choice {n} (English)": "选项 {n}（英文）",
+  "Choice {n} (Chinese)": "选项 {n}（中文）",
+  "Add a choice": "再加一个选项",
+  "Make the group": "建立规格组",
 });
