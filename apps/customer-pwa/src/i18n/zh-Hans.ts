@@ -1204,4 +1204,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{paid} of {count} parts paid · {amount} to go": "已付 {paid}/{count} 份 · 还差 {amount}",
   "Tip (for your part)": "小费（按你这一份）",
   "Every part of the bill is paid ({count} parts). Thank you!": "账单 {count} 份都已付清，谢谢！",
+  "Still to pay": "还要付",
+  "The table is paying the bill in {count} parts; {paid} paid so far. Each part has its own tip, and cash is rounded to the nearest 5 cents.":
+    "这桌分成 {count} 份付款，已付 {paid} 份。每份各自加小费，现金按 5 分取整。",
 });

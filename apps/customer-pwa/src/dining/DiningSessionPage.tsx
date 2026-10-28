@@ -381,7 +381,13 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
           <dd>{money(summary.paid)}</dd>
         </div>
         <div>
-          <dt>{payLater ? t("To pay at the end") : t("Waiting for payment")}</dt>
+          <dt>
+            {summary.splitParts !== undefined
+              ? t("Still to pay")
+              : payLater
+                ? t("To pay at the end")
+                : t("Waiting for payment")}
+          </dt>
           <dd>{nonZero(summary.due) ? money(summary.due) : t("Nothing")}</dd>
         </div>
         {nonZero(summary.refunded) ? (
@@ -403,17 +409,22 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
           : payLater
             ? t("Item prices are before tax. ")
             : t("Item prices are before tax. Rounds that were never paid are not included. ")}
-        {payLater
-          ? summary.cashRounding !== undefined
-            ? t(
-                "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
-              )
+        {payLater && summary.splitParts !== undefined
+          ? t(
+              "The table is paying the bill in {count} parts; {paid} paid so far. Each part has its own tip, and cash is rounded to the nearest 5 cents.",
+              { count: String(summary.splitParts.count), paid: String(summary.splitParts.paid) },
+            )
+          : payLater
+            ? summary.cashRounding !== undefined
+              ? t(
+                  "The table paid once at the end. Cash is rounded to the nearest 5 cents; card payments are not rounded.",
+                )
+              : t(
+                  "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax and any tip.",
+                )
             : t(
-                "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax and any tip.",
-              )
-          : t(
-              "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
-            )}
+                "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
+              )}
       </p>
     </section>
   );

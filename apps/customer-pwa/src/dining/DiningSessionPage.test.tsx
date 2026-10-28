@@ -374,3 +374,27 @@ it("WP-2423 D5: a round from another day shows its date, today's only its time",
   expect(dated).toContain("11");
   expect(dated).not.toBe(formatClockTime(earlier));
 });
+
+describe("WP-2423 item 8 ④ v15 a: a table paying its split bill in parts", () => {
+  it("shows what is still to pay and says the table pays in parts", () => {
+    const html = render({
+      status: "ready",
+      view: view({
+        paymentTiming: "PayLater",
+        summary: {
+          paid: cad("680"),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad("339"),
+          splitParts: { count: 3, paid: 2 },
+        },
+      }),
+      refreshing: false,
+    });
+    expect(html).toContain("Still to pay");
+    expect(html).toContain("$3.39");
+    expect(html).toContain("The table is paying the bill in 3 parts; 2 paid so far.");
+    expect(html).not.toContain("To pay at the end");
+    expect(html).not.toContain("The table paid once at the end");
+  });
+});

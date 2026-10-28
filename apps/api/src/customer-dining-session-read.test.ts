@@ -412,6 +412,33 @@ describe("WP-2423 Q26 a dish being remade at the table", () => {
   });
 });
 
+describe("WP-2423 item 8 ④ v15 a: a split bill paid part by part", () => {
+  it("takes the paid parts off what is still to pay and says how many parts are paid", () => {
+    const summary = (paidRoundsMinor: bigint | null) =>
+      composeCustomerDiningSession(
+        facts({
+          batches: [
+            { orderBatchReference: id(30), submittedAt: at, items: [item(31, "Ramen", 1, 1018n)] },
+          ],
+          authorship: new Map([[id(30), true]]),
+          delivery: new Map([[id(31), { phase: "Accepted" as never, deliveredQuantity: 0 }]]),
+          paymentDeadlines: new Map(),
+          paymentOutcomes: new Map(),
+          payments: [{ status: "Succeeded", amount: cad(679n) }],
+          payLaterRounds: new Set([id(30)]),
+          ...(paidRoundsMinor === null
+            ? {}
+            : { splitParts: { count: 3, paid: 2, paidRoundsMinor } }),
+        }),
+      ).summary;
+    expect(summary(null)?.due.amountMinor).toBe(1018n);
+    expect(summary(679n)).toMatchObject({
+      due: { amountMinor: 339n },
+      splitParts: { count: 3, paid: 2 },
+    });
+  });
+});
+
 describe("WP-2423 item 8 ③ decision 13: order a dish again", () => {
   it("gives each dish its published menu item and options, and nothing without them", () => {
     const again = {

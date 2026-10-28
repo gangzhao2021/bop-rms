@@ -145,6 +145,10 @@ export class CustomerDiningSessionHandler {
                   refunded: money(view.summary.refunded),
                   refundPending: money(view.summary.refundPending),
                   due: money(view.summary.due),
+                  // WP-2423 item 8 ④: the table pays in parts (how many, how many paid).
+                  ...(view.summary.splitParts === undefined
+                    ? {}
+                    : { splitParts: view.summary.splitParts }),
                   // DEC-DINE-IN-PAY-LATER: the table's one payment's tip and cash rounding.
                   ...(view.summary.cashRounding === undefined || view.summary.tableTip === undefined
                     ? {}

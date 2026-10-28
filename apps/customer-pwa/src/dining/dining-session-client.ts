@@ -120,6 +120,8 @@ export interface DiningSessionView {
     /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment, once paid. */
     readonly tableTip?: DiningMoney;
     readonly cashRounding?: DiningMoney;
+    /** WP-2423 item 8 ④: the table pays in parts — how many, and how many are paid. */
+    readonly splitParts?: { readonly count: number; readonly paid: number };
     /** WP-2423 D5: what the table ordered: items before tax, tax and total including tax. */
     readonly ordered?: {
       readonly subtotal: DiningMoney;
@@ -333,8 +335,13 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       session.summary !== null &&
       typeof session.summary === "object" &&
       Object.hasOwn(session.summary, "cashRounding");
+    const withSplit =
+      session.summary !== null &&
+      typeof session.summary === "object" &&
+      Object.hasOwn(session.summary, "splitParts");
     const raw = record(session.summary, [
       ...(withSettlement ? ["tableTip", "cashRounding"] : []),
+      ...(withSplit ? ["splitParts"] : []),
       "paid",
       "refunded",
       "refundPending",
@@ -362,6 +369,15 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       ...(ordered === null ? {} : { ordered }),
       ...(withSettlement
         ? { tableTip: money(raw.tableTip), cashRounding: money(raw.cashRounding) }
+        : {}),
+      ...(withSplit
+        ? (() => {
+            const parts = record(raw.splitParts, ["count", "paid"]);
+            const total = count(parts.count, 2),
+              paid = count(parts.paid, 0);
+            if (paid > total) return invalid();
+            return { splitParts: Object.freeze({ count: total, paid }) };
+          })()
         : {}),
     });
   }

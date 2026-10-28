@@ -6039,4 +6039,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Split evenly · {count} parts": "平均分 · {count} 份",
   "Each pays own rounds · {count} parts": "各付各点 · {count} 份",
   "Split the bill": "分单",
+  "Record that the guests at table {table} left without paying the {count} parts still unpaid ({amount})? The parts already paid stay paid. A manager decides this. It stays in the reports as written off.":
+    "确认 {table} 号桌的客人没付剩下的 {count} 份（{amount}）就走了？已付的份不变。由经理决定，会作为核销留在报表里。",
+  "Guests left without paying the rest": "客人没付剩下的就走了",
 });

@@ -114,6 +114,16 @@ export interface CustomerDiningSessionFacts {
     readonly settledRounds?: ReadonlySet<string>;
     /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment (if paid). */
     readonly tableSettlement?: { readonly tipMinor: bigint; readonly roundingMinor: bigint } | null;
+    /**
+     * WP-2423 item 8 ④ (v15 2026-10-28 a): a split bill being paid part by part — how many parts
+     * there are and are paid, and what the paid parts covered of the rounds (taken off what is
+     * still to pay until every part is paid).
+     */
+    readonly splitParts?: {
+      readonly count: number;
+      readonly paid: number;
+      readonly paidRoundsMinor: bigint;
+    } | null;
     readonly unpaidCancellations: ReadonlySet<string>;
     readonly staffCancellations: ReadonlyMap<
       string,
@@ -225,6 +235,8 @@ export interface CustomerDiningSessionView {
     readonly refunded: CustomerMoney;
     readonly refundPending: CustomerMoney;
     readonly due: CustomerMoney;
+    /** WP-2423 item 8 ④: the table pays in parts (count, how many are paid). */
+    readonly splitParts?: { readonly count: number; readonly paid: number };
     /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment, once paid. */
     readonly tableTip?: CustomerMoney;
     readonly cashRounding?: CustomerMoney;
@@ -468,7 +480,17 @@ export function composeCustomerDiningSession(
       paid: money(paid),
       refunded: money(refunded),
       refundPending: money(refundPending),
-      due: money(due),
+      // A split bill: the parts already paid are not still to pay.
+      due: money(
+        order.splitParts != null && due > order.splitParts.paidRoundsMinor
+          ? due - order.splitParts.paidRoundsMinor
+          : order.splitParts != null
+            ? 0n
+            : due,
+      ),
+      ...(order.splitParts == null
+        ? {}
+        : { splitParts: { count: order.splitParts.count, paid: order.splitParts.paid } }),
       ...(prices === undefined
         ? {}
         : {
@@ -892,9 +914,7 @@ function postgresDependencies(
       // WP-2423 item 8 ④: a split bill's rounds are paid once every part is (each part is a
       // payment with its own tip and cash rounding, added up below).
       const [splitPlan] =
-        tableStore !== null && tableSettlements.some((settlement) => settlement.part !== null)
-          ? await tableStore.listSplitPlans(transaction, [orderReference])
-          : [];
+        tableStore !== null ? await tableStore.listSplitPlans(transaction, [orderReference]) : [];
       const splitPaid =
         splitPlan !== undefined &&
         splitPlan.mode !== "Whole" &&
@@ -935,6 +955,16 @@ function postgresDependencies(
           paymentStarted,
           payLaterRounds,
           settledRounds,
+          splitParts:
+            splitPlan === undefined || splitPlan.mode === "Whole" || splitPaid
+              ? null
+              : {
+                  count: splitPlan.parts.length,
+                  paid: tableSettlements.filter((settlement) => settlement.part !== null).length,
+                  paidRoundsMinor: tableSettlements
+                    .filter((settlement) => settlement.part !== null)
+                    .reduce((sum, settlement) => sum + settlement.roundsMinor, 0n),
+                },
           tableSettlement:
             tableSettlements.length === 0
               ? null

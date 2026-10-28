@@ -45,7 +45,11 @@ const unpaidBill = (phase: "Active" | "Closing", version: number) => ({
   settlement: null,
 });
 
-async function floor(page: Page, state: { phase: "Active" | "Closing"; version: number }) {
+async function floor(
+  page: Page,
+  state: { phase: "Active" | "Closing"; version: number },
+  options: { canWriteOff?: boolean } = {},
+) {
   const scope = {
     brandLabel: "Synthetic Brand",
     storeLabel: "Synthetic Store",
@@ -83,6 +87,7 @@ async function floor(page: Page, state: { phase: "Active" | "Closing"; version: 
       json: {
         canOperateTables: false,
         canCloseSessions: true,
+        ...(options.canWriteOff ? { canWriteOff: true } : {}),
         items: [
           {
             tableReference: id(1),
@@ -406,7 +411,7 @@ test("@production split bill: staff collect one part in cash while the others ar
     phase: "Closing",
     version: 7,
   };
-  await floor(page, state);
+  await floor(page, state, { canWriteOff: true });
   await page.route("**/merchant/dining/table-close-plan", (route) =>
     route.fulfill({
       headers,
@@ -457,6 +462,12 @@ test("@production split bill: staff collect one part in cash while the others ar
   await expect(parts).toContainText("Paid $35.84 · card machine");
   await expect(parts).toContainText("A guest is paying on their phone");
   await expect(checkout).toContainText("1 of 3 parts paid · $63.28 to go");
+  // v15 2026-10-28 b: with parts unpaid, the write-off is offered for those parts only.
+  await checkout.getByRole("button", { name: "Guests left without paying the rest" }).click();
+  await expect(checkout.getByRole("group", { name: "Guests left without paying" })).toContainText(
+    "left without paying the 2 parts still unpaid ($63.28)? The parts already paid stay paid.",
+  );
+  await checkout.getByRole("button", { name: "Cancel", exact: true }).click();
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     expect(
@@ -477,6 +488,36 @@ test("@production split bill: staff collect one part in cash while the others ar
   const confirm = checkout.getByRole("alertdialog", { name: "Confirm the payment" });
   await confirm.getByRole("button", { name: "Confirm $31.65 cash received" }).click();
   await expect(checkout).toContainText("2 of 3 parts paid · $31.64 to go");
+  // Once every part is paid, nothing is left to write off: not offered.
+  const allPaid = structuredClone(split) as typeof split & {
+    split: { parts: Record<string, unknown>[]; paidParts: number; remainingMinor: string };
+    owed: { subtotalMinor: string; taxMinor: string; totalMinor: string };
+  };
+  for (const entry of allPaid.split.parts)
+    entry.payment ??= {
+      method: "Cash",
+      tipMinor: "0",
+      roundingMinor: "1",
+      totalMinor: "3165",
+      tenderedMinor: "4000",
+      changeMinor: "835",
+      recordedAt: "2026-10-29T00:55:00.000Z",
+      recordedAfterOutage: false,
+    };
+  for (const entry of allPaid.split.parts) entry.guestPaying = false;
+  allPaid.split.paidParts = 3;
+  allPaid.split.remainingMinor = "0";
+  allPaid.owed = { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" };
+  await page.unroute("**/merchant/dining/table-bill");
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: allPaid }),
+  );
+  await page.reload();
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  await expect(checkout.getByRole("heading", { name: "Paid" })).toBeVisible();
+  await expect(checkout.getByRole("button", { name: /Guests left without paying/u })).toHaveCount(
+    0,
+  );
   expect(sent).toHaveLength(1);
   expect(sent[0]).toMatchObject({
     diningSessionReference: id(2),

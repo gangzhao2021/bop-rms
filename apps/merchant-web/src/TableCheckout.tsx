@@ -691,7 +691,10 @@ export function TableCheckout({
                   )}
                 </>
               )}
-              {canWriteOff ? (
+              {/* v15 2026-10-28 b: only while something is unpaid — for a split bill, the parts
+                  still unpaid, and it says so. */}
+              {canWriteOff &&
+              (bill.split === null || bill.split.paidParts < bill.split.parts.length) ? (
                 leaving ? (
                   <div
                     role="group"
@@ -699,13 +702,22 @@ export function TableCheckout({
                     className="table-checkout__leaving"
                   >
                     <p>
-                      {t(
-                        "Record that the guests at table {table} left without paying {amount}? A manager decides this. It stays in the reports as written off.",
-                        {
-                          table: table.stableLabel,
-                          amount: cad(bill.owed.totalMinor),
-                        },
-                      )}
+                      {bill.split !== null && bill.split.paidParts > 0
+                        ? t(
+                            "Record that the guests at table {table} left without paying the {count} parts still unpaid ({amount})? The parts already paid stay paid. A manager decides this. It stays in the reports as written off.",
+                            {
+                              table: table.stableLabel,
+                              count: String(bill.split.parts.length - bill.split.paidParts),
+                              amount: cad(bill.owed.totalMinor),
+                            },
+                          )
+                        : t(
+                            "Record that the guests at table {table} left without paying {amount}? A manager decides this. It stays in the reports as written off.",
+                            {
+                              table: table.stableLabel,
+                              amount: cad(bill.owed.totalMinor),
+                            },
+                          )}
                     </p>
                     <button
                       type="button"
@@ -722,10 +734,12 @@ export function TableCheckout({
                   <button
                     type="button"
                     className="table-checkout__secondary"
-                    disabled={busy || locked || owed === 0n}
+                    disabled={busy || locked || BigInt(bill.owed.totalMinor) === 0n}
                     onClick={() => setLeaving(true)}
                   >
-                    {t("Guests left without paying")}
+                    {bill.split !== null && bill.split.paidParts > 0
+                      ? t("Guests left without paying the rest")
+                      : t("Guests left without paying")}
                   </button>
                 )
               ) : null}
