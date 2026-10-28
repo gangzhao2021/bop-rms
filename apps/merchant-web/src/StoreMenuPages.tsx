@@ -82,6 +82,15 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   NotSingleStore: t(
     "This Brand has more than one store, so a menu is reviewed by someone else before it is listed.",
   ),
+  RegistryMissing: t(
+    "The Brand's allergen list is not approved yet. Approve it under Allergens, then declare the dish's allergens.",
+  ),
+  NoKitchenStation: t(
+    "This store has no kitchen station yet. Set one up under Kitchen, then declare the dish's allergens.",
+  ),
+  RealRecipe: t(
+    "This dish has a recipe, so its allergens come from the recipe's ingredients. Change them on the recipe.",
+  ),
 };
 const stageText = {
   Editing: t("Draft — being edited"),

@@ -117,6 +117,7 @@ import type { createMerchantStockPlaces } from "./merchant-stock-places.js";
 import type { createMerchantOpeningCount } from "./merchant-opening-count.js";
 import type { createMerchantStoreReceipts } from "./merchant-store-receipts.js";
 import type { createMerchantRecipes } from "./merchant-recipes.js";
+import type { createMerchantDishAllergens } from "./merchant-dish-allergens.js";
 import type { createMerchantProducts } from "./merchant-products.js";
 import type { createMerchantPrices } from "./merchant-prices.js";
 import type { createMerchantAllergens } from "./merchant-allergens.js";
@@ -516,6 +517,8 @@ export interface MerchantBffRouterOptions {
   readonly openingCount?: ReturnType<typeof createMerchantOpeningCount>;
   readonly storeReceipts?: ReturnType<typeof createMerchantStoreReceipts>;
   readonly recipes?: ReturnType<typeof createMerchantRecipes>;
+  /** WP-2423 item 8 ⑥: a dish's allergens declared by staff in the one-page menu. */
+  readonly dishAllergens?: ReturnType<typeof createMerchantDishAllergens>;
   readonly products?: ReturnType<typeof createMerchantProducts>;
   readonly prices?: ReturnType<typeof createMerchantPrices>;
   readonly allergens?: ReturnType<typeof createMerchantAllergens>;

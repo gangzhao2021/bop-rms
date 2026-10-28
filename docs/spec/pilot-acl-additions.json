@@ -4922,6 +4922,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU (Owner 2026-10-28 decision 7 \"点上架就生效，不用审核\"; coordinator 2026-10-28 condition 4: each single-store exception gets the database check and a bite-proven restricted-role test): a single store's price book or option price published by its author with \"List it\", marked SingleStoreListing, refused unless the Brand has exactly one store"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "staff_declared_allergen_source",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU (coordinator 2026-10-28 accepted the dish editor's recipe generated from the allergens staff declare, with four conditions: labelled \"Allergens declared by staff\", kept out of inventory, costing and stock deduction, replaced by a real recipe once Inventory & recipes is on, and each single-store exception proven): the append-only label of each generated allergen source"
+    },
+    {
+      "type": "table",
+      "schema": "rms_recipe",
+      "object": "staff_declared_allergen_source",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU (coordinator 2026-10-28 accepted the dish editor's recipe generated from the allergens staff declare, with four conditions: labelled \"Allergens declared by staff\", kept out of inventory, costing and stock deduction, replaced by a real recipe once Inventory & recipes is on, and each single-store exception proven): the append-only label of each generated allergen source"
     }
   ]
 }

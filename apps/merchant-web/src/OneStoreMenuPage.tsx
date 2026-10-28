@@ -25,6 +25,7 @@ import {
   type StoreAvailabilityView,
 } from "./store-availability-page.js";
 import { menuErrorText } from "./StoreMenuPages.js";
+import { allergenSummary, DishAllergenEditor } from "./DishAllergenEditor.js";
 import {
   MenuPageError,
   menuReviewProblemText,
@@ -46,6 +47,9 @@ const filterText: Record<MenuFilter, string> = {
   },
   get MissingName() {
     return t("Missing a name");
+  },
+  get NoAllergens() {
+    return t("Allergens not declared");
   },
 };
 
@@ -80,6 +84,8 @@ export function OneStoreMenuPage({
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<ReadonlySet<MenuFilter>>(new Set());
   const [busy, setBusy] = useState(false);
+  // The dish whose allergens are open for editing (one at a time).
+  const [editing, setEditing] = useState<string | null>(null);
   // One listing reference per intended listing, kept until it is answered (a retry continues it).
   const [listing, setListing] = useState<string | null>(null);
   const newListing = () => {
@@ -250,9 +256,25 @@ export function OneStoreMenuPage({
     }
   };
   const permissions = stock.permissions;
+  const choices = view.allergenChoices ?? [];
+  const mayDeclare = mayList && client.declareAllergens !== undefined;
   const dishActions = (dish: MenuDish) => {
     const label = dish.nameZh ? `${dish.name} ${dish.nameZh}` : dish.name;
     const actions = [];
+    if (mayDeclare)
+      actions.push(
+        <button
+          key="allergens"
+          type="button"
+          aria-expanded={editing === dish.skuReference}
+          aria-label={t("Allergens of {item}", { item: label })}
+          onClick={() =>
+            setEditing((current) => (current === dish.skuReference ? null : dish.skuReference))
+          }
+        >
+          {t("Allergens")}
+        </button>,
+      );
     if (permissions.mayMarkSoldOut && !dish.hidden)
       actions.push(
         dish.soldOut ? (
@@ -344,6 +366,7 @@ export function OneStoreMenuPage({
         </span>
       </span>
       <span className="one-menu__price">{price(dish.priceMinor) ?? t("No price")}</span>
+      <span className="one-menu__allergens">{allergenSummary(dish, choices)}</span>
       <span className="one-menu__state">
         {dish.hidden ? t("Hidden") : dish.soldOut ? t("Sold out today") : ""}
       </span>
@@ -386,6 +409,20 @@ export function OneStoreMenuPage({
           </>
         ) : null}
       </span>
+      {editing === dish.skuReference ? (
+        <DishAllergenEditor
+          dish={dish}
+          choices={choices}
+          keepsStock={view.keepsStock === true}
+          client={client}
+          onSaved={(message) => {
+            setEditing(null);
+            setProblem(message);
+            reload();
+          }}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
     </li>
   );
   return (

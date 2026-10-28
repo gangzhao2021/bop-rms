@@ -753,6 +753,8 @@ describe("migration catalog", () => {
       "2000_109_create_menu_single_store_listing",
       "2000_110_create_pricing_single_store_listing",
       "2000_111_alter_recipe_review_single_store_listing",
+      "2000_112_alter_allergen_declaration_staff_source",
+      "2000_113_create_staff_declared_allergen_source",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

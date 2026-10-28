@@ -6129,4 +6129,40 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Open the menu": "打开菜单",
   "This Brand has more than one store, so a menu is reviewed by someone else before it is listed.":
     "这个品牌有不止一家门店，菜单要由另一个人审核后才能上架。",
+  "Allergens not declared":
+    "未申报过敏原",
+  "Allergens from its recipe":
+    "过敏原来自配方",
+  "No allergens":
+    "不含过敏原",
+  "Contains {list}":
+    "含 {list}",
+  "May contain {list}":
+    "可能含 {list}",
+  "Allergens of {item}":
+    "{item} 的过敏原",
+  "This dish has a recipe, so its allergens come from the recipe's ingredients.":
+    "这道菜有配方，过敏原来自配方里的配料。",
+  "Open recipes":
+    "打开配方",
+  "Allergens of {item} saved. Guests see them when the menu is listed.":
+    "{item} 的过敏原已保存。菜单上架后客人能看到。",
+  "Allergens declared by staff":
+    "员工申报的过敏原",
+  "Not a costed recipe and not used for stock. Mark each allergen the dish contains or may contain.":
+    "这不是计算成本的配方，也不用于库存。请标出这道菜含有或可能含有的每种过敏原。",
+  "This store keeps stock and recipes. Replace these declared allergens with a real recipe for this dish.":
+    "本店已使用库存与配方。请为这道菜建立真正的配方，替换这里申报的过敏原。",
+  "No":
+    "不含",
+  "May contain":
+    "可能含有",
+  "Save allergens":
+    "保存过敏原",
+  "The Brand's allergen list is not approved yet. Approve it under Allergens, then declare the dish's allergens.":
+    "品牌的过敏原清单还没有批准。请先在“过敏原”里批准，再申报这道菜的过敏原。",
+  "This store has no kitchen station yet. Set one up under Kitchen, then declare the dish's allergens.":
+    "本店还没有后厨档口。请先在“后厨”里设置，再申报这道菜的过敏原。",
+  "This dish has a recipe, so its allergens come from the recipe's ingredients. Change them on the recipe.":
+    "这道菜有配方，过敏原来自配方里的配料。请在配方里修改。",
 });

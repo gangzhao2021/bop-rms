@@ -327,3 +327,166 @@ test("@production a single store's menu on one page: search, filters, sold out, 
   // A refused listing is finished; the next press is a new listing.
   expect(listings[0]?.operationReference).not.toBe(listings[1]?.operationReference);
 });
+
+test("@production a dish's allergens declared by staff in the one-page menu", async ({ page }) => {
+  await session(page);
+  const peanut = id(60),
+    sesame = id(61),
+    wheat = id(62);
+  const declared = new Map<string, { allergenReference: string; classification: string }[]>([
+    [id(30), [{ allergenReference: wheat, classification: "Contains" }]],
+  ]);
+  let keepsStock = false;
+  const declarations: Record<string, unknown>[] = [];
+  const view = () => {
+    const base = builder(3, [
+      [30, 31],
+      [32, 33],
+    ]);
+    return {
+      ...base,
+      allergenRegistry: true,
+      allergenChoices: [
+        { allergenReference: peanut, name: "Peanuts", nameZh: "花生" },
+        { allergenReference: sesame, name: "Sesame", nameZh: "芝麻" },
+        { allergenReference: wheat, name: "Wheat", nameZh: "小麦" },
+      ],
+      keepsStock,
+      sellables: base.sellables.map((s) => ({
+        ...s,
+        allergens:
+          s.skuReference === id(33)
+            ? { source: "Recipe", declared: [] }
+            : declared.has(s.skuReference)
+              ? { source: "StaffDeclared", declared: declared.get(s.skuReference) }
+              : { source: "None", declared: [] },
+      })),
+    };
+  };
+  await page.route("**/merchant/commerce/menus/query", (route) => {
+    const body = route.request().postDataJSON() as { menuReference: string | null };
+    if (body.menuReference !== null) return route.fulfill({ headers, json: view() });
+    return route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-MENU-LIST",
+        sourceAsOf: at,
+        viewer: id(50),
+        permissions: view().permissions,
+        menus: [
+          {
+            menuReference: MENU,
+            internalCode: "MAIN",
+            aggregateVersion: 3,
+            currentVersionReference: id(2),
+            localizedNames: { "en-CA": "TEST menu" },
+            placements: 4,
+            publication: null,
+            latestRelease: null,
+          },
+        ],
+      },
+    });
+  });
+  await page.route("**/merchant/commerce/dish-allergens/command", (route) => {
+    const body = route.request().postDataJSON() as {
+      skuReference: string;
+      allergens: { allergenReference: string; classification: string }[];
+    };
+    declarations.push(body);
+    declared.set(body.skuReference, body.allergens);
+    return route.fulfill({ headers, json: { status: "Applied", skuReference: body.skuReference } });
+  });
+  await page.route("**/merchant/commerce/availability/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-AVAILABILITY",
+        sourceAsOf: at,
+        viewer: id(50),
+        timeZone: scope.timeZone,
+        permissions: { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true },
+        items: [30, 31, 32, 33].map((n) => ({
+          skuReference: id(n),
+          skuCode: "SKU_" + n,
+          productName: "x",
+          sizeName: "x",
+          status: "Available",
+          soldOutUntil: null,
+        })),
+      },
+    }),
+  );
+
+  await page.goto("/app/commerce/menus");
+  const row = (name: string) => page.locator(".one-menu__dish").filter({ hasText: name });
+  await expect(row("Har gow")).toContainText("Contains Wheat");
+  await expect(row("Siu mai")).toContainText("Allergens not declared");
+  await expect(row("Beef chow fun")).toContainText("Allergens from its recipe");
+  await page
+    .getByRole("group", { name: "Show only" })
+    .getByRole("button", { name: "Allergens not declared" })
+    .click();
+  await expect(page.locator(".one-menu__dish .one-menu__name")).toHaveText([
+    "Siu mai (TEST)",
+    "Dan dan noodles (TEST)",
+  ]);
+  await page
+    .getByRole("group", { name: "Show only" })
+    .getByRole("button", { name: "Allergens not declared" })
+    .click();
+
+  // Siu mai: peanuts contained, sesame possible.
+  await page.getByRole("button", { name: "Allergens of Siu mai (TEST) 烧卖" }).click();
+  const editor = page.getByRole("form", { name: "Allergens of Siu mai (TEST) 烧卖" });
+  await expect(editor.getByText("Allergens declared by staff")).toBeVisible();
+  await expect(
+    editor.getByText("Not a costed recipe and not used for stock.", { exact: false }),
+  ).toBeVisible();
+  await editor.getByRole("radiogroup", { name: "Peanuts 花生" }).getByLabel("Contains").check();
+  await editor.getByRole("radiogroup", { name: "Sesame 芝麻" }).getByLabel("May contain").check();
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/dish-allergens-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const axe = await new AxeBuilder({ page }).include(".one-menu").analyze();
+  expect(axe.violations).toEqual([]);
+  await expectNoInternalText(page);
+  await editor.getByRole("button", { name: "Save allergens" }).click();
+  await expect(
+    page.getByText(
+      "Allergens of Siu mai (TEST) 烧卖 saved. Guests see them when the menu is listed.",
+    ),
+  ).toBeVisible();
+  await expect(row("Siu mai")).toContainText("Contains Peanuts · May contain Sesame");
+  expect(declarations).toHaveLength(1);
+  expect(declarations[0]).toMatchObject({
+    action: "DeclareDish",
+    skuReference: id(31),
+    allergens: [
+      { allergenReference: peanut, classification: "Contains" },
+      { allergenReference: sesame, classification: "CrossContactPossible" },
+    ],
+  });
+
+  // A dish with a real recipe takes its allergens from it; nothing is declared over it.
+  await page.getByRole("button", { name: "Allergens of Beef chow fun (TEST) 干炒牛河" }).click();
+  await expect(
+    page.getByText("This dish has a recipe, so its allergens come from the recipe's ingredients."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
+
+  // Once the store keeps stock, staff are asked to replace declared allergens with a recipe.
+  keepsStock = true;
+  await page.reload();
+  await page.getByRole("button", { name: "Allergens of Har gow (TEST) 虾饺" }).click();
+  await expect(
+    page.getByText("This store keeps stock and recipes. Replace these declared allergens", {
+      exact: false,
+    }),
+  ).toBeVisible();
+});

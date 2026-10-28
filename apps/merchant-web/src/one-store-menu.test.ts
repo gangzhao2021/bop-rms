@@ -8,6 +8,7 @@ import {
   sectionInputs,
 } from "./one-store-menu.js";
 import { moveTo } from "./reorder.js";
+import { allergenSummary } from "./DishAllergenEditor.js";
 import type { MenuBuilderView } from "./store-menu-pages.js";
 import type { AvailabilityItem } from "./store-availability-page.js";
 
@@ -64,10 +65,23 @@ const view = (): MenuBuilderView =>
     soleOperator: null,
     allergenRegistry: false,
     sellables: [
-      sku(30, "Har gow (TEST)", "虾饺", "788"),
+      {
+        ...sku(30, "Har gow (TEST)", "虾饺", "788"),
+        allergens: {
+          source: "StaffDeclared",
+          declared: [
+            { allergenReference: id(90), classification: "Contains" },
+            { allergenReference: id(91), classification: "CrossContactPossible" },
+          ],
+        },
+      },
       sku(31, "Siu mai (TEST)", "烧卖", "728"),
       sku(32, "Dan dan noodles (TEST)", "", "1288"),
-      { ...sku(33, "Beef chow fun (TEST)", "干炒牛河", null), offeredHere: false },
+      {
+        ...sku(33, "Beef chow fun (TEST)", "干炒牛河", null),
+        offeredHere: false,
+        allergens: { source: "Recipe", declared: [] },
+      },
       sku(34, "Mango pudding (TEST)", "芒果布丁", "550"),
     ],
   }) as unknown as MenuBuilderView;
@@ -158,5 +172,25 @@ describe("WP-2423 item 8 ⑥ one-page menu", () => {
         ],
       },
     ]);
+  });
+
+  it("says where each dish's allergens come from, and finds dishes still without them", () => {
+    const rows = menuRows(view(), stock);
+    const choices = [
+      { allergenReference: id(90), name: "Crustaceans", nameZh: "甲壳类" },
+      { allergenReference: id(91), name: "Soy", nameZh: "大豆" },
+    ];
+    const [harGow, siuMai] = rows[0]?.dishes ?? [];
+    const chowFun = rows[1]?.dishes[1];
+    expect(harGow && allergenSummary(harGow, choices)).toBe(
+      "Contains Crustaceans · May contain Soy",
+    );
+    expect(siuMai && allergenSummary(siuMai, choices)).toBe("Allergens not declared");
+    expect(chowFun && allergenSummary(chowFun, choices)).toBe("Allergens from its recipe");
+    expect(
+      filterRows(rows, "", new Set(["NoAllergens"])).flatMap((row) =>
+        row.dishes.map((d) => d.name),
+      ),
+    ).toEqual(["Siu mai (TEST)", "Dan dan noodles (TEST)"]);
   });
 });

@@ -1,6 +1,7 @@
 /** Merchant BFF routes: commerce workbench (recipes, products, prices, allergens, menus, availability, option sets, tax classifications). Registered by createMerchantBffRouter (merchant-bff.ts). */
 import express, { type Router } from "express";
 import { MerchantRecipeError } from "./merchant-recipes.js";
+import { MerchantDishAllergenError } from "./merchant-dish-allergens.js";
 import {
   cookie,
   denied,
@@ -101,6 +102,49 @@ export function installMerchantCommerceRoutes(
       .then((result) => response.json(result))
       .catch((error: unknown) => recipeFailure(response, error));
   });
+
+  // WP-2423 item 8 ⑥: a dish's allergens declared by staff (generated recipe, single store).
+  const dishAllergenStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Invalid: 400,
+    Conflict: 409,
+    RegistryMissing: 409,
+    NoKitchenStation: 409,
+    RealRecipe: 409,
+    NotSingleStore: 409,
+  } as const;
+  router.post(
+    "/commerce/dish-allergens/command",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.dishAllergens) {
+        response.status(503).json({ error: "dish_allergens_unavailable" });
+        return;
+      }
+      void options.dishAllergens
+        .command({ sessionCookie, csrf, body: request.body })
+        .then((result) => response.json(result))
+        .catch((error: unknown) => {
+          if (!(error instanceof MerchantDishAllergenError)) {
+            denied(response);
+            return;
+          }
+          response.status(dishAllergenStatus[error.code]).json({ error: error.code });
+        });
+    },
+  );
 
   // WP-2423 / DEC-CAT-PRODUCT-ADMIN: CAT-PRODUCT-LIST / CAT-PRODUCT-DETAIL reads and Product commands.
   const productStatus = {

@@ -78,6 +78,7 @@ import { createMerchantStockPlaces } from "../../apps/api/dist/merchant-stock-pl
 import { createMerchantOpeningCount } from "../../apps/api/dist/merchant-opening-count.js";
 import { createMerchantStoreReceipts } from "../../apps/api/dist/merchant-store-receipts.js";
 import { createMerchantRecipes } from "../../apps/api/dist/merchant-recipes.js";
+import { createMerchantDishAllergens } from "../../apps/api/dist/merchant-dish-allergens.js";
 import { createMerchantProducts } from "../../apps/api/dist/merchant-products.js";
 import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
 import { createMerchantPrices } from "../../apps/api/dist/merchant-prices.js";
@@ -1354,6 +1355,14 @@ export async function createInternalMerchant(
     references: { next: () => resources.credentials.reference() },
     locale: "en",
   });
+  // WP-2423 item 8 ⑥: a dish's allergens declared by staff in the one-page menu (generated
+  // recipe; names in the menu's locale).
+  const dishAllergens = createMerchantDishAllergens({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en-CA",
+  });
   // TEST-ONLY locale: the internal-test Brand writes its menu in Canadian English.
   const products = createMerchantProducts({
     persistence,
@@ -1735,6 +1744,7 @@ export async function createInternalMerchant(
       openingCount,
       storeReceipts,
       recipes,
+      dishAllergens,
       products,
       ...(prices === undefined ? {} : { prices }),
       allergens,

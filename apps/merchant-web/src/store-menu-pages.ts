@@ -19,6 +19,12 @@ export type MenuErrorCode =
   | "NeedsReverification"
   /** WP-2423 item 8 ⑥: listing without review needs a Brand with exactly one store. */
   | "NotSingleStore"
+  /** WP-2423 item 8 ⑥ (declaring a dish's allergens): the Brand has no allergen list yet. */
+  | "RegistryMissing"
+  /** The store has no kitchen station for the dish's kitchen step. */
+  | "NoKitchenStation"
+  /** The dish has a real recipe; its allergens come from the recipe's ingredients. */
+  | "RealRecipe"
   | "Offline"
   | "Unavailable";
 export class MenuPageError extends Error {
@@ -193,6 +199,28 @@ export interface MenuSellable {
   /** WP-2423: offered at the selected Store (Item availability); customers here see it only then.
    * Absent from older views: treated as offered. */
   readonly offeredHere?: boolean;
+  /** WP-2423 item 8 ⑥: where the dish's allergens come from (absent from older views: None). */
+  readonly allergens?: DishAllergens;
+}
+export type AllergenClassification = "Contains" | "CrossContactPossible";
+export interface DishAllergens {
+  /** Declared by staff in this page (labelled so, not a costed recipe), a real recipe, or not yet. */
+  readonly source: "StaffDeclared" | "Recipe" | "None";
+  readonly declared: readonly {
+    readonly allergenReference: string;
+    readonly classification: AllergenClassification;
+  }[];
+}
+export interface AllergenChoice {
+  readonly allergenReference: string;
+  readonly name: string;
+  readonly nameZh: string;
+}
+export interface DeclareDishAllergensCommand {
+  readonly action: "DeclareDish";
+  readonly operationReference: string;
+  readonly skuReference: string;
+  readonly allergens: DishAllergens["declared"];
 }
 export interface MenuBuilderView extends MenuViewBase {
   readonly screenId: "CAT-MENU-BUILDER";
@@ -229,6 +257,10 @@ export interface MenuBuilderView extends MenuViewBase {
   readonly allergenRegistry: boolean;
   /** WP-2423: present once the version is frozen for review; absent from older views. */
   readonly customerView?: MenuCustomerView | null;
+  /** WP-2423 item 8 ⑥: the Brand's allergen list staff declare from (absent: none). */
+  readonly allergenChoices?: readonly AllergenChoice[];
+  /** WP-2423 item 8 ⑥: the Brand keeps stock: declared allergens should become real recipes. */
+  readonly keepsStock?: boolean;
 }
 export interface MenuSectionInput {
   readonly sectionReference: string | null;
@@ -289,6 +321,8 @@ export type MenuCommand =
 export interface MenuClient {
   load(menuReference: string | null): Promise<unknown>;
   command?(command: MenuCommand): Promise<unknown>;
+  /** WP-2423 item 8 ⑥: a dish's allergens declared by staff (single store). */
+  declareAllergens?(command: DeclareDishAllergensCommand): Promise<unknown>;
 }
 const object = (value: unknown) =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -548,6 +582,9 @@ const codes = new Set<MenuErrorCode>([
   "SoleOperatorNotInEffect",
   "NeedsReverification",
   "NotSingleStore",
+  "RegistryMissing",
+  "NoKitchenStation",
+  "RealRecipe",
 ]);
 export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): MenuClient {
   const post = async (path: string, body: unknown) => {
@@ -577,6 +614,7 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
   return {
     load: (menuReference) => post("/merchant/commerce/menus/query", { menuReference }),
     command: (command) => post("/merchant/commerce/menus/command", command),
+    declareAllergens: (command) => post("/merchant/commerce/dish-allergens/command", command),
   };
 }
 

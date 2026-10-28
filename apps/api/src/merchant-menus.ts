@@ -17,6 +17,7 @@ import {
   listBrandMenus,
   listBrandOptionSets,
   listBrandSkuChoices,
+  listCurrentIngredientDeclarations,
   listStoreAvailabilityRules,
   parseCatalogHash,
   parseCatalogReference,
@@ -31,6 +32,11 @@ import {
   type CurrencyMetadataSnapshot,
 } from "@rms/pricing";
 import { listInventoryRecipeIngredientFacts } from "@rms/inventory";
+import {
+  listRecipes,
+  listStaffDeclaredAllergenSources,
+  type RecipeAuthoringTransaction,
+} from "@rms/recipe";
 import { MenuReviewGapError, type MenuReviewGap } from "./menu-recipe-allergen-source.js";
 import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
@@ -44,6 +50,7 @@ import {
 import { itemAvailability } from "./merchant-availability.js";
 import { localBoundary } from "./merchant-prices.js";
 import { derivedReference } from "./merchant-products.js";
+import { sizeRecipeSource } from "./merchant-dish-allergens.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { chineseOf, optionalChinese, withChinese } from "./merchant-chinese-text.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
@@ -575,6 +582,68 @@ export function createMerchantMenus(options: {
       };
     });
   };
+  /**
+   * WP-2423 item 8 ⑥: where each size's allergens come from — declared by staff in this page (the
+   * generated recipe, with what was declared), a real recipe, or nothing yet — the allergen list
+   * staff choose from, and whether the Brand keeps stock (then generated recipes should be
+   * replaced by real ones; the page asks, it never mixes the two).
+   */
+  const dishAllergens = async (tx: unknown, s: Scope) => {
+    const rtx = tx as unknown as RecipeAuthoringTransaction;
+    const scope = {
+      brandReference: s.owner.brandReference,
+      storeReference: s.owner.storeReference,
+    };
+    const at = options.persistence.now();
+    const registry = await currentAllergenRegistry(ptx(tx) as never, s.owner);
+    const sources = await listStaffDeclaredAllergenSources(rtx, scope);
+    const declarations = new Map(
+      (await listCurrentIngredientDeclarations(ptx(tx) as never, s.owner, at))
+        .filter((d) => d.registryVersionReference === registry?.registryVersionReference)
+        .map((d) => [d.itemReference, d]),
+    );
+    const recipes = await listRecipes(rtx, scope, at);
+    const items = await listInventoryRecipeIngredientFacts(ptx(tx) as never, s.owner);
+    const generatedItems = new Set(sources.map((x) => x.itemReference));
+    const bySku = new Map<
+      string,
+      {
+        readonly source: "StaffDeclared" | "Recipe" | "None";
+        readonly declared: readonly { allergenReference: string; classification: string }[];
+      }
+    >();
+    const skus = new Set([
+      ...recipes.flatMap((recipe) => recipe.bindings.map((binding) => binding.skuReference)),
+      ...sources.flatMap((source) => (source.skuReference === null ? [] : [source.skuReference])),
+    ]);
+    for (const sku of skus) {
+      const kind = sizeRecipeSource(recipes, sources, sku);
+      const item = sources.find((x) => x.subject === "Dish" && x.skuReference === sku);
+      if (kind !== "None")
+        bySku.set(sku, {
+          source: kind,
+          declared:
+            kind === "StaffDeclared" && item !== undefined
+              ? (declarations.get(item.itemReference)?.allergens ?? []).map((a) => ({
+                  allergenReference: a.allergenReference,
+                  classification: a.classification,
+                }))
+              : [],
+        });
+    }
+    await brandScope(tx, s.owner.brandReference);
+    return {
+      bySku,
+      choices: (registry?.entries ?? []).map((entry) => ({
+        allergenReference: entry.allergenReference,
+        name: name(entry.localizedNames, entry.code),
+        nameZh: chineseOf(entry.localizedNames),
+      })),
+      keepsStock: items.some(
+        (item) => item.active && item.stockTracked && !generatedItems.has(item.itemReference),
+      ),
+    };
+  };
   /** Names a review gap for staff in a fresh read (the failed review's transaction is gone). */
   const describeGap = (
     sessionCookie: unknown,
@@ -752,7 +821,20 @@ export function createMerchantMenus(options: {
                     otherApprovers: gate.otherApprovers,
                     verifiedUntil: gate.verifiedUntil,
                   },
-            sellables: await sellables(tx, s),
+            ...(await (async () => {
+              const allergens = await dishAllergens(tx, s);
+              return {
+                sellables: (await sellables(tx, s)).map((sku) => ({
+                  ...sku,
+                  allergens: allergens.bySku.get(sku.skuReference) ?? {
+                    source: "None" as const,
+                    declared: [],
+                  },
+                })),
+                allergenChoices: allergens.choices,
+                keepsStock: allergens.keepsStock,
+              };
+            })()),
             mayOfferHere,
             customerView,
             allergenRegistry: (await currentAllergenRegistry(ptx(tx) as never, s.owner)) !== null,

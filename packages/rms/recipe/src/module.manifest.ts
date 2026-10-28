@@ -69,6 +69,7 @@ const moduleManifestInput =
         "recipe_admin_projection_checkpoint",
         "recipe_version_presentation",
         "recipe_authoring_review",
+        "staff_declared_allergen_source",
         "recipe_scope_binding_end",
         "option_recipe_change",
         "option_recipe_change_review",

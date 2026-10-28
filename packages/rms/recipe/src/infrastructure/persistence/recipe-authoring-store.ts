@@ -1350,3 +1350,128 @@ export async function listPublishedSubRecipes(
     };
   });
 }
+
+/**
+ * WP-2423 item 8 ⑥ (coordinator 2026-10-28): an inventory item standing for a dish size or a
+ * choice whose allergens staff declared in the menu, and (for a dish) its generated recipe. Labelled
+ * AllergensDeclaredByStaff: never a costed recipe and never used for stock.
+ */
+export interface StaffDeclaredAllergenSource {
+  readonly itemReference: string;
+  readonly subject: "Dish" | "Option";
+  readonly skuReference: string | null;
+  readonly recipeReference: string | null;
+  readonly bindingReference: string | null;
+  readonly optionReference: string | null;
+  readonly recordedAt: string;
+}
+/** The Brand's staff-declared allergen sources. Caller authorizes (recipe.read). */
+export async function listStaffDeclaredAllergenSources(
+  tx: RecipeAuthoringTransaction,
+  scope: RecipeAuthoringScope,
+): Promise<readonly StaffDeclaredAllergenSource[]> {
+  await tx.query(scopeSql, [scope.brandReference, ""]);
+  return (
+    await tx.query(
+      `SELECT inventory_item_id::text item,subject_kind,sku_id::text sku,recipe_id::text recipe,binding_id::text binding,
+         option_id::text option,recorded_at FROM rms_recipe.staff_declared_allergen_source WHERE brand_id=$1
+       ORDER BY recorded_at,inventory_item_id LIMIT 5000`,
+      [scope.brandReference],
+    )
+  ).rows.map((row) =>
+    Object.freeze({
+      itemReference: String(row.item),
+      subject: row.subject_kind === "Option" ? ("Option" as const) : ("Dish" as const),
+      skuReference: row.sku === null ? null : String(row.sku),
+      recipeReference: row.recipe === null ? null : String(row.recipe),
+      bindingReference: row.binding === null ? null : String(row.binding),
+      optionReference: row.option === null ? null : String(row.option),
+      recordedAt: iso(row.recorded_at),
+    }),
+  );
+}
+/** Records one staff-declared allergen source (append-only; replay by operation is a no-op). */
+export async function recordStaffDeclaredAllergenSource(
+  tx: RecipeAuthoringTransaction,
+  scope: RecipeAuthoringScope,
+  input: {
+    readonly operationReference: string;
+    readonly actorReference: string;
+    readonly at: string;
+    readonly auditReference: string;
+    readonly itemReference: string;
+  } & (
+    | {
+        readonly subject: "Dish";
+        readonly skuReference: string;
+        readonly recipeReference: string;
+      }
+    | {
+        readonly subject: "Option";
+        readonly bindingReference: string;
+        readonly optionReference: string;
+      }
+  ),
+): Promise<{ readonly status: "Applied" | "AlreadyApplied" }> {
+  await tx.query(scopeSql, [scope.brandReference, ""]);
+  const brand = scope.brandReference;
+  const dish = input.subject === "Dish";
+  const value = {
+    item: parseRecipeReference(input.itemReference),
+    sku: dish ? parseRecipeReference(input.skuReference) : null,
+    recipe: dish ? parseRecipeReference(input.recipeReference) : null,
+    binding: dish ? null : parseRecipeReference(input.bindingReference),
+    option: dish ? null : parseRecipeReference(input.optionReference),
+  };
+  const prior = (
+    await tx.query(
+      `SELECT inventory_item_id::text item,sku_id::text sku,recipe_id::text recipe,binding_id::text binding,option_id::text option
+       FROM rms_recipe.staff_declared_allergen_source WHERE brand_id=$1 AND operation_id=$2`,
+      [brand, parseRecipeReference(input.operationReference)],
+    )
+  ).rows[0];
+  if (prior !== undefined) {
+    if (
+      prior.item !== value.item ||
+      prior.sku !== value.sku ||
+      prior.recipe !== value.recipe ||
+      prior.binding !== value.binding ||
+      prior.option !== value.option
+    )
+      return fail("RECIPE_AUTHORING_CONFLICT");
+    return { status: "AlreadyApplied" };
+  }
+  await tx.query(
+    `INSERT INTO rms_recipe.staff_declared_allergen_source(brand_id,inventory_item_id,label,subject_kind,sku_id,recipe_id,binding_id,option_id,
+       actor_id,recorded_at,operation_id,audit_id) VALUES($1,$2,'AllergensDeclaredByStaff',$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [
+      brand,
+      value.item,
+      input.subject,
+      value.sku,
+      value.recipe,
+      value.binding,
+      value.option,
+      input.actorReference,
+      input.at,
+      input.operationReference,
+      input.auditReference,
+    ],
+  );
+  await appendBrandAudit(
+    tx,
+    auditInput({
+      brand,
+      actor: input.actorReference,
+      actionCode: "RECIPE_STAFF_ALLERGEN_SOURCE_RECORDED",
+      targetType: dish ? "Recipe" : "RecipeOptionChange",
+      targetId: dish ? (value.recipe as string) : (value.option as string),
+      correlationId: input.operationReference,
+      at: input.at,
+      auditReference: input.auditReference,
+      reasonCode: "RECIPE_AUTHORING",
+      afterSummary: { label: "AllergensDeclaredByStaff", subject: input.subject },
+    }),
+  );
+  return { status: "Applied" };
+}

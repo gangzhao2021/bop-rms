@@ -11,6 +11,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 item 8 ⑥: dish and choice allergens declared by staff (append-only label).
+      table: "staff_declared_allergen_source",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/recipe" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "recipe_authoring_review",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/recipe" },
@@ -342,6 +351,24 @@ const databaseAccessManifestInput = {
       principal: { kind: "module", id: "@rms/recipe" },
       readPattern: "owner-repository",
       source: "packages/rms/recipe/src/infrastructure/persistence/option-recipe-change-store.ts",
+    },
+    {
+      id: "recipe-authoring.read.staff_declared_allergen_source",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_recipe", table: "staff_declared_allergen_source" },
+      principal: { kind: "module", id: "@rms/recipe" },
+      readPattern: "owner-repository",
+      source: "packages/rms/recipe/src/infrastructure/persistence/recipe-authoring-store.ts",
+    },
+    {
+      id: "recipe-authoring.write.staff_declared_allergen_source",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_recipe", table: "staff_declared_allergen_source" },
+      principal: { kind: "module", id: "@rms/recipe" },
+      readPattern: null,
+      source: "packages/rms/recipe/src/infrastructure/persistence/recipe-authoring-store.ts",
     },
     {
       id: "recipe-authoring.read.recipe_authoring_review",

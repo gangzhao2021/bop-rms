@@ -367,6 +367,12 @@ export const allergenDeclarationSources = [
   "ProductLabel",
   "ManufacturerStatement",
 ] as const;
+/** WP-2423 item 8 ⑥: a dish's or a choice's allergens declared by staff in the one-page menu
+ * (2000_112), labelled as such; never offered as an ingredient's supplier source. */
+export const staffAllergenDeclarationSource = "StaffDeclaration" as const;
+type DeclarationSource =
+  | (typeof allergenDeclarationSources)[number]
+  | typeof staffAllergenDeclarationSource;
 export interface IngredientAllergenDeclaration {
   readonly evidenceReference: string;
   readonly itemReference: string;
@@ -376,7 +382,7 @@ export interface IngredientAllergenDeclaration {
     readonly allergenReference: string;
     readonly classification: "Contains" | "CrossContactPossible";
   }[];
-  readonly sourceKind: (typeof allergenDeclarationSources)[number];
+  readonly sourceKind: DeclarationSource;
   readonly documentReference: string;
   readonly note: string | null;
   readonly supplierReference: string | null;
@@ -462,7 +468,7 @@ export async function recordIngredientAllergenDeclaration(
       readonly allergenReference: string;
       readonly classification: "Contains" | "CrossContactPossible";
     }[];
-    readonly sourceKind: (typeof allergenDeclarationSources)[number];
+    readonly sourceKind: DeclarationSource;
     readonly documentReference: string;
     readonly note: string | null;
     readonly validUntil: string;
@@ -489,7 +495,10 @@ export async function recordIngredientAllergenDeclaration(
     allergens.some(
       (a) => a.classification !== "Contains" && a.classification !== "CrossContactPossible",
     ) ||
-    !(allergenDeclarationSources as readonly string[]).includes(input.sourceKind) ||
+    !(
+      (allergenDeclarationSources as readonly string[]).includes(input.sourceKind) ||
+      input.sourceKind === staffAllergenDeclarationSource
+    ) ||
     document.length < 1 ||
     document.length > 200 ||
     (note !== null && note.length > 500) ||

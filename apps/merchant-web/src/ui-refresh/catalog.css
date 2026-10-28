@@ -258,7 +258,8 @@
   color: var(--bop-color-text-muted);
   cursor: default;
 }
-.one-menu .one-menu__pending-actions .one-menu__primary {
+.one-menu .one-menu__pending-actions .one-menu__primary,
+.one-menu .dish-editor__actions .one-menu__primary {
   padding: 0 16px;
   border-radius: 8px;
   background: var(--bop-color-accent);
@@ -305,7 +306,11 @@
 .one-menu .one-menu__dish {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
-  grid-template-areas: "handle names price state" "handle actions actions actions";
+  grid-template-areas:
+    "handle names price state"
+    "handle allergens allergens allergens"
+    "handle actions actions actions"
+    "handle editor editor editor";
   align-items: center;
   gap: 2px 16px;
   padding: 8px 0;
@@ -348,4 +353,62 @@
   margin-left: 8px;
   font-size: 16px;
   font-weight: 400;
+}
+
+/* WP-2423 item 8 ⑥: a dish's allergens declared by staff, edited in its row. */
+.one-menu .one-menu__allergens {
+  grid-area: allergens;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.one-menu .dish-editor {
+  grid-area: editor;
+  margin: 8px 0 4px;
+}
+.one-menu .dish-editor fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.one-menu .dish-editor legend {
+  padding: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.one-menu .dish-editor__note {
+  margin: 4px 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.one-menu .dish-editor__allergens {
+  margin: 8px 0;
+}
+.one-menu .dish-editor__allergens > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.one-menu .dish-editor__allergen {
+  flex: 1 1 160px;
+}
+.one-menu .dish-editor__options {
+  display: flex;
+  gap: 0 16px;
+}
+.one-menu .dish-editor__allergens label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+.one-menu .dish-editor__problem {
+  color: var(--bop-color-danger, #b42318);
+}
+.one-menu .dish-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }

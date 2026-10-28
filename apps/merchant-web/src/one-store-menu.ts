@@ -1,5 +1,10 @@
 import type { AvailabilityItem } from "./store-availability-page.js";
-import type { MenuBuilderView, MenuSectionInput, MenuSellable } from "./store-menu-pages.js";
+import type {
+  DishAllergens,
+  MenuBuilderView,
+  MenuSectionInput,
+  MenuSellable,
+} from "./store-menu-pages.js";
 
 /**
  * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU (Owner 2026-10-28 decisions 7–8): the single store's
@@ -8,8 +13,14 @@ import type { MenuBuilderView, MenuSectionInput, MenuSellable } from "./store-me
  * sold out, no price, hidden, or a missing name. Pure functions over the menu builder's view and
  * the Store's item availability.
  */
-export type MenuFilter = "SoldOut" | "NoPrice" | "Hidden" | "MissingName";
-export const menuFilters: readonly MenuFilter[] = ["SoldOut", "NoPrice", "Hidden", "MissingName"];
+export type MenuFilter = "SoldOut" | "NoPrice" | "Hidden" | "MissingName" | "NoAllergens";
+export const menuFilters: readonly MenuFilter[] = [
+  "SoldOut",
+  "NoPrice",
+  "Hidden",
+  "MissingName",
+  "NoAllergens",
+];
 
 export interface MenuDish {
   readonly skuReference: string;
@@ -21,6 +32,8 @@ export interface MenuDish {
   readonly soldOut: boolean;
   readonly hidden: boolean;
   readonly featured: boolean;
+  /** Where its allergens come from: declared by staff here, a real recipe, or not yet. */
+  readonly allergens: DishAllergens;
 }
 export interface MenuSectionRow {
   readonly sectionReference: string;
@@ -64,6 +77,7 @@ function dishOf(
     // Not offered at this Store: guests here do not see it (it stays on the menu).
     hidden: sku.offeredHere === false || status === "NotOffered" || status === "Unavailable",
     featured,
+    allergens: sku.allergens ?? { source: "None", declared: [] },
   };
 }
 
@@ -95,6 +109,7 @@ export function dishMatches(
   if (filters.has("Hidden") && !dish.hidden) return false;
   if (filters.has("MissingName") && dish.name.trim() !== "" && dish.nameZh.trim() !== "")
     return false;
+  if (filters.has("NoAllergens") && dish.allergens.source !== "None") return false;
   return true;
 }
 
