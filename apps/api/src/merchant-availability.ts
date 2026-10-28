@@ -308,6 +308,13 @@ export function createMerchantAvailability(options: {
                 sizeName: name(sku.localizedNames, sku.skuCode),
                 ...(statuses.get(sku.skuReference) ??
                   itemAvailability(rules, s.owner, sku.skuReference, at)),
+                // WP-2423 item 8 ⑥ (v15 finding d): ever offered at this store — false for a
+                // size no one has decided here yet; a hidden size keeps its stopped offer.
+                decidedHere: rules.some(
+                  (rule) =>
+                    rule.sellableReference === sku.skuReference &&
+                    rule.reasonCode === offeredReason,
+                ),
                 stockSoldOut: stockSoldOutView(stock.get(String(sku.skuReference))),
               }))
               .sort(

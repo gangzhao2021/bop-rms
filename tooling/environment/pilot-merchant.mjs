@@ -1450,6 +1450,7 @@ export async function createInternalMerchant(
           menus,
           dishAllergens,
           optionRecipes,
+          availability,
           now: () => new Date().toISOString(),
         });
   const stockCounts = createMerchantStockCounts({
