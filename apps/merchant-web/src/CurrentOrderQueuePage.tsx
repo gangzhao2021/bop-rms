@@ -171,6 +171,8 @@ export interface OrderLineRounds {
   readonly timeZone?: string | undefined;
   /** The Store's business date: a round sent today shows its time only. */
   readonly today?: string | null | undefined;
+  /** WP-2423 item 8 ⑤ decision 4: which phone sent each round (staff rounds say so already). */
+  readonly phones?: ReadonlyMap<string, number | null> | undefined;
 }
 /** WP-2423 OPS-ORDER-DETAIL: what was ordered — items with options and notes, and the totals. */
 export function CurrentOrderLines({
@@ -332,7 +334,13 @@ export function CurrentOrderLines({
                 <header className="order-round__head">
                   <h3>
                     {t("Round {sequence}", { sequence: batch.sequence })}
-                    {batch.staffRound !== null ? t(" · Entered by staff") : ""}
+                    {batch.staffRound !== null
+                      ? t(" · Entered by staff")
+                      : typeof rounds.phones?.get(batch.orderBatchReference) === "number"
+                        ? t(" · Phone {number}", {
+                            number: String(rounds.phones.get(batch.orderBatchReference)),
+                          })
+                        : ""}
                     {batch.submittedAt === null ? null : (
                       <time className="order-round__time" dateTime={batch.submittedAt}>
                         {orderWhen(batch.submittedAt, rounds.timeZone, rounds.today ?? null)}

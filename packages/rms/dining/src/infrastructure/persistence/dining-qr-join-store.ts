@@ -337,32 +337,12 @@ export function createPostgresDiningQrJoinStore(
           await authorized(tx);
           await context(tx);
           const paused = await pausedOf(tx, session);
-          const participants = rows(
-            await tx.query(
-              `SELECT p.participant_id, p.status, p.participant_snapshot->>'joinedAt' AS joined_at,
- EXISTS (SELECT 1 FROM rms_dining.dining_participant_removal r WHERE r.tenant_id=p.tenant_id AND r.brand_id=p.brand_id
-  AND r.store_id=p.store_id AND r.session_id=p.session_id AND r.participant_id=p.participant_id) AS removed
- FROM rms_dining.dining_participant p WHERE p.tenant_id=$1 AND p.brand_id=$2 AND p.store_id=$3 AND p.session_id=$4
- ORDER BY p.participant_snapshot->>'joinedAt', p.participant_id LIMIT 201`,
-              [tenant, brand, store, session],
-            ),
-            200,
-          );
+          const phones = await loadDiningSessionPhones(tx, options.scope, session);
           await authorized(tx);
           return Object.freeze({
             diningSessionReference: session,
             paused,
-            phones: Object.freeze(
-              participants.map((row, index) =>
-                Object.freeze({
-                  participantReference: parseDiningReference(row.participant_id),
-                  phoneNumber: index + 1,
-                  joinedAt: parseDiningInstant(row.joined_at),
-                  left: row.status === "Left",
-                  removed: row.removed === true,
-                }),
-              ),
-            ),
+            phones,
           });
         }),
       );
@@ -507,4 +487,45 @@ export function createPostgresDiningQrJoinStore(
 
 function refused(reason: DiningQrJoinRefusal): DiningQrJoinIssueResult {
   return Object.freeze({ status: "Refused" as const, reason });
+}
+
+/**
+ * The phones that joined a table's Session, numbered 1, 2, … in the order they joined (decision
+ * 3: no names), read in the caller's transaction.
+ */
+export async function loadDiningSessionPhones(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+  diningSessionReference: string,
+): Promise<readonly DiningQrJoinPhone[]> {
+  const tenant = parseDiningReference(scopeInput.tenantReference);
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  const session = parseDiningReference(diningSessionReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const participants = rows(
+    await tx.query(
+      `SELECT p.participant_id, p.status, p.participant_snapshot->>'joinedAt' AS joined_at,
+ EXISTS (SELECT 1 FROM rms_dining.dining_participant_removal r WHERE r.tenant_id=p.tenant_id AND r.brand_id=p.brand_id
+  AND r.store_id=p.store_id AND r.session_id=p.session_id AND r.participant_id=p.participant_id) AS removed
+ FROM rms_dining.dining_participant p WHERE p.tenant_id=$1 AND p.brand_id=$2 AND p.store_id=$3 AND p.session_id=$4
+ ORDER BY p.participant_snapshot->>'joinedAt', p.participant_id LIMIT 201`,
+      [tenant, brand, store, session],
+    ),
+    200,
+  );
+  return Object.freeze(
+    participants.map((row, index) =>
+      Object.freeze({
+        participantReference: parseDiningReference(row.participant_id),
+        phoneNumber: index + 1,
+        joinedAt: parseDiningInstant(row.joined_at),
+        left: row.status === "Left",
+        removed: row.removed === true,
+      }),
+    ),
+  );
 }

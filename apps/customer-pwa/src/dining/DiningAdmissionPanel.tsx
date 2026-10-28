@@ -18,7 +18,10 @@ export type DiningAdmissionUiState =
   | "Unavailable"
   | DiningAdmissionRefusedState;
 /** The server definitively refused the code: nothing to recover, a new code is needed. */
-export type DiningAdmissionRefusedState = "CodeUsed" | "CodeNotAccepted" | "TooManyAttempts";
+export type DiningAdmissionRefusedState =
+  "CodeUsed" | "CodeNotAccepted" | "TooManyAttempts" | DiningQrJoinRefusedState;
+/** WP-2423 item 8 ⑤: the scanned table can't be joined by QR right now. */
+export type DiningQrJoinRefusedState = "QrPaused" | "NotOpen" | "CheckingOut" | "TableBusy";
 const refusalText: Readonly<Record<DiningAdmissionRefusedState, string>> = {
   get CodeUsed() {
     return t(
@@ -33,13 +36,38 @@ const refusalText: Readonly<Record<DiningAdmissionRefusedState, string>> = {
   get TooManyAttempts() {
     return t("Too many tries. Wait a few minutes before trying again, or ask staff for help.");
   },
+  get QrPaused() {
+    return t(
+      "Staff have paused joining by scan at this table. Ask staff, or the person who joined first, for the table’s code.",
+    );
+  },
+  get NotOpen() {
+    return t("This table isn’t open yet. Please ask staff to seat you.");
+  },
+  get CheckingOut() {
+    return t("This table is paying the bill, so no one new can join. Please ask staff.");
+  },
+  get TableBusy() {
+    return t("Many phones joined this table just now. Please ask staff for help.");
+  },
 };
+/** These refusals need a code; the others are about the table itself. */
+const needsCode = (state: DiningAdmissionUiState) =>
+  state === "Invalid" ||
+  state === "CodeUsed" ||
+  state === "CodeNotAccepted" ||
+  state === "TooManyAttempts" ||
+  state === "QrPaused";
 /** Maps a failed attempt: a definitive refusal returns to entry, anything else stays recoverable. */
 export function admissionStateForFailure(error: unknown): "Unknown" | DiningAdmissionRefusedState {
   if (!(error instanceof DiningAdmissionJourneyError)) return "Unknown";
   if (error.code === "code-used") return "CodeUsed";
   if (error.code === "code-not-accepted") return "CodeNotAccepted";
   if (error.code === "too-many-attempts") return "TooManyAttempts";
+  if (error.code === "qr-paused") return "QrPaused";
+  if (error.code === "table-not-open") return "NotOpen";
+  if (error.code === "table-checking-out") return "CheckingOut";
+  if (error.code === "table-busy") return "TableBusy";
   return "Unknown";
 }
 function refused(state: DiningAdmissionUiState): state is DiningAdmissionRefusedState {
@@ -88,15 +116,18 @@ export function DiningAdmissionPanel({
     if (state === "Invalid" || refused(state)) input.current?.focus();
     else if (state === "Bound" || state === "Unknown") status.current?.focus();
   }, [state]);
-  const run = (resume: boolean) => {
+  const [codeMode, setCodeMode] = useState(false);
+  useEffect(() => setCodeMode(false), [service, contextEpoch]);
+  /** `byQr`: join the scanned table with one tap (no code). */
+  const run = (resume: boolean, byQr = false) => {
     if (busy.current || !online || !service || navigator.onLine === false) return;
     let request: Promise<unknown>;
     let expected = operation.current;
     const current = generation.current;
     if (!resume) {
-      const value = input.current?.value ?? "";
+      const value = byQr ? null : (input.current?.value ?? "");
       if (input.current) input.current.value = "";
-      if (!framing.test(value)) {
+      if (value !== null && !framing.test(value)) {
         setState("Invalid");
         input.current?.focus();
         return;
@@ -150,6 +181,7 @@ export function DiningAdmissionPanel({
           const next = admissionStateForFailure(error);
           // A refused attempt is finished; the next submission is a new intent with a new code.
           if (next !== "Unknown") operation.current = null;
+          if (next === "QrPaused") setCodeMode(true);
           setState(next);
         },
       )
@@ -168,6 +200,9 @@ export function DiningAdmissionPanel({
         run(false);
       }}
       onResume={() => run(true)}
+      codeMode={codeMode}
+      onJoinByScan={() => run(false, true)}
+      onUseCode={() => setCodeMode(true)}
     />
   );
 }
@@ -179,6 +214,9 @@ export function DiningAdmissionView({
   statusRef,
   onSubmit,
   onResume,
+  codeMode = false,
+  onJoinByScan,
+  onUseCode,
 }: {
   readonly state: DiningAdmissionUiState;
   readonly online: boolean;
@@ -186,8 +224,14 @@ export function DiningAdmissionView({
   readonly statusRef?: RefObject<HTMLHeadingElement | null> | undefined;
   readonly onSubmit?: ((event: FormEvent<HTMLFormElement>) => void) | undefined;
   readonly onResume?: (() => void) | undefined;
+  /** Show the code entry (the guest has a code, or joining by scan is paused). */
+  readonly codeMode?: boolean;
+  readonly onJoinByScan?: (() => void) | undefined;
+  readonly onUseCode?: (() => void) | undefined;
 }) {
   const entry = state === "Ready" || state === "Invalid" || refused(state);
+  const showCode = entry && (codeMode || needsCode(state));
+  const showScan = entry && state !== "QrPaused";
   return (
     <section
       className="dining-admission"
@@ -202,12 +246,29 @@ export function DiningAdmissionView({
           {t("You’re offline. Joining and recovery are paused. Reconnect, then try again.")}
         </p>
       )}
-      {entry && (
+      {showScan && (
+        <div className="dining-admission__scan">
+          <p>{t("Tap to join the people at this table. You don’t need an account.")}</p>
+          {refused(state) && !needsCode(state) && <p role="alert">{refusalText[state]}</p>}
+          <button className="entry-action" type="button" disabled={!online} onClick={onJoinByScan}>
+            {t("Join this table")}
+          </button>
+          {!showCode && (
+            <button
+              className="entry-secondary-action"
+              type="button"
+              disabled={!online}
+              onClick={onUseCode}
+            >
+              {t("I have a table code")}
+            </button>
+          )}
+        </div>
+      )}
+      {showCode && (
         <form onSubmit={onSubmit} noValidate>
           <p id="dining-admission-help">
-            {t(
-              "Ask staff, or the person who joined your table first, for the table’s code. Scanning the table QR code alone does not join the table.",
-            )}
+            {t("Ask staff, or the person who joined your table first, for the table’s code.")}
           </p>
           <label htmlFor="dining-join-credential">{t("Join code or invitation")}</label>
           <input
@@ -219,11 +280,11 @@ export function DiningAdmissionView({
             spellCheck={false}
             maxLength={22}
             aria-describedby={
-              state === "Invalid" || refused(state)
+              needsCode(state)
                 ? "dining-admission-help dining-admission-error"
                 : "dining-admission-help"
             }
-            aria-invalid={state === "Invalid" || refused(state)}
+            aria-invalid={needsCode(state)}
             disabled={!online}
           />
           {state === "Invalid" && (
@@ -231,13 +292,17 @@ export function DiningAdmissionView({
               {t("Enter the six-digit code you were given.")}
             </p>
           )}
-          {refused(state) && (
+          {refused(state) && needsCode(state) && (
             <p id="dining-admission-error" role="alert">
               {refusalText[state]}
             </p>
           )}
-          <button className="entry-action" type="submit" disabled={!online}>
-            {t("Join table")}
+          <button
+            className={showScan ? "entry-secondary-action" : "entry-action"}
+            type="submit"
+            disabled={!online}
+          >
+            {t("Join with this code")}
           </button>
         </form>
       )}

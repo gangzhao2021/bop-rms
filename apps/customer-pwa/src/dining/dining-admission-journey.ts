@@ -23,6 +23,8 @@ export interface DiningAdmissionJourneyOptions extends DiningBindingCoordinatorO
 interface Plan {
   readonly operation: string;
   rawJoin: string | null;
+  /** WP-2423 item 8 ⑤: joining the scanned table by QR, with no code. */
+  readonly byQr: boolean;
   csrf: string;
   current: () => boolean;
   phase: "Join" | "Bind" | "Bound";
@@ -63,7 +65,8 @@ function csrf(value: unknown): string {
   if (typeof value !== "string" || !token.test(value)) return unknown();
   return value;
 }
-function joinCredential(value: unknown): string {
+function joinCredential(value: unknown): string | null {
+  if (value === null) return null;
   if (
     typeof value !== "string" ||
     !(/^[0-9]{6}$/u.test(value) || /^[A-Za-z0-9_-]{21}[AQgw]$/u.test(value))
@@ -111,11 +114,11 @@ export function createDiningAdmissionJourney(options: DiningAdmissionJourneyOpti
   async function execute(current: Plan): Promise<DiningBindingConfirmation> {
     context(current);
     if (current.phase === "Join") {
-      if (current.rawJoin === null) return unknown();
+      if (current.rawJoin === null && !current.byQr) return unknown();
       const result = await options.join.join({
         operationReference: current.operation,
         csrfToken: current.csrf,
-        joinCredential: current.rawJoin,
+        joinCredential: current.byQr ? null : current.rawJoin,
       });
       context(current);
       const receipt = exact(result, ["status", "operationReference", "admissionReference"]);
@@ -184,7 +187,7 @@ export function createDiningAdmissionJourney(options: DiningAdmissionJourneyOpti
   }
   return Object.freeze({
     start(value: unknown): Promise<DiningBindingConfirmation> {
-      let operation: string, rawJoin: string;
+      let operation: string, rawJoin: string | null;
       try {
         const input = exact(value, ["operationReference", "joinCredential"]);
         operation = reference(input.operationReference);
@@ -207,6 +210,7 @@ export function createDiningAdmissionJourney(options: DiningAdmissionJourneyOpti
         const candidate: Plan = {
           operation,
           rawJoin,
+          byQr: rawJoin === null,
           csrf: source,
           current: options.csrf.capture(),
           phase: "Join",
