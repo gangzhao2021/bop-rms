@@ -2034,8 +2034,8 @@ async function journey(ending) {
             settleWith(server, { partNumber: 1, method: "CardMachine", tenderedMinor: null }),
             { code: "TABLE_CHECKOUT_ALREADY_PAID" },
           );
-          // Parts 2 and 3 in cash, no tip, each rounded to 5 cents on its own amount.
-          for (const partNumber of [2, 3]) {
+          // Part 2 in cash, no tip, rounded to 5 cents on its own amount.
+          for (const partNumber of [2]) {
             const cash = await settleWith(server, {
               partNumber,
               tip: { kind: "None" },
@@ -2058,6 +2058,95 @@ async function journey(ending) {
             );
             assert.equal(part.payment.changeMinor, (100000n - amount - rounding).toString());
           }
+          // Part 3 on a guest's phone (TEST Provider): while it is open staff can't take that part
+          // and another guest can't start it; the capture pays exactly part 3.
+          const intents = new Map();
+          const answer = (request, intent) => ({
+            kind: "Snapshot",
+            context: request.context,
+            providerIntentReference: intent.reference,
+            providerTransactionReference: intent.status === "Captured" ? intent.transaction : null,
+            paymentMethod: "OnlineCard",
+            captureMode: "Automatic",
+            status: intent.status,
+            requestedAmount: intent.amount,
+            authorizedAmount:
+              intent.status === "Captured"
+                ? intent.amount
+                : { amountMinor: 0n, currencyCode: "CAD" },
+            capturedAmount:
+              intent.status === "Captured"
+                ? intent.amount
+                : { amountMinor: 0n, currencyCode: "CAD" },
+            refundedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+            observedAt: new Date().toISOString(),
+            evidenceDigest: sha256("intent:" + intent.reference + ":" + intent.status),
+          });
+          const phone = createDiningTableOnlinePayments({
+            scope: ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+            provider: {
+              async createIntent(request) {
+                const intent = intents.get(request.idempotencyKey) ?? {
+                  reference: "pi_TESTSPLIT" + String(intents.size + 1).padStart(4, "0"),
+                  transaction: "ch_TESTSPLIT" + String(intents.size + 1).padStart(4, "0"),
+                  status: "RequiresCustomerAction",
+                  amount: request.amount,
+                };
+                intents.set(request.idempotencyKey, intent);
+                intents.set(intent.reference, intent);
+                return answer(request, intent);
+              },
+              async retrieveIntent(request) {
+                return answer(request, intents.get(String(request.providerIntentReference)));
+              },
+              async cancelIntent(request) {
+                const intent = intents.get(String(request.providerIntentReference));
+                if (intent.status === "RequiresCustomerAction") intent.status = "Cancelled";
+                return answer(request, intent);
+              },
+            },
+            transactions: transactions(),
+            now,
+            nextReference: fresh,
+          });
+          const guestAt = (guestSessionReference) => ({
+            diningSessionReference: sessionReference,
+            guestSessionReference,
+            allowed: async () => true,
+          });
+          const paying = await phone.start(guestAt(guestSession), {
+            operationReference: fresh(),
+            tip: { kind: "None" },
+            partNumber: 3,
+          });
+          const part3 = paying.bill.split.parts[2];
+          assert.deepEqual(
+            [paying.attempt.partNumber, paying.attempt.totalMinor, part3.guestPaying],
+            [3, part3.amountMinor, true],
+          );
+          await assert.rejects(
+            settleWith(server, { partNumber: 3, tip: { kind: "None" }, tenderedMinor: "100000" }),
+            { code: "TABLE_CHECKOUT_GUEST_PAYING" },
+          );
+          await assert.rejects(
+            phone.start(guestAt(tableGuest), {
+              operationReference: fresh(),
+              tip: { kind: "None" },
+              partNumber: 3,
+            }),
+            { code: "TABLE_ONLINE_PAYMENT_ANOTHER_GUEST_PAYING" },
+          );
+          for (const intent of intents.values()) intent.status = "Captured";
+          const captured = await phone.refresh(guestAt(guestSession));
+          assert.deepEqual(
+            [
+              captured.bill.split.parts[2].payment.method,
+              captured.bill.split.parts[2].payment.totalMinor,
+            ],
+            ["Online", part3.amountMinor],
+          );
           const done = await bill();
           assert.deepEqual([done.split.paidParts, done.split.remainingMinor], [3, "0"]);
           assert.equal(done.owed.totalMinor, "0");

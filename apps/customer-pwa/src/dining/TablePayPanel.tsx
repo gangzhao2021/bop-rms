@@ -84,6 +84,8 @@ export function TablePayPanel({
   // AGENTS.md (customer respect): no tip is chosen for the guest; every option, "No tip"
   // included, is offered alike and the guest chooses before paying.
   const [tip, setTip] = useState<TipChoice | null>(null);
+  // WP-2423 item 8 ④: the part of a split bill this guest pays (null: the next one to pay).
+  const [part, setPart] = useState<number | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const operation = useRef<{ key: string; reference: string } | null>(null);
@@ -143,9 +145,14 @@ export function TablePayPanel({
   if (view === null) return problem ? <p role="alert">{problem}</p> : null;
   if (!view.checkingOut && view.state !== "Paid") return null;
 
+  const toPay = view.split?.parts.filter((entry) => entry.status === "ToPay") ?? [];
+  const chosen =
+    view.split === null
+      ? null
+      : (toPay.find((entry) => entry.partNumber === part) ?? toPay[0] ?? null);
   const pay = async () => {
-    if (busy || tip === null) return;
-    const key = tip;
+    if (busy || tip === null || (view.split !== null && chosen === null)) return;
+    const key = `${tip}:${chosen?.partNumber ?? "table"}`;
     // A failed payment is followed by a new one; a lost answer is retried with the same one.
     if (operation.current?.key !== key || view.state === "Failed")
       operation.current = { key, reference: uuidv7() };
@@ -154,7 +161,9 @@ export function TablePayPanel({
     setSubmitted(false);
     setClientSecret(null);
     try {
-      setView(await client.start(operation.current.reference, tipOf(tip)));
+      setView(
+        await client.start(operation.current.reference, tipOf(tip), chosen?.partNumber ?? null),
+      );
     } catch (error) {
       setProblem(problemText(error));
       if (error instanceof TablePaymentClientError && error.code !== "unavailable") void read();
@@ -218,23 +227,40 @@ export function TablePayPanel({
     );
   }
   if (view.state === "Closed") return null;
+  // WP-2423 item 8 ④: a split bill paid part by part — every part is paid.
+  if (view.state === "Paid" && view.split !== null)
+    return (
+      <section className="order-status__card dining-session__table-pay" aria-labelledby="table-pay">
+        <h2 id="table-pay">{t("Pay the bill")}</h2>
+        <p role="status">
+          {t("Every part of the bill is paid ({count} parts). Thank you!", {
+            count: String(view.split.parts.length),
+          })}
+        </p>
+      </section>
+    );
 
-  const subtotal = view.owed.subtotalMinor;
+  // A split bill: the chosen part's own amount, and its tip on its own share before tax.
+  const subtotal = chosen ? chosen.subtotalMinor : view.owed.subtotalMinor;
+  const amountDue = chosen ? chosen.amountMinor : view.owed.totalMinor;
   const total =
-    tip === null
-      ? null
-      : (BigInt(view.owed.totalMinor) + BigInt(tipMinor(tip, subtotal))).toString();
+    tip === null ? null : (BigInt(amountDue) + BigInt(tipMinor(tip, subtotal))).toString();
   return (
-    <section className="order-status__card dining-session__pay" aria-labelledby="table-pay">
+    <section className="order-status__card dining-session__table-pay" aria-labelledby="table-pay">
       <h2 id="table-pay">{t("Pay the bill")}</h2>
       {view.state === "AnotherGuestPaying" ? (
         <p role="status">{t("Someone else at your table is paying the bill right now.")}</p>
       ) : view.state === "Paying" && view.attempt !== null ? (
         <>
           <p>
-            {t("Paying {amount} for the whole table, tip included.", {
-              amount: money(view.attempt.totalMinor),
-            })}
+            {view.attempt.partNumber === null
+              ? t("Paying {amount} for the whole table, tip included.", {
+                  amount: money(view.attempt.totalMinor),
+                })
+              : t("Paying {amount} for part {number}, tip included.", {
+                  amount: money(view.attempt.totalMinor),
+                  number: String(view.attempt.partNumber),
+                })}
           </p>
           {configuration?.mode === "simulation" ? (
             <div className="payment-retry__simulated">
@@ -274,18 +300,67 @@ export function TablePayPanel({
               {t("The payment didn’t go through. You can try again with another card.")}
             </p>
           ) : null}
-          <dl className="order-status__money">
-            <div>
-              <dt>{t("Subtotal")}</dt>
-              <dd>{money(view.owed.subtotalMinor)}</dd>
+          {view.split !== null ? (
+            <div className="dining-session__split">
+              <p>
+                {view.split.mode === "Even"
+                  ? t("Your table split the bill evenly in {count} parts.", {
+                      count: String(view.split.parts.length),
+                    })
+                  : t("Your table split the bill by rounds, in {count} parts.", {
+                      count: String(view.split.parts.length),
+                    })}{" "}
+                {t("Pay one part; you can pay another one after it.")}
+              </p>
+              <fieldset>
+                <legend>{t("Which part you pay")}</legend>
+                {view.split.parts.map((entry) => (
+                  <label key={entry.partNumber} data-status={entry.status}>
+                    <input
+                      type="radio"
+                      name="table-part"
+                      disabled={entry.status !== "ToPay"}
+                      checked={chosen?.partNumber === entry.partNumber}
+                      onChange={() => setPart(entry.partNumber)}
+                    />{" "}
+                    {t("Part {number} · {amount}", {
+                      number: String(entry.partNumber),
+                      amount: money(entry.amountMinor),
+                    })}
+                    {entry.status === "Paid"
+                      ? ` · ${t("paid")}`
+                      : entry.status === "Paying" || entry.status === "Mine"
+                        ? ` · ${t("being paid")}`
+                        : ""}
+                  </label>
+                ))}
+              </fieldset>
+              <p>
+                {t("{paid} of {count} parts paid · {amount} to go", {
+                  paid: String(view.split.paidParts),
+                  count: String(view.split.parts.length),
+                  amount: money(view.split.remainingMinor),
+                })}
+              </p>
             </div>
-            <div>
-              <dt>{t("Tax")}</dt>
-              <dd>{money(view.owed.taxMinor)}</dd>
-            </div>
-          </dl>
+          ) : (
+            <dl className="order-status__money">
+              <div>
+                <dt>{t("Subtotal")}</dt>
+                <dd>{money(view.owed.subtotalMinor)}</dd>
+              </div>
+              <div>
+                <dt>{t("Tax")}</dt>
+                <dd>{money(view.owed.taxMinor)}</dd>
+              </div>
+            </dl>
+          )}
           <fieldset className="dining-session__tip">
-            <legend>{t("Tip (once, for the whole table)")}</legend>
+            <legend>
+              {view.split !== null
+                ? t("Tip (for your part)")
+                : t("Tip (once, for the whole table)")}
+            </legend>
             {(["0", "10", "15", "18"] as const).map((choice) => (
               <label key={choice}>
                 <input
@@ -310,7 +385,13 @@ export function TablePayPanel({
           <button
             type="button"
             className="dining-session__pay-button"
-            disabled={busy || tip === null || !view.consistent || view.owed.totalMinor === "0"}
+            disabled={
+              busy ||
+              tip === null ||
+              !view.consistent ||
+              view.owed.totalMinor === "0" ||
+              (view.split !== null && chosen === null)
+            }
             onClick={() => void pay()}
           >
             {busy

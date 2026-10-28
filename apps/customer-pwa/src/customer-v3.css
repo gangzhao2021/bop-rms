@@ -62,7 +62,8 @@
 .customer-page .entry-action,
 .customer-page .order-status__retry,
 .customer-page .shell-action,
-.customer-page .dining-session__pay {
+.customer-page a.dining-session__pay,
+.customer-page .dining-session__pay-button {
   border-color: var(--bop-color-accent);
   background: var(--bop-color-accent);
   color: var(--bop-color-on-accent-fill);
@@ -175,4 +176,44 @@
 }
 .customer-page .store-strip__stopped {
   color: var(--bop-color-text-default);
+}
+
+/* The guest's table payment (pay-later and split bill): the one next step is the pay button. */
+.customer-page .dining-session__pay-button {
+  display: inline-flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  margin-top: var(--bop-space-3);
+  border: 1px solid var(--bop-color-accent);
+  border-radius: var(--bop-radius-control);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.customer-page .dining-session__split fieldset,
+.customer-page .dining-session__tip {
+  display: grid;
+  gap: var(--bop-space-1);
+  margin: var(--bop-space-3) 0 0;
+  padding: 0;
+  border: 0;
+}
+.customer-page .dining-session__split legend,
+.customer-page .dining-session__tip legend {
+  margin-bottom: var(--bop-space-1);
+  font-weight: 600;
+}
+.customer-page .dining-session__split label,
+.customer-page .dining-session__tip label {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: var(--bop-space-2);
+}
+.customer-page .dining-session__split label[data-status="Paid"],
+.customer-page .dining-session__split label[data-status="Paying"],
+.customer-page .dining-session__split label[data-status="Mine"] {
+  color: var(--bop-color-text-muted);
 }

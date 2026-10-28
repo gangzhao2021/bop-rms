@@ -409,6 +409,107 @@ const syntheticStripe = `window.Stripe = function() { return {
 test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole table", () => {
   test.use({ serviceWorkers: "block" });
 
+  // WP-2423 item 8 ④ (Figma "分单 / AA · v3"): the table split the bill evenly in three; this
+  // guest pays one part with a tip on that part's own share; nobody's name is shown.
+  test("pays one part of a split bill with its own tip", async ({ page }) => {
+    await page.route("**/bff/customer/payment-configuration", (route) =>
+      route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          mode: "stripe",
+          publishableKey: "pk_test_SyntheticBrowserOnly",
+          returnUrl: "https://synthetic-return.invalid/return",
+          wallets: false,
+          internalTestEntry: false,
+        },
+      }),
+    );
+    await page.route("https://js.stripe.com/**", (route) =>
+      route.fulfill({ contentType: "application/javascript", body: syntheticStripe }),
+    );
+    const payLater = {
+      schemaVersion: 1,
+      session: {
+        ...session.session,
+        paymentTiming: "PayLater",
+        rounds: [{ ...session.session.rounds[0], payment: "OnTableBill" }],
+      },
+    };
+    let paying = false;
+    const starts: unknown[] = [];
+    const part = (partNumber: number, status: string) => ({
+      partNumber,
+      amountMinor: "3164",
+      subtotalMinor: "2800",
+      status,
+    });
+    await page.route("**/api/v1/dine-in/table-payment", (route) => {
+      const body = route.request().postDataJSON() as { action: string };
+      if (body.action === "Start") {
+        starts.push(body);
+        paying = true;
+      }
+      return route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          payment: {
+            tableLabel: "8",
+            checkingOut: true,
+            rounds: [],
+            owed: { subtotalMinor: "5600", taxMinor: "728", totalMinor: "6328" },
+            consistent: true,
+            state: paying ? "Paying" : "NotPaid",
+            attempt: paying ? { totalMinor: "3584", tipMinor: "420", partNumber: 2 } : null,
+            receipt: null,
+            split: {
+              mode: "Even",
+              paidParts: 1,
+              remainingMinor: "6328",
+              parts: [part(1, "Paid"), part(2, paying ? "Mine" : "ToPay"), part(3, "Paying")],
+            },
+          },
+        },
+      });
+    });
+    await page.route("**/api/v1/dine-in/table-payment/handoff", (route) =>
+      route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: { schemaVersion: 1, clientSecret: "pi_SYNTHETIC_secret_SYNTHETIC" },
+      }),
+    );
+    await enterTable(page, () => ({ status: 200, json: payLater }));
+    const pay = page.getByRole("region", { name: "Pay the bill" });
+    await expect(pay).toContainText("Your table split the bill evenly in 3 parts.");
+    await expect(pay).toContainText("1 of 3 parts paid · $63.28 to go");
+    await expect(pay.getByRole("radio", { name: /^Part 1 · \$31\.64 · paid/u })).toBeDisabled();
+    await expect(
+      pay.getByRole("radio", { name: /^Part 3 · \$31\.64 · being paid/u }),
+    ).toBeDisabled();
+    await expect(pay.getByRole("radio", { name: /^Part 2 · \$31\.64$/u })).toBeChecked();
+    // The tip is on this part's own share before tax: 15% of $28.00.
+    await pay.getByRole("radio", { name: /15% · \$4\.20/u }).check();
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await pay.screenshot({ path: `test-results/guest-split-pay-${width}.png` });
+    }
+    await pay.getByRole("button", { name: "Pay $35.84" }).click();
+    await expect(pay).toContainText("Paying $35.84 for part 2, tip included.");
+    expect(starts).toEqual([
+      {
+        action: "Start",
+        operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+        tip: { kind: "Percent", percent: 15 },
+        partNumber: 2,
+      },
+    ]);
+    await expectNoInternalText(page);
+  });
+
   test("chooses the tip once, pays with a card and gets the whole table's receipt", async ({
     page,
   }) => {
