@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import {
   createPostgresDiningOrderItemStateReader,
   createPostgresMerchantOrderIndex,
+  createPostgresOrderPayLaterConfirmationStore,
   createPostgresStaffOrderCancellationReader,
   listStoreDiningBatchPaymentDeadlines,
   listStoreOrderBatchPayments,
@@ -41,6 +43,10 @@ import type { MerchantBffService } from "./merchant-bff.js";
  *   (refunded line by line, online payments only); the rest must be served.
  * - BeingMade: the items left are being made (or were paid on the card machine and cannot be
  *   cancelled one by one): serve them, or have the kitchen finish them.
+ * - OnTableBill: a round of a table that pays at the end, not paid yet (v15 2026-10-28): serve
+ *   its dishes, or take the ones not started off the bill before payment.
+ * - PaidWithTable: a round paid with the table's one payment while dishes are still to come: serve
+ *   them; dishes of a paid table are not cancelled here (a manager gives cash back on the table).
  * - RefundOnCardMachine: already cancelled; refund `refund` on the card machine and record it.
  * - Refunding: already cancelled; the online refund is still being made.
  */
@@ -52,6 +58,8 @@ export type TableCloseRoundState =
   | "NotStarted"
   | "PartlyStarted"
   | "BeingMade"
+  | "OnTableBill"
+  | "PaidWithTable"
   | "RefundOnCardMachine"
   | "Refunding";
 
@@ -225,6 +233,30 @@ export function createMerchantDiningTableClosePlan(options: {
               ])
             ).map((record) => [String(record.orderBatchReference), record]),
           );
+          // v15 2026-10-28: rounds of a table that pays at the end have no payment of their own
+          // (the table pays once, or hasn't yet), so they are never refunded round by round here.
+          const payLater = new Set(
+            (
+              await createPostgresOrderPayLaterConfirmationStore({
+                ...owner,
+                quoteVersion: 2,
+                sha256: (value: string) =>
+                  "sha256:" + createHash("sha256").update(value).digest("hex"),
+                authorize: allowed,
+              }).listByOrders({ transaction: tx, orderReferences: [orderReference] })
+            ).map((confirmation) => String(confirmation.orderBatchReference)),
+          );
+          // Once the table has paid, every pay-later round is paid with it (a round comped or
+          // emptied to nothing is no payment line, but it is still the paid table's).
+          const tablePaid =
+            payLater.size > 0 &&
+            (
+              await createPostgresDiningTableSettlementStore({
+                scope,
+                authorize: async (_t, value) =>
+                  value.orderReference === orderReference && (await stillAllowed()),
+              }).listByOrders(tx, [orderReference])
+            ).length > 0;
           let configuration: Awaited<ReturnType<typeof options.resolveRefundConfiguration>> | null =
             null;
           /** What a whole-round cancellation refunds now (all that is left, tip included). */
@@ -303,6 +335,13 @@ export function createMerchantDiningTableClosePlan(options: {
               continue;
             }
             if (open.length === 0) continue;
+            if (payLater.has(reference)) {
+              rounds.push({
+                ...base,
+                state: tablePaid ? "PaidWithTable" : "OnTableBill",
+              });
+              continue;
+            }
             if (batch.acceptance === null) {
               const left = await remaining(reference);
               if (left === null) {

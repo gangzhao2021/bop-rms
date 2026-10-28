@@ -129,6 +129,18 @@ export function guestsLeftRoundText(
                 readyItemCount: String(round.readyItemCount),
               },
             );
+    case "OnTableBill":
+      // v15 2026-10-28: a round of a table that pays at the end, not paid yet.
+      return t(
+        "{name}: {openItemCount} not served yet. Serve them when they're ready (Serve all on the table). Dishes the kitchen hasn't started can come off the bill before the table pays.",
+        { name: name, openItemCount: items(round.openItemCount) },
+      );
+    case "PaidWithTable":
+      // v15 2026-10-28: paid with the table's one payment; dishes still to come.
+      return t(
+        "{name}: paid with the table, {openItemCount} not served yet. Serve them when they're ready, then close the table. If the guests left without them, a manager gives the money back from the table's payment.",
+        { name: name, openItemCount: items(round.openItemCount) },
+      );
     case "RefundOnCardMachine":
       return t(
         "{name}: cancelled. Refund {value} on the card machine and record it on the Orders page.",
@@ -239,6 +251,22 @@ export function TableGuestsLeft({
     );
   const plan = load.plan;
   if (plan.rounds.length === 0) return null;
+  // v15 2026-10-28: a table that pays at the end — what staff do is serve its dishes (nothing to
+  // cancel or refund round by round here), so everyone sees it, not "Check again".
+  if (
+    plan.rounds.every((round) => round.state === "OnTableBill" || round.state === "PaidWithTable")
+  )
+    return (
+      <section aria-label={t("Dishes still to serve")} className="dining-table-guests-left">
+        <ul>
+          {plan.rounds.map((round) => (
+            <li key={round.orderBatchReference} data-round-state={round.state}>
+              {guestsLeftRoundText(round, timeZone, Date.now(), null)}
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
   if (!canResolve)
     return (
       <p role="note" className="dining-table-guests-left">

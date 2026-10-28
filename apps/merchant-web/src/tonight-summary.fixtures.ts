@@ -128,6 +128,14 @@ export function tonightSummaryFixture(): Record<string, unknown> {
       owedMinor: "3430",
       openedMinutes: 160,
     },
+    // Paid in full, guests still at the table (v15 2026-10-28 finding a): listed apart.
+    {
+      tableLabel: "3",
+      phase: "Closing",
+      paymentTiming: "PayLater",
+      owedMinor: "0",
+      openedMinutes: 75,
+    },
   ];
   const byChannel = (["Online", "CardMachine", "Cash"] as const).map((channel) => ({
     channel,

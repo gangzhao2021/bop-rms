@@ -25,6 +25,9 @@ export const tableCloseRoundStates = [
   "NotStarted",
   "PartlyStarted",
   "BeingMade",
+  // v15 2026-10-28: rounds of a table that pays at the end (no payment of their own).
+  "OnTableBill",
+  "PaidWithTable",
   "RefundOnCardMachine",
   "Refunding",
 ] as const;

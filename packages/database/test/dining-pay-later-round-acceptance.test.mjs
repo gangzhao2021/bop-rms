@@ -1948,9 +1948,38 @@ async function journey(ending) {
               : digit <= 7n
                 ? 5n - digit
                 : 10n - digit;
+        // v15 2026-10-28 (b): the close check of a table that pays at the end, its dishes not served
+        // yet, says what staff do — never fails (it used to look for a per-round payment).
+        const closePlan = () =>
+          createMerchantDiningTableClosePlan({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            resolveRefundConfiguration: async () => ({
+              providerAccountReference: provider,
+              environment: "Test",
+            }),
+          })({
+            ...as(server),
+            query: { orderReference, diningSessionReference: sessionReference },
+          });
+        assert.deepEqual(
+          (await closePlan()).rounds.map((round) => [round.sequence, round.state, round.refund]),
+          [[1, "OnTableBill", null]],
+        );
         const operation = fresh();
         const paid = await settleWith(server, { operationReference: operation });
         assert.equal(paid.status, "Recorded");
+        // Paid in full while round 1's dishes are still to come: serve them, then close.
+        const afterPaying = await closePlan();
+        assert.deepEqual(
+          afterPaying.rounds.map((round) => [
+            round.sequence,
+            round.state,
+            round.openItemCount,
+            round.refund,
+          ]),
+          [[1, "PaidWithTable", items1.reduce((sum, item) => sum + item.quantity, 0), null]],
+        );
         assert.deepEqual(paid.bill.settlement, {
           method: "Cash",
           roundsMinor: (round1Minor + round2Minor).toString(),

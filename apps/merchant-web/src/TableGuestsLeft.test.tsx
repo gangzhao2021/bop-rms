@@ -223,3 +223,29 @@ it("WP-2423: a plan claiming more ready items than started is refused", () => {
   const value = { ...wire, rounds: wire.rounds.map((round) => ({ ...round, readyItemCount: 1 })) };
   expect(() => parseTableClosePlan(value, { order: id(3), session: id(2) })).toThrow();
 });
+
+it("v15 2026-10-28 (b): a table that pays at the end says to serve its dishes, never to cancel and refund them", () => {
+  const now = Date.parse("2026-10-28T01:00:00.000Z");
+  for (const state of ["OnTableBill", "PaidWithTable"] as const) {
+    expect(
+      parseTableClosePlan(
+        {
+          ...wire,
+          rounds: [{ ...wire.rounds[0], state, refund: null }],
+        },
+        { order: id(3), session: id(2) },
+      ).rounds[0]?.state,
+    ).toBe(state);
+    expect(resolvesOnConfirm(round({ state, refund: null }))).toBe(false);
+  }
+  expect(
+    guestsLeftRoundText(round({ state: "OnTableBill", refund: null, sequence: 1 }), undefined, now),
+  ).toContain("Serve them when they're ready");
+  expect(
+    guestsLeftRoundText(
+      round({ state: "PaidWithTable", refund: null, sequence: 1 }),
+      undefined,
+      now,
+    ),
+  ).toContain("paid with the table, 2 items not served yet");
+});

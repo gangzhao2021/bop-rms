@@ -64,7 +64,10 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
       // Open tables and the write-off.
       "Table 12",
       "$52.10",
-      "$86.40 to take before closing",
+      // Only the tables that still owe are counted under "not paid yet" (v15 finding a).
+      "2 tables · $86.40 to take before closing",
+      "Paid, guests still seated",
+      "Table 3",
       "Guests left without paying (written off)",
       "$23.04",
       // Listed, not sales.
@@ -73,6 +76,15 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
       "Rounds and orders cancelled unpaid",
     ])
       expect(html, text).toContain(text);
+  });
+  it("v15 finding a: never lists a paid table under not paid yet at $0.00", () => {
+    const html = render(tonightSummaryFixture());
+    const notPaid = html.slice(
+      html.indexOf("Tables not paid yet"),
+      html.indexOf("Paid, guests still seated"),
+    );
+    expect(notPaid).not.toContain("Table 3");
+    expect(notPaid).not.toContain("$0.00");
   });
   it("shows the closing reminder in the last 8 hours of the business day only", () => {
     const endsAt = "2026-10-28T08:00:00.000Z";

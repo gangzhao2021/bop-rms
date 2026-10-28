@@ -5990,4 +5990,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Card and cash taken since then are not counted yet. At closing, check the card machine's batch and the drawer's table cash against your paper slips; once the slips are entered, this page and tomorrow's day-end settlement include them.":
     "此后收的刷卡和现金还没算进来。打烊时用刷卡机批结单和抽屉里的桌台现金对照纸单；纸单补录后，这一页和明早的日结都会算上。",
   "Business day from {startsAt}": "营业日从 {startsAt} 开始",
+  "Paid, guests still seated": "已付清，客人还在座",
+  "{name}: {openItemCount} not served yet. Serve them when they're ready (Serve all on the table). Dishes the kitchen hasn't started can come off the bill before the table pays.":
+    "{name}：还有 {openItemCount}没上桌。做好后上桌（桌台上点“全部上桌”）。后厨还没开始做的菜，可以在付款前从账单删掉。",
+  "{name}: paid with the table, {openItemCount} not served yet. Serve them when they're ready, then close the table. If the guests left without them, a manager gives the money back from the table's payment.":
+    "{name}：已随整桌付清，还有 {openItemCount}没上桌。做好后上桌，再关台。如果客人没等到就走了，由经理从这桌的付款里退钱。",
+  "Dishes still to serve": "还没上的菜",
 });

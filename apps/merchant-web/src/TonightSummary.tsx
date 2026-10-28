@@ -123,7 +123,10 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
     cash = tonightChannel(summary, "Cash");
   const machineNet = machine === null ? 0n : BigInt(machine.netCollectedMinor);
   const drawer = cash === null ? 0n : BigInt(cash.netCollectedMinor);
-  const open = summary.openTables;
+  // v15 2026-10-28 (a): a table paid in full whose guests are still seated owes nothing; it is
+  // listed apart, never as "not paid yet" at $0.00.
+  const open = summary.openTables.filter((table) => table.owedMinor !== "0");
+  const paidSeated = summary.openTables.filter((table) => table.owedMinor === "0");
   const c = summary.cancelled;
   return (
     <div className="tonight">
@@ -257,14 +260,14 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
               {open.map((table) => (
                 <Row
                   key={table.tableLabel}
-                  tone={table.owedMinor !== "0" ? "action" : undefined}
+                  tone="action"
                   label={t("Table {table}", { table: table.tableLabel })}
                   detail={
                     (table.phase === "Closing" ? t("Checking out") : t("Seated")) +
                     " · " +
                     t("open {minutes} min", { minutes: String(table.openedMinutes) })
                   }
-                  value={table.owedMinor === "0" ? t("Paid") : money(table.owedMinor)}
+                  value={money(table.owedMinor)}
                 />
               ))}
             </dl>
@@ -277,6 +280,18 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
               )}
             </p>
           </>
+        ) : null}
+        {paidSeated.length > 0 ? (
+          <dl>
+            <Row
+              label={t("Paid, guests still seated")}
+              detail={countOf(paidSeated.length, "table")}
+              value={paidSeated
+                .map((table) => t("Table {table}", { table: table.tableLabel }))
+                .join(", ")}
+              muted
+            />
+          </dl>
         ) : null}
         {s.unpaidWriteOffCount > 0 ? (
           <dl>
