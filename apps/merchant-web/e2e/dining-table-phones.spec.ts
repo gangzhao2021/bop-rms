@@ -138,10 +138,21 @@ test("@production staff see the phones at a table, pause joining by scan and rem
   await expect(phones.getByRole("button", { name: "Resume joining by scan" })).toBeVisible();
 
   // Remove phone 2 (asked once more first).
+  // Each remove button names its phone (a screen reader can tell them apart): phone 1 once (its
+  // row), phone 2 in its row and in the "just joined" notice (the same action).
+  const removeNames = await phones
+    .getByRole("button", { name: /^Remove phone \d+ from this table$/u })
+    .allTextContents();
+  expect(removeNames.sort()).toEqual([
+    "Remove phone 1 from this table",
+    "Remove phone 2 from this table",
+    "Remove phone 2 from this table",
+  ]);
+  await expect(phones.getByRole("button", { name: "Remove from this table" })).toHaveCount(0);
   await phones
     .getByRole("listitem")
     .filter({ hasText: "Phone 2" })
-    .getByRole("button", { name: "Remove from this table" })
+    .getByRole("button", { name: "Remove phone 2 from this table" })
     .click();
   await expect(phones).toContainText("Remove phone 2? It can no longer see this table or order.");
   await phones.getByRole("button", { name: "Remove phone 2" }).click();

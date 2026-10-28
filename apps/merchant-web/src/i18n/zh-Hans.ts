@@ -6084,4 +6084,5 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Tables that pay at the end. Rapid ordering always waits: a phone's 4th round or a table's 7th within 10 minutes.":
     "只用于最后结账的桌。短时间大量下单总会先等确认：同一台手机 10 分钟内第 4 轮，或同一桌第 7 轮。",
   "A manager changes this.": "由经理修改。",
+  "Remove phone {number} from this table": "把手机 {number} 移出这桌",
 });

@@ -25,7 +25,7 @@ export function newPhones(phones: readonly TablePhone[], now: number): readonly 
 /**
  * WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN (decisions 2–4): on the table page, the phones at the
  * table, numbered in the order they joined. A phone that just joined is pointed out, with
- * "Remove from this table" and "Pause joining by scan" right there. Staff can pause or resume
+ * "Remove phone N from this table" and "Pause joining by scan" right there. Staff can pause or resume
  * joining by scan at any time; while paused, new guests need a code from staff or the host.
  */
 export function TablePanelPhones({
@@ -131,7 +131,7 @@ export function TablePanelPhones({
                 disabled={disabled}
                 onClick={() => setConfirming(phone.participantReference)}
               >
-                {t("Remove from this table")}
+                {t("Remove phone {number} from this table", { number: String(phone.phoneNumber) })}
               </button>
               {state.paused ? null : (
                 <button type="button" disabled={disabled} onClick={() => pause(true)}>
@@ -195,7 +195,7 @@ export function TablePanelPhones({
                 disabled={disabled}
                 onClick={() => setConfirming(phone.participantReference)}
               >
-                {t("Remove from this table")}
+                {t("Remove phone {number} from this table", { number: String(phone.phoneNumber) })}
               </button>
             )}
           </li>
