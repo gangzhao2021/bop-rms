@@ -17,6 +17,7 @@ import { createDiningPayLaterRound } from "../../../apps/api/src/dining-pay-late
 import {
   createMerchantDiningTableBillRead,
   createMerchantDiningTableSettle,
+  createMerchantDiningTableSplit,
 } from "../../../apps/api/src/merchant-dining-table-checkout.ts";
 import { createMerchantDiningUnpaidDeparture } from "../../../apps/api/src/merchant-dining-unpaid-departure.ts";
 import { createMerchantDiningUnpaidItemRemoval } from "../../../apps/api/src/merchant-dining-unpaid-item-removal.ts";
@@ -118,6 +119,15 @@ it("a manager comps and discounts served dishes before the table pays; it stays 
 it("a table comped in full owes nothing and closes without a payment", () =>
   journey("CompedWhole"));
 
+// WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL: the table splits the bill evenly in three; each part is
+// paid once, by its own method, with its own tip and cash rounding; a whole-table payment, a
+// second payment of a part and a new split once paying started are all refused.
+it("a table splits the bill evenly and pays it part by part", () => journey("PaidSplit"));
+// WP-2423 item 8 ④: a split table pays one part in cash (some of it refunded), the guests leave;
+// the manager writes off exactly the parts still unpaid, and the day's ledger keeps each.
+it("a split table that paid one part and left is written off for the rest", () =>
+  journey("SplitWrittenOff"));
+
 async function journey(ending) {
   await withIsolatedDatabase(
     {
@@ -130,7 +140,11 @@ async function journey(ending) {
               ? "wp2423_plcomp"
               : ending === "CompedWhole"
                 ? "wp2423_plcwhole"
-                : "wp2423_plon",
+                : ending === "PaidSplit"
+                  ? "wp2423_plsplit"
+                  : ending === "SplitWrittenOff"
+                    ? "wp2423_plsplwo"
+                    : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -1966,6 +1980,286 @@ async function journey(ending) {
           (await closePlan()).rounds.map((round) => [round.sequence, round.state, round.refund]),
           [[1, "OnTableBill", null]],
         );
+        if (ending === "PaidSplit" || ending === "SplitWrittenOff") {
+          const splitWith = (command) =>
+            createMerchantDiningTableSplit({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+              nextReference: fresh,
+            })({
+              ...as(server),
+              command: {
+                operationReference: fresh(),
+                diningSessionReference: sessionReference,
+                mode: "Even",
+                people: 3,
+                rounds: null,
+                ...command,
+              },
+            });
+          const billMinor = round1Minor + round2Minor;
+          const split = await splitWith({});
+          assert.equal(split.status, "Recorded");
+          const parts = split.bill.split.parts;
+          const base = billMinor / 3n,
+            extra = billMinor % 3n;
+          assert.deepEqual(
+            parts.map((part) => part.amountMinor),
+            [0n, 1n, 2n].map((index) => (index < extra ? base + 1n : base).toString()),
+          );
+          assert.equal(split.bill.split.mode, "Even");
+          assert.equal(split.bill.owed.totalMinor, billMinor.toString());
+          // The bill is split: one payment for the whole table, or for no part, is refused.
+          await assert.rejects(settleWith(server, {}), { code: "TABLE_CHECKOUT_INPUT_INVALID" });
+          await assert.rejects(settleWith(server, { partNumber: 4 }), {
+            code: "TABLE_CHECKOUT_INPUT_INVALID",
+          });
+          const ledgerNow = () =>
+            transactions().run((tx) =>
+              createPostgresStoreSalesPaymentLedger({
+                scope: { ...ownerScope, providerAccountReference: provider, environment: "Test" },
+                authorize: async () => true,
+              })(tx, {
+                startsAt: time(-minutes(120)),
+                endsAt: new Date(Date.now() + 1000).toISOString(),
+                observedAt: new Date(Date.now() + 1000).toISOString(),
+              }),
+            );
+          if (ending === "SplitWrittenOff") {
+            // Part 1 in cash, no tip; a manager gives $5.00 of it back (from that part's cash).
+            const cashPart = await settleWith(server, {
+              partNumber: 1,
+              tip: { kind: "None" },
+              tenderedMinor: "100000",
+            });
+            const part1Total = BigInt(cashPart.bill.split.parts[0].payment.totalMinor);
+            const refund = await createMerchantDiningTableCashRefund({
+              persistence: persistenceOf(manager),
+              authentication: manager.authentication,
+              nextReference: fresh,
+            })({
+              ...as(manager),
+              command: {
+                orderReference,
+                operationReference: fresh(),
+                amountMinor: "500",
+                reasonCode: "FOOD_ISSUE",
+                partNumber: 1,
+              },
+            });
+            assert.equal(refund.status, "Recorded");
+            // The guests leave: what is written off is exactly the parts not paid.
+            const served = await cookAndServeRound1();
+            const left = await departure(manager, served.currentOrderVersion);
+            assert.ok(left);
+            const [writeOff] = await rows(
+              "SELECT written_off_minor::text AS amount FROM rms_payment.order_unpaid_write_off WHERE order_id=$1",
+              [orderReference],
+            );
+            const unpaid = BigInt(parts[1].amountMinor) + BigInt(parts[2].amountMinor);
+            assert.equal(writeOff.amount, unpaid.toString());
+            await assert.rejects(
+              settleWith(server, { partNumber: 2, tip: { kind: "None" }, tenderedMinor: "100000" }),
+              { code: "TABLE_CHECKOUT_ALREADY_PAID" },
+            );
+            const day = await ledgerNow();
+            assert.deepEqual(
+              day.unpaidWriteOffs.map((entry) => [entry.orderReference, entry.amountMinor]),
+              [[orderReference, unpaid]],
+            );
+            assert.deepEqual(
+              [day.settlement.cashTaken.count, day.settlement.cashTaken.amountMinor],
+              [1, part1Total],
+            );
+            assert.deepEqual(day.settlement.cashRefunded, { count: 1, amountMinor: 500n });
+            return;
+          }
+          // Part 1 on the card machine with a 15 % tip on its own share before tax.
+          const card = await settleWith(server, {
+            partNumber: 1,
+            method: "CardMachine",
+            tenderedMinor: null,
+            slipReference: "TEST 0001",
+          });
+          const part1 = card.bill.split.parts[0];
+          const tip1 = (BigInt(part1.subtotalMinor) * 15n + 50n) / 100n;
+          assert.deepEqual(part1.payment, {
+            method: "CardMachine",
+            tipMinor: tip1.toString(),
+            roundingMinor: "0",
+            totalMinor: (BigInt(part1.amountMinor) + tip1).toString(),
+            tenderedMinor: null,
+            changeMinor: null,
+            recordedAt: part1.payment.recordedAt,
+            recordedAfterOutage: false,
+          });
+          assert.equal(card.bill.split.paidParts, 1);
+          // Locked once a part is paid; a part is paid once.
+          await assert.rejects(splitWith({ people: 2 }), { code: "TABLE_CHECKOUT_SPLIT_LOCKED" });
+          await assert.rejects(
+            settleWith(server, { partNumber: 1, method: "CardMachine", tenderedMinor: null }),
+            { code: "TABLE_CHECKOUT_ALREADY_PAID" },
+          );
+          // Part 2 in cash, no tip, rounded to 5 cents on its own amount.
+          for (const partNumber of [2]) {
+            const cash = await settleWith(server, {
+              partNumber,
+              tip: { kind: "None" },
+              tenderedMinor: "100000",
+            });
+            const part = cash.bill.split.parts[partNumber - 1];
+            const amount = BigInt(part.amountMinor);
+            const digit = amount % 10n;
+            const rounding =
+              digit === 0n || digit === 5n
+                ? 0n
+                : digit <= 2n
+                  ? -digit
+                  : digit <= 7n
+                    ? 5n - digit
+                    : 10n - digit;
+            assert.deepEqual(
+              [part.payment.method, part.payment.roundingMinor, part.payment.totalMinor],
+              ["Cash", rounding.toString(), (amount + rounding).toString()],
+            );
+            assert.equal(part.payment.changeMinor, (100000n - amount - rounding).toString());
+          }
+          // Part 3 on a guest's phone (TEST Provider): while it is open staff can't take that part
+          // and another guest can't start it; the capture pays exactly part 3.
+          const intents = new Map();
+          const answer = (request, intent) => ({
+            kind: "Snapshot",
+            context: request.context,
+            providerIntentReference: intent.reference,
+            providerTransactionReference: intent.status === "Captured" ? intent.transaction : null,
+            paymentMethod: "OnlineCard",
+            captureMode: "Automatic",
+            status: intent.status,
+            requestedAmount: intent.amount,
+            authorizedAmount:
+              intent.status === "Captured"
+                ? intent.amount
+                : { amountMinor: 0n, currencyCode: "CAD" },
+            capturedAmount:
+              intent.status === "Captured"
+                ? intent.amount
+                : { amountMinor: 0n, currencyCode: "CAD" },
+            refundedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+            observedAt: new Date().toISOString(),
+            evidenceDigest: sha256("intent:" + intent.reference + ":" + intent.status),
+          });
+          const phone = createDiningTableOnlinePayments({
+            scope: ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+            provider: {
+              async createIntent(request) {
+                const intent = intents.get(request.idempotencyKey) ?? {
+                  reference: "pi_TESTSPLIT" + String(intents.size + 1).padStart(4, "0"),
+                  transaction: "ch_TESTSPLIT" + String(intents.size + 1).padStart(4, "0"),
+                  status: "RequiresCustomerAction",
+                  amount: request.amount,
+                };
+                intents.set(request.idempotencyKey, intent);
+                intents.set(intent.reference, intent);
+                return answer(request, intent);
+              },
+              async retrieveIntent(request) {
+                return answer(request, intents.get(String(request.providerIntentReference)));
+              },
+              async cancelIntent(request) {
+                const intent = intents.get(String(request.providerIntentReference));
+                if (intent.status === "RequiresCustomerAction") intent.status = "Cancelled";
+                return answer(request, intent);
+              },
+            },
+            transactions: transactions(),
+            now,
+            nextReference: fresh,
+          });
+          const guestAt = (guestSessionReference) => ({
+            diningSessionReference: sessionReference,
+            guestSessionReference,
+            allowed: async () => true,
+          });
+          const paying = await phone.start(guestAt(guestSession), {
+            operationReference: fresh(),
+            tip: { kind: "None" },
+            partNumber: 3,
+          });
+          const part3 = paying.bill.split.parts[2];
+          assert.deepEqual(
+            [paying.attempt.partNumber, paying.attempt.totalMinor, part3.guestPaying],
+            [3, part3.amountMinor, true],
+          );
+          await assert.rejects(
+            settleWith(server, { partNumber: 3, tip: { kind: "None" }, tenderedMinor: "100000" }),
+            { code: "TABLE_CHECKOUT_GUEST_PAYING" },
+          );
+          await assert.rejects(
+            phone.start(guestAt(tableGuest), {
+              operationReference: fresh(),
+              tip: { kind: "None" },
+              partNumber: 3,
+            }),
+            { code: "TABLE_ONLINE_PAYMENT_ANOTHER_GUEST_PAYING" },
+          );
+          for (const intent of intents.values()) intent.status = "Captured";
+          const captured = await phone.refresh(guestAt(guestSession));
+          assert.deepEqual(
+            [
+              captured.bill.split.parts[2].payment.method,
+              captured.bill.split.parts[2].payment.totalMinor,
+            ],
+            ["Online", part3.amountMinor],
+          );
+          const done = await bill();
+          assert.deepEqual([done.split.paidParts, done.split.remainingMinor], [3, "0"]);
+          // The day's ledger: three payments, one per part, each in its own channel; their round
+          // allocations add up to the bill.
+          const day = await ledgerNow();
+          assert.deepEqual(
+            [
+              day.settlement.cardMachineTaken.count,
+              day.settlement.cashTaken.count,
+              day.settlement.onlineCaptured.count,
+            ],
+            [1, 1, 1],
+          );
+          assert.equal(
+            day.payments
+              .filter((payment) => payment.orderReference === orderReference)
+              .reduce((sum, payment) => sum + payment.orderAllocationMinor, 0n),
+            billMinor,
+          );
+          assert.equal(done.owed.totalMinor, "0");
+          assert.ok(done.rounds.every((round) => round.paid || round.totalMinor === "0"));
+          assert.ok(done.consistent);
+          // In the database: three payments under one plan; each round's lines add up to it.
+          const lines = await rows(
+            `SELECT r.order_batch_id::text AS batch,sum(r.round_minor)::text AS paid,count(DISTINCT s.part_number) AS parts
+ FROM rms_payment.dining_table_settlement_round r JOIN rms_payment.dining_table_settlement s ON s.settlement_id=r.settlement_id
+ WHERE s.order_id=$1 GROUP BY r.order_batch_id ORDER BY 1`,
+            [orderReference],
+          );
+          assert.deepEqual(
+            lines.map((line) => line.paid).sort(),
+            [round1Minor, round2Minor]
+              .filter((minor) => minor > 0n)
+              .map(String)
+              .sort(),
+          );
+          assert.equal(
+            (
+              await rows(
+                "SELECT count(*)::int AS n FROM rms_payment.dining_table_settlement WHERE order_id=$1 AND split_plan_id IS NOT NULL",
+                [orderReference],
+              )
+            )[0].n,
+            3,
+          );
+          return;
+        }
         const operation = fresh();
         const paid = await settleWith(server, { operationReference: operation });
         assert.equal(paid.status, "Recorded");

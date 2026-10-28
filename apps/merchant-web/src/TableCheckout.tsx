@@ -16,6 +16,7 @@ import {
 } from "./table-checkout-client.js";
 import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session-client.js";
 import { compedText } from "./ItemCompAction.js";
+import { TableSplitControls } from "./TableSplit.js";
 
 const cad = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
@@ -117,6 +118,8 @@ export function TableCheckout({
   const [leaving, setLeaving] = useState(false);
   // Operating continuity: a table paid while the system was down is entered afterwards from paper.
   const [paper, setPaper] = useState(false);
+  // WP-2423 item 8 ④: the part of a split bill being collected (null: the whole table).
+  const [part, setPart] = useState<number | null>(null);
   const [paidAt, setPaidAt] = useState("");
   const paperInstant = paper ? paidAtInstant(paidAt, Date.now(), timeZone) : null;
   // One operation per intent: a lost answer is resent with the same one.
@@ -159,8 +162,14 @@ export function TableCheckout({
     guestPaid.current = guestPaying;
   }, [paidNow, guestPaying, onChanged]);
 
-  const subtotal = bill ? BigInt(bill.owed.subtotalMinor) : 0n;
-  const owed = bill ? BigInt(bill.owed.totalMinor) : 0n;
+  const selected = bill?.split?.parts.find((entry) => entry.partNumber === part) ?? null;
+  // A part's own share before tax (its tip) and its amount; otherwise what the table owes.
+  const subtotal = selected
+    ? BigInt(selected.subtotalMinor)
+    : bill
+      ? BigInt(bill.owed.subtotalMinor)
+      : 0n;
+  const owed = selected ? BigInt(selected.amountMinor) : bill ? BigInt(bill.owed.totalMinor) : 0n;
   const tipMinor =
     tip === null
       ? null
@@ -176,6 +185,8 @@ export function TableCheckout({
     bill !== null &&
     bill.settlement === null &&
     bill.consistent &&
+    (bill.split === null ||
+      (selected !== null && selected.payment === null && !selected.guestPaying)) &&
     owed > 0n &&
     due !== null &&
     !busy &&
@@ -256,6 +267,7 @@ export function TableCheckout({
     if (!canPay || bill === null || tipMinor === null) return;
     setReviewing(false);
     const intent = JSON.stringify([
+      part,
       method,
       tip,
       tipMinor.toString(),
@@ -281,8 +293,12 @@ export function TableCheckout({
         tenderedMinor: method === "Cash" ? String(receivedMinor) : null,
         slipReference: method === "CardMachine" && slip.trim() !== "" ? slip.trim() : null,
         takenAt: paper ? paperInstant : null,
+        partNumber: bill.split === null ? null : part,
       });
       operation.current = null;
+      setPart(null);
+      setTip(null);
+      setReceived("");
       setBill(result.bill);
       onChanged();
     } catch (error) {
@@ -351,7 +367,11 @@ export function TableCheckout({
   return (
     <section aria-label={t("Checkout")} className="table-checkout">
       <h3 id="table-checkout-title">
-        {bill?.writeOff ? t("Written off") : bill?.settlement ? t("Paid") : t("Checkout")}
+        {bill?.writeOff
+          ? t("Written off")
+          : bill?.settlement || (bill?.split && bill.split.paidParts === bill.split.parts.length)
+            ? t("Paid")
+            : t("Checkout")}
       </h3>
       {bill === null ? (
         problem ? null : (
@@ -415,232 +435,261 @@ export function TableCheckout({
             </div>
           ) : bill.settlement === null ? (
             <>
-              <dl className="table-checkout__totals">
-                <div>
-                  <dt>{t("Subtotal")}</dt>
-                  <dd>{cad(bill.owed.subtotalMinor)}</dd>
-                </div>
-                <div>
-                  <dt>{t("Tax")}</dt>
-                  <dd>{cad(bill.owed.taxMinor)}</dd>
-                </div>
-                <div>
-                  <dt>{t("Total with tax")}</dt>
-                  <dd>{cad(bill.owed.totalMinor)}</dd>
-                </div>
-              </dl>
-              {!bill.consistent ? (
-                <p role="alert">
-                  {t(
-                    "A round is still being sent or was just changed. Wait a moment and read the bill again.",
-                  )}{" "}
-                  <button type="button" onClick={() => setReload((value) => value + 1)}>
-                    {t("Read the bill again")}
-                  </button>
-                </p>
-              ) : null}
-              <fieldset className="table-checkout__tip" disabled={busy || locked}>
-                <legend>{t("Tip")}</legend>
-                {(["0", "10", "15", "18"] as const).map((value) => (
-                  <label key={value}>
-                    <input
-                      type="radio"
-                      name="table-tip"
-                      checked={tip === value}
-                      onChange={() => setTip(value)}
-                    />
-                    {value === "0"
-                      ? t("No tip")
-                      : `${value}% · ${cad((subtotal * BigInt(value) + 50n) / 100n)}`}
-                  </label>
-                ))}
-                <label>
-                  <input
-                    type="radio"
-                    name="table-tip"
-                    checked={tip === "Other"}
-                    onChange={() => setTip("Other")}
-                  />
-                  {t("Other amount")}
-                </label>
-                {tip === "Other" ? (
-                  <input
-                    aria-label={t("Tip amount")}
-                    inputMode="decimal"
-                    value={otherTip}
-                    aria-invalid={dollarsToMinor(otherTip) === null}
-                    onChange={(event) => setOtherTip(event.currentTarget.value)}
-                  />
-                ) : null}
-              </fieldset>
-              <fieldset className="table-checkout__method" disabled={busy || locked}>
-                <legend>{t("How the table pays")}</legend>
-                <label>
-                  <input
-                    type="radio"
-                    name="table-method"
-                    checked={method === "CardMachine"}
-                    onChange={() => setMethod("CardMachine")}
-                  />
-                  {t("Card machine")}
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="table-method"
-                    checked={method === "Cash"}
-                    onChange={() => setMethod("Cash")}
-                  />
-                  {t("Cash")}
-                </label>
-              </fieldset>
-              {method === "CardMachine" ? (
-                <label className="table-checkout__field">
-                  {t("Slip reference (optional)")}
-                  <input
-                    value={slip}
-                    maxLength={40}
-                    autoComplete="off"
-                    aria-invalid={!slipValid}
-                    onChange={(event) => setSlip(event.currentTarget.value)}
-                  />
-                  <small>
-                    {t(
-                      "The approval or reference code on the card machine slip. Never the card number.",
-                    )}
-                  </small>
-                </label>
-              ) : (
+              <TableSplitControls
+                bill={bill}
+                csrf={csrf}
+                client={client}
+                disabled={busy || locked}
+                selectedPart={part}
+                onSelectPart={(value) => {
+                  setPart(value);
+                  setTip(null);
+                  setReceived("");
+                  setReviewing(false);
+                }}
+                onBill={setBill}
+                onProblem={setProblem}
+              />
+              {bill.split !== null && selected === null ? null : (
                 <>
-                  <p className="table-checkout__cash-due">
-                    {cashDue === null
-                      ? null
-                      : t("Cash total {amount} (rounded to 5 cents)", { amount: cad(cashDue) })}
-                  </p>
-                  <label className="table-checkout__field">
-                    {t("Cash received")}
-                    <input
-                      inputMode="decimal"
-                      value={received}
-                      aria-invalid={received !== "" && receivedMinor === null}
-                      onChange={(event) => setReceived(event.currentTarget.value)}
-                    />
-                  </label>
-                  {change !== null ? (
-                    <p className="table-checkout__change" aria-live="polite">
-                      {change >= 0n
-                        ? t("Change {amount}", { amount: cad(change) })
-                        : t("{amount} short", { amount: cad(-change) })}
-                    </p>
+                  {selected ? (
+                    <h4 className="table-checkout__part-title">
+                      {t("Collect part {number} of {count}", {
+                        number: String(selected.partNumber),
+                        count: String(bill.split?.parts.length ?? 0),
+                      })}
+                    </h4>
                   ) : null}
-                </>
-              )}
-              <fieldset className="table-checkout__paper" disabled={busy || locked}>
-                <legend>{t("Paper payment")}</legend>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={paper}
-                    onChange={(event) => setPaper(event.currentTarget.checked)}
-                  />
-                  {t("Paid while the system was down (enter it from paper now)")}
-                </label>
-                {paper ? (
-                  <label className="table-checkout__field">
-                    {t("Paid at (store time)")}
-                    <input
-                      type="datetime-local"
-                      value={paidAt}
-                      aria-invalid={paperInstant === null}
-                      onChange={(event) => setPaidAt(event.currentTarget.value)}
-                    />
-                    <small>{t("Within the last 3 days. It counts on the day it was paid.")}</small>
-                  </label>
-                ) : null}
-              </fieldset>
-              {reviewing && canPay && due !== null && tipMinor !== null ? (
-                // Money is confirmed (Owner decision 2): the amounts once more, then record.
-                <div
-                  role="alertdialog"
-                  aria-labelledby="table-checkout-confirm"
-                  className="table-checkout__confirm"
-                >
-                  <h4 id="table-checkout-confirm">{t("Confirm the payment")}</h4>
                   <dl className="table-checkout__totals">
                     <div>
-                      <dt>{t("Table {table}", { table: table.stableLabel })}</dt>
-                      <dd>{method === "Cash" ? t("Cash") : t("Card machine")}</dd>
+                      <dt>{t("Subtotal")}</dt>
+                      <dd>{cad(selected ? selected.subtotalMinor : bill.owed.subtotalMinor)}</dd>
                     </div>
                     <div>
-                      <dt>{t("Bill")}</dt>
-                      <dd>{cad(owed)}</dd>
+                      <dt>{t("Tax")}</dt>
+                      <dd>{cad(selected ? selected.taxMinor : bill.owed.taxMinor)}</dd>
                     </div>
                     <div>
-                      <dt>{t("Tip")}</dt>
-                      <dd>{cad(tipMinor)}</dd>
+                      <dt>{selected ? t("This part with tax") : t("Total with tax")}</dt>
+                      <dd>{cad(selected ? selected.amountMinor : bill.owed.totalMinor)}</dd>
                     </div>
-                    {method === "Cash" && cashDue !== null && change !== null ? (
-                      <>
-                        <div className="table-checkout__total">
-                          <dt>{t("Cash due (rounded to 5 cents)")}</dt>
-                          <dd>{cad(cashDue)}</dd>
+                  </dl>
+                  {!bill.consistent ? (
+                    <p role="alert">
+                      {t(
+                        "A round is still being sent or was just changed. Wait a moment and read the bill again.",
+                      )}{" "}
+                      <button type="button" onClick={() => setReload((value) => value + 1)}>
+                        {t("Read the bill again")}
+                      </button>
+                    </p>
+                  ) : null}
+                  <fieldset className="table-checkout__tip" disabled={busy || locked}>
+                    <legend>{t("Tip")}</legend>
+                    {(["0", "10", "15", "18"] as const).map((value) => (
+                      <label key={value}>
+                        <input
+                          type="radio"
+                          name="table-tip"
+                          checked={tip === value}
+                          onChange={() => setTip(value)}
+                        />
+                        {value === "0"
+                          ? t("No tip")
+                          : `${value}% · ${cad((subtotal * BigInt(value) + 50n) / 100n)}`}
+                      </label>
+                    ))}
+                    <label>
+                      <input
+                        type="radio"
+                        name="table-tip"
+                        checked={tip === "Other"}
+                        onChange={() => setTip("Other")}
+                      />
+                      {t("Other amount")}
+                    </label>
+                    {tip === "Other" ? (
+                      <input
+                        aria-label={t("Tip amount")}
+                        inputMode="decimal"
+                        value={otherTip}
+                        aria-invalid={dollarsToMinor(otherTip) === null}
+                        onChange={(event) => setOtherTip(event.currentTarget.value)}
+                      />
+                    ) : null}
+                  </fieldset>
+                  <fieldset className="table-checkout__method" disabled={busy || locked}>
+                    <legend>{t("How the table pays")}</legend>
+                    <label>
+                      <input
+                        type="radio"
+                        name="table-method"
+                        checked={method === "CardMachine"}
+                        onChange={() => setMethod("CardMachine")}
+                      />
+                      {t("Card machine")}
+                    </label>
+                    <label>
+                      <input
+                        type="radio"
+                        name="table-method"
+                        checked={method === "Cash"}
+                        onChange={() => setMethod("Cash")}
+                      />
+                      {t("Cash")}
+                    </label>
+                  </fieldset>
+                  {method === "CardMachine" ? (
+                    <label className="table-checkout__field">
+                      {t("Slip reference (optional)")}
+                      <input
+                        value={slip}
+                        maxLength={40}
+                        autoComplete="off"
+                        aria-invalid={!slipValid}
+                        onChange={(event) => setSlip(event.currentTarget.value)}
+                      />
+                      <small>
+                        {t(
+                          "The approval or reference code on the card machine slip. Never the card number.",
+                        )}
+                      </small>
+                    </label>
+                  ) : (
+                    <>
+                      <p className="table-checkout__cash-due">
+                        {cashDue === null
+                          ? null
+                          : t("Cash total {amount} (rounded to 5 cents)", { amount: cad(cashDue) })}
+                      </p>
+                      <label className="table-checkout__field">
+                        {t("Cash received")}
+                        <input
+                          inputMode="decimal"
+                          value={received}
+                          aria-invalid={received !== "" && receivedMinor === null}
+                          onChange={(event) => setReceived(event.currentTarget.value)}
+                        />
+                      </label>
+                      {change !== null ? (
+                        <p className="table-checkout__change" aria-live="polite">
+                          {change >= 0n
+                            ? t("Change {amount}", { amount: cad(change) })
+                            : t("{amount} short", { amount: cad(-change) })}
+                        </p>
+                      ) : null}
+                    </>
+                  )}
+                  <fieldset className="table-checkout__paper" disabled={busy || locked}>
+                    <legend>{t("Paper payment")}</legend>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={paper}
+                        onChange={(event) => setPaper(event.currentTarget.checked)}
+                      />
+                      {t("Paid while the system was down (enter it from paper now)")}
+                    </label>
+                    {paper ? (
+                      <label className="table-checkout__field">
+                        {t("Paid at (store time)")}
+                        <input
+                          type="datetime-local"
+                          value={paidAt}
+                          aria-invalid={paperInstant === null}
+                          onChange={(event) => setPaidAt(event.currentTarget.value)}
+                        />
+                        <small>
+                          {t("Within the last 3 days. It counts on the day it was paid.")}
+                        </small>
+                      </label>
+                    ) : null}
+                  </fieldset>
+                  {reviewing && canPay && due !== null && tipMinor !== null ? (
+                    // Money is confirmed (Owner decision 2): the amounts once more, then record.
+                    <div
+                      role="alertdialog"
+                      aria-labelledby="table-checkout-confirm"
+                      className="table-checkout__confirm"
+                    >
+                      <h4 id="table-checkout-confirm">{t("Confirm the payment")}</h4>
+                      <dl className="table-checkout__totals">
+                        <div>
+                          <dt>{t("Table {table}", { table: table.stableLabel })}</dt>
+                          <dd>{method === "Cash" ? t("Cash") : t("Card machine")}</dd>
                         </div>
                         <div>
-                          <dt>{t("Cash received")}</dt>
-                          <dd>{cad(receivedMinor ?? 0n)}</dd>
+                          <dt>{t("Bill")}</dt>
+                          <dd>{cad(owed)}</dd>
                         </div>
-                        <div className="table-checkout__total">
-                          <dt>{t("Change to give")}</dt>
-                          <dd>{cad(change)}</dd>
+                        <div>
+                          <dt>{t("Tip")}</dt>
+                          <dd>{cad(tipMinor)}</dd>
                         </div>
-                      </>
-                    ) : (
-                      <div className="table-checkout__total">
-                        <dt>{t("Charged on the card machine")}</dt>
-                        <dd>{cad(due)}</dd>
-                      </div>
-                    )}
-                  </dl>
-                  <p>
-                    {method === "Cash"
-                      ? t("Count the cash first. Once recorded, only a manager can refund it.")
-                      : t(
-                          "Check the card machine shows Approved first. Once recorded, only a manager can refund it.",
+                        {method === "Cash" && cashDue !== null && change !== null ? (
+                          <>
+                            <div className="table-checkout__total">
+                              <dt>{t("Cash due (rounded to 5 cents)")}</dt>
+                              <dd>{cad(cashDue)}</dd>
+                            </div>
+                            <div>
+                              <dt>{t("Cash received")}</dt>
+                              <dd>{cad(receivedMinor ?? 0n)}</dd>
+                            </div>
+                            <div className="table-checkout__total">
+                              <dt>{t("Change to give")}</dt>
+                              <dd>{cad(change)}</dd>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="table-checkout__total">
+                            <dt>{t("Charged on the card machine")}</dt>
+                            <dd>{cad(due)}</dd>
+                          </div>
                         )}
-                  </p>
-                  <div className="table-checkout__confirm-actions">
-                    <button type="button" onClick={() => setReviewing(false)}>
-                      {t("Back")}
-                    </button>
+                      </dl>
+                      <p>
+                        {method === "Cash"
+                          ? t("Count the cash first. Once recorded, only a manager can refund it.")
+                          : t(
+                              "Check the card machine shows Approved first. Once recorded, only a manager can refund it.",
+                            )}
+                      </p>
+                      <div className="table-checkout__confirm-actions">
+                        <button type="button" onClick={() => setReviewing(false)}>
+                          {t("Back")}
+                        </button>
+                        <button
+                          type="button"
+                          className="table-checkout__primary"
+                          disabled={!canPay}
+                          onClick={() => void pay()}
+                        >
+                          {method === "Cash"
+                            ? t("Confirm {amount} cash received", { amount: cad(cashDue ?? due) })
+                            : t("Confirm {amount} paid", { amount: cad(due) })}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
                     <button
                       type="button"
                       className="table-checkout__primary"
                       disabled={!canPay}
-                      onClick={() => void pay()}
+                      onClick={() => setReviewing(true)}
                     >
-                      {method === "Cash"
-                        ? t("Confirm {amount} cash received", { amount: cad(cashDue ?? due) })
-                        : t("Confirm {amount} paid", { amount: cad(due) })}
+                      {busy
+                        ? t("Recording…")
+                        : tip === null
+                          ? t("Choose a tip to take payment")
+                          : due === null
+                            ? t("Record payment")
+                            : method === "Cash"
+                              ? t("Cash received · {amount}", { amount: cad(cashDue ?? due) })
+                              : t("Paid on card machine · {amount}", { amount: cad(due) })}
                     </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="table-checkout__primary"
-                  disabled={!canPay}
-                  onClick={() => setReviewing(true)}
-                >
-                  {busy
-                    ? t("Recording…")
-                    : tip === null
-                      ? t("Choose a tip to take payment")
-                      : due === null
-                        ? t("Record payment")
-                        : method === "Cash"
-                          ? t("Cash received · {amount}", { amount: cad(cashDue ?? due) })
-                          : t("Paid on card machine · {amount}", { amount: cad(due) })}
-                </button>
+                  )}
+                </>
               )}
               {canWriteOff ? (
                 leaving ? (

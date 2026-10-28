@@ -13,6 +13,8 @@ export type TableCheckoutErrorCode =
   | "AlreadyPaid"
   /** S4: a guest is paying the whole table on their phone right now. */
   | "GuestPaying"
+  /** WP-2423 item 8 ④: the split can't change once a part was paid or a guest started paying. */
+  | "SplitLocked"
   | "NotReady"
   | "Unavailable"
   | "OutcomeUnknown";
@@ -50,6 +52,8 @@ export interface TableBill {
     readonly taxMinor: string;
     readonly totalMinor: string;
     readonly paid: boolean;
+    /** WP-2423 item 8 ④: which phone sent the round (1, 2, …), or null for staff (older: null). */
+    readonly orderedBy: number | null;
   }[];
   readonly owed: {
     readonly subtotalMinor: string;
@@ -69,6 +73,11 @@ export interface TableBill {
     readonly recordedAt: string;
     readonly recordedAfterOutage: boolean;
   };
+  /**
+   * WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL: the bill split into parts paid one by one (null: one
+   * payment for the table, or an older server). `stale`: split it again (the bill changed).
+   */
+  readonly split: null | TableSplit;
   /** DEC-DINE-IN-PAY-LATER: written off by a manager when the guests left (null from older). */
   readonly writeOff: null | { readonly amountMinor: string; readonly decidedAt: string };
   /** S4: the guests' latest phone payment for the table (null from older servers). */
@@ -77,6 +86,32 @@ export interface TableBill {
     readonly totalMinor: string;
     readonly startedAt: string;
   };
+}
+
+export interface TableSplitPart {
+  readonly partNumber: number;
+  readonly amountMinor: string;
+  readonly subtotalMinor: string;
+  readonly taxMinor: string;
+  readonly roundNumbers: readonly number[];
+  readonly payment: null | {
+    readonly method: "CardMachine" | "Cash" | "Online";
+    readonly tipMinor: string;
+    readonly roundingMinor: string;
+    readonly totalMinor: string;
+    readonly tenderedMinor: string | null;
+    readonly changeMinor: string | null;
+    readonly recordedAt: string;
+    readonly recordedAfterOutage: boolean;
+  };
+  readonly guestPaying: boolean;
+}
+export interface TableSplit {
+  readonly mode: "Even" | "ByRounds";
+  readonly stale: boolean;
+  readonly parts: readonly TableSplitPart[];
+  readonly paidParts: number;
+  readonly remainingMinor: string;
 }
 
 const minor = /^-?(?:0|[1-9][0-9]{0,18})$/u;
@@ -142,6 +177,12 @@ export function parseTableBill(value: unknown): TableBill {
           taxMinor: amount(round.taxMinor),
           totalMinor: amount(round.totalMinor),
           paid: round.paid,
+          orderedBy:
+            round.orderedBy === undefined || round.orderedBy === null
+              ? null
+              : Number.isSafeInteger(round.orderedBy) && (round.orderedBy as number) >= 1
+                ? (round.orderedBy as number)
+                : invalid(),
         });
       }),
     ),
@@ -171,8 +212,72 @@ export function parseTableBill(value: unknown): TableBill {
             recordedAt: text(settlement.recordedAt),
             recordedAfterOutage: settlement.recordedAfterOutage === true,
           }),
+    split: splitOf(raw.split),
     writeOff: writeOffOf(raw.writeOff),
     onlinePayment: onlinePaymentOf(raw.onlinePayment),
+  });
+}
+
+function splitOf(value: unknown): TableSplit | null {
+  if (value === undefined || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (
+    (raw.mode !== "Even" && raw.mode !== "ByRounds") ||
+    typeof raw.stale !== "boolean" ||
+    !Array.isArray(raw.parts) ||
+    raw.parts.length < 2 ||
+    raw.parts.length > 20 ||
+    !Number.isSafeInteger(raw.paidParts)
+  )
+    return invalid();
+  return Object.freeze({
+    mode: raw.mode,
+    stale: raw.stale,
+    paidParts: raw.paidParts as number,
+    remainingMinor: amount(raw.remainingMinor),
+    parts: Object.freeze(
+      raw.parts.map((value: unknown, index: number) => {
+        const part = value as Record<string, unknown>;
+        if (
+          part.partNumber !== index + 1 ||
+          !Array.isArray(part.roundNumbers) ||
+          typeof part.guestPaying !== "boolean"
+        )
+          return invalid();
+        const payment = part.payment as Record<string, unknown> | null;
+        return Object.freeze({
+          partNumber: index + 1,
+          amountMinor: amount(part.amountMinor),
+          subtotalMinor: amount(part.subtotalMinor),
+          taxMinor: amount(part.taxMinor),
+          roundNumbers: Object.freeze(
+            part.roundNumbers.map((round: unknown) =>
+              Number.isSafeInteger(round) ? (round as number) : invalid(),
+            ),
+          ),
+          payment:
+            payment === null
+              ? null
+              : Object.freeze({
+                  method:
+                    payment.method === "Cash" ||
+                    payment.method === "CardMachine" ||
+                    payment.method === "Online"
+                      ? payment.method
+                      : invalid(),
+                  tipMinor: amount(payment.tipMinor),
+                  roundingMinor: amount(payment.roundingMinor),
+                  totalMinor: amount(payment.totalMinor),
+                  tenderedMinor:
+                    payment.tenderedMinor === null ? null : amount(payment.tenderedMinor),
+                  changeMinor: payment.changeMinor === null ? null : amount(payment.changeMinor),
+                  recordedAt: text(payment.recordedAt),
+                  recordedAfterOutage: payment.recordedAfterOutage === true,
+                }),
+          guestPaying: part.guestPaying,
+        });
+      }),
+    ),
   });
 }
 
@@ -219,6 +324,7 @@ const codes: Readonly<Record<string, TableCheckoutErrorCode>> = {
   tender_short: "TenderShort",
   already_paid: "AlreadyPaid",
   guest_paying: "GuestPaying",
+  split_locked: "SplitLocked",
   idempotency_conflict: "BillChanged",
   not_ready: "NotReady",
   not_at_checkout: "NotStarted",
@@ -303,14 +409,40 @@ export function createTableCheckoutClient(fetcher: typeof fetch = fetch) {
         readonly slipReference: string | null;
         /** Paid while the system was down (paper), at this instant; null when paid now. */
         readonly takenAt: string | null;
+        /** WP-2423 item 8 ④: the part of a split bill this payment is (null: the whole table). */
+        readonly partNumber?: number | null;
       },
     ) {
+      const { partNumber, ...rest } = command;
       const raw = (await post("/merchant/dining/table-settle", csrf, {
-        ...command,
+        ...rest,
+        ...(partNumber === undefined || partNumber === null ? {} : { partNumber }),
         recordedAfterOutage: command.takenAt !== null,
       })) as { status?: unknown; bill?: unknown } | null;
       if (raw?.status !== "Recorded" && raw?.status !== "AlreadyRecorded") return invalid();
       return Object.freeze({ status: raw.status, bill: parseTableBill(raw.bill) });
+    },
+    /**
+     * WP-2423 item 8 ④: split the table's bill evenly (2–20 people) or by rounds (each round to a
+     * part), or go back to one payment ("Whole"). The server computes every part.
+     */
+    async split(
+      csrf: string,
+      command: {
+        readonly operationReference: string;
+        readonly diningSessionReference: string;
+        readonly mode: "Whole" | "Even" | "ByRounds";
+        readonly people: number | null;
+        readonly rounds:
+          readonly { readonly roundNumber: number; readonly partNumber: number }[] | null;
+      },
+    ) {
+      const raw = (await post("/merchant/dining/table-split", csrf, command)) as {
+        status?: unknown;
+        bill?: unknown;
+      } | null;
+      if (raw?.status !== "Recorded" && raw?.status !== "AlreadyRecorded") return invalid();
+      return parseTableBill(raw.bill);
     },
     /** S4: stop a phone payment a guest gave up on (the Provider is asked first). */
     async stopOnlinePayment(csrf: string, diningSessionReference: string) {

@@ -7,6 +7,7 @@ import {
   createPostgresDiningTableSettlementStore,
   createRetrieveIntentRequest,
   type DiningTableOnlinePaymentRecord,
+  type DiningTableSplitPlanRecord,
   type PaymentProviderAdapter,
   type PaymentProviderOutcome,
 } from "@rms/payment";
@@ -85,6 +86,8 @@ export interface DiningTableOnlinePaymentView {
     readonly totalMinor: string;
     readonly tipMinor: string;
     readonly mine: boolean;
+    /** WP-2423 item 8 ④: the part of a split bill this payment is for (null: the whole table). */
+    readonly partNumber: number | null;
   };
 }
 
@@ -132,7 +135,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
   const bill = async (
     tx: ConsumerTransaction,
     authority: TableOnlinePaymentAuthority,
-  ): Promise<DiningTableBill> =>
+  ): Promise<Awaited<ReturnType<typeof readDiningTableBill>>> =>
     readDiningTableBill(tx, scope, {
       diningSessionReference: authority.diningSessionReference,
       observedAt: milliseconds(options.now()),
@@ -148,11 +151,19 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
     attempts: readonly DiningTableOnlinePaymentRecord[],
     authority: TableOnlinePaymentAuthority,
   ): DiningTableOnlinePaymentView => {
-    const open = attempts.find((attempt) => attempt.outcome === null);
-    const { settlementRecord, ...publicBill } = current as DiningTableBill & {
+    // This guest's own open payment first; otherwise a whole-table one another guest started.
+    const open =
+      attempts.find(
+        (attempt) =>
+          attempt.outcome === null &&
+          attempt.guestSessionReference === authority.guestSessionReference,
+      ) ?? attempts.find((attempt) => attempt.outcome === null && attempt.part === null);
+    const { settlementRecord, splitPlanRecord, ...publicBill } = current as DiningTableBill & {
       settlementRecord?: unknown;
+      splitPlanRecord?: unknown;
     };
     void settlementRecord;
+    void splitPlanRecord;
     return Object.freeze({
       bill: publicBill,
       attempt:
@@ -165,31 +176,57 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
               totalMinor: open.totalMinor.toString(),
               tipMinor: open.tipMinor.toString(),
               mine: open.guestSessionReference === authority.guestSessionReference,
+              partNumber: open.part?.partNumber ?? null,
             }),
     });
   };
 
   /** The owed rounds and what the table pays now (the same rule as staff use at the table). */
-  const owedPlan = (current: DiningTableBill, tip: DiningTableTip) => {
+  /**
+   * WP-2423 item 8 ④: a split bill is paid part by part — the guest's chosen part, its own amount
+   * and its tip on its own share before tax; a bill paid whole, the whole table.
+   */
+  const owedPlan = (
+    current: DiningTableBill & { splitPlanRecord?: DiningTableSplitPlanRecord | null },
+    tip: DiningTableTip,
+    partNumber: number | null,
+  ) => {
     if (current.paymentTiming !== "PayLater" || current.sessionPhase !== "Closing")
       return fail("TABLE_ONLINE_PAYMENT_NOT_CHECKING_OUT");
     if (current.settlement !== null || current.writeOff !== null)
       return fail("TABLE_ONLINE_PAYMENT_ALREADY_PAID");
     if (!current.consistent) return fail("TABLE_ONLINE_PAYMENT_BILL_CHANGED");
+    if ((current.split === null) !== (partNumber === null))
+      return fail("TABLE_ONLINE_PAYMENT_INPUT_INVALID");
+    const part =
+      current.split === null
+        ? null
+        : (current.split.parts.find((entry) => entry.partNumber === partNumber) ??
+          fail("TABLE_ONLINE_PAYMENT_INPUT_INVALID"));
+    if (part !== null && part.payment !== null) return fail("TABLE_ONLINE_PAYMENT_ALREADY_PAID");
+    const plan = current.splitPlanRecord ?? null;
+    if (part !== null && plan === null) return fail("TABLE_ONLINE_PAYMENT_BILL_CHANGED");
     const owed = current.rounds.filter((round) => !round.paid && round.totalMinor !== "0");
     if (current.orderReference === null || owed.length === 0)
       return fail("TABLE_ONLINE_PAYMENT_NOTHING_OWED");
     let tipMinor: bigint;
     try {
-      tipMinor = tableTipMinor(tip, BigInt(current.owed.subtotalMinor));
+      tipMinor = tableTipMinor(
+        tip,
+        BigInt(part === null ? current.owed.subtotalMinor : part.subtotalMinor),
+      );
     } catch {
       return fail("TABLE_ONLINE_PAYMENT_INPUT_INVALID");
     }
     return {
       orderReference: current.orderReference,
       owed,
-      roundsMinor: BigInt(current.owed.totalMinor),
+      roundsMinor: BigInt(part === null ? current.owed.totalMinor : part.amountMinor),
       tipMinor,
+      part:
+        part === null || plan === null
+          ? null
+          : { splitPlanReference: plan.splitPlanReference, partNumber: part.partNumber },
     };
   };
 
@@ -243,8 +280,22 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
       const current = await bill(tx, authority);
       if (current.settlement !== null) return;
       const owed = current.rounds.filter((round) => !round.paid && round.totalMinor !== "0");
-      if (BigInt(current.owed.totalMinor) !== attempt.roundsMinor)
+      // WP-2423 item 8 ④: a part's capture pays exactly that part's slices of the rounds.
+      const planPart =
+        attempt.part === null
+          ? null
+          : ((current.splitPlanRecord?.splitPlanReference === attempt.part.splitPlanReference
+              ? current.splitPlanRecord.parts.find(
+                  (entry) => entry.partNumber === attempt.part?.partNumber,
+                )
+              : undefined) ?? fail("TABLE_ONLINE_PAYMENT_BILL_CHANGED"));
+      if (
+        planPart === null
+          ? BigInt(current.owed.totalMinor) !== attempt.roundsMinor
+          : planPart.amountMinor !== attempt.roundsMinor
+      )
         return fail("TABLE_ONLINE_PAYMENT_BILL_CHANGED");
+      const roundOf = new Map(current.rounds.map((round) => [round.orderBatchReference, round]));
       const [saved] = await owner
         .listOnlinePaymentsByOrders(tx, [attempt.orderReference])
         .then((all) =>
@@ -257,12 +308,26 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
         diningSessionReference: attempt.diningSessionReference,
         orderReference: attempt.orderReference,
         method: "Online",
-        rounds: owed.map((round) => ({
-          orderBatchReference: round.orderBatchReference,
-          submissionReference: round.submissionReference,
-          sequence: round.roundNumber,
-          roundMinor: BigInt(round.totalMinor),
-        })),
+        rounds:
+          planPart === null
+            ? owed.map((round) => ({
+                orderBatchReference: round.orderBatchReference,
+                submissionReference: round.submissionReference,
+                sequence: round.roundNumber,
+                roundMinor: BigInt(round.totalMinor),
+              }))
+            : planPart.slices.map((slice) => {
+                const round =
+                  roundOf.get(slice.orderBatchReference) ??
+                  fail("TABLE_ONLINE_PAYMENT_BILL_CHANGED");
+                return {
+                  orderBatchReference: slice.orderBatchReference,
+                  submissionReference: round.submissionReference,
+                  sequence: round.roundNumber,
+                  roundMinor: slice.roundMinor,
+                };
+              }),
+        ...(attempt.part === null ? {} : { part: attempt.part }),
         tipMinor: attempt.tipMinor,
         tenderedMinor: null,
         environment: options.environment,
@@ -285,14 +350,21 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
     authority: TableOnlinePaymentAuthority,
     stop: { actor: { type: "System" } | { type: "User"; reference: string } } | null,
   ) => {
-    const found = await options.transactions.run(async (tx) => {
+    // WP-2423 item 8 ④: guests may be paying different parts at once — ask about each.
+    const open = await options.transactions.run(async (tx) => {
       const current = await bill(tx, authority);
-      if (current.orderReference === null) return null;
-      return (await attemptsOf(tx, authority, current.orderReference)).find(
+      if (current.orderReference === null) return [];
+      return (await attemptsOf(tx, authority, current.orderReference)).filter(
         (attempt) => attempt.outcome === null,
       );
     });
-    if (found === null || found === undefined) return;
+    for (const found of open) await refreshOne(authority, found, stop);
+  };
+  const refreshOne = async (
+    authority: TableOnlinePaymentAuthority,
+    found: DiningTableOnlinePaymentRecord,
+    stop: { actor: { type: "System" } | { type: "User"; reference: string } } | null,
+  ) => {
     const request = {
       context: context(found),
       providerIntentReference: found.providerIntentReference,
@@ -345,8 +417,14 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
      */
     async start(
       authority: TableOnlinePaymentAuthority,
-      command: { readonly operationReference: string; readonly tip: DiningTableTip },
+      command: {
+        readonly operationReference: string;
+        readonly tip: DiningTableTip;
+        /** WP-2423 item 8 ④: the part of a split bill this guest pays (null: the whole table). */
+        readonly partNumber?: number | null;
+      },
     ): Promise<DiningTableOnlinePaymentView> {
+      const partNumber = command.partNumber ?? null;
       if (authority.guestSessionReference === null)
         return fail("TABLE_ONLINE_PAYMENT_INPUT_INVALID");
       // An earlier attempt may have finished with the Provider meanwhile.
@@ -355,6 +433,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
         kind: "DiningTableOnlinePayment/v1",
         diningSessionReference: authority.diningSessionReference,
         tip: command.tip,
+        ...(partNumber === null ? {} : { partNumber }),
       });
       const plan = await options.transactions.run(async (tx) => {
         const current = await bill(tx, authority);
@@ -369,12 +448,23 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
           if (same.intentDigest !== intentDigest) return fail("TABLE_ONLINE_PAYMENT_INPUT_INVALID");
           return { view: viewOf(current, attempts, authority) };
         }
-        const open = attempts.find((attempt) => attempt.outcome === null);
-        if (open !== undefined)
-          return open.guestSessionReference === authority.guestSessionReference
-            ? { view: viewOf(current, attempts, authority) }
-            : fail("TABLE_ONLINE_PAYMENT_ANOTHER_GUEST_PAYING");
-        return { plan: owedPlan(current, command.tip) };
+        // This guest finishes (or comes back to) their own open payment first. Another guest's
+        // open payment blocks the same part, or everything when either is for the whole table.
+        const open = attempts.filter((attempt) => attempt.outcome === null);
+        if (
+          open.some((attempt) => attempt.guestSessionReference === authority.guestSessionReference)
+        )
+          return { view: viewOf(current, attempts, authority) };
+        if (
+          open.some(
+            (attempt) =>
+              attempt.part === null ||
+              partNumber === null ||
+              attempt.part.partNumber === partNumber,
+          )
+        )
+          return fail("TABLE_ONLINE_PAYMENT_ANOTHER_GUEST_PAYING");
+        return { plan: owedPlan(current, command.tip, partNumber) };
       });
       if ("view" in plan) return plan.view;
       const onlinePaymentReference = attemptReference(command.operationReference);
@@ -396,7 +486,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
         await options.transactions.run(async (tx) => {
           // The bill may have changed while the Provider answered: what is owed must still be it.
           const current = await bill(tx, authority);
-          const again = owedPlan(current, command.tip);
+          const again = owedPlan(current, command.tip, partNumber);
           if (again.roundsMinor !== plan.plan.roundsMinor || again.tipMinor !== plan.plan.tipMinor)
             return fail("TABLE_ONLINE_PAYMENT_BILL_CHANGED");
           await store(authority).recordOnlinePayment(tx, {
@@ -413,6 +503,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
             providerIntentReference: String(created.providerIntentReference),
             createdAt: milliseconds(options.now()),
             auditReference: options.nextReference(),
+            ...(again.part === null ? {} : { part: again.part }),
           });
         });
       } catch (error) {

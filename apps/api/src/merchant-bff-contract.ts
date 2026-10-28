@@ -17,6 +17,7 @@ import type {
 import type {
   createMerchantDiningTableBillRead,
   createMerchantDiningTableSettle,
+  createMerchantDiningTableSplit,
 } from "./merchant-dining-table-checkout.js";
 import type { createMerchantDiningTableOnlinePaymentStop } from "./merchant-dining-table-online-payment.js";
 import type {
@@ -574,6 +575,8 @@ export interface MerchantBffRouterOptions {
   /** WP-2423 DEC-DINE-IN-PAY-LATER: a pay-later table's bill and its one payment. */
   readonly diningTableBill?: ReturnType<typeof createMerchantDiningTableBillRead>;
   readonly diningTableSettle?: ReturnType<typeof createMerchantDiningTableSettle>;
+  /** WP-2423 item 8 ④: split a pay-later table's bill evenly or by rounds (or pay it whole). */
+  readonly diningTableSplit?: ReturnType<typeof createMerchantDiningTableSplit>;
   /** S4: staff stop a phone payment a guest gave up on (the Provider is asked first). */
   readonly diningTableOnlinePaymentStop?: ReturnType<
     typeof createMerchantDiningTableOnlinePaymentStop

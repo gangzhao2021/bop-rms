@@ -449,6 +449,29 @@ export function installMerchantDiningRoutes(
       .catch((error: unknown) => checkoutFailure(response, error));
   });
 
+  // WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL: split the table's bill (or pay it whole again).
+  router.post("/dining/table-split", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningTableSplit) {
+      response.status(503).json({ error: "dining_table_split_unavailable" });
+      return;
+    }
+    void options
+      .diningTableSplit({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => checkoutFailure(response, error));
+  });
+
   // S4: stop a phone payment a guest gave up on, so the table can be paid another way.
   router.post(
     "/dining/table-online-payment/stop",

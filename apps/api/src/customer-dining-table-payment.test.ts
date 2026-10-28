@@ -34,6 +34,7 @@ const bill = {
   owed: { subtotalMinor: "1800", taxMinor: "234", totalMinor: "2034" },
   consistent: true,
   settlement: null,
+  split: null,
   writeOff: null,
   onlinePayment: null,
 };
@@ -103,6 +104,8 @@ it("DEC-DINE-IN-PAY-LATER S4: answers the guest's table payment in public fields
       action: "Start",
       operationReference: "01909968-0000-7000-8000-000000000001",
       tip: { kind: "Percent", percent: 15 },
+      // WP-2423 item 8 ④: no part — the whole table.
+      partNumber: null,
     },
   );
 });

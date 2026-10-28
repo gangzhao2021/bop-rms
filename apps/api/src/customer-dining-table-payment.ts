@@ -81,7 +81,7 @@ export function createCustomerDiningTablePayment(options: CustomerDiningTablePay
     },
     async start(
       credentials: Credentials,
-      command: { operationReference: string; tip: DiningTableTip },
+      command: { operationReference: string; tip: DiningTableTip; partNumber?: number | null },
     ) {
       return options.payments.start(await authority(credentials), command);
     },
@@ -138,21 +138,50 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
       owed: bill.owed,
       consistent: bill.consistent,
       state:
-        paid !== null
+        paid !== null || (bill.split !== null && bill.split.paidParts === bill.split.parts.length)
           ? "Paid"
           : bill.writeOff !== null
             ? "Closed"
             : view.attempt !== null
               ? view.attempt.mine
                 ? "Paying"
-                : "AnotherGuestPaying"
+                : bill.split === null
+                  ? "AnotherGuestPaying"
+                  : "NotPaid"
               : bill.onlinePayment?.status === "Failed"
                 ? "Failed"
                 : "NotPaid",
       attempt:
         view.attempt === null || !view.attempt.mine
           ? null
-          : { totalMinor: view.attempt.totalMinor, tipMinor: view.attempt.tipMinor },
+          : {
+              totalMinor: view.attempt.totalMinor,
+              tipMinor: view.attempt.tipMinor,
+              partNumber: view.attempt.partNumber,
+            },
+      // WP-2423 item 8 ④: a split bill's parts — what each comes to and whether it is paid,
+      // being paid on another phone, or still to pay (no names, no methods of other guests).
+      split:
+        bill.split === null
+          ? null
+          : {
+              mode: bill.split.mode,
+              paidParts: bill.split.paidParts,
+              remainingMinor: bill.split.remainingMinor,
+              parts: bill.split.parts.map((part) => ({
+                partNumber: part.partNumber,
+                amountMinor: part.amountMinor,
+                subtotalMinor: part.subtotalMinor,
+                status:
+                  part.payment !== null
+                    ? "Paid"
+                    : view.attempt?.mine === true && view.attempt.partNumber === part.partNumber
+                      ? "Mine"
+                      : part.guestPaying
+                        ? "Paying"
+                        : "ToPay",
+              })),
+            },
       // The whole-table receipt once paid (decision 5): one payment, never split by round.
       receipt:
         paid === null
@@ -249,7 +278,12 @@ export class CustomerDiningTablePaymentHandler {
         const credentials = this.credentials(request);
         let command:
           | { action: "Read" }
-          | { action: "Start"; operationReference: string; tip: DiningTableTip }
+          | {
+              action: "Start";
+              operationReference: string;
+              tip: DiningTableTip;
+              partNumber: number | null;
+            }
           | null = null;
         try {
           const body = (request.body ?? {}) as Record<string, unknown>;
@@ -257,7 +291,22 @@ export class CustomerDiningTablePaymentHandler {
             readClosedRecord(body, ["action"]);
             command = { action: "Read" };
           } else if (body.action === "Start") {
-            const raw = readClosedRecord(body, ["action", "operationReference", "tip"]);
+            const raw = readClosedRecord(body, [
+              "action",
+              "operationReference",
+              "tip",
+              ...(Object.hasOwn(body, "partNumber") ? ["partNumber"] : []),
+            ]);
+            const partNumber =
+              raw.partNumber === undefined || raw.partNumber === null
+                ? null
+                : Number.isSafeInteger(raw.partNumber) &&
+                    (raw.partNumber as number) >= 1 &&
+                    (raw.partNumber as number) <= 20
+                  ? (raw.partNumber as number)
+                  : (() => {
+                      throw new Error();
+                    })();
             const tip = readClosedRecord(raw.tip, Object.keys((raw.tip ?? {}) as object));
             let parsed: DiningTableTip | null = null;
             if (tip.kind === "None" && Object.keys(tip).length === 1) parsed = { kind: "None" };
@@ -282,7 +331,12 @@ export class CustomerDiningTablePaymentHandler {
               )
             )
               throw new Error();
-            command = { action: "Start", operationReference: raw.operationReference, tip: parsed };
+            command = {
+              action: "Start",
+              operationReference: raw.operationReference,
+              tip: parsed,
+              partNumber,
+            };
           }
         } catch {
           command = null;

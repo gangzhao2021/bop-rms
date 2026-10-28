@@ -17,7 +17,8 @@ function parseTableBill(
   readonly totalMinor: string;
   readonly paid: {
     readonly amountMinor: string;
-    readonly method: "CardMachine" | "Cash" | "Online";
+    /** WP-2423 item 8 ④: "Split" — paid part by part, every part paid. */
+    readonly method: "CardMachine" | "Cash" | "Online" | "Split";
   } | null;
 } | null {
   if (value === null) return null;
@@ -33,7 +34,10 @@ function parseTableBill(
   if (
     typeof paid.amountMinor !== "string" ||
     !minorAmount.test(paid.amountMinor) ||
-    (paid.method !== "CardMachine" && paid.method !== "Cash" && paid.method !== "Online")
+    (paid.method !== "CardMachine" &&
+      paid.method !== "Cash" &&
+      paid.method !== "Online" &&
+      paid.method !== "Split")
   )
     return fail();
   return Object.freeze({

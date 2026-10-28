@@ -44,6 +44,7 @@ import {
 import {
   createMerchantDiningTableBillRead,
   createMerchantDiningTableSettle,
+  createMerchantDiningTableSplit,
 } from "../../apps/api/dist/merchant-dining-table-checkout.js";
 import { createMerchantDiningTableClosePlan } from "../../apps/api/dist/merchant-dining-table-close-plan.js";
 import { createMerchantDiningOrderCloseCommand } from "../../apps/api/dist/merchant-dining-order-close-command.js";
@@ -1219,6 +1220,12 @@ export async function createInternalMerchant(
     environment: pilotProviderEnvironment(),
     nextReference: () => resources.credentials.reference(),
   });
+  // WP-2423 item 8 ④: split the table's bill evenly or by rounds (or pay it whole again).
+  const diningTableSplit = createMerchantDiningTableSplit({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+  });
   // DEC-DINE-IN-PAY-LATER S4: stop a phone payment a guest gave up on (the Provider is asked).
   const diningTableOnlinePaymentStop =
     tableOnlinePaymentProvider === undefined
@@ -1661,6 +1668,7 @@ export async function createInternalMerchant(
       diningPaymentTimingChange,
       diningTableBill,
       diningTableSettle,
+      diningTableSplit,
       ...(diningTableOnlinePaymentStop === undefined ? {} : { diningTableOnlinePaymentStop }),
       orderUnpaidDeparture,
       tablePayment,

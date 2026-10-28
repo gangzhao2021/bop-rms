@@ -248,15 +248,28 @@ export function createMerchantDiningTableClosePlan(options: {
           );
           // Once the table has paid, every pay-later round is paid with it (a round comped or
           // emptied to nothing is no payment line, but it is still the paid table's).
+          // WP-2423 item 8 ④: a split bill is paid when every part of the current split is.
+          const tableStore = createPostgresDiningTableSettlementStore({
+            scope,
+            authorize: async (_t, value) =>
+              value.orderReference === orderReference && (await stillAllowed()),
+          });
+          const tableSettlements =
+            payLater.size > 0 ? await tableStore.listByOrders(tx, [orderReference]) : [];
+          const [splitPlan] = tableSettlements.some((settlement) => settlement.part !== null)
+            ? await tableStore.listSplitPlans(tx, [orderReference])
+            : [];
           const tablePaid =
-            payLater.size > 0 &&
-            (
-              await createPostgresDiningTableSettlementStore({
-                scope,
-                authorize: async (_t, value) =>
-                  value.orderReference === orderReference && (await stillAllowed()),
-              }).listByOrders(tx, [orderReference])
-            ).length > 0;
+            tableSettlements.some((settlement) => settlement.part === null) ||
+            (splitPlan !== undefined &&
+              splitPlan.mode !== "Whole" &&
+              splitPlan.parts.every((part) =>
+                tableSettlements.some(
+                  (settlement) =>
+                    settlement.part?.splitPlanReference === splitPlan.splitPlanReference &&
+                    settlement.part.partNumber === part.partNumber,
+                ),
+              ));
           let configuration: Awaited<ReturnType<typeof options.resolveRefundConfiguration>> | null =
             null;
           /** What a whole-round cancellation refunds now (all that is left, tip included). */

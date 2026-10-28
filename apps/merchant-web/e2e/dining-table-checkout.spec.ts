@@ -393,3 +393,97 @@ test("@production DEC-DINE-IN-PAY-LATER S4: while a guest pays on their phone st
   await expect(checkout.getByRole("radio", { name: "Cash" })).toBeVisible();
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
+
+/**
+ * WP-2423 item 8 ④ (Figma "分单 / AA · v3"): a table split evenly in three — part 1 paid on the
+ * card machine, part 3 being paid on a guest's phone — staff collect part 2 in cash with its own
+ * rounding and change; the browser sends only the part number and intent.
+ */
+test("@production split bill: staff collect one part in cash while the others are paid or being paid", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state);
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: [],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  const { splitBillFixture } = await import("../src/table-split.fixtures.js");
+  const split = { ...splitBillFixture(), diningSessionReference: id(2), orderReference: id(3) };
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: split }),
+  );
+  const sent: unknown[] = [];
+  await page.route("**/merchant/dining/table-settle", (route) => {
+    sent.push(route.request().postDataJSON());
+    const paid = structuredClone(split) as typeof split & {
+      split: { parts: Record<string, unknown>[]; paidParts: number; remainingMinor: string };
+    };
+    paid.split.parts[1] = {
+      ...paid.split.parts[1],
+      payment: {
+        method: "Cash",
+        tipMinor: "0",
+        roundingMinor: "1",
+        totalMinor: "3165",
+        tenderedMinor: "4000",
+        changeMinor: "835",
+        recordedAt: "2026-10-29T00:50:00.000Z",
+        recordedAfterOutage: false,
+      },
+    };
+    paid.split.paidParts = 2;
+    paid.split.remainingMinor = "3164";
+    return route.fulfill({ headers, json: { status: "Recorded", bill: paid } });
+  });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  const parts = checkout.getByRole("list", { name: "Parts" });
+  await expect(parts).toContainText("Part 1 · $31.64");
+  await expect(parts).toContainText("Paid $35.84 · card machine");
+  await expect(parts).toContainText("A guest is paying on their phone");
+  await expect(checkout).toContainText("1 of 3 parts paid · $63.28 to go");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await checkout.screenshot({ path: `test-results/split-bill-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await checkout.getByRole("button", { name: "Collect this part" }).click();
+  await expect(checkout.getByRole("heading", { name: "Collect part 2 of 3" })).toBeVisible();
+  await expect(checkout).toContainText("This part with tax$31.64");
+  await checkout.getByRole("radio", { name: "No tip" }).check();
+  await checkout.getByRole("radio", { name: "Cash" }).check();
+  await checkout.getByRole("textbox", { name: "Cash received" }).fill("40");
+  await checkout.screenshot({ path: "test-results/split-bill-collect-1440.png" });
+  // The part's own cash total, rounded to 5 cents: $31.64 → $31.65.
+  await checkout.getByRole("button", { name: "Cash received · $31.65" }).click();
+  const confirm = checkout.getByRole("alertdialog", { name: "Confirm the payment" });
+  await confirm.getByRole("button", { name: "Confirm $31.65 cash received" }).click();
+  await expect(checkout).toContainText("2 of 3 parts paid · $31.64 to go");
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({
+    diningSessionReference: id(2),
+    method: "Cash",
+    tip: { kind: "None" },
+    tenderedMinor: "4000",
+    partNumber: 2,
+  });
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});

@@ -4655,6 +4655,60 @@
     },
     {
       "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_split_plan",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL (Owner 2026-10-27 decision 3 \"分单 / AA：排在桌台页和当晚营业小结之后，先做“按人数平均分”和“各付各点的轮次”\"): a table's bill split into parts paid one by one; the split plan, its parts and their round slices are recorded and read by the checkout, reports and reconciliation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_split_plan",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL (Owner 2026-10-27 decision 3 \"分单 / AA：排在桌台页和当晚营业小结之后，先做“按人数平均分”和“各付各点的轮次”\"): a table's bill split into parts paid one by one; the split plan, its parts and their round slices are recorded and read by the checkout, reports and reconciliation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_split_part",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL (Owner 2026-10-27 decision 3 \"分单 / AA：排在桌台页和当晚营业小结之后，先做“按人数平均分”和“各付各点的轮次”\"): a table's bill split into parts paid one by one; the split plan, its parts and their round slices are recorded and read by the checkout, reports and reconciliation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_split_part",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL (Owner 2026-10-27 decision 3 \"分单 / AA：排在桌台页和当晚营业小结之后，先做“按人数平均分”和“各付各点的轮次”\"): a table's bill split into parts paid one by one; the split plan, its parts and their round slices are recorded and read by the checkout, reports and reconciliation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_split_part_round",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL (Owner 2026-10-27 decision 3 \"分单 / AA：排在桌台页和当晚营业小结之后，先做“按人数平均分”和“各付各点的轮次”\"): a table's bill split into parts paid one by one; the split plan, its parts and their round slices are recorded and read by the checkout, reports and reconciliation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_split_part_round",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL (Owner 2026-10-27 decision 3 \"分单 / AA：排在桌台页和当晚营业小结之后，先做“按人数平均分”和“各付各点的轮次”\"): a table's bill split into parts paid one by one; the split plan, its parts and their round slices are recorded and read by the checkout, reports and reconciliation"
+    },
+    {
+      "type": "table",
       "schema": "rms_ordering",
       "object": "order_item_price_reduction",
       "column": null,

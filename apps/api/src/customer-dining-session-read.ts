@@ -879,18 +879,32 @@ function postgresDependencies(
       );
       // DEC-DINE-IN-PAY-LATER: the table's one payment at the end (card machine or cash), what
       // the guests paid in total (tip and cash rounding included).
-      const tableSettlements =
+      const tableStore =
         paymentTiming !== "PayLater" || options.diningScope === undefined
-          ? []
-          : await createPostgresDiningTableSettlementStore({
+          ? null
+          : createPostgresDiningTableSettlementStore({
               scope: options.diningScope,
               authorize: async (_tx, value) =>
                 value.orderReference === orderReference && (await stillAuthorized()),
-            }).listByOrders(transaction, [orderReference]);
+            });
+      const tableSettlements =
+        tableStore === null ? [] : await tableStore.listByOrders(transaction, [orderReference]);
+      // WP-2423 item 8 ④: a split bill's rounds are paid once every part is (each part is a
+      // payment with its own tip and cash rounding, added up below).
+      const [splitPlan] =
+        tableStore !== null && tableSettlements.some((settlement) => settlement.part !== null)
+          ? await tableStore.listSplitPlans(transaction, [orderReference])
+          : [];
+      const splitPaid =
+        splitPlan !== undefined &&
+        splitPlan.mode !== "Whole" &&
+        splitPlan.parts.every((part) =>
+          tableSettlements.some((settlement) => settlement.part?.partNumber === part.partNumber),
+        );
       const settledRounds = new Set(
-        tableSettlements.flatMap((settlement) =>
-          settlement.lines.map((line) => line.orderBatchReference),
-        ),
+        tableSettlements
+          .filter((settlement) => settlement.part === null || splitPaid)
+          .flatMap((settlement) => settlement.lines.map((line) => line.orderBatchReference)),
       );
       return {
         diningSessionReference,
@@ -922,11 +936,14 @@ function postgresDependencies(
           payLaterRounds,
           settledRounds,
           tableSettlement:
-            tableSettlements[0] === undefined
+            tableSettlements.length === 0
               ? null
               : {
-                  tipMinor: tableSettlements[0].tipMinor,
-                  roundingMinor: tableSettlements[0].roundingMinor,
+                  tipMinor: tableSettlements.reduce((sum, entry) => sum + entry.tipMinor, 0n),
+                  roundingMinor: tableSettlements.reduce(
+                    (sum, entry) => sum + entry.roundingMinor,
+                    0n,
+                  ),
                 },
           unpaidCancellations,
           staffCancellations,

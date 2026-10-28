@@ -28,7 +28,27 @@ export interface TablePaymentView {
   };
   readonly consistent: boolean;
   readonly state: TablePaymentState;
-  readonly attempt: { readonly totalMinor: string; readonly tipMinor: string } | null;
+  readonly attempt: {
+    readonly totalMinor: string;
+    readonly tipMinor: string;
+    /** WP-2423 item 8 ④: the part this guest is paying (null: the whole table). */
+    readonly partNumber: number | null;
+  } | null;
+  /**
+   * WP-2423 item 8 ④: the table's bill split into parts paid one by one (null: paid whole).
+   * "Mine": this guest is paying it; "Paying": someone else is.
+   */
+  readonly split: null | {
+    readonly mode: "Even" | "ByRounds";
+    readonly paidParts: number;
+    readonly remainingMinor: string;
+    readonly parts: readonly {
+      readonly partNumber: number;
+      readonly amountMinor: string;
+      readonly subtotalMinor: string;
+      readonly status: "Paid" | "Mine" | "Paying" | "ToPay";
+    }[];
+  };
   readonly receipt: null | {
     readonly method: "CardMachine" | "Cash" | "Online";
     readonly roundsMinor: string;
@@ -115,7 +135,14 @@ export function parseTablePaymentView(value: unknown): TablePaymentView {
         : Object.freeze({
             totalMinor: amount(attempt.totalMinor),
             tipMinor: amount(attempt.tipMinor),
+            partNumber:
+              attempt.partNumber === undefined || attempt.partNumber === null
+                ? null
+                : Number.isSafeInteger(attempt.partNumber)
+                  ? (attempt.partNumber as number)
+                  : fail(),
           }),
+    split: splitOf(p.split),
     receipt:
       receipt === null || receipt === undefined
         ? null
@@ -132,6 +159,40 @@ export function parseTablePaymentView(value: unknown): TablePaymentView {
             totalMinor: amount(receipt.totalMinor),
             paidAt: typeof receipt.paidAt === "string" ? receipt.paidAt : fail(),
           }),
+  });
+}
+
+function splitOf(value: unknown): TablePaymentView["split"] {
+  if (value === undefined || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (
+    (raw.mode !== "Even" && raw.mode !== "ByRounds") ||
+    !Number.isSafeInteger(raw.paidParts) ||
+    !Array.isArray(raw.parts) ||
+    raw.parts.length < 2 ||
+    raw.parts.length > 20
+  )
+    return fail();
+  return Object.freeze({
+    mode: raw.mode,
+    paidParts: raw.paidParts as number,
+    remainingMinor: amount(raw.remainingMinor),
+    parts: Object.freeze(
+      raw.parts.map((value: unknown, index: number) => {
+        const part = value as Record<string, unknown>;
+        if (
+          part.partNumber !== index + 1 ||
+          !["Paid", "Mine", "Paying", "ToPay"].includes(String(part.status))
+        )
+          return fail();
+        return Object.freeze({
+          partNumber: index + 1,
+          amountMinor: amount(part.amountMinor),
+          subtotalMinor: amount(part.subtotalMinor),
+          status: part.status as "Paid" | "Mine" | "Paying" | "ToPay",
+        });
+      }),
+    ),
   });
 }
 
@@ -182,9 +243,19 @@ export function createTablePaymentClient(request: typeof fetch = globalThis.fetc
     async read() {
       return parseTablePaymentView(await post("", { action: "Read" }));
     },
-    /** Pay the whole table with this tip; the same operation comes back to the same payment. */
-    async start(operationReference: string, tip: TableTip) {
-      return parseTablePaymentView(await post("", { action: "Start", operationReference, tip }));
+    /**
+     * Pay the whole table — or, for a split bill, one part (WP-2423 item 8 ④) — with this tip;
+     * the same operation comes back to the same payment.
+     */
+    async start(operationReference: string, tip: TableTip, partNumber: number | null = null) {
+      return parseTablePaymentView(
+        await post("", {
+          action: "Start",
+          operationReference,
+          tip,
+          ...(partNumber === null ? {} : { partNumber }),
+        }),
+      );
     },
     /** The secure card form's one-time value (Stripe). */
     async handoff() {
