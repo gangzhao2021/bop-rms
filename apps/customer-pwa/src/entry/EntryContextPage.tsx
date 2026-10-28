@@ -253,6 +253,44 @@ export function EntryContextView({
   );
 }
 
+/**
+ * WP-2423 item 8 ⑤ (v3: one primary action): at a table, joining it is the next step and the menu
+ * is there to browse; once joined, going to the menu is.
+ */
+function EntryNextSteps({
+  joining,
+  context,
+  diningAdmission,
+  onContinue,
+}: {
+  readonly joining: boolean;
+  readonly context: object;
+  readonly diningAdmission: DiningAdmissionUi | undefined;
+  readonly onContinue: () => void;
+}) {
+  const [joined, setJoined] = useState(false);
+  // Joining is the next step only where it can happen here.
+  const first = joining && diningAdmission !== undefined && !joined;
+  return (
+    <>
+      {joining ? (
+        <DiningAdmissionPanel
+          contextEpoch={context}
+          service={diningAdmission}
+          onStateChange={(state) => setJoined(state === "Bound" || state === "Unavailable")}
+        />
+      ) : null}
+      <button
+        className={first ? "entry-secondary-action" : "entry-action"}
+        type="button"
+        onClick={onContinue}
+      >
+        {first ? t("Look at the menu first") : t("Continue to menu")}
+      </button>
+    </>
+  );
+}
+
 function StateHeading({
   children,
   headingRef,
@@ -447,17 +485,18 @@ function EntryState({
             })}
       </p>
       {/* Open now, today's hours and the address are stated once, in the store card below. */}
-      {context.channel === "DineIn" &&
-      context.publicTableReference !== null &&
-      locationOpen &&
-      context.availableServiceModes.includes("DineIn") ? (
-        <DiningAdmissionPanel contextEpoch={context} service={diningAdmission} />
-      ) : null}
       {locationOpen ? (
         onContinue ? (
-          <button className="entry-action" type="button" onClick={onContinue}>
-            {t("Continue to menu")}
-          </button>
+          <EntryNextSteps
+            joining={
+              context.channel === "DineIn" &&
+              context.publicTableReference !== null &&
+              context.availableServiceModes.includes("DineIn")
+            }
+            context={context}
+            diningAdmission={diningAdmission}
+            onContinue={onContinue}
+          />
         ) : (
           <p role="status">
             {t("Menu navigation is unavailable. Scan the location QR code again.")}

@@ -7,6 +7,7 @@ import { it, vi } from "vitest";
 import {
   createPostgresDiningBatchCancellationCandidates,
   createPostgresDiningCheckoutExpiryCandidates,
+  createPostgresOrderRoundStaffHoldStore,
   listStoreUnpaidGuestDiningRounds,
   orderCancelledEventMatchesRecord,
 } from "../../rms/ordering/src/index.ts";
@@ -340,6 +341,9 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
 
       await admin.query("SET session_replication_role = replica");
       let resumed, staffRound, paidRound, lateRound, unknownRound, legacyRound, recentRound, pay;
+      // WP-2423 item 8 ⑤: a guest round with no payment that waits for staff (as a pay-later
+      // round held before the kitchen); its payment window ended long ago.
+      let heldRound;
       try {
         resumed = await guestRound(1, time(-minutes(5)));
         staffRound = await guestRound(2, time(-minutes(6)));
@@ -350,6 +354,7 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
         unknownRound = await guestRound(5, time(-minutes(41)));
         legacyRound = await guestRound(6, time(-minutes(42)));
         recentRound = await guestRound(7, time(-minutes(31)));
+        heldRound = await guestRound(8, time(-minutes(45)));
         pay = {
           resumed: await payment(resumed, "Open", 1),
           staff: await payment(staffRound, "Open", 2),
@@ -403,6 +408,23 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
           }
         },
       };
+      const holds = createPostgresOrderRoundStaffHoldStore({
+        brandReference: brand,
+        storeReference: store,
+        authorize: async () => true,
+      });
+      await transactions.run((tx) =>
+        holds.hold({
+          transaction: tx,
+          holdReference: id(0x8f1),
+          orderReference: heldRound.refs.order,
+          orderBatchReference: heldRound.refs.batch,
+          submissionReference: heldRound.refs.submission,
+          guestSessionReference: heldRound.refs.guest,
+          reason: "PhoneRapid",
+          observedAt: time(-minutes(44)),
+        }),
+      );
       const one = async (sql, values = []) => (await admin.query(sql, values)).rows;
 
       // ── Stock: one tracked item with 10 KG on hand; the staff round reserved 1 KG at submission
@@ -818,9 +840,16 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
       const listed = await unpaid();
       assert.deepEqual(
         listed.map((round) => [round.orderBatchReference, round.roundNumber, round.payBy]),
-        [resumed, staffRound, paidRound, lateRound, unknownRound, legacyRound, recentRound].map(
-          (round) => [round.refs.batch, 1, round.expiresAt],
-        ),
+        [
+          resumed,
+          staffRound,
+          paidRound,
+          lateRound,
+          unknownRound,
+          legacyRound,
+          recentRound,
+          heldRound,
+        ].map((round) => [round.refs.batch, 1, round.expiresAt]),
       );
 
       // ── 2. A manager cancels an unpaid round before its deadline.
@@ -1066,6 +1095,8 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
         for (const [n, round] of [
           [5, unknownRound],
           [6, legacyRound],
+          // WP-2423 item 8 ⑤: the held round's items are untracked too.
+          [8, heldRound],
         ]) {
           const k = 0x5000 + n * 0x10;
           const v = parseSubmissionInventoryFinalValidation({
@@ -1250,6 +1281,48 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
       assert.equal(
         (await unpaid()).some((round) => round.orderBatchReference === paidRound.refs.batch),
         false,
+      );
+
+      // ── WP-2423 item 8 ⑤ decision 7: the round waiting for staff was never cancelled by time
+      // (the dispatcher ran past its deadline above), and staff cancel it only with its release.
+      const heldCancellations = async () =>
+        (
+          await one(
+            "SELECT count(*)::int AS n FROM rms_ordering.order_batch_checkout_cancellation WHERE order_batch_id=$1",
+            [heldRound.refs.batch],
+          )
+        )[0].n;
+      assert.equal(await heldCancellations(), 0);
+      // Its payment window ended 15 minutes ago, yet the expiry scan never offers it.
+      assert.equal(await candidateOf(heldRound), undefined);
+      await assert.rejects(staffCancel(heldRound, id(0x8f2)));
+      assert.equal(await heldCancellations(), 0);
+      const cancelledHeld = await transactions.run(async (tx) => {
+        await holds.release({
+          transaction: tx,
+          operationReference: id(0x8f3),
+          orderReference: heldRound.refs.order,
+          orderBatchReference: heldRound.refs.batch,
+          outcome: "Cancelled",
+          actorReference: manager,
+          observedAt: now(),
+        });
+        return cancellation.cancelUnpaidForStaff(tx, {
+          operationReference: id(0x8f3),
+          orderReference: heldRound.refs.order,
+          orderBatchReference: heldRound.refs.batch,
+          actorReference: manager,
+          authorize: async () => true,
+        });
+      });
+      assert.equal(cancelledHeld.status, "Created");
+      assert.equal(cancelledHeld.record.reasonCode, "STAFF_CANCELLED_UNPAID");
+      assert.deepEqual(
+        await one(
+          "SELECT outcome,actor_id FROM rms_ordering.order_round_staff_hold_release WHERE order_batch_id=$1",
+          [heldRound.refs.batch],
+        ),
+        [{ outcome: "Cancelled", actor_id: manager }],
       );
     } finally {
       vi.unstubAllEnvs();

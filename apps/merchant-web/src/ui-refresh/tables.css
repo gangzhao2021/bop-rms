@@ -1242,3 +1242,78 @@
 .tables-v3 .table-phones .table-phones__danger {
   color: var(--bop-color-danger);
 }
+
+/* WP-2423 item 8 ⑤ decisions 5–7: a guest round waiting for staff before the kitchen. The one
+   next step ("Send to kitchen") is the accent fill; cancelling is accent words, asked once more. */
+.tables-v3 .table-held-rounds {
+  margin: 16px 0;
+}
+.tables-v3 .table-held-rounds__round {
+  padding: 8px 0 12px 12px;
+  border-left: 3px solid var(--bop-color-danger-mark);
+}
+.tables-v3 .table-held-rounds__round + .table-held-rounds__round {
+  margin-top: 12px;
+}
+.tables-v3 .table-held-rounds p {
+  margin: 0;
+  font-size: 15px;
+}
+.tables-v3 .table-held-rounds__note {
+  margin-top: 2px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.tables-v3 .table-held-rounds__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 8px;
+}
+.tables-v3 .table-held-rounds button {
+  min-height: 44px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.workspace-page.tables-v3 .table-panel .table-held-rounds .table-held-rounds__send,
+.tables-v3 .table-held-rounds .table-held-rounds__send {
+  padding: 0 16px;
+  border-radius: 8px;
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill, #fff);
+}
+.tables-v3 .table-held-rounds .table-phones__danger {
+  color: var(--bop-color-danger);
+}
+.tables-v3 .table-held-rounds button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.tables-v3 .round-hold-setting {
+  margin: 8px 0 12px;
+  font-size: 15px;
+}
+.tables-v3 .round-hold-setting label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.tables-v3 .round-hold-setting input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--bop-color-accent);
+}
+.tables-v3 .round-hold-setting__note {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}

@@ -1037,6 +1037,8 @@ it("WP-2423: reads one order's detail with its lines and hides other Stores' ord
     orderReference: order,
     orderNumber: "16",
     orderType: "Pickup" as const,
+    // WP-2423 item 8 ⑤: a pickup Order has no table session.
+    diningSessionReference: null,
     sourceChannel: "Qr" as const,
     submittedAt: "2026-10-08T21:00:30.000Z",
     initialBatchReference: "0198a408-0000-7000-8000-000000000124",

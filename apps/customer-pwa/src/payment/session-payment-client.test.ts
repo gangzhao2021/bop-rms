@@ -159,3 +159,29 @@ it.each([
     code: expected,
   });
 });
+it("WP-2423 item 8 ⑤: a round that waits for staff answers Held (202) with why", async () => {
+  const round = (extra: Record<string, unknown>) => ({
+    schemaVersion: 1,
+    round: {
+      checkoutSessionReference: id(1),
+      orderReference: id(3),
+      status: "Held",
+      total: { amountMinor: "1130", currency: "CAD" },
+      ...extra,
+    },
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(Response.json(round({ waitingReason: "PhoneRapid" }), { status: 202 })),
+  );
+  expect((await createSessionPaymentClient().sendToKitchen(id(1), id(4))).status).toBe("Held");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(Response.json(round({ waitingReason: "Other" }), { status: 202 })),
+  );
+  await expect(createSessionPaymentClient().sendToKitchen(id(1), id(4))).rejects.toMatchObject({
+    code: "unknown",
+  });
+});

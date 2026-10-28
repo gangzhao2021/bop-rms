@@ -385,3 +385,32 @@ it("DEC-DINE-IN-PAY-LATER: sends a pay-later table's round to the kitchen with n
   sendToKitchen.mockRejectedValueOnce(new CustomerStoreClosedError());
   expect((await send({ sendToKitchen: true })).status).toBe(409);
 });
+
+it("WP-2423 item 8 ⑤: a round that waits for staff is answered 202 Held with why, and nothing else", async () => {
+  const { send, sendToKitchen } = await setup();
+  sendToKitchen.mockResolvedValueOnce({
+    status: "Held",
+    waitingReason: "FirstOrder",
+    orderReference: id(40),
+    totalMinor: 2260n,
+  });
+  const held = await send({ sendToKitchen: true });
+  expect(held.status).toBe(202);
+  expect(await held.json()).toEqual({
+    schemaVersion: 1,
+    round: {
+      checkoutSessionReference: id(31),
+      orderReference: id(40),
+      status: "Held",
+      waitingReason: "FirstOrder",
+      total: { amountMinor: "2260", currency: "CAD" },
+    },
+  });
+  // Held without its reason (or a reason on a sent round) is an inconsistent answer.
+  sendToKitchen.mockResolvedValueOnce({
+    status: "Held",
+    orderReference: id(40),
+    totalMinor: 2260n,
+  });
+  expect((await send({ sendToKitchen: true })).status).toBe(503);
+});

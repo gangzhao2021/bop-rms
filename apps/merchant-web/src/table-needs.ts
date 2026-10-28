@@ -33,6 +33,15 @@ export function staffCallReasonText(reason: "Question" | "TableNeeds" | "OrderPr
       : t("A question");
 }
 
+/** WP-2423 item 8 ⑤: why a guest's round waits for staff, in staff words. */
+export function heldRoundReasonText(reason: "FirstOrder" | "PhoneRapid" | "TableRapid"): string {
+  return reason === "FirstOrder"
+    ? t("first round from a new phone")
+    : reason === "PhoneRapid"
+      ? t("many rounds from one phone just now")
+      : t("many rounds from this table just now");
+}
+
 const cad = (minor: string) => orderMoney({ amountMinor: minor, currencyCode: "CAD" });
 const minutesAgo = (since: string, now: number) =>
   Math.max(0, Math.floor((now - Date.parse(since)) / 60_000));
@@ -72,6 +81,37 @@ export function tableNeed(
       step: "Handled",
     };
   }
+  // WP-2423 item 8 ⑤ decisions 6–7: a guest's round waits for staff before the kitchen; it is
+  // never sent or cancelled on its own, so it stays here until someone decides.
+  const held = [...(table.heldRounds ?? [])].sort((a, b) => a.heldAt.localeCompare(b.heldAt))[0];
+  if (held !== undefined) {
+    const waited = minutesAgo(held.heldAt, now);
+    return {
+      tone: "action",
+      rank: 1,
+      urgent: waited >= 5,
+      since: held.heldAt,
+      words: t("Round waiting for your OK"),
+      detail:
+        heldRoundReasonText(held.reason) +
+        " · " +
+        (waited === 0 ? t("just now") : t("{minutes} min ago", { minutes: String(waited) })),
+      step: null,
+    };
+  }
+  // WP-2423 item 8 ⑤ decision 3: a phone joined the table in the last 10 minutes.
+  const joined = [...(table.newPhones ?? [])].sort((a, b) =>
+    b.joinedAt.localeCompare(a.joinedAt),
+  )[0];
+  if (joined !== undefined)
+    return {
+      tone: "action",
+      rank: 2,
+      since: joined.joinedAt,
+      words: t("Phone {number} just joined", { number: String(joined.phoneNumber) }),
+      detail: t("check it belongs to this table"),
+      step: null,
+    };
   // Warn before timeouts: the list says how long a paid round has waited, and how long is left
   // before an unpaid round is cancelled on its own (the panel says what to do).
   const oldestPaid = [...table.roundsAwaitingAcceptance].sort((a, b) =>

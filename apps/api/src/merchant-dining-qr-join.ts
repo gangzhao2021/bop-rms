@@ -7,6 +7,7 @@ import {
 } from "@rms/dining";
 import { listOrderItemPrices, listStoreDiningSessionOrders } from "@rms/ordering";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 
@@ -79,103 +80,121 @@ export function createMerchantDiningQrJoin(options: {
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const authenticated = await options.authentication.authorize(input);
     const command = parseMerchantDiningQrJoinCommand(input.command);
-    return options.persistence.transactions.run(async (tx) => {
-      const current = await resolve(
-        tx,
-        input.sessionCookie,
-        "dining.operate",
-        authenticated.sessionReference,
-      );
-      if ((await current.allowed()) !== true) throw new Error("DINING_QR_JOIN_DENIED");
-      const actorReference = String(current.actorReference);
-      const scope = {
-        tenantReference: current.selected.tenantReference,
-        brandReference: current.context.brand.brandReference,
-        storeReference: current.store.storeReference,
-      };
-      const store = createPostgresDiningQrJoinStore(
-        { run: (work) => work(tx) },
+    const denied = (): never => {
+      throw new Error("DINING_QR_JOIN_DENIED");
+    };
+    return options.persistence.transactions.run((tx) =>
+      withMerchantTransactionAuthorization(
         {
-          scope,
-          credentials: options.credentials,
-          pepperVersion: 1,
-          now: options.now,
-          authorize: async () => (await current.allowed()) === true,
-          audit: (record) => ({
-            auditId: options.nextReference(),
-            brandId: scope.brandReference,
-            storeId: scope.storeReference,
-            actor: { type: "User", reference: actorReference },
-            actionCode:
-              record.action === "Pause"
-                ? "DINING_QR_JOIN_PAUSE"
-                : record.action === "Resume"
-                  ? "DINING_QR_JOIN_RESUME"
-                  : "DINING_PARTICIPANT_REMOVE",
-            targetType: "DiningTable",
-            targetId: record.tableReference,
-            reasonCode: "STAFF_TABLE_CONTROL",
-            correlationId: record.operationReference,
-            occurredAt: record.observedAt,
-            sourceChannel: "API",
-            dataClassification: "Internal",
-            retentionPolicyCode: options.retentionPolicyCode,
-            retentionPolicyVersion: options.retentionPolicyVersion,
-          }),
+          transaction: tx,
+          resolve: async () => {
+            const current = await resolve(
+              tx,
+              input.sessionCookie,
+              "dining.operate",
+              authenticated.sessionReference,
+            );
+            if ((await current.allowed()) !== true) return denied();
+            return current;
+          },
+          recheck: async (current) => (await current.allowed()) === true,
+          denied,
         },
-      );
-      const observedAt = options.now();
-      if (command.action === "Pause" || command.action === "Resume") {
-        await store.setPaused({
-          operationReference: command.operationReference,
-          diningSessionReference: command.diningSessionReference,
-          paused: command.action === "Pause",
-          actorReference,
-          observedAt,
-        });
-      } else if (command.action === "Remove") {
-        await store.remove({
-          operationReference: command.operationReference,
-          diningSessionReference: command.diningSessionReference,
-          participantReference: command.participantReference,
-          actorReference,
-          observedAt,
-        });
-      }
-      const state = await store.state(command.diningSessionReference);
-      // Decision 4: which phone sent each round (the order's own item records); staff rounds
-      // have none.
-      const owner = { brandReference: scope.brandReference, storeReference: scope.storeReference };
-      const consumer = tx as unknown as ConsumerTransaction;
-      const order =
-        (await listStoreDiningSessionOrders(consumer, owner, [command.diningSessionReference])).get(
-          command.diningSessionReference,
-        ) ?? null;
-      const phoneOf = new Map(
-        state.phones.map((phone) => [String(phone.participantReference), phone.phoneNumber]),
-      );
-      const rounds = new Map<string, number | null>();
-      if (order !== null)
-        for (const item of await listOrderItemPrices(consumer, owner, order)) {
-          const batch = String(item.orderBatchReference);
-          if (rounds.has(batch)) continue;
-          const participant = item.addedByParticipantReference;
-          rounds.set(
-            batch,
-            participant === null || participant === undefined
-              ? null
-              : (phoneOf.get(String(participant)) ?? null),
+        async (authority) => {
+          const current = authority.scope;
+          const actorReference = String(current.actorReference);
+          const scope = {
+            tenantReference: current.selected.tenantReference,
+            brandReference: current.context.brand.brandReference,
+            storeReference: current.store.storeReference,
+          };
+          const store = createPostgresDiningQrJoinStore(
+            { run: (work) => work(tx) },
+            {
+              scope,
+              credentials: options.credentials,
+              pepperVersion: 1,
+              now: options.now,
+              authorize: async () => authority.guard(),
+              audit: (record) => ({
+                auditId: options.nextReference(),
+                brandId: scope.brandReference,
+                storeId: scope.storeReference,
+                actor: { type: "User", reference: actorReference },
+                actionCode:
+                  record.action === "Pause"
+                    ? "DINING_QR_JOIN_PAUSE"
+                    : record.action === "Resume"
+                      ? "DINING_QR_JOIN_RESUME"
+                      : "DINING_PARTICIPANT_REMOVE",
+                targetType: "DiningTable",
+                targetId: record.tableReference,
+                reasonCode: "STAFF_TABLE_CONTROL",
+                correlationId: record.operationReference,
+                occurredAt: record.observedAt,
+                sourceChannel: "API",
+                dataClassification: "Internal",
+                retentionPolicyCode: options.retentionPolicyCode,
+                retentionPolicyVersion: options.retentionPolicyVersion,
+              }),
+            },
           );
-        }
-      if ((await current.allowed()) !== true) throw new Error("DINING_QR_JOIN_DENIED");
-      return Object.freeze({
-        ...state,
-        rounds: Object.freeze(
-          [...rounds].map(([orderBatchReference, phoneNumber]) =>
-            Object.freeze({ orderBatchReference, phoneNumber }),
-          ),
-        ),
-      });
-    });
+          const observedAt = options.now();
+          if (command.action === "Pause" || command.action === "Resume") {
+            await store.setPaused({
+              operationReference: command.operationReference,
+              diningSessionReference: command.diningSessionReference,
+              paused: command.action === "Pause",
+              actorReference,
+              observedAt,
+            });
+          } else if (command.action === "Remove") {
+            await store.remove({
+              operationReference: command.operationReference,
+              diningSessionReference: command.diningSessionReference,
+              participantReference: command.participantReference,
+              actorReference,
+              observedAt,
+            });
+          }
+          const state = await store.state(command.diningSessionReference);
+          // Decision 4: which phone sent each round (the order's own item records); staff rounds
+          // have none.
+          const owner = {
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+          };
+          const consumer = tx as unknown as ConsumerTransaction;
+          const order =
+            (
+              await listStoreDiningSessionOrders(consumer, owner, [command.diningSessionReference])
+            ).get(command.diningSessionReference) ?? null;
+          const phoneOf = new Map(
+            state.phones.map((phone) => [String(phone.participantReference), phone.phoneNumber]),
+          );
+          const rounds = new Map<string, number | null>();
+          if (order !== null)
+            for (const item of await listOrderItemPrices(consumer, owner, order)) {
+              const batch = String(item.orderBatchReference);
+              if (rounds.has(batch)) continue;
+              const participant = item.addedByParticipantReference;
+              rounds.set(
+                batch,
+                participant === null || participant === undefined
+                  ? null
+                  : (phoneOf.get(String(participant)) ?? null),
+              );
+            }
+          return Object.freeze({
+            ...state,
+            rounds: Object.freeze(
+              [...rounds].map(([orderBatchReference, phoneNumber]) =>
+                Object.freeze({ orderBatchReference, phoneNumber }),
+              ),
+            ),
+          });
+        },
+      ),
+    );
   };
 }

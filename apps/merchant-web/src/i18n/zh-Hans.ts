@@ -6064,4 +6064,24 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Keep: "保留",
   "Remove phone {number}": "移出手机 {number}",
   " · Phone {number}": " · 手机 {number}",
+  "Round waiting for your OK": "有一轮等你确认",
+  "Phone {number} just joined": "手机 {number} 刚加入",
+  "check it belongs to this table": "看看是不是这桌的客人",
+  "first round from a new phone": "新手机的第一轮",
+  "many rounds from one phone just now": "同一台手机刚送出很多轮",
+  "many rounds from this table just now": "这桌刚送出很多轮",
+  "Rounds waiting for your OK": "等你确认的轮次",
+  "{round} is waiting for your OK": "{round}等你确认",
+  "It has not gone to the kitchen. Check it with the table, then send it or cancel it.":
+    "还没送厨房。和这桌核对后，送厨房或取消。",
+  "Cancel {round}? Nothing was made or paid; it stays on the records as cancelled.":
+    "取消{round}？还没做也没付款，记录里保留为已取消。",
+  "Cancel this round": "取消这一轮",
+  "Send to kitchen": "送厨房",
+  "Ordering from guests' phones": "客人用手机点餐",
+  "A new phone's first round waits for staff OK before the kitchen":
+    "新手机的第一轮要店员确认后才送厨房",
+  "Tables that pay at the end. Rapid ordering always waits: a phone's 4th round or a table's 7th within 10 minutes.":
+    "只用于最后结账的桌。短时间大量下单总会先等确认：同一台手机 10 分钟内第 4 轮，或同一桌第 7 轮。",
+  "A manager changes this.": "由经理修改。",
 });

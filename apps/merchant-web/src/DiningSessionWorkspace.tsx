@@ -35,7 +35,7 @@ import { TableSessionClose } from "./TableSessionClose.js";
 import { LastOrdersNotice } from "./LastOrdersNotice.js";
 import { TableCheckout } from "./TableCheckout.js";
 import { TableOrderRounds } from "./TableOrderRounds.js";
-import { TablePanelPhones } from "./TablePhones.js";
+import { RoundHoldSettingControl, TableHeldRounds, TablePanelPhones } from "./TablePhones.js";
 import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
 import {
   browserOffline,
@@ -1017,6 +1017,8 @@ export function DiningSessionWorkspace({
     >
       {/* WP-2423 item 8 ③ follow-up: guests' last orders coming, or passed (staff still can). */}
       <LastOrdersNotice timeZone={timeZone} />
+      {/* WP-2423 item 8 ⑤ decision 5: the Store's "a new phone's first round waits for staff". */}
+      {csrf ? <RoundHoldSettingControl csrf={csrf} locked={locked} /> : null}
       {stale ? <StaleReadNotice stale={stale} /> : null}
       {/* Operating continuity: what servers do while the page can't reach the store system. */}
       {stale ? <TablesOfflineGuide /> : null}
@@ -1272,6 +1274,15 @@ function TablePanel({
         </section>
       ) : null}
       {code ? <DiningEntryCode code={code} onHide={onHideCode} /> : null}
+      {seated ? (
+        <TableHeldRounds
+          rounds={table.heldRounds ?? []}
+          csrf={csrf}
+          timeZone={timeZone}
+          locked={locked}
+          onChanged={onChanged}
+        />
+      ) : null}
       {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
         <TablePanelPhones
           key={table.currentDiningSessionReference}

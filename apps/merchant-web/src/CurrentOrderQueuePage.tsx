@@ -1,4 +1,5 @@
 import { systemText, displayLocale, t } from "./i18n/i18n.js";
+import { useRoundPhones, WithRoundPhones } from "./TablePhones.js";
 import {
   AcceptanceHoldDecision,
   AcceptanceHoldNotice,
@@ -1026,6 +1027,10 @@ function QueuedOrderLines({
   >({ kind: "Loading" });
   const reported = useRef(onDetail);
   reported.current = onDetail;
+  const phones = useRoundPhones(
+    refundCheck?.csrf ?? null,
+    state.kind === "Ready" ? state.detail.order.diningSessionReference : null,
+  );
   useEffect(() => {
     const controller = new AbortController();
     void client
@@ -1060,7 +1065,7 @@ function QueuedOrderLines({
         )}
         rounds={
           state.detail.order.orderType === "DineIn"
-            ? { batches: state.detail.order.batches, head: roundHead, timeZone, today }
+            ? { batches: state.detail.order.batches, head: roundHead, timeZone, today, phones }
             : undefined
         }
       />
@@ -2860,34 +2865,43 @@ export function CurrentOrderQueuePage({
                     <>
                       <PickupContactPanel contact={detail.pickupContact} timeZone={timeZone} />
                       <OnlineRefundNote order={detail.order} position={detail.paymentPosition} />
-                      <CurrentOrderLines
-                        lines={detail.lines}
-                        cancelledBatches={storeCancelledBatches(detail.view)}
-                        unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
-                        failedPaymentBatches={failedPaymentBatches(detail.view)}
-                        removedItems={removedUnpaidItems(detail.view)}
-                        refundRows={orderRefundRows(
-                          detail.order,
-                          detail.lines,
-                          detail.paymentPosition,
+                      <WithRoundPhones
+                        csrf={csrf}
+                        diningSessionReference={detail.order.diningSessionReference}
+                        fetcher={fetcher}
+                      >
+                        {(phones) => (
+                          <CurrentOrderLines
+                            lines={detail.lines}
+                            cancelledBatches={storeCancelledBatches(detail.view)}
+                            unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
+                            failedPaymentBatches={failedPaymentBatches(detail.view)}
+                            removedItems={removedUnpaidItems(detail.view)}
+                            refundRows={orderRefundRows(
+                              detail.order,
+                              detail.lines,
+                              detail.paymentPosition,
+                            )}
+                            rounds={
+                              detail.order.orderType === "DineIn"
+                                ? {
+                                    batches: detail.order.batches,
+                                    head: roundHead,
+                                    timeZone,
+                                    today: businessDay,
+                                    phones,
+                                  }
+                                : undefined
+                            }
+                            refundCheck={{
+                              orderReference: order.orderReference,
+                              csrf,
+                              fetcher,
+                              onChecked: () => reload(after),
+                            }}
+                          />
                         )}
-                        rounds={
-                          detail.order.orderType === "DineIn"
-                            ? {
-                                batches: detail.order.batches,
-                                head: roundHead,
-                                timeZone,
-                                today: businessDay,
-                              }
-                            : undefined
-                        }
-                        refundCheck={{
-                          orderReference: order.orderReference,
-                          csrf,
-                          fetcher,
-                          onChecked: () => reload(after),
-                        }}
-                      />
+                      </WithRoundPhones>
                     </>
                   ) : open ? (
                     <>

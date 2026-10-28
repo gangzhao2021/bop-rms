@@ -87,6 +87,13 @@ export interface StaffDiningTable {
    */
   roundsAwaitingAcceptance: readonly { readonly roundNumber: number; readonly paidAt: string }[];
   /**
+   * WP-2423 item 8 ⑤ decisions 5–7: guest rounds waiting for staff before the kitchen ("needs
+   * action"; never sent or cancelled automatically). Empty from an older server.
+   */
+  heldRounds?: readonly StaffHeldRound[];
+  /** WP-2423 item 8 ⑤ decision 3: phones that joined the table in the last 10 minutes. */
+  newPhones?: readonly { readonly phoneNumber: number; readonly joinedAt: string }[];
+  /**
    * WP-2423 D4: the open session's phase and version and its Order, for closing the table's
    * session from the Tables page (absent when the staff member may not close sessions).
    */
@@ -96,6 +103,15 @@ export interface StaffDiningTable {
    * answered yet. Null when nobody is waiting (and from an older server).
    */
   staffCall?: StaffDiningCall | null;
+}
+export type StaffHeldRoundReason = "FirstOrder" | "PhoneRapid" | "TableRapid";
+export interface StaffHeldRound {
+  readonly orderReference: string;
+  readonly orderBatchReference: string;
+  /** Null when the round's number could not be read with it. */
+  readonly roundNumber: number | null;
+  readonly reason: StaffHeldRoundReason;
+  readonly heldAt: string;
 }
 export type StaffDiningCallReason = "Question" | "TableNeeds" | "OrderProblem";
 export interface StaffDiningCall {
@@ -298,6 +314,44 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
             orderReference: facts.orderReference === null ? null : ref(facts.orderReference),
           });
         }
+        // WP-2423 item 8 ⑤: rounds waiting for staff and phones that just joined (open tables).
+        const instant = (value: unknown) =>
+          typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value)
+            ? value
+            : fail();
+        const count = (value: unknown) =>
+          typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : fail();
+        const openOnly = (value: unknown) =>
+          value === undefined
+            ? []
+            : Array.isArray(value) &&
+                value.length <= 20 &&
+                (currentDiningSessionReference !== null || value.length === 0)
+              ? (value as unknown[])
+              : fail();
+        const heldRounds = openOnly(r.heldRounds).map((entry) => {
+          const round = obj(entry);
+          if (
+            Object.keys(round).length !== 5 ||
+            !["FirstOrder", "PhoneRapid", "TableRapid"].includes(String(round.reason))
+          )
+            return fail();
+          return Object.freeze({
+            orderReference: ref(round.orderReference),
+            orderBatchReference: ref(round.orderBatchReference),
+            roundNumber: round.roundNumber === null ? null : count(round.roundNumber),
+            reason: round.reason as StaffHeldRoundReason,
+            heldAt: instant(round.heldAt),
+          });
+        });
+        const newPhones = openOnly(r.newPhones).map((entry) => {
+          const phone = obj(entry);
+          if (Object.keys(phone).length !== 2) return fail();
+          return Object.freeze({
+            phoneNumber: count(phone.phoneNumber),
+            joinedAt: instant(phone.joinedAt),
+          });
+        });
         // WP-2423 Q28: an open call only at a table with an open session.
         const callValue: unknown = r.staffCall;
         let staffCall: StaffDiningCall | null = null;
@@ -343,6 +397,8 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
                 : fail(),
           staffRoundsAwaitingPayment: Object.freeze(awaiting),
           guestRoundsAwaitingPayment: Object.freeze(guestAwaiting),
+          heldRounds: Object.freeze(heldRounds),
+          newPhones: Object.freeze(newPhones),
           roundsAwaitingAcceptance: Object.freeze(acceptanceAwaiting),
           session,
           staffCall,

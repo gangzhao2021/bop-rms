@@ -13,6 +13,8 @@ const mock = vi.hoisted(() => ({
   paidAwaitingAcceptance: vi.fn(),
   paidOnline: vi.fn(),
   staffCalls: vi.fn(),
+  waitingRounds: vi.fn(),
+  phones: vi.fn(),
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
@@ -22,6 +24,7 @@ vi.mock("@rms/ordering", async (original) => ({
   listStoreDiningSessionOrders: mock.sessionOrders,
   listStoreUnpaidGuestDiningRounds: mock.unpaidGuestRounds,
   listStorePaidDiningRoundsAwaitingAcceptance: mock.paidAwaitingAcceptance,
+  createPostgresOrderRoundStaffHoldStore: vi.fn(() => ({ listWaiting: mock.waitingRounds })),
 }));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<typeof import("@rms/payment")>()),
@@ -39,6 +42,7 @@ vi.mock("@rms/dining", async (original) => ({
   createPostgresDiningSessionReadStore: vi.fn(() => ({ loadSessions: mock.loadSessions })),
   createPostgresDiningTableQrStore: vi.fn(() => ({ loadLatestForTables: mock.codes })),
   createPostgresDiningStaffCallStore: vi.fn(() => ({ listOpen: mock.staffCalls })),
+  loadDiningSessionPhones: mock.phones,
   // DEC-DINE-IN-PAY-LATER: the Store opens tables pay first; no open table was opened otherwise.
   createPostgresDiningPaymentTimingStore: vi.fn(() => ({
     load: async () => ({ paymentTiming: timing.store }),
@@ -84,6 +88,8 @@ function setup() {
   mock.paidAwaitingAcceptance.mockResolvedValue([]);
   mock.paidOnline.mockResolvedValue(new Set());
   mock.staffCalls.mockResolvedValue(new Map());
+  mock.waitingRounds.mockResolvedValue([]);
+  mock.phones.mockResolvedValue([]);
   mock.list.mockResolvedValue({
     items: [
       {
@@ -614,4 +620,89 @@ it("WP-2423 Q28: shows the open call for staff at each open table, and none else
   // Never the participant who called: staff go to the table.
   expect(JSON.stringify(view.items[0]?.staffCall)).not.toContain(id(8));
   expect(view.items[1]?.staffCall).toBeNull();
+});
+
+it("WP-2423 item 8 ⑤: a round waiting for staff needs action (not awaiting payment), and a phone that just joined is pointed out", async () => {
+  const f = setup();
+  mock.list.mockResolvedValueOnce({
+    items: [
+      {
+        tableReference: id(4),
+        stableLabel: "T4",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 3,
+        activeDiningSessionReference: id(5),
+      },
+    ],
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValueOnce([
+    {
+      diningSessionReference: id(5),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      startedAt: "2026-09-25T11:42:00.000Z",
+    },
+  ]);
+  mock.sessionOrders.mockResolvedValueOnce(new Map([[id(5), id(40)]]));
+  // The held round is also a submitted round nobody paid for: it is listed once, as waiting.
+  mock.unpaidGuestRounds.mockResolvedValueOnce([
+    {
+      diningSessionReference: id(5),
+      orderReference: id(40),
+      orderBatchReference: id(41),
+      roundNumber: 3,
+      payBy: "2026-09-25T12:10:00.000Z",
+    },
+  ]);
+  mock.waitingRounds.mockResolvedValueOnce([
+    {
+      orderReference: id(40),
+      orderBatchReference: id(41),
+      submissionReference: id(42),
+      reason: "PhoneRapid",
+      heldAt: "2026-09-25T11:58:00.000Z",
+      release: null,
+    },
+  ]);
+  mock.phones.mockResolvedValueOnce([
+    {
+      participantReference: id(60),
+      phoneNumber: 1,
+      joinedAt: "2026-09-25T11:43:00.000Z",
+      left: false,
+      removed: false,
+    },
+    {
+      participantReference: id(61),
+      phoneNumber: 2,
+      joinedAt: "2026-09-25T11:56:00.000Z",
+      left: false,
+      removed: false,
+    },
+    {
+      participantReference: id(62),
+      phoneNumber: 3,
+      joinedAt: "2026-09-25T11:57:00.000Z",
+      left: true,
+      removed: true,
+    },
+  ]);
+  const [table] = (await f.read(f.input)).items;
+  expect(table?.guestRoundsAwaitingPayment).toEqual([]);
+  expect(table?.heldRounds).toEqual([
+    {
+      orderReference: id(40),
+      orderBatchReference: id(41),
+      roundNumber: 3,
+      reason: "PhoneRapid",
+      heldAt: "2026-09-25T11:58:00.000Z",
+    },
+  ]);
+  // Joined in the last 10 minutes and still at the table (phone 3 was taken off it).
+  expect(table?.newPhones).toEqual([{ phoneNumber: 2, joinedAt: "2026-09-25T11:56:00.000Z" }]);
 });

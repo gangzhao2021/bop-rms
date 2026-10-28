@@ -63,6 +63,7 @@ const moduleManifestInput =
         "dining_qr_join_issue",
         "dining_qr_join_control",
         "dining_participant_removal",
+        "dining_round_hold_setting",
         "dining_staff_call",
         "dining_staff_call_closure",
         "store_dining_payment_timing",

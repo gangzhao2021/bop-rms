@@ -95,9 +95,56 @@ test("@production a guest joins the scanned open table with one tap, or with a c
     }),
   );
 
+  await page.route("**/api/v1/dine-in/session", (route) =>
+    route.fulfill({
+      status: 200,
+      headers: noStore,
+      json: {
+        schemaVersion: 1,
+        session: {
+          tableLabel: "T4",
+          orderNumber: "12",
+          checkedAt: new Date().toISOString(),
+          paymentTiming: "PayLater",
+          rounds: [
+            {
+              roundNumber: 1,
+              orderedBy: "You",
+              submittedAt: new Date().toISOString(),
+              status: "WaitingForStaff",
+              payment: "NotCharged",
+              cancelsAt: null,
+              storeCancellationReason: null,
+              waitingReason: "FirstOrder",
+              items: [
+                {
+                  displayName: "Synthetic ramen",
+                  quantity: 1,
+                  servedQuantity: 0,
+                  cancelled: false,
+                  lineTotal: { amountMinor: "1500", currencyCode: "CAD" },
+                },
+              ],
+              itemsTotal: { amountMinor: "1500", currencyCode: "CAD" },
+            },
+          ],
+          // Nothing is owed for a round that has not gone to the kitchen.
+          summary: {
+            paid: { amountMinor: "0", currencyCode: "CAD" },
+            refunded: { amountMinor: "0", currencyCode: "CAD" },
+            refundPending: { amountMinor: "0", currencyCode: "CAD" },
+            due: { amountMinor: "0", currencyCode: "CAD" },
+          },
+        },
+      },
+    }),
+  );
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/#qr=aaa.bbb.ccc");
   await expect(page.getByText("You don’t need an account.", { exact: false })).toBeVisible();
+  // One primary action: joining the table; the menu is there to look at first.
+  await expect(page.locator(".entry-action")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Look at the menu first" })).toBeVisible();
   await expect(page.getByLabel("Join code or invitation", { exact: true })).toHaveCount(0);
 
   // Staff paused joining by scan: plain words, and the code entry.
@@ -128,5 +175,20 @@ test("@production a guest joins the scanned open table with one tap, or with a c
   await page.getByRole("button", { name: "Join this table", exact: true }).click();
   await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
   expect(table).toMatchObject({ qrJoins: 1, codeJoins: 0 });
+  // Joined: going to the menu is now the one primary action.
+  await expect(page.getByRole("button", { name: "Continue to menu" })).toHaveClass(/entry-action/u);
+
+  // WP-2423 item 8 ⑤ decisions 5–6: a round waiting for staff says so, and why, on the table page.
+  await page.evaluate(() => {
+    history.pushState(null, "", "/dine-in/session");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect(page.getByText("Waiting for staff to confirm")).toBeVisible();
+  await expect(
+    page.getByText("This is the first round from this phone, so staff confirm it", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await page.screenshot({ path: "test-results/waiting-round-390.png", fullPage: true });
   expect(errors).toEqual([]);
 });

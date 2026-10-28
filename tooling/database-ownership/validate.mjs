@@ -2875,6 +2875,7 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_qr_join_issue",
             "dining_qr_join_control",
             "dining_participant_removal",
+            "dining_round_hold_setting",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-qr-join-store.ts";
         // WP-2402: exact scoped Host-transfer store; normal SQL/driver checks still apply.
@@ -3139,6 +3140,8 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
           [
             "order_pay_later_confirmation",
+            "order_round_staff_hold",
+            "order_round_staff_hold_release",
             "order_acceptance_record",
             "order_revision",
             "order_header",

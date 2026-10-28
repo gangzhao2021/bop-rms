@@ -3,7 +3,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { orderWhen } from "./CurrentOrderQueuePage.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { useStoreBusinessDay } from "./StoreBusinessDay.js";
+import type { StaffHeldRound } from "./dining-session-client.js";
+import { heldRoundReasonText } from "./table-needs.js";
 import {
+  createHeldRoundClient,
   createTablePhonesClient,
   TablePhonesError,
   type TablePhone,
@@ -205,4 +208,242 @@ export function TablePanelPhones({
       ) : null}
     </section>
   );
+}
+
+/**
+ * WP-2423 item 8 ⑤ decisions 5–7: guest rounds at this table waiting for staff before the
+ * kitchen. Nothing sends or cancels them on their own; staff "Send to kitchen" or "Cancel this
+ * round" (asked once more; it stays on the records as cancelled, nothing was made or paid).
+ */
+export function TableHeldRounds({
+  rounds,
+  csrf,
+  timeZone,
+  locked,
+  onChanged,
+  fetcher,
+}: {
+  readonly rounds: readonly StaffHeldRound[];
+  readonly csrf: string;
+  readonly timeZone: string | undefined;
+  readonly locked: boolean;
+  readonly onChanged: () => void;
+  readonly fetcher?: typeof fetch | undefined;
+}) {
+  const client = useMemo(() => createHeldRoundClient(fetcher), [fetcher]);
+  const today = useStoreBusinessDay()?.businessDate ?? null;
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const pending = useRef<{ readonly key: string; readonly reference: string } | null>(null);
+  if (rounds.length === 0) return null;
+  const decide = async (round: StaffHeldRound, action: "Confirm" | "Cancel") => {
+    if (busy) return;
+    const key = action + ":" + round.orderBatchReference;
+    if (pending.current?.key !== key)
+      pending.current = { key, reference: serviceOperationReference() };
+    setBusy(true);
+    setProblem(null);
+    try {
+      await client.decide(csrf, {
+        action,
+        orderReference: round.orderReference,
+        orderBatchReference: round.orderBatchReference,
+        operationReference: pending.current.reference,
+      });
+      pending.current = null;
+      setConfirming(null);
+      onChanged();
+    } catch (error) {
+      setProblem(
+        error instanceof TablePhonesError && error.code === "OutcomeUnknown"
+          ? t(
+              "We couldn't confirm the result. Check the connection and press the button again: it is never recorded twice.",
+            )
+          : t("That didn't go through. Read the table again and retry."),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const name = (round: StaffHeldRound) =>
+    round.roundNumber === null
+      ? t("A round")
+      : t("Round {number}", { number: String(round.roundNumber) });
+  return (
+    <section className="table-held-rounds" aria-label={t("Rounds waiting for your OK")}>
+      {rounds.map((round) => (
+        <div key={round.orderBatchReference} className="table-held-rounds__round">
+          <p>
+            <strong>{t("{round} is waiting for your OK", { round: name(round) })}</strong> ·{" "}
+            {heldRoundReasonText(round.reason)} · {orderWhen(round.heldAt, timeZone, today)}
+          </p>
+          <p className="table-held-rounds__note">
+            {t(
+              "It has not gone to the kitchen. Check it with the table, then send it or cancel it.",
+            )}
+          </p>
+          {confirming === round.orderBatchReference ? (
+            <div className="table-held-rounds__actions" role="group">
+              <span>
+                {t(
+                  "Cancel {round}? Nothing was made or paid; it stays on the records as cancelled.",
+                  { round: name(round).toLowerCase() },
+                )}
+              </span>
+              <button type="button" onClick={() => setConfirming(null)}>
+                {t("Keep")}
+              </button>
+              <button
+                type="button"
+                className="table-phones__danger"
+                disabled={locked || busy}
+                onClick={() => void decide(round, "Cancel")}
+              >
+                {t("Cancel this round")}
+              </button>
+            </div>
+          ) : (
+            <div className="table-held-rounds__actions">
+              <button
+                type="button"
+                className="table-held-rounds__send"
+                disabled={locked || busy}
+                onClick={() => void decide(round, "Confirm")}
+              >
+                {t("Send to kitchen")}
+              </button>
+              <button
+                type="button"
+                disabled={locked || busy}
+                onClick={() => setConfirming(round.orderBatchReference)}
+              >
+                {t("Cancel this round")}
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+      {problem ? (
+        <p className="table-panel__notice" role="alert">
+          {problem}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * WP-2423 item 8 ⑤ decision 5: the Store's "a new phone's first round waits for staff" (tables
+ * that pay at the end). Everyone running tables sees it; a manager changes it.
+ */
+export function RoundHoldSettingControl({
+  csrf,
+  locked,
+  fetcher,
+}: {
+  readonly csrf: string;
+  readonly locked: boolean;
+  readonly fetcher?: typeof fetch | undefined;
+}) {
+  const client = useMemo(() => createHeldRoundClient(fetcher), [fetcher]);
+  const [setting, setSetting] = useState<{
+    readonly version: number;
+    readonly firstRoundNeedsStaff: boolean;
+    readonly canChange: boolean;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void client
+      .setting(csrf)
+      .then((value) => {
+        if (live) setSetting(value);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [client, csrf]);
+  if (setting === null) return null;
+  const change = async (on: boolean) => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      setSetting(
+        await client.setting(csrf, {
+          expectedVersion: setting.version,
+          firstRoundNeedsStaff: on,
+          operationReference: serviceOperationReference(),
+        }),
+      );
+    } catch {
+      setProblem(t("That didn't go through. Read the table again and retry."));
+      setSetting(await client.setting(csrf).catch(() => setting));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="round-hold-setting" aria-label={t("Ordering from guests' phones")}>
+      <label>
+        <input
+          type="checkbox"
+          checked={setting.firstRoundNeedsStaff}
+          disabled={!setting.canChange || locked || busy}
+          onChange={(event) => void change(event.target.checked)}
+        />{" "}
+        {t("A new phone's first round waits for staff OK before the kitchen")}
+      </label>
+      <p className="round-hold-setting__note">
+        {setting.canChange
+          ? t(
+              "Tables that pay at the end. Rapid ordering always waits: a phone's 4th round or a table's 7th within 10 minutes.",
+            )
+          : t("A manager changes this.")}
+      </p>
+      {problem ? <p role="alert">{problem}</p> : null}
+    </section>
+  );
+}
+
+/**
+ * WP-2423 item 8 ⑤ decision 4: which phone sent each round of a table's Order (Orders page), read
+ * from the table's phone list. Empty while it is read, for staff who may not read it, or on error.
+ */
+export function useRoundPhones(
+  csrf: string | null,
+  diningSessionReference: string | null,
+  fetcher?: typeof fetch,
+): ReadonlyMap<string, number | null> {
+  const client = useMemo(() => createTablePhonesClient(fetcher), [fetcher]);
+  const [rounds, setRounds] = useState<ReadonlyMap<string, number | null>>(new Map());
+  useEffect(() => {
+    if (csrf === null || diningSessionReference === null) return;
+    const controller = new AbortController();
+    void client
+      .read(csrf, diningSessionReference, controller.signal)
+      .then((state) => {
+        if (!controller.signal.aborted) setRounds(state.rounds);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [client, csrf, diningSessionReference]);
+  return rounds;
+}
+
+/** Render-prop form of `useRoundPhones` for places that render inside a callback. */
+export function WithRoundPhones({
+  csrf,
+  diningSessionReference,
+  fetcher,
+  children,
+}: {
+  readonly csrf: string | null;
+  readonly diningSessionReference: string | null;
+  readonly fetcher?: typeof fetch | undefined;
+  readonly children: (phones: ReadonlyMap<string, number | null>) => React.ReactNode;
+}) {
+  return <>{children(useRoundPhones(csrf, diningSessionReference, fetcher))}</>;
 }

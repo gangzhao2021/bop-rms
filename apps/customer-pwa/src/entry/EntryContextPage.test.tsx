@@ -220,3 +220,24 @@ describe("WP-2423 Q10 continue the order in progress", () => {
     expect(html.split("<main")[1]).not.toContain("<button");
   });
 });
+
+describe("WP-2423 item 8 ⑤ one primary action", () => {
+  it("at a table, joining comes first and the menu is there to look at; one filled button", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView
+          onContinue={vi.fn()}
+          onRetry={vi.fn()}
+          state={{ kind: "Established", context }}
+          diningAdmission={{
+            journey: {} as never,
+            generateOperationReference: () => "",
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Join this table</button>");
+    expect(html).toContain("Look at the menu first");
+    expect(html.match(/class="entry-action"/gu)).toHaveLength(1);
+  });
+});

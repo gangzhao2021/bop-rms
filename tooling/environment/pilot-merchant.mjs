@@ -29,6 +29,10 @@ import { createMerchantOrdinaryRefundItems } from "../../apps/api/dist/merchant-
 import { createMerchantOrdinaryRefundRequest } from "../../apps/api/dist/merchant-ordinary-refund-request.js";
 import { createMerchantDiningJoinState } from "../../apps/api/dist/merchant-dining-join-state.js";
 import { createMerchantDiningQrJoin } from "../../apps/api/dist/merchant-dining-qr-join.js";
+import {
+  createMerchantDiningHeldRound,
+  createMerchantDiningRoundHoldSetting,
+} from "../../apps/api/dist/merchant-dining-held-round.js";
 import { createMerchantDiningJoinRegenerate } from "../../apps/api/dist/merchant-dining-join-regenerate.js";
 import { createMerchantDiningSessionStart } from "../../apps/api/dist/merchant-dining-session-start.js";
 import { createMerchantDiningTableCommand } from "../../apps/api/dist/merchant-dining-table-command.js";
@@ -1567,13 +1571,31 @@ export async function createInternalMerchant(
       ...(createInternalCounterOrder === undefined
         ? {}
         : await (async () => {
-            const counter = await createInternalCounterOrder(resources, persistence, service, {
-              diningClosing,
-              // WP-2423 (v15 3cd0f8dd M4): a machine refund of a cancelled round is on the receipt.
-              issueRefundReceipt: issueOrderRefundReceipt,
-            });
+            const { diningPayLaterRound, ...counter } = await createInternalCounterOrder(
+              resources,
+              persistence,
+              service,
+              {
+                diningClosing,
+                // WP-2423 (v15 3cd0f8dd M4): a machine refund of a cancelled round is on the receipt.
+                issueRefundReceipt: issueOrderRefundReceipt,
+              },
+            );
             return {
               ...counter,
+              // WP-2423 item 8 ⑤: staff send a guest round that waited for them to the kitchen,
+              // or cancel it with the unpaid round cancellation.
+              ...(diningPayLaterRound === undefined || unpaidRound === undefined
+                ? {}
+                : {
+                    diningHeldRound: createMerchantDiningHeldRound({
+                      persistence,
+                      authentication: service,
+                      payLater: diningPayLaterRound,
+                      cancellation: unpaidRound.cancellation,
+                      now: resources.now,
+                    }),
+                  }),
               ...(counter.counterMenu === undefined
                 ? {}
                 : { counterMenu: storePresence.wrap(presenceScope, counter.counterMenu) }),
@@ -1662,6 +1684,12 @@ export async function createInternalMerchant(
       })(),
       diningJoinState,
       diningQrJoin,
+      // WP-2423 item 8 ⑤ decision 5: "a new phone's first round waits for staff".
+      diningRoundHoldSetting: createMerchantDiningRoundHoldSetting({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
       diningJoinRegenerate,
       diningSessionStart,
       diningTables,

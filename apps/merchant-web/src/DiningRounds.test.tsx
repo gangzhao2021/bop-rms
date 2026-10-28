@@ -246,3 +246,28 @@ describe("Orders v3: a table's order read round by round (Owner 2026-10-26)", ()
     expect(render(view)).not.toContain('aria-label="Mark 1 × TEST beef noodles served"');
   });
 });
+
+describe("WP-2423 item 8 ⑤ decision 4: which phone sent each round", () => {
+  it("labels a guest round with its phone (numbered in join order); none when unknown", () => {
+    const [first, second] = detail.order.batches;
+    const html = renderToStaticMarkup(
+      <DiningRoundsContext.Provider value={context(null)}>
+        <CurrentOrderLines
+          lines={detail.lines}
+          rounds={{
+            batches: detail.order.batches,
+            timeZone: "America/Toronto",
+            today: "2026-10-26",
+            phones: new Map([
+              [first?.orderBatchReference ?? "", 2],
+              [second?.orderBatchReference ?? "", null],
+            ]),
+          }}
+        />
+      </DiningRoundsContext.Provider>,
+    );
+    const sections = html.split('class="order-round order-round--lines"').slice(1);
+    expect(text(sections[0] ?? "")).toContain("Round 1 · Phone 2");
+    expect(text(sections[1] ?? "")).not.toContain("Phone");
+  });
+});

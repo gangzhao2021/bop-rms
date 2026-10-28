@@ -6,6 +6,23 @@ import { DiningClosingError } from "@rms/dining";
 import { DiningCheckoutAlreadyPaidError } from "./merchant-dining-closing-command.js";
 import type { Response, Router } from "express";
 import { DiningTableCheckoutError } from "./merchant-dining-table-checkout.js";
+import { MerchantDiningHeldRoundError } from "./merchant-dining-held-round.js";
+
+function heldRoundFailure(response: Response, error: unknown) {
+  if (!(error instanceof MerchantDiningHeldRoundError)) {
+    denied(response);
+    return;
+  }
+  const status =
+    error.code === "HELD_ROUND_INPUT_INVALID"
+      ? 400
+      : error.code === "HELD_ROUND_PERMISSION_DENIED"
+        ? 403
+        : error.code === "HELD_ROUND_UNAVAILABLE"
+          ? 503
+          : 409;
+  response.status(status).set("Cache-Control", NO_STORE).json({ error: error.code.toLowerCase() });
+}
 
 export function installMerchantDiningRoutes(
   router: Router,
@@ -41,6 +58,50 @@ export function installMerchantDiningRoutes(
         }),
       )
       .catch(() => denied(response));
+  });
+  // WP-2423 item 8 ⑤ decisions 5–7: a guest round waiting for staff — send it or cancel it.
+  router.post("/dining/held-round", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningHeldRound) {
+      response.status(503).json({ error: "dining_held_round_unavailable" });
+      return;
+    }
+    void options
+      .diningHeldRound({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => heldRoundFailure(response, error));
+  });
+  // WP-2423 item 8 ⑤ decision 5: the Store's "a new phone's first round waits for staff".
+  router.post("/dining/round-hold-setting", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningRoundHoldSetting) {
+      response.status(503).json({ error: "dining_round_hold_setting_unavailable" });
+      return;
+    }
+    void options
+      .diningRoundHoldSetting({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => heldRoundFailure(response, error));
   });
   // WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN: phones at the table, pause/resume QR joining, remove.
   router.post("/dining/sessions/qr-join", sameOriginMutation(options), (request, response) => {

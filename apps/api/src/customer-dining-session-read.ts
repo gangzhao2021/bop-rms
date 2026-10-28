@@ -26,6 +26,8 @@ import {
   type OrderItemProgressPhase,
   createPostgresStaffDiningRoundEntryStore,
   createPostgresOrderPayLaterConfirmationStore,
+  createPostgresOrderRoundStaffHoldStore,
+  type OrderRoundHoldReason,
   createPostgresPayLaterItemCancellationStore,
 } from "@rms/ordering";
 import {
@@ -112,6 +114,8 @@ export interface CustomerDiningSessionFacts {
     readonly payLaterRounds?: ReadonlySet<string>;
     /** DEC-DINE-IN-PAY-LATER: rounds the table paid at the end, with its one payment. */
     readonly settledRounds?: ReadonlySet<string>;
+    /** WP-2423 item 8 ⑤: rounds waiting for staff before the kitchen, and why. */
+    readonly heldRounds?: ReadonlyMap<string, OrderRoundHoldReason>;
     /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment (if paid). */
     readonly tableSettlement?: { readonly tipMinor: bigint; readonly roundingMinor: bigint } | null;
     /**
@@ -181,7 +185,9 @@ export type DiningRoundStatus =
   | "Preparing"
   | "Ready"
   | "Serving"
-  | "Served";
+  | "Served"
+  /** WP-2423 item 8 ⑤: waits for staff before it goes to the kitchen (not owed yet). */
+  | "WaitingForStaff";
 export type DiningRoundPayment =
   | "Paid"
   | "Awaiting"
@@ -211,6 +217,8 @@ export interface CustomerDiningSessionView {
      */
     readonly cancelsAt: string | null;
     readonly storeCancellationReason: DiningStoreCancellationReason | null;
+    /** WP-2423 item 8 ⑤: why the round waits for staff (with status WaitingForStaff). */
+    readonly waitingReason?: OrderRoundHoldReason | null;
     readonly items: readonly {
       readonly displayName: string;
       readonly quantity: number;
@@ -344,7 +352,8 @@ export function composeCustomerDiningSession(
       0n,
     );
     const tax = items.reduce((sum, item) => sum + (item.price?.tax.amountMinor ?? 0n), 0n);
-    if (!unpaidCancelled) {
+    const waiting = order.heldRounds?.get(reference) ?? null;
+    if (!unpaidCancelled && waiting === null) {
       const charged = items.filter((item) => !item.notCharged);
       ordered.subtotal += charged.reduce(
         (sum, item) => sum + (item.price?.subtotal.amountMinor ?? 0n),
@@ -372,6 +381,10 @@ export function composeCustomerDiningSession(
       payment = "Failed";
       cancelsAt = deadline;
       due += itemsTotal;
+    } else if (outcome === undefined && waiting !== null) {
+      // Not in the kitchen and not owed until staff confirm it; never cancelled by time.
+      status = "WaitingForStaff";
+      payment = "NotCharged";
     } else if (
       outcome === undefined &&
       order.payLaterRounds?.has(reference) === true &&
@@ -431,6 +444,7 @@ export function composeCustomerDiningSession(
       payment,
       cancelsAt,
       storeCancellationReason: reason,
+      waitingReason: waiting,
       items: Object.freeze(
         items.map((item) =>
           Object.freeze({
@@ -886,6 +900,18 @@ function postgresDependencies(
         refunds.confirmedMinor += ordinary.confirmedMinor;
         refunds.pendingMinor += ordinary.pendingMinor;
       }
+      // WP-2423 item 8 ⑤: rounds waiting for staff (only at a table that pays at the end).
+      const heldRounds = new Map(
+        paymentTiming !== "PayLater"
+          ? []
+          : (
+              await createPostgresOrderRoundStaffHoldStore({
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+                authorize: async () => stillAuthorized(),
+              }).listWaiting({ transaction, orderReferences: [orderReference] })
+            ).map((hold) => [String(hold.orderBatchReference), hold.reason] as const),
+      );
       const payLaterRounds = new Set(
         paymentTiming !== "PayLater"
           ? []
@@ -955,6 +981,7 @@ function postgresDependencies(
           paymentStarted,
           payLaterRounds,
           settledRounds,
+          heldRounds,
           splitParts:
             splitPlan === undefined || splitPlan.mode === "Whole" || splitPaid
               ? null

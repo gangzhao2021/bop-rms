@@ -142,3 +142,82 @@ export function createTablePhonesClient(fetcher: typeof fetch = fetch) {
     ) => post(csrf, { action: "Remove", ...command }),
   });
 }
+
+/** WP-2423 item 8 ⑤ decisions 5–7: send a round waiting for staff to the kitchen, or cancel it. */
+export function createHeldRoundClient(fetcher: typeof fetch = fetch) {
+  const post = async (path: string, csrf: string, body: unknown) => {
+    if (!/^[A-Za-z0-9_-]{43}$/u.test(csrf)) throw new TablePhonesError("Unavailable");
+    let response: Response;
+    try {
+      response = await fetcher(path, {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-BOP-CSRF": csrf,
+        },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      throw new TablePhonesError("OutcomeUnknown");
+    }
+    if (response.status === 401 || response.status === 403)
+      throw new TablePhonesError("PermissionDenied");
+    if (!response.ok || response.headers.get("cache-control") !== "no-store")
+      throw new TablePhonesError(response.status >= 500 ? "OutcomeUnknown" : "Unavailable");
+    return (await response.json().catch(() => null)) as unknown;
+  };
+  return Object.freeze({
+    async decide(
+      csrf: string,
+      command: {
+        readonly action: "Confirm" | "Cancel";
+        readonly orderReference: string;
+        readonly orderBatchReference: string;
+        readonly operationReference: string;
+      },
+    ): Promise<"Sent" | "Cancelled"> {
+      const value = exact(await post("/merchant/dining/held-round", csrf, command), ["status"]);
+      const expected = command.action === "Confirm" ? "Sent" : "Cancelled";
+      if (value.status !== expected) return fail();
+      return expected;
+    },
+    /** The Store's "a new phone's first round waits for staff" (and whether you may change it). */
+    async setting(
+      csrf: string,
+      change?: {
+        readonly expectedVersion: number;
+        readonly firstRoundNeedsStaff: boolean;
+        readonly operationReference: string;
+      },
+    ): Promise<{
+      readonly version: number;
+      readonly firstRoundNeedsStaff: boolean;
+      readonly canChange: boolean;
+    }> {
+      const value = exact(
+        await post(
+          "/merchant/dining/round-hold-setting",
+          csrf,
+          change === undefined ? { action: "Read" } : { action: "Change", ...change },
+        ),
+        ["version", "firstRoundNeedsStaff", "canChange"],
+      );
+      if (
+        !Number.isSafeInteger(value.version) ||
+        Number(value.version) < 0 ||
+        typeof value.firstRoundNeedsStaff !== "boolean" ||
+        typeof value.canChange !== "boolean"
+      )
+        return fail();
+      return Object.freeze({
+        version: Number(value.version),
+        firstRoundNeedsStaff: value.firstRoundNeedsStaff,
+        canChange: value.canChange,
+      });
+    },
+  });
+}

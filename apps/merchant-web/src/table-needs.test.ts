@@ -120,3 +120,35 @@ it("WP-2423 item 8 ①: lists the most urgent first and filters by tab", () => {
   expect(count("Free")).toBe(0);
   expect(count("All")).toBe(4);
 });
+
+it("WP-2423 item 8 ⑤: a round waiting for staff needs action (never times out); a new phone is pointed out", () => {
+  const held = tableNeed(
+    table(7, {
+      heldRounds: [
+        {
+          orderReference: id(70),
+          orderBatchReference: id(71),
+          roundNumber: 3,
+          reason: "FirstOrder",
+          heldAt: "2026-10-27T19:35:00.000Z",
+        },
+      ],
+      newPhones: [{ phoneNumber: 3, joinedAt: "2026-10-27T19:40:00.000Z" }],
+    }),
+    facts({ readyToServe: 2 }),
+    now,
+  );
+  expect([held.tone, held.words, held.detail, held.urgent]).toEqual([
+    "action",
+    "Round waiting for your OK",
+    "first round from a new phone · 7 min ago",
+    true,
+  ]);
+  const joined = tableNeed(
+    table(8, { newPhones: [{ phoneNumber: 3, joinedAt: "2026-10-27T19:40:00.000Z" }] }),
+    facts(),
+    now,
+  );
+  expect([joined.tone, joined.words]).toEqual(["action", "Phone 3 just joined"]);
+  expect(tableInTab(table(8), joined, "Needs")).toBe(true);
+});

@@ -44,6 +44,8 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
     orderReference: item.orderReference,
     orderNumber: item.orderNumber,
     orderType: item.orderType,
+    // WP-2423 item 8 ⑤: the table's session (Orders shows which phone sent each round).
+    diningSessionReference: item.diningSessionReference ?? null,
     sourceChannel: item.sourceChannel,
     // WP-2423 Q21: the Store business day the Order belongs to (order numbers restart daily).
     businessDate: item.businessDate,

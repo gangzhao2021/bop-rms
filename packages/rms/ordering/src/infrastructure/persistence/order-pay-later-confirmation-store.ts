@@ -437,3 +437,291 @@ export function createPostgresOrderPayLaterConfirmationStore(options: {
     },
   });
 }
+
+/** WP-2423 item 8 ⑤ decisions 5–6: why a guest's round waits for staff. */
+export type OrderRoundHoldReason = "FirstOrder" | "PhoneRapid" | "TableRapid";
+/** Decision 6: a phone's 4th round, or the table's 7th guest round, within 10 minutes. */
+export const orderRoundHoldLimits = Object.freeze({
+  windowMinutes: 10,
+  phoneRounds: 4,
+  tableRounds: 7,
+});
+
+export interface OrderRoundHold {
+  readonly orderReference: string;
+  readonly orderBatchReference: string;
+  readonly submissionReference: string;
+  readonly reason: OrderRoundHoldReason;
+  readonly heldAt: string;
+  /** Who released it and how; null while it still waits for staff. */
+  readonly release: null | {
+    readonly outcome: "Confirmed" | "Cancelled";
+    readonly actorReference: string;
+    readonly releasedAt: string;
+  };
+}
+
+/**
+ * WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN decisions 5–7: at a table that pays at the end, a guest's
+ * round waits for staff before it goes to the kitchen when it is a new phone's first round (the
+ * Store's setting), a phone's 4th round or the table's 7th guest round within 10 minutes. The
+ * hold is recorded in the caller's transaction; staff then send the round to the kitchen (its
+ * pay-later confirmation) or cancel it (the unpaid round cancellation), and the release records
+ * who did which. The database refuses either without the release; nothing releases a round
+ * automatically. "Phone" is the guest session that submitted the round.
+ */
+export function createPostgresOrderRoundStaffHoldStore(options: {
+  readonly brandReference: string;
+  readonly storeReference: string;
+  authorize(transaction: ConsumerTransaction): Promise<boolean>;
+}) {
+  const brand = parseOrderingReference(options.brandReference);
+  const store = parseOrderingReference(options.storeReference);
+  const context = (tx: ConsumerTransaction) =>
+    tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      brand,
+      store,
+    ]);
+  const allowed = async (tx: ConsumerTransaction) => {
+    if ((await options.authorize(tx)) !== true) fail();
+  };
+  const holdColumns =
+    'h.order_id AS "orderReference",h.order_batch_id AS "orderBatchReference",' +
+    'h.submission_id AS "submissionReference",h.reason,h.held_at,' +
+    'r.outcome,r.actor_id AS "actorReference",r.released_at';
+  const holdRow = (value: Record<string, unknown>): OrderRoundHold => {
+    const reason = value.reason;
+    if (reason !== "FirstOrder" && reason !== "PhoneRapid" && reason !== "TableRapid")
+      return fail();
+    const outcome = value.outcome;
+    if (outcome !== null && outcome !== "Confirmed" && outcome !== "Cancelled") return fail();
+    return Object.freeze({
+      orderReference: parseOrderingReference(value.orderReference),
+      orderBatchReference: parseOrderingReference(value.orderBatchReference),
+      submissionReference: parseOrderingReference(value.submissionReference),
+      reason,
+      heldAt: instantOf(value.held_at),
+      release:
+        outcome === null
+          ? null
+          : Object.freeze({
+              outcome,
+              actorReference: parseOrderingReference(value.actorReference),
+              releasedAt: instantOf(value.released_at),
+            }),
+    });
+  };
+  const loadHold = async (tx: ConsumerTransaction, order: string, batch: string) => {
+    const found = (
+      await tx.query<Record<string, unknown>>(
+        `SELECT ${holdColumns} FROM rms_ordering.order_round_staff_hold h LEFT JOIN rms_ordering.order_round_staff_hold_release r
+          ON r.brand_id=h.brand_id AND r.store_id=h.store_id AND r.order_batch_id=h.order_batch_id
+          WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_id=$3 AND h.order_batch_id=$4`,
+        [brand, store, order, batch],
+      )
+    ).rows;
+    return found.length === 0 ? null : holdRow(found[0] ?? fail());
+  };
+  return Object.freeze({
+    /**
+     * The round of this guest's submission: its hold if it has one, or whether it must wait for
+     * staff now (`reason`, null: it goes straight to the kitchen).
+     */
+    async evaluate(input: {
+      transaction: ConsumerTransaction;
+      submissionReference: string;
+      guestSessionReference: string;
+      observedAt: string;
+      firstRoundNeedsStaff: boolean;
+    }): Promise<{
+      readonly orderReference: string;
+      readonly orderBatchReference: string;
+      readonly hold: OrderRoundHold | null;
+      readonly reason: OrderRoundHoldReason | null;
+    }> {
+      const tx = input.transaction;
+      const submission = parseOrderingReference(input.submissionReference);
+      const guest = parseOrderingReference(input.guestSessionReference);
+      const at = parseOrderingInstant(input.observedAt);
+      await context(tx);
+      await allowed(tx);
+      const batches = (
+        await tx.query<Record<string, unknown>>(
+          "SELECT order_id,order_batch_id,submitted_by_actor_id FROM rms_ordering.order_batch WHERE brand_id=$1 AND store_id=$2 AND submission_id=$3 LIMIT 2",
+          [brand, store, submission],
+        )
+      ).rows;
+      if (batches.length !== 1) return fail();
+      const batch = batches[0] ?? fail();
+      if (String(batch.submitted_by_actor_id) !== guest) return fail();
+      const order = parseOrderingReference(batch.order_id);
+      const batchReference = parseOrderingReference(batch.order_batch_id);
+      // The Order's disposition fence: two rounds sent at once are counted one after the other.
+      await acquireOrderDispositionFence(tx, {
+        brandReference: brand,
+        storeReference: store,
+        orderReference: order,
+      });
+      const hold = await loadHold(tx, order, batchReference);
+      if (hold !== null)
+        return Object.freeze({
+          orderReference: order,
+          orderBatchReference: batchReference,
+          hold,
+          reason: null,
+        });
+      const counted = (
+        await tx.query<Record<string, unknown>>(
+          `SELECT
+            count(*) FILTER (WHERE b.submitted_by_actor_id=$4 AND b.order_batch_id<>$5)::int AS phone_before,
+            count(*) FILTER (WHERE b.submitted_by_actor_id=$4 AND b.submitted_at>$6::timestamptz-make_interval(mins=>$7))::int AS phone_recent,
+            count(*) FILTER (WHERE b.submitted_at>$6::timestamptz-make_interval(mins=>$7)
+              AND EXISTS (SELECT 1 FROM rms_ordering.order_item i WHERE i.brand_id=b.brand_id AND i.store_id=b.store_id
+                AND i.order_batch_id=b.order_batch_id AND i.transaction_snapshot_json->>'addedByParticipantReference' IS NOT NULL))::int AS table_recent
+          FROM rms_ordering.order_batch b WHERE b.brand_id=$1 AND b.store_id=$2 AND b.order_id=$3 AND b.submitted_at<=$6::timestamptz`,
+          [brand, store, order, guest, batchReference, at, orderRoundHoldLimits.windowMinutes],
+        )
+      ).rows[0];
+      if (counted === undefined) return fail();
+      const reason: OrderRoundHoldReason | null =
+        input.firstRoundNeedsStaff && Number(counted.phone_before) === 0
+          ? "FirstOrder"
+          : Number(counted.phone_recent) >= orderRoundHoldLimits.phoneRounds
+            ? "PhoneRapid"
+            : Number(counted.table_recent) >= orderRoundHoldLimits.tableRounds
+              ? "TableRapid"
+              : null;
+      await allowed(tx);
+      return Object.freeze({
+        orderReference: order,
+        orderBatchReference: batchReference,
+        hold: null,
+        reason,
+      });
+    },
+
+    /** Records that the round waits for staff (in the transaction that evaluated it). */
+    async hold(input: {
+      transaction: ConsumerTransaction;
+      holdReference: string;
+      orderReference: string;
+      orderBatchReference: string;
+      submissionReference: string;
+      guestSessionReference: string;
+      reason: OrderRoundHoldReason;
+      observedAt: string;
+    }): Promise<OrderRoundHold> {
+      const tx = input.transaction;
+      const order = parseOrderingReference(input.orderReference);
+      const batch = parseOrderingReference(input.orderBatchReference);
+      await context(tx);
+      await allowed(tx);
+      await tx.query(
+        "INSERT INTO rms_ordering.order_round_staff_hold (hold_id,brand_id,store_id,order_id,order_batch_id,submission_id,guest_session_id,reason,held_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+        [
+          parseOrderingReference(input.holdReference),
+          brand,
+          store,
+          order,
+          batch,
+          parseOrderingReference(input.submissionReference),
+          parseOrderingReference(input.guestSessionReference),
+          input.reason,
+          parseOrderingInstant(input.observedAt),
+        ],
+      );
+      await allowed(tx);
+      return (await loadHold(tx, order, batch)) ?? fail();
+    },
+
+    /** The round's hold, or null when it never waited for staff. */
+    async load(input: {
+      transaction: ConsumerTransaction;
+      orderReference: string;
+      orderBatchReference: string;
+    }): Promise<OrderRoundHold | null> {
+      const tx = input.transaction;
+      await context(tx);
+      await allowed(tx);
+      return loadHold(
+        tx,
+        parseOrderingReference(input.orderReference),
+        parseOrderingReference(input.orderBatchReference),
+      );
+    },
+
+    /** The rounds of these Orders that wait for staff now (Tables "needs action"). */
+    async listWaiting(input: {
+      transaction: ConsumerTransaction;
+      orderReferences: readonly string[];
+    }): Promise<readonly OrderRoundHold[]> {
+      if (input.orderReferences.length > 200) return fail();
+      const orders = input.orderReferences.map((value) => parseOrderingReference(value));
+      if (orders.length === 0) return Object.freeze([]);
+      const tx = input.transaction;
+      await context(tx);
+      await allowed(tx);
+      const found = await tx.query<Record<string, unknown>>(
+        `SELECT ${holdColumns} FROM rms_ordering.order_round_staff_hold h LEFT JOIN rms_ordering.order_round_staff_hold_release r
+          ON r.brand_id=h.brand_id AND r.store_id=h.store_id AND r.order_batch_id=h.order_batch_id
+          WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_id=ANY($3::uuid[]) AND r.order_batch_id IS NULL
+          ORDER BY h.held_at LIMIT 501`,
+        [brand, store, orders],
+      );
+      if (found.rows.length > 500) return fail();
+      return Object.freeze(found.rows.map(holdRow));
+    },
+
+    /**
+     * Staff release a waiting round, in the transaction that sends it to the kitchen or cancels
+     * it. The same operation again returns the release; another decision for it is a conflict.
+     */
+    async release(input: {
+      transaction: ConsumerTransaction;
+      operationReference: string;
+      orderReference: string;
+      orderBatchReference: string;
+      outcome: "Confirmed" | "Cancelled";
+      actorReference: string;
+      observedAt: string;
+    }): Promise<{
+      readonly status: "Released" | "AlreadyReleased";
+      readonly hold: OrderRoundHold;
+    }> {
+      const tx = input.transaction;
+      const order = parseOrderingReference(input.orderReference);
+      const batch = parseOrderingReference(input.orderBatchReference);
+      await context(tx);
+      await allowed(tx);
+      await acquireOrderDispositionFence(tx, {
+        brandReference: brand,
+        storeReference: store,
+        orderReference: order,
+      });
+      const current = await loadHold(tx, order, batch);
+      if (current === null) return fail("ORDER_PAY_LATER_CONFLICT");
+      if (current.release !== null) {
+        if (current.release.outcome !== input.outcome) return fail("ORDER_PAY_LATER_CONFLICT");
+        return Object.freeze({ status: "AlreadyReleased" as const, hold: current });
+      }
+      await tx.query(
+        "INSERT INTO rms_ordering.order_round_staff_hold_release (operation_id,brand_id,store_id,order_id,order_batch_id,outcome,actor_id,released_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+        [
+          parseOrderingReference(input.operationReference),
+          brand,
+          store,
+          order,
+          batch,
+          input.outcome,
+          parseOrderingReference(input.actorReference),
+          parseOrderingInstant(input.observedAt),
+        ],
+      );
+      await allowed(tx);
+      return Object.freeze({
+        status: "Released" as const,
+        hold: (await loadHold(tx, order, batch)) ?? fail(),
+      });
+    },
+  });
+}

@@ -213,3 +213,19 @@ describe("WP-2423 D5 item prices before tax", () => {
     expect(() => parseDiningSessionView(p)).toThrow(DiningSessionClientError);
   });
 });
+
+describe("WP-2423 item 8 ⑤ a round waiting for staff", () => {
+  it("decodes the waiting round and why, and refuses an unknown reason", () => {
+    const p = payload();
+    Object.assign(firstRound(p), {
+      status: "WaitingForStaff",
+      payment: "NotCharged",
+      waitingReason: "FirstOrder",
+    });
+    const round = parseDiningSessionView(p).rounds[0];
+    expect(round?.status).toBe("WaitingForStaff");
+    expect(round?.waitingReason).toBe("FirstOrder");
+    Object.assign(firstRound(p), { waitingReason: "Suspicious" });
+    expect(() => parseDiningSessionView(p)).toThrow();
+  });
+});

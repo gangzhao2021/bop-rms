@@ -529,3 +529,103 @@ export async function loadDiningSessionPhones(
     ),
   );
 }
+
+/** WP-2423 item 8 ⑤ decision 5: the Store's "a new phone's first round waits for staff". */
+export interface DiningRoundHoldSetting {
+  /** 0: never changed (off). */
+  readonly version: number;
+  readonly firstRoundNeedsStaff: boolean;
+  readonly changedAt: string | null;
+}
+
+/** The Store's current setting, in the caller's transaction (off until a manager turns it on). */
+export async function loadDiningRoundHoldSetting(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+): Promise<DiningRoundHoldSetting> {
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const found = rows(
+    await tx.query(
+      "SELECT version,first_round_needs_staff,to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at FROM rms_dining.dining_round_hold_setting WHERE brand_id=$1 AND store_id=$2 ORDER BY version DESC LIMIT 1",
+      [brand, store],
+    ),
+  )[0];
+  if (found === undefined)
+    return Object.freeze({ version: 0, firstRoundNeedsStaff: false, changedAt: null });
+  const version = Number(found.version);
+  if (
+    !Number.isSafeInteger(version) ||
+    version < 1 ||
+    typeof found.first_round_needs_staff !== "boolean"
+  )
+    return fail();
+  return Object.freeze({
+    version,
+    firstRoundNeedsStaff: found.first_round_needs_staff,
+    changedAt: parseDiningInstant(found.occurred_at),
+  });
+}
+
+/**
+ * A manager changes the setting: the next version, with who and when. `expectedVersion` is the
+ * version they saw (another change in between is a conflict); the same operation again returns.
+ */
+export async function changeDiningRoundHoldSetting(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+  input: {
+    readonly operationReference: string;
+    readonly expectedVersion: number;
+    readonly firstRoundNeedsStaff: boolean;
+    readonly actorReference: string;
+    readonly observedAt: string;
+  },
+): Promise<DiningRoundHoldSetting> {
+  const tenant = parseDiningReference(scopeInput.tenantReference);
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  const operation = parseDiningReference(input.operationReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    `DiningRoundHoldSetting:${brand}:${store}`,
+  ]);
+  const prior = rows(
+    await tx.query(
+      "SELECT first_round_needs_staff FROM rms_dining.dining_round_hold_setting WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      [brand, store, operation],
+    ),
+  )[0];
+  if (prior !== undefined) {
+    if (prior.first_round_needs_staff !== input.firstRoundNeedsStaff)
+      throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+    return loadDiningRoundHoldSetting(tx, scopeInput);
+  }
+  const current = await loadDiningRoundHoldSetting(tx, scopeInput);
+  if (current.version !== input.expectedVersion)
+    throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+  if (current.firstRoundNeedsStaff === input.firstRoundNeedsStaff) return current;
+  changed(
+    await tx.query(
+      "INSERT INTO rms_dining.dining_round_hold_setting (tenant_id,brand_id,store_id,version,operation_id,first_round_needs_staff,actor_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+      [
+        tenant,
+        brand,
+        store,
+        current.version + 1,
+        operation,
+        input.firstRoundNeedsStaff,
+        parseDiningReference(input.actorReference),
+        parseDiningInstant(input.observedAt),
+      ],
+    ),
+  );
+  return loadDiningRoundHoldSetting(tx, scopeInput);
+}

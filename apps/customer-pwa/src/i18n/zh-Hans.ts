@@ -1220,4 +1220,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Ask staff, or the person who joined your table first, for the table’s code.":
     "请向店员或先入桌的人要桌码。",
   "Join with this code": "用桌码加入",
+  "Look at the menu first": "先看看菜单",
+  "Waiting for staff to confirm": "等店员确认",
+  "This is the first round from this phone, so staff confirm it before the kitchen.":
+    "这是这台手机的第一轮，店员确认后再送厨房。",
+  "Many rounds were sent just now, so staff confirm this one before the kitchen.":
+    "刚才送出了很多轮，这一轮由店员确认后再送厨房。",
+  "It is not charged until it goes to the kitchen.": "送厨房之前不计入账单。",
 });

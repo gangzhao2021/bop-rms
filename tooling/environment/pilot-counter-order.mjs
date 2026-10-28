@@ -341,6 +341,7 @@ export async function createInternalCounterOrder(
       },
     }),
     ...(staffDiningRound === undefined ? {} : { staffDiningRound: staffDiningRound.command }),
+    ...(staffDiningRound === undefined ? {} : { diningPayLaterRound: staffDiningRound.payLater }),
     cardMachineRefund: createMerchantCardMachineCancellationRefund({
       persistence,
       authentication,
@@ -555,7 +556,28 @@ async function createInternalStaffDiningRound(
     nextReference: reference,
     now,
   });
+  const payLater = (selected) => {
+    if (
+      selected.tenantReference !== tenantReference ||
+      selected.brandReference !== scope.brandReference ||
+      selected.storeReference !== scope.storeReference
+    )
+      throw new Error("INTERNAL_STAFF_ROUND_ONLY");
+    return createDiningPayLaterRound({
+      scope: fullScope,
+      quoteVersion: 2,
+      workflow: {
+        purposeCode: saved.workflow.purposeCode,
+        applicabilityCode: saved.workflow.applicabilityCode,
+        workflowVersionReference: saved.workflow.payment.workflowVersionReference,
+      },
+      now,
+      generateReference: reference,
+    });
+  };
   return {
+    // WP-2423 item 8 ⑤: staff send a guest round that waited for them to the kitchen.
+    payLater,
     command: createMerchantStaffDiningRound({
       persistence,
       authentication,
@@ -564,25 +586,7 @@ async function createInternalStaffDiningRound(
       onUnexpected: (error) => reportUnexpected("INTERNAL_STAFF_DINING_ROUND_UNAVAILABLE", error),
       // DEC-DINE-IN-PAY-LATER: rounds of a table opened pay later go to the kitchen unpaid, through
       // the dining workflow's Accept for the System (only this pilot Store).
-      payLater: (selected) => {
-        if (
-          selected.tenantReference !== tenantReference ||
-          selected.brandReference !== scope.brandReference ||
-          selected.storeReference !== scope.storeReference
-        )
-          throw new Error("INTERNAL_STAFF_ROUND_ONLY");
-        return createDiningPayLaterRound({
-          scope: fullScope,
-          quoteVersion: 2,
-          workflow: {
-            purposeCode: saved.workflow.purposeCode,
-            applicabilityCode: saved.workflow.applicabilityCode,
-            workflowVersionReference: saved.workflow.payment.workflowVersionReference,
-          },
-          now,
-          generateReference: reference,
-        });
-      },
+      payLater,
     }),
     /** The online payment admission of the round's kind, under this staff member's authority. */
     admission: ({ selected, preparation, kind, authorize }) => {

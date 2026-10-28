@@ -4805,6 +4805,60 @@
       "privilege": "UPDATE",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN (Owner 2026-10-28 decisions 1 and 17 \"开台后这张桌的二维码直接可以加入……服务员可以把它移出这桌或暂停扫码加入\"): a guest joins an open table by its QR code (each join a recorded one-time capability), staff pause or resume QR joining and take a phone off the table"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_round_staff_hold",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN decisions 5–7 (Owner 2026-10-28 decisions 1 and 17 \"新手机第一次下单要店员确认（门店设置，默认关）；短时间大量下单就暂停，等店员确认；不自动取消\"): a pay-later guest round waits for staff (new phone's first round when the Store asks, or rapid ordering), staff send it to the kitchen or cancel it (recorded, never sales); the Store's setting is versioned"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_round_staff_hold",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN decisions 5–7 (Owner 2026-10-28 decisions 1 and 17 \"新手机第一次下单要店员确认（门店设置，默认关）；短时间大量下单就暂停，等店员确认；不自动取消\"): a pay-later guest round waits for staff (new phone's first round when the Store asks, or rapid ordering), staff send it to the kitchen or cancel it (recorded, never sales); the Store's setting is versioned"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_round_staff_hold_release",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN decisions 5–7 (Owner 2026-10-28 decisions 1 and 17 \"新手机第一次下单要店员确认（门店设置，默认关）；短时间大量下单就暂停，等店员确认；不自动取消\"): a pay-later guest round waits for staff (new phone's first round when the Store asks, or rapid ordering), staff send it to the kitchen or cancel it (recorded, never sales); the Store's setting is versioned"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_round_staff_hold_release",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN decisions 5–7 (Owner 2026-10-28 decisions 1 and 17 \"新手机第一次下单要店员确认（门店设置，默认关）；短时间大量下单就暂停，等店员确认；不自动取消\"): a pay-later guest round waits for staff (new phone's first round when the Store asks, or rapid ordering), staff send it to the kitchen or cancel it (recorded, never sales); the Store's setting is versioned"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_round_hold_setting",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN decisions 5–7 (Owner 2026-10-28 decisions 1 and 17 \"新手机第一次下单要店员确认（门店设置，默认关）；短时间大量下单就暂停，等店员确认；不自动取消\"): a pay-later guest round waits for staff (new phone's first round when the Store asks, or rapid ordering), staff send it to the kitchen or cancel it (recorded, never sales); the Store's setting is versioned"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_round_hold_setting",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN decisions 5–7 (Owner 2026-10-28 decisions 1 and 17 \"新手机第一次下单要店员确认（门店设置，默认关）；短时间大量下单就暂停，等店员确认；不自动取消\"): a pay-later guest round waits for staff (new phone's first round when the Store asks, or rapid ordering), staff send it to the kitchen or cancel it (recorded, never sales); the Store's setting is versioned"
     }
   ]
 }

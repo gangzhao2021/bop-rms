@@ -211,3 +211,42 @@ it("WP-2423: offers the Order host section only when the server says this staff 
   // An older server sends nothing: offered as before; the server decides.
   expect((await read({})).canTransferHost).toBe(true);
 });
+it("WP-2423 item 8 ⑤: reads rounds waiting for staff and phones that just joined, only at open tables", async () => {
+  const open = {
+    ...table,
+    currentDiningSessionReference: id(3),
+    elapsedMinutes: 12,
+    heldRounds: [
+      {
+        orderReference: id(40),
+        orderBatchReference: id(41),
+        roundNumber: null,
+        reason: "TableRapid",
+        heldAt: "2026-10-28T19:00:00.000Z",
+      },
+    ],
+    newPhones: [{ phoneNumber: 2, joinedAt: "2026-10-28T18:58:00.000Z" }],
+  };
+  const read = (item: unknown) =>
+    createDiningSessionClient(
+      vi.fn(async () =>
+        response({ canOperateTables: true, items: [item], nextAfterTableReference: null }),
+      ),
+    ).tables("A".repeat(43));
+  const [listed] = (await read(open)).items;
+  expect(listed?.heldRounds?.[0]?.reason).toBe("TableRapid");
+  expect(listed?.newPhones).toEqual([{ phoneNumber: 2, joinedAt: "2026-10-28T18:58:00.000Z" }]);
+  // A free table has neither; an unknown reason or an extra field is refused.
+  await expect(
+    read({ ...open, currentDiningSessionReference: null, elapsedMinutes: null }),
+  ).rejects.toThrow();
+  await expect(
+    read({ ...open, heldRounds: [{ ...open.heldRounds[0], reason: "Suspicious" }] }),
+  ).rejects.toThrow();
+  await expect(
+    read({
+      ...open,
+      newPhones: [{ phoneNumber: 2, joinedAt: "2026-10-28T18:58:00.000Z", guest: "x" }],
+    }),
+  ).rejects.toThrow();
+});

@@ -20,7 +20,9 @@ export type DiningRoundStatus =
   | "Preparing"
   | "Ready"
   | "Serving"
-  | "Served";
+  | "Served"
+  /** WP-2423 item 8 ⑤: waits for staff before it goes to the kitchen (not owed yet). */
+  | "WaitingForStaff";
 export type DiningRoundPayment =
   | "Paid"
   | "Awaiting"
@@ -30,6 +32,7 @@ export type DiningRoundPayment =
   | "RefundPending"
   /** DEC-DINE-IN-PAY-LATER: in the kitchen; paid with the table's bill at the end. */
   | "OnTableBill";
+export type DiningWaitingReason = "FirstOrder" | "PhoneRapid" | "TableRapid";
 export type DiningCancellationReason =
   "CustomerRequest" | "SoldOut" | "StoreError" | "DuplicateOrder" | "GuestLeft";
 
@@ -42,6 +45,8 @@ export interface DiningRound {
   readonly payment: DiningRoundPayment;
   readonly cancelsAt: string | null;
   readonly storeCancellationReason: DiningCancellationReason | null;
+  /** WP-2423 item 8 ⑤: why the round waits for staff (status WaitingForStaff). */
+  readonly waitingReason?: DiningWaitingReason;
   readonly items: readonly {
     readonly displayName: string;
     readonly quantity: number;
@@ -158,6 +163,7 @@ const statuses: readonly DiningRoundStatus[] = [
   "Ready",
   "Serving",
   "Served",
+  "WaitingForStaff",
 ];
 const payments: readonly DiningRoundPayment[] = [
   "Paid",
@@ -237,8 +243,11 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
   if (!Array.isArray(session.rounds) || session.rounds.length > 100) return invalid();
   const rounds = session.rounds.map((value: unknown, index): DiningRound => {
     const priced = value !== null && typeof value === "object" && Object.hasOwn(value, "subtotal");
+    const waiting =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "waitingReason");
     const round = record(value, [
       ...(priced ? ["subtotal", "tax"] : []),
+      ...(waiting ? ["waitingReason"] : []),
       "roundNumber",
       "orderedBy",
       "submittedAt",
@@ -320,6 +329,15 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
         round.storeCancellationReason === null
           ? null
           : oneOf(round.storeCancellationReason, reasons),
+      ...(waiting
+        ? {
+            waitingReason: oneOf(round.waitingReason, [
+              "FirstOrder",
+              "PhoneRapid",
+              "TableRapid",
+            ] as const),
+          }
+        : {}),
       items,
       ...(breakdown === null ? {} : breakdown),
       itemsTotal,

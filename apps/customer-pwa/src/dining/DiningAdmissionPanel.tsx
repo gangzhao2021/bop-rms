@@ -79,9 +79,12 @@ const framing = /^(?:[0-9]{6}|[A-Za-z0-9_-]{21}[AQgw])$/u;
 export function DiningAdmissionPanel({
   service,
   contextEpoch,
+  onStateChange,
 }: {
   readonly service?: DiningAdmissionUi | undefined;
   readonly contextEpoch?: object | undefined;
+  /** WP-2423 item 8 ⑤: the page keeps one primary action (joining, then the menu). */
+  readonly onStateChange?: ((state: DiningAdmissionUiState) => void) | undefined;
 }) {
   const [state, setState] = useState<DiningAdmissionUiState>(service ? "Ready" : "Unavailable");
   const [online, setOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine);
@@ -112,6 +115,9 @@ export function DiningAdmissionPanel({
       window.removeEventListener("offline", changed);
     };
   }, []);
+  const reported = useRef(onStateChange);
+  reported.current = onStateChange;
+  useEffect(() => reported.current?.(state), [state]);
   useEffect(() => {
     if (state === "Invalid" || refused(state)) input.current?.focus();
     else if (state === "Bound" || state === "Unknown") status.current?.focus();

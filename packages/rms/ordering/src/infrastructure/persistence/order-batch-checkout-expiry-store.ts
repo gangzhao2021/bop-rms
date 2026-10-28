@@ -316,6 +316,9 @@ export function createPostgresDiningCheckoutExpiryCandidates(options: {
                 AND e.status<>'AwaitingPaymentResolution')
             AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation c
               WHERE c.brand_id=b.brand_id AND c.store_id=b.store_id AND c.order_batch_id=b.order_batch_id)
+            -- WP-2423 item 8 ⑤ decision 7: a round waiting for staff is never cancelled by time.
+            AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_round_staff_hold h
+              WHERE h.brand_id=b.brand_id AND h.store_id=b.store_id AND h.order_batch_id=b.order_batch_id)
           ORDER BY b.order_batch_id LIMIT $5`,
           [brand, store, at, after, limit],
         );

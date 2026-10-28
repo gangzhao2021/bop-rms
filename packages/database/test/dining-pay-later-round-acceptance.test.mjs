@@ -5,11 +5,12 @@ import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
 import { loadOutboxEnvelope } from "../../bop/eventing/src/index.ts";
-import { parseDiningSession } from "../../rms/dining/src/index.ts";
+import { changeDiningRoundHoldSetting, parseDiningSession } from "../../rms/dining/src/index.ts";
 import {
   createOrderNumberAllocation,
   createPostgresOrderKitchenSourceStore,
   createPostgresOrderPayLaterConfirmationStore,
+  createPostgresOrderRoundStaffHoldStore,
   parseAdditionalDiningBatchSnapshot,
 } from "../../rms/ordering/src/index.ts";
 import { createCustomerAdditionalDiningSubmissionStore } from "../../../apps/api/src/customer-additional-dining-submission-store.ts";
@@ -127,6 +128,11 @@ it("a table splits the bill evenly and pays it part by part", () => journey("Pai
 // the manager writes off exactly the parts still unpaid, and the day's ledger keeps each.
 it("a split table that paid one part and left is written off for the rest", () =>
   journey("SplitWrittenOff"));
+// WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN decisions 5–7: with the Store's "a new phone's first round
+// waits for staff" on, each guest's first round waits: it is not sent to the kitchen (the database
+// refuses that and a cancellation without staff), asking again finds the same hold, and staff send
+// it with their release in one transaction. Then the table goes on and pays as usual.
+it("a new phone's first round waits for staff, who send it to the kitchen", () => journey("Held"));
 
 async function journey(ending) {
   await withIsolatedDatabase(
@@ -144,7 +150,9 @@ async function journey(ending) {
                   ? "wp2423_plsplit"
                   : ending === "SplitWrittenOff"
                     ? "wp2423_plsplwo"
-                    : "wp2423_plon",
+                    : ending === "Held"
+                      ? "wp2423_plheld"
+                      : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -352,8 +360,111 @@ async function journey(ending) {
           true,
         );
 
+        // WP-2423 item 8 ⑤: the Store turns on "a new phone's first round waits for staff".
+        const holdStore = createPostgresOrderRoundStaffHoldStore({
+          ...scope,
+          authorize: async () => true,
+        });
+        const staffMember = id(0x701);
+        if (ending === "Held") {
+          const setting = await transactions().run((tx) =>
+            changeDiningRoundHoldSetting(tx, ownerScope, {
+              operationReference: fresh(),
+              expectedVersion: 0,
+              firstRoundNeedsStaff: true,
+              actorReference: staffMember,
+              observedAt: clock,
+            }),
+          );
+          assert.deepEqual([setting.version, setting.firstRoundNeedsStaff], [1, true]);
+        }
+        const holdIfNeeded = (submissionReference, guest) =>
+          transactions().run((tx) =>
+            payLater.holdIfNeeded(tx, {
+              submissionReference,
+              guestSessionReference: guest,
+              authorize: async () => true,
+            }),
+          );
+        /** A guest's round as sent from their phone: held, then sent by staff (Held ending). */
+        const guestSends = async (submissionReference, guest) => {
+          if (ending !== "Held") {
+            assert.equal(await holdIfNeeded(submissionReference, guest), null);
+            return send(submissionReference, guest);
+          }
+          const held = await holdIfNeeded(submissionReference, guest);
+          assert.equal(held.status, "Waiting");
+          assert.equal(held.reason, "FirstOrder");
+          // Asking again finds the same hold; nothing more is written.
+          assert.deepEqual(await holdIfNeeded(submissionReference, guest), held);
+          assert.equal(
+            (
+              await rows(
+                "SELECT count(*)::int AS n FROM rms_ordering.order_round_staff_hold WHERE order_batch_id=$1",
+                [held.orderBatchReference],
+              )
+            )[0].n,
+            1,
+          );
+          // Not in the kitchen while it waits: the database refuses its confirmation...
+          await assert.rejects(send(submissionReference, guest));
+          // ...and a release recorded without its outcome fails when the transaction commits.
+          await assert.rejects(
+            transactions().run((tx) =>
+              holdStore.release({
+                transaction: tx,
+                operationReference: fresh(),
+                orderReference: held.orderReference,
+                orderBatchReference: held.orderBatchReference,
+                outcome: "Cancelled",
+                actorReference: staffMember,
+                observedAt: clock,
+              }),
+            ),
+          );
+          assert.deepEqual(
+            await rows(
+              "SELECT 1 FROM rms_ordering.order_pay_later_confirmation WHERE order_batch_id=$1",
+              [held.orderBatchReference],
+            ),
+            [],
+          );
+          // Staff send it: their release and the round's confirmation, together.
+          const operation = fresh();
+          const sent = await transactions().run(async (tx) => {
+            await holdStore.release({
+              transaction: tx,
+              operationReference: operation,
+              orderReference: held.orderReference,
+              orderBatchReference: held.orderBatchReference,
+              outcome: "Confirmed",
+              actorReference: staffMember,
+              observedAt: clock,
+            });
+            return payLater.confirm(tx, {
+              submissionReference,
+              actorReference: staffMember,
+              operationReference: operation,
+              correlationReference: operation,
+              authorize: async () => true,
+            });
+          });
+          assert.equal(sent.status, "Confirmed");
+          assert.deepEqual(await holdIfNeeded(submissionReference, guest), {
+            status: "Confirmed",
+          });
+          assert.deepEqual(
+            await rows(
+              "SELECT outcome,actor_id FROM rms_ordering.order_round_staff_hold_release WHERE order_batch_id=$1",
+              [held.orderBatchReference],
+            ),
+            [{ outcome: "Confirmed", actor_id: staffMember }],
+          );
+          return sent;
+        };
+
         // The round is sent: the System's acceptance, its revision, the confirmation and the event.
-        const sent1 = await send(r1.submissionReference, guestSession);
+        const sent1 = await guestSends(r1.submissionReference, guestSession);
         assert.equal(sent1.status, "Confirmed");
         const c1 = sent1.confirmation;
         assert.equal(String(c1.orderBatchReference), R1.batch.orderBatchReference);
@@ -713,7 +824,7 @@ async function journey(ending) {
         assert.equal(submitted.status, "Created");
 
         clock = now();
-        const sent2 = await send(R2.batch.submissionReference, tableGuest);
+        const sent2 = await guestSends(R2.batch.submissionReference, tableGuest);
         assert.equal(sent2.status, "Confirmed");
         const c2 = sent2.confirmation;
         assert.equal(String(c2.orderBatchReference), R2.batch.orderBatchReference);

@@ -43,7 +43,9 @@ export interface CustomerPayLaterRoundInput {
 export interface CustomerPaymentIntentPort {
   create(input: CustomerPaymentIntentInput): Promise<unknown>;
   sendToKitchen?(input: CustomerPayLaterRoundInput): Promise<{
-    readonly status: "Sent" | "AlreadySent";
+    /** Held (WP-2423 item 8 ⑤): the round waits for staff before it goes to the kitchen. */
+    readonly status: "Sent" | "AlreadySent" | "Held";
+    readonly waitingReason?: "FirstOrder" | "PhoneRapid" | "TableRapid";
     readonly orderReference: string;
     readonly totalMinor: bigint;
   }>;
@@ -344,7 +346,8 @@ export class CustomerPaymentIntentHandler {
           return;
         }
         if (
-          (sent.status !== "Sent" && sent.status !== "AlreadySent") ||
+          (sent.status !== "Sent" && sent.status !== "AlreadySent" && sent.status !== "Held") ||
+          (sent.status === "Held") !== (sent.waitingReason !== undefined) ||
           typeof sent.totalMinor !== "bigint" ||
           sent.totalMinor <= 0n ||
           !uuid.test(sent.orderReference)
@@ -352,12 +355,13 @@ export class CustomerPaymentIntentHandler {
           reject(response, 503);
           return;
         }
-        response.status(sent.status === "Sent" ? 201 : 200).json({
+        response.status(sent.status === "Sent" ? 201 : sent.status === "Held" ? 202 : 200).json({
           schemaVersion: 1,
           round: {
             checkoutSessionReference: input.checkoutSessionReference,
             orderReference: sent.orderReference,
             status: sent.status,
+            ...(sent.status === "Held" ? { waitingReason: sent.waitingReason } : {}),
             total: { amountMinor: sent.totalMinor.toString(), currency: "CAD" },
           },
         });

@@ -1,7 +1,11 @@
 import { createPostgresWorkflowDefinitionStore } from "@bop/workflow";
 import type { ConsumerTransaction } from "@bop/eventing";
-import { createPostgresDiningPaymentTimingStore } from "@rms/dining";
-import { createPostgresOrderPayLaterConfirmationStore } from "@rms/ordering";
+import { createPostgresDiningPaymentTimingStore, loadDiningRoundHoldSetting } from "@rms/dining";
+import {
+  createPostgresOrderPayLaterConfirmationStore,
+  createPostgresOrderRoundStaffHoldStore,
+  type OrderRoundHoldReason,
+} from "@rms/ordering";
 import { createHash } from "node:crypto";
 
 /**
@@ -158,6 +162,69 @@ export function createDiningPayLaterRound(options: DiningPayLaterRoundOptions) {
             }),
         },
       });
+    },
+
+    /**
+     * WP-2423 item 8 ⑤ decisions 5–7: before a guest's round goes to the kitchen — does it wait
+     * for staff? A round already held answers with its hold (Waiting, or how staff released it);
+     * otherwise, when it is a new phone's first round (the Store's setting), the phone's 4th or the
+     * table's 7th guest round within 10 minutes, it is held now. Null: send it to the kitchen.
+     * Staff rounds never wait.
+     */
+    async holdIfNeeded(
+      transaction: ConsumerTransaction,
+      input: {
+        readonly submissionReference: string;
+        readonly guestSessionReference: string;
+        authorize(transaction: ConsumerTransaction): Promise<boolean>;
+      },
+    ): Promise<
+      | null
+      | {
+          readonly status: "Waiting";
+          readonly reason: OrderRoundHoldReason;
+          readonly orderReference: string;
+          readonly orderBatchReference: string;
+        }
+      | { readonly status: "Confirmed" | "Cancelled" }
+    > {
+      const observedAt = new Date(Date.parse(options.now())).toISOString();
+      const holds = createPostgresOrderRoundStaffHoldStore({
+        brandReference: scope.brandReference,
+        storeReference: scope.storeReference,
+        authorize: input.authorize,
+      });
+      const setting = await loadDiningRoundHoldSetting(transaction, scope);
+      const evaluated = await holds.evaluate({
+        transaction,
+        submissionReference: input.submissionReference,
+        guestSessionReference: input.guestSessionReference,
+        observedAt,
+        firstRoundNeedsStaff: setting.firstRoundNeedsStaff,
+      });
+      const waiting = (reason: OrderRoundHoldReason) =>
+        Object.freeze({
+          status: "Waiting" as const,
+          reason,
+          orderReference: evaluated.orderReference,
+          orderBatchReference: evaluated.orderBatchReference,
+        });
+      if (evaluated.hold !== null)
+        return evaluated.hold.release === null
+          ? waiting(evaluated.hold.reason)
+          : Object.freeze({ status: evaluated.hold.release.outcome });
+      if (evaluated.reason === null) return null;
+      await holds.hold({
+        transaction,
+        holdReference: options.generateReference(),
+        orderReference: evaluated.orderReference,
+        orderBatchReference: evaluated.orderBatchReference,
+        submissionReference: input.submissionReference,
+        guestSessionReference: input.guestSessionReference,
+        reason: evaluated.reason,
+        observedAt,
+      });
+      return waiting(evaluated.reason);
     },
 
     /** What the round comes to, tax included (it is owed until the table is settled). */

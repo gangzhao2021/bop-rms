@@ -196,7 +196,8 @@ export function createSessionPaymentClient() {
       session: string,
       selection: string,
     ): Promise<{
-      readonly status: "Sent" | "AlreadySent";
+      /** Held (WP-2423 item 8 ⑤): it waits for staff before the kitchen; the table page says why. */
+      readonly status: "Sent" | "AlreadySent" | "Held";
       readonly total: Readonly<{ amountMinor: string; currency: "CAD" }>;
     }> {
       if (!uuid.test(selection)) throw new SessionPaymentClientError("invalid");
@@ -208,14 +209,18 @@ export function createSessionPaymentClient() {
       );
       try {
         const root = exact(payload, ["schemaVersion", "round"]);
+        const held = response.status === 202;
         const raw = exact(root.round, [
           "checkoutSessionReference",
           "orderReference",
           "status",
           "total",
+          ...(held ? ["waitingReason"] : []),
         ]);
         const total = exact(raw.total, ["amountMinor", "currency"]);
-        const expected = response.status === 201 ? "Sent" : "AlreadySent";
+        const expected = held ? "Held" : response.status === 201 ? "Sent" : "AlreadySent";
+        if (held && !["FirstOrder", "PhoneRapid", "TableRapid"].includes(String(raw.waitingReason)))
+          throw new Error();
         if (
           root.schemaVersion !== 1 ||
           raw.checkoutSessionReference !== session ||

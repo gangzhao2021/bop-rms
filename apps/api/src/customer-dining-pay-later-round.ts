@@ -177,6 +177,24 @@ export function createCustomerDiningPayLaterRound(options: CustomerDiningPayLate
             );
           };
           if (!(await current())) throw new CustomerDiningPayLaterError("NotJoined");
+          // WP-2423 item 8 ⑤: a round that must wait for staff is held, not sent.
+          const held = await round.holdIfNeeded(transaction, {
+            submissionReference: submitted.submissionReference,
+            guestSessionReference: before.guestSessionReference,
+            authorize: current,
+          });
+          if (held?.status === "Cancelled") throw new CustomerDiningPayLaterError("Unavailable");
+          if (held?.status === "Waiting")
+            return Object.freeze({
+              status: "Held" as const,
+              waitingReason: held.reason,
+              orderReference: held.orderReference,
+              totalMinor: await round.roundTotalMinor(transaction, {
+                orderReference: held.orderReference,
+                orderBatchReference: held.orderBatchReference,
+                authorize: current,
+              }),
+            });
           const sent = await round.confirm(transaction, {
             submissionReference: submitted.submissionReference,
             actorReference: before.guestSessionReference,

@@ -53,6 +53,9 @@ export function roundTime(instant: string, now = Date.now(), locale = dateLocale
 export const diningSessionPollIntervalMs = 15_000;
 
 const statusText: Readonly<Record<DiningRoundStatus, string>> = {
+  get WaitingForStaff() {
+    return t("Waiting for staff to confirm");
+  },
   get AwaitingPayment() {
     return t("Waiting for payment");
   },
@@ -140,6 +143,16 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
     );
   if (round.status === "NotPaidCancelled")
     return <p>{t("This round never went to the kitchen. No one was charged for it.")}</p>;
+  // WP-2423 item 8 ⑤ decisions 5–6: the round waits for staff before the kitchen, and why.
+  if (round.status === "WaitingForStaff")
+    return (
+      <p role="status">
+        {round.waitingReason === "FirstOrder"
+          ? t("This is the first round from this phone, so staff confirm it before the kitchen.")
+          : t("Many rounds were sent just now, so staff confirm this one before the kitchen.")}{" "}
+        {t("It is not charged until it goes to the kitchen.")}
+      </p>
+    );
   if (round.status === "StoreCancelled")
     return (
       <p>

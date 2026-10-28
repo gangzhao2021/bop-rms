@@ -433,6 +433,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     // WP-2423 (2026-10-16): stock still set aside for an earlier-day Order (absent from an older server).
     const withHeldStock =
       value !== null && typeof value === "object" && Object.hasOwn(value, "heldStock");
+    // WP-2423 item 8 ⑤: a dine-in Order's table session (absent from an older server).
+    const withSession =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "diningSessionReference");
     const withReady =
       value !== null && typeof value === "object" && Object.hasOwn(value, "readyToServeItemCount");
     // WP-2423 (2026-10-18): dine-in portions the kitchen is remaking (absent from an older server).
@@ -458,6 +461,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       ...(withRemaking ? ["remakingItemCount"] : []),
       ...(withKitchen ? ["kitchenPhase"] : []),
       ...(withHeldStock ? ["heldStock"] : []),
+      ...(withSession ? ["diningSessionReference"] : []),
       ...(withCounter ? ["counter"] : []),
       ...(withPaidOnline ? ["paidOnline"] : []),
       ...(withPosition ? ["paymentPosition"] : []),
@@ -831,6 +835,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
        * aside — Open (still to make and hand over, or cancel) or Ended (only the stock is left).
        */
       heldStock,
+      /** WP-2423 item 8 ⑤: the table's session of a dine-in Order (which phone sent each round). */
+      diningSessionReference:
+        !withSession || item.diningSessionReference === null || item.orderType !== "DineIn"
+          ? null
+          : reference(item.diningSessionReference),
       submittedAt,
       observedAt,
       initialBatchReference: reference(item.initialBatchReference),

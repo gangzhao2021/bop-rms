@@ -3,6 +3,22 @@ const databaseAccessManifestInput = {
   module: { moduleName: "ordering", packageName: "@rms/ordering", layer: "RMS" },
   tables: [
     {
+      table: "order_round_staff_hold",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "order_round_staff_hold_release",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "order_pay_later_confirmation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },
@@ -1909,6 +1925,56 @@ const databaseAccessManifestInput = {
       principal: { kind: "module", id: "@rms/ordering" },
       readPattern: "owner-repository",
       source: "packages/rms/ordering/src/infrastructure/persistence/merchant-order-list-summary.ts",
+    },
+    {
+      id: "round-staff-hold.read.order_round_staff_hold",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_round_staff_hold" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "round-staff-hold.write.order_round_staff_hold",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_round_staff_hold" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "round-staff-hold.read.order_round_staff_hold_release",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_round_staff_hold_release" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "round-staff-hold.write.order_round_staff_hold_release",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_round_staff_hold_release" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-pay-later-confirmation-store.ts",
+    },
+    {
+      id: "checkout-expiry-hold.read.order_round_staff_hold",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_round_staff_hold" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/order-batch-checkout-expiry-store.ts",
     },
     {
       id: "pay-later-confirmation.read.order_pay_later_confirmation",

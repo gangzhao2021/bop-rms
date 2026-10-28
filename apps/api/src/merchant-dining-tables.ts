@@ -5,10 +5,12 @@ import {
   createPostgresDiningSessionReadStore,
   createPostgresDiningTableQrStore,
   createPostgresDiningTableStore,
+  loadDiningSessionPhones,
   parseDiningInstant,
   parseDiningReference,
 } from "@rms/dining";
 import {
+  createPostgresOrderRoundStaffHoldStore,
   createPostgresStaffDiningRoundEntryStore,
   listStoreDiningSessionOrders,
   listStorePaidDiningRoundsAwaitingAcceptance,
@@ -36,6 +38,9 @@ const tablePageActions = Object.freeze([
   // WP-2423 item 8 ①: "Guests left without paying" (a write-off) is offered to managers only.
   "payment.refund.approve",
 ]);
+
+/** WP-2423 item 8 ⑤ decision 3: a phone that joined in the last 10 minutes is pointed out. */
+const newPhoneMinutes = 10;
 
 export function createMerchantDiningTables(options: {
   persistence: PersistentMerchantBffOptions;
@@ -289,6 +294,77 @@ export function createMerchantDiningTables(options: {
             scoped,
             activeReferences,
           );
+          // WP-2423 item 8 ⑤ decisions 3 and 7: rounds waiting for staff ("needs action"; they are
+          // not awaiting payment and are never cancelled by time) and phones that just joined.
+          const ownerScope = {
+            tenantReference: String(current.selected.tenantReference),
+            brandReference: String(current.context.brand.brandReference),
+            storeReference: String(current.store.storeReference),
+          };
+          const sessionOfOrder = new Map(
+            [...sessionOrders].map(([session, order]) => [String(order), String(session)]),
+          );
+          const waitingRounds = await createPostgresOrderRoundStaffHoldStore({
+            brandReference: ownerScope.brandReference,
+            storeReference: ownerScope.storeReference,
+            authorize: async () => (await authorize()) === true,
+          }).listWaiting({
+            transaction: tx as unknown as Parameters<typeof listStoreDiningSessionOrders>[0],
+            orderReferences: [...sessionOfOrder.keys()],
+          });
+          const heldRounds = new Map<
+            string,
+            {
+              orderReference: string;
+              orderBatchReference: string;
+              roundNumber: number | null;
+              reason: string;
+              heldAt: string;
+            }[]
+          >();
+          for (const hold of waitingRounds) {
+            const session = sessionOfOrder.get(String(hold.orderReference));
+            if (session === undefined) continue;
+            const listed = unpaidGuestRounds.get(session) ?? [];
+            const round = listed.find(
+              (entry) => entry.orderBatchReference === String(hold.orderBatchReference),
+            );
+            unpaidGuestRounds.set(
+              session,
+              listed.filter((entry) => entry !== round),
+            );
+            heldRounds.set(session, [
+              ...(heldRounds.get(session) ?? []),
+              {
+                orderReference: String(hold.orderReference),
+                orderBatchReference: String(hold.orderBatchReference),
+                roundNumber: round?.roundNumber ?? null,
+                reason: hold.reason,
+                heldAt: String(hold.heldAt),
+              },
+            ]);
+          }
+          const joinedAt = Date.parse(parseDiningInstant(options.persistence.now()));
+          const newPhones = new Map<string, { phoneNumber: number; joinedAt: string }[]>();
+          for (const session of activeReferences) {
+            const phones = await loadDiningSessionPhones(
+              tx as unknown as Parameters<typeof loadDiningSessionPhones>[0],
+              ownerScope,
+              String(session),
+            );
+            newPhones.set(
+              String(session),
+              phones
+                .filter(
+                  (phone) =>
+                    !phone.left && joinedAt - Date.parse(phone.joinedAt) < newPhoneMinutes * 60_000,
+                )
+                .map((phone) => ({
+                  phoneNumber: phone.phoneNumber,
+                  joinedAt: String(phone.joinedAt),
+                })),
+            );
+          }
           // WP-2423 Q28 DEC-DINING-STAFF-CALL: the open call of each open session (one read).
           const staffCalls = await merchantDiningStaffCallStore(tx, {
             tenantReference: String(current.selected.tenantReference),
@@ -372,6 +448,20 @@ export function createMerchantDiningTables(options: {
                     )
                       .slice(0, 20)
                       .map((round) => Object.freeze({ ...round })),
+                  ),
+                  heldRounds: Object.freeze(
+                    (table.activeDiningSessionReference === null
+                      ? []
+                      : (heldRounds.get(String(table.activeDiningSessionReference)) ?? [])
+                    )
+                      .slice(0, 20)
+                      .map((round) => Object.freeze({ ...round })),
+                  ),
+                  newPhones: Object.freeze(
+                    (table.activeDiningSessionReference === null
+                      ? []
+                      : (newPhones.get(String(table.activeDiningSessionReference)) ?? [])
+                    ).map((phone) => Object.freeze({ ...phone })),
                   ),
                   staffRoundsAwaitingPayment: Object.freeze(
                     (awaiting.get(table.tableReference) ?? [])
