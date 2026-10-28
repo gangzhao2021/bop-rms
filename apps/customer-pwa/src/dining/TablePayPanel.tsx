@@ -43,16 +43,47 @@ function problemText(error: unknown) {
  * checkout — the bill as it stands, the tip chosen once, one card payment. A declined card is
  * tried again; coming back finds the same payment; the receipt is the whole table's.
  */
+/** What the table page needs to know: checking out (no more rounds), and paid in full. */
+export interface TablePayStatus {
+  readonly checkingOut: boolean;
+  readonly paid: boolean;
+}
+// The guest's tip choice during this checkout, kept in this tab so a reload keeps it. Only the
+// option chosen is kept (no table, bill or amount); it is cleared once the table is paid or no
+// longer checking out. A per-tab convenience: the server never relies on it.
+const TIP_KEY = "bop-table-tip-choice";
+const savedTip = (): TipChoice | null => {
+  try {
+    const value = window.sessionStorage.getItem(TIP_KEY);
+    return value === "0" || value === "10" || value === "15" || value === "18" ? value : null;
+  } catch {
+    return null;
+  }
+};
+const saveTip = (choice: TipChoice | null) => {
+  try {
+    if (choice === null) window.sessionStorage.removeItem(TIP_KEY);
+    else window.sessionStorage.setItem(TIP_KEY, choice);
+  } catch {
+    /* A private window may refuse storage; the guest just chooses again after a reload. */
+  }
+};
+
 export function TablePayPanel({
   client: provided,
+  onStatus,
 }: {
   readonly client?: ReturnType<typeof createTablePaymentClient>;
+  /** Called when checkout or payment changes, so the table page reads itself again. */
+  readonly onStatus?: (status: TablePayStatus) => void;
 }) {
   const [client] = useState(() => provided ?? createTablePaymentClient());
   const [view, setView] = useState<TablePaymentView | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tip, setTip] = useState<TipChoice>("15");
+  // AGENTS.md (customer respect): no tip is chosen for the guest; every option, "No tip"
+  // included, is offered alike and the guest chooses before paying.
+  const [tip, setTip] = useState<TipChoice | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const operation = useRef<{ key: string; reference: string } | null>(null);
@@ -69,6 +100,29 @@ export function TablePayPanel({
   useEffect(() => {
     void read();
   }, [read]);
+  // A reload keeps the tip the guest chose for this bill.
+  useEffect(() => {
+    if (view === null) return;
+    if (!view.checkingOut || view.state === "Paid" || view.state === "Closed") {
+      saveTip(null);
+      return;
+    }
+    if (tip === null) {
+      const saved = savedTip();
+      if (saved !== null) setTip(saved);
+    }
+  }, [view, tip]);
+  // The table page (its total, its "order more") follows checkout and payment.
+  const status =
+    view === null ? null : { checkingOut: view.checkingOut, paid: view.state === "Paid" };
+  const reported = useRef<string | null>(null);
+  useEffect(() => {
+    if (status === null) return;
+    const key = JSON.stringify(status);
+    if (reported.current === key) return;
+    reported.current = key;
+    onStatus?.(status);
+  }, [status, onStatus]);
   // After the card was submitted (or while another guest pays), the result is read again.
   useEffect(() => {
     if (view?.state !== "Paying" && view?.state !== "AnotherGuestPaying") return;
@@ -90,7 +144,7 @@ export function TablePayPanel({
   if (!view.checkingOut && view.state !== "Paid") return null;
 
   const pay = async () => {
-    if (busy) return;
+    if (busy || tip === null) return;
     const key = tip;
     // A failed payment is followed by a new one; a lost answer is retried with the same one.
     if (operation.current?.key !== key || view.state === "Failed")
@@ -166,8 +220,10 @@ export function TablePayPanel({
   if (view.state === "Closed") return null;
 
   const subtotal = view.owed.subtotalMinor;
-  const chosenTip = tipMinor(tip, subtotal);
-  const total = (BigInt(view.owed.totalMinor) + BigInt(chosenTip)).toString();
+  const total =
+    tip === null
+      ? null
+      : (BigInt(view.owed.totalMinor) + BigInt(tipMinor(tip, subtotal))).toString();
   return (
     <section className="order-status__card dining-session__pay" aria-labelledby="table-pay">
       <h2 id="table-pay">{t("Pay the bill")}</h2>
@@ -237,7 +293,10 @@ export function TablePayPanel({
                   name="table-tip"
                   value={choice}
                   checked={tip === choice}
-                  onChange={() => setTip(choice)}
+                  onChange={() => {
+                    setTip(choice);
+                    saveTip(choice);
+                  }}
                 />{" "}
                 {choice === "0"
                   ? t("No tip")
@@ -251,10 +310,14 @@ export function TablePayPanel({
           <button
             type="button"
             className="dining-session__pay-button"
-            disabled={busy || !view.consistent || view.owed.totalMinor === "0"}
+            disabled={busy || tip === null || !view.consistent || view.owed.totalMinor === "0"}
             onClick={() => void pay()}
           >
-            {busy ? t("Starting your payment…") : t("Pay {amount}", { amount: money(total) })}
+            {busy
+              ? t("Starting your payment…")
+              : total === null
+                ? t("Choose a tip to pay")
+                : t("Pay {amount}", { amount: money(total) })}
           </button>
         </>
       )}
