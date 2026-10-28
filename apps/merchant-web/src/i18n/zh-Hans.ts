@@ -5918,4 +5918,21 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Comps: "免单/折让",
   Dish: "菜品",
   "Comp or discount dishes before the table pays": "付款前给菜免单或折让",
+  "While the connection is down": "断网期间怎么做",
+  "Take new rounds on paper slips (table and round) and pass them to the kitchen.":
+    "新点的菜写在纸单上（桌号和第几轮），交给后厨。",
+  "Tick each dish on the slip when it is served.": "每道菜上桌后在纸单上打勾。",
+  "A comp or discount is the manager's decision: write the dish, how much and the reason on the slip, with the manager's name.":
+    "免单或折让由经理决定：在纸单上写明哪道菜、减多少、原因和经理姓名。",
+  "Take the table's payment on the card machine or in cash as usual. Write the table, amount, tip, time and the slip's reference code (cash: received and change). Never write a card number.":
+    "照常用刷卡机或现金收这桌的钱。记下桌号、金额、小费、时间和刷卡单上的单号（现金记实收和找零）。不要记卡号。",
+  "When the connection is back, for each table": "恢复联网后，每桌按顺序补录",
+  "Enter its paper rounds: Take order for table, tick Recorded after an outage.":
+    "补录纸单上的轮次：点“为桌台点单”，勾选“停电/断网后补录”。",
+  "Mark the dishes served.": "把菜记为已上桌。",
+  "Manager: record the comps and discounts from the slips first. They can't be added once the payment is recorded.":
+    "经理先按纸单补录免单/折让。收款记下后就不能再加。",
+  "Start checkout, check the bill matches the paper, choose the tip, tick Paid while the system was down with the time, and record the payment.":
+    "开始结账，核对账单和纸单一致，选小费，勾选“断网时已收款”并填时间，再记下收款。",
+  "Close the table, then mark it cleaned.": "关台，清洁后点“已清洁”。",
 });

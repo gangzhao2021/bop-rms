@@ -622,6 +622,35 @@ Cause: [ ] store network [ ] host [ ] Provider [ ] card machine [ ] tablet
 Notes (possible duplicates, refunds, goodwill given):
 ```
 
+### 3a. Tables that pay at the end (pay later) during an outage
+
+Added 2026-10-27 (WP-2423 item 8 ①, [DEC-TABLES-SERVER-MAIN](../spec/design/tables-server-main-screen.md);
+[DEC-DINE-IN-PAY-LATER](../spec/design/dine-in-pay-later.md)). A table that pays at the end has no
+payment per round, so section 3's "card machine before cooking" does not apply to it. The `Tables`
+page shows the same steps under "While the connection is down" while it cannot reach the store
+system (staff cannot open this document offline).
+
+- **New rounds**: one paper slip per round with the table and round number; no payment now. Pass it
+  to the kitchen as in section 4. Guests on mobile data may still send rounds from their phones,
+  which the store cannot see: the incident lead pauses online ordering (section 2) and staff tell
+  seated tables to order with them for now.
+- **Serving**: tick each dish on its slip when it is served.
+- **Comps and discounts**: only the incident lead (a manager) decides. Write on the slip which dish,
+  comp / percent off / amount off, the reason and the manager's name. Never just leave a dish off the
+  bill (AGENTS.md: no sales suppression); it is recorded in recovery step 5 before the payment.
+- **The bill**: the last bill seen on `Tables` (if it was open) plus the paper rounds, at the menu
+  prices including tax. The guests choose the tip (none is chosen for them).
+- **Payment**: on the store card machine as usual, or in cash (rounded to 5 cents, change given).
+  On the incident sheet write the table, total, tip, time and the card slip's reference code, or
+  for cash the amount received and the change. Never write a card number, expiry or CVV.
+- **Payment provider down only** (screens work): guests cannot pay on their phones; take the table's
+  payment on the card machine or in cash from `Tables`. If a guest's phone payment stays "in
+  progress", press `Stop the phone payment` first (a payment the guest did finish is kept).
+- **Guests leave without paying**: the incident lead writes it on the incident sheet; it is recorded
+  in recovery step 5 as "Guests left without paying" (manager), never left open or deleted.
+- **A tablet fails**: carry on from another store tablet or a phone signed in to the merchant
+  workspace (PIN switch on shared tablets); nothing is stored only on the failed device.
+
 ### 4. Kitchen without the Kitchen board
 
 - The counter passes each paid paper slip to the kitchen; the kitchen keeps slips in time order on a
@@ -688,6 +717,20 @@ Do these in order, before resuming online ordering.
      available in `Tables` first. Sending gives the table a new table code: a code handed out and
      not yet used stops working; guests already at the table stay joined. If the table's session
      was already closed, the entry opens a new one for it; close it again in step 8.
+   - **Tables that pay at the end** (section 3a), one table at a time, in this order — a comp
+     can't be added once the table's payment is recorded:
+     1. enter the table's paper rounds as in step 5 (`Tables` → `Take order for table …`, "Recorded
+        after an outage (taken on paper)");
+     2. mark the dishes served (`Serve all` on the table, or `Served` per dish);
+     3. the manager records each comp or discount written on the slips (`Comp or discount` on the
+        table: the dishes, how much and the reason; on a shared tablet the manager signs in);
+     4. `Start checkout` if it was not started; check the bill matches the paper total; choose the tip
+        the guests paid; tick "Paid while the system was down (enter it from paper now)" with the time
+        from the incident sheet (within 3 days); choose card machine (slip reference) or cash (amount
+        received); confirm the amounts shown, then record it. If the bill differs from the paper, stop
+        and give the slip to the incident lead;
+     5. guests who left without paying: the manager records `Guests left without paying`;
+     6. `Close table …`, then `Cleaned` once it is cleaned.
 6. **Expired online pickup orders** (rare since G1 is handled: only orders whose 30 minutes ended
    while a staff screen was still online, or held orders not decided within the 15 minutes): in
    `Orders` filter "Expired · refunded" for the outage period. For each one the kitchen actually made
@@ -705,10 +748,9 @@ Do these in order, before resuming online ordering.
    as a counter order, the Store Manager or Owner cancels that counter order in `Orders` (recorded as
    refunded on card machine, `Record card-machine refund`) after refunding on the machine. Online
    refunds over CAD 100 or after 24 hours need the approval step (Q5).
-8. **Close stale tables**: `Tables` shows "Open for a long time — check the table and close the
-   session if the guests have left." For each table whose guests have left: close each fulfilled
-   order (`Close order`), then `Begin session closing` and `Finalize session closing`. The system
-   checks orders, payments and exceptions before releasing the table.
+8. **Close stale tables**: `Tables` lists "Open a long time" under "Needs action". For each table
+   whose guests have left, select it and press `Close table …`: the system checks dishes, payments
+   and exceptions before releasing the table, and says what is still open if it can't.
 9. **Resume online ordering**: `Hours & ordering` → `Resume …`. Remove the signs.
 10. **Exceptions** (Store Manager/Owner): Home "Open exceptions" → `View exceptions`. Look for
     "Paid without a fulfillable order" and "Payment reconciliation difference" created during the
@@ -723,6 +765,9 @@ Do these in order, before resuming online ordering.
     card-machine payments on the machine. Any difference goes on the incident sheet with the slip.
   - **Online**: Captured, Refunded, Net. Online and card machine totals are separate and must not be
     added to each other to match either source.
+- **Cash for tables** (pay at the end): "Cash taken" and "Cash refunded" on `Settlement`; compare with
+  the drawer count of table cash. "Comps and discounts by a manager" lists what managers took off
+  bills that day (not money taken).
 - A paper slip paid on the machine and not yet entered can still be entered for 72 hours; after that
   the system refuses it, and the incident lead records it on the incident sheet for the Owner.
 - The pilot operator reads the daily settlement result for the day (see
@@ -780,6 +825,9 @@ STORE OUTAGE CHECKLIST                       keep at the counter
        Then Mark ready (Kitchen) and hand over (Pickup) / served (on the order).
 [ ] 12 Orders: "Expired · refunded" in the outage period -> lead follows up.
 [ ] 13 Refund any duplicate on the card machine, then record it.
+[ ] 11a Pay-at-the-end tables, one at a time: paper rounds -> Serve all ->
+       manager: Comp or discount from the slips -> Start checkout -> tick
+       "Paid while the system was down", time, card ref or cash -> Close table.
 [ ] 14 Tables: close sessions of guests who left.
 [ ] 15 Resume online ordering. Remove signs.
 [ ] 16 Refunds "not sent yet" / item refunds "pending" on the incident sheet:

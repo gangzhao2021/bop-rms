@@ -34,6 +34,7 @@ import { newOperationReference } from "./operation-reference.js";
 import { TableSessionClose } from "./TableSessionClose.js";
 import { TableCheckout } from "./TableCheckout.js";
 import { TableOrderRounds } from "./TableOrderRounds.js";
+import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
 import {
   browserOffline,
   StaleReadNotice,
@@ -1013,6 +1014,8 @@ export function DiningSessionWorkspace({
       }
     >
       {stale ? <StaleReadNotice stale={stale} /> : null}
+      {/* Operating continuity: what servers do while the page can't reach the store system. */}
+      {stale ? <TablesOfflineGuide /> : null}
       <nav className="table-tabs" aria-label={t("Show tables")}>
         {tableTabs.map((value) => (
           <button

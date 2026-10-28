@@ -997,3 +997,36 @@
 .workspace-page.tables-v3 .table-checkout__comp {
   color: var(--bop-color-text-muted);
 }
+
+/* WP-2423 item 8 ① segment 3: what to do while offline, under the read-only notice. */
+.workspace-page.tables-v3 .tables-offline {
+  margin: 0 0 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider);
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .tables-offline h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .tables-offline ul {
+  list-style: disc;
+}
+.workspace-page.tables-v3 .tables-offline ol {
+  list-style: decimal;
+}
+.workspace-page.tables-v3 .tables-offline :is(ul, ol) {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+}
+.workspace-page.tables-v3 .tables-offline summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--bop-color-accent);
+  font-weight: 600;
+  cursor: pointer;
+}
