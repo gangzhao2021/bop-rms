@@ -91,3 +91,74 @@ export async function recordMenuSoleOperatorApproval(
   );
   return "Created";
 }
+
+/**
+ * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU: the mark of a menu version listed by one person at a
+ * single store ("List it", no review). Append-only; written in the approving transaction. The
+ * database refuses it unless the Brand has exactly one store (not archived) and it is this one.
+ * Exact replay returns the existing mark; anything else conflicts.
+ */
+export async function recordMenuSingleStoreListing(
+  tx: MenuSoleOperatorTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly approvalEvidenceReference: string;
+    readonly operationReference: string;
+    readonly menuReference: string;
+    readonly menuVersionReference: string;
+    readonly lifecycleReference: string;
+    readonly actorReference: string;
+    readonly listedAt: string;
+    readonly auditReference: string;
+  },
+): Promise<"Created" | "AlreadyCommitted"> {
+  const ref = (value: string) => String(parseCatalogReference(value));
+  const v = {
+    brand: ref(input.brandReference),
+    store: ref(input.storeReference),
+    evidence: ref(input.approvalEvidenceReference),
+    operation: ref(input.operationReference),
+    menu: ref(input.menuReference),
+    version: ref(input.menuVersionReference),
+    lifecycle: ref(input.lifecycleReference),
+    actor: ref(input.actorReference),
+    audit: ref(input.auditReference),
+    at: instant(input.listedAt),
+  };
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)", [
+    v.brand,
+  ]);
+  const prior = rows(
+    await tx.query(
+      "SELECT approval_evidence_id::text evidence,menu_version_id::text version,actor_id::text actor,audit_id::text audit FROM rms_catalog.menu_single_store_listing WHERE brand_id=$1 AND operation_id=$2",
+      [v.brand, v.operation],
+    ),
+  )[0];
+  if (prior !== undefined) {
+    if (
+      prior.evidence !== v.evidence ||
+      prior.version !== v.version ||
+      prior.actor !== v.actor ||
+      prior.audit !== v.audit
+    )
+      return conflict();
+    return "AlreadyCommitted";
+  }
+  await tx.query(
+    "INSERT INTO rms_catalog.menu_single_store_listing (brand_id,approval_evidence_id,operation_id,menu_id,menu_version_id,lifecycle_id,approval_mode,listing_store_id,actor_id,listed_at,audit_id) VALUES ($1,$2,$3,$4,$5,$6,'SingleStoreListing',$7,$8,$9,$10)",
+    [
+      v.brand,
+      v.evidence,
+      v.operation,
+      v.menu,
+      v.version,
+      v.lifecycle,
+      v.store,
+      v.actor,
+      v.at,
+      v.audit,
+    ],
+  );
+  return "Created";
+}

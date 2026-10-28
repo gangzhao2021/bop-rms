@@ -28,6 +28,8 @@ const sellable = (n: number, name: string, nameZh: string, price: string | null)
   priceMinor: price,
   offeredHere: true,
 });
+let released: string | null = null;
+let refuseListing = false;
 function builder(version: number, order: number[][]) {
   return {
     screenId: "CAT-MENU-BUILDER",
@@ -75,7 +77,10 @@ function builder(version: number, order: number[][]) {
       })),
     },
     publication: null,
-    latestRelease: null,
+    latestRelease:
+      released === null
+        ? null
+        : { releaseReference: id(7), sequence: 1, menuVersionReference: released, createdAt: at },
     submittedBy: null,
     soleOperator: null,
     sellables: [
@@ -159,6 +164,12 @@ test("@production a single store's menu on one page: search, filters, sold out, 
   await page.route("**/merchant/commerce/menus/command", (route) => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     menuCommands.push(body);
+    if (body.action === "List") {
+      if (refuseListing)
+        return route.fulfill({ status: 409, headers, json: { error: "NotSingleStore" } });
+      released = id(2);
+      return route.fulfill({ headers, json: { status: "Listed", menuReference: MENU } });
+    }
     const sections = body.sections as { items: { skuReference: string }[] }[] | undefined;
     if (sections)
       order = sections.map((section) =>
@@ -215,6 +226,9 @@ test("@production a single store's menu on one page: search, filters, sold out, 
   await expect(page.getByText("No Chinese name")).toBeVisible();
   await expect(page.locator(".one-menu__dish").nth(3)).toContainText("No price");
   await expect(page.locator(".one-menu__dish").nth(3)).toContainText("Hidden");
+  await expect(
+    page.getByText("This menu has not been listed yet.", { exact: false }),
+  ).toBeVisible();
 
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -292,4 +306,24 @@ test("@production a single store's menu on one page: search, filters, sold out, 
     },
   ]);
   await expect(dishes.first()).toHaveText("Siu mai (TEST)");
+
+  // WP-2423 item 8 ⑥ part 2: "List it" — no review at a single store.
+  refuseListing = true;
+  await page.getByRole("button", { name: "List it" }).click();
+  await expect(
+    page.getByText("This Brand has more than one store, so a menu is reviewed", { exact: false }),
+  ).toBeVisible();
+  refuseListing = false;
+  await page.getByRole("button", { name: "List it" }).click();
+  await expect(page.getByText("Listed. Guests see the menu as it is now.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "List it" })).toHaveCount(0);
+  const listings = menuCommands.filter((command) => command.action === "List");
+  expect(listings).toHaveLength(2);
+  expect(Object.keys(listings[1] ?? {}).sort()).toEqual([
+    "action",
+    "menuReference",
+    "operationReference",
+  ]);
+  // A refused listing is finished; the next press is a new listing.
+  expect(listings[0]?.operationReference).not.toBe(listings[1]?.operationReference);
 });

@@ -24,8 +24,10 @@ import {
   type AvailabilityCommand,
   type StoreAvailabilityView,
 } from "./store-availability-page.js";
+import { menuErrorText } from "./StoreMenuPages.js";
 import {
   MenuPageError,
+  menuReviewProblemText,
   menuStage,
   parseMenuBuilderView,
   type MenuBuilderView,
@@ -78,6 +80,13 @@ export function OneStoreMenuPage({
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<ReadonlySet<MenuFilter>>(new Set());
   const [busy, setBusy] = useState(false);
+  // One listing reference per intended listing, kept until it is answered (a retry continues it).
+  const [listing, setListing] = useState<string | null>(null);
+  const newListing = () => {
+    const reference = newOperationReference();
+    setListing(reference);
+    return reference;
+  };
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
@@ -146,9 +155,11 @@ export function OneStoreMenuPage({
   const reordering = !narrowing && view.permissions.mayEdit;
   const changedOrder = orderKey(rows) !== saved;
   const stage = menuStage(view.publication);
+  // The menu as saved is not what guests see: never listed, edited since, or listing unfinished.
   const orderPending =
-    view.latestRelease !== null &&
-    view.latestRelease.menuVersionReference !== view.menu.versionReference;
+    view.latestRelease === null ||
+    view.latestRelease.menuVersionReference !== view.menu.versionReference ||
+    (stage !== "Editing" && stage !== "Published");
 
   const availabilityCommand = async (command: AvailabilityCommand, done: string) => {
     if (availability.command === undefined || busy) return;
@@ -204,6 +215,36 @@ export function OneStoreMenuPage({
           ? t("Someone changed the menu meanwhile. Read it again, then move the dishes again.")
           : t("That didn't go through. Read the menu again and retry."),
       );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const mayList =
+    view.permissions.maySubmit && view.permissions.mayApprove && view.permissions.mayPublish;
+  // WP-2423 item 8 ⑥ part 2: "List it" — the menu as saved takes effect for guests, no review.
+  const listMenu = async () => {
+    if (client.command === undefined || busy) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      await client.command({
+        action: "List",
+        operationReference: listing ?? newListing(),
+        menuReference,
+      });
+      setListing(null);
+      setProblem(t("Listed. Guests see the menu as it is now."));
+      reload();
+    } catch (error) {
+      if (!(error instanceof MenuPageError) || error.code !== "Offline") setListing(null);
+      setProblem(
+        error instanceof MenuPageError
+          ? error.problem !== null
+            ? menuReviewProblemText(error.problem)
+            : menuErrorText[error.code]
+          : t("That didn't go through. Read the menu again and retry."),
+      );
+      reload();
     } finally {
       setBusy(false);
     }
@@ -387,7 +428,9 @@ export function OneStoreMenuPage({
           <p>
             {changedOrder
               ? t("You moved dishes. Save the new order; guests see it when the menu is listed.")
-              : t("A new order is saved and not listed yet. Guests still see the listed menu.")}
+              : view.latestRelease === null
+                ? t("This menu has not been listed yet. Guests do not see it.")
+                : t("There are saved changes not listed yet. Guests still see the listed menu.")}
           </p>
           {changedOrder ? (
             <div className="one-menu__pending-actions">
@@ -403,8 +446,22 @@ export function OneStoreMenuPage({
                 {t("Undo")}
               </button>
             </div>
+          ) : mayList ? (
+            <div className="one-menu__pending-actions">
+              <button
+                type="button"
+                className="one-menu__primary"
+                disabled={busy}
+                onClick={() => void listMenu()}
+              >
+                {busy ? t("Listing…") : t("List it")}
+              </button>
+            </div>
           ) : (
-            <Link to={`/app/commerce/menus/${menuReference}`}>{t("Open the menu to list it")}</Link>
+            <p className="one-menu__note">
+              {t("A manager or the owner lists the menu.")}{" "}
+              <Link to={`/app/commerce/menus/${menuReference}`}>{t("Open the menu")}</Link>
+            </p>
           )}
         </div>
       ) : null}

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewedMenuContent } from "@rms/catalog";
-import { MerchantMenuError, menuCustomerView, parseMenuCommandBody } from "./merchant-menus.js";
+import {
+  MerchantMenuError,
+  menuCustomerView,
+  nextMenuListingStep,
+  parseMenuCommandBody,
+} from "./merchant-menus.js";
 
 const id = (n: number) => "01909a1e-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const digest = "sha256:" + "b".repeat(64);
@@ -276,5 +281,50 @@ describe("WP-2423 what customers will see, from the frozen review snapshot", () 
     });
     expect(by("Juice")).toMatchObject({ descriptionChange: null, photoChange: null, before: null });
     expect(view.removedFromMenu).toEqual([{ skuReference: id(16), name: "Scone" }]);
+  });
+});
+
+describe("WP-2423 item 8 ⑥ List it: where listing goes on from", () => {
+  const ref = (n: number) => "01909a3e-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const summary = (state: string | null, released: number | null) => ({
+    currentVersionReference: ref(1),
+    publication: state === null ? null : { state },
+    latestRelease: released === null ? null : { menuVersionReference: ref(released) },
+  });
+  it.each([
+    [null, null, "Submit"],
+    [null, 2, "Submit"],
+    [null, 1, "Listed"],
+    ["InReview", 2, "Approve"],
+    ["Approved", null, "Publish"],
+    ["Published", 1, "Listed"],
+    ["Published", 2, "Stuck"],
+    ["Archived", 1, "Listed"],
+  ] as const)("state %s, release %s → %s", (state, released, step) => {
+    expect(nextMenuListingStep(summary(state, released))).toBe(step);
+  });
+  it("accepts List with only its operation and menu, and Approve as a single-store listing", () => {
+    expect(
+      parseMenuCommandBody({ action: "List", operationReference: ref(2), menuReference: ref(3) }),
+    ).toEqual({ action: "List", operationReference: ref(2), menuReference: ref(3) });
+    expect(() =>
+      parseMenuCommandBody({
+        action: "List",
+        operationReference: ref(2),
+        menuReference: ref(3),
+        approvalMode: "SingleStoreListing",
+      }),
+    ).toThrow();
+    expect(
+      parseMenuCommandBody({
+        action: "Approve",
+        operationReference: ref(2),
+        menuReference: ref(3),
+        menuVersionReference: ref(4),
+        expectedVersion: 2,
+        snapshotDigest: "sha256:" + "a".repeat(64),
+        approvalMode: "SingleStoreListing",
+      }),
+    ).toMatchObject({ action: "Approve", approvalMode: "SingleStoreListing" });
   });
 });

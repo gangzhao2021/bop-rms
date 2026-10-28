@@ -14,6 +14,7 @@ import {
 import {
   createPostgresSoleOperatorSettingSource,
   createSoleOperatorApprovalSource,
+  holdBrandSingleStore,
   SoleOperatorApprovalError,
   type SoleOperatorSettingTransaction,
 } from "@bop/tenant";
@@ -410,4 +411,45 @@ export async function requireMerchantStoreConfigurationSoleOperatorBasis(
     observedAt: mark.approvedAt,
   });
   if (setting.state !== "On") throw new MerchantSoleOperatorBasisError();
+}
+
+/** WP-2423 item 8 ⑥: why a single-store listing was refused. */
+export class MerchantSingleStoreListingError extends Error {
+  constructor(readonly code: "NotSingleStore" | "NotPermitted") {
+    super("single-store listing " + code);
+    this.name = "MerchantSingleStoreListingError";
+  }
+}
+
+/**
+ * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU (Owner 2026-10-28 decision 7): may the actor list this
+ * alone, with no review? Only an active Brand member who holds `permissionCode` (the Permission
+ * and Membership owners' reads at `observedAt`), whose current access `allowed` still holds, at a
+ * Brand that has exactly one store (not archived) — this one. The store check holds the Brand's
+ * stores until the transaction ends, so a second store cannot be added before the listing commits.
+ */
+export async function requireMerchantBrandSingleStore(
+  tx: ConsumerTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly actorReference: string;
+    readonly permissionCode: string;
+    readonly observedAt: string;
+    allowed(): Promise<boolean>;
+  },
+): Promise<void> {
+  if (!(await input.allowed())) throw new MerchantSingleStoreListingError("NotPermitted");
+  const holders = await merchantBrandApprovalHolders(tx, input);
+  if (!holders.includes(input.actorReference))
+    throw new MerchantSingleStoreListingError("NotPermitted");
+  if (
+    !(await holdBrandSingleStore(
+      tx as unknown as SoleOperatorSettingTransaction,
+      input.brandReference,
+      input.storeReference,
+    ))
+  )
+    throw new MerchantSingleStoreListingError("NotSingleStore");
+  if (!(await input.allowed())) throw new MerchantSingleStoreListingError("NotPermitted");
 }

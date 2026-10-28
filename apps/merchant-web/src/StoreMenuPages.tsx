@@ -42,7 +42,7 @@ import {
 } from "./store-menu-pages.js";
 
 /** WP-2423 / DEC-MENU-REVISION: Brand menus — edit, review, publish and revise. */
-const copy: Record<MenuErrorCode | "Loading", string> = {
+export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   Loading: t("Loading menus…"),
   PermissionDenied: t("You do not have permission for this menu action at Brand level."),
   NotFound: t("This menu does not exist for the Brand."),
@@ -79,6 +79,9 @@ const copy: Record<MenuErrorCode | "Loading", string> = {
     "Someone else now holds menu approval, so they must approve this version. Refresh to see who.",
   ),
   NeedsReverification: t("Confirm it is you with your authenticator code, then approve again."),
+  NotSingleStore: t(
+    "This Brand has more than one store, so a menu is reviewed by someone else before it is listed.",
+  ),
 };
 const stageText = {
   Editing: t("Draft — being edited"),
@@ -127,7 +130,7 @@ function Failure({ code }: { readonly code: MenuErrorCode | "Loading" }) {
         tone={code === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{code === "PermissionDenied" ? pageAccessDeniedText : copy[code]}</p>
+        <p>{code === "PermissionDenied" ? pageAccessDeniedText : menuErrorText[code]}</p>
       </StatePanel>
     </WorkspacePage>
   );
@@ -507,7 +510,7 @@ function MenuBuilder({
       const problem = error instanceof MenuPageError ? error.problem : null;
       setMessage({
         tone: "error",
-        text: problem === null ? copy[code] : menuReviewProblemText(problem),
+        text: problem === null ? menuErrorText[code] : menuReviewProblemText(problem),
       });
     } finally {
       setBusy(false);

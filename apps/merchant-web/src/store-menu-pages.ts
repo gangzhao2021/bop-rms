@@ -17,6 +17,8 @@ export type MenuErrorCode =
   | "Invalid"
   | "SoleOperatorNotInEffect"
   | "NeedsReverification"
+  /** WP-2423 item 8 ⑥: listing without review needs a Brand with exactly one store. */
+  | "NotSingleStore"
   | "Offline"
   | "Unavailable";
 export class MenuPageError extends Error {
@@ -271,6 +273,12 @@ export type MenuCommand =
       readonly snapshotDigest: string;
       /** WP-2423 Q19: the submitter approves alone as sole operator (Approve only). */
       readonly approvalMode?: "SoleOperator";
+    }
+  | {
+      /** WP-2423 item 8 ⑥: "List it" at a single store (submit, approve as listing, publish). */
+      readonly action: "List";
+      readonly operationReference: string;
+      readonly menuReference: string;
     }
   | {
       readonly action: "Rebuild";
@@ -539,6 +547,7 @@ const codes = new Set<MenuErrorCode>([
   "Invalid",
   "SoleOperatorNotInEffect",
   "NeedsReverification",
+  "NotSingleStore",
 ]);
 export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): MenuClient {
   const post = async (path: string, body: unknown) => {

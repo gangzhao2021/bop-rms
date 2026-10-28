@@ -48,6 +48,11 @@ export function createMenuReviewApprovalSource(options: {
          * callback checks, in this transaction, that sole operator is in effect for them and that
          * their second factor is recent, and throws otherwise. */
         soleOperator?: () => Promise<unknown>;
+        /**
+         * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU: the submitter lists it at a single store (no
+         * review). Throws when the Brand does not have exactly one store or the caller may not.
+         */
+        singleStoreListing?: () => Promise<unknown>;
       },
     ) {
       try {
@@ -110,11 +115,14 @@ export function createMenuReviewApprovalSource(options: {
         // never used for someone else's submission.
         const submitter = head.audit.actor.type === "User" ? head.audit.actor.reference : null;
         if (submitter === null) return fail("CATALOG_INDEPENDENT_APPROVAL_REQUIRED");
+        if (input.soleOperator !== undefined && input.singleStoreListing !== undefined)
+          return fail("CATALOG_INPUT_INVALID");
         if (submitter === actor) {
-          if (input.soleOperator === undefined)
-            return fail("CATALOG_INDEPENDENT_APPROVAL_REQUIRED");
-          await input.soleOperator();
-        } else if (input.soleOperator !== undefined) return fail("CATALOG_INPUT_INVALID");
+          if (input.soleOperator !== undefined) await input.soleOperator();
+          else if (input.singleStoreListing !== undefined) await input.singleStoreListing();
+          else return fail("CATALOG_INDEPENDENT_APPROVAL_REQUIRED");
+        } else if (input.soleOperator !== undefined || input.singleStoreListing !== undefined)
+          return fail("CATALOG_INPUT_INVALID");
         const validation = head.validationEvidence;
         if (
           validation.checkedAt > at ||
@@ -183,7 +191,12 @@ export function createMenuReviewApprovalSource(options: {
       } catch (error) {
         if (error instanceof CatalogError) throw error;
         // The sole-operator check names why it refused (not in effect, verify again).
-        if (error instanceof Error && error.name === "MerchantSoleOperatorGateError") throw error;
+        if (
+          error instanceof Error &&
+          (error.name === "MerchantSoleOperatorGateError" ||
+            error.name === "MerchantSingleStoreListingError")
+        )
+          throw error;
         return fail();
       }
     },

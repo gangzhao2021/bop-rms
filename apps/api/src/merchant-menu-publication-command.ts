@@ -16,6 +16,7 @@ import {
   parseCatalogHash,
   parseCatalogInstant,
   parseCatalogReference,
+  recordMenuSingleStoreListing,
   recordMenuSoleOperatorApproval,
   validateMenuEffectivePeriod,
   type MenuPublicationCommand,
@@ -24,7 +25,10 @@ import {
 import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { ConsumerTransaction } from "@bop/eventing";
-import { requireMerchantBrandSoleOperator } from "./merchant-sole-operator.js";
+import {
+  requireMerchantBrandSingleStore,
+  requireMerchantBrandSoleOperator,
+} from "./merchant-sole-operator.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
@@ -156,8 +160,9 @@ export function createMerchantMenuPublicationCommand(options: {
     sessionCookie: unknown;
     csrf: unknown;
     command: unknown;
-    /** WP-2423 Q19: the submitter approves alone as sole operator (explicitly confirmed). */
-    approvalMode?: "SoleOperator";
+    /** WP-2423 Q19: the submitter approves alone as sole operator (explicitly confirmed).
+     * WP-2423 item 8 ⑥: SingleStoreListing — the submitter lists it at a single store. */
+    approvalMode?: "SoleOperator" | "SingleStoreListing";
   }) => {
     const session = await options.authentication.authorize({
       sessionCookie: request.sessionCookie,
@@ -166,11 +171,13 @@ export function createMerchantMenuPublicationCommand(options: {
     const review = decodeReview(request.command);
     const publication = review === null ? decode(request.command) : null;
     const sole = request.approvalMode === "SoleOperator";
+    const single = request.approvalMode === "SingleStoreListing";
     if (
-      (request.approvalMode !== undefined && !sole) ||
-      (sole && publication?.action !== "Approve")
+      (request.approvalMode !== undefined && !sole && !single) ||
+      ((sole || single) && publication?.action !== "Approve")
     )
       return fail("CATALOG_INPUT_INVALID");
+    let singleStoreListed = false;
     let soleOperatorMfaAt: string | null = null;
     return options.merchant.transactions.run(async (identityTransaction) => {
       const transaction: ProductLifecycleTransaction = {
@@ -357,6 +364,28 @@ export function createMerchantMenuPublicationCommand(options: {
               operationReference: command.operationReference,
               expectedVersion: command.expectedVersion,
               observedAt: command.requestedAt,
+              ...(single
+                ? {
+                    // WP-2423 item 8 ⑥: the Brand has exactly one store (held to commit), and the
+                    // caller still holds menu approval.
+                    singleStoreListing: async () => {
+                      await requireMerchantBrandSingleStore(tx as unknown as ConsumerTransaction, {
+                        brandReference: String(brand),
+                        storeReference: String(scope.selectedStoreReference),
+                        actorReference: String(scope.actorReference),
+                        permissionCode: "catalog.menu.approve",
+                        observedAt: String(command.requestedAt),
+                        allowed: async () =>
+                          (await permission()) !== null && (await publishingApprovalAllowed()),
+                      });
+                      singleStoreListed = true;
+                      await tx.query(
+                        "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+                        [brand],
+                      );
+                    },
+                  }
+                : {}),
               ...(sole
                 ? {
                     soleOperator: async () => {
@@ -468,12 +497,41 @@ export function createMerchantMenuPublicationCommand(options: {
                   ...(sole && input.action === "Approve"
                     ? { afterSummary: { approvalMode: "SoleOperator" } }
                     : {}),
+                  ...(single && input.action === "Approve"
+                    ? { afterSummary: { approvalMode: "SingleStoreListing" } }
+                    : {}),
                 },
               };
             },
           },
         });
         const result = await service.execute(command);
+        if (single && options.reviewApproval) {
+          const listed = await transaction.query<{ n: number }>(
+            "SELECT count(*)::int n FROM rms_catalog.menu_single_store_listing WHERE brand_id=$1 AND operation_id=$2",
+            [brand, command.operationReference],
+          );
+          if (!singleStoreListed && listed.rows[0]?.n !== 1)
+            return fail("CATALOG_INDEPENDENT_APPROVAL_REQUIRED");
+          if (singleStoreListed)
+            await recordMenuSingleStoreListing(transaction, {
+              brandReference: String(brand),
+              storeReference: String(scope.selectedStoreReference),
+              approvalEvidenceReference: options.reviewApproval.reference(
+                "Approval",
+                command.operationReference,
+              ),
+              operationReference: command.operationReference,
+              menuReference: command.menuReference,
+              menuVersionReference: command.menuVersionReference,
+              lifecycleReference: String(result.record.lifecycle.lifecycleId),
+              actorReference: String(scope.actorReference),
+              listedAt: String(command.requestedAt),
+              auditReference: String(
+                parseCatalogReference(options.reference("Audit", command.operationReference)),
+              ),
+            });
+        }
         if (sole && options.reviewApproval) {
           // A replayed approval keeps its original mark; a fresh one is marked here.
           const approvalEvidence = options.reviewApproval.reference(

@@ -381,3 +381,22 @@ export function createPostgresSoleOperatorSettingStore(options: {
     });
   };
 }
+
+/**
+ * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU: does the Brand have exactly one store that is not
+ * archived, and is it this store? Holds the Brand's stores until the asking transaction ends (adding a store or bringing
+ * one back waits), so a single-store listing never commits beside a second store being added.
+ */
+export async function holdBrandSingleStore(
+  tx: SoleOperatorSettingTransaction,
+  brandReference: string,
+  storeReference: string,
+): Promise<boolean> {
+  const brand = parseSoleOperatorReference(brandReference);
+  const store = parseSoleOperatorReference(storeReference);
+  const found = resultRows(
+    await tx.query("SELECT bop_tenant.brand_has_single_store($1,$2) AS single", [brand, store]),
+    1,
+  )[0];
+  return found?.single === true;
+}

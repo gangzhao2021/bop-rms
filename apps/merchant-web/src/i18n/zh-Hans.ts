@@ -6119,4 +6119,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Open the menu to list it": "打开菜单去上架",
   "No dishes match.": "没有符合的菜。",
   "Not on the menu": "不在菜单上",
+  "Listed. Guests see the menu as it is now.": "已上架，客人看到的就是现在的菜单。",
+  "This menu has not been listed yet. Guests do not see it.": "这份菜单还没上架，客人看不到。",
+  "There are saved changes not listed yet. Guests still see the listed menu.":
+    "有已保存但还没上架的改动；客人看到的仍是已上架的菜单。",
+  "Listing…": "正在上架…",
+  "List it": "上架",
+  "A manager or the owner lists the menu.": "由经理或老板上架菜单。",
+  "Open the menu": "打开菜单",
+  "This Brand has more than one store, so a menu is reviewed by someone else before it is listed.":
+    "这个品牌有不止一家门店，菜单要由另一个人审核后才能上架。",
 });

@@ -105,6 +105,7 @@ const moduleManifestInput =
       tables: [
         "allergen_registry_proposal",
         "menu_sole_operator_approval",
+        "menu_single_store_listing",
         "brand_catalog_source",
         "brand_catalog_source_operation",
         "option_set_authoring_identity",
