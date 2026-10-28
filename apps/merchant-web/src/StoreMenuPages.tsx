@@ -9,6 +9,7 @@ import { Link, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
 import { moveTo, useDragReorder } from "./reorder.js";
 import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
+import { OneStoreMenuPage } from "./OneStoreMenuPage.js";
 import {
   MenuPageError,
   channelText,
@@ -41,7 +42,7 @@ import {
 } from "./store-menu-pages.js";
 
 /** WP-2423 / DEC-MENU-REVISION: Brand menus — edit, review, publish and revise. */
-const copy: Record<MenuErrorCode | "Loading", string> = {
+export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   Loading: t("Loading menus…"),
   PermissionDenied: t("You do not have permission for this menu action at Brand level."),
   NotFound: t("This menu does not exist for the Brand."),
@@ -78,6 +79,9 @@ const copy: Record<MenuErrorCode | "Loading", string> = {
     "Someone else now holds menu approval, so they must approve this version. Refresh to see who.",
   ),
   NeedsReverification: t("Confirm it is you with your authenticator code, then approve again."),
+  NotSingleStore: t(
+    "This Brand has more than one store, so a menu is reviewed by someone else before it is listed.",
+  ),
 };
 const stageText = {
   Editing: t("Draft — being edited"),
@@ -126,7 +130,7 @@ function Failure({ code }: { readonly code: MenuErrorCode | "Loading" }) {
         tone={code === "Loading" ? "neutral" : "error"}
         status
       >
-        <p>{code === "PermissionDenied" ? pageAccessDeniedText : copy[code]}</p>
+        <p>{code === "PermissionDenied" ? pageAccessDeniedText : menuErrorText[code]}</p>
       </StatePanel>
     </WorkspacePage>
   );
@@ -134,12 +138,27 @@ function Failure({ code }: { readonly code: MenuErrorCode | "Loading" }) {
 
 export function StoreMenuListPage({
   client = unavailableMenuClient,
+  availability,
 }: {
   readonly client?: MenuClient;
+  /** WP-2423 item 8 ⑥: with it, a single store's one menu opens as the one-page menu. */
+  readonly availability?: AvailabilityClient;
 }) {
   const { state } = useMenuView(client, null, parseMenuListView);
+  const [multiStore, setMultiStore] = useState(false);
+  const showList = useCallback(() => setMultiStore(true), []);
   if (state.kind !== "Found") return <Failure code={state.kind} />;
   const view: MenuListView = state.view;
+  const only = view.menus.length === 1 ? view.menus[0] : undefined;
+  if (only !== undefined && availability !== undefined && !multiStore)
+    return (
+      <OneStoreMenuPage
+        menuReference={only.menuReference}
+        client={client}
+        availability={availability}
+        onMultiStore={showList}
+      />
+    );
   return (
     <WorkspacePage
       title={t("Menus")}
@@ -491,7 +510,7 @@ function MenuBuilder({
       const problem = error instanceof MenuPageError ? error.problem : null;
       setMessage({
         tone: "error",
-        text: problem === null ? copy[code] : menuReviewProblemText(problem),
+        text: problem === null ? menuErrorText[code] : menuReviewProblemText(problem),
       });
     } finally {
       setBusy(false);

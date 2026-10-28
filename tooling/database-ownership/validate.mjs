@@ -1120,6 +1120,7 @@ async function scanUnsupported(root, module, diagnostics) {
           module.packageName === "@rms/catalog" &&
           module.manifest.ownedDatabase?.schema === "rms_catalog" &&
           module.manifest.ownedDatabase?.tables?.includes("menu_sole_operator_approval") &&
+          module.manifest.ownedDatabase?.tables?.includes("menu_single_store_listing") &&
           moduleRelative === "src/infrastructure/persistence/menu-sole-operator-store.ts";
         const acceptedBrowserSessionStoreAsset =
           module.packageName === "@bop/identity" &&

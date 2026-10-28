@@ -1,5 +1,6 @@
 import {
   merchantBrandSoleOperatorGate,
+  MerchantSingleStoreListingError,
   MerchantSoleOperatorGateError,
 } from "./merchant-sole-operator.js";
 import { createHash } from "node:crypto";
@@ -77,7 +78,9 @@ export class MerchantMenuError extends Error {
       /** WP-2423 Q19: the submitter asked to approve alone, but sole operator is not in effect. */
       | "SoleOperatorNotInEffect"
       /** WP-2423 Q19: approving alone needs a second-factor check in the last 15 minutes. */
-      | "NeedsReverification",
+      | "NeedsReverification"
+      /** WP-2423 item 8 ⑥: "List it" without review needs a Brand with exactly one store. */
+      | "NotSingleStore",
     /** WP-2423 (v15 2026-10-22): for ReviewBlocked, what the review found missing, named. */
     readonly problem: MenuReviewProblem | null = null,
   ) {
@@ -154,8 +157,18 @@ export type MenuCommandBody =
       readonly menuVersionReference: string;
       readonly expectedVersion: number;
       readonly snapshotDigest: string;
-      /** WP-2423 Q19: the submitter approves alone as sole operator (Approve only). */
-      readonly approvalMode?: "SoleOperator";
+      /** WP-2423 Q19: the submitter approves alone as sole operator (Approve only).
+       * WP-2423 item 8 ⑥: SingleStoreListing — the submitter lists it at a single store. */
+      readonly approvalMode?: "SoleOperator" | "SingleStoreListing";
+    }
+  | {
+      /**
+       * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU: "List it" — submit, approve as a single-store
+       * listing and publish, from wherever the menu is now (a retry goes on from there).
+       */
+      readonly action: "List";
+      readonly operationReference: string;
+      readonly menuReference: string;
     }
   | {
       readonly action: "Rebuild";
@@ -234,6 +247,12 @@ export function parseMenuCommandBody(value: unknown): MenuCommandBody {
       menuReference: ref(r.menuReference),
       expectedAggregateVersion: version(r.expectedAggregateVersion),
     };
+  if (r.action === "List" && keys === "action,menuReference,operationReference")
+    return {
+      action: "List",
+      operationReference: ref(r.operationReference),
+      menuReference: ref(r.menuReference),
+    };
   if (r.action === "Submit" && keys === "action,menuReference,operationReference")
     return {
       action: "Submit",
@@ -255,7 +274,7 @@ export function parseMenuCommandBody(value: unknown): MenuCommandBody {
     };
   if (
     r.action === "Approve" &&
-    r.approvalMode === "SoleOperator" &&
+    (r.approvalMode === "SoleOperator" || r.approvalMode === "SingleStoreListing") &&
     keys ===
       "action,approvalMode,expectedVersion,menuReference,menuVersionReference,operationReference,snapshotDigest"
   )
@@ -266,7 +285,7 @@ export function parseMenuCommandBody(value: unknown): MenuCommandBody {
       menuVersionReference: ref(r.menuVersionReference),
       expectedVersion: version(r.expectedVersion),
       snapshotDigest: digestOf(r.snapshotDigest),
-      approvalMode: "SoleOperator",
+      approvalMode: r.approvalMode,
     };
   if (
     r.action === "Rebuild" &&
@@ -438,6 +457,29 @@ export function menuCustomerView(input: {
   };
 }
 
+/**
+ * WP-2423 item 8 ⑥: where "List it" goes on from — the menu's current version is already the
+ * latest release (Listed), is being edited (Submit), is in review (Approve), is approved (Publish),
+ * or is somewhere listing cannot go on from (Stuck: e.g. archived without a release of it).
+ */
+export function nextMenuListingStep(summary: {
+  readonly currentVersionReference: string;
+  readonly publication: { readonly state: string } | null;
+  readonly latestRelease: { readonly menuVersionReference: string } | null;
+}): "Listed" | "Submit" | "Approve" | "Publish" | "Stuck" {
+  const state = summary.publication?.state ?? null;
+  if (
+    (state === null || state === "Published" || state === "Archived") &&
+    summary.latestRelease !== null &&
+    summary.latestRelease.menuVersionReference === summary.currentVersionReference
+  )
+    return "Listed";
+  if (state === null) return "Submit";
+  if (state === "InReview") return "Approve";
+  if (state === "Approved") return "Publish";
+  return "Stuck";
+}
+
 export function createMerchantMenus(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -524,6 +566,8 @@ export function createMerchantMenus(options: {
         skuReference: sku.skuReference,
         skuCode: sku.skuCode,
         productName: name(sku.productLocalizedNames, ""),
+        // WP-2423 item 8 ⑥: the dish's Chinese name ("" when none), for the one-page menu.
+        productNameZh: chineseOf(sku.productLocalizedNames),
         sizeName: name(sku.localizedNames, sku.skuCode),
         active: sku.active,
         priceMinor: prices.get(sku.skuReference) ?? null,
@@ -782,9 +826,82 @@ export function createMerchantMenus(options: {
       ),
     );
 
-  const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
+  /**
+   * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU: "List it" at a single store. Each step is the
+   * ordinary command (its own transaction and checks), with an operation reference derived from
+   * the listing's, so a retry after a lost answer goes on from the step the menu is at and never
+   * repeats one. Needs submit, approve and publish permission; the approval is the submitter's own
+   * as a single-store listing (refused unless the Brand has exactly one store).
+   */
+  const list = async (
+    input: { sessionCookie: unknown; csrf: unknown },
+    body: { readonly operationReference: string; readonly menuReference: string },
+    sessionReference: string,
+  ) => {
+    const step = (action: string) => derivedReference(body.operationReference, "list:" + action);
+    let changed = false;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const summary = await retryTransactionConflict(() =>
+        options.persistence.transactions.run((tx) =>
+          withRememberedBrandAuthorization(tx, async () => {
+            const s = await scopeFor(tx, input.sessionCookie, sessionReference);
+            if (!s.permissions.maySubmit || !s.permissions.mayApprove || !s.permissions.mayPublish)
+              fail("PermissionDenied");
+            return (await listBrandMenus(ptx(tx) as never, s.owner)).find(
+              (candidate) => candidate.menuReference === body.menuReference,
+            );
+          }),
+        ),
+      );
+      if (summary === undefined) return fail("NotFound");
+      const publication = summary.publication;
+      const next = nextMenuListingStep(summary);
+      if (next === "Listed")
+        return { status: changed ? "Listed" : "AlreadyListed", menuReference: body.menuReference };
+      const facts = {
+        menuReference: body.menuReference,
+        menuVersionReference: String(summary.currentVersionReference),
+        expectedVersion: publication?.lifecycleVersion ?? 0,
+        snapshotDigest: String(publication?.snapshotDigest ?? ""),
+      };
+      if (next === "Submit")
+        await command({
+          ...input,
+          body: {
+            action: "Submit",
+            operationReference: step("submit"),
+            menuReference: body.menuReference,
+          },
+        });
+      else if (next === "Approve")
+        await command({
+          ...input,
+          body: {
+            action: "Approve",
+            operationReference: step("approve"),
+            ...facts,
+            approvalMode: "SingleStoreListing",
+          },
+        });
+      else if (next === "Publish")
+        await command({
+          ...input,
+          body: { action: "Publish", operationReference: step("publish"), ...facts },
+        });
+      else return fail("Lifecycle");
+      changed = true;
+    }
+    return fail("Lifecycle");
+  };
+
+  const command = async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    body: unknown;
+  }): Promise<unknown> => {
     const body = parseMenuCommandBody(input.body);
     const current = await session(input);
+    if (body.action === "List") return list(input, body, current.sessionReference);
     try {
       if (body.action === "Submit" || body.action === "Approve" || body.action === "Publish") {
         // Facts the publication command needs that the client does not supply.
@@ -869,8 +986,8 @@ export function createMerchantMenus(options: {
           sessionCookie: input.sessionCookie,
           csrf: input.csrf,
           command: commandBody,
-          ...(body.action === "Approve" && body.approvalMode === "SoleOperator"
-            ? { approvalMode: "SoleOperator" as const }
+          ...(body.action === "Approve" && body.approvalMode !== undefined
+            ? { approvalMode: body.approvalMode }
             : {}),
         });
         if (body.action === "Publish")
@@ -1087,6 +1204,8 @@ export function createMerchantMenus(options: {
             () => null,
           ),
         );
+      if (error instanceof MerchantSingleStoreListingError)
+        return fail(error.code === "NotSingleStore" ? "NotSingleStore" : "PermissionDenied");
       if (error instanceof MerchantSoleOperatorGateError)
         return fail(
           error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification",

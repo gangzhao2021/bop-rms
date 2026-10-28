@@ -376,6 +376,7 @@ export function installMerchantCommerceRoutes(
     Invalid: 400,
     SoleOperatorNotInEffect: 409,
     NeedsReverification: 409,
+    NotSingleStore: 409,
   } as const;
   const menuFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantMenuError)) {

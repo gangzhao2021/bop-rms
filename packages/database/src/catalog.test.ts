@@ -749,6 +749,8 @@ describe("migration catalog", () => {
       "2000_105_create_dining_qr_join",
       "2000_106_create_order_round_staff_hold",
       "2000_107_create_dining_round_hold_setting",
+      "2000_108_create_brand_single_store_guard",
+      "2000_109_create_menu_single_store_listing",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

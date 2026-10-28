@@ -204,3 +204,148 @@
 .availability-menu--more .availability-menu__items button {
   color: var(--bop-color-danger);
 }
+
+/* WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU: a single store's menu on one page. White, row
+   hairlines, accent words for actions; the one primary action is "Save order" when dishes moved. */
+.one-menu .one-menu__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px 24px;
+  margin-bottom: 12px;
+}
+.one-menu .one-menu__search {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 260px;
+  font-size: 14px;
+  color: var(--bop-color-text-muted);
+}
+.one-menu .one-menu__search input {
+  min-height: 44px;
+  font-size: 16px;
+}
+.one-menu .one-menu__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.one-menu .one-menu__filters button,
+.one-menu .one-menu__actions button,
+.one-menu .one-menu__pending-actions button {
+  min-height: 44px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.one-menu .one-menu__filters button {
+  color: var(--bop-color-text-default);
+  font-weight: 400;
+}
+.one-menu .one-menu__filters button[aria-pressed="true"] {
+  border-bottom-color: var(--bop-color-accent);
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.one-menu button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+.one-menu .one-menu__pending-actions .one-menu__primary {
+  padding: 0 16px;
+  border-radius: 8px;
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+}
+.one-menu .one-menu__pending {
+  margin: 8px 0 16px;
+  padding: 8px 0 8px 12px;
+  border-left: 3px solid var(--bop-color-accent);
+}
+.one-menu .one-menu__pending p,
+.one-menu .one-menu__note,
+.one-menu .one-menu__message {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+.one-menu .one-menu__note {
+  color: var(--bop-color-text-muted);
+}
+.one-menu .one-menu__pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.one-menu .one-menu__sections {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.one-menu .one-menu__section {
+  margin: 24px 0 0;
+}
+.one-menu .one-menu__section h2 {
+  display: flex;
+  align-items: center;
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+.one-menu .one-menu__dishes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.one-menu .one-menu__dish {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "handle names price state" "handle actions actions actions";
+  align-items: center;
+  gap: 2px 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.one-menu .one-menu__dish > .drag-handle {
+  grid-area: handle;
+}
+.one-menu .one-menu__names {
+  grid-area: names;
+  display: grid;
+  min-width: 0;
+}
+.one-menu .one-menu__name {
+  font-size: 16px;
+}
+.one-menu .one-menu__name-zh {
+  color: var(--bop-color-text-muted);
+  font-size: 15px;
+}
+.one-menu .one-menu__price {
+  grid-area: price;
+  font-variant-numeric: tabular-nums;
+}
+.one-menu .one-menu__state {
+  grid-area: state;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.one-menu .one-menu__actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+}
+.one-menu [data-drop-target="true"] {
+  box-shadow: inset 0 2px 0 var(--bop-color-accent);
+}
+.one-menu .one-menu__section h2 .one-menu__name-zh {
+  margin-left: 8px;
+  font-size: 16px;
+  font-weight: 400;
+}
