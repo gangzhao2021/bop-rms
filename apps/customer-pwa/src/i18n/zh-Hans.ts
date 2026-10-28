@@ -1207,4 +1207,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Still to pay": "还要付",
   "The table is paying the bill in {count} parts; {paid} paid so far. Each part has its own tip, and cash is rounded to the nearest 5 cents.":
     "这桌分成 {count} 份付款，已付 {paid} 份。每份各自加小费，现金按 5 分取整。",
+  "Staff have paused joining by scan at this table. Ask staff, or the person who joined first, for the table’s code.":
+    "店员暂停了这桌的扫码加入。请向店员或先入桌的人要桌码。",
+  "This table isn’t open yet. Please ask staff to seat you.": "这张桌还没开台，请找店员。",
+  "This table is paying the bill, so no one new can join. Please ask staff.":
+    "这张桌正在结账，不能再加入。请找店员。",
+  "Many phones joined this table just now. Please ask staff for help.":
+    "这张桌刚加入了很多手机，请找店员帮忙。",
+  "Tap to join the people at this table. You don’t need an account.":
+    "点一下就能和同桌的人一起点餐，不用注册账号。",
+  "I have a table code": "我有桌码",
+  "Ask staff, or the person who joined your table first, for the table’s code.":
+    "请向店员或先入桌的人要桌码。",
+  "Join with this code": "用桌码加入",
 });

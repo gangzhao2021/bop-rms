@@ -1165,3 +1165,80 @@
   margin: 0;
   font-weight: 600;
 }
+
+/* WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN: the phones at the table, pause/resume joining by scan,
+   remove a phone. White, row hairlines, accent words for actions (no boxes). */
+.tables-v3 .table-phones {
+  margin: 16px 0;
+}
+.tables-v3 .table-phones__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.tables-v3 .table-phones__head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.tables-v3 .table-phones__mode {
+  margin: 2px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.tables-v3 .table-phones__new {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin-bottom: 12px;
+  padding: 8px 0 8px 12px;
+  border-left: 3px solid var(--bop-color-accent);
+}
+.tables-v3 .table-phones__new p {
+  margin: 0;
+  font-weight: 600;
+}
+.tables-v3 .table-phones__actions,
+.tables-v3 .table-phones__confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+.tables-v3 .table-phones__list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.tables-v3 .table-phones__list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider, #e5e5e5);
+  font-size: 15px;
+}
+.tables-v3 .table-phones button {
+  min-height: 44px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tables-v3 .table-phones button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+.tables-v3 .table-phones .table-phones__danger {
+  color: var(--bop-color-danger);
+}

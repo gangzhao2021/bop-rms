@@ -198,3 +198,8 @@ CREATE POLICY dining_participant_removal_scope ON rms_dining.dining_participant_
 REVOKE ALL ON TABLE rms_dining.dining_qr_join_issue FROM PUBLIC;
 REVOKE ALL ON TABLE rms_dining.dining_qr_join_control FROM PUBLIC;
 REVOKE ALL ON TABLE rms_dining.dining_participant_removal FROM PUBLIC;
+REVOKE ALL ON FUNCTION rms_dining.validate_qr_join_issue() FROM PUBLIC;
+REVOKE ALL ON FUNCTION rms_dining.validate_qr_join_control() FROM PUBLIC;
+REVOKE ALL ON FUNCTION rms_dining.validate_participant_removal() FROM PUBLIC;
+REVOKE ALL ON FUNCTION rms_dining.check_participant_removal_left() FROM PUBLIC;
+REVOKE ALL ON FUNCTION rms_dining.reject_qr_join_mutation() FROM PUBLIC;

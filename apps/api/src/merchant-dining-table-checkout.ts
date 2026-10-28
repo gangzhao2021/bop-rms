@@ -7,6 +7,7 @@ import {
   createPostgresDiningSessionReadStore,
   listDiningSessionTableLabels,
   parseDiningReference,
+  loadDiningSessionPhones,
 } from "@rms/dining";
 import {
   createPostgresPayLaterItemCancellationStore,
@@ -315,15 +316,21 @@ export async function readDiningTableBill(
         if (!unpaidBatches.has(slice.orderBatchReference))
           paidBatches.add(slice.orderBatchReference);
   }
-  // Which phone sent each round (in the order they first ordered); staff rounds have none.
-  const phoneOf = new Map<string, number>();
+  // Which phone sent each round: phones are numbered in the order they joined the table
+  // (WP-2423 item 8 ⑤ decision 3, the same numbers staff see in the table's phone list); staff
+  // rounds have none.
+  const phoneOf = new Map(
+    (await loadDiningSessionPhones(tx as never, scope, session)).map((phone) => [
+      String(phone.participantReference),
+      phone.phoneNumber,
+    ]),
+  );
   const orderedByOf = (batch: string): number | null => {
     const participant = prices.find(
       (item) => String(item.orderBatchReference) === batch,
     )?.addedByParticipantReference;
     if (participant === null || participant === undefined) return null;
-    if (!phoneOf.has(participant)) phoneOf.set(participant, phoneOf.size + 1);
-    return phoneOf.get(participant) as number;
+    return phoneOf.get(String(participant)) ?? null;
   };
   let owedSubtotal = 0n,
     owedTax = 0n,

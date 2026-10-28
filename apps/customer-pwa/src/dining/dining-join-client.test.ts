@@ -22,6 +22,33 @@ afterEach(() => {
   vi.useRealTimers();
   setCustomerCsrfCredential(null);
 });
+describe("WP-2423 item 8 ⑤ joining the scanned table by QR", () => {
+  it("posts an empty body to the QR route", async () => {
+    const f = setup();
+    await expect(f.client.join({ ...input, joinCredential: null })).resolves.toEqual(prepared);
+    expect(f.fetch).toHaveBeenCalledWith(
+      "/bff/customer/dining/qr-join",
+      expect.objectContaining({ body: "{}" }),
+    );
+  });
+  it.each([
+    ["dining_join_table_not_open", "customer.dining.join_table_not_open", 409, "table-not-open"],
+    [
+      "dining_join_table_checking_out",
+      "customer.dining.join_table_checking_out",
+      409,
+      "table-checking-out",
+    ],
+    ["dining_join_qr_paused", "customer.dining.join_qr_paused", 409, "qr-paused"],
+    ["dining_join_table_busy", "customer.dining.join_table_busy", 429, "table-busy"],
+  ])("maps %s to a definitive refusal", async (code, messageKey, status, mapped) => {
+    const f = setup(() => response({ error: { code, messageKey } }, status));
+    await expect(f.client.join({ ...input, joinCredential: null })).rejects.toMatchObject({
+      code: mapped,
+    });
+  });
+});
+
 describe("browser Dining Join transport", () => {
   it("uses exact credential transport and leaves active CSRF in caller control", async () => {
     setCustomerCsrfCredential(old);

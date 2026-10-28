@@ -1,9 +1,17 @@
 export type DiningJoinClientErrorCode =
   "request-invalid" | "offline" | "unavailable" | "outcome-unknown" | DiningJoinRefusalCode;
 /** Definitive server refusals: nothing was joined, and the same code cannot succeed later. */
-export type DiningJoinRefusalCode = "code-used" | "code-not-accepted" | "too-many-attempts";
+export type DiningJoinRefusalCode =
+  | "code-used"
+  | "code-not-accepted"
+  | "too-many-attempts"
+  // WP-2423 item 8 ⑤: joining the scanned table by QR.
+  | "table-not-open"
+  | "table-checking-out"
+  | "qr-paused"
+  | "table-busy";
 export function isDiningJoinRefusal(code: unknown): code is DiningJoinRefusalCode {
-  return code === "code-used" || code === "code-not-accepted" || code === "too-many-attempts";
+  return Object.values(refusals).some((refusal) => refusal.code === code);
 }
 const refusals: Readonly<
   Record<string, { status: number; messageKey: string; code: DiningJoinRefusalCode }>
@@ -23,6 +31,26 @@ const refusals: Readonly<
     messageKey: "customer.dining.join_rate_limited",
     code: "too-many-attempts",
   },
+  dining_join_table_not_open: {
+    status: 409,
+    messageKey: "customer.dining.join_table_not_open",
+    code: "table-not-open",
+  },
+  dining_join_table_checking_out: {
+    status: 409,
+    messageKey: "customer.dining.join_table_checking_out",
+    code: "table-checking-out",
+  },
+  dining_join_qr_paused: {
+    status: 409,
+    messageKey: "customer.dining.join_qr_paused",
+    code: "qr-paused",
+  },
+  dining_join_table_busy: {
+    status: 429,
+    messageKey: "customer.dining.join_table_busy",
+    code: "table-busy",
+  },
 };
 export class DiningJoinClientError extends Error {
   constructor(readonly code: DiningJoinClientErrorCode) {
@@ -41,6 +69,8 @@ export interface DiningJoinClient {
 const referencePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const credentialPattern = /^[A-Za-z0-9_-]{43}$/u;
 const route = "/bff/customer/dining/join";
+/** WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN: join the scanned, open table without a code. */
+const qrRoute = "/bff/customer/dining/qr-join";
 function invalid(): never {
   throw new DiningJoinClientError("request-invalid");
 }
@@ -73,7 +103,8 @@ function reference(value: unknown): string {
   if (typeof value !== "string" || !referencePattern.test(value)) return invalid();
   return value;
 }
-function joinCredential(value: unknown): string {
+function joinCredential(value: unknown): string | null {
+  if (value === null) return null;
   // A canonical 16-byte base64url encoding has four zero padding bits in its last character.
   if (
     typeof value !== "string" ||
@@ -101,6 +132,7 @@ export function createBrowserDiningJoinClient(
     csrfToken: string,
     body: object,
     parse: (value: unknown) => T,
+    target: string,
   ): Promise<T> {
     try {
       if (!online()) throw new DiningJoinClientError("offline");
@@ -118,7 +150,7 @@ export function createBrowserDiningJoinClient(
       }, timeoutMs);
     });
     const operation = async () => {
-      const response = await fetcher(route, {
+      const response = await fetcher(target, {
         method: "POST",
         mode: "cors",
         credentials: "same-origin",
@@ -207,7 +239,8 @@ export function createBrowserDiningJoinClient(
   }
   return Object.freeze({
     async join(value: unknown) {
-      let parsed: { operationReference: string; csrfToken: string; joinCredential: string };
+      // `joinCredential: null` joins the scanned table by its QR code (no code).
+      let parsed: { operationReference: string; csrfToken: string; joinCredential: string | null };
       try {
         const raw = exact(value, ["operationReference", "csrfToken", "joinCredential"]);
         parsed = {
@@ -221,7 +254,7 @@ export function createBrowserDiningJoinClient(
       return send(
         parsed.operationReference,
         parsed.csrfToken,
-        { joinCredential: parsed.joinCredential },
+        parsed.joinCredential === null ? {} : { joinCredential: parsed.joinCredential },
         (value) => {
           const raw = exact(value, ["status", "operationReference", "admissionReference"]);
           const admissionReference = reference(raw.admissionReference);
@@ -233,6 +266,7 @@ export function createBrowserDiningJoinClient(
             admissionReference,
           } as const);
         },
+        parsed.joinCredential === null ? qrRoute : route,
       );
     },
   });

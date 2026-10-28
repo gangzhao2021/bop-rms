@@ -25,6 +25,8 @@ test("@demo Dining admission supports keyboard validation and explicit recovery"
   await expect(
     page.getByRole("heading", { name: "Dining UI Training Store", exact: true }),
   ).toBeVisible();
+  // WP-2423 item 8 ⑤: joining by scan is one tap; a code is entered on request.
+  await page.getByRole("button", { name: "I have a table code" }).click();
   const field = page.getByLabel("Join code or invitation", { exact: true });
   await expect(field).toHaveAttribute("type", "password");
   await field.fill("12");
@@ -33,7 +35,7 @@ test("@demo Dining admission supports keyboard validation and explicit recovery"
   await expect(field).toHaveValue("");
   await expect(field).toBeFocused();
   await field.fill("123");
-  await page.getByRole("button", { name: "Join table", exact: true }).click();
+  await page.getByRole("button", { name: "Join with this code", exact: true }).click();
   await expect(field).toHaveValue("");
   await expect(field).toBeFocused();
   await field.fill("123456");
@@ -75,17 +77,23 @@ test("@demo Dining admission pauses offline and never resumes on reconnect", asy
 }) => {
   await page.setViewportSize({ width: 320, height: 800 });
   await page.goto("/?scenario=dining-admission");
+  // WP-2423 item 8 ⑤: joining by scan is one tap; a code is entered on request.
+  await page.getByRole("button", { name: "I have a table code" }).click();
   const field = page.getByLabel("Join code or invitation", { exact: true });
   await field.fill("123456");
   await context.setOffline(true);
-  await expect(page.getByRole("button", { name: "Join table", exact: true })).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Join with this code", exact: true }),
+  ).toBeDisabled();
   await expect(field).toHaveValue("");
   await expect(page.getByText("Joining and recovery are paused", { exact: false })).toBeVisible();
   await context.setOffline(false);
-  await expect(page.getByRole("button", { name: "Join table", exact: true })).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "Join with this code", exact: true }),
+  ).toBeEnabled();
   await expect(page.getByRole("button", { name: "Recover this attempt" })).toHaveCount(0);
   await field.fill("123456");
-  await page.getByRole("button", { name: "Join table", exact: true }).click();
+  await page.getByRole("button", { name: "Join with this code", exact: true }).click();
   const recover = page.getByRole("button", { name: "Recover this attempt" });
   await expect(recover).toBeVisible();
   await context.setOffline(true);
@@ -97,6 +105,23 @@ test("@demo Dining admission pauses offline and never resumes on reconnect", asy
     true,
   );
   await recover.click();
+  await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
+});
+
+test("@demo Dining admission joins the scanned table with one tap", async ({ page }, info) => {
+  await page.goto("/?scenario=dining-admission");
+  await expect(page.getByText("You don’t need an account.", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("Join code or invitation", { exact: true })).toHaveCount(0);
+  for (const width of [390, 1024, 1440]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: info.outputPath(`dining-qr-join-${width}.png`), fullPage: true });
+  }
+  await page.getByRole("button", { name: "Join this table", exact: true }).click();
+  // The training store never confirms the first answer: the guest recovers it.
+  await page.getByRole("button", { name: "Recover this attempt" }).click();
   await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
 });
 

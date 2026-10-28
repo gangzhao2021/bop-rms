@@ -13,14 +13,32 @@ describe("contextual Dining admission screen", () => {
     expect(html).toContain("Table joining is unavailable");
     expect(html).not.toContain("<input");
   });
-  it("provides protected unpopulated input with explicit help and accessible labels", () => {
+  it("offers one tap to join the scanned table, and the code entry only on request", () => {
     const html = renderToStaticMarkup(<DiningAdmissionView state="Ready" online />);
+    expect(html).toContain("Join this table</button>");
+    expect(html).toContain("I have a table code");
+    expect(html).not.toContain("<input");
+  });
+  it.each([
+    ["QrPaused", "paused joining by scan", true],
+    ["NotOpen", "isn’t open yet", false],
+    ["CheckingOut", "paying the bill", false],
+    ["TableBusy", "Many phones joined", false],
+  ] as const)("explains a %s refusal in plain words", (state, text, code) => {
+    const html = renderToStaticMarkup(<DiningAdmissionView state={state} online />);
+    expect(html).toContain(text);
+    expect(html.includes("<input")).toBe(code);
+    // Paused: only the code entry; otherwise the guest can tap again once staff have helped.
+    expect(html.includes("Join this table</button>")).toBe(!code);
+  });
+  it("provides protected unpopulated input with explicit help and accessible labels", () => {
+    const html = renderToStaticMarkup(<DiningAdmissionView state="Ready" online codeMode />);
     expect(html).toContain('type="password"');
     expect(html).toContain('autoComplete="off"');
     expect(html).toContain('for="dining-join-credential"');
     expect(html).toContain('aria-describedby="dining-admission-help"');
     expect(html).not.toMatch(/value=|name=/u);
-    expect(html).toContain("Scanning the table QR code alone does not join the table");
+    expect(html).toContain("for the table’s code");
   });
   it.each([
     ["Invalid", "Enter the six-digit code"],

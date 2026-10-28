@@ -32,6 +32,7 @@ export function TableOrderRounds({
   onBusy,
   onChanged,
   fetcher,
+  roundPhones,
 }: {
   readonly orderReference: string;
   readonly csrf: string;
@@ -41,6 +42,8 @@ export function TableOrderRounds({
   readonly onBusy?: ((busy: boolean) => void) | undefined;
   readonly onChanged?: (() => void) | undefined;
   readonly fetcher?: typeof fetch | undefined;
+  /** WP-2423 item 8 ⑤: which phone sent each round (by round reference). */
+  readonly roundPhones?: ReadonlyMap<string, number | null> | undefined;
 }) {
   const client = useMemo(() => createCurrentOrderQueueClient(fetcher), [fetcher]);
   const today = useStoreBusinessDay()?.businessDate ?? null;
@@ -103,7 +106,7 @@ export function TableOrderRounds({
           unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
           failedPaymentBatches={failedPaymentBatches(detail.view)}
           refundRows={orderRefundRows(detail.order, detail.lines, detail.paymentPosition)}
-          rounds={{ batches: detail.order.batches, timeZone, today }}
+          rounds={{ batches: detail.order.batches, timeZone, today, phones: roundPhones }}
         />
       </DiningRoundsProvider>
       {detail.order.batches

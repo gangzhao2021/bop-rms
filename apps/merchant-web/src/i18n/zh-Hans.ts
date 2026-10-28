@@ -6042,4 +6042,26 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Record that the guests at table {table} left without paying the {count} parts still unpaid ({amount})? The parts already paid stay paid. A manager decides this. It stays in the reports as written off.":
     "确认 {table} 号桌的客人没付剩下的 {count} 份（{amount}）就走了？已付的份不变。由经理决定，会作为核销留在报表里。",
   "Guests left without paying the rest": "客人没付剩下的就走了",
+  "Phones at this table": "这桌的手机",
+  "The phones at this table could not be read. They are read again with the table.":
+    "读不到这桌的手机，会随桌台一起重读。",
+  "That didn't go through. Read the table again and retry.": "没有完成。请重新读取这桌后再试。",
+  "Phone {number} just joined.": "手机 {number} 刚加入。",
+  "Remove from this table": "移出这桌",
+  "Pause joining by scan": "暂停扫码加入",
+  "Resume joining by scan": "恢复扫码加入",
+  "1 phone at this table": "这桌有 1 台手机",
+  "{count} phones at this table": "这桌有 {count} 台手机",
+  "Joining by scan is paused. New guests need a table code from you or the host.":
+    "扫码加入已暂停。新客人要向你或桌主要桌码。",
+  "Guests join by scanning the table's QR code.": "客人扫这桌的二维码就能加入。",
+  "Phone {number}": "手机 {number}",
+  removed: "已移出",
+  left: "已离开",
+  "joined {time}": "{time} 加入",
+  "Remove phone {number}? It can no longer see this table or order. Its rounds stay on the bill.":
+    "移出手机 {number}？它不能再看这桌或下单，已点的轮次仍在账单上。",
+  Keep: "保留",
+  "Remove phone {number}": "移出手机 {number}",
+  " · Phone {number}": " · 手机 {number}",
 });

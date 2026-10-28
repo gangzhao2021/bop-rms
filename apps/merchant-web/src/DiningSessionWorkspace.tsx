@@ -35,6 +35,7 @@ import { TableSessionClose } from "./TableSessionClose.js";
 import { LastOrdersNotice } from "./LastOrdersNotice.js";
 import { TableCheckout } from "./TableCheckout.js";
 import { TableOrderRounds } from "./TableOrderRounds.js";
+import { TablePanelPhones } from "./TablePhones.js";
 import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
 import {
   browserOffline,
@@ -1221,6 +1222,8 @@ function TablePanel({
   const unpaidHint = guestRoundCancelHint(table, now, canCancelUnpaidRounds);
   const eligible = table.lifecycle === "Published" && table.operationalState === "Available";
   const noCode = table.qrCodeValidUntil === null;
+  // WP-2423 item 8 ⑤ decision 4: which phone sent each round, from the table's phone list.
+  const [roundPhones, setRoundPhones] = useState<ReadonlyMap<string, number | null>>(new Map());
   return (
     <>
       <header className="table-panel__head">
@@ -1269,6 +1272,18 @@ function TablePanel({
         </section>
       ) : null}
       {code ? <DiningEntryCode code={code} onHide={onHideCode} /> : null}
+      {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
+        <TablePanelPhones
+          key={table.currentDiningSessionReference}
+          diningSessionReference={table.currentDiningSessionReference}
+          csrf={csrf}
+          timeZone={timeZone}
+          now={now}
+          locked={locked}
+          refreshKey={refreshKey + ":" + String(checkoutRevision)}
+          onRounds={setRoundPhones}
+        />
+      ) : null}
       {seated && table.session?.orderReference ? (
         // Orders v3 (Owner 2026-10-26): the table's rounds and dishes, served from here.
         <TableOrderRounds
@@ -1279,6 +1294,7 @@ function TablePanel({
           refreshKey={refreshKey + ":" + String(checkoutRevision)}
           locked={locked}
           onChanged={onChanged}
+          roundPhones={roundPhones}
         />
       ) : seated ? (
         <p className="table-panel__notice">{t("Nothing ordered yet.")}</p>
