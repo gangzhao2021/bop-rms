@@ -124,6 +124,8 @@ test("@production a manager discounts a started dish from the Tables page; only 
       },
     ],
     canRequestAcceptance: false,
+    // The table's bill (Payment's figure): 22.60, then 1.70 off.
+    tableBill: { totalMinor: discounted ? "2090" : "2260", paid: null },
     currentPhase: "InProgress",
     currentVersion: 3,
     unfulfillable: null,
@@ -223,6 +225,10 @@ test("@production a manager discounts a started dish from the Tables page; only 
   // The discount stays on the table's order, with what came off.
   await expect(details.getByRole("list", { name: "Comps and discounts" })).toContainText(
     "Synthetic boiled fish · 15% off−$1.70",
+  );
+  // What is left to pay shows under it at once, before checkout.
+  await expect(details.getByRole("list", { name: "Comps and discounts" })).toContainText(
+    "To pay after comps$20.90",
   );
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });

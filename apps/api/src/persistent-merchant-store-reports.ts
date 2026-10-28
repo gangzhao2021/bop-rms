@@ -1,5 +1,8 @@
 import type { ConsumerTransaction } from "@bop/eventing";
-import { createPostgresStoreSalesOrderSource } from "@rms/ordering";
+import {
+  createPostgresStoreSalesOrderSource,
+  listStorePriceReductionsDecided,
+} from "@rms/ordering";
 import { createPostgresStoreSalesPaymentLedger } from "@rms/payment";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -137,23 +140,17 @@ export function createPersistentMerchantStoreReports(options: {
           if (days.some((day, index) => index > 0 && day.startsAt !== days[index - 1]?.endsAt))
             return unavailable();
           const configuration = await options.resolveConfiguration(tx, scope);
-          const ledger = await createPostgresStoreSalesPaymentLedger({
-            scope: { ...scope, ...configuration },
-            authorize: sameTransaction,
-          })(tx, { startsAt: first.startsAt, endsAt: last.endsAt, observedAt: persistence.now() });
-          const orderReferences = [
-            ...ledger.payments.map((payment) => payment.orderReference),
-            ...ledger.refunds.map((refund) => refund.orderReference),
-          ];
           const locale = /^[a-z]{2}-[A-Z]{2}$/u.test(String(value.store.locale))
             ? String(value.store.locale)
             : "en-CA";
-          const orders = await createPostgresStoreSalesOrderSource({
-            brandReference: scope.brandReference,
-            storeReference: scope.storeReference,
+          const { ledger, orders, priceReductions } = await loadStoreSalesReportSources(tx, {
+            scope,
+            configuration,
+            window: { startsAt: first.startsAt, endsAt: last.endsAt },
+            observedAt: persistence.now(),
             locale,
             authorize: sameTransaction,
-          })(tx, orderReferences);
+          });
           const mayExport =
             input.permission === storeReportsExportPermission ||
             (await value.authorizeAction(storeReportsExportPermission))?.effect === "Allow";
@@ -168,6 +165,7 @@ export function createPersistentMerchantStoreReports(options: {
             unresolvedOnlineRefundCount: ledger.unresolvedOnlineRefundCount,
             unpaidWriteOffs: ledger.unpaidWriteOffs,
             orders,
+            priceReductions,
             mayExport,
             generatedAt: persistence.now(),
           });
@@ -215,4 +213,54 @@ export function createPersistentMerchantStoreReports(options: {
       });
     },
   });
+}
+
+/**
+ * The owners' records behind the Store sales reports for one window, in the caller's authorized
+ * transaction: Payment's ledger, the comps and discounts managers decided (WP-2423 item 8 ①
+ * segment 2: a round comped in full has no payment), and the Orders of both.
+ */
+export async function loadStoreSalesReportSources(
+  tx: ConsumerTransaction,
+  input: {
+    readonly scope: {
+      readonly tenantReference: string;
+      readonly brandReference: string;
+      readonly storeReference: string;
+    };
+    readonly configuration: {
+      readonly providerAccountReference: string;
+      readonly environment: "Test" | "Live";
+    };
+    readonly window: { readonly startsAt: string; readonly endsAt: string };
+    readonly observedAt: string;
+    readonly locale: string;
+    authorize(tx: ConsumerTransaction): Promise<boolean>;
+  },
+) {
+  const ledger = await createPostgresStoreSalesPaymentLedger({
+    scope: { ...input.scope, ...input.configuration },
+    authorize: input.authorize,
+  })(tx, { ...input.window, observedAt: input.observedAt });
+  if ((await input.authorize(tx)) !== true) throw new Error("MERCHANT_STORE_REPORTS_UNAVAILABLE");
+  const priceReductions = (
+    await listStorePriceReductionsDecided(tx, input.scope, input.window)
+  ).map((record) =>
+    Object.freeze({
+      orderReference: record.orderReference,
+      orderBatchReference: record.orderBatchReference,
+      decidedAt: record.decidedAt,
+    }),
+  );
+  const orders = await createPostgresStoreSalesOrderSource({
+    brandReference: input.scope.brandReference,
+    storeReference: input.scope.storeReference,
+    locale: input.locale,
+    authorize: input.authorize,
+  })(tx, [
+    ...ledger.payments.map((payment) => payment.orderReference),
+    ...ledger.refunds.map((refund) => refund.orderReference),
+    ...priceReductions.map((reduction) => reduction.orderReference),
+  ]);
+  return Object.freeze({ ledger, orders, priceReductions: Object.freeze(priceReductions) });
 }

@@ -132,6 +132,8 @@ export function TableOrderRounds({
         // WP-2423 item 8 ① segment 2: comps and discounts, kept on the record (never removed).
         const comps = detail.order.batches.flatMap((batch) => batch.compedItems);
         if (comps.length === 0) return null;
+        // The table's bill (Payment's own figure): what is left to pay after the comps.
+        const bill = detail.order.tableBill;
         const names = new Map(detail.lines.items.map((line) => [line.orderItemReference, line]));
         return (
           <ul className="table-order-rounds__comps" aria-label={t("Comps and discounts")}>
@@ -144,6 +146,12 @@ export function TableOrderRounds({
                 <span>−{orderMoney({ amountMinor: comp.amountMinor, currencyCode: "CAD" })}</span>
               </li>
             ))}
+            {bill !== null && bill.paid === null ? (
+              <li className="table-order-rounds__owed">
+                <span>{t("To pay after comps")}</span>
+                <span>{orderMoney({ amountMinor: bill.totalMinor, currencyCode: "CAD" })}</span>
+              </li>
+            ) : null}
           </ul>
         );
       })()}

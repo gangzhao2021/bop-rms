@@ -613,4 +613,71 @@ describe("store sales report (WP-2423 Q14)", () => {
       "comps_and_discounts_by_manager",
     );
   });
+  it("WP-2423 item 8 ① segment 2: a round comped in full (no payment line) still counts, on the day it was comped", () => {
+    // v15 2026-10-27: round 1 (latte) paid in cash; round 2 (one mocha) comped in full, owing 0.
+    const latte = item(sku.latteLarge, 1, 1000);
+    const mocha = {
+      ...item(sku.muffin, 1, 475),
+      compMinor: 475n,
+      taxMinor: 0n,
+      totalMinor: 0n,
+      taxComponents: [{ code: "SYNTHETIC_TAX", amountMinor: 0n }],
+    };
+    const tableOrder = order(902, "DineIn", "Qr", [[latte], [mocha]]);
+    const input = {
+      ...today,
+      orders: [tableOrder],
+      payments: [
+        {
+          channel: "Cash" as const,
+          paymentIntentReference: ref(952) + ":1",
+          orderReference: ref(902),
+          orderBatchReference: ref(912),
+          orderAllocationMinor: latte.totalMinor,
+          tipMinor: 0n,
+          totalMinor: latte.totalMinor,
+          roundingMinor: 0n,
+          paymentCount: 1,
+          takenAt: "2026-10-14T20:00:00.000Z",
+        },
+      ],
+      refundedPayments: [],
+      refunds: [],
+      settlement: {
+        onlineCaptured: { count: 0, amountMinor: 0n },
+        onlineRefunded: { count: 0, amountMinor: 0n },
+        cardMachineTaken: { count: 0, amountMinor: 0n, tipMinor: 0n },
+        cardMachineRefunded: { count: 0, amountMinor: 0n },
+        cashTaken: { count: 1, amountMinor: latte.totalMinor, tipMinor: 0n, roundingMinor: 0n },
+        cashRefunded: { count: 0, amountMinor: 0n },
+      },
+      priceReductions: [
+        {
+          orderReference: ref(902),
+          orderBatchReference: ref(913),
+          decidedAt: "2026-10-14T19:30:00.000Z",
+        },
+      ],
+    };
+    const view = computeStoreSalesReport(input);
+    expect(view.summary).toMatchObject({
+      grossSalesMinor: "1475",
+      compCount: 1,
+      compsMinor: "475",
+      netSalesMinor: "1000",
+      collectedMinor: latte.totalMinor.toString(),
+      unmatchedPaymentCount: 0,
+    });
+    expect(view.items.find((row) => row.compsMinor === "475")).toMatchObject({
+      quantitySold: 1,
+      grossSalesMinor: "475",
+      netSalesMinor: "0",
+    });
+    expect(view.reconciliation.matchesSettlement).toBe(true);
+    // Without the comps decided in the range, the mocha would vanish from the sales.
+    expect(computeStoreSalesReport({ ...input, priceReductions: [] }).summary).toMatchObject({
+      grossSalesMinor: "1000",
+      compCount: 0,
+    });
+  });
 });

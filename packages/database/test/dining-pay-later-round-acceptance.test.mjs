@@ -21,6 +21,12 @@ import {
 import { createMerchantDiningUnpaidDeparture } from "../../../apps/api/src/merchant-dining-unpaid-departure.ts";
 import { createMerchantDiningUnpaidItemRemoval } from "../../../apps/api/src/merchant-dining-unpaid-item-removal.ts";
 import { createMerchantDiningItemComp } from "../../../apps/api/src/merchant-dining-item-comp.ts";
+import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/merchant-dining-order-close-command.ts";
+import { loadStoreSalesReportSources } from "../../../apps/api/src/persistent-merchant-store-reports.ts";
+import {
+  computeStoreSalesReport,
+  storeSalesReportCsv,
+} from "../../../apps/api/src/store-sales-report.ts";
 import { createMerchantDiningServeCommand } from "../../../apps/api/src/merchant-dining-serve-command.ts";
 import { createDiningTableOnlinePayments } from "../../../apps/api/src/dining-table-online-payment.ts";
 import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
@@ -107,6 +113,10 @@ it("a guest pays the whole table on their phone, once, split by round", () =>
 it("a manager comps and discounts served dishes before the table pays; it stays on record", () =>
   journey("Comped"));
 
+// v15 2026-10-27 follow-up: a table whose every dish was comped owes nothing and closes as usual.
+it("a table comped in full owes nothing and closes without a payment", () =>
+  journey("CompedWhole"));
+
 async function journey(ending) {
   await withIsolatedDatabase(
     {
@@ -117,7 +127,9 @@ async function journey(ending) {
             ? "wp2423_plwo"
             : ending === "Comped"
               ? "wp2423_plcomp"
-              : "wp2423_plon",
+              : ending === "CompedWhole"
+                ? "wp2423_plcwhole"
+                : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -730,79 +742,85 @@ async function journey(ending) {
               )
             )[0].version,
           );
-        const removeOperation = fresh();
-        const beforeRemoval = await versionNow();
-        // Without the cancel permission nothing is written.
-        const outsider = await seedMerchantAcceptanceSession({
-          admin,
-          runner: transactions(),
-          scope: ownerScope,
-          actor: id(0x702),
-          at: now(),
-          extraPermissions: ["dining.operate"],
-          referencePrefix: "01909964",
-          sessionReferencePrefix: "01909963",
-        });
-        await assert.rejects(
-          removal(outsider, { expectedOrderVersion: beforeRemoval, operationReference: fresh() }),
-          { code: "UNPAID_ITEM_REMOVAL_PERMISSION_DENIED" },
-        );
-        // A stale Order version is refused.
-        await assert.rejects(
-          removal(server, { expectedOrderVersion: beforeRemoval - 1, operationReference: fresh() }),
-          { code: "UNPAID_ITEM_REMOVAL_VERSION_CONFLICT" },
-        );
-        const removed = await removal(server, {
-          expectedOrderVersion: beforeRemoval,
-          operationReference: removeOperation,
-        });
-        assert.equal(removed.status, "Removed");
-        assert.equal(removed.cancelledOrderVersion, beforeRemoval + 1);
-        // The same command again returns that removal; nothing is written twice.
-        assert.equal(
-          (
-            await removal(server, {
-              expectedOrderVersion: beforeRemoval,
-              operationReference: removeOperation,
-            })
-          ).status,
-          "AlreadyRemoved",
-        );
-        assert.deepEqual(
-          await rows(
-            "SELECT basis,reason_code,actor_id::text AS actor,payment_disposition_id,refund_request_id FROM rms_ordering.order_item_staff_cancellation WHERE order_id=$1",
-            [orderReference],
-          ),
-          [
-            {
-              basis: "PayLater",
-              reason_code: "CUSTOMER_REQUEST",
-              actor: id(0x700),
-              payment_disposition_id: null,
-              refund_request_id: null,
-            },
-          ],
-        );
-        assert.equal(
-          (
+        // The Comped ending keeps round 2 on the bill: its one dish is comped instead (v15 case).
+        if (ending !== "Comped") {
+          const removeOperation = fresh();
+          const beforeRemoval = await versionNow();
+          // Without the cancel permission nothing is written.
+          const outsider = await seedMerchantAcceptanceSession({
+            admin,
+            runner: transactions(),
+            scope: ownerScope,
+            actor: id(0x702),
+            at: now(),
+            extraPermissions: ["dining.operate"],
+            referencePrefix: "01909964",
+            sessionReferencePrefix: "01909963",
+          });
+          await assert.rejects(
+            removal(outsider, { expectedOrderVersion: beforeRemoval, operationReference: fresh() }),
+            { code: "UNPAID_ITEM_REMOVAL_PERMISSION_DENIED" },
+          );
+          // A stale Order version is refused.
+          await assert.rejects(
+            removal(server, {
+              expectedOrderVersion: beforeRemoval - 1,
+              operationReference: fresh(),
+            }),
+            { code: "UNPAID_ITEM_REMOVAL_VERSION_CONFLICT" },
+          );
+          const removed = await removal(server, {
+            expectedOrderVersion: beforeRemoval,
+            operationReference: removeOperation,
+          });
+          assert.equal(removed.status, "Removed");
+          assert.equal(removed.cancelledOrderVersion, beforeRemoval + 1);
+          // The same command again returns that removal; nothing is written twice.
+          assert.equal(
+            (
+              await removal(server, {
+                expectedOrderVersion: beforeRemoval,
+                operationReference: removeOperation,
+              })
+            ).status,
+            "AlreadyRemoved",
+          );
+          assert.deepEqual(
             await rows(
-              "SELECT count(*)::int AS n FROM rms_ordering.order_revision WHERE order_id=$1 AND version=$2 AND kind='StaffItemCancellation'",
-              [orderReference, beforeRemoval + 1],
-            )
-          )[0].n,
-          1,
-        );
-        assert.equal(
-          (
-            await rows(
-              "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE action_code='ORDER_ITEMS_REMOVED_FROM_UNPAID_BILL'",
-            )
-          )[0].n,
-          1,
-        );
+              "SELECT basis,reason_code,actor_id::text AS actor,payment_disposition_id,refund_request_id FROM rms_ordering.order_item_staff_cancellation WHERE order_id=$1",
+              [orderReference],
+            ),
+            [
+              {
+                basis: "PayLater",
+                reason_code: "CUSTOMER_REQUEST",
+                actor: id(0x700),
+                payment_disposition_id: null,
+                refund_request_id: null,
+              },
+            ],
+          );
+          assert.equal(
+            (
+              await rows(
+                "SELECT count(*)::int AS n FROM rms_ordering.order_revision WHERE order_id=$1 AND version=$2 AND kind='StaffItemCancellation'",
+                [orderReference, beforeRemoval + 1],
+              )
+            )[0].n,
+            1,
+          );
+          assert.equal(
+            (
+              await rows(
+                "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE action_code='ORDER_ITEMS_REMOVED_FROM_UNPAID_BILL'",
+              )
+            )[0].n,
+            1,
+          );
+        }
         // Round 2's only dish came off: the whole round is off the bill (it owes nothing).
         assert.equal(items2.length, 1);
-        const removedMinor = items2[0].pricing.total.amountMinor;
+        const removedMinor = ending === "Comped" ? 0n : items2[0].pricing.total.amountMinor;
         // Paying before checkout started is refused: rounds can still be added.
         await assert.rejects(settleWith(server, {}), { code: "TABLE_CHECKOUT_NOT_STARTED" });
         // Checkout starts again with round 2 on the table.
@@ -813,7 +831,7 @@ async function journey(ending) {
         const round1Minor = items1.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n);
         const round2Minor =
           items2.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n) - removedMinor;
-        assert.equal(round2Minor, 0n);
+        if (ending !== "Comped") assert.equal(round2Minor, 0n);
         const open = await bill();
         assert.equal(open.paymentTiming, "PayLater");
         assert.equal(open.sessionPhase, "Closing");
@@ -822,7 +840,7 @@ async function journey(ending) {
           open.rounds.map((round) => [round.roundNumber, round.totalMinor, round.paid]),
           [
             [1, round1Minor.toString(), false],
-            [2, "0", false],
+            [2, round2Minor.toString(), false],
           ],
         );
         assert.equal(open.owed.totalMinor, (round1Minor + round2Minor).toString());
@@ -861,217 +879,224 @@ async function journey(ending) {
          * The kitchen makes round 1 (accepts, starts and completes each dish through the pilot
          * kitchen lifecycle) and staff serve it; round 2 came off the bill. Returns the progress.
          */
-        async function cookAndServeRound1() {
-          // ── Kitchen: round 1's ticket, one queued work item per dish (test-only owner seed, as
-          // the dine-in item cancellation acceptance seeds it), whose source evidence is the real
-          // Ordering kitchen source of the pay-later round as it is now.
-          const sourceQuery = {
-            brandReference: scope.brandReference,
-            storeReference: scope.storeReference,
-            orderReference,
-            orderBatchReference: String(c1.orderBatchReference),
-            confirmationReference: String(c1.confirmationReference),
-            sourceEventReference: event1.eventId,
-            sourceAggregateVersion: event1.aggregateVersion,
-            sourceSnapshotDigest: String(c1.sourceSnapshotDigest),
-          };
-          const sourceStore = createPostgresOrderKitchenSourceStore({
-            ...scope,
-            quoteVersion: 1,
-            sha256,
-            authorize: async () => true,
-          });
-          const issued = await transactions().run((tx) =>
-            sourceStore.resolve({ transaction: tx, query: { ...sourceQuery, observedAt: now() } }),
-          );
-          assert.ok(issued);
-          const kitchenAt = now();
-          const ticket = fresh(),
-            evidence = fresh(),
-            plan = fresh(),
-            correlation = fresh();
-          await admin.query(
-            "INSERT INTO rms_kitchen.kitchen_ticket (kitchen_ticket_id,brand_id,store_id,order_id,order_batch_id,confirmation_id,consumer_name,consumer_version,source_event_id,source_aggregate_version,source_snapshot_digest,confirmed_at,correlation_id,semantic_event_binding_digest,source_evidence_id,source_evidence_version,source_evidence_digest,source_evidence_captured_at,work_plan_id,work_plan_version,work_plan_digest,work_plan_generated_at,aggregate_version,status,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,'kitchen.confirmed-order:v1',1,$7,$17,$8,$9,$10,$11,$12,1,$13,$9,$15,1,$16,$14,1,'Open','System','System',$14,$14)",
-            [
-              ticket,
-              scope.brandReference,
-              scope.storeReference,
-              orderReference,
-              R1.batch.orderBatchReference,
-              String(c1.confirmationReference),
-              event1.eventId,
-              String(c1.sourceSnapshotDigest),
-              String(c1.confirmedAt),
-              correlation,
-              sha256("binding:" + ticket),
-              evidence,
-              issued.evidenceDigest,
-              kitchenAt,
-              plan,
-              sha256("plan:" + ticket),
-              event1.aggregateVersion,
-            ],
-          );
-          const workItems = items1.map(() => fresh());
-          for (const [j, item] of items1.entries())
-            await admin.query(
-              "INSERT INTO rms_kitchen.kitchen_work_item (kitchen_work_item_id,brand_id,store_id,kitchen_ticket_id,order_id,order_batch_id,order_item_id,source_evidence_id,work_plan_id,source_item_ordinal,split_ordinal,version,status,required_quantity,completed_quantity,product_id,product_version_id,sku_id,menu_version_id,localized_display_names_json,selected_options_json,source_line_digest,station_id,routing_rule_id,routing_rule_version,routing_rule_digest,preparation_id,preparation_version,preparation_digest,preparation_instructions_json,execution_snapshot_digest,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,1,'Queued',$11,0,$12,$13,$14,$15,$16::jsonb,'[]'::jsonb,$17,$18,$19,1,$20,$21,1,$22,$23::jsonb,$24,'System','System',$25,$25)",
-              [
-                workItems[j],
-                scope.brandReference,
-                scope.storeReference,
-                ticket,
-                orderReference,
-                R1.batch.orderBatchReference,
-                String(item.orderItemReference),
-                evidence,
-                plan,
-                j + 1,
-                item.quantity,
-                fresh(),
-                fresh(),
-                fresh(),
-                fresh(),
-                JSON.stringify({ "en-CA": "Synthetic dish " + (j + 1) }),
-                sha256("line:" + j),
-                fresh(),
-                fresh(),
-                sha256("routing"),
-                fresh(),
-                sha256("preparation"),
-                JSON.stringify(["Synthetic preparation"]),
-                sha256("execution:" + j),
-                kitchenAt,
-              ],
-            );
-          // ── The kitchen accepts, starts and completes each dish (the pilot kitchen lifecycle,
-          // its current-source check over the real Ordering kitchen source); synthetic admission
-          // and Expo decisions, as in the pilot kitchen command.
-          const issuedSourceIsCurrent = async (tx) =>
-            (
-              await sourceStore.resolveIssued({
-                transaction: tx,
-                query: { ...sourceQuery, observedAt: new Date().toISOString() },
-              })
-            ).evidenceDigest === issued.evidenceDigest;
-          const kitchenReferences = {
-            next: fresh,
-            derive(purpose, identity) {
-              const digest = createHash("sha256")
-                .update(purpose + identity)
-                .digest("hex");
-              return (
-                "0190abcf-" +
-                digest.slice(0, 4) +
-                "-7" +
-                digest.slice(4, 7) +
-                "-8" +
-                digest.slice(7, 10) +
-                "-" +
-                digest.slice(10, 22)
-              );
-            },
-          };
-          const cook = id(0x720);
-          let active = null;
-          const kitchenRunner = transactions({ guc: true });
-          const kitchen = createKitchenWorkLifecycleService({
-            trustedContext: {
-              resolveAuthority: async () => ({
-                actorReference: cook,
-                brandReference: scope.brandReference,
-                storeReference: scope.storeReference,
-                observedAt: new Date().toISOString(),
-              }),
-            },
-            correlationContext: { resolve: async () => ({ correlationReference: correlation }) },
-            authorization: { authorize: async () => true },
-            transactions: { withTransaction: (work) => kitchenRunner.run(work) },
-            tenantContext: { install: async () => undefined },
-            idempotency: {
-              acquireFence: async ({ transaction, idempotencyKey }) => {
-                await transaction.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-                  scope.brandReference + ":" + scope.storeReference + ":" + idempotencyKey,
-                ]);
-              },
-            },
-            repository: createPostgresKitchenWorkLifecycleStore({
+        async function cookAndServeRound1(
+          rounds = [{ c: c1, event: event1, batch: R1.batch, items: items1 }],
+        ) {
+          for (const round of rounds) {
+            // ── Kitchen: round 1's ticket, one queued work item per dish (test-only owner seed, as
+            // the dine-in item cancellation acceptance seeds it), whose source evidence is the real
+            // Ordering kitchen source of the pay-later round as it is now.
+            const sourceQuery = {
               brandReference: scope.brandReference,
               storeReference: scope.storeReference,
+              orderReference,
+              orderBatchReference: String(round.c.orderBatchReference),
+              confirmationReference: String(round.c.confirmationReference),
+              sourceEventReference: round.event.eventId,
+              sourceAggregateVersion: round.event.aggregateVersion,
+              sourceSnapshotDigest: String(round.c.sourceSnapshotDigest),
+            };
+            const sourceStore = createPostgresOrderKitchenSourceStore({
+              ...scope,
+              quoteVersion: 1,
+              sha256,
+              authorize: async () => true,
+            });
+            const issued = await transactions().run((tx) =>
+              sourceStore.resolve({
+                transaction: tx,
+                query: { ...sourceQuery, observedAt: now() },
+              }),
+            );
+            assert.ok(issued);
+            const kitchenAt = now();
+            const ticket = fresh(),
+              evidence = fresh(),
+              plan = fresh(),
+              correlation = fresh();
+            await admin.query(
+              "INSERT INTO rms_kitchen.kitchen_ticket (kitchen_ticket_id,brand_id,store_id,order_id,order_batch_id,confirmation_id,consumer_name,consumer_version,source_event_id,source_aggregate_version,source_snapshot_digest,confirmed_at,correlation_id,semantic_event_binding_digest,source_evidence_id,source_evidence_version,source_evidence_digest,source_evidence_captured_at,work_plan_id,work_plan_version,work_plan_digest,work_plan_generated_at,aggregate_version,status,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,'kitchen.confirmed-order:v1',1,$7,$17,$8,$9,$10,$11,$12,1,$13,$9,$15,1,$16,$14,1,'Open','System','System',$14,$14)",
+              [
+                ticket,
+                scope.brandReference,
+                scope.storeReference,
+                orderReference,
+                round.batch.orderBatchReference,
+                String(round.c.confirmationReference),
+                round.event.eventId,
+                String(round.c.sourceSnapshotDigest),
+                String(round.c.confirmedAt),
+                correlation,
+                sha256("binding:" + ticket),
+                evidence,
+                issued.evidenceDigest,
+                kitchenAt,
+                plan,
+                sha256("plan:" + ticket),
+                round.event.aggregateVersion,
+              ],
+            );
+            const workItems = round.items.map(() => fresh());
+            for (const [j, item] of round.items.entries())
+              await admin.query(
+                "INSERT INTO rms_kitchen.kitchen_work_item (kitchen_work_item_id,brand_id,store_id,kitchen_ticket_id,order_id,order_batch_id,order_item_id,source_evidence_id,work_plan_id,source_item_ordinal,split_ordinal,version,status,required_quantity,completed_quantity,product_id,product_version_id,sku_id,menu_version_id,localized_display_names_json,selected_options_json,source_line_digest,station_id,routing_rule_id,routing_rule_version,routing_rule_digest,preparation_id,preparation_version,preparation_digest,preparation_instructions_json,execution_snapshot_digest,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,1,'Queued',$11,0,$12,$13,$14,$15,$16::jsonb,'[]'::jsonb,$17,$18,$19,1,$20,$21,1,$22,$23::jsonb,$24,'System','System',$25,$25)",
+                [
+                  workItems[j],
+                  scope.brandReference,
+                  scope.storeReference,
+                  ticket,
+                  orderReference,
+                  round.batch.orderBatchReference,
+                  String(item.orderItemReference),
+                  evidence,
+                  plan,
+                  j + 1,
+                  item.quantity,
+                  fresh(),
+                  fresh(),
+                  fresh(),
+                  fresh(),
+                  JSON.stringify({ "en-CA": "Synthetic dish " + (j + 1) }),
+                  sha256("line:" + j),
+                  fresh(),
+                  fresh(),
+                  sha256("routing"),
+                  fresh(),
+                  sha256("preparation"),
+                  JSON.stringify(["Synthetic preparation"]),
+                  sha256("execution:" + j),
+                  kitchenAt,
+                ],
+              );
+            // ── The kitchen accepts, starts and completes each dish (the pilot kitchen lifecycle,
+            // its current-source check over the real Ordering kitchen source); synthetic admission
+            // and Expo decisions, as in the pilot kitchen command.
+            const issuedSourceIsCurrent = async (tx) =>
+              (
+                await sourceStore.resolveIssued({
+                  transaction: tx,
+                  query: { ...sourceQuery, observedAt: new Date().toISOString() },
+                })
+              ).evidenceDigest === issued.evidenceDigest;
+            const kitchenReferences = {
+              next: fresh,
+              derive(purpose, identity) {
+                const digest = createHash("sha256")
+                  .update(purpose + identity)
+                  .digest("hex");
+                return (
+                  "0190abcf-" +
+                  digest.slice(0, 4) +
+                  "-7" +
+                  digest.slice(4, 7) +
+                  "-8" +
+                  digest.slice(7, 10) +
+                  "-" +
+                  digest.slice(10, 22)
+                );
+              },
+            };
+            const cook = id(0x720);
+            let active = null;
+            const kitchenRunner = transactions({ guc: true });
+            const kitchen = createKitchenWorkLifecycleService({
+              trustedContext: {
+                resolveAuthority: async () => ({
+                  actorReference: cook,
+                  brandReference: scope.brandReference,
+                  storeReference: scope.storeReference,
+                  observedAt: new Date().toISOString(),
+                }),
+              },
+              correlationContext: { resolve: async () => ({ correlationReference: correlation }) },
+              authorization: { authorize: async () => true },
+              transactions: { withTransaction: (work) => kitchenRunner.run(work) },
+              tenantContext: { install: async () => undefined },
+              idempotency: {
+                acquireFence: async ({ transaction, idempotencyKey }) => {
+                  await transaction.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+                    scope.brandReference + ":" + scope.storeReference + ":" + idempotencyKey,
+                  ]);
+                },
+              },
+              repository: createPostgresKitchenWorkLifecycleStore({
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+                references: kitchenReferences,
+                digests: { sha256 },
+                authorize: async () => true,
+                validateCurrentSource: (transaction) => issuedSourceIsCurrent(transaction),
+              }),
               references: kitchenReferences,
               digests: { sha256 },
-              authorize: async () => true,
-              validateCurrentSource: (transaction) => issuedSourceIsCurrent(transaction),
-            }),
-            references: kitchenReferences,
-            digests: { sha256 },
-            clock: { now: () => new Date().toISOString() },
-            admission: {
-              resolve: async ({ command, acceptedOperationReference }) => ({
-                decisionReference: fresh(),
-                decisionVersion: 1,
-                decisionDigest: sha256("synthetic admission"),
-                producerContractVersion: 1,
-                actorReference: command.actorReference,
-                brandReference: scope.brandReference,
-                storeReference: scope.storeReference,
-                ticketReference: command.ticketReference,
-                workItemReference: command.workItemReference,
-                acceptedOperationReference,
-                ticketVersion: BigInt(command.expectedTicketVersion),
-                workItemVersion: BigInt(command.expectedWorkItemVersion),
-                action: "StartKitchenWorkItem",
-                purpose: "KitchenWorkExecution",
-                outcome: "Allowed",
-                evaluatedAt: new Date().toISOString(),
-                validUntil: new Date(Date.now() + minutes(60)).toISOString(),
-              }),
-            },
-            expo: {
-              resolve: async () => ({
-                decisionReference: fresh(),
-                decisionVersion: 1,
-                decisionDigest: sha256("synthetic Expo"),
-                producerContractVersion: 1,
-                brandReference: scope.brandReference,
-                storeReference: scope.storeReference,
-                purpose: "KitchenReadiness",
-                mode: "Disabled",
-                evaluatedAt: new Date().toISOString(),
-                validUntil: new Date(Date.now() + minutes(60)).toISOString(),
-              }),
-            },
-          });
-          for (const [j, item] of items1.entries()) {
-            const step = async (action, extra = {}) => {
-              const [versions] = await rows(
-                "SELECT t.aggregate_version::text AS ticket,w.version::text AS item FROM rms_kitchen.kitchen_ticket t JOIN rms_kitchen.kitchen_work_item w ON w.kitchen_ticket_id=t.kitchen_ticket_id WHERE w.kitchen_work_item_id=$1",
-                [workItems[j]],
-              );
-              active = {
-                action,
-                idempotencyKey: "pay-later-write-off-" + workItems[j] + "-" + action,
-                actorReference: cook,
-                brandReference: scope.brandReference,
-                storeReference: scope.storeReference,
-                ticketReference: ticket,
-                workItemReference: workItems[j],
-                orderItemReference: String(item.orderItemReference),
-                expectedTicketVersion: versions.ticket,
-                expectedWorkItemVersion: versions.item,
-                correlationReference: correlation,
-                ...extra,
+              clock: { now: () => new Date().toISOString() },
+              admission: {
+                resolve: async ({ command, acceptedOperationReference }) => ({
+                  decisionReference: fresh(),
+                  decisionVersion: 1,
+                  decisionDigest: sha256("synthetic admission"),
+                  producerContractVersion: 1,
+                  actorReference: command.actorReference,
+                  brandReference: scope.brandReference,
+                  storeReference: scope.storeReference,
+                  ticketReference: command.ticketReference,
+                  workItemReference: command.workItemReference,
+                  acceptedOperationReference,
+                  ticketVersion: BigInt(command.expectedTicketVersion),
+                  workItemVersion: BigInt(command.expectedWorkItemVersion),
+                  action: "StartKitchenWorkItem",
+                  purpose: "KitchenWorkExecution",
+                  outcome: "Allowed",
+                  evaluatedAt: new Date().toISOString(),
+                  validUntil: new Date(Date.now() + minutes(60)).toISOString(),
+                }),
+              },
+              expo: {
+                resolve: async () => ({
+                  decisionReference: fresh(),
+                  decisionVersion: 1,
+                  decisionDigest: sha256("synthetic Expo"),
+                  producerContractVersion: 1,
+                  brandReference: scope.brandReference,
+                  storeReference: scope.storeReference,
+                  purpose: "KitchenReadiness",
+                  mode: "Disabled",
+                  evaluatedAt: new Date().toISOString(),
+                  validUntil: new Date(Date.now() + minutes(60)).toISOString(),
+                }),
+              },
+            });
+            for (const [j, item] of round.items.entries()) {
+              const step = async (action, extra = {}) => {
+                const [versions] = await rows(
+                  "SELECT t.aggregate_version::text AS ticket,w.version::text AS item FROM rms_kitchen.kitchen_ticket t JOIN rms_kitchen.kitchen_work_item w ON w.kitchen_ticket_id=t.kitchen_ticket_id WHERE w.kitchen_work_item_id=$1",
+                  [workItems[j]],
+                );
+                active = {
+                  action,
+                  idempotencyKey: "pay-later-write-off-" + workItems[j] + "-" + action,
+                  actorReference: cook,
+                  brandReference: scope.brandReference,
+                  storeReference: scope.storeReference,
+                  ticketReference: ticket,
+                  workItemReference: workItems[j],
+                  orderItemReference: String(item.orderItemReference),
+                  expectedTicketVersion: versions.ticket,
+                  expectedWorkItemVersion: versions.item,
+                  correlationReference: correlation,
+                  ...extra,
+                };
+                return kitchen.execute(active);
               };
-              return kitchen.execute(active);
-            };
-            assert.equal((await step("AcceptKitchenWorkItem")).outcome, "Accepted");
-            assert.equal((await step("StartKitchenWorkItem")).outcome, "Started");
-            assert.match(
-              (await step("CompleteKitchenWorkItem", { quantityDelta: item.quantity })).outcome,
-              /^Completed/u,
-            );
+              assert.equal((await step("AcceptKitchenWorkItem")).outcome, "Accepted");
+              assert.equal((await step("StartKitchenWorkItem")).outcome, "Started");
+              assert.match(
+                (await step("CompleteKitchenWorkItem", { quantityDelta: item.quantity })).outcome,
+                /^Completed/u,
+              );
+            }
+            void active;
           }
-          void active;
           // Inventory uses the dishes from the Kitchen lifecycle Events (as the pilot consumers do).
           const consume = createKitchenInventoryConsumption({
             scope: ownerScope,
@@ -1105,7 +1130,7 @@ async function journey(ending) {
               retentionPolicyVersion: 1,
             },
           });
-          for (const item of items1)
+          for (const item of rounds.flatMap((round) => round.items))
             await serve({
               ...as(server),
               command: {
@@ -1120,14 +1145,16 @@ async function journey(ending) {
               },
             });
           const served = await progress();
-          // Round 1 served; round 2's dishes, taken off the bill before the table paid, are cancelled.
-          assert.deepEqual(
-            served.items.map((item) => [item.batchSequence, item.phase]),
-            [
-              [1, "Fulfilled"],
-              [2, "Cancelled"],
-            ],
-          );
+          if (ending !== "Comped") {
+            // Round 1 served; round 2's dishes, taken off the bill before the table paid, are cancelled.
+            assert.deepEqual(
+              served.items.map((item) => [item.batchSequence, item.phase]),
+              [
+                [1, "Fulfilled"],
+                [2, "Cancelled"],
+              ],
+            );
+          }
           return served;
         }
         async function writtenOffEnding() {
@@ -1232,58 +1259,103 @@ async function journey(ending) {
          * (Stripe's normalized answers; the test decides each outcome); everything else is the
          * real composition under the restricted role.
          */
-        async function compedEnding() {
-          const comp = (who, command) =>
-            createMerchantDiningItemComp({
-              persistence: persistenceOf(who),
-              authentication: who.authentication,
-              nextReference: fresh,
-              installContext: async (tx, selected) => {
-                await tx.query(
-                  "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
-                  [selected.tenantReference, selected.brandReference, selected.storeReference],
-                );
-              },
-            })({
-              ...as(who),
-              command: {
-                orderReference,
-                orderItemReferences: [String(items1[0].orderItemReference)],
-                kind: "Comp",
-                percent: null,
-                amountOffMinor: null,
-                reasonCode: "QUALITY",
-                operationReference: fresh(),
-                ...command,
-              },
-            });
-          // Before the kitchen starts a dish it is taken off the bill instead (the kitchen stops it).
-          await assert.rejects(comp(manager, {}), { code: "ITEM_COMP_NOT_STARTED" });
-          const served = await cookAndServeRound1();
-          assert.ok(served.items.filter((item) => item.batchSequence === 1).length > 0);
-          // A server (no comp permission) is refused; nothing is written.
-          await assert.rejects(comp(server, {}), { code: "ITEM_COMP_PERMISSION_DENIED" });
-          // The browser never sets the money: an amount off the whole dish or more is refused.
-          const price = (item) => ({
-            net: item.pricing.subtotal.amountMinor - item.pricing.discount.amountMinor,
-            tax: item.pricing.tax.amountMinor,
-            fee: item.pricing.fee.amountMinor,
-            total: item.pricing.total.amountMinor,
+        const comp = (who, command) =>
+          createMerchantDiningItemComp({
+            persistence: persistenceOf(who),
+            authentication: who.authentication,
+            nextReference: fresh,
+            installContext: async (tx, selected) => {
+              await tx.query(
+                "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+                [selected.tenantReference, selected.brandReference, selected.storeReference],
+              );
+            },
+          })({
+            ...as(who),
+            command: {
+              orderReference,
+              orderItemReferences: [String(items1[0].orderItemReference)],
+              kind: "Comp",
+              percent: null,
+              amountOffMinor: null,
+              reasonCode: "QUALITY",
+              operationReference: fresh(),
+              ...command,
+            },
           });
-          const first = price(items1[0]);
+        const price = (item) => ({
+          net: item.pricing.subtotal.amountMinor - item.pricing.discount.amountMinor,
+          tax: item.pricing.tax.amountMinor,
+          fee: item.pricing.fee.amountMinor,
+          total: item.pricing.total.amountMinor,
+          subtotal: item.pricing.subtotal.amountMinor,
+        });
+        /** The day's sales reports from the same sources and composition the reports page uses. */
+        const salesReport = () =>
+          transactions().run(async (tx) => {
+            const window = {
+              startsAt: time(-minutes(120)),
+              endsAt: new Date(Date.now() + 1000).toISOString(),
+            };
+            const sources = await loadStoreSalesReportSources(tx, {
+              scope: ownerScope,
+              configuration: { providerAccountReference: provider, environment: "Test" },
+              window,
+              observedAt: new Date(Date.now() + 1000).toISOString(),
+              locale: "en-CA",
+              authorize: async () => true,
+            });
+            return computeStoreSalesReport({
+              storeLabel: "Synthetic Store",
+              timeZone: "America/Toronto",
+              days: [
+                {
+                  businessDate: "2026-10-27",
+                  ...window,
+                  timeZone: "America/Toronto",
+                  status: "Open",
+                },
+              ],
+              payments: sources.ledger.payments,
+              refundedPayments: sources.ledger.refundedPayments,
+              refunds: sources.ledger.refunds,
+              settlement: sources.ledger.settlement,
+              unresolvedOnlineRefundCount: sources.ledger.unresolvedOnlineRefundCount,
+              unpaidWriteOffs: sources.ledger.unpaidWriteOffs,
+              orders: sources.orders,
+              priceReductions: sources.priceReductions,
+              mayExport: true,
+              generatedAt: new Date().toISOString(),
+            });
+          });
+        const round2 = { c: c2, event: event2, batch: R2.batch, items: items2 };
+        const round1 = { c: c1, event: event1, batch: R1.batch, items: items1 };
+        /**
+         * v15 2026-10-27 (the reported case): round 2 is one dish, comped in full by a manager; round
+         * 1 is discounted 50 % and paid in cash. The comped dish stays in the sales, the comps are
+         * their own line, and reports, the day-end settlement and the export all say so.
+         */
+        async function compedEnding() {
+          const mocha = String(items2[0].orderItemReference);
+          // Before the kitchen starts a dish it is taken off the bill instead (the kitchen stops it).
+          await assert.rejects(comp(manager, { orderItemReferences: [mocha] }), {
+            code: "ITEM_COMP_NOT_STARTED",
+          });
+          await cookAndServeRound1([round1, round2]);
+          // A server (no comp permission) is refused; nothing is written.
+          await assert.rejects(comp(server, { orderItemReferences: [mocha] }), {
+            code: "ITEM_COMP_PERMISSION_DENIED",
+          });
+          const first = price(items1[0]),
+            second = price(items2[0]);
+          // The browser never sets the money: an amount off the whole dish or more is refused.
           await assert.rejects(
             comp(manager, { kind: "Amount", amountOffMinor: String(first.net) }),
             {
               code: "ITEM_COMP_INVALID_AMOUNT",
             },
           );
-          assert.deepEqual(
-            await rows("SELECT 1 FROM rms_ordering.order_item_price_reduction WHERE order_id=$1", [
-              orderReference,
-            ]),
-            [],
-          );
-          // The database checks the money itself: 1.00 off with 0.05 tax is not this dish's rule.
+          // The database checks the money itself: 0.01 off with 0.05 tax is not this dish's rule.
           await assert.rejects(
             admin.query(
               "INSERT INTO rms_ordering.order_item_price_reduction (reduction_id,operation_id,brand_id,store_id,order_id,order_batch_id,order_item_id,kind,percent,net_minor,tax_minor,fee_minor,total_minor,currency_code,reason_code,actor_id,permission_code,audit_id,decided_at) VALUES ($1,$2,$3,$4,$5,$6,$7,'Amount',NULL,1,5,0,6,'CAD','GOODWILL',$8,'ordering.order.comp',$9,date_trunc('milliseconds',now()))",
@@ -1294,49 +1366,49 @@ async function journey(ending) {
                 scope.storeReference,
                 orderReference,
                 R1.batch.orderBatchReference,
-                String(items1[items1.length - 1].orderItemReference),
+                String(items1[0].orderItemReference),
                 id(0x701),
                 fresh(),
               ],
             ),
             /price reduction amount mismatch/u,
           );
-          // The manager takes 50 % off the dish (the guests waited too long): net off its price,
-          // tax and fee in proportion, half up to the cent — the database's own rule.
-          const discountNet = (first.net * 50n + 50n) / 100n;
-          const share = (amount) => (amount * discountNet * 2n + first.net) / (2n * first.net);
-          const compMinor = discountNet + share(first.tax) + share(first.fee);
+          // The manager comps round 2's only dish (food quality): net, tax and fee all come off.
           const compOperation = fresh();
-          const discounted = await comp(manager, {
-            kind: "Percent",
-            percent: 50,
-            reasonCode: "LONG_WAIT",
+          const comped = await comp(manager, {
+            orderItemReferences: [mocha],
             operationReference: compOperation,
           });
-          assert.equal(discounted.status, "Recorded");
           assert.deepEqual(
-            discounted.reductions.map((entry) => [
-              entry.kind,
-              entry.percent,
-              entry.amountMinor,
-              entry.reasonCode,
-            ]),
-            [["Percent", 50, compMinor.toString(), "LONG_WAIT"]],
+            comped.reductions.map((entry) => [entry.kind, entry.amountMinor, entry.reasonCode]),
+            [["Comp", second.total.toString(), "QUALITY"]],
           );
-          // The same request again is that discount; a second decision on the dish is refused.
+          // The same request again is that comp; a second decision on the dish is refused.
           assert.equal(
             (
               await comp(manager, {
-                kind: "Percent",
-                percent: 50,
-                reasonCode: "LONG_WAIT",
+                orderItemReferences: [mocha],
                 operationReference: compOperation,
               })
             ).status,
             "AlreadyRecorded",
           );
-          await assert.rejects(comp(manager, {}), { code: "ITEM_COMP_ALREADY_COMPED" });
-          // Every record is kept (append-only).
+          await assert.rejects(comp(manager, { orderItemReferences: [mocha] }), {
+            code: "ITEM_COMP_ALREADY_COMPED",
+          });
+          // Round 1's dish 50 % off (the guests waited too long): tax in proportion, half up.
+          const discountNet = (first.net * 50n + 50n) / 100n;
+          const share = (amount) => (amount * discountNet * 2n + first.net) / (2n * first.net);
+          const discountMinor = discountNet + share(first.tax) + share(first.fee);
+          const discounted = await comp(manager, {
+            kind: "Percent",
+            percent: 50,
+            reasonCode: "LONG_WAIT",
+          });
+          assert.deepEqual(
+            discounted.reductions.map((entry) => [entry.kind, entry.percent, entry.amountMinor]),
+            [["Percent", 50, discountMinor.toString()]],
+          );
           await assert.rejects(
             admin.query("UPDATE rms_ordering.order_item_price_reduction SET total_minor=1"),
             /append-only/u,
@@ -1347,25 +1419,41 @@ async function journey(ending) {
           );
           assert.deepEqual(
             await rows(
-              "SELECT action_code,actor_reference::text AS actor,reason_code FROM platform_audit.audit_record WHERE action_code IN ('ORDER_ITEM_COMPED','ORDER_ITEM_DISCOUNTED')",
+              "SELECT action_code,actor_reference::text AS actor,reason_code FROM platform_audit.audit_record WHERE action_code IN ('ORDER_ITEM_COMPED','ORDER_ITEM_DISCOUNTED') ORDER BY action_code",
             ),
-            [{ action_code: "ORDER_ITEM_DISCOUNTED", actor: id(0x701), reason_code: "LONG_WAIT" }],
+            [
+              { action_code: "ORDER_ITEM_COMPED", actor: id(0x701), reason_code: "QUALITY" },
+              { action_code: "ORDER_ITEM_DISCOUNTED", actor: id(0x701), reason_code: "LONG_WAIT" },
+            ],
           );
-          // The bill drops by exactly what was comped; the dishes stay on it with what came off.
+          // The bill: round 2 owes nothing, round 1 less its discount; the dishes stay on it.
           const owedNow = await bill();
           assert.equal(owedNow.consistent, true);
-          assert.equal(owedNow.owed.totalMinor, (round1Minor - compMinor).toString());
-          assert.deepEqual(owedNow.rounds[0].items[0].reduction, {
-            kind: "Percent",
-            percent: 50,
-            amountMinor: compMinor.toString(),
+          assert.deepEqual(
+            owedNow.rounds.map((round) => [round.roundNumber, round.totalMinor]),
+            [
+              [1, (round1Minor - discountMinor).toString()],
+              [2, "0"],
+            ],
+          );
+          assert.equal(owedNow.owed.totalMinor, (round1Minor - discountMinor).toString());
+          assert.deepEqual(owedNow.rounds[1].items[0].reduction, {
+            kind: "Comp",
+            percent: null,
+            amountMinor: second.total.toString(),
           });
-          // The table pays what is left (cash, 15 % tip on the bill as it now is).
+          // The table pays what is left, in cash; round 2 is never a payment line.
           const paid = await settleWith(server, {});
           assert.equal(paid.status, "Recorded");
-          assert.equal(paid.bill.settlement.roundsMinor, (round1Minor - compMinor).toString());
-          // A paid table is refunded instead: no comp after payment (the paid check comes before
-          // the dish's own; a fresh dish of the paid table is refused the same way).
+          assert.equal(paid.bill.settlement.roundsMinor, (round1Minor - discountMinor).toString());
+          assert.deepEqual(
+            await rows(
+              "SELECT r.order_batch_id::text AS batch FROM rms_payment.dining_table_settlement_round r JOIN rms_payment.dining_table_settlement s ON s.settlement_id=r.settlement_id WHERE s.order_id=$1",
+              [orderReference],
+            ),
+            [{ batch: R1.batch.orderBatchReference }],
+          );
+          // A paid table is refunded instead: no comp after payment.
           await assert.rejects(comp(manager, {}), { code: "ITEM_COMP_ALREADY_PAID" });
           // The Order is settled at its priced total less the comps (closing can follow).
           const settledNow = await transactions().run(async (tx) => {
@@ -1380,7 +1468,7 @@ async function journey(ending) {
               ...scope,
               authorize: async () => true,
             })(tx, { orderReference, observedAt: at });
-            assert.equal(priced.pricedTotalMinor, round1Minor - compMinor);
+            assert.equal(priced.pricedTotalMinor, round1Minor - discountMinor);
             return assessOrderSettlement({
               currencyCode: "CAD",
               pricedOrderTotalMinor: priced.pricedTotalMinor,
@@ -1395,42 +1483,40 @@ async function journey(ending) {
             });
           });
           assert.equal(settledNow.classification, "Settled");
-          // Reports: the dishes as sold, the comp on its own, and they add up to the payment
-          // (the report's match), read as the pilot API role.
-          const sales = await transactions().run((tx) =>
-            createPostgresStoreSalesOrderSource({
-              ...scope,
-              locale: "en-CA",
-              authorize: async () => true,
-            })(tx, [orderReference]),
-          );
-          const round1Lines = sales[0].batches.find(
-            (batch) => batch.orderBatchReference === R1.batch.orderBatchReference,
-          ).items;
+          // Reports (as the reports page composes them, under the pilot API role): both dishes sold
+          // at their price, the two comps on their own line, net sales and tax less them, and the
+          // takings still the settlement's (no sales suppression).
+          const report = await salesReport();
+          const compsMinor = second.net + discountNet;
           assert.equal(
-            round1Lines.reduce((sum, line) => sum + line.compMinor, 0n),
-            discountNet,
+            report.summary.grossSalesMinor,
+            (first.subtotal + second.subtotal).toString(),
           );
+          assert.equal(report.summary.compCount, 2);
+          assert.equal(report.summary.compsMinor, compsMinor.toString());
           assert.equal(
-            round1Lines.reduce((sum, line) => sum + line.subtotalMinor, 0n),
-            items1.reduce((sum, item) => sum + item.pricing.subtotal.amountMinor, 0n),
+            report.summary.netSalesMinor,
+            (first.subtotal + second.subtotal - compsMinor).toString(),
           );
-          const ledger = await transactions().run((tx) =>
-            createPostgresStoreSalesPaymentLedger({
-              scope: { ...ownerScope, providerAccountReference: provider, environment: "Test" },
-              authorize: async () => true,
-            })(tx, {
-              startsAt: time(-minutes(120)),
-              endsAt: new Date(Date.now() + 1000).toISOString(),
-              observedAt: new Date(Date.now() + 1000).toISOString(),
-            }),
-          );
-          const line = ledger.payments.find(
-            (payment) => payment.orderBatchReference === R1.batch.orderBatchReference,
+          assert.equal(report.summary.unmatchedPaymentCount, 0);
+          assert.equal(report.reconciliation.matchesSettlement, true);
+          // Every dish sold is in the item rows (the comped one too), with its comp.
+          assert.equal(
+            report.items.reduce((sum, row) => sum + row.quantitySold, 0),
+            items1[0].quantity + items2[0].quantity,
           );
           assert.equal(
-            round1Lines.reduce((sum, item) => sum + item.totalMinor, 0n),
-            line.orderAllocationMinor,
+            report.items.reduce((sum, row) => sum + BigInt(row.compsMinor), 0n),
+            compsMinor,
+          );
+          // …and in the export.
+          const [header, line] = storeSalesReportCsv(report, "summary").slice(1).split("\r\n");
+          const columns = header.split(",");
+          const values = line.split(",");
+          assert.equal(values[columns.indexOf("comps_and_discounts_count")], "2");
+          assert.equal(
+            values[columns.indexOf("comps_and_discounts_by_manager")],
+            (Number(compsMinor) / 100).toFixed(2),
           );
           // The day-end settlement's line: what managers took off today, by dish.
           const decided = await transactions().run((tx) =>
@@ -1439,10 +1525,10 @@ async function journey(ending) {
               endsAt: new Date(Date.now() + 1000).toISOString(),
             }),
           );
-          assert.equal(decided.length, 1);
+          assert.equal(decided.length, 2);
           assert.equal(
             decided.reduce((sum, record) => sum + record.totalMinor, 0n),
-            compMinor,
+            second.total + discountMinor,
           );
           // Another Store of the Brand sees none of it (row security).
           assert.deepEqual(
@@ -1456,6 +1542,92 @@ async function journey(ending) {
                 },
               ),
             ),
+            [],
+          );
+        }
+        /**
+         * Round 2 came off the bill (S3); the manager comps round 1's dishes in full. The table owes
+         * nothing: no payment is taken, the Order is settled at zero and the table closes as usual,
+         * and the comped dishes are still in the day's sales.
+         */
+        async function compedWholeEnding() {
+          await cookAndServeRound1();
+          const comped = await comp(manager, {
+            orderItemReferences: items1.map((item) => String(item.orderItemReference)),
+          });
+          assert.equal(comped.status, "Recorded");
+          const owedNow = await bill();
+          assert.equal(owedNow.consistent, true);
+          assert.equal(owedNow.owed.totalMinor, "0");
+          // Nothing to pay: a payment is refused, and nothing stops the table from closing.
+          await assert.rejects(settleWith(server, {}), { code: "TABLE_CHECKOUT_NOTHING_OWED" });
+          const closePlan = await createMerchantDiningTableClosePlan({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            resolveRefundConfiguration: async () => ({
+              providerAccountReference: provider,
+              environment: "Test",
+            }),
+          })({
+            ...as(server),
+            query: { orderReference, diningSessionReference: sessionReference },
+          });
+          assert.deepEqual(closePlan.closeBlockers, []);
+          // A server closes it as the Tables page does: the Order, then the table.
+          const progress = await createMerchantDiningOrderProgress({
+            persistence: persistenceOf(server),
+            locale: "en-CA",
+            authentication: server.authentication,
+          })({ ...as(server), query: { orderReference } });
+          const closed = await createMerchantDiningOrderCloseCommand({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            resolveConfiguration: createDiningOrderCloseConfiguration({
+              ...ownerScope,
+              providerAccountReference: provider,
+              environment: "Test",
+            }),
+            newReference: fresh,
+            audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+          })({
+            ...as(server),
+            command: {
+              orderReference,
+              operationReference: fresh(),
+              expectedOrderVersion: progress.currentOrderVersion,
+              expectedClosureVersion: progress.closureVersion,
+              reasonCode: "ORDER_COMPLETED",
+            },
+          });
+          assert.equal(closed.status, "Committed");
+          assert.equal((await closing(server, "Finalize")).phase, "Closed");
+          const [table] = await rows(
+            "SELECT t.table_snapshot->>'blockReasonCode' AS reason FROM rms_dining.dining_table t JOIN rms_dining.dining_session s ON s.table_id=t.table_id WHERE s.session_id=$1",
+            [sessionReference],
+          );
+          assert.deepEqual(table, { reason: "CLEANING" });
+          // The comped dishes are still sold in the day's report, all of it comped, nothing taken.
+          const report = await salesReport();
+          const subtotal = items1.reduce(
+            (sum, item) => sum + item.pricing.subtotal.amountMinor,
+            0n,
+          );
+          assert.equal(report.summary.grossSalesMinor, subtotal.toString());
+          assert.equal(report.summary.compsMinor, subtotal.toString());
+          assert.equal(report.summary.netSalesMinor, "0");
+          assert.equal(report.summary.collectedMinor, "0");
+          // Round 2's dish, taken off the bill before the table paid, was never sold or charged:
+          // it is not a line of the sale.
+          const [sale] = await transactions().run((tx) =>
+            createPostgresStoreSalesOrderSource({
+              ...scope,
+              locale: "en-CA",
+              authorize: async () => true,
+            })(tx, [orderReference]),
+          );
+          assert.deepEqual(
+            sale.batches.find((batch) => batch.orderBatchReference === R2.batch.orderBatchReference)
+              ?.items ?? [],
             [],
           );
         }
@@ -1707,6 +1879,10 @@ async function journey(ending) {
         }
         if (ending === "Comped") {
           await compedEnding();
+          return;
+        }
+        if (ending === "CompedWhole") {
+          await compedWholeEnding();
           return;
         }
         if (ending === "PaidOnline") {

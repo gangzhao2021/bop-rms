@@ -1030,3 +1030,10 @@
   font-weight: 600;
   cursor: pointer;
 }
+.workspace-page.tables-v3 .table-order-rounds__comps .table-order-rounds__owed {
+  padding-top: 4px;
+  border-top: 1px solid var(--bop-color-row-divider);
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 600;
+}
