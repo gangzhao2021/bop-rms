@@ -4,7 +4,7 @@ import path from "node:path";
 import { URL, fileURLToPath, pathToFileURL } from "node:url";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { loadPilotInstallation } from "./pilot-installation.mjs";
-import { createConfiguredPilotResources } from "./pilot-configured-resources.mjs";
+import { createBackgroundPilotResources } from "./pilot-configured-resources.mjs";
 import { createInternalKitchenQueue } from "./pilot-kitchen-queue.mjs";
 import { startPilotKitchenWorker } from "./pilot-worker-entry.mjs";
 
@@ -16,7 +16,7 @@ export function parseKitchenWorkerArguments(args) {
 export async function startConfiguredKitchenWorker({
   directory,
   loadInstallation = loadPilotInstallation,
-  createResources = createConfiguredPilotResources,
+  createResources = createBackgroundPilotResources,
   createQueue = createInternalKitchenQueue,
   startWorker = startPilotKitchenWorker,
 }) {

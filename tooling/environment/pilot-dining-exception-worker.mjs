@@ -3,7 +3,7 @@ import { URL, fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { loadPilotInstallation } from "./pilot-installation.mjs";
-import { createConfiguredPilotResources } from "./pilot-configured-resources.mjs";
+import { createBackgroundPilotResources } from "./pilot-configured-resources.mjs";
 import process from "node:process";
 import { startWorkerRuntime } from "../../apps/worker/dist/index.js";
 import {
@@ -84,7 +84,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       directory,
       providerAccountReference: config.providerAccountReference,
       createResources: async () => {
-        const resources = await createConfiguredPilotResources(directory);
+        const resources = await createBackgroundPilotResources(directory);
         if (
           Object.entries(config.scope).some(
             ([key, value]) => resources.publicProfile.binding[key] !== value,

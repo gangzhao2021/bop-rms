@@ -6,6 +6,7 @@ import { createCustomerRequestAdmission } from "./pilot-customer-admission.mjs";
 import { createInternalTestResources } from "./pilot-resources.mjs";
 import { createPilotOrderMessaging } from "./pilot-order-messaging.mjs";
 import { isPilotStore } from "./pilot-environment.mjs";
+import { withTransactionConflictWait } from "./pilot-transaction-conflict-wait.mjs";
 import { loadPilotManagedSecrets } from "./pilot-secrets.mjs";
 /** Loads existing scoped configuration. Never provisions secrets, roles or business facts. */
 export async function createConfiguredPilotResources(directory) {
@@ -46,4 +47,19 @@ export async function createConfiguredPilotResources(directory) {
     await resources.close();
     throw error;
   }
+}
+
+/**
+ * WP-2423 (v15 2026-10-28 findings c, f): the resources of a background worker. Its transactions
+ * ride out a short administrative write (a menu listing holds the Publishing history table that
+ * store-calendar, settlement and other readers lock in SHARE mode) instead of failing a cycle:
+ * a conflicted transaction is rerun whole with growing waits (pilot-transaction-conflict-wait).
+ * Request handling keeps its own short retry (apps/api transaction-conflict-retry).
+ */
+export async function createBackgroundPilotResources(directory) {
+  const resources = await createConfiguredPilotResources(directory);
+  return Object.freeze({
+    ...resources,
+    transactions: withTransactionConflictWait(resources.transactions),
+  });
 }
