@@ -612,6 +612,7 @@ const tablesView = {
   canCloseSessions: true,
   canTransferHost: true,
   canCancelUnpaidRounds: true,
+  canWriteOff: true,
   items: [
     {
       tableReference: id(0x501),

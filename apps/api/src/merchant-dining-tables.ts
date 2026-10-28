@@ -33,6 +33,8 @@ const tablePageActions = Object.freeze([
   "dining.host.transfer",
   // WP-2423 abandoned payment: "Cancel unpaid round" is offered to staff who may cancel orders.
   "ordering.order.cancel",
+  // WP-2423 item 8 ①: "Guests left without paying" (a write-off) is offered to managers only.
+  "payment.refund.approve",
 ]);
 
 export function createMerchantDiningTables(options: {
@@ -92,6 +94,7 @@ export function createMerchantDiningTables(options: {
               ),
               canTransferHost: decisions.get("dining.host.transfer")?.effect === "Allow",
               canCancelUnpaidRounds: decisions.get("ordering.order.cancel")?.effect === "Allow",
+              canWriteOff: decisions.get("payment.refund.approve")?.effect === "Allow",
             });
           },
           recheck: async ({ current }) => (await current.allowed()) === true,
@@ -104,6 +107,7 @@ export function createMerchantDiningTables(options: {
             canCloseSessions,
             canTransferHost,
             canCancelUnpaidRounds,
+            canWriteOff,
           } = authority.scope;
           const authorize = () => authority.guard();
           const store = createPostgresDiningTableStore(
@@ -277,16 +281,14 @@ export function createMerchantDiningTables(options: {
               ...(paidAwaitingAcceptance.get(round.diningSessionReference) ?? []),
               { roundNumber: round.roundNumber, paidAt: round.paidAt },
             ]);
-          // WP-2423 D4: closing a table's session from this page — offered to staff who may close
-          // both the session and its Order, with the session's Order (one read for every open
-          // session) so the close dialog checks its rounds when it is opened, not on every poll.
-          const sessionOrders = canCloseSessions
-            ? await listStoreDiningSessionOrders(
-                tx as unknown as Parameters<typeof listStoreDiningSessionOrders>[0],
-                scoped,
-                activeReferences,
-              )
-            : new Map<string, string>();
+          // WP-2423 D4 / item 8 ①: each open session's Order (one read for every open session), so
+          // the list joins the table's dishes and bill and the close dialog checks its rounds when
+          // it is opened, not on every poll.
+          const sessionOrders = await listStoreDiningSessionOrders(
+            tx as unknown as Parameters<typeof listStoreDiningSessionOrders>[0],
+            scoped,
+            activeReferences,
+          );
           // WP-2423 Q28 DEC-DINING-STAFF-CALL: the open call of each open session (one read).
           const staffCalls = await merchantDiningStaffCallStore(tx, {
             tenantReference: String(current.selected.tenantReference),
@@ -308,6 +310,7 @@ export function createMerchantDiningTables(options: {
             canCloseSessions,
             canTransferHost,
             canCancelUnpaidRounds,
+            canWriteOff,
             items: Object.freeze(
               page.items.map((table) =>
                 Object.freeze({

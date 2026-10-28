@@ -92,6 +92,16 @@
   日结页读取、BFF 与导航改用该权限；日结页上的异常处理动作（未匹配扣款退款、对账跟进）仍要求 `operations.order-exception.manage`。
 - 已开通门店需安装目录 v17 并把门店角色升级到 v17（只增 Owner 与 Store Manager 各 1 项授权）；品牌模板不变。
 
+## 服务员结账与关台（2026-10-27，Owner 决定 2 与“服务员（不只是店长和老板）可以开始结账、收刷卡机和现金”）
+
+- 原状：开始结账、取消结账与关台（`dining.session.close`）以及关闭已结清的订单（`ordering.order.close`）只有 Owner 与
+  Store Manager 持有；记录刷卡机与现金收款（`dining.operate`）前台已持有，但页面只对能关台的人显示结账。
+- 决定：权限目录 v18 让前台模板也持有 `dining.session.close` 与 `ordering.order.close`。两者都拒绝任何未付的结束方式：
+  关台要求已付清或已核销、每道菜已上或已取消；关单只关已结清的订单。核销（`payment.refund.approve`）、取消与退款
+  （`ordering.order.cancel`、`payment.refund.*`）、异常任务（`task.create`）仍只给经理，免单/折让另设经理权限（第 2 段）。
+- 批准：Owner 常设批准 2026-10-14“我都批准，之后不需要问我”（门店角色升级），本项由 2026-10-27 原话授权。已开通门店需安装
+  目录 v18 并把门店角色升级到 v18（前台新增 2 项授权，另含旧名对照 `order.close`）；品牌模板不变。
+
 ## 不改变
 
 不改变 Section 88 已写明的权限名与页面契约；平台级权限（平台管理员）保持现有机制；具名厨房操作员会话的最小权限档案继续生效。

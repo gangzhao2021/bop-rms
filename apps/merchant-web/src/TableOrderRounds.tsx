@@ -8,6 +8,7 @@ import {
   unpaidCancelledBatches,
 } from "./CurrentOrderQueuePage.js";
 import { DiningRoundsProvider } from "./DiningRounds.js";
+import { PayLaterItemRemoveAction } from "./PayLaterItemRemoveAction.js";
 import { useStoreBusinessDay } from "./StoreBusinessDay.js";
 import {
   createCurrentOrderQueueClient,
@@ -103,6 +104,28 @@ export function TableOrderRounds({
           rounds={{ batches: detail.order.batches, timeZone, today }}
         />
       </DiningRoundsProvider>
+      {detail.order.batches
+        .filter((batch) => batch.unpaidRemovableItems.length > 0)
+        .map((batch) => (
+          // DEC-DINE-IN-PAY-LATER (rule 2), item 8 ①: dishes come off the unpaid bill right here.
+          <fieldset
+            key={batch.orderBatchReference}
+            disabled={locked}
+            className="order-cancel-actions table-order-rounds__remove"
+          >
+            <PayLaterItemRemoveAction
+              order={detail.order}
+              batch={batch}
+              lines={detail.lines.items}
+              csrf={csrf}
+              fetcher={fetcher}
+              onSettled={() => {
+                setServed((count) => count + 1);
+                onChanged?.();
+              }}
+            />
+          </fieldset>
+        ))}
     </section>
   );
 }

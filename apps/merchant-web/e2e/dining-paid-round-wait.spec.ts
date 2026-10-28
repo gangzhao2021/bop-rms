@@ -76,19 +76,20 @@ test("@production WP-2423: Tables says how long a paid round has waited for acce
     }),
   );
   await page.goto("/operations/dining");
+  // WP-2423 item 8 ①: the list row says how long the round has waited (red from 10 minutes);
+  // the table's panel says what to do.
   const tile = (label: string) =>
     page
-      .locator(".dining-table-tile")
+      .locator(".table-row")
       .filter({ has: page.getByRole("button", { name: `Select ${label}`, exact: true }) });
-  await expect(tile("DEMO-01")).toContainText(
-    /Round 1 paid [56] min ago · accept it on the Orders page to send it to the kitchen/u,
-  );
-  const urgent = tile("DEMO-02").locator('[data-tier="urgent"]');
-  await expect(urgent).toContainText(
+  await expect(tile("DEMO-01")).toContainText(/Paid round to accept\s*paid [56] min ago/u);
+  await expect(tile("DEMO-01")).toHaveAttribute("data-urgent", "false");
+  await expect(tile("DEMO-02")).toContainText(/paid 1[23] min ago/u);
+  await expect(tile("DEMO-02")).toHaveAttribute("data-urgent", "true");
+  await tile("DEMO-02").getByRole("button", { name: "Select DEMO-02", exact: true }).click();
+  await expect(page.getByRole("note").filter({ hasText: "and still not accepted" })).toContainText(
     /Round 2 paid 1[23] min ago and still not accepted · accept it on the Orders page now \(and 1 more paid round\)/u,
   );
-  await expect(urgent).toHaveAttribute("role", "alert");
-  await tile("DEMO-02").getByRole("button", { name: "Select DEMO-02", exact: true }).click();
   const note = page.getByRole("note").filter({ hasText: "Round 2 paid" });
   await expect(note).toBeVisible();
   // Staff words only: no references or codes.

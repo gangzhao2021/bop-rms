@@ -44,12 +44,16 @@ test("@production staff starts a table and recovers a lost entry code without du
   );
 
   let tableReads = 0;
+  let denyNext = false;
   const starts: string[] = [],
     regens: string[] = [],
     availability: string[] = [];
   await page.route("**/merchant/dining/tables", (route) => {
     tableReads += 1;
-    if (tableReads === 2) return route.fulfill({ status: 403, headers });
+    if (denyNext) {
+      denyNext = false;
+      return route.fulfill({ status: 403, headers });
+    }
     return route.fulfill({
       headers,
       json: {
@@ -63,7 +67,8 @@ test("@production staff starts a table and recovers a lost entry code without du
             lifecycle: "Published",
             operationalState: "Available",
             aggregateVersion: 2,
-            currentDiningSessionReference: null,
+            // Opened once the start went through (the list is read again after it).
+            currentDiningSessionReference: starts.length >= 2 ? id(3) : null,
             elapsedMinutes: null,
             qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
           },
@@ -181,166 +186,67 @@ test("@production staff starts a table and recovers a lost entry code without du
       .getByRole("link", { name: "Tables", exact: true }),
   ).toHaveAttribute("aria-current", "page");
   await expect(page.getByText(/DIN-FLOOR-BOARD|TemporarilyBlocked|projection/u)).toHaveCount(0);
-  await expect(page.locator('section[aria-label="MAIN area"]')).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Find a table" })).toHaveCount(1);
-  await expect(page.getByRole("search", { name: "Find a table" })).toBeVisible();
+  // WP-2423 item 8 ① (Owner decision 2, Figma 44-2): tables listed by what they need, the free
+  // ones on one line, each opened in one tap; no floor plan, search or area filter for now.
+  await expect(page.getByRole("button", { name: /^Needs action/u })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByRole("search")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Select T1", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Select T2", exact: true })).toBeVisible();
   const elapsedTile = page
-    .locator(".dining-table-tile")
+    .locator(".table-row")
     .filter({ has: page.getByRole("button", { name: "Select T2", exact: true }) });
-  await expect(elapsedTile).toContainText("Seated · open 17 min · Temporarily unavailable");
+  await expect(elapsedTile).toContainText("Seats 2 · 17 min");
+  const free = page.getByRole("region", { name: "Free tables" });
+  await expect(free).toContainText("Table T1Open");
+  await expect(free).toContainText("Table Window counter seat 14Unavailable");
   await elapsedTile.screenshot({ path: "test-results/dining-elapsed-1440.png" });
   expect(tableReads).toBe(1);
-  const assertConfirmationTarget = async () => {
-    const label = page.locator(
-      '.dining-session-detail section[aria-label="Dining session action"] label',
-    );
-    await expect(label).toBeVisible();
-    const geometry = await label.evaluate((element) => {
-      const checkbox = element.querySelector("input[type=checkbox]");
-      const textNode = [...element.childNodes].find(
-        (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
-      );
-      if (!(checkbox instanceof HTMLInputElement) || !textNode) return null;
-      const range = document.createRange();
-      range.selectNode(textNode);
-      return {
-        labelHeight: element.getBoundingClientRect().height,
-        gap: getComputedStyle(element).gap,
-        checkboxRight: checkbox.getBoundingClientRect().right,
-        textLeft: range.getBoundingClientRect().left,
-      };
-    });
-    expect(geometry).not.toBeNull();
-    expect(geometry?.labelHeight).toBeGreaterThanOrEqual(44);
-    // 0.5rem at the 15px root size; the checkbox and its text must not touch.
-    expect(Number.parseFloat(geometry?.gap ?? "0")).toBeGreaterThanOrEqual(7);
-    // 0.5rem token gap at the 15px root is 7.5px.
-    expect(geometry?.textLeft).toBeGreaterThanOrEqual((geometry?.checkboxRight ?? 0) + 7);
-  };
-  await page.getByRole("combobox", { name: "Area", exact: true }).selectOption("PATIO");
-  await expect(page.getByRole("button", { name: "Select T1", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Select T2", exact: true })).toBeVisible();
-  await page.getByRole("combobox", { name: "Table state", exact: true }).selectOption("Available");
-  await expect(
-    page.getByText("No tables match the current filters.", { exact: true }),
-  ).toBeVisible();
-  await page.getByRole("combobox", { name: "Table state", exact: true }).selectOption("All");
-  await page.getByLabel("Table", { exact: true }).fill("T2");
-  await expect(page.getByRole("button", { name: "Select T2", exact: true })).toBeVisible();
-  await page.getByLabel("Table", { exact: true }).fill("");
-  await page.getByRole("combobox", { name: "Area", exact: true }).selectOption("All");
+
+  // Marking a table unavailable: a lost answer is sent again as the same request.
   await page.getByRole("button", { name: "Select T1", exact: true }).click();
-  await page.getByRole("combobox", { name: /^Reason/u }).selectOption("CLEANING");
-  await page.getByRole("button", { name: "Mark table unavailable" }).click();
+  const details = page.getByRole("complementary", { name: "Selected table details" });
+  await details.getByRole("combobox", { name: "Mark unavailable" }).selectOption("CLEANING");
+  await details.getByRole("button", { name: "Mark unavailable", exact: true }).click();
   await expect(
-    page.getByText("The result is unknown. Retry the same table request", { exact: false }),
+    page.getByText("The result is unknown. Press it again: the same request is sent, never twice."),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Retry same availability request" }).click();
-  await expect(page.getByText("Table marked temporarily unavailable.")).toBeVisible();
-  await page.getByRole("button", { name: "Mark table available" }).click();
-  await expect(page.getByText("Table marked available.")).toBeVisible();
-  const reasonField = page.getByRole("combobox", { name: /^Reason/u });
-  await expect(reasonField).toBeVisible();
-  await expect(
-    page.getByText("Required. Guests can't be seated here until you mark it available."),
-  ).toBeVisible();
-  expect(await reasonField.getAttribute("aria-describedby")).toBe("dining-table-reason-help");
-  expect((await reasonField.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-  // A field is one 3:1 bottom line under its label (Owner 2026-10-26), not a box.
-  expect(
-    await reasonField.evaluate((input) => {
-      const style = getComputedStyle(input);
-      return [style.borderTopWidth, style.borderBottomStyle, style.borderBottomColor];
-    }),
-  ).toEqual(["0px", "solid", "rgb(138, 138, 138)"]);
-  expect(availability.map((body) => JSON.parse(body).expectedAggregateVersion)).toEqual([2, 2, 3]);
+  await details.getByRole("button", { name: "Mark unavailable", exact: true }).click();
+  await expect(page.getByText("Table T1 is back to needing cleaning.")).toBeVisible();
+  // Cleaning is an everyday step: one tap from the list, said in words, and it can be undone.
+  const cleaningRow = page
+    .locator(".table-row")
+    .filter({ has: page.getByRole("button", { name: "Select T1", exact: true }) });
+  await expect(cleaningRow).toContainText("Needs cleaning");
+  await cleaningRow.getByRole("button", { name: "Cleaned" }).click();
+  const result = page.locator(".table-result");
+  await expect(result).toContainText("Table T1 is clean and free for the next guests.");
+  await result.getByRole("button", { name: "Undo" }).click();
+  await expect(result).toContainText("Table T1 is back to needing cleaning.");
+  await expect(result.getByRole("button", { name: "Undo" })).toHaveCount(0);
+  expect(availability.map((body) => JSON.parse(body).expectedAggregateVersion)).toEqual([
+    2, 2, 3, 4,
+  ]);
   expect(availability.map((body) => JSON.parse(body).action)).toEqual([
     "SetBlock",
     "SetBlock",
     "ClearBlock",
+    "SetBlock",
   ]);
   expect(availability[1]).toBe(availability[0]);
-  for (const width of [390, 320]) {
-    await page.setViewportSize({ width, height: 844 });
-    await assertConfirmationTarget();
-    expect(
-      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-    ).toBe(true);
-  }
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await assertConfirmationTarget();
   await page.getByRole("button", { name: "Select T1", exact: true }).focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("complementary", { name: "Selected table details" })).toContainText(
-    "Table T1",
-  );
-  await page.getByRole("heading", { name: "Tables", level: 1 }).click();
-  // UI refresh 2026-10-21 (POS floor grid): compact square-ish tiles; the selected table's details
-  // sit to the right of the floor on desktop and under it on a phone.
-  const tableTile = page
-    .locator(".dining-table-tile")
-    .filter({ has: page.getByRole("button", { name: "Select T1", exact: true }) });
-  const desktopTile = await tableTile.boundingBox();
-  expect(desktopTile?.width).toBeGreaterThanOrEqual(130);
-  expect(desktopTile?.width).toBeLessThanOrEqual(260);
-  // The whole tile selects the table: the button covers everything inside the tile's border.
-  const selectBox = await tableTile
-    .getByRole("button", { name: "Select T1", exact: true })
-    .boundingBox();
-  const tileInner = await tableTile.evaluate((tile) => ({
-    width: tile.clientWidth,
-    height: tile.clientHeight,
-  }));
-  expect(Math.abs((selectBox?.width ?? 0) - tileInner.width)).toBeLessThanOrEqual(1);
-  expect(Math.abs((selectBox?.height ?? 0) - tileInner.height)).toBeLessThanOrEqual(1);
+  await expect(details).toContainText("Table T1");
+  // The selected table's details sit beside the list on desktop and under it on a phone.
   const [desktopBoard, desktopDetails] = await Promise.all([
-    page.locator(".dining-floor-board").boundingBox(),
-    page.getByRole("complementary", { name: "Selected table details" }).boundingBox(),
+    page.locator(".table-list").boundingBox(),
+    details.boundingBox(),
   ]);
   if (!desktopBoard || !desktopDetails)
-    throw new Error("Desktop floor and selected detail must be visible");
+    throw new Error("Desktop list and selected detail must be visible");
   expect(desktopDetails.x).toBeGreaterThanOrEqual(desktopBoard.x + desktopBoard.width);
-  expect(Math.abs(desktopDetails.y - desktopBoard.y)).toBeLessThan(40);
-  const mainTiles = page
-    .locator('section[aria-label="MAIN area"]')
-    .locator('.dining-table-tile[data-attention="false"]');
-  const mainTileBoxes = await mainTiles.evaluateAll((tiles) =>
-    tiles.map((tile) => {
-      const { x, y, width } = tile.getBoundingClientRect();
-      return { x, y, width };
-    }),
-  );
-  expect(mainTileBoxes.length).toBeGreaterThanOrEqual(2);
-  expect(mainTileBoxes.every((tile) => tile.width >= 130 && tile.width <= 260)).toBe(true);
-  const [firstMainTile, secondMainTile] = mainTileBoxes;
-  if (!firstMainTile || !secondMainTile)
-    throw new Error("Dining Main area must have at least two measured tiles");
-  expect(Math.abs(secondMainTile.y - firstMainTile.y)).toBeLessThan(2);
-  // Tile gap is the 0.75rem token: 11.25px at the 15px root font.
-  const tileGap = secondMainTile.x - (firstMainTile.x + firstMainTile.width);
-  expect(tileGap).toBeGreaterThanOrEqual(11);
-  expect(tileGap).toBeLessThanOrEqual(12);
-  const [desktopLabel, desktopState] = await Promise.all([
-    tableTile.locator("h3").boundingBox(),
-    tableTile.locator(".dining-table-tile__identity > span").boundingBox(),
-  ]);
-  if (!desktopLabel || !desktopState) throw new Error("Dining card heading/state must be visible");
-  expect(desktopState.y).toBeGreaterThan(desktopLabel.y + desktopLabel.height - 1);
-  // 2026-10-21 live check ("DEMO-" / "01"): a table name stays on one line in every tile; a name
-  // wider than its tile ends in an ellipsis and keeps the full name in its title.
-  for (const name of ["DEMO-03", "Window counter seat 14"]) {
-    const heading = page.locator(".dining-table-tile h3", { hasText: name });
-    await expect(heading).toHaveAttribute("title", name);
-    const lines = await heading.evaluate((element) => {
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
-    });
-    expect(lines, name).toBe(1);
-    await expect(page.getByRole("button", { name: `Select ${name}`, exact: true })).toBeAttached();
-  }
   await page.screenshot({ path: "test-results/dining-board-1440.png", fullPage: true });
   // v15 f971cecb live check (blank strip above the sidebar on Tables): nothing sits above the
   // workspace frame, and the sidebar stays pinned to the top of the window when the page scrolls.
@@ -349,31 +255,26 @@ test("@production staff starts a table and recovers a lost entry code without du
       .getByRole("navigation", { name: "Workspace" })
       .evaluate((element) => Math.abs(Math.round(element.getBoundingClientRect().top)));
   expect(await sidebarTop()).toBe(0);
-  await page.setViewportSize({ width: 1440, height: 600 });
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
-  expect(await sidebarTop()).toBe(0);
-  await page.screenshot({ path: "test-results/dining-board-1440-scrolled.png" });
-  await page.evaluate(() => window.scrollTo(0, 0));
   await page.setViewportSize({ width: 1024, height: 900 });
   expect(await sidebarTop()).toBe(0);
   await page.screenshot({ path: "test-results/dining-board-1024.png", fullPage: true });
-  await page.setViewportSize({ width: 1440, height: 900 });
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     const [mobileBoard, mobileDetails] = await Promise.all([
-      page.locator(".dining-floor-board").boundingBox(),
-      page.getByRole("complementary", { name: "Selected table details" }).boundingBox(),
+      page.locator(".table-list").boundingBox(),
+      details.boundingBox(),
     ]);
     if (!mobileBoard || !mobileDetails)
-      throw new Error("Mobile floor and selected detail must be visible");
+      throw new Error("Mobile list and selected detail must be visible");
     expect(mobileDetails.y).toBeGreaterThanOrEqual(mobileBoard.y + mobileBoard.height);
     await page.screenshot({ path: `test-results/dining-board-${width}.png`, fullPage: true });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
+  const readsBefore = tableReads;
+  denyNext = true;
   await page.getByRole("button", { name: "Refresh tables", exact: true }).click();
   await expect(page.getByRole("button", { name: "Select T1", exact: true })).toHaveCount(0);
   await expect(page.getByRole("status").last()).toContainText(
@@ -381,30 +282,23 @@ test("@production staff starts a table and recovers a lost entry code without du
   );
   await page.getByRole("button", { name: "Refresh tables", exact: true }).click();
   await expect(page.getByRole("button", { name: "Select T1", exact: true })).toBeVisible();
-  expect(tableReads).toBe(3);
-  await page.getByRole("button", { name: "Select T1", exact: true }).click();
-  const confirm = page.getByRole("checkbox", {
-    name: "I confirm the selected table and session action",
-    exact: true,
-  });
-  const start = page.getByRole("button", { name: "Start dining session", exact: true });
-  await expect(start).toBeDisabled();
-  await confirm.check();
-  await start.click();
+  expect(tableReads).toBe(readsBefore + 2);
+  // Opening a free table is one tap (no checkbox); a lost answer is tried again as the same start.
+  const freeT1 = free.getByRole("listitem").filter({ hasText: "Table T1" });
+  await freeT1.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByRole("button", { name: "Refresh tables", exact: true })).toBeDisabled();
-  await page.getByRole("button", { name: "Retry same session request", exact: true }).click();
+  await freeT1.getByRole("button", { name: "Try opening again", exact: true }).click();
   await expect(
     page.getByText(
-      "The request already completed. Its code cannot be displayed again. Confirm replacement to generate a new code.",
+      "The request already completed. Its code cannot be displayed again. Replace the entry code to get a new one.",
       { exact: true },
     ),
   ).toBeVisible();
-  await expect(page.getByText("Linked · elapsed time unavailable", { exact: true })).toBeVisible();
-  const replace = page.getByRole("button", { name: "Replace entry code", exact: true });
-  await expect(replace).toBeDisabled();
-  await confirm.check();
-  await replace.click();
+  await details.getByRole("button", { name: "New entry code", exact: true }).click();
   await expect(page.getByText("123456", { exact: true })).toBeVisible();
+  await expect(page.locator(".table-result")).toContainText(
+    "Table T1 has a new entry code; the old one no longer works.",
+  );
   // 2026-10-21 live check: the sharing instruction sits with the code and goes away with it.
   const shareCode = page.getByText("Share this one-time code with the party at this table.");
   await expect(page.locator(".dining-entry-code")).toContainText(

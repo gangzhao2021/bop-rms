@@ -65,15 +65,24 @@ test("@production Tables board shows open time in hours or days and flags long-o
     }),
   );
   await page.goto("/operations/dining");
+  // WP-2423 item 8 ①: tables are listed by what they need; a table open far too long is one.
   const tile = (label: string) =>
     page
-      .locator(".dining-table-tile")
+      .locator(".table-row, .table-free li")
       .filter({ has: page.getByRole("button", { name: "Select " + label, exact: true }) });
-  await expect(tile("T1")).toContainText("Seated · open 3 h 20 min");
-  await expect(tile("T1")).not.toContainText("Open for a long time");
-  await expect(tile("T2")).toContainText("Guests may have left · open 24 days");
-  await expect(tile("T2")).toContainText("Open for a long time — if the guests have left");
-  await expect(tile("T3")).toContainText("No table QR code. Ask a manager to print one.");
+  await expect(tile("T1")).toContainText("Seats 4 · 3 h 20 min");
+  await expect(tile("T1")).not.toContainText("Open a long time");
+  await expect(tile("T2")).toContainText("Seats 4 · 24 days");
+  await expect(tile("T2")).toContainText("Open a long time");
+  await expect(tile("T3")).toContainText("No table QR code");
+  await tile("T2").getByRole("button", { name: "Select T2", exact: true }).click();
+  await expect(page.getByRole("complementary", { name: "Selected table details" })).toContainText(
+    "Open for a long time — if the guests have left",
+  );
+  await tile("T3").getByRole("button", { name: "Select T3", exact: true }).click();
+  await expect(page.getByRole("complementary", { name: "Selected table details" })).toContainText(
+    "No table QR code. Ask a manager to print one.",
+  );
   await expect(page.getByText(/34992|min elapsed/u)).toHaveCount(0);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
@@ -177,9 +186,7 @@ test("@production Tables keeps the last tables read-only after a failed refresh 
   await context.setOffline(true);
   await expect(notice).toBeVisible({ timeout: 2_000 });
   await expect(select).toBeDisabled();
-  await expect(
-    page.getByRole("button", { name: "Start dining session", exact: true }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Open table", exact: true })).toBeDisabled();
   await context.setOffline(false);
   await expect(notice).toHaveCount(0, { timeout: 5_000 });
   await expect(select).toBeEnabled();

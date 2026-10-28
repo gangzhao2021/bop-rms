@@ -491,3 +491,431 @@
     flex-wrap: wrap;
   }
 }
+
+/*
+ * WP-2423 item 8 ① (Owner decision 2, Figma 44-2 approved 2026-10-27): the Tables page as the
+ * server's main screen in the frozen v3 visuals — white, no boxes, hairlines between rows only;
+ * tables listed by what they need (red dot: needs a person, blue: in progress, green: done), one
+ * next step per row; the selected table beside the list from 1024, under it on a phone.
+ */
+.workspace-page.tables-v3 .workspace-page__title h1 {
+  font-size: 28px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .tables-v3__quiet {
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-muted);
+  font: inherit;
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .tables-v3__quiet:hover:not(:disabled) {
+  color: var(--bop-color-accent);
+}
+.workspace-page.tables-v3 .dining-floor-summary > [data-attention="true"] {
+  color: var(--bop-color-text-default);
+}
+
+/* Tabs: words; the selected one in the accent over a 2px line; counts in grey. */
+.workspace-page.tables-v3 .table-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 24px;
+  margin: 0 0 8px;
+}
+.workspace-page.tables-v3 .table-tabs button {
+  min-height: 44px;
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 16px;
+}
+.workspace-page.tables-v3 .table-tabs button[aria-pressed="true"] {
+  border-bottom-color: var(--bop-color-accent);
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-tabs__count {
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+}
+
+/* The last step's result, with Undo where it can be taken back. */
+.workspace-page.tables-v3 .table-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin: 0 0 8px;
+  padding: 8px 0;
+  font-size: 14px;
+}
+
+.workspace-page.tables-v3 .dining-floor-layout {
+  gap: 0;
+}
+@media (min-width: 1024px) {
+  .workspace-page.tables-v3 .dining-floor-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(22rem, 44%);
+  }
+  .workspace-page.tables-v3 .table-panel {
+    border-left: 1px solid var(--bop-color-row-divider);
+    padding: 0 0 24px 28px;
+  }
+  .workspace-page.tables-v3 .table-list {
+    padding-right: 20px;
+  }
+}
+
+/* The list: group words, then rows parted by hairlines. */
+.workspace-page.tables-v3 .table-list__group {
+  margin: 16px 0 4px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-list__calm {
+  margin: 8px 0 16px;
+  color: var(--bop-color-text-muted);
+}
+.workspace-page.tables-v3 .table-rows {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-page.tables-v3 .table-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page.tables-v3 .table-row:last-child {
+  border-bottom: 0;
+}
+.workspace-page.tables-v3 .table-row[data-selected="true"] {
+  box-shadow: inset 3px 0 0 var(--bop-color-accent);
+}
+.workspace-page.tables-v3 .table-row__open {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 4px;
+  min-height: 64px;
+  padding: 12px 0 12px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workspace-page.tables-v3 .table-row__open:focus-visible {
+  outline: 2px solid var(--bop-color-accent);
+  outline-offset: -2px;
+}
+.workspace-page.tables-v3 .table-row__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+.workspace-page.tables-v3 .table-row__name strong {
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.workspace-page.tables-v3 :is(.table-row__meta, .table-row__detail) {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .table-row__status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .table-row__status::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--table-dot, var(--bop-color-border-control));
+  transform: translateY(-1px);
+}
+.workspace-page.tables-v3 [data-tone="action"] {
+  --table-dot: var(--bop-color-danger-mark);
+}
+.workspace-page.tables-v3 [data-tone="progress"] {
+  --table-dot: var(--bop-color-accent);
+}
+.workspace-page.tables-v3 [data-tone="done"] {
+  --table-dot: var(--bop-color-success-mark);
+}
+.workspace-page.tables-v3 .table-row__next {
+  flex: none;
+}
+
+/* Buttons: the accent fill for the one next step, accent words for the rest. */
+.workspace-page.tables-v3 :is(.table-row__step, .table-panel__primary) {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.workspace-page.tables-v3 .table-panel__primary {
+  min-height: 44px;
+}
+.workspace-page.tables-v3 :is(.table-row__text-step, .table-panel__text-step) {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.workspace-page.tables-v3
+  :is(
+    .table-row__step,
+    .table-panel__primary,
+    .table-row__text-step,
+    .table-panel__text-step
+  ):disabled {
+  opacity: 0.45;
+}
+
+/* Free tables: one line of names, each opened in one tap. */
+.workspace-page.tables-v3 .table-free h3 {
+  margin: 16px 0 4px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-free ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-page.tables-v3 .table-free li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.workspace-page.tables-v3 .table-free__name {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+}
+.workspace-page.tables-v3 .table-free__name[aria-pressed="true"] {
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-free__why {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+
+/* The selected table: no box; its title, then dishes, checkout and close, then the rest. */
+.workspace-page.tables-v3 .table-panel {
+  gap: 16px;
+  padding: 16px 0 24px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.workspace-page.tables-v3 .table-panel__head h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-panel__meta,
+.workspace-page.tables-v3 .table-panel__notice {
+  margin: 4px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .table-panel__notice[data-tier="urgent"] {
+  color: var(--bop-color-danger);
+}
+.workspace-page.tables-v3 .table-panel__more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page.tables-v3 .table-panel__block {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+.workspace-page.tables-v3 .table-panel__block .dining-table-reason {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .table-panel__block select {
+  min-height: 44px;
+  font: inherit;
+}
+
+/* Checkout on the panel: tip and method as chips, the selected one a dark pill. */
+.workspace-page.tables-v3 :is(.table-checkout__tip, .table-checkout__method) label {
+  position: relative;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+/* The radio covers its chip (invisible), so a tap anywhere on the chip chooses it. */
+.workspace-page.tables-v3 :is(.table-checkout__tip, .table-checkout__method) input[type="radio"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.workspace-page.tables-v3
+  :is(.table-checkout__tip, .table-checkout__method)
+  label:has(input[type="radio"]:checked) {
+  background: var(--bop-color-text-default);
+  color: var(--bop-color-surface-default);
+}
+.workspace-page.tables-v3
+  :is(.table-checkout__tip, .table-checkout__method)
+  label:has(input[type="radio"]:focus-visible) {
+  outline: 2px solid var(--bop-color-accent);
+  outline-offset: 2px;
+}
+.workspace-page.tables-v3 .table-checkout__confirm {
+  display: grid;
+  gap: 12px;
+  padding: 16px 0;
+  border-top: 1px solid var(--bop-color-row-divider);
+  border-bottom: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page.tables-v3 .table-checkout__confirm h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-checkout__confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 16px;
+}
+.workspace-page.tables-v3 .table-checkout__confirm .table-checkout__secondary {
+  color: var(--bop-color-accent);
+  text-decoration: none;
+}
+
+@media (max-width: 1023px) {
+  .workspace-page.tables-v3 .table-panel {
+    border-top: 1px solid var(--bop-color-row-divider);
+    margin-top: 16px;
+  }
+}
+@media (max-width: 767px) {
+  .workspace-page.tables-v3 .table-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 0 20px;
+  }
+  .workspace-page.tables-v3 .table-tabs button {
+    flex: none;
+  }
+}
+
+/* v3 inside the table panel: buttons are accent words unless they are the one next step, and
+   amounts sit at the right edge of their row (older Tables rules drew boxes and two columns). */
+.workspace-page.tables-v3 .table-panel button:not([data-variant="destructive"]) {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-panel button:disabled {
+  opacity: 0.45;
+}
+.workspace-page.tables-v3 .table-panel :is(.table-checkout__primary, .table-panel__primary) {
+  justify-self: start;
+  min-height: 44px;
+  padding: 0 24px;
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+}
+.workspace-page.tables-v3 .table-panel .table-checkout__primary:disabled {
+  opacity: 1;
+  background: var(--bop-color-surface-raised, #f2f2f2);
+  color: var(--bop-color-text-muted);
+}
+.workspace-page.tables-v3 .table-panel .table-checkout__secondary {
+  color: var(--bop-color-danger);
+  text-decoration: none;
+}
+.workspace-page.tables-v3 .table-panel :is(.table-checkout__tip, .table-checkout__method) label {
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .table-panel .table-checkout__totals > div,
+.workspace-page.tables-v3 .table-panel .table-receipt dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-block: 4px;
+  border-bottom: 0;
+}
+.workspace-page.tables-v3 .table-panel .table-checkout__total dt {
+  color: var(--bop-color-text-default);
+}
+.workspace-page.tables-v3 .table-panel .table-checkout__total {
+  font-size: 16px;
+}
+.workspace-page.tables-v3 .table-tabs__count {
+  margin-left: 4px;
+}
+.workspace-page.tables-v3 .table-row[data-urgent="true"] .table-row__detail {
+  color: var(--bop-color-danger);
+}
+@media (min-width: 1024px) {
+  .workspace-page.tables-v3 .table-panel {
+    padding: 0 0 24px 28px;
+    border-left: 1px solid var(--bop-color-row-divider);
+  }
+}

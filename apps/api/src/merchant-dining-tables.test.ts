@@ -417,6 +417,13 @@ it("WP-2423 abandoned payment: lists each party's unpaid guest rounds and who ma
     effect: action === "ordering.order.cancel" ? "Deny" : "Allow",
   }));
   expect((await f.read(f.input)).canCancelUnpaidRounds).toBe(false);
+  // WP-2423 item 8 ①: only a manager who may approve refunds is offered a write-off.
+  f.authorizeAction.mockImplementation(async (action?: string) => ({
+    effect: action === "payment.refund.approve" ? "Deny" : "Allow",
+  }));
+  expect((await f.read(f.input)).canWriteOff).toBe(false);
+  f.authorizeAction.mockImplementation(async () => ({ effect: "Allow" }));
+  expect((await f.read(f.input)).canWriteOff).toBe(true);
   // A payment that just arrived (Payment recorded it, Ordering not yet): no longer unpaid, so no
   // "cancel unpaid round" for it. One Payment read for every listed round.
   mock.list.mockResolvedValueOnce(tables);
@@ -462,15 +469,17 @@ it("WP-2423 D4: gives each open session's phase, version and Order to staff who 
   expect(f.authorizeAction).toHaveBeenCalledWith("order.close");
   expect(mock.sessionOrders.mock.calls[0]?.[2]).toEqual([id(5)]);
   expect(view.items[0]?.session).toEqual({ phase: "Active", version: 3, orderReference: id(40) });
-  // Without the closing permission (Front of House): nothing to close with, no Order looked up.
+  // Without the closing permission: nothing to close with, but the table's Order is still listed
+  // (item 8 ①: the list shows each table's dishes and bill).
   f.authorizeAction.mockImplementation(async (action?: unknown) => ({
     effect: action === "dining.session.close" ? "Deny" : "Allow",
   }));
   mock.sessionOrders.mockClear();
+  mock.sessionOrders.mockResolvedValueOnce(new Map([[id(5), id(40)]]));
   const denied = await f.read(f.input);
   expect(denied.canCloseSessions).toBe(false);
-  expect(mock.sessionOrders).not.toHaveBeenCalled();
-  expect(denied.items[0]?.session).toEqual({ phase: "Active", version: 3, orderReference: null });
+  expect(mock.sessionOrders).toHaveBeenCalledOnce();
+  expect(denied.items[0]?.session).toEqual({ phase: "Active", version: 3, orderReference: id(40) });
 });
 
 it("WP-2423: offers the Order host section only to staff who may transfer the host", async () => {

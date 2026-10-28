@@ -49,6 +49,8 @@ async function floor(page: Page, session = { phase: "Active", version: 19 }) {
       json: {
         canOperateTables: false,
         canCloseSessions: true,
+        // Closing out a departed table's rounds cancels and refunds them: a manager.
+        canCancelUnpaidRounds: true,
         items: [
           {
             tableReference: id(1),
@@ -290,9 +292,8 @@ test("@production a manager closes out a table whose guests left: rounds cancell
   for (const body of cancels) expect(body.reasonCode).toBe("GUEST_LEFT");
 
   // The table then closes as usual; its fully cancelled order is closed as cancelled.
-  await dialog.getByRole("checkbox", { name: "The guests at table T2 have left" }).check();
   await dialog.getByRole("button", { name: "Close table T2", exact: true }).click();
-  await expect(page.getByText("Table T2 is closed and free for the next party.")).toBeVisible();
+  await expect(page.getByText("Table T2 is closed. Clean it, then mark it cleaned.")).toBeVisible();
   expect(closing.map((body) => body.action ?? body.reasonCode)).toEqual([
     "Begin",
     "ORDER_CANCELLED",
@@ -392,7 +393,6 @@ test("@production B759: a table left in Closing names what still stops it, then 
   const close = dialog.getByRole("button", { name: "Close table T2", exact: true });
   await expect(close).toBeVisible();
   await expect(dialog).not.toContainText("can't be closed yet");
-  await dialog.getByRole("checkbox", { name: "The guests at table T2 have left" }).check();
   await close.click();
   const alert = dialog.getByRole("alert");
   await expect(alert).toContainText("The table wasn't closed yet:");
@@ -408,9 +408,8 @@ test("@production B759: a table left in Closing names what still stops it, then 
       fullPage: true,
     });
   }
-  await dialog.getByRole("checkbox", { name: "The guests at table T2 have left" }).check();
   await dialog.getByRole("button", { name: "Close table T2", exact: true }).click();
-  await expect(page.getByText("Table T2 is closed and free for the next party.")).toBeVisible();
+  await expect(page.getByText("Table T2 is closed. Clean it, then mark it cleaned.")).toBeVisible();
   // No new Begin: the order close, then Finalize at the Closing session's version.
   expect(closing.map((body) => body.action ?? body.reasonCode)).toEqual([
     "ORDER_CANCELLED",

@@ -52,8 +52,13 @@
  * day-end settlement (Section 88 PAY-RECONCILIATION: takings, refunds, card machine and the Provider
  * statement check) apart from handling exceptions, so reading the day's money never implies
  * resolving payment or order exceptions. Owner and Store Manager hold it.
+ * v18 (2026-10-27, WP-2423 item 8 ①, Owner decision 2 and "服务员（不只是店长和老板）可以开始结账、收刷卡机
+ * 和现金"): the Tables page is the server's main screen. Front of House also holds
+ * dining.session.close (start and cancel a table's checkout, close a table that is paid or written
+ * off) and ordering.order.close (close that table's settled Order). Both refuse anything unpaid:
+ * write-offs, cancellations, refunds and comps keep their own manager permissions.
  */
-export const storePermissionCatalogVersion = 17 as const;
+export const storePermissionCatalogVersion = 18 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -544,6 +549,9 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
       "dining.table.read",
       "dining.session.manage",
       "dining.item.serve",
+      // v18 (WP-2423 item 8 ①): start checkout and close a paid table and its settled Order.
+      "dining.session.close",
+      "ordering.order.close",
       "inventory.waste.record",
       // v10 (WP-2423 Q17): sold out for today and back in stock.
       "catalog.sku.sold_out.mark",

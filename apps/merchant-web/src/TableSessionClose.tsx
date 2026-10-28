@@ -176,7 +176,10 @@ export function TableSessionClose({
   onRefresh,
   fetcher,
   timeZone,
+  canResolveGuestsLeft = true,
 }: {
+  /** WP-2423 item 8 ①: may close out a departed table's rounds (cancel or refund: a manager). */
+  readonly canResolveGuestsLeft?: boolean;
   /** The Store's time zone, for when an unpaid round is cancelled automatically. */
   readonly timeZone?: string | undefined;
   readonly table: StaffDiningTable;
@@ -193,7 +196,6 @@ export function TableSessionClose({
   const [check, setCheck] = useState<Check>(
     session.orderReference === null ? { kind: "Ready", progress: null } : { kind: "Checking" },
   );
-  const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
   const [attempt, setAttempt] = useState(0);
@@ -255,6 +257,7 @@ export function TableSessionClose({
         csrf={csrf}
         timeZone={timeZone}
         locked={locked || submitting}
+        canResolve={canResolveGuestsLeft}
         attempt={attempt}
         onPlan={setPlan}
         onResolved={() => {
@@ -273,7 +276,7 @@ export function TableSessionClose({
 
   const close = async () => {
     if (pending.current || check.kind !== "Ready" || blockers.length > 0 || planBlocks) return;
-    if (outcome !== "Unknown" && (!confirmed || locked)) return;
+    if (outcome !== "Unknown" && locked) return;
     const controller = new AbortController();
     pending.current = controller;
     setSubmitting(true);
@@ -308,7 +311,6 @@ export function TableSessionClose({
       // Refused: start over from what the table shows now. Steps already done (ordering stopped)
       // are read back from the table, so pressing Close again continues from there.
       steps.current = { done: new Set() };
-      setConfirmed(false);
       setOutcome(
         code === "PermissionDenied"
           ? "Denied"
@@ -375,23 +377,13 @@ export function TableSessionClose({
         <>
           <p>
             {t(
-              "When the guests have left and everything is paid, close the table. Ordering at this table stops, its order is closed and the table is free for the next party.",
+              "When the guests have left, close the table: its order is closed and it waits for cleaning.",
             )}
           </p>
-          {outcome === "Unknown" ? null : (
-            <label>
-              <input
-                type="checkbox"
-                checked={confirmed}
-                disabled={submitting || locked}
-                onChange={(event) => setConfirmed(event.target.checked)}
-              />
-              {t("The guests at table {stableLabel} have left", { stableLabel: table.stableLabel })}
-            </label>
-          )}
           <button
             type="button"
-            disabled={submitting || (outcome !== "Unknown" && (!confirmed || locked))}
+            className="table-panel__primary"
+            disabled={submitting || (outcome !== "Unknown" && locked)}
             onClick={() => void close()}
           >
             {submitting

@@ -166,7 +166,13 @@ export function TableGuestsLeft({
   onPlan,
   onResolved,
   fetcher,
+  canResolve = true,
 }: {
+  /**
+   * WP-2423 item 8 ①: closing out rounds cancels and refunds them (money), so only a manager is
+   * offered it; a server sees what is still open and whom to ask.
+   */
+  readonly canResolve?: boolean;
   readonly orderReference: string;
   readonly diningSessionReference: string;
   readonly tableLabel: string;
@@ -233,6 +239,14 @@ export function TableGuestsLeft({
     );
   const plan = load.plan;
   if (plan.rounds.length === 0) return null;
+  if (!canResolve)
+    return (
+      <p role="note" className="dining-table-guests-left">
+        {t(
+          "If the guests have left, a manager closes out the open rounds (cancelling or refunding them).",
+        )}
+      </p>
+    );
   const now = Date.now();
   const actionable = plan.rounds.filter(resolvesOnConfirm);
   const partly = plan.rounds

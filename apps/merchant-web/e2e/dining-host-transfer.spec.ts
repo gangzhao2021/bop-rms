@@ -117,9 +117,7 @@ test("@production staff confirms Host transfer and retains unknown operation acr
   await expect(retry).toBeEnabled();
   await expect(page.getByRole("button", { name: "Refresh tables", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Select T1", exact: true })).toBeDisabled();
-  await expect(
-    page.getByRole("button", { name: "Replace entry code", exact: true }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "New entry code", exact: true })).toBeDisabled();
   await retry.click();
   await expect(retry).toBeEnabled();
   await expect(
