@@ -445,6 +445,22 @@ services` for the hours until opening. Guests who scan then see "isn't taking or
 6. Leave the counter tablet charging. Signing out is not required; a staff screen signs itself out
    after 30 minutes without use.
 
+## Chinese TEST demo menu (WP-2423 item 8 ③)
+
+The pilot's internal-test menu for a Cantonese and Sichuan restaurant is
+[`docs/pilot/demo-menu-chinese-test.json`](../pilot/demo-menu-chinese-test.json): 22 dishes in six
+sections, each with an English and a Chinese name, the four choice groups (spice level, portion,
+add rice, hot or iced), allergens and TEST prices (checked by
+`tooling/environment/pilot-demo-menu.test.mjs`). Prices are for testing only; keep "TEST" in the
+menu or section name while it is on the pilot.
+
+To put it on the pilot, a manager enters it on the back office's catalog pages, in this order:
+choice groups and their options with prices; each dish with its English and Chinese name,
+description, allergens, tax class, price and the choice groups listed for it; the sections in the
+order of the file; then publish the menu. Guests see each name in their phone's language; the
+kitchen shows the Chinese name first with the English one under it. Check one dish of each
+section on a phone in both languages and on the kitchen screen before testing with staff.
+
 ## Store outage procedure (WP-2423 Q9)
 
 What staff do when the store network, the pilot host, the payment Provider, the card machine or a

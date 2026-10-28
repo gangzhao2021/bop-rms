@@ -406,3 +406,31 @@ it("Warn before timeouts: reads a paid pickup's refund deadline with one small f
   );
   await expect(f.client.loadAwaitingAcceptance()).rejects.toThrow();
 });
+
+it("WP-2423 item 8 ③ decision 8: shows a dish's Chinese name first with its English name under it", async () => {
+  const f = setup();
+  const bilingual = {
+    ...item(),
+    localizedDisplayNames: { "en-CA": "Mapo tofu (TEST)", "zh-Hans-CA": "麻婆豆腐（测试）" },
+    selectedOptions: [
+      {
+        optionReference: id(40),
+        quantity: 1,
+        localizedNames: { "en-CA": "Extra spicy", "zh-Hans-CA": "特辣" },
+      },
+    ],
+  };
+  f.fetcher.mockResolvedValue(
+    response({ ...metadata, items: [bilingual, item(7)], nextCursor: null }),
+  );
+  const view = parseKitchenBoardView(await f.client.loadQueue());
+  // The screen is in English here; the kitchen still reads the Chinese name first.
+  expect(view.items[0]).toMatchObject({
+    displayName: "麻婆豆腐（测试）",
+    otherName: "Mapo tofu (TEST)",
+    selectedOptions: [{ displayName: "特辣", quantity: 1 }],
+  });
+  // A dish with only an English name shows it, with nothing under it.
+  expect(view.items[1]?.displayName).toBe("Synthetic rice");
+  expect(view.items[1]).not.toHaveProperty("otherName");
+});

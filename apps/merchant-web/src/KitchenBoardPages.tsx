@@ -993,6 +993,11 @@ function WorkCard({
             item.displayName
           )}
         </h3>
+        {item.otherName === undefined ? null : (
+          <p className="kitchen-work-item__other-name" lang="en">
+            {item.otherName}
+          </p>
+        )}
       </div>
       <div className="kitchen-work-item__state">
         <strong data-status={item.status}>
@@ -2092,6 +2097,11 @@ export function KitchenWorkItemScreen({
               <h1>{view.item.displayName}</h1>
             ) : (
               <h2>{view.item.displayName}</h2>
+            )}
+            {view.item.otherName === undefined ? null : (
+              <p className="kitchen-work-item__other-name" lang="en">
+                {view.item.otherName}
+              </p>
             )}
             <p className="kitchen-board-freshness">
               <Freshness status={view.freshnessStatus} at={view.projectedAt} />

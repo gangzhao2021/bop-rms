@@ -38,6 +38,8 @@ export interface KitchenBoardItem {
   readonly orderReference: string;
   readonly stationLabel: string | null;
   readonly displayName: string;
+  /** WP-2423 item 8 ③ (decision 8): the English name under a Chinese one, when it has both. */
+  readonly otherName?: string;
   readonly status: KitchenStatus;
   readonly requiredQuantity: number;
   readonly completedQuantity: number;
@@ -277,6 +279,8 @@ function item(value: unknown): KitchenBoardItem {
     value !== null && typeof value === "object" && Object.hasOwn(value, "customerNote");
   const hasBusinessDate =
     value !== null && typeof value === "object" && Object.hasOwn(value, "businessDate");
+  const hasOtherName =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "otherName");
   const input = closed(value, [
     "workItemReference",
     "ticketReference",
@@ -295,12 +299,14 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasCustomerNote ? ["customerNote"] : []),
     ...(hasBusinessDate ? ["businessDate"] : []),
     ...(hasExecution ? ["execution"] : []),
+    ...(hasOtherName ? ["otherName"] : []),
   ]);
   if (
     (input.stationLabel !== null &&
       (typeof input.stationLabel !== "string" || !SAFE_TEXT.test(input.stationLabel))) ||
     typeof input.displayName !== "string" ||
     !SAFE_TEXT.test(input.displayName) ||
+    (hasOtherName && (typeof input.otherName !== "string" || !SAFE_TEXT.test(input.otherName))) ||
     !["Queued", "Held", "In Progress", "Completed", "Cancelled"].includes(String(input.status)) ||
     !["None", "ReviewRequired", "Acknowledged", "Unavailable"].includes(
       String(input.allergenCue),
@@ -319,6 +325,7 @@ function item(value: unknown): KitchenBoardItem {
     orderReference: parseKitchenRouteReference(input.orderReference),
     stationLabel: input.stationLabel as string | null,
     displayName: input.displayName,
+    ...(hasOtherName ? { otherName: input.otherName as string } : {}),
     status: input.status as KitchenStatus,
     requiredQuantity: Number(input.requiredQuantity),
     completedQuantity: Number(input.completedQuantity),

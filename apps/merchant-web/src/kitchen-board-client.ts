@@ -1,4 +1,4 @@
-import { allergenName, contentName } from "./i18n/i18n.js";
+import { allergenName, kitchenDishNames } from "./i18n/i18n.js";
 import {
   KitchenBoardClientError,
   parseKitchenBoardView,
@@ -67,8 +67,8 @@ function selectedOptions(value: unknown) {
       )
         return fail();
     }
-    // Owner 2026-10-24: in the staff member's chosen language when the option has a name in it.
-    const displayName = contentName(names as Readonly<Record<string, string>>);
+    // Decision 8: Chinese when the option has a Chinese name, else the staff member's language.
+    const displayName = kitchenDishNames(names as Readonly<Record<string, string>>).displayName;
     if (typeof displayName !== "string" || !SAFE_TEXT.test(displayName)) return fail();
     return Object.freeze({ displayName, quantity: Number(option.quantity) });
   });
@@ -104,13 +104,15 @@ function allergens(value: unknown) {
 function item(value: unknown) {
   const raw = record(value),
     names = record(raw.localizedDisplayNames);
-  const displayName = contentName(names as Readonly<Record<string, string>>);
+  // WP-2423 item 8 ③ (decision 8): the Chinese name first, the English one under it.
+  const { displayName, otherName } = kitchenDishNames(names as Readonly<Record<string, string>>);
   return parseKitchenWorkItemView({
     workItemReference: raw.workItemReference,
     ticketReference: raw.ticketReference,
     orderReference: raw.orderReference,
     stationLabel: null,
     displayName,
+    ...(otherName === null ? {} : { otherName }),
     status: raw.status,
     requiredQuantity: raw.requiredQuantity,
     completedQuantity: raw.completedQuantity,

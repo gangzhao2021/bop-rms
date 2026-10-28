@@ -1,0 +1,316 @@
+{
+  "purpose": "WP-2423 item 8 ③ (Owner 2026-10-27 decision 8): a Chinese TEST demo menu for an ordinary Cantonese and Sichuan restaurant, for internal testing on the pilot. Every price is a TEST price, not a real store's.",
+  "label": "TEST — prices for testing only",
+  "currencyCode": "CAD",
+  "taxClassification": "Prepared food (TEST, 13% HST)",
+  "optionGroups": [
+    {
+      "key": "spice",
+      "names": { "en-CA": "Spice level", "zh-Hans-CA": "辣度" },
+      "rule": { "minimum": 1, "maximum": 1 },
+      "options": [
+        {
+          "key": "mild",
+          "names": { "en-CA": "Mild", "zh-Hans-CA": "微辣" },
+          "priceMinor": 0,
+          "default": true
+        },
+        { "key": "medium", "names": { "en-CA": "Medium", "zh-Hans-CA": "中辣" }, "priceMinor": 0 },
+        { "key": "hot", "names": { "en-CA": "Hot", "zh-Hans-CA": "特辣" }, "priceMinor": 0 },
+        { "key": "none", "names": { "en-CA": "Not spicy", "zh-Hans-CA": "不辣" }, "priceMinor": 0 }
+      ]
+    },
+    {
+      "key": "portion",
+      "names": { "en-CA": "Portion", "zh-Hans-CA": "份量" },
+      "rule": { "minimum": 1, "maximum": 1 },
+      "options": [
+        {
+          "key": "regular",
+          "names": { "en-CA": "Regular", "zh-Hans-CA": "标准份" },
+          "priceMinor": 0,
+          "default": true
+        },
+        {
+          "key": "large",
+          "names": { "en-CA": "Large (for 3–4)", "zh-Hans-CA": "大份（3–4 人）" },
+          "priceMinor": 600
+        }
+      ]
+    },
+    {
+      "key": "rice",
+      "names": { "en-CA": "Add rice", "zh-Hans-CA": "加饭" },
+      "rule": { "minimum": 0, "maximum": 1 },
+      "options": [
+        {
+          "key": "steamed",
+          "names": { "en-CA": "Steamed rice", "zh-Hans-CA": "加一碗白饭" },
+          "priceMinor": 250
+        },
+        {
+          "key": "fried",
+          "names": { "en-CA": "Egg fried rice", "zh-Hans-CA": "加一份蛋炒饭" },
+          "priceMinor": 550
+        }
+      ]
+    },
+    {
+      "key": "temperature",
+      "names": { "en-CA": "Hot or iced", "zh-Hans-CA": "冷热" },
+      "rule": { "minimum": 1, "maximum": 1 },
+      "options": [
+        {
+          "key": "hot",
+          "names": { "en-CA": "Hot", "zh-Hans-CA": "热" },
+          "priceMinor": 0,
+          "default": true
+        },
+        { "key": "iced", "names": { "en-CA": "Iced", "zh-Hans-CA": "冻" }, "priceMinor": 50 }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "names": { "en-CA": "Dim sum", "zh-Hans-CA": "点心" },
+      "dishes": [
+        {
+          "names": { "en-CA": "Har gow (shrimp dumplings), 4 pcs", "zh-Hans-CA": "虾饺（4 只）" },
+          "description": {
+            "en-CA": "Steamed shrimp dumplings in a thin wrapper.",
+            "zh-Hans-CA": "薄皮鲜虾，现蒸。"
+          },
+          "priceMinor": 788,
+          "allergens": ["CRUSTACEAN_MOLLUSC", "WHEAT_TRITICALE"],
+          "options": []
+        },
+        {
+          "names": { "en-CA": "Siu mai (pork and shrimp), 4 pcs", "zh-Hans-CA": "烧卖（4 只）" },
+          "description": {
+            "en-CA": "Open-top pork and shrimp dumplings.",
+            "zh-Hans-CA": "猪肉鲜虾烧卖。"
+          },
+          "priceMinor": 728,
+          "allergens": ["CRUSTACEAN_MOLLUSC", "WHEAT_TRITICALE", "EGG"],
+          "options": []
+        },
+        {
+          "names": { "en-CA": "BBQ pork buns, 3 pcs", "zh-Hans-CA": "叉烧包（3 个）" },
+          "description": {
+            "en-CA": "Soft steamed buns with Cantonese barbecue pork.",
+            "zh-Hans-CA": "广式叉烧馅，松软蒸包。"
+          },
+          "priceMinor": 688,
+          "allergens": ["WHEAT_TRITICALE", "SOY", "SESAME"],
+          "options": []
+        },
+        {
+          "names": {
+            "en-CA": "Pork and chive dumplings, 8 pcs",
+            "zh-Hans-CA": "韭菜猪肉饺（8 只）"
+          },
+          "description": {
+            "en-CA": "Pan-fried or boiled, with black vinegar.",
+            "zh-Hans-CA": "配镇江香醋。"
+          },
+          "priceMinor": 1088,
+          "allergens": ["WHEAT_TRITICALE", "SOY"],
+          "options": []
+        }
+      ]
+    },
+    {
+      "names": { "en-CA": "Cold dishes", "zh-Hans-CA": "凉菜" },
+      "dishes": [
+        {
+          "names": { "en-CA": "Smashed cucumber with garlic", "zh-Hans-CA": "拍黄瓜" },
+          "description": {
+            "en-CA": "Garlic, vinegar and a little chili oil.",
+            "zh-Hans-CA": "蒜香醋汁，少许红油。"
+          },
+          "priceMinor": 788,
+          "allergens": ["SOY", "SESAME"],
+          "options": ["spice"]
+        },
+        {
+          "names": { "en-CA": "Mouth-watering chicken", "zh-Hans-CA": "口水鸡" },
+          "description": {
+            "en-CA": "Poached chicken in Sichuan chili oil and peppercorn.",
+            "zh-Hans-CA": "川味红油，花椒香麻。"
+          },
+          "priceMinor": 1488,
+          "allergens": ["SOY", "SESAME", "PEANUT"],
+          "options": ["spice"]
+        }
+      ]
+    },
+    {
+      "names": { "en-CA": "Sichuan", "zh-Hans-CA": "川菜" },
+      "dishes": [
+        {
+          "names": { "en-CA": "Mapo tofu", "zh-Hans-CA": "麻婆豆腐" },
+          "description": {
+            "en-CA": "Silken tofu with minced pork in a numbing, spicy sauce.",
+            "zh-Hans-CA": "嫩豆腐、肉末，麻辣鲜香。"
+          },
+          "priceMinor": 1588,
+          "allergens": ["SOY", "WHEAT_TRITICALE"],
+          "options": ["spice", "rice"]
+        },
+        {
+          "names": { "en-CA": "Kung pao chicken", "zh-Hans-CA": "宫保鸡丁" },
+          "description": {
+            "en-CA": "Chicken, peanuts and dried chili.",
+            "zh-Hans-CA": "鸡丁、花生、干辣椒。"
+          },
+          "priceMinor": 1788,
+          "allergens": ["PEANUT", "SOY", "WHEAT_TRITICALE"],
+          "options": ["spice", "portion", "rice"]
+        },
+        {
+          "names": { "en-CA": "Fish-fragrant eggplant", "zh-Hans-CA": "鱼香茄子" },
+          "description": {
+            "en-CA": "Braised eggplant in a sweet, sour and spicy sauce.",
+            "zh-Hans-CA": "酸甜微辣，软糯入味。"
+          },
+          "priceMinor": 1588,
+          "allergens": ["SOY", "WHEAT_TRITICALE"],
+          "options": ["spice", "rice"]
+        },
+        {
+          "names": { "en-CA": "Boiled fish in chili oil", "zh-Hans-CA": "水煮鱼" },
+          "description": {
+            "en-CA": "Basa fillet with bean sprouts in hot chili oil.",
+            "zh-Hans-CA": "巴沙鱼片、豆芽，红油麻辣。"
+          },
+          "priceMinor": 2688,
+          "allergens": ["FISH", "SOY"],
+          "options": ["spice", "portion"]
+        },
+        {
+          "names": { "en-CA": "Twice-cooked pork", "zh-Hans-CA": "回锅肉" },
+          "description": {
+            "en-CA": "Pork belly stir-fried with leeks and bean paste.",
+            "zh-Hans-CA": "五花肉、蒜苗、郫县豆瓣。"
+          },
+          "priceMinor": 1888,
+          "allergens": ["SOY", "WHEAT_TRITICALE"],
+          "options": ["spice", "rice"]
+        }
+      ]
+    },
+    {
+      "names": { "en-CA": "Cantonese", "zh-Hans-CA": "粤菜" },
+      "dishes": [
+        {
+          "names": { "en-CA": "BBQ pork (char siu)", "zh-Hans-CA": "蜜汁叉烧" },
+          "description": {
+            "en-CA": "Honey-glazed Cantonese barbecue pork.",
+            "zh-Hans-CA": "蜜汁烧烤，肥瘦相间。"
+          },
+          "priceMinor": 1888,
+          "allergens": ["SOY", "WHEAT_TRITICALE", "SESAME"],
+          "options": ["portion", "rice"]
+        },
+        {
+          "names": { "en-CA": "Sweet and sour pork", "zh-Hans-CA": "咕噜肉" },
+          "description": {
+            "en-CA": "Crispy pork with pineapple and peppers.",
+            "zh-Hans-CA": "菠萝、彩椒，酸甜酥香。"
+          },
+          "priceMinor": 1788,
+          "allergens": ["WHEAT_TRITICALE", "EGG"],
+          "options": ["portion", "rice"]
+        },
+        {
+          "names": { "en-CA": "Stir-fried gai lan with garlic", "zh-Hans-CA": "蒜蓉炒芥兰" },
+          "description": {
+            "en-CA": "Chinese broccoli with garlic.",
+            "zh-Hans-CA": "清炒芥兰，蒜香。"
+          },
+          "priceMinor": 1388,
+          "allergens": [],
+          "options": []
+        },
+        {
+          "names": { "en-CA": "Steamed fish with ginger and scallion", "zh-Hans-CA": "清蒸鲈鱼" },
+          "description": {
+            "en-CA": "Whole sea bass, about 600 g.",
+            "zh-Hans-CA": "整条鲈鱼，约 600 克。"
+          },
+          "priceMinor": 3888,
+          "allergens": ["FISH", "SOY"],
+          "options": []
+        }
+      ]
+    },
+    {
+      "names": { "en-CA": "Rice and noodles", "zh-Hans-CA": "主食" },
+      "dishes": [
+        {
+          "names": { "en-CA": "Yangzhou fried rice", "zh-Hans-CA": "扬州炒饭" },
+          "description": {
+            "en-CA": "Fried rice with shrimp, BBQ pork and egg.",
+            "zh-Hans-CA": "虾仁、叉烧、鸡蛋。"
+          },
+          "priceMinor": 1488,
+          "allergens": ["CRUSTACEAN_MOLLUSC", "EGG", "SOY"],
+          "options": ["portion"]
+        },
+        {
+          "names": { "en-CA": "Beef chow fun", "zh-Hans-CA": "干炒牛河" },
+          "description": {
+            "en-CA": "Wide rice noodles stir-fried with beef.",
+            "zh-Hans-CA": "河粉、牛肉，镬气十足。"
+          },
+          "priceMinor": 1688,
+          "allergens": ["SOY", "WHEAT_TRITICALE"],
+          "options": ["portion"]
+        },
+        {
+          "names": { "en-CA": "Dan dan noodles", "zh-Hans-CA": "担担面" },
+          "description": {
+            "en-CA": "Noodles with spicy minced pork and sesame.",
+            "zh-Hans-CA": "肉臊、芝麻酱，麻辣。"
+          },
+          "priceMinor": 1388,
+          "allergens": ["WHEAT_TRITICALE", "SESAME", "PEANUT", "SOY"],
+          "options": ["spice"]
+        },
+        {
+          "names": { "en-CA": "Steamed rice", "zh-Hans-CA": "白饭" },
+          "description": null,
+          "priceMinor": 250,
+          "allergens": [],
+          "options": []
+        }
+      ]
+    },
+    {
+      "names": { "en-CA": "Drinks", "zh-Hans-CA": "饮品" },
+      "dishes": [
+        {
+          "names": { "en-CA": "Hong Kong milk tea", "zh-Hans-CA": "港式奶茶" },
+          "description": null,
+          "priceMinor": 450,
+          "allergens": ["MILK"],
+          "options": ["temperature"]
+        },
+        {
+          "names": { "en-CA": "Lemon tea", "zh-Hans-CA": "柠檬茶" },
+          "description": null,
+          "priceMinor": 450,
+          "allergens": [],
+          "options": ["temperature"]
+        },
+        {
+          "names": { "en-CA": "Pot of jasmine tea", "zh-Hans-CA": "茉莉花茶（一壶）" },
+          "description": null,
+          "priceMinor": 300,
+          "allergens": [],
+          "options": []
+        }
+      ]
+    }
+  ]
+}
