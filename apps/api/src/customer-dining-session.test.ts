@@ -195,7 +195,17 @@ it("WP-2423 Q26: tells the table which dish the kitchen is making again, and onl
         ...round,
         items: [
           { ...ramen, beingRemade: true },
-          { ...ramen, displayName: "Gyoza", quantity: 1 },
+          {
+            ...ramen,
+            displayName: "Gyoza",
+            quantity: 1,
+            orderAgain: {
+              sellableReference: "018f0000-0000-7000-8000-000000000040",
+              optionSelections: [
+                { optionReference: "018f0000-0000-7000-8000-000000000041", quantity: 1 },
+              ],
+            },
+          },
         ],
       },
     ],
@@ -206,6 +216,12 @@ it("WP-2423 Q26: tells the table which dish the kitchen is making again, and onl
   const items = body.session.rounds[0]?.items ?? [];
   expect(items[0]).toMatchObject({ displayName: "Ramen", beingRemade: true });
   expect(items[1]).not.toHaveProperty("beingRemade");
+  // WP-2423 item 8 ③ (decision 13): "Order again" gets the public menu references only.
+  expect(items[1]?.orderAgain).toEqual({
+    sellableReference: "018f0000-0000-7000-8000-000000000040",
+    optionSelections: [{ optionReference: "018f0000-0000-7000-8000-000000000041", quantity: 1 }],
+  });
+  expect(items[0]).not.toHaveProperty("orderAgain");
   // Without a remake the field is absent, not false.
   const plain = (await (await f.send()).json()) as {
     session: { rounds: { items: Record<string, unknown>[] }[] };

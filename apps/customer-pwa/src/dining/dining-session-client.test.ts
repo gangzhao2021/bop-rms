@@ -94,6 +94,26 @@ describe("WP-2423 Q8 dining session client", () => {
     await expect(client.load()).rejects.toMatchObject({ code: "unavailable" });
   });
 
+  it("WP-2423 item 8 ③ decision 13: decodes what Order again adds, and rejects anything else", () => {
+    const reference = (n: number) => "018f8a30-0000-7000-8000-" + String(n).padStart(12, "0");
+    const again = {
+      sellableReference: reference(1),
+      optionSelections: [{ optionReference: reference(2), quantity: 1 }],
+    };
+    const withAgain = payload();
+    Object.assign(firstRound(withAgain).items[0] as object, { orderAgain: again });
+    expect(parseDiningSessionView(withAgain).rounds[0]?.items[0]?.orderAgain).toEqual(again);
+    for (const wrong of [
+      { ...again, sellableReference: "not-a-reference" },
+      { ...again, optionSelections: [{ optionReference: reference(2), quantity: 0 }] },
+      { ...again, customerNote: "spicy" },
+    ]) {
+      const value = payload();
+      Object.assign(firstRound(value).items[0] as object, { orderAgain: wrong });
+      expect(() => parseDiningSessionView(value)).toThrow();
+    }
+  });
+
   it("WP-2423 Q26: decodes a dish the kitchen is making again, and rejects any other value", () => {
     const remade = payload();
     Object.assign(firstRound(remade).items[0] as object, { beingRemade: true });

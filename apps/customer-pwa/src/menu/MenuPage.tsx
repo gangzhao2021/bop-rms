@@ -44,6 +44,8 @@ import {
   type StoreProfileLoader,
 } from "../store/store-profile-client.js";
 import { StoreInfoSection, StoreStatusStrip } from "../store/StoreIdentity.js";
+import { TableOrderedProvider, useTableOrderedCount } from "../dining/table-ordered.js";
+import type { DiningSessionClient } from "../dining/dining-session-client.js";
 import { cartLinePrices, cartLinesSubtotal } from "./menu-line-prices.js";
 import type {
   CustomerMenuClient,
@@ -350,6 +352,8 @@ export interface MenuScreenProps {
   readonly readOnlyNotice?: React.ReactNode | undefined;
   readonly cartSummary?: CartSummaryLoader | undefined;
   readonly storeProfile?: StoreProfileLoader | null | undefined;
+  /** WP-2423 item 8 ③ (decision 13): the table's rounds, for "already ordered" (tests inject). */
+  readonly tableOrderedClient?: DiningSessionClient | undefined;
   readonly search?: React.ReactNode | undefined;
   readonly searchTerm?: string | null | undefined;
   readonly state: ScreenState;
@@ -365,6 +369,7 @@ export function MenuScreen({
   readOnlyNotice,
   cartSummary,
   storeProfile,
+  tableOrderedClient,
   search,
   searchTerm,
   state,
@@ -375,104 +380,107 @@ export function MenuScreen({
   const browseFound = mode === "browse" && state.kind === "Found";
   const withCart = context !== undefined && mode !== "detail";
   return (
-    <CustomerPage
-      step="menu"
-      className={`customer-menu-screen customer-menu-screen--${mode}`}
-      store={
-        context
-          ? {
-              storeName: context.storeDisplayName,
-              brandName: context.brandDisplayName,
-              serviceMode: context.channel,
-            }
-          : undefined
-      }
-    >
-      <div className={`menu-layout${withCart ? " menu-layout--with-cart" : ""}`}>
-        <div className="menu-layout__main">
-          {mode === "browse" && context !== undefined ? (
-            <StoreStatusStrip
-              load={storeProfile === undefined ? browserStoreProfile : storeProfile}
-            />
-          ) : null}
-          {mode === "detail" ? (
-            <h2 className="sr-only">{title}</h2>
-          ) : (
-            <div className={`menu-page-intro menu-page-intro--${mode}`}>
-              {/* Figma v1: browsing shows the search field first; the journey bar already says
-                  "Menu", so its heading is for assistive technology only. */}
-              {browseFound ? (
-                <h2 className="sr-only" ref={headingRef} tabIndex={-1}>
-                  {title}
-                </h2>
-              ) : (
-                <h2 className={mode === "browse" ? "sr-only" : undefined}>{title}</h2>
-              )}
-              <nav className="menu-navigation" aria-label={t("Menu")}>
-                {mode === "search" ? (
-                  <div className="menu-navigation__links menu-navigation__links--search">
-                    <Link to="/menu">{t("← Back to menu")}</Link>
-                  </div>
-                ) : (
-                  <Link className="menu-navigation__search" to="/menu/search">
-                    {t("Search menu")}
-                  </Link>
-                )}
-              </nav>
-            </div>
-          )}
-          {/* Above the menu from the start (also while it loads), so it never pushes the menu down. */}
-          {mode !== "detail" &&
-          state.kind !== "PermissionDenied" &&
-          state.kind !== "MissingContext" ? (
-            <AllergenHelp />
-          ) : null}
-          {state.kind === "MissingContext" ? null : search}
-          {state.kind === "Found" && mode === "search" ? (
-            <section className="menu-search-summary" aria-label={t("Search results")}>
-              <h2>{t("Search results")}</h2>
-              {searchTerm ? (
-                <p>
-                  {t("Matched term ·")} {searchTerm}
-                </p>
-              ) : null}
-            </section>
-          ) : null}
-          <div className="menu-content" aria-live="polite" aria-busy={state.kind === "Loading"}>
-            <MenuState
-              key={
-                context ? `${context.publicStoreReference}:${context.channel}` : "missing-context"
+    // WP-2423 item 8 ③ (decision 13): at a table, a dish the table already ordered says so.
+    <TableOrderedProvider enabled={context?.channel === "DineIn"} client={tableOrderedClient}>
+      <CustomerPage
+        step="menu"
+        className={`customer-menu-screen customer-menu-screen--${mode}`}
+        store={
+          context
+            ? {
+                storeName: context.storeDisplayName,
+                brandName: context.brandDisplayName,
+                serviceMode: context.channel,
               }
-              channel={context?.channel}
-              detail={detail}
-              detailFamily={detailFamily}
-              headingRef={headingRef}
-              mode={mode}
-              onRetry={onRetry}
-              readOnlyNotice={readOnlyNotice}
-              state={state}
-            />
-          </div>
-          {/* An item's page adds it under the loaded item, never under the short loading notice
+            : undefined
+        }
+      >
+        <div className={`menu-layout${withCart ? " menu-layout--with-cart" : ""}`}>
+          <div className="menu-layout__main">
+            {mode === "browse" && context !== undefined ? (
+              <StoreStatusStrip
+                load={storeProfile === undefined ? browserStoreProfile : storeProfile}
+              />
+            ) : null}
+            {mode === "detail" ? (
+              <h2 className="sr-only">{title}</h2>
+            ) : (
+              <div className={`menu-page-intro menu-page-intro--${mode}`}>
+                {/* Figma v1: browsing shows the search field first; the journey bar already says
+                  "Menu", so its heading is for assistive technology only. */}
+                {browseFound ? (
+                  <h2 className="sr-only" ref={headingRef} tabIndex={-1}>
+                    {title}
+                  </h2>
+                ) : (
+                  <h2 className={mode === "browse" ? "sr-only" : undefined}>{title}</h2>
+                )}
+                <nav className="menu-navigation" aria-label={t("Menu")}>
+                  {mode === "search" ? (
+                    <div className="menu-navigation__links menu-navigation__links--search">
+                      <Link to="/menu">{t("← Back to menu")}</Link>
+                    </div>
+                  ) : (
+                    <Link className="menu-navigation__search" to="/menu/search">
+                      {t("Search menu")}
+                    </Link>
+                  )}
+                </nav>
+              </div>
+            )}
+            {/* Above the menu from the start (also while it loads), so it never pushes the menu down. */}
+            {mode !== "detail" &&
+            state.kind !== "PermissionDenied" &&
+            state.kind !== "MissingContext" ? (
+              <AllergenHelp />
+            ) : null}
+            {state.kind === "MissingContext" ? null : search}
+            {state.kind === "Found" && mode === "search" ? (
+              <section className="menu-search-summary" aria-label={t("Search results")}>
+                <h2>{t("Search results")}</h2>
+                {searchTerm ? (
+                  <p>
+                    {t("Matched term ·")} {searchTerm}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
+            <div className="menu-content" aria-live="polite" aria-busy={state.kind === "Loading"}>
+              <MenuState
+                key={
+                  context ? `${context.publicStoreReference}:${context.channel}` : "missing-context"
+                }
+                channel={context?.channel}
+                detail={detail}
+                detailFamily={detailFamily}
+                headingRef={headingRef}
+                mode={mode}
+                onRetry={onRetry}
+                readOnlyNotice={readOnlyNotice}
+                state={state}
+              />
+            </div>
+            {/* An item's page adds it under the loaded item, never under the short loading notice
               where the arriving item would push it down. */}
-          {mode === "detail" && state.kind !== "PermissionDenied" && state.kind !== "Loading" ? (
-            <AllergenHelp />
-          ) : null}
-          {/* WP-2423 item 8 ③ (decision 16): the Store's hours, holidays, address and phone. */}
-          {mode === "browse" && context !== undefined ? (
-            <StoreInfoSection
-              load={storeProfile === undefined ? browserStoreProfile : storeProfile}
+            {mode === "detail" && state.kind !== "PermissionDenied" && state.kind !== "Loading" ? (
+              <AllergenHelp />
+            ) : null}
+            {/* WP-2423 item 8 ③ (decision 16): the Store's hours, holidays, address and phone. */}
+            {mode === "browse" && context !== undefined ? (
+              <StoreInfoSection
+                load={storeProfile === undefined ? browserStoreProfile : storeProfile}
+              />
+            ) : null}
+          </div>
+          {withCart ? (
+            <MenuCart
+              load={cartSummary ?? browserCartSummary}
+              menu={state.kind === "Found" && mode === "browse" ? state.menu : null}
             />
           ) : null}
         </div>
-        {withCart ? (
-          <MenuCart
-            load={cartSummary ?? browserCartSummary}
-            menu={state.kind === "Found" && mode === "browse" ? state.menu : null}
-          />
-        ) : null}
-      </div>
-    </CustomerPage>
+      </CustomerPage>
+    </TableOrderedProvider>
   );
 }
 
@@ -826,6 +834,9 @@ function MenuItemCard({
   const allergens = compactAllergenLine(familyAllergens(family));
   const price = familyPriceText(family);
   const role = opens.presentationRole;
+  const alreadyOrdered = useTableOrderedCount(
+    family.variants.map((variant) => variant.sellable.sellableReference),
+  );
   return (
     <article
       className={`menu-card${soldOut ? " menu-card--sold-out" : ""}${photo === null ? "" : " menu-card--with-photo"}`}
@@ -870,6 +881,11 @@ function MenuItemCard({
             </span>
             {soldOut ? <span className="menu-sold-out">{t("Sold out")}</span> : null}
           </span>
+          {alreadyOrdered > 0 ? (
+            <span className="menu-card__table-ordered">
+              {t("Your table ordered {count}", { count: alreadyOrdered })}
+            </span>
+          ) : null}
           {allergens === null ? null : <span className="menu-card__allergens">{allergens}</span>}
         </span>
         {photo === null ? null : (
@@ -1103,7 +1119,7 @@ function configurationIssues(
   return Object.freeze(issues);
 }
 
-function ConfigureStatus({
+export function ConfigureStatus({
   state,
   controller,
 }: {
@@ -1243,6 +1259,11 @@ export function SellableConfigurator({
   );
   const [quantity, setQuantity] = useState(1);
   const [note, setNote] = useState("");
+  const alreadyOrdered = useTableOrderedCount(
+    (variants ?? []).length > 0
+      ? (variants ?? []).map((variant) => variant.sellable.sellableReference)
+      : [sellable.sellableReference],
+  );
   const [selected, setSelected] = useState<ReadonlyMap<string, number>>(() =>
     defaultMenuOptionSelections(sellable.optionRules),
   );
@@ -1406,6 +1427,11 @@ export function SellableConfigurator({
         </p>
       ) : null}
       <ConfigureStatus state={state} controller={controller} />
+      {alreadyOrdered > 0 ? (
+        <p className="configure-table-ordered" role="note">
+          {t("This table already ordered {count} of these.", { count: alreadyOrdered })}
+        </p>
+      ) : null}
       <div className="configure-actions">
         <div className="configure-stepper">
           <button

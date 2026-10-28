@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { MenuScreen, SellableConfigurator } from "./MenuPage.js";
+import { TableOrderedProvider } from "../dining/table-ordered.js";
 import type { ConfigureController } from "./configure-state.js";
 import type { MenuJourneyContext, MenuSellable, MenuView } from "./types.js";
 import { findInternalText, staticText } from "../../e2e/internal-text-patterns.js";
@@ -397,6 +398,28 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).not.toContain("Staff");
     expect(html).not.toContain(configurable.optionRules[0]?.options[0]?.optionReference);
   });
+});
+
+it("WP-2423 item 8 ③ decision 13: says how many of a dish the table already ordered", () => {
+  const controller: ConfigureController = {
+    getState: () => ({ status: "idle" }),
+    retry: vi.fn(),
+    setOnline: vi.fn(),
+    submit: vi.fn(),
+    subscribe: () => () => undefined,
+  };
+  const at = (counts: ReadonlyMap<string, number>) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <TableOrderedProvider enabled={false} initial={counts}>
+          <SellableConfigurator sellable={sellable} controller={controller} />
+        </TableOrderedProvider>
+      </MemoryRouter>,
+    );
+  expect(at(new Map([[sellable.sellableReference, 2]]))).toContain(
+    "This table already ordered 2 of these.",
+  );
+  expect(at(new Map())).not.toContain("already ordered");
 });
 
 it("disables Configurator edits and add while keeping unknown-outcome retry", () => {

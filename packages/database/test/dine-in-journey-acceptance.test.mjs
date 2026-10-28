@@ -1131,6 +1131,22 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         hostTable.rounds[0].items.reduce((sum, item) => sum + item.lineTotal.amountMinor, 0n),
         roundTotal,
       );
+      // WP-2423 item 8 ③ (decision 13): read under the pilot API role, each dish carries the
+      // published menu item and options frozen with it, so "Order again" adds the same dish; the
+      // note and who added it never come along.
+      const frozen = await one(
+        "SELECT transaction_snapshot_json#>>'{catalog,sellableReference}' AS sellable,jsonb_array_length(transaction_snapshot_json#>'{catalog,options}') AS options FROM rms_ordering.order_item WHERE order_id=$1 ORDER BY order_batch_id,ordinal",
+        [orderReference],
+      );
+      for (const item of hostTable.rounds[0].items) {
+        assert.ok(frozen.some((row) => row.sellable === item.orderAgain.sellableReference));
+        assert.equal(item.orderAgain.optionSelections.length, 1);
+        assert.equal(item.orderAgain.optionSelections[0].quantity, 1);
+        assert.deepEqual(Object.keys(item.orderAgain).sort(), [
+          "optionSelections",
+          "sellableReference",
+        ]);
+      }
       const otherTable = await tableOf(tableGuestP);
       assert.deepEqual(
         roundsOf(otherTable),

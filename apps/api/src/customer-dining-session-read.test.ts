@@ -412,6 +412,30 @@ describe("WP-2423 Q26 a dish being remade at the table", () => {
   });
 });
 
+describe("WP-2423 item 8 ③ decision 13: order a dish again", () => {
+  it("gives each dish its published menu item and options, and nothing without them", () => {
+    const again = {
+      sellableReference: id(40),
+      optionSelections: [{ optionReference: id(41), quantity: 1 }],
+    };
+    const round = composeCustomerDiningSession(
+      facts({
+        batches: [
+          { orderBatchReference: id(30), submittedAt: at, items: [item(31, "Ramen", 2, 3000n)] },
+        ],
+        authorship: new Map([[id(30), false]]),
+        delivery: new Map([[id(31), { phase: "Accepted" as never, deliveredQuantity: 0 }]]),
+        paymentDeadlines: new Map(),
+        orderAgain: new Map([[id(31), again]]),
+      }),
+    ).rounds[0];
+    // Another guest's dish too: the table orders together; no note or author is given.
+    expect(round?.items[0]?.orderAgain).toEqual(again);
+    const plain = composeCustomerDiningSession(facts()).rounds[0]?.items[0];
+    expect(plain).not.toHaveProperty("orderAgain");
+  });
+});
+
 describe("WP-2423 D5 item prices before tax at the table", () => {
   // Ramen 2 × $13.27 + 13% tax = $30.00 (26.55 + 3.45); Gyoza $7.96 + $1.04 = $9.00;
   // Soda $2.21 + $0.29 = $2.50 (its round was never paid and is cancelled).
