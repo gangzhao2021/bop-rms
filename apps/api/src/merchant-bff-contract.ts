@@ -151,6 +151,7 @@ import type { createMerchantProductPublicationQuery } from "./merchant-product-p
 import type { createMerchantProductPublicationCommand } from "./merchant-product-publication-command.js";
 import type { createMerchantPriceBookHttpCommand } from "./merchant-price-book-http-command.js";
 import type { createMerchantDiningJoinState } from "./merchant-dining-join-state.js";
+import type { createMerchantDiningQrJoin } from "./merchant-dining-qr-join.js";
 import type { createMerchantDiningJoinRegenerate } from "./merchant-dining-join-regenerate.js";
 import type { createMerchantDiningHostSelection } from "./merchant-dining-host-selection.js";
 import type { createMerchantDiningHostTransfer } from "./merchant-dining-host-transfer.js";
@@ -555,6 +556,8 @@ export interface MerchantBffRouterOptions {
   readonly productPublication?: ReturnType<typeof createMerchantProductPublicationCommand>;
   readonly priceBooks?: ReturnType<typeof createMerchantPriceBookHttpCommand>;
   readonly diningJoinState?: ReturnType<typeof createMerchantDiningJoinState>;
+  /** WP-2423 item 8 ⑤: the phones at a table, pause/resume joining by QR, remove a phone. */
+  readonly diningQrJoin?: ReturnType<typeof createMerchantDiningQrJoin>;
   readonly diningJoinRegenerate?: ReturnType<typeof createMerchantDiningJoinRegenerate>;
   readonly diningHostSelection?: ReturnType<typeof createMerchantDiningHostSelection>;
   readonly diningHostTransfer?: ReturnType<typeof createMerchantDiningHostTransfer>;

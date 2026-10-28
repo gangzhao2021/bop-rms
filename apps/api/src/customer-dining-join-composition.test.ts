@@ -169,6 +169,78 @@ function fixture(offset = 0) {
     composition: createCustomerDiningJoinComposition(options),
   };
 }
+describe("WP-2423 item 8 ⑤ QR join composition", () => {
+  const qrInput = (f: ReturnType<typeof fixture>) => ({
+    sessionCredential: f.input.sessionCredential,
+    csrfCredential: f.input.csrfCredential,
+    operationReference: f.input.operationReference,
+  });
+  it("issues this guest's code for the scanned table's internal reference and joins with it", async () => {
+    const f = fixture();
+    const issue = vi.fn(async (_input: unknown, authorize: () => Promise<boolean>) => {
+      expect(await authorize()).toBe(true);
+      return {
+        status: "Issued" as const,
+        diningSessionReference: id(70),
+        joinCredential: f.input.joinCredential as never,
+      };
+    });
+    const composition = createCustomerDiningJoinComposition({ ...f.options, qr: { issue } });
+    expect(await composition.join(qrInput(f), f.request)).toEqual({
+      status: "Joined",
+      operationReference: f.input.operationReference,
+      admissionReference: id(22),
+    });
+    expect(issue).toHaveBeenCalledTimes(1);
+    expect(issue.mock.calls[0]?.[0]).toEqual({
+      guestSessionReference: id(1),
+      tableReference: id(50),
+      observedAt: at(0),
+    });
+  });
+  it("issues again when another phone replaced the code first, and stops after three", async () => {
+    const f = fixture();
+    const issue = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "Issued",
+        diningSessionReference: id(70),
+        joinCredential: "123456",
+      })
+      .mockResolvedValueOnce({
+        status: "Issued",
+        diningSessionReference: id(70),
+        joinCredential: f.input.joinCredential,
+      });
+    const composition = createCustomerDiningJoinComposition({ ...f.options, qr: { issue } });
+    expect(await composition.join(qrInput(f), f.request)).toMatchObject({ status: "Joined" });
+    expect(issue).toHaveBeenCalledTimes(2);
+    const g = fixture(1);
+    const always = vi.fn(async () => ({
+      status: "Issued" as const,
+      diningSessionReference: id(70),
+      joinCredential: "123456" as never,
+    }));
+    const stuck = createCustomerDiningJoinComposition({ ...g.options, qr: { issue: always } });
+    expect(await stuck.join(qrInput(g), g.request)).toEqual({
+      status: "Refused",
+      reason: "CodeNotAccepted",
+    });
+    expect(always).toHaveBeenCalledTimes(3);
+  });
+  it("passes a table refusal through without joining, and needs the QR port", async () => {
+    const f = fixture();
+    const issue = vi.fn(async () => ({ status: "Refused" as const, reason: "Paused" as const }));
+    const composition = createCustomerDiningJoinComposition({ ...f.options, qr: { issue } });
+    expect(await composition.join(qrInput(f), f.request)).toEqual({
+      status: "Refused",
+      reason: "Paused",
+    });
+    expect(f.store.join).not.toHaveBeenCalled();
+    await expect(f.composition.join(qrInput(f), f.request)).rejects.toMatchObject(unavailable);
+  });
+});
+
 describe("current-authorized Dining Join composition", () => {
   it("joins and recovers only a narrow receipt, preserving public/internal Table distinction", async () => {
     const f = fixture();

@@ -4724,6 +4724,87 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ① segment 2 (Owner decision 2, 2026-10-27 \"后厨已开始做的菜由经理免单或折让…经理确认并选原因，作为补偿记录；报表单列'免单/折让'，不能删除\"): a manager comps or discounts started or served dishes before the table pays; the append-only record is read by the bill, the priced total, the order list, reports and the day-end settlement"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_qr_join_issue",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN (Owner 2026-10-28 decisions 1 and 17 \"开台后这张桌的二维码直接可以加入……服务员可以把它移出这桌或暂停扫码加入\"): a guest joins an open table by its QR code (each join a recorded one-time capability), staff pause or resume QR joining and take a phone off the table"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_qr_join_issue",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN (Owner 2026-10-28 decisions 1 and 17 \"开台后这张桌的二维码直接可以加入……服务员可以把它移出这桌或暂停扫码加入\"): a guest joins an open table by its QR code (each join a recorded one-time capability), staff pause or resume QR joining and take a phone off the table"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_qr_join_control",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN (Owner 2026-10-28 decisions 1 and 17 \"开台后这张桌的二维码直接可以加入……服务员可以把它移出这桌或暂停扫码加入\"): a guest joins an open table by its QR code (each join a recorded one-time capability), staff pause or resume QR joining and take a phone off the table"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_qr_join_control",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN (Owner 2026-10-28 decisions 1 and 17 \"开台后这张桌的二维码直接可以加入……服务员可以把它移出这桌或暂停扫码加入\"): a guest joins an open table by its QR code (each join a recorded one-time capability), staff pause or resume QR joining and take a phone off the table"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_participant_removal",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN (Owner 2026-10-28 decisions 1 and 17 \"开台后这张桌的二维码直接可以加入……服务员可以把它移出这桌或暂停扫码加入\"): a guest joins an open table by its QR code (each join a recorded one-time capability), staff pause or resume QR joining and take a phone off the table"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_participant_removal",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN (Owner 2026-10-28 decisions 1 and 17 \"开台后这张桌的二维码直接可以加入……服务员可以把它移出这桌或暂停扫码加入\"): a guest joins an open table by its QR code (each join a recorded one-time capability), staff pause or resume QR joining and take a phone off the table"
+    },
+    {
+      "type": "column",
+      "schema": "rms_dining",
+      "object": "dining_participant",
+      "column": "status",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN (Owner 2026-10-28 decisions 1 and 17 \"开台后这张桌的二维码直接可以加入……服务员可以把它移出这桌或暂停扫码加入\"): a guest joins an open table by its QR code (each join a recorded one-time capability), staff pause or resume QR joining and take a phone off the table"
+    },
+    {
+      "type": "column",
+      "schema": "rms_dining",
+      "object": "dining_participant",
+      "column": "version",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN (Owner 2026-10-28 decisions 1 and 17 \"开台后这张桌的二维码直接可以加入……服务员可以把它移出这桌或暂停扫码加入\"): a guest joins an open table by its QR code (each join a recorded one-time capability), staff pause or resume QR joining and take a phone off the table"
+    },
+    {
+      "type": "column",
+      "schema": "rms_dining",
+      "object": "dining_participant",
+      "column": "participant_snapshot",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN (Owner 2026-10-28 decisions 1 and 17 \"开台后这张桌的二维码直接可以加入……服务员可以把它移出这桌或暂停扫码加入\"): a guest joins an open table by its QR code (each join a recorded one-time capability), staff pause or resume QR joining and take a phone off the table"
     }
   ]
 }

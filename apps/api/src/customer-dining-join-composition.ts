@@ -15,6 +15,7 @@ import {
   createDiningSessionService,
   parseDiningIdentityAdmission,
   parseDiningReference,
+  type DiningQrJoinIssueResult,
   type DiningSessionPorts,
   type QrTableContextEvidence,
 } from "@rms/dining";
@@ -39,6 +40,22 @@ export interface CustomerDiningJoinCompositionOptions {
       readonly observedAt: CanonicalInstant;
       readonly purpose: "DiningJoin";
     }): Promise<QrTableContextEvidence | null>;
+  };
+  /**
+   * WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN: while the scanned table is open, Dining issues the
+   * Session's next one-time code for this guest, and the ordinary Join below consumes it.
+   * `authorize` re-checks, inside the owner's transaction, that the guest is still the scanned,
+   * not-yet-joined guest at this table.
+   */
+  readonly qr?: {
+    issue(
+      input: {
+        readonly guestSessionReference: string;
+        readonly tableReference: string;
+        readonly observedAt: string;
+      },
+      authorize: () => Promise<boolean>,
+    ): Promise<DiningQrJoinIssueResult>;
   };
   readonly now: () => unknown;
 }
@@ -66,17 +83,19 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
   return Object.freeze({
     async join(input: unknown, request: CustomerDiningJoinRequestContext) {
       try {
-        const raw = readClosedRecord(input, [
-          "sessionCredential",
-          "csrfCredential",
-          "joinCredential",
-          "operationReference",
-        ]);
+        const byQr =
+          input !== null && typeof input === "object" && !Object.hasOwn(input, "joinCredential");
+        const raw = readClosedRecord(
+          input,
+          byQr
+            ? ["sessionCredential", "csrfCredential", "operationReference"]
+            : ["sessionCredential", "csrfCredential", "joinCredential", "operationReference"],
+        );
         const sessionCredential = parseGuestRawCredential(raw.sessionCredential);
         const csrfCredential = parseGuestRawCredential(raw.csrfCredential);
         const operationReference = parseGuestOperationReference(raw.operationReference);
-        const joinCredential = raw.joinCredential;
-        if (typeof joinCredential !== "string") return unavailable();
+        if (byQr && options.qr === undefined) return unavailable();
+        if (!byQr && typeof raw.joinCredential !== "string") return unavailable();
         const admit = request.abuse.admit.bind(request.abuse);
         const observedAt = now();
         const authorize = async (instant: CanonicalInstant) => {
@@ -151,12 +170,43 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
             regenerate: async () => unavailable(),
           },
         });
-        const result = await owner.joinCurrent({
-          guestSessionReference: initial.sessionReference,
-          joinCredential,
-          operationReference,
-          requestedAt: now(),
-        });
+        const joinWith = (joinCredential: string) =>
+          owner.joinCurrent({
+            guestSessionReference: initial.sessionReference,
+            joinCredential,
+            operationReference,
+            requestedAt: now(),
+          });
+        let result: Awaited<ReturnType<typeof joinWith>> | null = null;
+        if (byQr) {
+          // Another phone scanning at the same moment replaces the code just issued; the join
+          // then refuses it without writing anything, so issue again (bounded).
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            const at = now();
+            const evidence = await current(initial.sessionReference, at);
+            const issued = await options.qr!.issue(
+              {
+                guestSessionReference: String(initial.sessionReference),
+                tableReference: String(parseDiningReference(evidence.context.tableReference)),
+                observedAt: String(at),
+              },
+              async () => {
+                try {
+                  const again = await current(initial.sessionReference, now());
+                  return again.context.tableReference === evidence.context.tableReference;
+                } catch {
+                  return false;
+                }
+              },
+            );
+            if (issued.status === "Refused")
+              return Object.freeze({ status: "Refused" as const, reason: issued.reason });
+            result = await joinWith(String(issued.joinCredential));
+            if (!(result.status === "DiningJoinRefused" && result.reason === "CodeNotAccepted"))
+              break;
+          }
+        } else result = await joinWith(raw.joinCredential as string);
+        if (result === null) return unavailable();
         // A definitive Dining refusal wrote nothing; the Guest needs a new code, not a retry.
         if (result.status === "DiningJoinRefused")
           return Object.freeze({ status: "Refused" as const, reason: result.reason });

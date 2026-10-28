@@ -8,13 +8,16 @@ import {
 import type { Request, RequestHandler, Response } from "express";
 import type { CustomerDiningJoinRequestContext } from "./customer-dining-join-composition.js";
 export const customerDiningJoinRoute = "/bff/customer/dining/join";
+/** WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN: join the scanned, open table without a code. */
+export const customerDiningQrJoinRoute = "/bff/customer/dining/qr-join";
 export interface CustomerDiningJoinPort {
   join(
     input: {
       readonly operationReference: string;
       readonly sessionCredential: string;
       readonly csrfCredential: string;
-      readonly joinCredential: string;
+      /** Absent for a QR join. */
+      readonly joinCredential?: string;
     },
     context: CustomerDiningJoinRequestContext,
   ): Promise<unknown>;
@@ -51,6 +54,26 @@ const refusals = {
     status: 429,
     code: "dining_join_rate_limited",
     messageKey: "customer.dining.join_rate_limited",
+  },
+  NotOpen: {
+    status: 409,
+    code: "dining_join_table_not_open",
+    messageKey: "customer.dining.join_table_not_open",
+  },
+  CheckingOut: {
+    status: 409,
+    code: "dining_join_table_checking_out",
+    messageKey: "customer.dining.join_table_checking_out",
+  },
+  Paused: {
+    status: 409,
+    code: "dining_join_qr_paused",
+    messageKey: "customer.dining.join_qr_paused",
+  },
+  TooManyJoins: {
+    status: 429,
+    code: "dining_join_table_busy",
+    messageKey: "customer.dining.join_table_busy",
   },
 } as const;
 function refusal(value: unknown) {
@@ -121,16 +144,23 @@ export class CustomerDiningJoinHandler {
     this.#resolve = options.resolveRequestContext;
   }
   join(): RequestHandler {
+    return this.#handle(customerDiningJoinRoute);
+  }
+  qrJoin(): RequestHandler {
+    return this.#handle(customerDiningQrJoinRoute);
+  }
+  #handle(route: string): RequestHandler {
+    const byQr = route === customerDiningQrJoinRoute;
     return async (request, response) => {
       controls(response);
       let operationReference: string;
       let sessionCredential: string;
       let csrfCredential: string;
-      let joinCredential: string;
+      let joinCredential: string | null;
       try {
         if (
           request.method !== "POST" ||
-          request.originalUrl !== customerDiningJoinRoute ||
+          request.originalUrl !== route ||
           single(request, "origin") !== this.#origin ||
           single(request, "sec-fetch-site") !== "same-origin" ||
           single(request, "sec-fetch-mode") !== "cors" ||
@@ -143,9 +173,13 @@ export class CustomerDiningJoinHandler {
         const current = cookie(single(request, "cookie"), guestSessionCookie.name);
         if (current === null || current === csrfCredential) throw new Error("invalid credentials");
         sessionCredential = current;
-        joinCredential = credential(
-          readClosedRecord(request.body, ["joinCredential"]).joinCredential,
-        );
+        if (byQr) {
+          readClosedRecord(request.body, []);
+          joinCredential = null;
+        } else
+          joinCredential = credential(
+            readClosedRecord(request.body, ["joinCredential"]).joinCredential,
+          );
       } catch {
         error(response, true);
         return;
@@ -155,7 +189,9 @@ export class CustomerDiningJoinHandler {
         if (context === null || context === undefined || typeof context.abuse?.admit !== "function")
           throw new Error("missing request context");
         const value = await this.#port.join(
-          { operationReference, sessionCredential, csrfCredential, joinCredential },
+          joinCredential === null
+            ? { operationReference, sessionCredential, csrfCredential }
+            : { operationReference, sessionCredential, csrfCredential, joinCredential },
           context,
         );
         const refused = refusal(value);
