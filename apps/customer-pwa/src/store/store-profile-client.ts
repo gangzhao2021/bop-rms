@@ -44,8 +44,14 @@ export interface StoreProfile {
   } | null;
 }
 
-/** The current Store profile; null when it can't be read. */
-export type StoreProfileLoader = () => Promise<StoreProfile | null>;
+/**
+ * The current Store profile; null when it can't be read. `last` (when the loader has one) gives
+ * the most recent profile read, so a page coming back shows it at once instead of moving the
+ * menu when it arrives again; the read still follows.
+ */
+export type StoreProfileLoader = (() => Promise<StoreProfile | null>) & {
+  readonly last?: () => StoreProfile | null;
+};
 
 const localDate = /^\d{4}-\d{2}-\d{2}$/u;
 const kinds: readonly StoreDayKind[] = ["Holiday", "TemporaryClosure", "Override"];
@@ -211,6 +217,7 @@ export function createStoreProfileClient(
   now: () => number = Date.now,
 ): StoreProfileLoader {
   let shared: { readonly at: number; readonly read: Promise<StoreProfile | null> } | null = null;
+  let latest: StoreProfile | null = null;
   const read = async (): Promise<StoreProfile | null> => {
     try {
       const response = await boundedFetch(request, "/api/v1/customer/store", {
@@ -221,16 +228,18 @@ export function createStoreProfileClient(
         headers: { accept: "application/json" },
       });
       if (response.status !== 200) return null;
-      return parseStoreProfile(await response.json());
+      latest = parseStoreProfile(await response.json());
+      return latest;
     } catch {
       return null;
     }
   };
-  return () => {
+  const load = () => {
     const at = now();
     if (shared === null || at - shared.at >= STORE_PROFILE_SHARE_MS) shared = { at, read: read() };
     return shared.read;
   };
+  return Object.assign(load, { last: () => latest });
 }
 
 /** A map search for the published address; the address is the Store's own public fact. */

@@ -20,6 +20,7 @@ import { App } from "./App.js";
 import { LanguageRoot, t } from "./i18n/i18n.js";
 import { createCustomerEntryClient } from "./entry/entry-client.js";
 import "./styles.css";
+import "./customer-v3.css";
 import { ResumeScreen } from "./resume/ResumeScreen.js";
 import { orderRecoveryPath, takeOrderRecoveryToken } from "./resume/order-recovery.js";
 import { startCustomerServiceWorker } from "./pwa/register-service-worker.js";

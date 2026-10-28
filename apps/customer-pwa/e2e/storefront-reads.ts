@@ -82,6 +82,25 @@ function emptyMenu(storeReference: string) {
 }
 
 export async function routeStorefrontReads(target: Page | BrowserContext): Promise<void> {
+  // WP-2423 item 8 ③ (decision 13): a dine-in menu reads the table to say what it already
+  // ordered; a table with no rounds yet unless the spec answers itself.
+  await target.route("**/api/v1/dine-in/session**", (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { "cache-control": "no-store" },
+      contentType: "application/json",
+      body: JSON.stringify({
+        schemaVersion: 1,
+        session: {
+          tableLabel: "1",
+          orderNumber: null,
+          checkedAt: new Date().toISOString(),
+          rounds: [],
+          summary: null,
+        },
+      }),
+    }),
+  );
   await target.route("**/api/v1/customer/store", (route) =>
     route.fulfill({
       status: 200,

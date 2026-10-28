@@ -11,7 +11,7 @@ import { dayKindLabel, intervalsText, nextOpeningText, storeDayName } from "./st
 
 /** Reads the guest's Store once per mount; null until known and whenever it can't be read. */
 export function useStoreProfile(load: StoreProfileLoader | null): StoreProfile | null {
-  const [profile, setProfile] = useState<StoreProfile | null>(null);
+  const [profile, setProfile] = useState<StoreProfile | null>(() => load?.last?.() ?? null);
   useEffect(() => {
     if (load === null) return;
     let active = true;
@@ -33,7 +33,10 @@ export function useStoreProfile(load: StoreProfileLoader | null): StoreProfile |
  * "Open now · until 10:00 p.m. · last orders 9:30 p.m.", "Closed · opens at 1:00 p.m.",
  * "Closed · opens tomorrow at 11:00 a.m.", "Online ordering paused".
  */
-export function storeStatusLine(hours: NonNullable<StoreProfile["hours"]>): {
+export function storeStatusLine(
+  hours: NonNullable<StoreProfile["hours"]>,
+  { lastOrders = true }: { readonly lastOrders?: boolean } = {},
+): {
   readonly label: string;
   readonly detail: string | null;
 } {
@@ -48,7 +51,7 @@ export function storeStatusLine(hours: NonNullable<StoreProfile["hours"]>): {
             ? null
             : t("until {value1}", { value1: formatStoreLocalTime(hours.closesAt) }),
           // WP-2423 item 8 ③ (decision 16): the kitchen's last orders, when the Store set them.
-          hours.lastOrdersAt === null
+          hours.lastOrdersAt === null || !lastOrders
             ? null
             : t("last orders {time}", { time: formatStoreLocalTime(hours.lastOrdersAt) }),
         ]
@@ -141,25 +144,37 @@ function StoreDetails({ profile }: { readonly profile: StoreProfile }) {
 export function StoreStatusStrip({ load }: { readonly load: StoreProfileLoader | null }) {
   const profile = useStoreProfile(load);
   if (load === null) return null;
-  const status = profile?.hours ? storeStatusLine(profile.hours) : null;
+  const hours = profile?.hours ?? null;
+  const status = hours === null ? null : storeStatusLine(hours, { lastOrders: false });
+  // Two lines that never wrap, their height kept from the first render: the status, then the
+  // kitchen's last orders and this week's holidays when there are any.
   return (
     <section className="store-strip" aria-label={t("Store hours and address")}>
-      {profile === null || status === null ? null : (
-        <p className="store-strip__line">
-          <span
-            className={`store-strip__label store-strip__label--${profile.hours?.status.toLowerCase()}`}
-          >
-            {status.label}
-          </span>
-          {status.detail === null ? null : (
-            <span className="store-strip__detail"> · {status.detail}</span>
-          )}
-          {profile.hours?.upcoming.length ? (
-            <a className="store-strip__more" href="#store-info">
-              {t("Holidays this week")}
-            </a>
-          ) : null}
-        </p>
+      {hours === null || status === null ? null : (
+        <>
+          <p className="store-strip__line">
+            <span
+              className={`store-strip__label store-strip__label--${hours.status.toLowerCase()}`}
+            >
+              {status.label}
+            </span>
+            {status.detail === null ? null : (
+              <span className="store-strip__detail"> · {status.detail}</span>
+            )}
+          </p>
+          <p className="store-strip__line store-strip__line--more">
+            {hours.status === "Open" && hours.lastOrdersAt !== null ? (
+              <span>
+                {t("Last orders {time}", { time: formatStoreLocalTime(hours.lastOrdersAt) })}
+              </span>
+            ) : null}
+            {hours.upcoming.length > 0 ? (
+              <a className="store-strip__more" href="#store-info">
+                {t("Holidays this week")}
+              </a>
+            ) : null}
+          </p>
+        </>
       )}
     </section>
   );

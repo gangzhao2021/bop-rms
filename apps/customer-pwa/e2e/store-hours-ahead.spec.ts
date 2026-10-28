@@ -51,7 +51,8 @@ test.describe("@production the Store's hours ahead", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     const strip = page.getByRole("region", { name: "Store hours and address" });
-    await expect(strip).toContainText("Open now · until 10:00 p.m. · last orders 9:30 p.m.");
+    await expect(strip).toContainText("Open now · until 10:00 p.m.");
+    await expect(strip).toContainText("Last orders 9:30 p.m.");
     await expect(strip.getByRole("link", { name: "Holidays this week" })).toHaveAttribute(
       "href",
       "#store-info",
@@ -81,7 +82,7 @@ test.describe("@production the Store's hours ahead", () => {
     await expect(info).toContainText("未来 7 天的节假日和特殊营业时间");
     await expect(info).toContainText("节假日 · 不营业");
     await page.setViewportSize({ width: 390, height: 844 });
-    await info.screenshot({ path: "test-results/store-info-zh-390.png" });
+    await page.screenshot({ path: "test-results/store-info-zh-390.png", fullPage: true });
   });
 
   test("a guest who scans on a holiday is told so and when the Store opens next", async ({
