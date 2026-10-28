@@ -29,6 +29,7 @@ import {
 import {
   createPostgresPriceBookRepository,
   currentStorePriceBook,
+  listBrandPriceBooks,
   type CurrencyMetadataSnapshot,
 } from "@rms/pricing";
 import { listInventoryRecipeIngredientFacts } from "@rms/inventory";
@@ -547,8 +548,8 @@ export function createMerchantMenus(options: {
   const sellables = async (tx: unknown, s: Scope) => {
     const skus = await listBrandSkuChoices(ptx(tx) as never, s.owner);
     const assignment = await currentStorePriceBook(ptx(tx) as never, s.owner);
-    const prices = new Map<string, string>();
-    if (assignment !== null) {
+    const bookPrices = async (priceBookReference: string) => {
+      const found = new Map<string, string>();
       const book = await createPostgresPriceBookRepository({
         brandReference: s.owner.brandReference,
         currencyMetadata: options.currencyMetadata,
@@ -557,11 +558,22 @@ export function createMerchantMenus(options: {
         appendEvent: async () => {
           throw new Error("MENU_READ_ONLY");
         },
-      }).load(assignment.priceBookReference as never);
+      }).load(priceBookReference as never);
       for (const entry of book?.entries ?? [])
         if (entry.scopeKind === "Brand" && entry.channelCode === null && entry.orderType === null)
-          prices.set(entry.sellableReference, entry.amount.amountMinor.toString());
-    }
+          found.set(entry.sellableReference, entry.amount.amountMinor.toString());
+      return found;
+    };
+    const prices =
+      assignment === null
+        ? new Map<string, string>()
+        : await bookPrices(assignment.priceBookReference);
+    // WP-2423 item 8 ⑥: prices waiting in the open price book draft (listed with the menu).
+    const draft = (await listBrandPriceBooks(ptx(tx) as never, s.owner))
+      .filter((book) => book.lifecycle === "Draft")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    const waiting =
+      draft === undefined ? new Map<string, string>() : await bookPrices(draft.priceBookReference);
     // WP-2423 (v15 2026-10-16): customers at this Store see a menu item only where it is offered
     // here (Item availability). Sold out still counts as offered: it comes back by itself.
     const rules = await listStoreAvailabilityRules(ptx(tx), s.owner);
@@ -572,12 +584,20 @@ export function createMerchantMenus(options: {
       return {
         skuReference: sku.skuReference,
         skuCode: sku.skuCode,
+        // WP-2423 item 8 ⑥: the dish (product) the size belongs to, for its editor.
+        productReference: sku.productReference,
         productName: name(sku.productLocalizedNames, ""),
         // WP-2423 item 8 ⑥: the dish's Chinese name ("" when none), for the one-page menu.
         productNameZh: chineseOf(sku.productLocalizedNames),
         sizeName: name(sku.localizedNames, sku.skuCode),
         active: sku.active,
         priceMinor: prices.get(sku.skuReference) ?? null,
+        // A different price waiting to be listed (null: none).
+        pendingPriceMinor:
+          waiting.has(sku.skuReference) &&
+          waiting.get(sku.skuReference) !== prices.get(sku.skuReference)
+            ? (waiting.get(sku.skuReference) ?? null)
+            : null,
         offeredHere: status !== "NotOffered" && status !== "Unavailable",
       };
     });

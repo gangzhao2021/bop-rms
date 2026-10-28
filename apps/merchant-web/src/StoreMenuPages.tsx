@@ -91,6 +91,11 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   RealRecipe: t(
     "This dish has a recipe, so its allergens come from the recipe's ingredients. Change them on the recipe.",
   ),
+  OthersPending: t(
+    "Someone else's price changes are waiting to be listed. They list them first, then try again.",
+  ),
+  NoSection: t("That section is no longer on the menu. Read the menu again and choose a section."),
+  ManySizes: t("This dish has more than one size. Change it on the Products page."),
 };
 const stageText = {
   Editing: t("Draft — being edited"),

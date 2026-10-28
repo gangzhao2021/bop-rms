@@ -146,6 +146,57 @@ export function installMerchantCommerceRoutes(
     },
   );
 
+  // WP-2423 item 8 ⑥: one dish saved from the one-page menu, and "List it" for all of it. A step
+  // refused by its own page's command answers with that page's error and which page it was.
+  router.post(
+    "/commerce/one-store-dishes/command",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.oneStoreDishes) {
+        response.status(503).json({ error: "one_store_dishes_unavailable" });
+        return;
+      }
+      void options.oneStoreDishes
+        .command({ sessionCookie, csrf, body: request.body })
+        .then((result) => response.json(result))
+        .catch((error: unknown) => {
+          const code = (error as { code?: unknown } | null)?.code;
+          if (
+            !(error instanceof Error) ||
+            typeof code !== "string" ||
+            !/^Merchant[A-Za-z]+Error$/u.test(error.name)
+          ) {
+            denied(response);
+            return;
+          }
+          response
+            .status(
+              code === "PermissionDenied"
+                ? 403
+                : code === "NotFound"
+                  ? 404
+                  : code === "Invalid"
+                    ? 400
+                    : code === "Offline" || code === "Unavailable"
+                      ? 503
+                      : 409,
+            )
+            .json({ error: code, part: error.name.slice(8, -5) });
+        });
+    },
+  );
+
   // WP-2423 / DEC-CAT-PRODUCT-ADMIN: CAT-PRODUCT-LIST / CAT-PRODUCT-DETAIL reads and Product commands.
   const productStatus = {
     PermissionDenied: 403,

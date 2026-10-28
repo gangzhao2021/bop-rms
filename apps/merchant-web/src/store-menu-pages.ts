@@ -25,6 +25,12 @@ export type MenuErrorCode =
   | "NoKitchenStation"
   /** The dish has a real recipe; its allergens come from the recipe's ingredients. */
   | "RealRecipe"
+  /** WP-2423 item 8 ⑥ (saving a dish): someone else's price changes wait to be listed. */
+  | "OthersPending"
+  /** The menu no longer has the chosen section. */
+  | "NoSection"
+  /** The dish has more than one size; sizes are edited on the product page. */
+  | "ManySizes"
   | "Offline"
   | "Unavailable";
 export class MenuPageError extends Error {
@@ -196,6 +202,10 @@ export interface MenuSellable {
   readonly sizeName: string;
   readonly active: boolean;
   readonly priceMinor: string | null;
+  /** WP-2423 item 8 ⑥: the dish (product) of the size, for its editor (absent in older views). */
+  readonly productReference?: string;
+  /** WP-2423 item 8 ⑥: a different price waiting to be listed (null or absent: none). */
+  readonly pendingPriceMinor?: string | null;
   /** WP-2423: offered at the selected Store (Item availability); customers here see it only then.
    * Absent from older views: treated as offered. */
   readonly offeredHere?: boolean;
@@ -221,6 +231,30 @@ export interface DeclareDishAllergensCommand {
   readonly operationReference: string;
   readonly skuReference: string;
   readonly allergens: DishAllergens["declared"];
+}
+/** WP-2423 item 8 ⑥: one dish as the one-page menu saves it (see merchant-one-store-dishes). */
+export interface SaveDishCommand {
+  readonly action: "SaveDish";
+  readonly operationReference: string;
+  readonly menuReference: string;
+  readonly productReference: string | null;
+  readonly sectionCode: string;
+  readonly name: string;
+  readonly nameZh: string;
+  readonly description: string;
+  readonly descriptionZh: string;
+  readonly taxClassificationReference: string;
+  readonly priceMinor: string;
+  readonly choiceGroups: readonly {
+    readonly optionSetReference: string;
+    readonly options: readonly { readonly optionReference: string; readonly amountMinor: string }[];
+  }[];
+  readonly allergens: DishAllergens["declared"] | null;
+}
+export interface ListAllCommand {
+  readonly action: "ListAll";
+  readonly operationReference: string;
+  readonly menuReference: string;
 }
 export interface MenuBuilderView extends MenuViewBase {
   readonly screenId: "CAT-MENU-BUILDER";
@@ -323,6 +357,11 @@ export interface MenuClient {
   command?(command: MenuCommand): Promise<unknown>;
   /** WP-2423 item 8 ⑥: a dish's allergens declared by staff (single store). */
   declareAllergens?(command: DeclareDishAllergensCommand): Promise<unknown>;
+  /** WP-2423 item 8 ⑥: what the dish editor reads — the product (or the Brand's tax classes and
+   * choice groups for a new dish) and the choice prices. */
+  loadDish?(productReference: string | null): Promise<{ product: unknown; optionPrices: unknown }>;
+  /** WP-2423 item 8 ⑥: one dish saved, or everything listed. */
+  oneStore?(command: SaveDishCommand | ListAllCommand): Promise<unknown>;
 }
 const object = (value: unknown) =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -585,6 +624,9 @@ const codes = new Set<MenuErrorCode>([
   "RegistryMissing",
   "NoKitchenStation",
   "RealRecipe",
+  "OthersPending",
+  "NoSection",
+  "ManySizes",
 ]);
 export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): MenuClient {
   const post = async (path: string, body: unknown) => {
@@ -615,6 +657,14 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
     load: (menuReference) => post("/merchant/commerce/menus/query", { menuReference }),
     command: (command) => post("/merchant/commerce/menus/command", command),
     declareAllergens: (command) => post("/merchant/commerce/dish-allergens/command", command),
+    loadDish: async (productReference) => {
+      const [product, optionPrices] = await Promise.all([
+        post("/merchant/commerce/products/query", { productReference }),
+        post("/merchant/commerce/option-prices/query", {}),
+      ]);
+      return { product, optionPrices };
+    },
+    oneStore: (command) => post("/merchant/commerce/one-store-dishes/command", command),
   };
 }
 

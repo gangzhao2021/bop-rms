@@ -11,7 +11,7 @@ import {
   type MenuClient,
 } from "./store-menu-pages.js";
 
-type Choice = "None" | AllergenClassification;
+export type AllergenAnswer = "None" | AllergenClassification;
 
 /** The dish's declared allergens in words, for its row ("" when none are declared). */
 export function allergenSummary(dish: MenuDish, choices: readonly AllergenChoice[]): string {
@@ -59,7 +59,7 @@ export function DishAllergenEditor({
   readonly onClose: () => void;
 }) {
   const label = dish.nameZh ? `${dish.name} ${dish.nameZh}` : dish.name;
-  const [values, setValues] = useState<ReadonlyMap<string, Choice>>(
+  const [values, setValues] = useState<ReadonlyMap<string, AllergenAnswer>>(
     () =>
       new Map(dish.allergens.declared.map((a) => [a.allergenReference, a.classification] as const)),
   );
@@ -150,38 +150,14 @@ export function DishAllergenEditor({
             <Link to="/app/commerce/recipes">{t("Open recipes")}</Link>
           </p>
         ) : null}
-        <div className="dish-editor__allergens">
-          {choices.map((choice) => {
-            const value = values.get(choice.allergenReference) ?? "None";
-            const set = (next: Choice) =>
-              setValues((current) => new Map(current).set(choice.allergenReference, next));
-            const name = choice.nameZh ? `${choice.name} ${choice.nameZh}` : choice.name;
-            return (
-              <div key={choice.allergenReference} role="radiogroup" aria-label={name}>
-                <span className="dish-editor__allergen">{name}</span>
-                <span className="dish-editor__options">
-                  {(
-                    [
-                      ["None", t("No")],
-                      ["Contains", t("Contains")],
-                      ["CrossContactPossible", t("May contain")],
-                    ] as const
-                  ).map(([kind, text]) => (
-                    <label key={kind}>
-                      <input
-                        type="radio"
-                        name={`allergen-${dish.skuReference}-${choice.allergenReference}`}
-                        checked={value === kind}
-                        onChange={() => set(kind)}
-                      />
-                      {text}
-                    </label>
-                  ))}
-                </span>
-              </div>
-            );
-          })}
-        </div>
+        <AllergenFields
+          fieldKey={dish.skuReference}
+          choices={choices}
+          values={values}
+          onChange={(allergen, next) =>
+            setValues((current) => new Map(current).set(allergen, next))
+          }
+        />
       </fieldset>
       {problem ? (
         <p className="dish-editor__problem" role="alert">
@@ -197,5 +173,52 @@ export function DishAllergenEditor({
         </button>
       </div>
     </form>
+  );
+}
+
+/** One row per allergen on the Brand's list: no, contains, or may contain. */
+export function AllergenFields({
+  fieldKey,
+  choices,
+  values,
+  onChange,
+}: {
+  readonly fieldKey: string;
+  readonly choices: readonly AllergenChoice[];
+  readonly values: ReadonlyMap<string, AllergenAnswer>;
+  readonly onChange: (allergenReference: string, value: AllergenAnswer) => void;
+}) {
+  return (
+    <div className="dish-editor__allergens">
+      {choices.map((choice) => {
+        const value = values.get(choice.allergenReference) ?? "None";
+        const set = (next: AllergenAnswer) => onChange(choice.allergenReference, next);
+        const name = choice.nameZh ? `${choice.name} ${choice.nameZh}` : choice.name;
+        return (
+          <div key={choice.allergenReference} role="radiogroup" aria-label={name}>
+            <span className="dish-editor__allergen">{name}</span>
+            <span className="dish-editor__options">
+              {(
+                [
+                  ["None", t("No")],
+                  ["Contains", t("Contains")],
+                  ["CrossContactPossible", t("May contain")],
+                ] as const
+              ).map(([kind, text]) => (
+                <label key={kind}>
+                  <input
+                    type="radio"
+                    name={`allergen-${fieldKey}-${choice.allergenReference}`}
+                    checked={value === kind}
+                    onChange={() => set(kind)}
+                  />
+                  {text}
+                </label>
+              ))}
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }

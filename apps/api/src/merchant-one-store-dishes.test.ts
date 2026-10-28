@@ -1,0 +1,354 @@
+import { describe, expect, it } from "vitest";
+import {
+  createMerchantOneStoreDishes,
+  MerchantOneStoreDishError,
+  newDishCode,
+  parseOneStoreDishBody,
+} from "./merchant-one-store-dishes.js";
+
+const id = (n: number) => "01a4d800-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const MENU = id(1),
+  TAX = id(2),
+  SPICE = id(3),
+  MILD = id(4),
+  HOT = id(5),
+  PEANUT = id(6);
+
+/** In-memory stand-ins for the six pages' services (TEST-only), recording each command. */
+function fakes() {
+  const calls: string[] = [];
+  const state = {
+    product: null as null | {
+      productReference: string;
+      lifecycle: string;
+      aggregateVersion: number;
+      name: string;
+      nameZh: string;
+      taxClassificationReference: string;
+      sizes: {
+        skuReference: string;
+        skuCode: string;
+        name: string;
+        nameZh: string;
+        lifecycle: string;
+      }[];
+      optionSets: { optionSetReference: string; enabledOptionReferences: string[] }[];
+      presentation: { description: string; descriptionZh: string; photo: null };
+    },
+    books: [] as {
+      priceBookReference: string;
+      lifecycle: string;
+      createdAt: string;
+      aggregateVersion: number;
+      prices: { sellableReference: string; amountMinor: string }[];
+    }[],
+    assigned: null as string | null,
+    optionPrices: new Map<string, { price: string | null; pending: string | null }>(),
+    menu: {
+      aggregateVersion: 1,
+      versionReference: id(90),
+      name: "TEST menu",
+      sections: [
+        {
+          sectionReference: id(80),
+          code: "NOODLES",
+          name: "Noodles",
+          nameZh: "面",
+          items: [] as { skuReference: string; featured: boolean }[],
+        },
+      ],
+    },
+    published: true,
+    declared: null as unknown,
+    optionRecipes: new Map<string, { published: boolean; reviews: string[] }>(),
+  };
+  const record = (name: string, body: Record<string, unknown>) =>
+    calls.push(name + ":" + String(body.action));
+  const services = {
+    products: {
+      query: async () => ({ product: state.product }),
+      command: async ({ body }: { body: Record<string, unknown> }) => {
+        record("product", body);
+        if (body.action === "Create") {
+          state.product = {
+            productReference: id(10),
+            lifecycle: "Draft",
+            aggregateVersion: 1,
+            name: String(body.name),
+            nameZh: String(body.nameZh ?? ""),
+            taxClassificationReference: String(body.taxClassificationReference),
+            sizes: [
+              {
+                skuReference: id(11),
+                skuCode: newDishCode(String(body.operationReference).slice(0, 36)) + "-1",
+                name: String(body.name),
+                nameZh: String(body.nameZh ?? ""),
+                lifecycle: "Draft",
+              },
+            ],
+            optionSets: [],
+            presentation: { description: "", descriptionZh: "", photo: null },
+          };
+          return { product: { productReference: id(10) } };
+        }
+        const p = state.product;
+        if (p === null) throw new Error("TEST_NO_PRODUCT");
+        if (body.action === "SaveDraft") {
+          p.name = String(body.name);
+          p.nameZh = String(body.nameZh);
+          p.optionSets = body.optionSets as typeof p.optionSets;
+          p.presentation = { ...(body.presentation as typeof p.presentation) };
+          p.sizes = p.sizes.map((s) => ({ ...s, name: p.name, nameZh: p.nameZh }));
+        } else {
+          p.lifecycle = "Active";
+          p.sizes = p.sizes.map((s) => ({ ...s, lifecycle: "Active" }));
+        }
+        p.aggregateVersion += 1;
+        return {};
+      },
+    },
+    prices: {
+      query: async ({ priceBookReference }: { priceBookReference: string | null }) => {
+        if (priceBookReference === null)
+          return {
+            books: state.books,
+            storeAssignment:
+              state.assigned === null ? null : { priceBookReference: state.assigned },
+          };
+        const book = state.books.find((b) => b.priceBookReference === priceBookReference);
+        if (book === undefined) throw new Error("TEST_NO_BOOK");
+        return { book, draftAuthor: book.lifecycle === "Draft" ? id(50) : null, viewer: id(50) };
+      },
+      command: async ({ body }: { body: Record<string, unknown> }) => {
+        record("price", body);
+        if (body.action === "CreateDraft") {
+          const copy = state.books.find((b) => b.priceBookReference === body.copyFrom);
+          state.books.push({
+            priceBookReference: id(20 + state.books.length),
+            lifecycle: "Draft",
+            createdAt: "2026-10-28T20:00:00.000Z",
+            aggregateVersion: 1,
+            prices: [...(copy?.prices ?? [])],
+          });
+          return { priceBookReference: id(20 + state.books.length - 1) };
+        }
+        const book = state.books.find((b) => b.priceBookReference === body.priceBookReference);
+        if (book === undefined) throw new Error("TEST_NO_BOOK");
+        if (body.action === "SaveDraft") book.prices = body.prices as typeof book.prices;
+        if (body.action === "Publish") book.lifecycle = "Published";
+        if (body.action === "AssignToStore") state.assigned = book.priceBookReference;
+        book.aggregateVersion += 1;
+        return {};
+      },
+    },
+    optionPrices: {
+      query: async () => ({
+        products:
+          state.product === null
+            ? []
+            : [
+                {
+                  productReference: id(10),
+                  optionSets: [
+                    {
+                      bindingReference: id(30),
+                      options: [MILD, HOT].map((o) => ({
+                        optionReference: o,
+                        ruleReference: id(31),
+                        aggregateVersion: 1,
+                        priceMinor: state.optionPrices.get(o)?.price ?? null,
+                        pending:
+                          state.optionPrices.get(o)?.pending == null
+                            ? null
+                            : { priceMinor: state.optionPrices.get(o)?.pending, byViewer: true },
+                      })),
+                    },
+                  ],
+                },
+              ],
+      }),
+      command: async ({ body }: { body: Record<string, unknown> }) => {
+        record("optionPrice", body);
+        if (body.action === "SetPrices")
+          for (const p of body.prices as { optionReference: string; amountMinor: string }[])
+            state.optionPrices.set(p.optionReference, {
+              price: state.optionPrices.get(p.optionReference)?.price ?? null,
+              pending: p.amountMinor,
+            });
+        else
+          for (const [k, v] of state.optionPrices)
+            state.optionPrices.set(k, { price: v.pending ?? v.price, pending: null });
+        return {};
+      },
+    },
+    menus: {
+      query: async () => ({
+        menu: state.menu,
+        publication: state.published ? { state: "Published" } : null,
+      }),
+      command: async ({ body }: { body: Record<string, unknown> }) => {
+        record("menu", body);
+        if (body.action === "Revise") state.published = false;
+        if (body.action === "SaveDraft")
+          state.menu = { ...state.menu, sections: body.sections as typeof state.menu.sections };
+        if (body.action === "List") state.published = true;
+        state.menu.aggregateVersion += 1;
+        return { status: "Listed" };
+      },
+    },
+    dishAllergens: {
+      command: async ({ body }: { body: Record<string, unknown> }) => {
+        record("allergens", body);
+        state.declared = body.allergens;
+        return { status: "Applied" };
+      },
+    },
+    optionRecipes: {
+      query: async () => ({
+        options: [MILD, HOT].map((o) => {
+          const r = state.optionRecipes.get(o);
+          return {
+            bindingReference: id(30),
+            optionReference: o,
+            sizes: [{ skuReference: id(11) }],
+            covered: r?.published === true,
+            change:
+              r === undefined
+                ? null
+                : {
+                    changeVersionReference: id(40),
+                    version: 1,
+                    published: r.published,
+                    reviews: r.reviews.map((kind) => ({ kind, decision: "Approved" })),
+                  },
+          };
+        }),
+      }),
+      command: async ({ body }: { body: Record<string, unknown> }) => {
+        record("optionRecipe", body);
+        const o = String(body.optionReference ?? "");
+        if (body.action === "Save") state.optionRecipes.set(o, { published: false, reviews: [] });
+        for (const [k, v] of state.optionRecipes) {
+          if (body.action === "Review" && !v.published) v.reviews.push(String(body.kind));
+          if (body.action === "Publish" && v.reviews.length === 2)
+            state.optionRecipes.set(k, { ...v, published: true });
+        }
+        return {};
+      },
+    },
+  };
+  const dishes = createMerchantOneStoreDishes({
+    ...(services as unknown as Parameters<typeof createMerchantOneStoreDishes>[0]),
+    now: () => "2026-10-28T20:00:00.000Z",
+  });
+  return { calls, state, dishes };
+}
+const save = (overrides: Record<string, unknown> = {}) => ({
+  action: "SaveDish",
+  operationReference: id(100),
+  menuReference: MENU,
+  productReference: null,
+  sectionCode: "NOODLES",
+  name: "Dan dan noodles (TEST)",
+  nameZh: "担担面",
+  description: "Sesame and chili (TEST)",
+  descriptionZh: "麻酱辣油",
+  taxClassificationReference: TAX,
+  priceMinor: "1288",
+  choiceGroups: [
+    {
+      optionSetReference: SPICE,
+      options: [
+        { optionReference: MILD, amountMinor: "0" },
+        { optionReference: HOT, amountMinor: "50" },
+      ],
+    },
+  ],
+  allergens: [{ allergenReference: PEANUT, classification: "Contains" }],
+  ...overrides,
+});
+const session = { sessionCookie: "cookie", csrf: "csrf" };
+
+describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
+  it("does each page's step in order, then a retry changes nothing", async () => {
+    const { calls, state, dishes } = fakes();
+    expect(await dishes.command({ ...session, body: save() })).toMatchObject({
+      status: "Saved",
+      skuReference: id(11),
+    });
+    expect(calls).toEqual([
+      "product:Create",
+      "product:SaveDraft",
+      "product:StartSelling",
+      "price:CreateDraft",
+      "price:SaveDraft",
+      "optionPrice:SetPrices",
+      "menu:Revise",
+      "menu:SaveDraft",
+      "allergens:DeclareDish",
+      "optionRecipe:Save",
+      "optionRecipe:Review",
+      "optionRecipe:Review",
+      "optionRecipe:Publish",
+      "optionRecipe:Save",
+      "optionRecipe:Review",
+      "optionRecipe:Review",
+      "optionRecipe:Publish",
+    ]);
+    expect(state.books[0]?.prices).toEqual([{ sellableReference: id(11), amountMinor: "1288" }]);
+    expect(state.menu.sections[0]?.items).toEqual([{ skuReference: id(11), featured: false }]);
+    expect(state.product?.presentation).toMatchObject({
+      description: "Sesame and chili (TEST)",
+      descriptionZh: "麻酱辣油",
+    });
+    // The same save again: every step already holds (the allergens are re-sent; the generator
+    // answers AlreadyApplied).
+    calls.length = 0;
+    await dishes.command({ ...session, body: save({ productReference: id(10) }) });
+    expect(calls).toEqual(["allergens:DeclareDish"]);
+  });
+
+  it("lists the price book, the waiting choice prices and the menu, alone at the one store", async () => {
+    const { calls, state, dishes } = fakes();
+    await dishes.command({ ...session, body: save() });
+    calls.length = 0;
+    await dishes.command({
+      ...session,
+      body: { action: "ListAll", operationReference: id(101), menuReference: MENU },
+    });
+    expect(calls).toEqual([
+      "price:Publish",
+      "price:AssignToStore",
+      "optionPrice:Publish",
+      "menu:List",
+    ]);
+    expect(state.assigned).toBe(id(20));
+    expect(state.optionPrices.get(HOT)).toEqual({ price: "50", pending: null });
+    // A price change after listing opens a new draft copied from the charged book.
+    calls.length = 0;
+    await dishes.command({
+      ...session,
+      body: save({
+        productReference: id(10),
+        operationReference: id(102),
+        priceMinor: "1388",
+        allergens: null,
+      }),
+    });
+    expect(calls).toEqual(["price:CreateDraft", "price:SaveDraft", "menu:Revise"]);
+    expect(state.books[1]?.prices).toEqual([{ sellableReference: id(11), amountMinor: "1388" }]);
+  });
+
+  it("accepts only a whole dish or a listing", () => {
+    expect(parseOneStoreDishBody(save()).action).toBe("SaveDish");
+    for (const bad of [
+      save({ extra: 1 }),
+      save({ name: " " }),
+      save({ priceMinor: "12.88" }),
+      save({ sectionCode: "noodles" }),
+      save({ allergens: [{ allergenReference: PEANUT, classification: "None" }] }),
+      save({ choiceGroups: [{ optionSetReference: SPICE, options: [] }] }),
+    ])
+      expect(() => parseOneStoreDishBody(bad)).toThrow(MerchantOneStoreDishError);
+  });
+});

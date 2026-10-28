@@ -412,3 +412,67 @@
   flex-wrap: wrap;
   gap: 8px 16px;
 }
+
+/* WP-2423 item 8 ⑥: the dish editor on the one-page menu. */
+.one-menu .one-menu__add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 8px 0;
+}
+.one-menu .one-menu__pending-price {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.one-menu .dish-editor fieldset + fieldset,
+.one-menu .dish-editor__grid + fieldset {
+  margin-top: 16px;
+}
+.one-menu .dish-editor__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 24px;
+}
+.one-menu .dish-editor__field {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+.one-menu .dish-editor__field input,
+.one-menu .dish-editor__field select {
+  min-height: 44px;
+  font-size: 16px;
+}
+.one-menu .dish-editor__group {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.one-menu .dish-editor__group > label,
+.one-menu .dish-editor__choices label,
+.one-menu .dish-editor__confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.one-menu .dish-editor__choices {
+  margin: 0 0 0 28px;
+  padding: 0;
+  list-style: none;
+}
+.one-menu .dish-editor__choices li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+.one-menu .dish-editor__choice-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.one-menu .dish-editor__choice-price input {
+  width: 6em;
+  min-height: 44px;
+}

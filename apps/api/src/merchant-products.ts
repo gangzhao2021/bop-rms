@@ -556,9 +556,17 @@ export function createMerchantProducts(options: {
             };
           }
           const products = await listBrandProducts(reads(tx), { brandReference: s.brand });
+          // WP-2423 item 8 ⑥: a new dish on the one-page menu chooses its choice groups too.
+          const mayReadOptions = (await s.decision("catalog.option_set.read"))?.effect === "Allow";
           return {
             screenId: "CAT-PRODUCT-LIST" as const,
             ...base,
+            optionSetChoices: mayReadOptions
+              ? optionSetChoices(
+                  await listBrandOptionSets(productTx(tx), { brandReference: s.brand }),
+                  options.locale,
+                )
+              : null,
             products: products.map((product) => ({
               ...product,
               name:

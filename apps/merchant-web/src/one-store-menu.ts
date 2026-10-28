@@ -29,6 +29,10 @@ export interface MenuDish {
   /** The size's own name when it differs from the dish's (e.g. "Large"). */
   readonly sizeName: string | null;
   readonly priceMinor: string | null;
+  /** A different price waiting to be listed (null: none). */
+  readonly pendingPriceMinor: string | null;
+  /** The dish (product) of the size; null in views without it. */
+  readonly productReference: string | null;
   readonly soldOut: boolean;
   readonly hidden: boolean;
   readonly featured: boolean;
@@ -73,6 +77,8 @@ function dishOf(
     nameZh: sku.productNameZh ?? "",
     sizeName: sku.sizeName === sku.productName || sku.sizeName === "" ? null : sku.sizeName,
     priceMinor: sku.priceMinor,
+    pendingPriceMinor: sku.pendingPriceMinor ?? null,
+    productReference: sku.productReference ?? null,
     soldOut: status === "SoldOut",
     // Not offered at this Store: guests here do not see it (it stays on the menu).
     hidden: sku.offeredHere === false || status === "NotOffered" || status === "Unavailable",
@@ -141,4 +147,20 @@ export function orderKey(rows: readonly MenuSectionRow[]): string {
   return rows
     .map((row) => row.code + ":" + row.dishes.map((d) => d.skuReference).join(","))
     .join("|");
+}
+
+/** A section code for a new section from its English name (unique among the menu's codes). */
+export function newSectionCode(name: string, taken: readonly string[]): string {
+  const base =
+    name
+      .normalize("NFKD")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/gu, "-")
+      .replace(/^-+|-+$/gu, "")
+      .replace(/^[^A-Z]+/u, "")
+      .slice(0, 40) || "SECTION";
+  let code = base,
+    n = 2;
+  while (taken.includes(code)) code = `${base}-${n++}`;
+  return code;
 }

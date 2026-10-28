@@ -6154,4 +6154,31 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "本店还没有后厨档口。请先在“后厨”里设置，再申报这道菜的过敏原。",
   "This dish has a recipe, so its allergens come from the recipe's ingredients. Change them on the recipe.":
     "这道菜有配方，过敏原来自配方里的配料。请在配方里修改。",
+  "Edit {item}": "编辑 {item}",
+  "→ {price} when listed": "→ 上架后 {price}",
+  "New dish": "新建菜品",
+  "New section": "新建分类",
+  "Section added. Guests see it when the menu is listed.": "分类已添加。菜单上架后客人能看到。",
+  "English name": "英文名",
+  "English description": "英文说明",
+  "Chinese description": "中文说明",
+  "Price ($)": "价格（元）",
+  Section: "分类",
+  "Enter the price like 12.88.": "价格请写成 12.88 这样。",
+  "Choice groups": "规格组",
+  "No choice groups yet.": "还没有规格组。",
+  "Add choice groups": "添加规格组",
+  "Extra ($) for {choice}": "{choice} 加价（元）",
+  "I checked every allergen of this dish.": "我已逐项核对这道菜的过敏原。",
+  "Save dish": "保存菜品",
+  "{item} saved. Guests see it when the menu is listed.": "{item} 已保存。菜单上架后客人能看到。",
+  "The dish could not be read. Check the connection and try again.":
+    "读不到这道菜。请检查网络后重试。",
+  "Reading the dish…": "正在读取菜品…",
+  "Someone else's price changes are waiting to be listed. They list them first, then try again.":
+    "有其他人的改价还没有上架。请他们先上架，再重试。",
+  "That section is no longer on the menu. Read the menu again and choose a section.":
+    "这个分类已不在菜单上。请重新读取菜单，再选择分类。",
+  "This dish has more than one size. Change it on the Products page.":
+    "这道菜有多个规格。请在“商品”页修改。",
 });

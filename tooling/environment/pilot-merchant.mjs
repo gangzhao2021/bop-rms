@@ -79,6 +79,7 @@ import { createMerchantOpeningCount } from "../../apps/api/dist/merchant-opening
 import { createMerchantStoreReceipts } from "../../apps/api/dist/merchant-store-receipts.js";
 import { createMerchantRecipes } from "../../apps/api/dist/merchant-recipes.js";
 import { createMerchantDishAllergens } from "../../apps/api/dist/merchant-dish-allergens.js";
+import { createMerchantOneStoreDishes } from "../../apps/api/dist/merchant-one-store-dishes.js";
 import { createMerchantProducts } from "../../apps/api/dist/merchant-products.js";
 import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
 import { createMerchantPrices } from "../../apps/api/dist/merchant-prices.js";
@@ -1438,6 +1439,19 @@ export async function createInternalMerchant(
     references: { next: () => resources.credentials.reference() },
     locale: "en-CA",
   });
+  // WP-2423 item 8 ⑥: one dish saved from the one-page menu, and "List it" for all of it.
+  const oneStoreDishes =
+    prices === undefined || optionPrices === undefined || menus === undefined
+      ? undefined
+      : createMerchantOneStoreDishes({
+          products,
+          prices,
+          optionPrices,
+          menus,
+          dishAllergens,
+          optionRecipes,
+          now: () => new Date().toISOString(),
+        });
   const stockCounts = createMerchantStockCounts({
     persistence,
     authentication: service,
@@ -1753,6 +1767,7 @@ export async function createInternalMerchant(
       optionSets,
       optionPrices,
       optionRecipes,
+      ...(oneStoreDishes === undefined ? {} : { oneStoreDishes }),
       storeTax,
       taxClassifications,
       stockCounts,

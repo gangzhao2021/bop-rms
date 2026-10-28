@@ -178,6 +178,19 @@ test("@production a single store's menu on one page: search, filters, sold out, 
     version += 1;
     return route.fulfill({ headers, json: { ok: true } });
   });
+  // "List it" lists the open price book, waiting choice prices and the menu together.
+  await page.route("**/merchant/commerce/one-store-dishes/command", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    menuCommands.push({ ...body, action: body.action === "ListAll" ? "List" : body.action });
+    if (refuseListing)
+      return route.fulfill({
+        status: 409,
+        headers,
+        json: { error: "NotSingleStore", part: "Menu" },
+      });
+    released = id(2);
+    return route.fulfill({ headers, json: { status: "Listed", menuReference: MENU } });
+  });
   await page.route("**/merchant/commerce/availability/query", (route) =>
     route.fulfill({
       headers,
@@ -328,23 +341,49 @@ test("@production a single store's menu on one page: search, filters, sold out, 
   expect(listings[0]?.operationReference).not.toBe(listings[1]?.operationReference);
 });
 
-test("@production a dish's allergens declared by staff in the one-page menu", async ({ page }) => {
+test("@production one dish edited on the one-page menu: names, price, choices, allergens; new dish and section; List it", async ({
+  page,
+}) => {
+  // The menu has not been listed yet (state left by the test before is reset).
+  released = null;
+  refuseListing = false;
   await session(page);
   const peanut = id(60),
     sesame = id(61),
-    wheat = id(62);
+    wheat = id(62),
+    spice = id(70),
+    mild = id(71),
+    hot = id(72),
+    tax = id(75);
   const declared = new Map<string, { allergenReference: string; classification: string }[]>([
     [id(30), [{ allergenReference: wheat, classification: "Contains" }]],
   ]);
+  const pending = new Map<string, string>();
   let keepsStock = false;
-  const declarations: Record<string, unknown>[] = [];
+  const order = [
+    [30, 31],
+    [32, 33],
+  ];
+  let extraSections: { code: string; name: string; nameZh: string }[] = [];
+  const dishCommands: Record<string, unknown>[] = [];
+  const menuCommands: Record<string, unknown>[] = [];
   const view = () => {
-    const base = builder(3, [
-      [30, 31],
-      [32, 33],
-    ]);
+    const base = builder(3, order);
     return {
       ...base,
+      menu: {
+        ...base.menu,
+        sections: [
+          ...base.menu.sections,
+          ...extraSections.map((x, n) => ({
+            sectionReference: id(12 + n),
+            code: x.code,
+            name: x.name,
+            nameZh: x.nameZh,
+            items: [],
+          })),
+        ],
+      },
       allergenRegistry: true,
       allergenChoices: [
         { allergenReference: peanut, name: "Peanuts", nameZh: "花生" },
@@ -354,6 +393,8 @@ test("@production a dish's allergens declared by staff in the one-page menu", as
       keepsStock,
       sellables: base.sellables.map((s) => ({
         ...s,
+        productReference: id(Number.parseInt(s.skuReference.slice(-12), 16) + 100),
+        pendingPriceMinor: pending.get(s.skuReference) ?? null,
         allergens:
           s.skuReference === id(33)
             ? { source: "Recipe", declared: [] }
@@ -388,14 +429,98 @@ test("@production a dish's allergens declared by staff in the one-page menu", as
       },
     });
   });
-  await page.route("**/merchant/commerce/dish-allergens/command", (route) => {
-    const body = route.request().postDataJSON() as {
-      skuReference: string;
-      allergens: { allergenReference: string; classification: string }[];
+  await page.route("**/merchant/commerce/menus/command", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    menuCommands.push(body);
+    const sections = body.sections as { code: string; name: string; nameZh: string }[];
+    extraSections = sections.filter((x) => !["DIM", "NOODLE"].includes(x.code));
+    return route.fulfill({ headers, json: { ok: true } });
+  });
+  const groups = [
+    {
+      optionSetReference: spice,
+      name: "Spice level",
+      archived: false,
+      displayStyle: "SingleChoice",
+      minimum: 1,
+      maximum: 1,
+      perOptionMaximum: 1,
+      options: [
+        { optionReference: mild, name: "Mild", offered: true },
+        { optionReference: hot, name: "Hot", offered: true },
+      ],
+    },
+  ];
+  const taxClasses = [
+    {
+      taxClassificationReference: tax,
+      rules: [
+        {
+          orderType: "DineIn",
+          taxComponentCode: "TEST_TAX",
+          treatment: "Taxable",
+          rate: "0.13",
+          priceInclusion: "Exclusive",
+        },
+      ],
+    },
+  ];
+  await page.route("**/merchant/commerce/products/query", (route) => {
+    const body = route.request().postDataJSON() as { productReference: string | null };
+    const base = {
+      sourceAsOf: at,
+      locale: "en-CA",
+      permissions: {},
+      productTypes: [],
+      sellingUnits: [],
+      taxClasses,
+      optionSetChoices: groups,
     };
-    declarations.push(body);
-    declared.set(body.skuReference, body.allergens);
-    return route.fulfill({ headers, json: { status: "Applied", skuReference: body.skuReference } });
+    if (body.productReference === null)
+      return route.fulfill({
+        headers,
+        json: { screenId: "CAT-PRODUCT-LIST", ...base, products: [] },
+      });
+    const sku = Number.parseInt(body.productReference.slice(-12), 16) - 100;
+    const row = view().sellables.find((x) => x.skuReference === id(sku));
+    return route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-PRODUCT-DETAIL",
+        ...base,
+        product: {
+          productReference: body.productReference,
+          name: row?.productName,
+          nameZh: row?.productNameZh,
+          taxClassificationReference: tax,
+          sizes: [
+            { skuReference: id(sku), skuCode: "SKU_" + sku, name: row?.productName, nameZh: "" },
+          ],
+          optionSets: [],
+          presentation: { description: "Steamed (TEST)", descriptionZh: "", photo: null },
+        },
+      },
+    });
+  });
+  await page.route("**/merchant/commerce/option-prices/query", (route) =>
+    route.fulfill({ headers, json: { screenId: "PRICE-OPTION-LIST", products: [] } }),
+  );
+  await page.route("**/merchant/commerce/one-store-dishes/command", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    dishCommands.push(body);
+    if (body.action === "SaveDish" && body.productReference !== null) {
+      const sku = id(Number.parseInt(String(body.productReference).slice(-12), 16) - 100);
+      pending.set(sku, String(body.priceMinor));
+      if (body.allergens !== null)
+        declared.set(
+          sku,
+          body.allergens as { allergenReference: string; classification: string }[],
+        );
+    }
+    return route.fulfill({
+      headers,
+      json: { status: body.action === "ListAll" ? "Listed" : "Saved" },
+    });
   });
   await page.route("**/merchant/commerce/availability/query", (route) =>
     route.fulfill({
@@ -436,37 +561,58 @@ test("@production a dish's allergens declared by staff in the one-page menu", as
     .getByRole("button", { name: "Allergens not declared" })
     .click();
 
-  // Siu mai: peanuts contained, sesame possible.
-  await page.getByRole("button", { name: "Allergens of Siu mai (TEST) 烧卖" }).click();
-  const editor = page.getByRole("form", { name: "Allergens of Siu mai (TEST) 烧卖" });
+  // Siu mai: Chinese description, a new price, the spice group (hot +0.50) and its allergens.
+  await page.getByRole("button", { name: "Edit Siu mai (TEST) 烧卖" }).click();
+  const editor = page.getByRole("form", { name: "Siu mai (TEST) 烧卖" });
+  await expect(editor.getByLabel("English name")).toHaveValue("Siu mai (TEST)");
+  await expect(editor.getByLabel("English description")).toHaveValue("Steamed (TEST)");
+  await editor.getByLabel("Chinese description").fill("蒸（测试）");
+  await editor.getByLabel("Price ($)").fill("7.50");
+  await editor.getByRole("checkbox", { name: "Spice level" }).check();
+  await editor.getByLabel("Extra ($) for Hot").fill("0.50");
   await expect(editor.getByText("Allergens declared by staff")).toBeVisible();
-  await expect(
-    editor.getByText("Not a costed recipe and not used for stock.", { exact: false }),
-  ).toBeVisible();
   await editor.getByRole("radiogroup", { name: "Peanuts 花生" }).getByLabel("Contains").check();
   await editor.getByRole("radiogroup", { name: "Sesame 芝麻" }).getByLabel("May contain").check();
+  await expect(
+    editor.getByRole("checkbox", { name: "I checked every allergen of this dish." }),
+  ).toBeChecked();
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
-    await page.screenshot({ path: `test-results/dish-allergens-${width}.png`, fullPage: true });
+    await page.screenshot({ path: `test-results/dish-editor-${width}.png`, fullPage: true });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   const axe = await new AxeBuilder({ page }).include(".one-menu").analyze();
   expect(axe.violations).toEqual([]);
   await expectNoInternalText(page);
-  await editor.getByRole("button", { name: "Save allergens" }).click();
+  await editor.getByRole("button", { name: "Save dish" }).click();
   await expect(
-    page.getByText(
-      "Allergens of Siu mai (TEST) 烧卖 saved. Guests see them when the menu is listed.",
-    ),
+    page.getByText("Siu mai (TEST) saved. Guests see it when the menu is listed."),
   ).toBeVisible();
+  await expect(row("Siu mai")).toContainText("→ $7.50 when listed");
   await expect(row("Siu mai")).toContainText("Contains Peanuts · May contain Sesame");
-  expect(declarations).toHaveLength(1);
-  expect(declarations[0]).toMatchObject({
-    action: "DeclareDish",
-    skuReference: id(31),
+  expect(dishCommands[0]).toMatchObject({
+    action: "SaveDish",
+    menuReference: MENU,
+    productReference: id(131),
+    sectionCode: "DIM",
+    name: "Siu mai (TEST)",
+    nameZh: "烧卖",
+    description: "Steamed (TEST)",
+    descriptionZh: "蒸（测试）",
+    taxClassificationReference: tax,
+    priceMinor: "750",
+    choiceGroups: [
+      {
+        optionSetReference: spice,
+        options: [
+          { optionReference: mild, amountMinor: "0" },
+          { optionReference: hot, amountMinor: "50" },
+        ],
+      },
+    ],
     allergens: [
       { allergenReference: peanut, classification: "Contains" },
       { allergenReference: sesame, classification: "CrossContactPossible" },
@@ -474,16 +620,56 @@ test("@production a dish's allergens declared by staff in the one-page menu", as
   });
 
   // A dish with a real recipe takes its allergens from it; nothing is declared over it.
-  await page.getByRole("button", { name: "Allergens of Beef chow fun (TEST) 干炒牛河" }).click();
+  await page.getByRole("button", { name: "Edit Beef chow fun (TEST) 干炒牛河" }).click();
   await expect(
     page.getByText("This dish has a recipe, so its allergens come from the recipe's ingredients."),
   ).toBeVisible();
   await page.getByRole("button", { name: "Close" }).click();
 
+  // A new section, then a new dish in it.
+  await page.getByRole("button", { name: "New section" }).click();
+  const sectionForm = page.getByRole("form", { name: "New section" });
+  await sectionForm.getByLabel("English name").fill("Soups (TEST)");
+  await sectionForm.getByLabel("Chinese name").fill("汤");
+  await sectionForm.getByRole("button", { name: "Add section" }).click();
+  await expect(page.getByText("Section added.", { exact: false })).toBeVisible();
+  expect(menuCommands.at(-1)).toMatchObject({
+    action: "SaveDraft",
+    sections: [
+      { code: "DIM" },
+      { code: "NOODLE" },
+      { sectionReference: null, code: "SOUPS-TEST", name: "Soups (TEST)", nameZh: "汤", items: [] },
+    ],
+  });
+  await page.getByRole("button", { name: "New dish" }).click();
+  const fresh = page.getByRole("form", { name: "New dish" });
+  await fresh.getByLabel("English name").fill("Hot and sour soup (TEST)");
+  await fresh.getByLabel("Chinese name").fill("酸辣汤");
+  await fresh.getByLabel("Price ($)").fill("6.50");
+  await fresh.getByLabel("Section").selectOption("SOUPS-TEST");
+  await fresh.getByRole("radiogroup", { name: "Wheat 小麦" }).getByLabel("Contains").check();
+  await fresh.getByRole("button", { name: "Save dish" }).click();
+  await expect(page.getByText("Hot and sour soup (TEST) saved.", { exact: false })).toBeVisible();
+  expect(dishCommands.at(-1)).toMatchObject({
+    action: "SaveDish",
+    productReference: null,
+    sectionCode: "SOUPS-TEST",
+    name: "Hot and sour soup (TEST)",
+    nameZh: "酸辣汤",
+    priceMinor: "650",
+    choiceGroups: [],
+    allergens: [{ allergenReference: wheat, classification: "Contains" }],
+  });
+
+  // List it: the price book, choice prices and menu together.
+  await page.getByRole("button", { name: "List it" }).click();
+  await expect(page.getByText("Listed. Guests see the menu as it is now.")).toBeVisible();
+  expect(dishCommands.at(-1)).toMatchObject({ action: "ListAll", menuReference: MENU });
+
   // Once the store keeps stock, staff are asked to replace declared allergens with a recipe.
   keepsStock = true;
   await page.reload();
-  await page.getByRole("button", { name: "Allergens of Har gow (TEST) 虾饺" }).click();
+  await page.getByRole("button", { name: "Edit Har gow (TEST) 虾饺" }).click();
   await expect(
     page.getByText("This store keeps stock and recipes. Replace these declared allergens", {
       exact: false,
