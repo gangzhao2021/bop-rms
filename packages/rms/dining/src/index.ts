@@ -77,6 +77,7 @@ export * from "./infrastructure/persistence/dining-host-transfer-store.js";
 export * from "./domain/dining-guest-invitation.js";
 export * from "./domain/dining-staff-call.js";
 export * from "./infrastructure/persistence/dining-guest-invitation-store.js";
+export * from "./infrastructure/persistence/dining-qr-join-store.js";
 export * from "./infrastructure/persistence/dining-staff-call-store.js";
 
 export { createDiningExceptionEpisodeResolution } from "./application/dining-exception-episode-resolution.js";

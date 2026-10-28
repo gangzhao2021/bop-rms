@@ -6,6 +6,7 @@ import { createApp } from "./app.js";
 import {
   CustomerDiningJoinHandler,
   customerDiningJoinRoute,
+  customerDiningQrJoinRoute,
   type CustomerDiningJoinPort,
 } from "./customer-dining-join.js";
 import type { CustomerDiningJoinRequestContext } from "./customer-dining-join-composition.js";
@@ -60,6 +61,7 @@ async function post(
   body: unknown = { joinCredential: "123456" },
   overrides: Record<string, string | string[]> = {},
   query = "",
+  route = customerDiningJoinRoute,
 ): Promise<Response> {
   // Native HTTP preserves deliberately invalid/duplicate fetch metadata; fetch normalizes it.
   return new Promise((resolve, reject) => {
@@ -67,7 +69,7 @@ async function post(
       {
         host: "127.0.0.1",
         port: server,
-        path: customerDiningJoinRoute + query,
+        path: route + query,
         method: "POST",
         headers: {
           origin,
@@ -102,6 +104,43 @@ async function post(
     request.end(JSON.stringify(body));
   });
 }
+
+describe("WP-2423 item 8 ⑤ joining the scanned table by QR", () => {
+  it("forwards an empty body as a QR join, without any code", async () => {
+    const service = port();
+    const response = await post(await listen(service), {}, {}, "", customerDiningQrJoinRoute);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(result);
+    expect(service.join).toHaveBeenCalledWith(
+      { operationReference: op, sessionCredential: oldSession, csrfCredential: oldCsrf },
+      context,
+    );
+  });
+  it.each([{ joinCredential: "123456" }, null, { tableReference: admission }])(
+    "denies a QR join that carries anything %#",
+    async (body) => {
+      const service = port();
+      const response = await post(await listen(service), body, {}, "", customerDiningQrJoinRoute);
+      expect(response.status).toBe(400);
+      expect(service.join).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    ["NotOpen", 409, "dining_join_table_not_open"],
+    ["CheckingOut", 409, "dining_join_table_checking_out"],
+    ["Paused", 409, "dining_join_qr_paused"],
+    ["TooManyJoins", 429, "dining_join_table_busy"],
+  ])("answers %s with a stable public code", async (reason, status, code) => {
+    const service = {
+      join: vi
+        .fn<CustomerDiningJoinPort["join"]>()
+        .mockResolvedValue({ status: "Refused", reason }),
+    };
+    const response = await post(await listen(service), {}, {}, "", customerDiningQrJoinRoute);
+    expect(response.status).toBe(status);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(code);
+  });
+});
 
 describe("same-origin Dining Join transport", () => {
   it.each(["123456", "000000", "AAAAAAAAAAAAAAAAAAAAAA"])(

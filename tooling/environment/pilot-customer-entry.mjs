@@ -2,7 +2,10 @@ import { Buffer } from "node:buffer";
 import { createInternalDiningBinding } from "./pilot-dining-binding.mjs";
 import { createInternalDiningJoinRequestContext } from "./pilot-dining-join.mjs";
 import { createCustomerDiningSessionBinding } from "../../apps/api/dist/customer-dining-binding-composition.js";
-import { createPostgresDiningGuestBindingStore } from "../../packages/rms/dining/src/index.ts";
+import {
+  createPostgresDiningGuestBindingStore,
+  createPostgresDiningQrJoinStore,
+} from "../../packages/rms/dining/src/index.ts";
 export async function createInternalCustomerEntry(
   resources,
   {
@@ -84,6 +87,34 @@ export async function createInternalCustomerEntry(
       join: {
         dining: { store: owner.stores.join, credentials: owner.credentials, pepperVersion: 1 },
         contexts: dining.binding(resources.transactions),
+        // WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN: the scanned, open table issues this guest's
+        // one-time code; the ordinary Join consumes it.
+        qr: {
+          issue: (input, authorize) =>
+            createPostgresDiningQrJoinStore(resources.transactions, {
+              scope: owner.scope,
+              credentials: owner.credentials,
+              pepperVersion: 1,
+              now: resources.now,
+              authorize: () => authorize(),
+              audit: (record) => ({
+                auditId: resources.credentials.reference(),
+                brandId: owner.scope.brandReference,
+                storeId: owner.scope.storeReference,
+                actor: { type: "System" },
+                actionCode: "DINING_QR_JOIN_ISSUE",
+                targetType: "DiningTable",
+                targetId: record.tableReference,
+                reasonCode: "GUEST_SCANNED_OPEN_TABLE",
+                correlationId: record.operationReference,
+                occurredAt: record.observedAt,
+                sourceChannel: "CUSTOMER_PWA",
+                dataClassification: "Restricted",
+                retentionPolicyCode: "AUDIT_DEFAULT",
+                retentionPolicyVersion: 1,
+              }),
+            }).issue({ ...input, operationReference: resources.credentials.reference() }),
+        },
       },
       binding: bindingOptions,
       resolveRequestContext: async () => createInternalDiningJoinRequestContext(resources, owner),

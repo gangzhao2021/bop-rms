@@ -28,6 +28,7 @@ import { createMerchantRefundPaymentContext } from "../../apps/api/dist/merchant
 import { createMerchantOrdinaryRefundItems } from "../../apps/api/dist/merchant-ordinary-refund-items.js";
 import { createMerchantOrdinaryRefundRequest } from "../../apps/api/dist/merchant-ordinary-refund-request.js";
 import { createMerchantDiningJoinState } from "../../apps/api/dist/merchant-dining-join-state.js";
+import { createMerchantDiningQrJoin } from "../../apps/api/dist/merchant-dining-qr-join.js";
 import { createMerchantDiningJoinRegenerate } from "../../apps/api/dist/merchant-dining-join-regenerate.js";
 import { createMerchantDiningSessionStart } from "../../apps/api/dist/merchant-dining-session-start.js";
 import { createMerchantDiningTableCommand } from "../../apps/api/dist/merchant-dining-table-command.js";
@@ -1150,6 +1151,16 @@ export async function createInternalMerchant(
     authentication: service,
     credentials: await createInternalDiningCredentials(resources),
   });
+  // WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN: phones at a table, pause/resume QR joining, remove one.
+  const diningQrJoin = createMerchantDiningQrJoin({
+    persistence,
+    authentication: service,
+    credentials: await createInternalDiningCredentials(resources),
+    retentionPolicyCode: "AUDIT_DEFAULT",
+    retentionPolicyVersion: 1,
+    nextReference: () => resources.credentials.reference(),
+    now: resources.now,
+  });
   const diningJoinRegenerate = createMerchantDiningJoinRegenerate({
     persistence,
     authentication: service,
@@ -1650,6 +1661,7 @@ export async function createInternalMerchant(
         });
       })(),
       diningJoinState,
+      diningQrJoin,
       diningJoinRegenerate,
       diningSessionStart,
       diningTables,

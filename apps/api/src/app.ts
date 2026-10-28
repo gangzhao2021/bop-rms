@@ -86,6 +86,7 @@ import {
 import {
   CustomerDiningJoinHandler,
   customerDiningJoinRoute,
+  customerDiningQrJoinRoute,
   unavailableCustomerDiningJoinHandler,
 } from "./customer-dining-join.js";
 import {
@@ -364,6 +365,10 @@ export function createApp({
   app.post(
     customerDiningJoinRoute,
     customerDiningJoin?.join() ?? unavailableCustomerDiningJoinHandler,
+  );
+  app.post(
+    customerDiningQrJoinRoute,
+    customerDiningJoin?.qrJoin() ?? unavailableCustomerDiningJoinHandler,
   );
   app.post(
     customerDiningBindingRoutes.prepare,

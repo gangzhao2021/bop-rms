@@ -29,7 +29,7 @@ import {
   customerCheckoutPolicyRoute,
 } from "./customer-checkout-details.js";
 import { customerOrderSubmissionRoute } from "./customer-order-submission.js";
-import { customerDiningJoinRoute } from "./customer-dining-join.js";
+import { customerDiningJoinRoute, customerDiningQrJoinRoute } from "./customer-dining-join.js";
 import { customerDiningBindingRoutes } from "./customer-dining-binding.js";
 import { customerCartBindingRoutes } from "./customer-cart-binding.js";
 import { customerCartRoutes } from "./customer-cart.js";
@@ -57,6 +57,7 @@ export const apiRouteTemplates = Object.freeze([
   "/bff/customer/entry",
   ...Object.values(customerCartBindingRoutes),
   customerDiningJoinRoute,
+  customerDiningQrJoinRoute,
   ...Object.values(customerDiningBindingRoutes),
   customerCartRoutes.current,
   "/bff/realtime",

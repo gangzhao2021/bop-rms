@@ -42,6 +42,28 @@ export function installMerchantDiningRoutes(
       )
       .catch(() => denied(response));
   });
+  // WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN: phones at the table, pause/resume QR joining, remove.
+  router.post("/dining/sessions/qr-join", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningQrJoin) {
+      response.status(503).json({ error: "dining_qr_join_unavailable" });
+      return;
+    }
+    void options
+      .diningQrJoin({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch(() => denied(response));
+  });
   router.post("/dining/sessions/regenerate", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
       csrf = exactHeader(request, "x-bop-csrf");
