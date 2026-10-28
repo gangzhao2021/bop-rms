@@ -41,6 +41,7 @@ export function installMerchantCommerceRoutes(
     Invalid: 400,
     SoleOperatorNotInEffect: 409,
     NeedsReverification: 409,
+    NotSingleStore: 409,
   } as const;
   const recipeFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantRecipeError)) {
@@ -746,6 +747,7 @@ export function installMerchantCommerceRoutes(
     Invalid: 400,
     SoleOperatorNotInEffect: 409,
     NeedsReverification: 409,
+    NotSingleStore: 409,
   } as const;
   const optionRecipeFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantOptionRecipeError)) {

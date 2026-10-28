@@ -12,8 +12,9 @@ export interface RecipePublicationReview {
   readonly evidenceDigest: string;
   readonly reviewedAt: string;
   readonly decision: "Approved";
-  /** WP-2423 Q19: given alone by the sole operator (absent for an independent review). */
-  readonly reviewMode?: "SoleOperator";
+  /** WP-2423 Q19: given alone by the sole operator; WP-2423 item 8 ⑥: given alone by the author
+   * listing at the Brand's one store (absent for an independent review). */
+  readonly reviewMode?: "SoleOperator" | "SingleStoreListing";
 }
 export interface RecipePublicationEvidence {
   readonly recipeReference: string;
@@ -86,7 +87,12 @@ export function parseRecipePublicationEvidence(
       typeof entry.value === "object" &&
       Object.prototype.hasOwnProperty.call(entry.value, "reviewMode");
     const review = closed(entry.value, marked ? [...reviewKeys, "reviewMode"] : reviewKeys);
-    if (marked && review.reviewMode !== "SoleOperator") return fail();
+    if (
+      marked &&
+      review.reviewMode !== "SoleOperator" &&
+      review.reviewMode !== "SingleStoreListing"
+    )
+      return fail();
     if (
       (review.reviewKind !== "Cost" && review.reviewKind !== "FoodSafety") ||
       review.decision !== "Approved" ||
@@ -97,7 +103,8 @@ export function parseRecipePublicationEvidence(
     )
       return fail();
     const actor = parseRecipeReference(review.reviewerActorReference);
-    // The author reviews only as the sole operator (WP-2423 Q19), marked.
+    // The author reviews only as the sole operator (WP-2423 Q19) or listing at the Brand's one
+    // store (item 8 ⑥), marked.
     if (actor === author && !marked) return fail();
     reviews.push(
       Object.freeze({
@@ -107,14 +114,17 @@ export function parseRecipePublicationEvidence(
         evidenceDigest: parseRecipeDigest(review.evidenceDigest),
         reviewedAt: review.reviewedAt,
         decision: "Approved",
-        ...(marked ? { reviewMode: "SoleOperator" as const } : {}),
+        ...(marked
+          ? { reviewMode: review.reviewMode as "SoleOperator" | "SingleStoreListing" }
+          : {}),
       }),
     );
   }
-  // Two reviewers, except one sole operator who gave both reviews (both marked).
+  // Two reviewers, except one person who gave both reviews with the same mark.
   const oneSoleReviewer =
     new Set(reviews.map((r) => r.reviewerActorReference)).size === 1 &&
-    reviews.every((r) => r.reviewMode === "SoleOperator");
+    reviews[0]?.reviewMode !== undefined &&
+    reviews.every((r) => r.reviewMode === reviews[0]?.reviewMode);
   if (
     new Set(reviews.map((r) => r.reviewKind)).size !== 2 ||
     (new Set(reviews.map((r) => r.reviewerActorReference)).size !== 2 && !oneSoleReviewer) ||

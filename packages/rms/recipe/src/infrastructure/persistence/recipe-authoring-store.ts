@@ -100,8 +100,9 @@ export interface RecipeReviewView {
   readonly reviewedAt: string;
   /** False when the content changed after the review (never for an immutable version). */
   readonly current: boolean;
-  /** WP-2423 Q19: given by the sole operator alone (own recipe, or both kinds). */
-  readonly reviewMode: "Independent" | "SoleOperator";
+  /** WP-2423 Q19: given by the sole operator alone (own recipe, or both kinds); WP-2423 item 8 ⑥:
+   * given by the author alone when listing at the Brand's one store. */
+  readonly reviewMode: "Independent" | "SoleOperator" | "SingleStoreListing";
 }
 export interface RecipeDetailView extends RecipeSummaryView {
   readonly snapshot: RecipeSnapshot;
@@ -318,7 +319,9 @@ async function reviewsOf(
     digest: String(row.subject_digest),
     current: true,
     reviewMode:
-      row.review_mode === "SoleOperator" ? ("SoleOperator" as const) : ("Independent" as const),
+      row.review_mode === "SoleOperator" || row.review_mode === "SingleStoreListing"
+        ? (row.review_mode as "SoleOperator" | "SingleStoreListing")
+        : ("Independent" as const),
   }));
 }
 
@@ -661,10 +664,16 @@ export async function recordRecipeReview(
      * transaction, that sole operator is in effect for them; `reviewerMfaAt` is their second
      * factor (the database requires it within 15 minutes before the review). */
     readonly soleOperator?: { readonly reviewerMfaAt: string };
+    /** WP-2423 item 8 ⑥: the author reviews alone, listing at the Brand's one store. The caller
+     * has read, in this transaction, that the Brand has exactly that one store (the database
+     * holds it until commit). */
+    readonly singleStoreListing?: { readonly storeReference: string };
   },
 ) {
   await tx.query(scopeSql, [scope.brandReference, ""]);
   const brand = scope.brandReference;
+  if (input.soleOperator !== undefined && input.singleStoreListing !== undefined)
+    return fail("RECIPE_AUTHORING_INVALID");
   const prior = (
     await tx.query(
       "SELECT recipe_version_id::text v,subject,review_kind,decision,reviewer_actor_id::text r FROM rms_recipe.recipe_authoring_review WHERE review_id=$1",
@@ -711,15 +720,23 @@ export async function recordRecipeReview(
       review.subject === input.subject && review.reviewerReference === input.actorReference,
   );
   const sole = input.soleOperator !== undefined;
-  if (!sole && (ownRecipe || otherKind !== undefined))
+  const mode = sole
+    ? ("SoleOperator" as const)
+    : input.singleStoreListing !== undefined
+      ? ("SingleStoreListing" as const)
+      : ("Independent" as const);
+  const marked = mode !== "Independent";
+  if (!marked && (ownRecipe || otherKind !== undefined))
     return fail("RECIPE_AUTHORING_REVIEWER_NOT_INDEPENDENT");
-  if (sole && !ownRecipe && otherKind === undefined) return fail("RECIPE_AUTHORING_INVALID");
-  if (sole && otherKind !== undefined && otherKind.reviewMode !== "SoleOperator")
+  // A single-store listing is the author's own; the sole operator may also review another's.
+  if (marked && !ownRecipe && (otherKind === undefined || mode === "SingleStoreListing"))
+    return fail("RECIPE_AUTHORING_INVALID");
+  if (marked && otherKind !== undefined && otherKind.reviewMode !== mode)
     return fail("RECIPE_AUTHORING_REVIEWER_NOT_INDEPENDENT");
   await tx.query(
     `INSERT INTO rms_recipe.recipe_authoring_review(review_id,recipe_version_id,recipe_id,brand_id,subject,subject_digest,review_kind,
-       decision,reviewer_actor_id,author_actor_id,comment,reviewed_at,audit_id,review_mode,reviewer_mfa_at)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+       decision,reviewer_actor_id,author_actor_id,comment,reviewed_at,audit_id,review_mode,reviewer_mfa_at,listing_store_id)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
     [
       input.reviewReference,
       s.versionReference,
@@ -734,8 +751,9 @@ export async function recordRecipeReview(
       input.comment,
       input.at,
       input.auditReference,
-      sole ? "SoleOperator" : "Independent",
+      mode,
       input.soleOperator?.reviewerMfaAt ?? null,
+      input.singleStoreListing?.storeReference ?? null,
     ],
   );
   await appendBrandAudit(
@@ -755,7 +773,7 @@ export async function recordRecipeReview(
         reviewKind: input.kind,
         decision: input.decision,
         version: s.versionNumber,
-        ...(sole ? { approvalMode: "SoleOperator" } : {}),
+        ...(marked ? { approvalMode: mode } : {}),
       },
     }),
   );
@@ -772,6 +790,7 @@ async function approvedReviews(
   author: string,
   reviewersAuthorized: (actors: readonly string[]) => Promise<boolean>,
   soleOperatorEffective?: (actor: string) => Promise<boolean>,
+  singleStoreListingEffective?: (actor: string) => Promise<boolean>,
 ) {
   const reviews = (await reviewsOf(tx, brand, version)).filter(
     (review) => review.subject === subject,
@@ -786,9 +805,9 @@ async function approvedReviews(
     cost.digest !== digest ||
     safety.digest !== digest ||
     (cost.reviewerReference === safety.reviewerReference &&
-      (cost.reviewMode !== "SoleOperator" || safety.reviewMode !== "SoleOperator")) ||
+      (cost.reviewMode === "Independent" || cost.reviewMode !== safety.reviewMode)) ||
     [cost, safety].some(
-      (review) => review.reviewerReference === author && review.reviewMode !== "SoleOperator",
+      (review) => review.reviewerReference === author && review.reviewMode === "Independent",
     ) ||
     !(await reviewersAuthorized([cost.reviewerReference, safety.reviewerReference]))
   )
@@ -802,6 +821,15 @@ async function approvedReviews(
         !(await soleOperatorEffective(review.reviewerReference)))
     )
       return fail("RECIPE_AUTHORING_SOLE_OPERATOR_NOT_IN_EFFECT");
+  // WP-2423 item 8 ⑥: a single-store listing review counts only while the Brand still has that
+  // one store (read now, in the publishing transaction).
+  for (const review of [cost, safety])
+    if (
+      review.reviewMode === "SingleStoreListing" &&
+      (singleStoreListingEffective === undefined ||
+        !(await singleStoreListingEffective(review.reviewerReference)))
+    )
+      return fail("RECIPE_AUTHORING_NOT_SINGLE_STORE");
   return [cost, safety];
 }
 /** A copy of a version with fresh row references, as the next lifecycle state. */
@@ -882,6 +910,8 @@ export async function publishRecipe(
     readonly reviewersAuthorized: (actors: readonly string[]) => Promise<boolean>;
     /** WP-2423 Q19: whether sole operator is still in effect for a reviewer who reviewed alone. */
     readonly soleOperatorEffective?: (actor: string) => Promise<boolean>;
+    /** WP-2423 item 8 ⑥: whether the Brand still has one store, for a single-store listing review. */
+    readonly singleStoreListingEffective?: (actor: string) => Promise<boolean>;
     readonly auditReference: string;
   },
 ) {
@@ -928,6 +958,7 @@ export async function publishRecipe(
     current.author,
     input.reviewersAuthorized,
     input.soleOperatorEffective,
+    input.singleStoreListingEffective,
   );
   const published = nextVersion(s, "Published", input.at, input.nextReference);
   await commitVersion(tx, brand, {
@@ -949,7 +980,7 @@ export async function publishRecipe(
         evidenceDigest: review.digest,
         reviewedAt: review.reviewedAt,
         decision: "Approved" as const,
-        ...(review.reviewMode === "SoleOperator" ? { reviewMode: "SoleOperator" as const } : {}),
+        ...(review.reviewMode === "Independent" ? {} : { reviewMode: review.reviewMode }),
       })),
     },
     writer: input,
@@ -979,6 +1010,8 @@ export async function publishRecipePreparation(
     readonly reviewersAuthorized: (actors: readonly string[]) => Promise<boolean>;
     /** WP-2423 Q19: whether sole operator is still in effect for a reviewer who reviewed alone. */
     readonly soleOperatorEffective?: (actor: string) => Promise<boolean>;
+    /** WP-2423 item 8 ⑥: whether the Brand still has one store, for a single-store listing review. */
+    readonly singleStoreListingEffective?: (actor: string) => Promise<boolean>;
     readonly auditReference: string;
   },
 ) {
@@ -1008,6 +1041,7 @@ export async function publishRecipePreparation(
     current.author,
     input.reviewersAuthorized,
     input.soleOperatorEffective,
+    input.singleStoreListingEffective,
   );
   const record = {
     operationReference: input.operationReference,
@@ -1031,7 +1065,7 @@ export async function publishRecipePreparation(
         evidenceDigest: review.digest,
         reviewedAt: review.reviewedAt,
         decision: "Approved",
-        ...(review.reviewMode === "SoleOperator" ? { reviewMode: "SoleOperator" as const } : {}),
+        ...(review.reviewMode === "Independent" ? {} : { reviewMode: review.reviewMode }),
       })),
     },
   };

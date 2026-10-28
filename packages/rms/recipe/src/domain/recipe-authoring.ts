@@ -24,7 +24,9 @@ export type RecipeAuthoringErrorCode =
   | "RECIPE_AUTHORING_IN_USE"
   | "RECIPE_AUTHORING_ALLERGEN_UNDECLARED"
   /** WP-2423 Q19: a sole-operator review no longer counts (another person now holds approval). */
-  | "RECIPE_AUTHORING_SOLE_OPERATOR_NOT_IN_EFFECT";
+  | "RECIPE_AUTHORING_SOLE_OPERATOR_NOT_IN_EFFECT"
+  /** WP-2423 item 8 ⑥: a single-store listing review no longer counts (the Brand has another store). */
+  | "RECIPE_AUTHORING_NOT_SINGLE_STORE";
 export class RecipeAuthoringError extends Error {
   constructor(
     readonly code: RecipeAuthoringErrorCode,
