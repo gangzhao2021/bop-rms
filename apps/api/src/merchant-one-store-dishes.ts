@@ -414,6 +414,11 @@ export function createMerchantOneStoreDishes(options: {
     choiceItems: ReadonlyMap<string, string> = new Map(),
     /** Told the dish (product and size) as soon as it exists (a combo records it at once). */
     onProduct?: (productReference: string, skuReference: string) => Promise<void>,
+    /**
+     * Save the product even when its fields and choices are unchanged: its choice group bindings
+     * are recomputed from the groups as they are now (a combo re-saves its slots' groups first).
+     */
+    rebind = false,
   ) => {
     const step = (purpose: string) => derivedReference(body.operationReference, purpose);
     const product = async (productReference: string) =>
@@ -466,7 +471,7 @@ export function createMerchantOneStoreDishes(options: {
       detail.presentation.description === body.description &&
       detail.presentation.descriptionZh === body.descriptionZh &&
       JSON.stringify(detail.optionSets) === JSON.stringify(groups);
-    if (!same) {
+    if (!same || rebind) {
       await options.products.command({
         ...session,
         body: {
@@ -928,6 +933,9 @@ export function createMerchantOneStoreDishes(options: {
         if (current?.dishRecorded === true) return;
         await combos.recordDish({ ...session, bundleReference, productReference, skuReference });
       },
+      // v15 2026-10-29: the slots' groups were just saved (a dish's place, a part's first dish may
+      // have changed); the combo's bindings are recomputed from them, never left stale.
+      true,
     );
     return {
       status: "Saved" as const,

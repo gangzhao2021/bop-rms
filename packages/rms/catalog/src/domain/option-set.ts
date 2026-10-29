@@ -290,12 +290,96 @@ export function parseOptionSetAggregate(value: unknown): OptionSetAggregate {
   });
 }
 
+/**
+ * A binding that does not fit its option set, naming the rule (v15 2026-10-29: a menu review was
+ * refused as "unavailable" with nothing to say which binding rule failed). Same refusal as before:
+ * a CatalogError with CATALOG_INPUT_INVALID.
+ */
+export class OptionBindingRuleError extends CatalogError {
+  constructor(readonly rule: OptionBindingRule) {
+    super("CATALOG_INPUT_INVALID");
+    this.name = "OptionBindingRuleError";
+  }
+}
+export type OptionBindingRule =
+  | "OtherOptionSet"
+  | "OtherOptionSetVersion"
+  | "EnabledOptionArchived"
+  | "LimitsOutsideOptionSet"
+  | "DefaultUnavailable"
+  | "DefaultNotEligible"
+  | "DefaultsConflict"
+  | "EnabledBelowMinimum"
+  | "DefaultsBelowMinimum"
+  | "DefaultsAboveMaximum"
+  | "DefaultsAboveTotal"
+  | "DefaultAboveOptionMaximum";
+/** The first rule a binding breaks against its option set, or null when it fits. */
+export function productOptionBindingRule(
+  binding: ProductOptionBinding,
+  optionSet: OptionSetAggregate,
+): OptionBindingRule | null {
+  if (binding.optionSetReference !== optionSet.optionSetReference) return "OtherOptionSet";
+  if (binding.optionSetVersionReference !== optionSet.draft.versionReference)
+    return "OtherOptionSetVersion";
+  if (
+    binding.enabledOptionReferences.some(
+      (reference) =>
+        !optionSet.draft.options.some(
+          (option) => option.optionReference === reference && option.lifecycle !== "Archived",
+        ),
+    )
+  )
+    return "EnabledOptionArchived";
+  const minimum = binding.minimumSelectionOverride ?? optionSet.draft.minimumSelection;
+  const maximum = binding.maximumSelectionOverride ?? optionSet.draft.maximumSelection;
+  if (
+    minimum < optionSet.draft.minimumSelection ||
+    (optionSet.draft.maximumSelection !== null &&
+      (maximum === null || maximum > optionSet.draft.maximumSelection)) ||
+    (maximum !== null && maximum < minimum)
+  )
+    return "LimitsOutsideOptionSet";
+  const selectedReferences = new Set(binding.defaultSelections.map((item) => item.optionReference));
+  for (const item of binding.defaultSelections) {
+    const option = optionSet.draft.options.find(
+      (candidate) => candidate.optionReference === item.optionReference,
+    );
+    if (option === undefined || option.lifecycle === "Inactive" || option.lifecycle === "Archived")
+      return "DefaultUnavailable";
+    if (!option.defaultEligible) return "DefaultNotEligible";
+    if (option.conflictOptionReferences.some((reference) => selectedReferences.has(reference)))
+      return "DefaultsConflict";
+  }
+  const selected = binding.defaultSelections.reduce((sum, item) => sum + BigInt(item.quantity), 0n);
+  if (
+    BigInt(binding.enabledOptionReferences.length) *
+      BigInt(optionSet.draft.perOptionMaximumQuantity) <
+    BigInt(minimum)
+  )
+    return "EnabledBelowMinimum";
+  if (selected < BigInt(minimum)) return "DefaultsBelowMinimum";
+  if (maximum !== null && selected > BigInt(maximum)) return "DefaultsAboveMaximum";
+  if (
+    optionSet.draft.maximumTotalQuantity !== null &&
+    selected > BigInt(optionSet.draft.maximumTotalQuantity)
+  )
+    return "DefaultsAboveTotal";
+  if (
+    binding.defaultSelections.some(
+      (item) => item.quantity > optionSet.draft.perOptionMaximumQuantity,
+    )
+  )
+    return "DefaultAboveOptionMaximum";
+  return null;
+}
+
 export function validateProductOptionBinding(
   binding: ProductOptionBinding,
   optionSet: OptionSetAggregate,
 ): void {
-  if (assessProductOptionBindingDefaultQuantity(binding, optionSet) === "DefaultQuantityViolation")
-    return invalid();
+  const rule = productOptionBindingRule(binding, optionSet);
+  if (rule !== null) throw new OptionBindingRuleError(rule);
 }
 /** Parsed owning references and bounds remain strict. Quantity contradiction is
  * a necessary-condition result only; it does not qualify references or publication. */

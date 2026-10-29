@@ -397,6 +397,7 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         },
       };
       const availability = createMerchantAvailability(common);
+      const choiceGroups = createMerchantOptionSets(common);
       const combos = createMerchantCombos(common);
       const dishes = createMerchantOneStoreDishes({
         products: createMerchantProducts(common),
@@ -412,7 +413,7 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
           ...combos,
           recordDish: async (input) => (asBefore ? undefined : combos.recordDish(input)),
         },
-        optionSets: createMerchantOptionSets(common),
+        optionSets: choiceGroups,
         now: () => new Date().toISOString(),
       });
       const session = { sessionCookie: "cookie", csrf: "csrf" };
@@ -538,6 +539,7 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
             minimum: 1,
             maximum: 1,
             dishes: [
+              // Staff's order (not the dishes' reference order): hot and sour first.
               { skuReference: sour, upgradeMinor: "0" },
               { skuReference: wonton, upgradeMinor: "100" },
             ],
@@ -573,6 +575,113 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       assert.equal((await combos.query(session)).combos[0].dishRecorded, true);
       // Retrying the same save continues (nothing is made twice).
       assert.deepEqual(await dishes.command({ ...session, body: first }), saved);
+      // v15 2026-10-29: staff open the combo with Edit and save it unchanged, as the editor sends
+      // it (the dishes in the order the combo is read back); "List it" must still pass the review.
+      const editFromView = async () => {
+        const c = (await combos.query(session)).combos.find(
+          (candidate) => candidate.bundleReference === saved.bundleReference,
+        );
+        return dishes.command({
+          ...session,
+          body: {
+            action: "SaveCombo",
+            operationReference: op(),
+            menuReference,
+            bundleReference: c.bundleReference,
+            expectedAggregateVersion: c.aggregateVersion,
+            sectionCode: "COMBOS",
+            name: c.name,
+            nameZh: c.nameZh,
+            description: c.description,
+            descriptionZh: c.descriptionZh,
+            taxClassificationReference: taxClass,
+            priceMinor: c.priceMinor,
+            slots: c.slots.map((slot) => ({
+              code: slot.code,
+              name: slot.name,
+              nameZh: slot.nameZh,
+              minimum: slot.minimum,
+              maximum: slot.maximum,
+              dishes: slot.dishes.map((d) => ({
+                skuReference: d.skuReference,
+                upgradeMinor: d.upgradeMinor,
+              })),
+            })),
+          },
+        });
+      };
+      // Staff may also reorder a part on purpose: its first dish (the one a required part starts
+      // with underneath) moves, and the combo's bindings follow (v15 2026-10-29 DefaultNotEligible).
+      const reordered = (await combos.query(session)).combos.find(
+        (candidate) => candidate.bundleReference === saved.bundleReference,
+      );
+      await dishes.command({
+        ...session,
+        body: comboBody({
+          operationReference: op(),
+          bundleReference: reordered.bundleReference,
+          expectedAggregateVersion: reordered.aggregateVersion,
+          slots: [
+            { ...first.slots[0], code: "SLOT-1", dishes: [...first.slots[0].dishes].reverse() },
+            { ...first.slots[1], code: "SLOT-2" },
+          ],
+        }),
+      });
+      await dishes.command({
+        ...session,
+        body: comboBody({
+          operationReference: op(),
+          bundleReference: reordered.bundleReference,
+          expectedAggregateVersion: reordered.aggregateVersion + 1,
+          slots: [
+            { ...first.slots[0], code: "SLOT-1" },
+            { ...first.slots[1], code: "SLOT-2" },
+          ],
+        }),
+      });
+      // The state v15 was left in: a part's choice group moved its default (the first dish) after
+      // the combo's dish was bound to it, so the dish's binding names a default the group no longer
+      // allows. Saving the combo again from Edit, unchanged, repairs it.
+      const slotSet = (
+        await admin.query(
+          "SELECT option_set_id::text set FROM rms_catalog.bundle_combo_choice WHERE brand_id=$1 AND dish_sku_id=$2",
+          [brandReference, sour],
+        )
+      ).rows[0].set;
+      const group = (await choiceGroups.query({ ...session, optionSetReference: slotSet }))
+        .optionSet;
+      await choiceGroups.command({
+        ...session,
+        body: {
+          action: "Save",
+          operationReference: op(),
+          optionSetReference: slotSet,
+          expectedAggregateVersion: group.aggregateVersion,
+          name: group.name,
+          nameZh: group.nameZh,
+          kind: group.kind,
+          minimum: group.minimum,
+          maximum: group.maximum,
+          perOptionMaximum: group.perOptionMaximum,
+          // Its dishes in the other order, the new first one the default (as v15's group read).
+          options: [...group.options].reverse().map((o, n) => ({
+            optionReference: o.optionReference,
+            name: o.name,
+            nameZh: o.nameZh,
+            offered: o.offered,
+            defaultChoice: n === 0,
+          })),
+        },
+      });
+      await editFromView();
+      // The order staff gave is the order the combo reads back (and guests see).
+      assert.deepEqual(
+        (await combos.query(session)).combos
+          .find((c) => c.bundleReference === saved.bundleReference)
+          .slots[0].dishes.map((d) => d.skuReference),
+        // (the order its choice group now has)
+        [wonton, sour],
+      );
       const choices = (
         await admin.query(
           "SELECT group_code,option_set_id::text set,option_id::text option,dish_sku_id::text dish FROM rms_catalog.bundle_combo_choice WHERE brand_id=$1 ORDER BY group_code,dish_sku_id",
@@ -729,21 +838,19 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         amount: "28.80",
         currency: "CAD",
       });
-      // The listed version is kept as it was.
-      assert.deepEqual(
-        (
-          await admin.query(
-            "SELECT status,fixed_amount_minor::text price FROM rms_catalog.bundle_version WHERE brand_id=$1 ORDER BY created_at",
-            [brandReference],
-          )
-        ).rows,
-        [
-          // The stopped save's version, never listed; the one listed; the edit.
-          { status: "Draft", price: "2880" },
-          { status: "Published", price: "2880" },
-          { status: "Draft", price: "2980" },
-        ],
-      );
+      // The listed version is kept as it was: every save before it is a version never listed
+      // (the stopped save, its finish, the saves from Edit), then the listed one, then the edit.
+      const versions = (
+        await admin.query(
+          "SELECT status,fixed_amount_minor::text price FROM rms_catalog.bundle_version WHERE brand_id=$1 ORDER BY created_at",
+          [brandReference],
+        )
+      ).rows;
+      assert.deepEqual(versions.slice(-2), [
+        { status: "Published", price: "2880" },
+        { status: "Draft", price: "2980" },
+      ]);
+      assert.ok(versions.slice(0, -2).every((v) => v.status === "Draft" && v.price === "2880"));
 
       // 4. At a Brand with two stores the database refuses a single-store listing …
       await admin.query(
