@@ -9,6 +9,8 @@ const f = vi.hoisted(() => ({ rules: [] as unknown[] }));
 vi.mock("@rms/catalog", async (original) => ({
   ...(await original<typeof import("@rms/catalog")>()),
   listStoreAvailabilityRules: async () => f.rules,
+  // No combos at this store (WP-2423 item 8 ⑥ part 4).
+  listBundleComboRecords: async () => ({ dishes: [], choices: [], listedVersions: [] }),
 }));
 vi.mock("@rms/pricing", async (original) => ({
   ...(await original<typeof import("@rms/pricing")>()),

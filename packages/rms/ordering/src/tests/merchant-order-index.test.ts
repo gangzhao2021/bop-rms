@@ -280,7 +280,11 @@ it("WP-2423: reads an Order's lines with option names, notes and totals", async 
   const lines = await loadMerchantOrderLines(tx, scope, id(3), "en-CA");
   expect(lines?.items).toHaveLength(2);
   expect(lines?.items[0]?.options).toEqual([
-    { name: "Synthetic option", quantity: item.catalog.options[0]?.quantity },
+    {
+      optionReference: item.catalog.options[0]?.optionReference,
+      name: "Synthetic option",
+      quantity: item.catalog.options[0]?.quantity,
+    },
   ]);
   expect(lines?.items[0]?.total).toEqual({ amountMinor: "2825", currencyCode: "CAD" });
   expect(lines?.totals.total).toEqual({ amountMinor: "5650", currencyCode: "CAD" });

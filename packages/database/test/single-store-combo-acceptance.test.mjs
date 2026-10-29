@@ -5,6 +5,12 @@ import { it } from "vitest";
 import { createCustomerMenuStoreFacts } from "../../../apps/api/src/customer-menu-store-facts.ts";
 import { createMerchantAvailability } from "../../../apps/api/src/merchant-availability.ts";
 import { createMerchantCombos } from "../../../apps/api/src/merchant-combos.ts";
+import {
+  comboPartsByOrderItem,
+  markDiningComboPartServed,
+  markKitchenComboPartDone,
+} from "../../../apps/api/src/merchant-combo-parts.ts";
+import { createDiningTable, parseDiningSession } from "../../rms/dining/src/index.ts";
 import { createMerchantOneStoreDishes } from "../../../apps/api/src/merchant-one-store-dishes.ts";
 import { createMerchantOptionPrices } from "../../../apps/api/src/merchant-option-prices.ts";
 import { createMerchantOptionSets } from "../../../apps/api/src/merchant-option-sets.ts";
@@ -219,6 +225,63 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         query: async () => assert.fail("allergens are not declared in this journey"),
         command: async () => assert.fail("allergens are not declared in this journey"),
       };
+      // Stand-ins for the allergen steps (each has its own acceptance), recording what was sent:
+      // the combo declares no allergens of its own; each choice's recipe adds its dish's item.
+      const declarations = [];
+      const declaredAllergens = {
+        command: async ({ body }) => {
+          declarations.push(body);
+          return { status: "Applied" };
+        },
+      };
+      const recipes = new Map();
+      const optionRecipes = {
+        query: async () => ({
+          options: (
+            await admin.query(
+              `SELECT b.binding_id::text binding,o.option_id::text option,s.sku_id::text sku
+                 FROM rms_catalog.bundle_combo_choice c
+                 JOIN rms_catalog.product_option_binding b ON b.brand_id=c.brand_id AND b.option_set_id=c.option_set_id
+                 JOIN rms_catalog.option o ON o.option_id=c.option_id AND o.brand_id=c.brand_id
+                 JOIN rms_catalog.sku s ON s.product_id=b.product_id AND s.brand_id=b.brand_id
+                WHERE c.brand_id=$1`,
+              [brandReference],
+            )
+          ).rows.map((row) => {
+            const recipe = recipes.get(row.option);
+            return {
+              bindingReference: row.binding,
+              optionReference: row.option,
+              sizes: [{ skuReference: row.sku }],
+              covered: recipe?.published === true,
+              change:
+                recipe === undefined
+                  ? null
+                  : {
+                      changeVersionReference: recipe.reference,
+                      version: 1,
+                      published: recipe.published,
+                      reviews: recipe.reviews.map((kind) => ({ kind, decision: "Approved" })),
+                    },
+            };
+          }),
+        }),
+        command: async ({ body }) => {
+          if (body.action === "Save")
+            recipes.set(body.optionReference, {
+              reference: op(),
+              change: body.change,
+              published: false,
+              reviews: [],
+            });
+          for (const recipe of recipes.values())
+            if (recipe.reference === body.changeVersionReference) {
+              if (body.action === "Review") recipe.reviews.push(body.kind);
+              if (body.action === "Publish") recipe.published = recipe.reviews.length === 2;
+            }
+          return {};
+        },
+      };
       const availability = createMerchantAvailability(common);
       const combos = createMerchantCombos(common);
       const dishes = createMerchantOneStoreDishes({
@@ -226,9 +289,8 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         prices: createMerchantPrices({ ...common, currencyMetadata }),
         optionPrices: createMerchantOptionPrices({ ...common, currencyMetadata }),
         menus,
-        dishAllergens: unused,
-        // Option recipes have their own acceptance; none are needed for a listing.
-        optionRecipes: { query: async () => ({ options: [] }), command: unused.command },
+        dishAllergens: declaredAllergens,
+        optionRecipes,
         availability,
         combos,
         optionSets: createMerchantOptionSets(common),
@@ -303,12 +365,14 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
             allergens: null,
           },
         });
+        // Staff declared the dish's allergens (its own acceptance); a combo choice adds the item.
         sellables.push({
           skuReference: saved.skuReference,
           productName: name,
           productNameZh: nameZh,
           sizeName: name,
           active: true,
+          allergens: { source: "StaffDeclared", itemReference: op() },
         });
         return saved.skuReference;
       };
@@ -381,6 +445,33 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         ).rows,
         [{ product: saved.productReference, sku: saved.skuReference }],
       );
+      // The combo declares no allergens of its own; each choice adds its dish's declared item.
+      // (The retried save sends the same operation again: a replay for the real command.)
+      assert.deepEqual(
+        [
+          ...new Map(
+            declarations.map((d) => [
+              d.operationReference,
+              [d.action, d.skuReference, d.allergens],
+            ]),
+          ).values(),
+        ],
+        [["DeclareDish", saved.skuReference, []]],
+      );
+      const itemOf = new Map(sellables.map((x) => [x.skuReference, x.allergens.itemReference]));
+      for (const choice of choices)
+        assert.deepEqual(recipes.get(choice.option)?.change, {
+          kind: "Add",
+          fromItemReference: null,
+          toItemReference: itemOf.get(choice.dish),
+          quantity: "1",
+          unitCostCents: null,
+          lossPercent: "0",
+        });
+      assert.equal(
+        [...recipes.values()].every((r) => r.published),
+        true,
+      );
       // The combo dish sits in its section and offers the two choice groups.
       assert.deepEqual(menu.sections[1].items, [
         { skuReference: saved.skuReference, featured: false },
@@ -437,6 +528,8 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         { bindingReference: binding, optionReference: sourChoice },
       ]);
       assert.equal(offered.availability, "Available");
+      // Guests are told which choices stand for a combo's dishes (each part starts unchosen).
+      assert.deepEqual([...offered.comboChoices].sort(), choices.map((c) => c.option).sort());
       assert.deepEqual(offered.price, { amount: "28.80", currency: "CAD" });
       // Each choice's extra price: wonton +1.00, hot and sour included.
       assert.deepEqual(offered.optionPrices.get(binding + ":" + wontonChoice), {
@@ -592,6 +685,235 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       } finally {
         await admin.query("ROLLBACK");
       }
+
+      // 6. Ordered at a table: the kitchen makes each chosen dish on its own and staff serve each
+      // (decision 3). The order line, its kitchen ticket and the table are the owners' records
+      // (seeded as the dine-in journey seeds them); what the combo adds runs as the API role.
+      const sessionReference = op(),
+        tableReference = op(),
+        orderReference = op(),
+        orderItemReference = op(),
+        ticket = op(),
+        workItem = op();
+      const startedAt = new Date(Date.now() - 600_000).toISOString();
+      const diningScope = { tenantReference, brandReference, storeReference };
+      const table = createDiningTable({
+        ...diningScope,
+        tableReference,
+        stableLabel: "TEST-T1",
+        areaReference: op(),
+        areaCode: "ROOM",
+        capacity: 4,
+        accessibilityAttributes: [],
+        lifecycle: "Published",
+        qrStatus: "Active",
+        qrVersion: 1,
+        operationalState: "Available",
+        blockReasonCode: null,
+        activeDiningSessionReference: sessionReference,
+        aggregateVersion: 1,
+        createdAt: startedAt,
+        observedAt: startedAt,
+      });
+      const diningSession = parseDiningSession({
+        diningSessionReference: sessionReference,
+        brandReference,
+        storeReference,
+        tableReference,
+        tableAssignmentVersion: 1,
+        phase: "Active",
+        version: 2,
+        startedByActorReference: owner,
+        startedAt,
+        hostParticipantReference: op(),
+      });
+      await admin.query(
+        "INSERT INTO rms_dining.dining_table (table_id,tenant_id,brand_id,store_id,version,table_snapshot,created_at,observed_at) VALUES ($1,$2,$3,$4,1,$5::jsonb,$6,$6)",
+        [
+          tableReference,
+          tenantReference,
+          brandReference,
+          storeReference,
+          JSON.stringify(table),
+          startedAt,
+        ],
+      );
+      await admin.query(
+        "INSERT INTO rms_dining.dining_session (session_id,tenant_id,brand_id,store_id,table_id,version,phase,session_snapshot,started_at) VALUES ($1,$2,$3,$4,$5,2,'Active',$6::jsonb,$7)",
+        [
+          sessionReference,
+          tenantReference,
+          brandReference,
+          storeReference,
+          tableReference,
+          JSON.stringify(diningSession),
+          startedAt,
+        ],
+      );
+      // The guest chose 馄饨汤 and 炒饭; the kitchen ticket has one work item for the combo.
+      const chosen = [wonton, rice].map((dish) => choices.find((c) => c.dish === dish).option);
+      const h = (...parts) =>
+        "sha256:" + createHash("sha256").update(parts.join(":")).digest("hex");
+      await admin.query(
+        "INSERT INTO rms_kitchen.kitchen_ticket (kitchen_ticket_id,brand_id,store_id,order_id,order_batch_id,confirmation_id,consumer_name,consumer_version,source_event_id,source_aggregate_version,source_snapshot_digest,confirmed_at,correlation_id,semantic_event_binding_digest,source_evidence_id,source_evidence_version,source_evidence_digest,source_evidence_captured_at,work_plan_id,work_plan_version,work_plan_digest,work_plan_generated_at,aggregate_version,status,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,'kitchen.confirmed-order:v1',1,$7,2,$8,$9,$10,$11,$12,1,$13,$9,$14,1,$15,$9,1,'Open','System','System',$9,$9)",
+        [
+          ticket,
+          brandReference,
+          storeReference,
+          orderReference,
+          op(),
+          op(),
+          op(),
+          h("snapshot"),
+          startedAt,
+          op(),
+          h("binding"),
+          op(),
+          h("evidence"),
+          op(),
+          h("plan"),
+        ],
+      );
+      const optionsJson = JSON.stringify(
+        chosen.map((optionReference) => ({
+          optionReference,
+          quantity: 1,
+          localizedNames: { "en-CA": "TEST choice" },
+        })),
+      );
+      const ticketRow = (
+        await admin.query(
+          "SELECT order_batch_id::text batch,source_evidence_id::text evidence,work_plan_id::text plan FROM rms_kitchen.kitchen_ticket WHERE kitchen_ticket_id=$1",
+          [ticket],
+        )
+      ).rows[0];
+      await admin.query(
+        "INSERT INTO rms_kitchen.kitchen_work_item (kitchen_work_item_id,brand_id,store_id,kitchen_ticket_id,order_id,order_batch_id,order_item_id,source_evidence_id,work_plan_id,source_item_ordinal,split_ordinal,version,status,required_quantity,completed_quantity,product_id,product_version_id,sku_id,menu_version_id,localized_display_names_json,selected_options_json,source_line_digest,station_id,routing_rule_id,routing_rule_version,routing_rule_digest,preparation_id,preparation_version,preparation_digest,preparation_instructions_json,execution_snapshot_digest,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1,1,2,'In Progress',1,0,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,1,$19,$20,1,$21,$22::jsonb,$23,'System','System',$24,$24)",
+        [
+          workItem,
+          brandReference,
+          storeReference,
+          ticket,
+          orderReference,
+          ticketRow.batch,
+          orderItemReference,
+          ticketRow.evidence,
+          ticketRow.plan,
+          saved.productReference,
+          op(),
+          saved.skuReference,
+          op(),
+          JSON.stringify({ "zh-Hans": "二人套餐", "en-CA": "Combo for two (TEST)" }),
+          optionsJson,
+          h("line"),
+          op(),
+          op(),
+          h("routing"),
+          op(),
+          h("preparation"),
+          JSON.stringify(["TEST step"]),
+          h("execution"),
+          startedAt,
+        ],
+      );
+      // Store-scoped API role work (the kitchen board and the serving page run here).
+      const asStore = async (work) => {
+        await admin.query("BEGIN");
+        try {
+          await admin.query("SET LOCAL ROLE " + role);
+          await admin.query(
+            "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+            [tenantReference, brandReference, storeReference],
+          );
+          const value = await work(admin);
+          await admin.query("COMMIT");
+          return value;
+        } catch (error) {
+          await admin.query("ROLLBACK");
+          throw error;
+        }
+      };
+      const line = { orderItemReference, optionReferences: chosen };
+      const parts = async () =>
+        (await asStore((tx) => comboPartsByOrderItem(tx, { ...diningScope }, "en-CA", [line]))).get(
+          orderItemReference,
+        );
+      // The kitchen sees each chosen dish under the combo, Chinese name first.
+      assert.deepEqual(
+        (await parts()).map((p) => [p.nameZh, p.name, p.done, p.served]),
+        [
+          ["馄饨汤", "Wonton soup (TEST)", false, false],
+          ["炒饭", "Fried rice (TEST)", false, false],
+        ],
+      );
+      const done = (optionReference, operationReference = op()) =>
+        asStore((tx) =>
+          markKitchenComboPartDone(tx, diningScope, {
+            workItemReference: workItem,
+            ...line,
+            optionReference,
+            operationReference,
+            actorReference: owner,
+            at: new Date().toISOString(),
+            locale: "en-CA",
+          }),
+        );
+      const served = (optionReference) =>
+        asStore((tx) =>
+          markDiningComboPartServed(tx, diningScope, {
+            diningSessionReference: sessionReference,
+            ...line,
+            optionReference,
+            operationReference: op(),
+            actorReference: owner,
+            at: new Date().toISOString(),
+            locale: "en-CA",
+          }),
+        );
+      // A dish is served only once the kitchen made it.
+      await assert.rejects(served(chosen[0]), /DINING_COMBO_PART_NOT_READY/u);
+      const firstDone = op();
+      assert.deepEqual(await done(chosen[0], firstDone), { allDone: false });
+      // A retry of the same step records nothing again.
+      assert.deepEqual(await done(chosen[0], firstDone), { allDone: false });
+      assert.deepEqual(await served(chosen[0]), { allServed: false });
+      assert.deepEqual(await done(chosen[1]), { allDone: true });
+      assert.deepEqual(await served(chosen[1]), { allServed: true });
+      assert.deepEqual(
+        (await parts()).map((p) => [p.nameZh, p.done, p.served]),
+        [
+          ["馄饨汤", true, true],
+          ["炒饭", true, true],
+        ],
+      );
+      // The database refuses a dish the work item does not have, and keeps each record.
+      await assert.rejects(
+        asStore((tx) =>
+          tx.query(
+            "INSERT INTO rms_kitchen.kitchen_combo_part_done(brand_id,store_id,kitchen_work_item_id,option_id,operation_id,actor_id,done_at) VALUES($1,$2,$3,$4,$5,$6,now())",
+            [brandReference, storeReference, workItem, sourChoice, op(), owner],
+          ),
+        ),
+        /kitchen combo part needs a chosen dish of a live work item/u,
+      );
+      await assert.rejects(
+        asStore((tx) =>
+          tx.query(
+            "UPDATE rms_dining.dining_combo_part_served SET actor_id=$1 WHERE order_item_id=$2",
+            [op(), orderItemReference],
+          ),
+        ),
+        /append-only dining combo part record|permission denied/u,
+      );
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM rms_kitchen.kitchen_combo_part_done WHERE kitchen_work_item_id=$1",
+            [workItem],
+          )
+        ).rows[0].n,
+        2,
+      );
     } finally {
       await admin.end();
     }
