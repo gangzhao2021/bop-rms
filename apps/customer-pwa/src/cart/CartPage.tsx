@@ -24,6 +24,7 @@ import {
   type CartLinePrice,
 } from "../menu/menu-line-prices.js";
 import type { CustomerMenuClient, MenuJourneyContext, MenuView } from "../menu/types.js";
+import { comboLineAllergenText } from "../menu/combo-allergens.js";
 import {
   cartIssueMessage,
   cartItemWarningMessage,
@@ -68,8 +69,11 @@ function CartItem({
   readOnly,
   controller,
   price,
+  allergens,
 }: {
   readonly item: CartItemView;
+  /** WP-2423 item 8 ⑥ part 4: a combo's chosen dishes' allergens (null for other lines). */
+  readonly allergens: string | null;
   /** The line's price before tax when it can be stated (the Store's, or the published one). */
   readonly price: CartLinePrice | null;
   readonly pending: boolean;
@@ -97,6 +101,7 @@ function CartItem({
         <div>
           <h3 id={`cart-item-${item.cartItemReference}`}>{item.displayName}</h3>
           {configuration ? <p className="cart-item__configuration">{configuration}</p> : null}
+          {allergens === null ? null : <p className="cart-item__allergens">{allergens}</p>}
           {item.customerNote === null || foreign ? null : (
             <p className="cart-item__note">
               {commonText.notePrefix} {item.customerNote}
@@ -449,6 +454,11 @@ function CartContent({
             <CartItem
               key={item.cartItemReference}
               item={item}
+              allergens={comboLineAllergenText(
+                menu,
+                item.sellableReference,
+                item.configuration.map((option) => option.optionReference),
+              )}
               price={prices.get(item.cartItemReference) ?? null}
               pending={pending}
               readOnly={
@@ -514,7 +524,10 @@ export function CartPage({
   const menu = usePublishedMenu(
     menuContext,
     menuClient,
-    cart?.items.some((item) => item.lineEstimate.status !== "Available") ?? false,
+    // Also for a line with choices: a combo's chosen dishes show their allergens.
+    cart?.items.some(
+      (item) => item.lineEstimate.status !== "Available" || item.configuration.length > 0,
+    ) ?? false,
   );
   const resolvedStore: CustomerStoreContext | undefined =
     store ??

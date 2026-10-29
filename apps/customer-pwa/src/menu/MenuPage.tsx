@@ -26,6 +26,8 @@ import {
 import { createCustomerMenuClient, normalizeMenuSearch } from "./menu-client.js";
 import {
   allergensForChoice,
+  comboDishAllergens,
+  missingComboPart,
   compactAllergenLine,
   configuredItemTotal,
   familyAllergens,
@@ -1083,7 +1085,8 @@ function configurationIssues(
       (total, option) => total + (selected.get(option.optionReference) ?? 0),
       0,
     );
-    if (count < rule.minimumSelections)
+    // A combo part still to choose in is named on the button instead (not an error yet).
+    if (count < rule.minimumSelections && rule.comboPart !== true)
       issues.push(
         t("{value1} requires at least {minimumSelections}.", {
           value1: rule.name ?? `Choice group ${index + 1}`,
@@ -1303,7 +1306,8 @@ export function SellableConfigurator({
   }, [controller]);
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (issues.length > 0 || locked || soldOut) return;
+    if (issues.length > 0 || locked || soldOut || missingComboPart(sellable, current) !== null)
+      return;
     const draft: CartItemDraft = Object.freeze({
       quantity,
       optionSelections: selectedMenuOptions(sellable.optionRules, current),
@@ -1383,6 +1387,12 @@ export function SellableConfigurator({
                 <span className="configure-option__name">{option.name}</span>
               </label>
               <span className="configure-option__price">{optionPriceText(option.price)}</span>
+              {/* WP-2423 item 8 ⑥ part 4: each dish of a combo part with its allergens. */}
+              {rule.comboPart === true ? (
+                <span className="configure-option__allergens">
+                  {dishAllergenText(comboDishAllergens(sellable, option.optionReference))}
+                </span>
+              ) : null}
               {current.has(option.optionReference) && option.maximumQuantity > 1 ? (
                 <label className="configure-option__quantity">
                   {t("How many")} {option.name}
@@ -1475,9 +1485,14 @@ export function SellableConfigurator({
         <button
           className="menu-action configure-actions__submit"
           type="submit"
-          disabled={issues.length > 0 || locked || soldOut}
+          disabled={
+            issues.length > 0 || locked || soldOut || missingComboPart(sellable, current) !== null
+          }
         >
-          {t("Add to cart")}
+          {/* A combo says which part the guest still has to choose in. */}
+          {((part) => (part === null ? t("Add to cart") : t("Choose {part}", { part })))(
+            missingComboPart(sellable, current),
+          )}
         </button>
         <p className="configure-actions__total" aria-live="polite">
           {total === null ? (
@@ -1501,6 +1516,26 @@ export function SellableConfigurator({
       ) : null}
     </form>
   );
+}
+
+/** WP-2423 item 8 ⑥ part 4: one combo dish's allergens, in a few words (never a free-from claim). */
+export function dishAllergenText(allergens: readonly MenuAllergenItem[] | null): string {
+  if (allergens === null) return t("Ask staff about allergens");
+  if (allergens.length === 0) return t("No listed allergens declared");
+  const contains = allergens.filter((item) => item.classification === "Contains");
+  const may = allergens.filter((item) => item.classification !== "Contains");
+  return [
+    contains.length === 0
+      ? null
+      : t("Contains {value1}", {
+          value1: contains.map((item) => item.name).join(listSeparator()),
+        }),
+    may.length === 0
+      ? null
+      : t("May contain {value1}", { value1: may.map((item) => item.name).join(listSeparator()) }),
+  ]
+    .filter(Boolean)
+    .join(clauseSeparator());
 }
 
 /**

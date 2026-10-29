@@ -21,6 +21,11 @@ export interface CustomerMenuStoreFact {
     string,
     { readonly amount: string; readonly currency: string }
   >;
+  /**
+   * WP-2423 item 8 ⑥ part 4: the item's choices that stand for a dish of a combo. A part whose
+   * choices all do starts unchosen for guests (Owner 2026-10-28 combo decision 1).
+   */
+  readonly comboChoices?: ReadonlySet<string>;
 }
 
 export interface CustomerMenuQueryPorts {

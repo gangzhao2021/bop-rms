@@ -1,4 +1,5 @@
 import {
+  listBundleComboRecords,
   listStoreAvailabilityRules,
   parseAvailabilitySafetyEvidence,
   parseCatalogCode,
@@ -77,6 +78,10 @@ export function createCustomerMenuStoreFacts(options: {
           { run: (work) => work(tx as never) },
           scope,
           options.currencyMetadata,
+        );
+        // WP-2423 item 8 ⑥ part 4: choices standing for a combo's dishes (guests choose them).
+        const comboChoices = new Set(
+          (await listBundleComboRecords(tx as never, scope)).choices.map((c) => c.optionReference),
         );
         const facts = new Map<string, CustomerMenuStoreFact>();
         for (const sellable of input.sellableReferences) {
@@ -164,6 +169,7 @@ export function createCustomerMenuStoreFacts(options: {
               resolved.status === "Available" ? "Available" : soldOut ? "SoldOut" : "NotOffered",
             price,
             optionPrices,
+            ...(comboChoices.size === 0 ? {} : { comboChoices }),
           });
         }
         // Read last, so a failed stock read cannot disturb the Store's offers and prices above.

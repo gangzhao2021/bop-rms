@@ -30,6 +30,9 @@ import type { DiningInvitationClient } from "./dining-invitation-client.js";
 import { createBrowserCustomerCartClient, type CustomerCartClient } from "../cart/cart-client.js";
 import { createConfigureController, type ConfigureController } from "../menu/configure-state.js";
 import { ConfigureStatus } from "../menu/MenuPage.js";
+import { comboLineAllergenText, comboLineChoices } from "../menu/combo-allergens.js";
+import { usePublishedMenu } from "../menu/menu-line-prices.js";
+import type { CustomerMenuClient, MenuJourneyContext, MenuView } from "../menu/types.js";
 
 /**
  * WP-2423 D5: when a round was sent. Today's rounds show the time; a round from another day (a
@@ -245,12 +248,36 @@ function OrderAgainStatus({
   return <ConfigureStatus state={state} controller={controller} />;
 }
 
+/** A combo line's chosen dishes and what they contain (nothing for other dishes). */
+function ComboLine({
+  menu,
+  again,
+}: {
+  readonly menu: MenuView | null;
+  readonly again: NonNullable<DiningItem["orderAgain"]>;
+}) {
+  const options = again.optionSelections.map((option) => option.optionReference);
+  const dishes = comboLineChoices(menu, again.sellableReference, options);
+  if (dishes === null) return null;
+  return (
+    <>
+      <span className="order-status__item-options">{dishes}</span>
+      <span className="order-status__item-allergens">
+        {comboLineAllergenText(menu, again.sellableReference, options)}
+      </span>
+    </>
+  );
+}
+
 function RoundCard({
   round,
   onOrderAgain,
   againStatus,
+  menu = null,
 }: {
   readonly round: DiningRound;
+  /** WP-2423 item 8 ⑥ part 4: the published menu, for a combo's chosen dishes and allergens. */
+  readonly menu?: MenuView | null;
   /** Absent when the table can't add dishes now (checking out, paid or closed). */
   readonly onOrderAgain?: ((item: DiningItem, key: string) => void) | undefined;
   /** What happened to the dish last ordered again, shown under it (by "round:item" key). */
@@ -282,6 +309,9 @@ function RoundCard({
           <li key={index} className={item.cancelled ? "order-status__item--cancelled" : undefined}>
             <span className="order-status__item-name">
               {item.quantity} × {item.displayName}
+              {item.orderAgain === undefined ? null : (
+                <ComboLine menu={menu} again={item.orderAgain} />
+              )}
             </span>
             <span className="order-status__item-amount">
               {money(item.priceBeforeTax ?? item.lineTotal)}
@@ -467,9 +497,14 @@ export function DiningSessionPage({
   invitationClient,
   staffCallClient,
   cartClient,
+  menuContext,
+  menuClient,
 }: {
   readonly store?: CustomerStoreContext | undefined;
   readonly client?: DiningSessionClient | undefined;
+  /** WP-2423 item 8 ⑥ part 4: the published menu, for a combo's chosen dishes and allergens. */
+  readonly menuContext?: MenuJourneyContext | undefined;
+  readonly menuClient?: CustomerMenuClient | undefined;
   /** WP-2423 item 8 ③ (decision 13): the guest's own cart for "Order again" (tests inject). */
   readonly cartClient?: CustomerCartClient | undefined;
   /** WP-2423 DEC-DINING-GUEST-INVITATION (tests inject; the page uses HTTP by default). */
@@ -479,6 +514,12 @@ export function DiningSessionPage({
 }) {
   const [client] = useState(() => provided ?? createHttpDiningSessionClient());
   const [state, setState] = useState<DiningSessionState>({ status: "loading" });
+  // The menu is read once the table has ordered something (a combo's dishes and allergens).
+  const menu = usePublishedMenu(
+    menuContext,
+    menuClient,
+    "view" in state && state.view !== null && state.view.rounds.length > 0,
+  );
   const pending = useRef<AbortController | null>(null);
   // v15 2026-10-27: right after the first round the order is prepared within seconds; the page
   // waits and reads again (a bounded number of times) instead of saying "join your table".
@@ -560,6 +601,7 @@ export function DiningSessionPage({
       state={state}
       store={store}
       cartClient={cartClient}
+      menu={menu}
       onRefresh={() => void load()}
       invitation={
         // Stays mounted while a table is shown (also during a failed refresh), so a code on
@@ -586,8 +628,11 @@ export function DiningSessionScreen({
   invitation = null,
   staffCall = null,
   cartClient,
+  menu = null,
 }: {
   readonly cartClient?: CustomerCartClient | undefined;
+  /** WP-2423 item 8 ⑥ part 4: the published menu (a combo's chosen dishes and allergens). */
+  readonly menu?: MenuView | null;
   readonly state: DiningSessionState;
   readonly store?: CustomerStoreContext | undefined;
   readonly onRefresh: () => void;
@@ -686,6 +731,7 @@ export function DiningSessionScreen({
             <RoundCard
               key={round.roundNumber}
               round={round}
+              menu={menu}
               againStatus={
                 again === null
                   ? undefined

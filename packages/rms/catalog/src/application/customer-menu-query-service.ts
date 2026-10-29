@@ -208,6 +208,11 @@ function publicSellable(
               rule.localizedNames === undefined
                 ? null
                 : (rule.localizedNames[locale] ?? rule.localizedNames[defaultLocale] ?? null),
+            ...(fact?.comboChoices !== undefined &&
+            rule.options.length > 0 &&
+            rule.options.every((option) => fact.comboChoices?.has(option.optionReference))
+              ? { comboPart: true as const }
+              : {}),
             options: Object.freeze(
               rule.options.map((option) =>
                 Object.freeze({

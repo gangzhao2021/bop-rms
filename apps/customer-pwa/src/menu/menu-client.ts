@@ -143,8 +143,12 @@ function optionRule(value: unknown): MenuOptionRule {
     value !== null &&
     typeof value === "object" &&
     Object.getOwnPropertyDescriptor(value, "semanticsVersion")?.value === 2;
+  // WP-2423 item 8 ⑥ part 4: a combo part (guests start with nothing chosen).
+  const comboPart =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "comboPart");
   const raw = exact(value, [
     ...(quantity ? ["semanticsVersion", "activationOptionReferences"] : []),
+    ...(comboPart ? ["comboPart"] : []),
     "name",
     "bindingReference",
     "optionSetVersionReference",
@@ -251,14 +255,21 @@ function optionRule(value: unknown): MenuOptionRule {
   )
     throw new TypeError("invalid option rule");
   if (raw.name !== null && typeof raw.name !== "string") throw new TypeError("name invalid");
+  if (comboPart && (raw.comboPart !== true || quantity)) throw new TypeError("combo part invalid");
   return Object.freeze({
     name: raw.name === null ? null : text(raw.name),
+    ...(comboPart ? { comboPart: true as const } : {}),
     ...(quantity
       ? { activationOptionReferences: referenceList(raw.activationOptionReferences) }
       : {}),
     minimumSelections,
     maximumSelections,
-    options,
+    // A guest never sends a dish they did not choose: no defaults in a combo part.
+    options: comboPart
+      ? Object.freeze(
+          options.map((option) => Object.freeze({ ...option, selectedByDefault: false })),
+        )
+      : options,
   });
 }
 

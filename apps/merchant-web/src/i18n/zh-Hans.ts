@@ -6230,4 +6230,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The combos could not be read. Read the menu again to edit or add combos.":
     "读不到套餐。请重新读取菜单，再编辑或新建套餐。",
   "Read again": "重新读取",
+  "A dish in this combo has no allergens declared yet. Declare its allergens (Edit the dish), then save the combo.":
+    "套餐里有一道菜还没申报过敏原。请先编辑这道菜申报过敏原，再保存套餐。",
+  "A dish in this combo has a recipe. For now a combo offers dishes whose allergens staff declared; choose another dish.":
+    "套餐里有一道菜用的是配方。目前套餐只能放由店员申报过敏原的菜，请换一道菜。",
 });

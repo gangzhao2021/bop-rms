@@ -1227,4 +1227,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Many rounds were sent just now, so staff confirm this one before the kitchen.":
     "刚才送出了很多轮，这一轮由店员确认后再送厨房。",
   "It is not charged until it goes to the kitchen.": "送厨房之前不计入账单。",
+  "Choose {part}": "请选择{part}",
+  "Ask staff about allergens": "过敏原请询问店员",
+  "No listed allergens declared": "未申报所列过敏原",
+  "Ask staff about allergens in your choices.": "所选菜品的过敏原请询问店员。",
+  "Your choices: no listed allergens declared.": "所选菜品：未申报所列过敏原。",
+  "Your choices: {allergens}.": "所选菜品：{allergens}。",
 });

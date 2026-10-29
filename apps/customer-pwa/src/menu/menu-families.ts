@@ -183,6 +183,55 @@ export function allergensForChoice(
   return entry === undefined ? null : (choices.outcomes[entry[0] as number] ?? null);
 }
 
+/** WP-2423 item 8 ⑥ part 4: a combo — one price, and parts guests choose a dish in. */
+export function isCombo(sellable: MenuSellable): boolean {
+  return sellable.optionRules.some((rule) => rule.comboPart === true);
+}
+
+/**
+ * The allergens of one dish of a combo part, from the published combinations: what every
+ * combination with that dish contains. Exact whenever the other parts offer a dish without an
+ * allergen; otherwise it may also name an allergen every combination contains. null when the
+ * menu does not say.
+ */
+export function comboDishAllergens(
+  sellable: MenuSellable,
+  optionReference: string,
+): readonly MenuAllergenItem[] | null {
+  const choices = sellable.allergensByChoice;
+  if (choices === undefined) return null;
+  const index = choices.options.indexOf(optionReference);
+  if (index < 0) return null;
+  const outcomes = choices.sets
+    .filter((set) => set.slice(1).includes(index))
+    .map((set) => choices.outcomes[set[0] as number]);
+  if (outcomes.length === 0 || outcomes.some((outcome) => outcome === undefined)) return null;
+  const [first, ...rest] = outcomes as (readonly MenuAllergenItem[])[];
+  return (first ?? []).filter((item) =>
+    rest.every((outcome) =>
+      outcome.some(
+        (other) => other.name === item.name && other.classification === item.classification,
+      ),
+    ),
+  );
+}
+
+/** The first combo part still to choose in, by name (null when every part is chosen). */
+export function missingComboPart(
+  sellable: MenuSellable,
+  selected: ReadonlyMap<string, number>,
+): string | null {
+  for (const [index, rule] of sellable.optionRules.entries()) {
+    if (rule.comboPart !== true) continue;
+    const count = rule.options.reduce(
+      (total, option) => total + (selected.get(option.optionReference) ?? 0),
+      0,
+    );
+    if (count < rule.minimumSelections) return rule.name ?? String(index + 1);
+  }
+  return null;
+}
+
 /* ---------- Exact decimal arithmetic for menu prices (never binary floating point) ---------- */
 
 const decimalPattern = /^(0|[1-9][0-9]{0,20})(?:\.([0-9]{1,6}))?$/u;

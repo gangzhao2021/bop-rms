@@ -35,6 +35,10 @@ export type MenuErrorCode =
   | "NotADish"
   /** A dish the combo offers is no longer sold. */
   | "DishUnavailable"
+  /** A dish in the combo has no allergens declared yet. */
+  | "DishAllergensMissing"
+  /** A dish in the combo has a real recipe (combos offer dishes with declared allergens). */
+  | "DishHasRecipe"
   | "Offline"
   | "Unavailable";
 export class MenuPageError extends Error {
@@ -746,6 +750,8 @@ const codes = new Set<MenuErrorCode>([
   "ManySizes",
   "NotADish",
   "DishUnavailable",
+  "DishAllergensMissing",
+  "DishHasRecipe",
 ]);
 export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): MenuClient {
   const post = async (path: string, body: unknown) => {

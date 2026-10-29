@@ -33,7 +33,14 @@ export class MerchantOneStoreDishError extends Error {
       /** Someone else's price changes are waiting; they list them (or discard them) first. */
       | "OthersPending"
       /** A combo offers a dish that is not on the menu (or a combo itself). */
-      | "NotADish",
+      | "NotADish"
+      /** A dish in a combo has no allergens declared yet (guests see them per chosen dish). */
+      | "DishAllergensMissing"
+      /**
+       * A dish in a combo has a real recipe: until the combo's choices carry recipes (and stock),
+       * combos offer dishes whose allergens staff declared.
+       */
+      | "DishHasRecipe",
   ) {
     super(code);
     this.name = "MerchantOneStoreDishError";
@@ -397,7 +404,15 @@ export function createMerchantOneStoreDishes(options: {
     return menu;
   };
 
-  const saveDish = async (session: Session, body: SaveDishBody) => {
+  /**
+   * `choiceItems` (combos): the item each choice adds to the dish's recipe — the chosen dish's
+   * staff-declared allergen item — instead of "no change".
+   */
+  const saveDish = async (
+    session: Session,
+    body: SaveDishBody,
+    choiceItems: ReadonlyMap<string, string> = new Map(),
+  ) => {
     const step = (purpose: string) => derivedReference(body.operationReference, purpose);
     const product = async (productReference: string) =>
       (
@@ -683,14 +698,23 @@ export function createMerchantOneStoreDishes(options: {
               bindingReference: row.bindingReference,
               optionReference: row.optionReference,
               expectedVersion: change?.version ?? null,
-              change: {
-                kind: "NoChange",
-                fromItemReference: null,
-                toItemReference: null,
-                quantity: null,
-                unitCostCents: null,
-                lossPercent: "0",
-              },
+              change: choiceItems.has(row.optionReference)
+                ? {
+                    kind: "Add",
+                    fromItemReference: null,
+                    toItemReference: choiceItems.get(row.optionReference) ?? null,
+                    quantity: "1",
+                    unitCostCents: null,
+                    lossPercent: "0",
+                  }
+                : {
+                    kind: "NoChange",
+                    fromItemReference: null,
+                    toItemReference: null,
+                    quantity: null,
+                    unitCostCents: null,
+                    lossPercent: "0",
+                  },
             },
           });
           const again = (await options.optionRecipes.query(session)) as unknown as typeof recipes;
@@ -756,6 +780,7 @@ export function createMerchantOneStoreDishes(options: {
         productNameZh: string;
         sizeName: string;
         active: boolean;
+        allergens?: { source: string; itemReference?: string | null };
       }[];
     };
     const comboSkus = new Set(
@@ -764,10 +789,15 @@ export function createMerchantOneStoreDishes(options: {
     const dishLabel = (sku: string) => {
       const found = menu.sellables.find((x) => x.skuReference === sku && x.active);
       if (found === undefined || comboSkus.has(sku)) return fail("NotADish");
+      // Guests see each dish's allergens in the combo: from what staff declared for the dish.
+      if (found.allergens?.source === "Recipe") return fail("DishHasRecipe");
+      if (found.allergens?.source !== "StaffDeclared" || !found.allergens.itemReference)
+        return fail("DishAllergensMissing");
       const sized = found.sizeName !== "" && found.sizeName !== found.productName;
       return {
         name: sized ? found.productName + " — " + found.sizeName : found.productName,
         nameZh: found.productNameZh,
+        itemReference: found.allergens.itemReference,
       };
     };
     const used = new Set(body.slots.flatMap((slot) => (slot.code === null ? [] : [slot.code])));
@@ -859,27 +889,37 @@ export function createMerchantOneStoreDishes(options: {
         slots,
       },
     });
-    const dish = await saveDish(session, {
-      action: "SaveDish",
-      operationReference: step("dish"),
-      menuReference: body.menuReference,
-      productReference: current?.productReference ?? null,
-      sectionCode: body.sectionCode,
-      name: body.name,
-      nameZh: body.nameZh,
-      description: body.description,
-      descriptionZh: body.descriptionZh,
-      taxClassificationReference: body.taxClassificationReference,
-      priceMinor: body.priceMinor,
-      choiceGroups: slots.map((slot) => ({
-        optionSetReference: slot.optionSetReference,
-        options: slot.dishes.map((d) => ({
-          optionReference: d.optionReference,
-          amountMinor: d.upgradeMinor,
+    const dish = await saveDish(
+      session,
+      {
+        action: "SaveDish",
+        operationReference: step("dish"),
+        menuReference: body.menuReference,
+        productReference: current?.productReference ?? null,
+        sectionCode: body.sectionCode,
+        name: body.name,
+        nameZh: body.nameZh,
+        description: body.description,
+        descriptionZh: body.descriptionZh,
+        taxClassificationReference: body.taxClassificationReference,
+        priceMinor: body.priceMinor,
+        choiceGroups: slots.map((slot) => ({
+          optionSetReference: slot.optionSetReference,
+          options: slot.dishes.map((d) => ({
+            optionReference: d.optionReference,
+            amountMinor: d.upgradeMinor,
+          })),
         })),
-      })),
-      allergens: null,
-    });
+        // The combo itself declares no allergens of its own (its recipe holds the kitchen step);
+        // each choice adds its dish's.
+        allergens: current?.productReference == null ? [] : null,
+      },
+      new Map(
+        slots.flatMap((slot) =>
+          slot.dishes.map((d) => [d.optionReference, dishLabel(d.skuReference).itemReference]),
+        ),
+      ),
+    );
     if (current?.productReference == null)
       await combos.recordDish({
         ...session,

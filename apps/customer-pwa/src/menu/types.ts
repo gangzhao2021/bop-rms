@@ -17,6 +17,11 @@ export interface MenuOptionRule {
   readonly activationOptionReferences?: readonly string[];
   readonly minimumSelections: number;
   readonly maximumSelections: number;
+  /**
+   * WP-2423 item 8 ⑥ part 4: a part of a combo — it starts with nothing chosen and each dish in it
+   * shows its allergens.
+   */
+  readonly comboPart?: true;
   readonly options: readonly {
     readonly optionReference: string;
     readonly name: string;

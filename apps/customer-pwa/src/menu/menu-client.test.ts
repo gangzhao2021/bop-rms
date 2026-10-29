@@ -512,3 +512,28 @@ it("retains explicit quantities and rejects a dangling activation reference", as
   Object.assign(rule, { activationOptionReferences: [references.allergen] });
   expect((await client.load()).kind).not.toBe("Found");
 });
+
+it("starts a combo part with nothing chosen, whatever the defaults underneath", async () => {
+  const value = found();
+  const rule = value.menu.sections[0]?.sellables[0]?.optionRules[0];
+  const option = rule?.options[0];
+  if (!rule || !option) throw new Error("fixture");
+  Object.assign(rule, {
+    comboPart: true,
+    minimumSelections: 1,
+    maximumSelections: 1,
+    defaultOptionReferences: [option.optionReference],
+  });
+  Object.assign(option, { selectedByDefault: true });
+  const client = createCustomerMenuClient(context, {
+    fetch: async () => response(200, value),
+    online: () => true,
+  });
+  const result = await client.load();
+  if (result.kind !== "Found") throw new Error("not found");
+  const parsed = result.menu.sections[0]?.sellables[0]?.optionRules[0];
+  expect(parsed?.comboPart).toBe(true);
+  expect(parsed?.options.every((o) => !o.selectedByDefault)).toBe(true);
+  Object.assign(rule, { comboPart: false });
+  expect((await client.load()).kind).not.toBe("Found");
+});

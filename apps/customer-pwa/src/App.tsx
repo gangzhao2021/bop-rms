@@ -226,7 +226,16 @@ export function App({
             />
           }
         />
-        <Route path="/dine-in/session" element={<DiningSessionPage store={store} />} />
+        <Route
+          path="/dine-in/session"
+          element={
+            <DiningSessionPage
+              store={store}
+              menuContext={localizedMenuContext}
+              menuClient={demo?.menuClient}
+            />
+          }
+        />
         <Route
           path="/cart"
           element={

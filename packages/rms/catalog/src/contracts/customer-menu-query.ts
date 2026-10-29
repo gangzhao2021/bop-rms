@@ -23,6 +23,11 @@ export interface CustomerMenuOptionRuleDto {
   readonly maximumSelections: number;
   readonly enabledOptionReferences: readonly CatalogReference[];
   readonly defaultOptionReferences: readonly CatalogReference[];
+  /**
+   * WP-2423 item 8 ⑥ part 4: a combo part — guests start with nothing chosen and must choose
+   * (whatever the defaults underneath); absent otherwise.
+   */
+  readonly comboPart?: true;
   readonly options: readonly {
     readonly optionReference: CatalogReference;
     readonly name: string;

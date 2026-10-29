@@ -157,6 +157,7 @@ export function publicFound(value: CustomerMenuFound): CustomerMenuFound {
             maximumSelections: rule.maximumSelections,
             enabledOptionReferences: [...rule.enabledOptionReferences],
             defaultOptionReferences: [...rule.defaultOptionReferences],
+            ...(rule.comboPart === true ? { comboPart: true as const } : {}),
             options: rule.options.map((option) => ({
               optionReference: option.optionReference,
               name: option.name,
