@@ -1236,4 +1236,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{store} takes dine-in orders only": "{store}只做堂食",
   "Pickup orders aren’t taken here. To eat in, scan the QR code on your table or ask a staff member for a table.":
     "本店不接自取单。要在店里用餐，请扫桌上的二维码，或请店员安排桌位。",
+  "Back to your table": "回到本桌",
+  "Back to the menu": "回到菜单",
 });
