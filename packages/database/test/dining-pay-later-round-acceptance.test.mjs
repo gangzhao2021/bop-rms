@@ -8,9 +8,12 @@ import { loadOutboxEnvelope } from "../../bop/eventing/src/index.ts";
 import {
   changeDiningRoundHoldSetting,
   changeDiningServiceSetting,
+  changeDiningTeaChargeSetting,
   parseDiningSession,
+  recordDiningPartySize,
 } from "../../rms/dining/src/index.ts";
 import { createMerchantDiningPartySize } from "../../../apps/api/src/merchant-dining-party-size.ts";
+import { createMerchantDiningTeaCharge } from "../../../apps/api/src/merchant-dining-tea-charge.ts";
 import {
   createOrderNumberAllocation,
   createPostgresOrderKitchenSourceStore,
@@ -154,6 +157,12 @@ it("a new phone's first round waits for staff, who send it to the kitchen", () =
 // refunded, and the Order's settlement, the day's ledger and reports follow with no tip.
 it("a store with tips off takes no tip from staff or guests; the table pays and is refunded without one", () =>
   journey("TipsOff"));
+// WP-2423 item 8 ⑦ 4b-2 (Owner decision 2, coordinator 2026-10-29): with a tea charge set, the
+// table's tea follows its party size until it pays — added for more guests, taken off (who, when,
+// "guests left"; the original line kept) for fewer, a retry never doing either twice; a server who
+// may not take dishes off leaves it for a manager; none before a party size.
+it("the per-head tea charge follows a pay-later table's party size until it pays", () =>
+  journey("TeaCharge"));
 
 async function journey(ending) {
   await withIsolatedDatabase(
@@ -175,7 +184,9 @@ async function journey(ending) {
                       ? "wp2423_plheld"
                       : ending === "TipsOff"
                         ? "wp2423_pltips"
-                        : "wp2423_plon",
+                        : ending === "TeaCharge"
+                          ? "wp2423_pltea"
+                          : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -891,6 +902,150 @@ async function journey(ending) {
               )
             )[0].version,
           );
+        if (ending === "TeaCharge") {
+          // The tea charge is round 2's dish (a synthetic stand-in for the Store's tea item).
+          const [{ sku }] = await rows(
+            "SELECT transaction_snapshot_json->'catalog'->>'sellableReference' AS sku FROM rms_ordering.order_item WHERE order_item_id=$1",
+            [String(items2[0].orderItemReference)],
+          );
+          const placed = [];
+          const tea = (who, command) =>
+            createMerchantDiningTeaCharge({
+              persistence: persistenceOf(who),
+              authentication: who.authentication,
+              now,
+              placeRound: async (input) => {
+                placed.push(input.command);
+                return { status: "Placed" };
+              },
+              removeItems: (input) =>
+                createMerchantDiningUnpaidItemRemoval({
+                  persistence: persistenceOf(who),
+                  authentication: who.authentication,
+                  nextReference: fresh,
+                  installContext: async (tx, selected) => {
+                    await tx.query(
+                      "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+                      [selected.tenantReference, selected.brandReference, selected.storeReference],
+                    );
+                  },
+                })(input),
+            })({ ...as(who), command });
+          const sync = (who, operationReference = fresh()) =>
+            tea(who, {
+              action: "Sync",
+              diningSessionReference: sessionReference,
+              operationReference,
+            });
+          const readTea = () =>
+            tea(server, { action: "Read", diningSessionReference: sessionReference });
+          // No tea charge yet: nothing is ever added.
+          assert.equal((await readTea()).status, "NoTeaCharge");
+          await transactions().run((tx) =>
+            changeDiningTeaChargeSetting(tx, ownerScope, {
+              operationReference: fresh(),
+              expectedVersion: 0,
+              teaSellableReference: sku,
+              actorReference: id(0x701),
+              observedAt: now(),
+            }),
+          );
+          const before = await readTea();
+          assert.equal(before.status, "NoPartySize");
+          const charged = before.charged;
+          assert.ok(charged >= 1);
+          const party = (version, size) =>
+            transactions().run((tx) =>
+              recordDiningPartySize(tx, ownerScope, {
+                diningSessionReference: sessionReference,
+                operationReference: fresh(),
+                expectedVersion: version,
+                partySize: size,
+                actorReference: id(0x700),
+                observedAt: now(),
+              }),
+            );
+          // One more guest than tea on the bill: the difference is added as a staff round.
+          await party(0, charged + 1);
+          const addOperation = fresh();
+          const more = await sync(server, addOperation);
+          assert.deepEqual(
+            [more.status, more.charged, more.expected],
+            ["Mismatch", charged, charged + 1],
+          );
+          assert.equal(placed.length, 1);
+          assert.deepEqual(placed[0].lines, [
+            { sellableReference: sku, quantity: 1, optionSelections: [], note: null },
+          ]);
+          assert.equal(placed[0].tip.kind, "None");
+          // The same sync again asks for the same round (its operation), never a second one.
+          await sync(server, addOperation);
+          assert.equal(placed[1].operationReference, placed[0].operationReference);
+          // Fewer guests: as many as round 2's tea held. A server who may not take dishes off
+          // changes nothing: left for a manager.
+          const fewer = charged - items2[0].quantity;
+          assert.ok(fewer >= 1);
+          await party(1, fewer);
+          const outsiderTea = await seedMerchantAcceptanceSession({
+            admin,
+            runner: transactions(),
+            scope: ownerScope,
+            actor: id(0x703),
+            at: now(),
+            extraPermissions: ["dining.operate"],
+            referencePrefix: "019099aa",
+            sessionReferencePrefix: "019099ab",
+          });
+          const refused = await sync(outsiderTea);
+          assert.deepEqual([refused.status, refused.problem], ["Mismatch", "NeedsManager"]);
+          assert.deepEqual(
+            await rows(
+              "SELECT count(*)::int AS n FROM rms_ordering.order_item_staff_cancellation WHERE order_id=$1",
+              [orderReference],
+            ),
+            [{ n: 0 }],
+          );
+          // The server takes the newest tea off with "guests left"; the line stays on record.
+          const lessOperation = fresh();
+          placed.length = 0;
+          const less = await sync(server, lessOperation);
+          assert.deepEqual([less.status, less.charged, less.expected], ["Charged", fewer, fewer]);
+          assert.deepEqual(
+            await rows(
+              "SELECT basis,reason_code,actor_id::text AS actor,order_item_ids::text[] AS items FROM rms_ordering.order_item_staff_cancellation WHERE order_id=$1",
+              [orderReference],
+            ),
+            [
+              {
+                basis: "PayLater",
+                reason_code: "GUEST_LEFT",
+                actor: id(0x700),
+                items: [String(items2[0].orderItemReference)],
+              },
+            ],
+          );
+          assert.deepEqual(
+            await rows(
+              "SELECT count(*)::int AS n FROM rms_ordering.order_item WHERE order_item_id=$1",
+              [String(items2[0].orderItemReference)],
+            ),
+            [{ n: 1 }],
+          );
+          // The same sync again takes nothing more off.
+          await sync(server, lessOperation);
+          assert.equal(
+            (
+              await rows(
+                "SELECT count(*)::int AS n FROM rms_ordering.order_item_staff_cancellation WHERE order_id=$1",
+                [orderReference],
+              )
+            )[0].n,
+            1,
+          );
+          // Exactly the guests are charged: nothing is added back.
+          assert.deepEqual(placed, []);
+          return;
+        }
         // The Comped ending keeps round 2 on the bill: its one dish is comped instead (v15 case).
         if (ending !== "Comped") {
           const removeOperation = fresh();

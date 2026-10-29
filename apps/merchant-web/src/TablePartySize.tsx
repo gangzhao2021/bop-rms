@@ -98,20 +98,102 @@ export function createTablePartySizeClient(fetcher: typeof fetch = fetch): Table
   });
 }
 
+/** WP-2423 item 8 ⑦ 4b-2: the table's per-head tea charge (read, or bring it to the party size). */
+export interface TableTeaView {
+  readonly status:
+    "Charged" | "NoTeaCharge" | "PaysEachRound" | "NoPartySize" | "Paid" | "Mismatch";
+  readonly charged: number;
+  readonly expected: number | null;
+  readonly problem: "NeedsManager" | "Unavailable" | null;
+}
+export type TableTeaClient = (
+  csrf: string,
+  command:
+    | { action: "Read"; diningSessionReference: string }
+    | { action: "Sync"; diningSessionReference: string; operationReference: string },
+) => Promise<TableTeaView>;
+export function createTableTeaClient(fetcher: typeof fetch = fetch): TableTeaClient {
+  return async (csrf, command) => {
+    let response: Response;
+    try {
+      response = await fetcher("/merchant/dining/tea-charge", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        headers: { "content-type": "application/json", "x-bop-csrf": csrf },
+        body: JSON.stringify(command),
+      });
+    } catch {
+      throw new TablePartySizeError("Unavailable");
+    }
+    if (response.status === 401 || response.status === 403) throw new TablePartySizeError("Denied");
+    const raw = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+    const statuses = ["Charged", "NoTeaCharge", "PaysEachRound", "NoPartySize", "Paid", "Mismatch"];
+    if (
+      !response.ok ||
+      raw === null ||
+      !statuses.includes(String(raw.status)) ||
+      !Number.isSafeInteger(raw.charged) ||
+      (raw.expected !== null && !Number.isSafeInteger(raw.expected)) ||
+      (raw.problem !== null && raw.problem !== "NeedsManager" && raw.problem !== "Unavailable")
+    )
+      throw new TablePartySizeError("Unavailable");
+    return raw as unknown as TableTeaView;
+  };
+}
+
 export function TablePartySize({
   diningSessionReference,
   tableLabel,
   csrf,
   locked,
   client: provided,
+  tea: providedTea,
 }: {
   readonly diningSessionReference: string;
   readonly tableLabel: string;
   readonly csrf: string;
   readonly locked: boolean;
   readonly client?: TablePartySizeClient;
+  readonly tea?: TableTeaClient;
 }) {
   const [client] = useState(() => provided ?? createTablePartySizeClient());
+  const [teaClient] = useState(() => providedTea ?? createTableTeaClient());
+  const [tea, setTea] = useState<TableTeaView | null>(null);
+  const [teaBusy, setTeaBusy] = useState(false);
+  // One reference per sync until it is answered (a retry repeats its steps, never adds).
+  const teaOperation = useRef<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    teaClient(csrf, { action: "Read", diningSessionReference })
+      .then((value) => {
+        if (active) setTea(value);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [teaClient, csrf, diningSessionReference]);
+  const syncTea = async () => {
+    if (teaBusy) return;
+    teaOperation.current ??= newOperationReference();
+    setTeaBusy(true);
+    try {
+      setTea(
+        await teaClient(csrf, {
+          action: "Sync",
+          diningSessionReference,
+          operationReference: teaOperation.current,
+        }),
+      );
+      teaOperation.current = null;
+    } catch {
+      setTea((current) => (current === null ? null : { ...current, problem: "Unavailable" }));
+    } finally {
+      setTeaBusy(false);
+    }
+  };
   const [view, setView] = useState<{
     askPartySize: boolean;
     partySize: number | null;
@@ -171,6 +253,8 @@ export function TablePartySize({
       });
       operation.current = null;
       setView({ ...view, ...saved });
+      // The tea follows the guests now counted (tables that pay at the end).
+      void syncTea();
       setEditing(false);
       setDraft("");
     } catch (error) {
@@ -255,6 +339,33 @@ export function TablePartySize({
         </p>
       )}
       {problem ? <p role="alert">{problem}</p> : null}
+      {tea === null ||
+      tea.status === "NoTeaCharge" ||
+      tea.status === "PaysEachRound" ||
+      tea.status === "NoPartySize" ? null : (
+        <p className="table-panel__tea">
+          {tea.status === "Mismatch"
+            ? t("Tea on the bill: {charged} · guests: {expected}", {
+                charged: tea.charged,
+                expected: tea.expected ?? 0,
+              })
+            : t("Tea on the bill: {charged}", { charged: tea.charged })}{" "}
+          {tea.status === "Mismatch" ? (
+            <button type="button" disabled={teaBusy || locked} onClick={() => void syncTea()}>
+              {teaBusy ? t("Saving…") : t("Match the tea to the guests")}
+            </button>
+          ) : null}
+        </p>
+      )}
+      {tea?.status === "Mismatch" && tea.problem === "NeedsManager" ? (
+        <p role="alert">
+          {t(
+            "Fewer guests than tea on the bill: a manager takes the extra tea off (it is recorded who and why).",
+          )}
+        </p>
+      ) : tea?.status === "Mismatch" && tea.problem === "Unavailable" ? (
+        <p role="alert">{t("The tea wasn't changed. Check the connection and try again.")}</p>
+      ) : null}
     </section>
   );
 }

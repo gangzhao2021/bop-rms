@@ -9,6 +9,7 @@ import { DiningTableCheckoutError } from "./merchant-dining-table-checkout.js";
 import { MerchantDiningHeldRoundError } from "./merchant-dining-held-round.js";
 import { MerchantDiningChaseError } from "./merchant-dining-chase.js";
 import { MerchantDiningPartySizeError } from "./merchant-dining-party-size.js";
+import { MerchantDiningTeaChargeError } from "./merchant-dining-tea-charge.js";
 
 /** WP-2423: the order progress reply (exported so acceptance reads the wire form). */
 export function orderProgressResponse(
@@ -233,6 +234,40 @@ export function installMerchantDiningRoutes(
           .status(status)
           .set("Cache-Control", NO_STORE)
           .json({ error: error.code.replace(/^DINING_/u, "").toLowerCase() });
+      });
+  });
+  // WP-2423 item 8 ⑦ 4b-2: the table's per-head tea charge, and bringing it to the party size.
+  router.post("/dining/tea-charge", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningTeaCharge) {
+      response.status(503).json({ error: "dining_tea_charge_unavailable" });
+      return;
+    }
+    void options
+      .diningTeaCharge({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        if (
+          !(error instanceof MerchantDiningTeaChargeError) ||
+          error.code === "DINING_TEA_CHARGE_PERMISSION_DENIED"
+        ) {
+          denied(response);
+          return;
+        }
+        response
+          .status(error.code === "DINING_TEA_CHARGE_INPUT_INVALID" ? 400 : 503)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: error.code.toLowerCase() });
       });
   });
   router.post("/dining/round-hold-setting", sameOriginMutation(options), (request, response) => {

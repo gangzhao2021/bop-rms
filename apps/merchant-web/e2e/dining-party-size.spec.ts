@@ -117,6 +117,21 @@ test("@production staff record how many guests sit at a table and change it", as
       json: { diningSessionReference: id(2), partySize: party.partySize, version: party.version },
     });
   });
+  // WP-2423 item 8 ⑦ 4b-2: the tea follows the guests recorded (the server adds or takes it off).
+  const teaSent: Record<string, unknown>[] = [];
+  let tea = { status: "NoPartySize", charged: 0, expected: null as number | null, problem: null };
+  await page.route("**/merchant/dining/tea-charge", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    teaSent.push(body);
+    if (body.action === "Sync")
+      tea = {
+        status: party.partySize === 6 ? "Mismatch" : "Charged",
+        charged: party.partySize === 6 ? 4 : (party.partySize ?? 0),
+        expected: party.partySize,
+        problem: null,
+      };
+    return route.fulfill({ headers, json: tea });
+  });
   await page.goto("/operations/dining");
   await page.getByRole("button", { name: "Select T6", exact: true }).click();
   const guests = page.getByRole("region", { name: "Guests at this table" });
@@ -129,6 +144,9 @@ test("@production staff record how many guests sit at a table and change it", as
   await count.fill("4");
   await save.click();
   await expect(guests).toContainText("4 guests");
+  // Saving the guests brings the tea to them: four on the bill.
+  await expect(guests).toContainText("Tea on the bill: 4");
+  expect(teaSent.at(-1)).toMatchObject({ action: "Sync", diningSessionReference: id(2) });
   expect(sent.at(-1)).toMatchObject({
     action: "Record",
     diningSessionReference: id(2),
@@ -157,6 +175,7 @@ test("@production staff record how many guests sit at a table and change it", as
   await guests.getByRole("textbox", { name: "Number of guests" }).fill("5");
   await guests.getByRole("button", { name: "Save", exact: true }).click();
   await expect(guests).toContainText("5 guests");
+  await expect(guests).toContainText("Tea on the bill: 5");
   expect(sent.at(-1)).toMatchObject({ action: "Record", expectedVersion: 2, partySize: 5 });
   await expectNoInternalText(page, ["Mark unavailable"]);
 });

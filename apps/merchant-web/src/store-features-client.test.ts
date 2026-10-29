@@ -13,6 +13,7 @@ const view = {
     askPartySize: false,
     changedAt: "2026-10-29T15:06:00.000Z",
   },
+  teaCharge: { version: 0, teaSellableReference: null, changedAt: null },
   tips: { version: 0, enabled: true, tierPercents: [10, 15, 18], changedAt: null },
   canChange: true,
 };
@@ -34,6 +35,9 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
       { ...view, services: undefined },
       // WP-2423 item 8 ⑦: three ascending whole percentages 1–50, and tips on or off.
       { ...view, tips: undefined },
+      // WP-2423 item 8 ⑦ 4b-2: the tea charge item is a reference or none.
+      { ...view, teaCharge: undefined },
+      { ...view, teaCharge: { ...view.teaCharge, teaSellableReference: "tea" } },
       { ...view, tips: { ...view.tips, enabled: "yes" } },
       { ...view, tips: { ...view.tips, tierPercents: [10, 10, 18] } },
       { ...view, tips: { ...view.tips, tierPercents: [10, 15, 51] } },

@@ -12,6 +12,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 item 8 ⑦ decision 2: the per-head tea charge's menu item (versioned).
+      table: "dining_tea_charge_setting",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/dining" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       // WP-2423 item 8 ⑦ decision 2: how many guests sit at a table (versioned per session).
       table: "dining_session_party_size",
       classification: "append-only-record",
@@ -297,6 +306,24 @@ const databaseAccessManifestInput = {
       operation: "write",
       mechanism: "repository",
       target: { schema: "rms_dining", table: "dining_service_setting" },
+      principal: { kind: "module", id: "@rms/dining" },
+      readPattern: null,
+      source: "packages/rms/dining/src/infrastructure/persistence/dining-qr-join-store.ts",
+    },
+    {
+      id: "tea-charge.read.dining_tea_charge_setting",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_dining", table: "dining_tea_charge_setting" },
+      principal: { kind: "module", id: "@rms/dining" },
+      readPattern: "owner-repository",
+      source: "packages/rms/dining/src/infrastructure/persistence/dining-qr-join-store.ts",
+    },
+    {
+      id: "tea-charge.write.dining_tea_charge_setting",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_dining", table: "dining_tea_charge_setting" },
       principal: { kind: "module", id: "@rms/dining" },
       readPattern: null,
       source: "packages/rms/dining/src/infrastructure/persistence/dining-qr-join-store.ts",

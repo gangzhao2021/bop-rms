@@ -6316,6 +6316,28 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Saved. No one is asked for a tip from now on.": "已保存。从现在起不再询问小费。",
   "Save tips": "保存小费设置",
   "Ask how many guests when opening a table": "开台时问人数",
+  "Saved. No tea charge is added from now on.": "已保存。从现在起不再加茶位。",
+  "Saved. Tea is added for each guest from the next party size recorded.":
+    "已保存。从下一次记人数起，按人数加茶位。",
+  "This wasn't saved. Check the connection and try again.": "没有保存，请检查网络后再试。",
+  "Tea charge": "茶位费",
+  "Choose the menu item charged per guest. When staff record how many guests sit at a table, that many are added to its bill; it is shown to guests as tea per person.":
+    "选菜单里按人头收的那一项。店员记下一桌几位后，按人数加到这桌的账单上；客人看到的是“茶位 每位”。",
+  "Tea is only added at tables that pay at the end. Tables that pay for each round are not charged tea automatically.":
+    "茶位只自动加在吃完再付的桌上，每轮先付的桌不会自动加。",
+  "Tea charge item": "茶位项目",
+  "No tea charge": "不收茶位",
+  "The item set before (no longer on the menu)": "之前设的项目（已不在菜单上）",
+  "The menu could not be read, so the items can't be listed.": "读不到菜单，无法列出项目。",
+  "Mark that item “Not prepared by the kitchen” on the menu, so it never goes to the kitchen board.":
+    "请在菜单里把这一项标为“不经后厨”，这样它不会进后厨看板。",
+  "Save tea charge": "保存茶位设置",
+  "Tea on the bill: {charged} · guests: {expected}": "账单上的茶位：{charged} · 人数：{expected}",
+  "Tea on the bill: {charged}": "账单上的茶位：{charged}",
+  "Match the tea to the guests": "按人数调整茶位",
+  "Fewer guests than tea on the bill: a manager takes the extra tea off (it is recorded who and why).":
+    "人数比账单上的茶位少：请经理把多的茶位去掉（会记录是谁、为什么）。",
+  "The tea wasn't changed. Check the connection and try again.": "茶位没有改，请检查网络后再试。",
   "Whether the kitchen prepares this dish could not be read.": "读不到这道菜是否经后厨。",
   "This wasn't saved. It has been read again: check it and try again.":
     "没有保存，已重新读取，请核对后再试。",
