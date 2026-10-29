@@ -321,7 +321,10 @@ const rowsOf = (result: unknown): readonly Record<string, unknown>[] => {
     ? (rows as Record<string, unknown>[])
     : fail("STORE_FEATURE_SETTING_UNAVAILABLE");
 };
-const featureScope = async (tx: Transaction, scope: StoreFeatureScope) => {
+const featureScope = async (
+  tx: Transaction,
+  scope: Pick<StoreFeatureScope, "brandReference" | "storeReference">,
+) => {
   const brand = parseBrandReference(scope.brandReference);
   const store = parseStoreReference(scope.storeReference);
   await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
@@ -334,7 +337,7 @@ const featureScope = async (tx: Transaction, scope: StoreFeatureScope) => {
 /** The Store's current modules, in the caller's transaction (Store RLS). */
 export async function loadStoreFeatureSetting(
   tx: Transaction,
-  scope: StoreFeatureScope,
+  scope: Pick<StoreFeatureScope, "brandReference" | "storeReference">,
 ): Promise<StoreFeatureSetting> {
   const { brand, store } = await featureScope(tx, scope);
   const found = rowsOf(

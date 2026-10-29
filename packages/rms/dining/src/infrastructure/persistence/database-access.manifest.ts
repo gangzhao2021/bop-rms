@@ -3,6 +3,15 @@ const databaseAccessManifestInput = {
   module: { moduleName: "dining", packageName: "@rms/dining", layer: "RMS" },
   tables: [
     {
+      // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: call staff and chase a dish switches (versioned).
+      table: "dining_service_setting",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/dining" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "dining_round_hold_setting",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/dining" },
@@ -261,6 +270,24 @@ const databaseAccessManifestInput = {
       operation: "write",
       mechanism: "repository",
       target: { schema: "rms_dining", table: "dining_qr_join_control" },
+      principal: { kind: "module", id: "@rms/dining" },
+      readPattern: null,
+      source: "packages/rms/dining/src/infrastructure/persistence/dining-qr-join-store.ts",
+    },
+    {
+      id: "service-setting.read.dining_service_setting",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_dining", table: "dining_service_setting" },
+      principal: { kind: "module", id: "@rms/dining" },
+      readPattern: "owner-repository",
+      source: "packages/rms/dining/src/infrastructure/persistence/dining-qr-join-store.ts",
+    },
+    {
+      id: "service-setting.write.dining_service_setting",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_dining", table: "dining_service_setting" },
       principal: { kind: "module", id: "@rms/dining" },
       readPattern: null,
       source: "packages/rms/dining/src/infrastructure/persistence/dining-qr-join-store.ts",

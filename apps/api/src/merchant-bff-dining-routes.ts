@@ -7,6 +7,7 @@ import { DiningCheckoutAlreadyPaidError } from "./merchant-dining-closing-comman
 import type { Response, Router } from "express";
 import { DiningTableCheckoutError } from "./merchant-dining-table-checkout.js";
 import { MerchantDiningHeldRoundError } from "./merchant-dining-held-round.js";
+import { MerchantDiningChaseError } from "./merchant-dining-chase.js";
 
 /** WP-2423: the order progress reply (exported so acceptance reads the wire form). */
 export function orderProgressResponse(
@@ -27,6 +28,8 @@ export function orderProgressResponse(
     orderVersion: current.orderVersion,
     phase: current.phase,
     observedAt: current.observedAt,
+    // WP-2423 item 8 ⑦: whether servers may chase a dish here.
+    chaseDish: current.chaseDish,
     items: current.items.map((item) => ({
       orderItemReference: item.orderItemReference,
       orderBatchReference: item.orderBatchReference,
@@ -53,6 +56,9 @@ export function orderProgressResponse(
         : {}),
       // WP-2423 item 8 ⑥ part 4: a combo's dishes, each served on its own (v15 2026-10-29:
       // the reply left them out, so a combo was served only as a whole).
+      ...("chase" in item && item.chase !== undefined
+        ? { chase: { count: item.chase.count, lastChasedAt: item.chase.lastChasedAt } }
+        : {}),
       ...("comboParts" in item && item.comboParts !== undefined
         ? {
             comboParts: item.comboParts.map((part) => ({
@@ -142,6 +148,52 @@ export function installMerchantDiningRoutes(
       .catch((error: unknown) => heldRoundFailure(response, error));
   });
   // WP-2423 item 8 ⑤ decision 5: the Store's "a new phone's first round waits for staff".
+  // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: chase a dish not yet served.
+  router.post("/dining/chase", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningChase) {
+      response.status(503).json({ error: "dining_chase_unavailable" });
+      return;
+    }
+    void options
+      .diningChase({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        if (!(error instanceof MerchantDiningChaseError)) {
+          denied(response);
+          return;
+        }
+        response.set("Cache-Control", NO_STORE);
+        if (error.code === "DINING_CHASE_TOO_SOON" && error.retryAt !== null) {
+          const seconds = Math.max(1, Math.ceil((Date.parse(error.retryAt) - Date.now()) / 1000));
+          response
+            .status(429)
+            .set("Retry-After", String(seconds))
+            .json({ error: "dining_chase_too_soon", retryAt: error.retryAt });
+          return;
+        }
+        const status =
+          error.code === "DINING_CHASE_INPUT_INVALID"
+            ? 400
+            : error.code === "DINING_CHASE_PERMISSION_DENIED"
+              ? 403
+              : error.code === "DINING_CHASE_NOT_OFFERED" ||
+                  error.code === "DINING_CHASE_NOT_BEING_MADE"
+                ? 409
+                : 503;
+        response.status(status).json({ error: error.code.toLowerCase() });
+      });
+  });
   router.post("/dining/round-hold-setting", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
       csrf = exactHeader(request, "x-bop-csrf");

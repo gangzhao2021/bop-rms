@@ -760,6 +760,8 @@ describe("migration catalog", () => {
       "2000_116_create_kitchen_combo_part_done",
       "2000_117_create_dining_combo_part_served",
       "2000_118_create_store_feature_setting",
+      "2000_119_create_dining_service_setting",
+      "2000_120_create_kitchen_work_chase",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

@@ -57,6 +57,8 @@ export interface PickupQueueView {
   readonly freshnessStatus: "Fresh" | "Stale" | "Rebuilding" | "Failed";
   readonly items: readonly PickupQueueItem[];
   readonly nextAfterFulfillmentReference?: string | null;
+  /** WP-2423 item 8 ⑦ (v15 finding v): guests' pickup ordering is turned off at this store. */
+  readonly guestPickupOff?: boolean;
 }
 export interface PickupClient {
   loadQueue(input?: {
@@ -182,6 +184,8 @@ export function parsePickupQueueView(value: unknown): PickupQueueView {
     !!value && typeof value === "object" && Object.hasOwn(value, "workstation");
   const hasCursor =
     !!value && typeof value === "object" && Object.hasOwn(value, "nextAfterFulfillmentReference");
+  const hasPickupOff =
+    !!value && typeof value === "object" && Object.hasOwn(value, "guestPickupOff");
   const input = closed(value, [
     "screenId",
     "projectionName",
@@ -192,7 +196,9 @@ export function parsePickupQueueView(value: unknown): PickupQueueView {
     "items",
     ...(hasCursor ? ["nextAfterFulfillmentReference"] : []),
     ...(hasWorkstation ? ["workstation"] : []),
+    ...(hasPickupOff ? ["guestPickupOff"] : []),
   ]);
+  if (hasPickupOff && input.guestPickupOff !== true) throw new Error("PICKUP_VIEW_INVALID");
   if (
     input.screenId !== "FUL-PICKUP-QUEUE" ||
     input.projectionName !== "fulfillment_pickup_queue_v1" ||
@@ -216,6 +222,7 @@ export function parsePickupQueueView(value: unknown): PickupQueueView {
     freshnessStatus: input.freshnessStatus as PickupQueueView["freshnessStatus"],
     items,
     ...(hasWorkstation ? { workstation: parsePickupWorkstation(input.workstation) } : {}),
+    ...(hasPickupOff ? { guestPickupOff: true } : {}),
     ...(hasCursor
       ? {
           nextAfterFulfillmentReference:

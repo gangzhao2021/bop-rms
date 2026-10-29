@@ -692,6 +692,11 @@ export function CheckoutPage({
                 ? checkoutText.continueToPayment
                 : checkoutText.sendToKitchen}
             </button>
+          ) : sessionState.status === "store_closed" ? (
+            // WP-2423 item 8 ⑦ s1: closed or past last orders: retrying does not help now.
+            <Link className="checkout-continue__button" to={dineIn ? "/dine-in/session" : "/menu"}>
+              {dineIn ? checkoutText.backToYourTable : checkoutText.backToTheMenu}
+            </Link>
           ) : "canRetry" in sessionState && sessionState.canRetry ? (
             <button
               type="button"

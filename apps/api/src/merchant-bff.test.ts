@@ -18,6 +18,7 @@ import { StaffOrderCancellationError } from "./merchant-order-staff-cancellation
 import { StaffItemCancellationError } from "./merchant-order-item-staff-cancellation.js";
 import { CounterOrderError } from "./merchant-counter-order.js";
 import { MerchantStoreFeaturesError } from "./merchant-store-features.js";
+import { MerchantDiningChaseError } from "./merchant-dining-chase.js";
 import { StaffDiningRoundError } from "./merchant-staff-dining-round.js";
 import { CounterMenuError } from "./merchant-counter-menu.js";
 import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.js";
@@ -2036,6 +2037,7 @@ it("WP-2423 item 8 ⑦: reads and changes the Store's modules, and says when ano
     templateCode: "FullService" as const,
     modules: { counterOrder: false, pickup: true, inventory: false },
     changedAt: serverTime,
+    services: { version: 0, staffCall: false, chaseDish: false, changedAt: null },
     canChange: true,
   };
   const command = vi.fn<Command>().mockResolvedValue(view);
@@ -2091,6 +2093,64 @@ it("WP-2423 item 8 ⑦: reads and changes the Store's modules, and says when ano
   const denied = await submit({ action: "Read" });
   expect(denied.status).toBe(403);
   expect(await denied.json()).toEqual({ error: "request_denied" });
+});
+
+it("WP-2423 item 8 ⑦: chases a dish, and says when a round was chased too soon", async () => {
+  type Command = NonNullable<MerchantBffRouterOptions["diningChase"]>;
+  const command = vi.fn<Command>().mockResolvedValue({ status: "Chased", chaseCount: 1 });
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      diningChase: command,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const body = { orderItemReference: storeReference, operationReference: storeReference };
+  const submit = (extra: Record<string, string> = {}) =>
+    request(root, "/merchant/dining/chase", {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: {
+        ...safeHeaders,
+        Cookie: "__Host-bop-merchant=" + sessionCookie,
+        "X-BOP-CSRF": csrf,
+        "Content-Type": "application/json",
+        ...extra,
+      },
+    });
+  expect((await submit({ Origin: "https://foreign.invalid" })).status).toBe(403);
+  expect(command).not.toHaveBeenCalled();
+  const chased = await submit();
+  expect(chased.status).toBe(200);
+  expect(await chased.json()).toEqual({ status: "Chased", chaseCount: 1 });
+  expect(command).toHaveBeenCalledWith({ sessionCookie, csrf, command: body });
+  const retryAt = new Date(Date.now() + 120_000).toISOString();
+  command.mockRejectedValueOnce(new MerchantDiningChaseError("DINING_CHASE_TOO_SOON", retryAt));
+  const soon = await submit();
+  expect(soon.status).toBe(429);
+  expect(Number(soon.headers.get("retry-after"))).toBeGreaterThan(100);
+  expect(await soon.json()).toEqual({ error: "dining_chase_too_soon", retryAt });
+  for (const [code, status] of [
+    ["DINING_CHASE_NOT_OFFERED", 409],
+    ["DINING_CHASE_NOT_BEING_MADE", 409],
+    ["DINING_CHASE_PERMISSION_DENIED", 403],
+    ["DINING_CHASE_INPUT_INVALID", 400],
+    ["DINING_CHASE_UNAVAILABLE", 503],
+  ] as const) {
+    command.mockRejectedValueOnce(new MerchantDiningChaseError(code));
+    const refused = await submit();
+    expect(refused.status).toBe(status);
+    expect(await refused.json()).toEqual({ error: code.toLowerCase() });
+  }
 });
 
 it("protects Dining progress transport and returns only operational fields", async () => {
@@ -3432,6 +3492,18 @@ it("WP-2423 Q7 slice 2: protects the staff table round transport and maps refusa
   expect(await (await submit()).json()).toEqual({
     error: "table_cart_has_items",
     items: [{ name: "Iced Latte", quantity: 1 }],
+  });
+  // WP-2423 item 8 ⑦: with the cart version to add them against, and whether guests can send.
+  const withCart = new StaffDiningRoundError("STAFF_ROUND_TABLE_CART_HAS_ITEMS", null, [
+    { name: "Iced Latte", quantity: 1 },
+  ]);
+  withCart.tableCart = { cartVersion: 4, guestsCanSend: false };
+  staffDiningRound.mockRejectedValueOnce(withCart);
+  expect(await (await submit()).json()).toEqual({
+    error: "table_cart_has_items",
+    items: [{ name: "Iced Latte", quantity: 1 }],
+    cartVersion: 4,
+    guestsCanSend: false,
   });
   staffDiningRound.mockRejectedValueOnce(new Error("synthetic-private"));
   const denied = await submit();

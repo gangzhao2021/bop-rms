@@ -139,7 +139,9 @@ export function createPickupClient(options: {
           view.nextAfterFulfillmentReference <= after
         )
           return fail();
-        return view;
+        return result.guestPickupOff === true
+          ? Object.freeze({ ...view, guestPickupOff: true })
+          : view;
       } catch (error) {
         if (error instanceof PickupClientError) throw error;
         if (error instanceof TypeError || controller.signal.aborted)

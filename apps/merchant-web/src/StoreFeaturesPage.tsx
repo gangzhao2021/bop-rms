@@ -105,6 +105,8 @@ export function StoreFeaturesPage({
   const [view, setView] = useState<StoreFeatures | null>(null);
   const [failed, setFailed] = useState<"Denied" | "Unavailable" | null>(null);
   const [draft, setDraft] = useState<Modules | null>(null);
+  // WP-2423 item 8 ⑦ (Owner decision 4): the table switches, saved on their own.
+  const [services, setServices] = useState<{ staffCall: boolean; chaseDish: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
   const [refresh, setRefresh] = useState(0);
@@ -120,6 +122,7 @@ export function StoreFeaturesPage({
         if (!active) return;
         setView(value);
         setDraft(modulesOf(value));
+        setServices({ staffCall: value.services.staffCall, chaseDish: value.services.chaseDish });
         setFailed(null);
       })
       .catch((error: unknown) => {
@@ -155,7 +158,7 @@ export function StoreFeaturesPage({
         </StatePanel>
       </WorkspacePage>
     );
-  if (view === null || draft === null)
+  if (view === null || draft === null || services === null)
     return (
       <WorkspacePage title={t("Store features")}>
         <p role="status">{t("Reading store features…")}</p>
@@ -242,6 +245,7 @@ export function StoreFeaturesPage({
       operation.current = null;
       setView(next);
       setDraft(modulesOf(next));
+      setServices({ staffCall: next.services.staffCall, chaseDish: next.services.chaseDish });
       setMessage({ tone: "status", text: done });
     } catch (error) {
       if (error instanceof StoreFeaturesClientError && error.code === "Changed") {
@@ -326,6 +330,69 @@ export function StoreFeaturesPage({
           )}
         </div>
         {confirming === "Save" ? pickupOff(draft.counterOrder) : null}
+        <fieldset className="store-features__modules" disabled={busy}>
+          <legend>{t("At the table")}</legend>
+          <label className="store-features__row">
+            <input
+              type="checkbox"
+              checked={services.staffCall}
+              onChange={(event) => {
+                operation.current = null;
+                setServices({ ...services, staffCall: event.target.checked });
+              }}
+            />
+            <span>
+              <strong>{t("Guests can call staff")}</strong>
+              <span className="store-features__detail">
+                {t(
+                  "A guest at the table taps “Call staff” on their phone; the table shows it on Tables, with a sound.",
+                )}
+              </span>
+            </span>
+          </label>
+          <label className="store-features__row">
+            <input
+              type="checkbox"
+              checked={services.chaseDish}
+              onChange={(event) => {
+                operation.current = null;
+                setServices({ ...services, chaseDish: event.target.checked });
+              }}
+            />
+            <span>
+              <strong>{t("Servers can chase a dish")}</strong>
+              <span className="store-features__detail">
+                {t(
+                  "On a table's order, “Chase” next to a dish not yet ready turns its kitchen ticket red with a sound, and counts the chases. A round can be chased once every 5 minutes.",
+                )}
+              </span>
+            </span>
+          </label>
+        </fieldset>
+        <div className="store-features__actions">
+          <button
+            type="button"
+            className="store-features__save"
+            disabled={
+              busy ||
+              (services.staffCall === view.services.staffCall &&
+                services.chaseDish === view.services.chaseDish)
+            }
+            onClick={() =>
+              void run(
+                (operationReference) =>
+                  client.changeServices({
+                    operationReference,
+                    expectedVersion: view.services.version,
+                    ...services,
+                  }),
+                t("Saved. Staff see the change the next time a page opens."),
+              )
+            }
+          >
+            {t("Save table settings")}
+          </button>
+        </div>
         {message === null ? null : (
           <p role={message.tone} className="store-features__message">
             {message.text}

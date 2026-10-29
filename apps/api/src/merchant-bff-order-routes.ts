@@ -425,7 +425,16 @@ export function installMerchantOrderRoutes(
                     sharedStock: error.sharedStock,
                   }
                 : error.code === "STAFF_ROUND_TABLE_CART_HAS_ITEMS"
-                  ? { error: code, items: error.pendingItems.slice(0, 30) }
+                  ? {
+                      error: code,
+                      items: error.pendingItems.slice(0, 30),
+                      ...(error.tableCart === null
+                        ? {}
+                        : {
+                            cartVersion: error.tableCart.cartVersion,
+                            guestsCanSend: error.tableCart.guestsCanSend,
+                          }),
+                    }
                   : { error: code },
           );
       });

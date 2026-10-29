@@ -11,6 +11,13 @@ export interface StoreFeatures {
     readonly inventory: boolean;
   };
   readonly changedAt: string | null;
+  /** WP-2423 item 8 ⑦ (Owner decision 4): guests call staff; servers chase a dish. */
+  readonly services: {
+    readonly version: number;
+    readonly staffCall: boolean;
+    readonly chaseDish: boolean;
+    readonly changedAt: string | null;
+  };
 }
 export class StoreFeaturesClientError extends Error {
   constructor(readonly code: "Denied" | "Changed" | "Unavailable") {
@@ -26,6 +33,7 @@ const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 export function parseStoreFeatures(value: unknown): StoreFeatures {
   const raw = value as Record<string, unknown> | null;
   const modules = raw?.modules as Record<string, unknown> | null | undefined;
+  const services = raw?.services as Record<string, unknown> | null | undefined;
   if (
     raw === null ||
     typeof raw !== "object" ||
@@ -39,7 +47,16 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
     modules === null ||
     typeof modules !== "object" ||
     Object.keys(modules).sort().join(",") !== "counterOrder,inventory,pickup" ||
-    Object.values(modules).some((entry) => typeof entry !== "boolean")
+    Object.values(modules).some((entry) => typeof entry !== "boolean") ||
+    services === null ||
+    typeof services !== "object" ||
+    Object.keys(services).sort().join(",") !== "changedAt,chaseDish,staffCall,version" ||
+    !Number.isSafeInteger(services.version) ||
+    Number(services.version) < 0 ||
+    typeof services.staffCall !== "boolean" ||
+    typeof services.chaseDish !== "boolean" ||
+    (services.changedAt !== null &&
+      (typeof services.changedAt !== "string" || !instant.test(services.changedAt)))
   )
     return fail();
   return Object.freeze({
@@ -51,6 +68,12 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
       inventory: modules.inventory === true,
     }),
     changedAt: raw.changedAt as string | null,
+    services: Object.freeze({
+      version: Number(services.version),
+      staffCall: services.staffCall,
+      chaseDish: services.chaseDish,
+      changedAt: services.changedAt as string | null,
+    }),
   });
 }
 
@@ -75,6 +98,12 @@ export function createStoreFeaturesClient(csrf: string, fetcher: typeof fetch = 
   };
   return Object.freeze({
     read: () => send({ action: "Read" }),
+    changeServices: (input: {
+      operationReference: string;
+      expectedVersion: number;
+      staffCall: boolean;
+      chaseDish: boolean;
+    }) => send({ action: "ChangeServices", ...input }),
     applyFullService: (input: { operationReference: string; expectedVersion: number }) =>
       send({ action: "ApplyTemplate", template: "FullService", ...input }),
     change: (input: {

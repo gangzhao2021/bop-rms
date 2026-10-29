@@ -69,6 +69,12 @@ export class StaffDiningRoundError extends Error {
   readonly available: number | null;
   /** WP-2423: the item is short only because other items in the round use the same stock. */
   readonly sharedStock: boolean;
+  /**
+   * WP-2423 item 8 ⑦ (v15 finding t): for STAFF_ROUND_TABLE_CART_HAS_ITEMS, the version of the
+   * table's Cart those items are in (staff add them to the round against it) and whether guests
+   * can still send them themselves (not after last orders).
+   */
+  tableCart: { readonly cartVersion: number; readonly guestsCanSend: boolean } | null = null;
   constructor(
     code: StaffDiningRoundErrorCode,
     lineIndex: number | null = null,
@@ -113,6 +119,8 @@ export interface StaffTableGuestPipeline extends Pick<
 > {
   /** Whether the Store takes a dine-in round now (paper rounds after an outage: always). */
   takesOrder(input: { readonly recordedAfterOutage: boolean }): Promise<boolean>;
+  /** WP-2423 item 8 ⑦: whether guests can still send a round themselves (not after last orders). */
+  guestsCanSend?(): Promise<boolean>;
   /**
    * Starts the table's dining session, or issues a fresh one-time table code for its current
    * session, under this staff member's table authority (Dining owner commands).
@@ -251,15 +259,31 @@ export function parseStaffDiningRoundCommand(value: unknown): {
   readonly lines: readonly StaffDiningRoundLine[];
   readonly tip: CounterTipChoice;
   readonly recordedAfterOutage: boolean;
+  /**
+   * WP-2423 item 8 ⑦ (v15 finding t): add the items guests left unsent in the table's Cart to
+   * this round, as staff saw them (that Cart version); null: the round is only its own lines.
+   */
+  readonly includeTableCart: number | null;
 } {
   try {
+    const includes =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "includeTableCart");
     const raw = readClosedRecord(value, [
       "operationReference",
       "tableReference",
       "lines",
       "tip",
       "recordedAfterOutage",
+      ...(includes ? ["includeTableCart"] : []),
     ]);
+    const includeTableCart = includes
+      ? Number(readClosedRecord(raw.includeTableCart, ["expectedCartVersion"]).expectedCartVersion)
+      : null;
+    if (
+      includeTableCart !== null &&
+      (!Number.isSafeInteger(includeTableCart) || includeTableCart < 1)
+    )
+      return fail("STAFF_ROUND_INPUT_INVALID");
     if (!Array.isArray(raw.lines)) return fail("STAFF_ROUND_INPUT_INVALID");
     const notes = raw.lines.map((line: unknown) => {
       const note = readClosedRecord(line, [
@@ -288,6 +312,7 @@ export function parseStaffDiningRoundCommand(value: unknown): {
       ),
       tip: parsed.tip,
       recordedAfterOutage: parsed.recordedAfterOutage,
+      includeTableCart,
     });
   } catch (error) {
     if (error instanceof StaffDiningRoundError) throw error;
@@ -339,6 +364,10 @@ export function createMerchantStaffDiningRound(options: {
             lines: command.lines,
             tip: command.tip,
             recordedAfterOutage: command.recordedAfterOutage,
+            // A round that takes in the guests' unsent items is a different intent.
+            ...(command.includeTableCart === null
+              ? {}
+              : { includeTableCart: command.includeTableCart }),
           }),
         ),
     );
@@ -609,9 +638,25 @@ export function createMerchantStaffDiningRound(options: {
       });
       if (cart.status !== "Selected") return fail("STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS");
       // Items guests put in the table's shared Cart and haven't sent yet would be sent and charged
-      // with this round: staff ask the guests to send or remove them first.
-      if (cart.pendingItems.length > 0)
-        return fail("STAFF_ROUND_TABLE_CART_HAS_ITEMS", null, cart.pendingItems);
+      // with this round. Staff either ask the guests to send or remove them (while guests can
+      // still send), or add them to this round, as they saw them: only that same Cart version is
+      // taken in (one checkout of the Cart, recorded as this staff round, so a guest's phone
+      // retrying its send finds the Cart already sent and adds nothing).
+      if (cart.pendingItems.length > 0 && command.includeTableCart !== cart.cartVersion) {
+        const refusal = new StaffDiningRoundError(
+          "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
+          null,
+          cart.pendingItems,
+        );
+        refusal.tableCart = {
+          cartVersion: cart.cartVersion,
+          guestsCanSend:
+            options.pipeline.guestsCanSend === undefined
+              ? true
+              : await options.pipeline.guestsCanSend(),
+        };
+        throw refusal;
+      }
       let cartVersion = cart.cartVersion;
       // The Cart line each round line went to, to name a line the checkout finds short.
       const cartLines: (string | undefined)[] = [];

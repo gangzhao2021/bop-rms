@@ -114,6 +114,7 @@ function item(value: unknown) {
     displayName,
     ...(otherName === null ? {} : { otherName }),
     ...("comboParts" in raw ? { comboParts: raw.comboParts } : {}),
+    ...("chase" in raw ? { chase: raw.chase } : {}),
     status: raw.status,
     requiredQuantity: raw.requiredQuantity,
     completedQuantity: raw.completedQuantity,

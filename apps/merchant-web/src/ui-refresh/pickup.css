@@ -312,3 +312,10 @@
 .workspace-page .pickup-queue__card > .card-actions:empty {
   display: none;
 }
+
+/* WP-2423 item 8 ⑦ (v15 finding v): guests' pickup is off; orders still to hand over are listed. */
+.pickup-queue__off {
+  margin: 0 0 var(--bop-space-3);
+  padding: var(--bop-space-2) 0 var(--bop-space-2) var(--bop-space-3);
+  border-left: 3px solid var(--bop-color-accent);
+}

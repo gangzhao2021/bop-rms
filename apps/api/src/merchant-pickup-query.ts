@@ -1,4 +1,5 @@
 import { staffNameLocales } from "./staff-content-locale.js";
+import { readStoreFeatures } from "./merchant-store-features.js";
 import { readClosedRecord } from "@bop/identity";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
@@ -241,10 +242,21 @@ export function createMerchantPickupQuery(options: {
               }),
             );
       }
+      // WP-2423 item 8 ⑦ (v15 finding v): guests' pickup ordering is off; staff still hand over
+      // the orders already placed here. Unreadable: not said.
+      const features = await readStoreFeatures(
+        tx,
+        {
+          brandReference: String(selected.brandReference),
+          storeReference: String(selected.storeReference),
+        },
+        "AllModules",
+      );
       return Object.freeze({
         ...result,
         workstation,
         storeReference: selected.storeReference,
+        guestPickupOff: !features.pickup,
         items: result.items
           .filter((item) => !cancelled.has(String(item.orderReference)))
           .map((item) =>
@@ -275,4 +287,70 @@ export function createMerchantPickupQuery(options: {
       });
     }
   };
+}
+
+/**
+ * WP-2423 item 8 ⑦ (v15 finding v): how many pickup orders Fulfillment's current pickup queue
+ * still has to hand over (the Pickup page's own read, without handed-over orders), inside another
+ * read (the workspace's navigation), in a savepoint that restores the Brand and Store context it
+ * changes. Only the number leaves; null when it cannot be read. The caller has authorized the
+ * Store; this read names no order.
+ */
+export async function waitingPickupOrders(
+  transaction: { query(sql: string, values: readonly unknown[]): Promise<unknown> },
+  options: Pick<StoreOptions, "sha256" | "validateCurrentSource" | "now"> & {
+    readonly brandReference: string;
+    readonly storeReference: string;
+  },
+): Promise<number | null> {
+  const tx: ConsumerTransaction = {
+    async query<Row = Record<string, unknown>>(sql: string, values: readonly unknown[]) {
+      const result = (await transaction.query(sql, values)) as {
+        rows: readonly Row[];
+        rowCount: number | null;
+      };
+      return { rows: result.rows, rowCount: result.rowCount ?? null };
+    },
+  };
+  const before = (
+    (await transaction.query(
+      "SELECT current_setting('bop.brand_id',true) brand,current_setting('bop.store_id',true) store",
+      [],
+    )) as { rows: { brand: string | null; store: string | null }[] }
+  ).rows[0];
+  await transaction.query("SAVEPOINT waiting_pickup_orders", []);
+  try {
+    const store = createPostgresFulfillmentReadinessStore({
+      ...options,
+      authorizeQueue: async () => true,
+      authorize: async () => true,
+    });
+    let after: string | null = null;
+    let count = 0;
+    for (let page = 0; page < 20; page++) {
+      const result = await store.listPickupQueue({
+        transaction: tx,
+        afterFulfillmentReference: after,
+        limit: 50,
+        includeCompleted: false,
+      });
+      count += result.items.length;
+      if (result.nextAfterFulfillmentReference === null) {
+        await transaction.query("RELEASE SAVEPOINT waiting_pickup_orders", []);
+        return count;
+      }
+      after = result.nextAfterFulfillmentReference;
+    }
+    await transaction.query("RELEASE SAVEPOINT waiting_pickup_orders", []);
+    return null;
+  } catch {
+    await transaction.query("ROLLBACK TO SAVEPOINT waiting_pickup_orders", []);
+    await transaction.query("RELEASE SAVEPOINT waiting_pickup_orders", []);
+    return null;
+  } finally {
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [before?.brand ?? "", before?.store ?? ""],
+    );
+  }
 }

@@ -54,7 +54,10 @@ export function DiningStaffCallPanel({
       } catch (error) {
         if (signal?.aborted) return;
         // Not seated at a table (or the table ended): nothing to offer here.
-        if (error instanceof DiningStaffCallClientError && error.code === "not-joined")
+        if (
+          error instanceof DiningStaffCallClientError &&
+          (error.code === "not-joined" || error.code === "not-offered")
+        )
           setState({ status: "hidden" });
         else
           // Not reachable: say so (and to wave to staff) rather than hide the way to ask.
@@ -121,7 +124,10 @@ export function DiningStaffCallPanel({
         void refresh();
       }
     } catch (error) {
-      if (error instanceof DiningStaffCallClientError && error.code === "not-joined") {
+      if (
+        error instanceof DiningStaffCallClientError &&
+        (error.code === "not-joined" || error.code === "not-offered")
+      ) {
         pending.current = null;
         setState({ status: "hidden" });
       } else

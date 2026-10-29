@@ -603,3 +603,14 @@
 .kitchen-work-item__combo-done {
   margin-left: auto;
 }
+
+/* WP-2423 item 8 ⑦ DEC-STORE-FEATURES: a ticket with a dish a server chased (still being made). */
+.kitchen-ticket[data-chased="true"] {
+  border-color: var(--bop-color-danger);
+  box-shadow: inset 4px 0 0 var(--bop-color-danger);
+}
+.kitchen-work-item[data-chased="true"] .kitchen-work-item__chased {
+  margin: 4px 0 0;
+  color: var(--bop-color-danger);
+  font-weight: 600;
+}

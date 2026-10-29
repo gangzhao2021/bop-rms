@@ -696,6 +696,28 @@ export function KitchenArrivals({
   );
 }
 
+/**
+ * WP-2423 item 8 ⑦: work still being made that a server chased since the previous read (its
+ * chase count went up). The first read sounds nothing: only chases while the board is open.
+ */
+export function newKitchenChases(
+  previous: KitchenBoardView | null,
+  next: KitchenBoardView,
+): readonly string[] {
+  if (previous === null) return [];
+  const before = new Map(
+    previous.items.map((item) => [item.workItemReference, item.chase?.count ?? 0]),
+  );
+  return next.items
+    .filter(
+      (item) =>
+        item.chase !== undefined &&
+        isActiveKitchenWork(item) &&
+        item.chase.count > (before.get(item.workItemReference) ?? 0),
+    )
+    .map((item) => item.workItemReference);
+}
+
 /** The queued work item references that were not in the previous read. */
 export function newQueuedReferences(
   previous: KitchenBoardView | null,
@@ -979,6 +1001,7 @@ function WorkCard({
       data-status={item.status}
       data-in-ticket={inTicket ? "true" : undefined}
       data-finished={inTicket && !isActiveKitchenWork(item) ? "true" : undefined}
+      data-chased={item.chase !== undefined && isActiveKitchenWork(item) ? "true" : undefined}
       data-partial={
         item.completedQuantity > 0 && item.completedQuantity < item.requiredQuantity
           ? "true"
@@ -1007,6 +1030,15 @@ function WorkCard({
         {item.otherName === undefined ? null : (
           <p className="kitchen-work-item__other-name" lang="en">
             {item.otherName}
+          </p>
+        )}
+        {item.chase === undefined || !isActiveKitchenWork(item) ? null : (
+          // WP-2423 item 8 ⑦: the table is waiting; how often a server chased it.
+          <p className="kitchen-work-item__chased" role="note">
+            {item.chase.count === 1
+              ? t("Chased by the server")
+              : t("Chased {count} times", { count: item.chase.count })}{" "}
+            · <SourceTime instant={item.chase.lastChasedAt} withDate={false} />
           </p>
         )}
       </div>
@@ -1961,6 +1993,14 @@ export function KitchenBoardScreen({
                               ? "true"
                               : undefined
                           }
+                          // WP-2423 item 8 ⑦: a server chased a dish still being made here.
+                          data-chased={
+                            group.items.some(
+                              (item) => item.chase !== undefined && isActiveKitchenWork(item),
+                            )
+                              ? "true"
+                              : undefined
+                          }
                           aria-label={dayLabel(first)}
                         >
                           <header className="kitchen-ticket__header">
@@ -2426,13 +2466,18 @@ function KitchenBoardContent(
   // WP-2423 Q33: new work also stays announced on screen until a cook says they saw it, or until
   // it is no longer waiting to be accepted; the chime repeats while it is unanswered.
   const previousView = useRef<KitchenBoardView | null>(null);
+  const previousChases = useRef<KitchenBoardView | null>(null);
   const [arrivals, setArrivals] = useState<readonly string[]>([]);
   useEffect(() => {
     if (state.kind !== "Found") return;
     const arrived = newQueuedReferences(previousView.current, state.view);
     previousView.current = state.view;
     setArrivals((current) => unansweredArrivals(current, arrived, state.view));
-    if (soundOn && arrived.length > 0 && audio.current) playKitchenChime(audio.current);
+    // WP-2423 item 8 ⑦: a server chased a dish since the previous read.
+    const chased = newKitchenChases(previousChases.current, state.view);
+    previousChases.current = state.view;
+    if (soundOn && (arrived.length > 0 || chased.length > 0) && audio.current)
+      playKitchenChime(audio.current);
   }, [soundOn, state]);
   const waiting = arrivals.length > 0;
   useEffect(() => {

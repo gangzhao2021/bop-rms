@@ -6291,4 +6291,37 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No pickup orders are waiting to be handed over.": "没有等候交付的自取单。",
   "1 pickup order is still waiting to be handed over.": "还有 1 张自取单等候交付。",
   "{count} pickup orders are still waiting to be handed over.": "还有 {count} 张自取单等候交付。",
+  "At the table": "桌边服务",
+  "Guests can call staff": "客人可以呼叫店员",
+  "A guest at the table taps “Call staff” on their phone; the table shows it on Tables, with a sound.":
+    "客人在手机上点“呼叫店员”，桌台页会显示并响铃。",
+  "Servers can chase a dish": "服务员可以催菜",
+  "On a table's order, “Chase” next to a dish not yet ready turns its kitchen ticket red with a sound, and counts the chases. A round can be chased once every 5 minutes.":
+    "在桌子的订单里，没做好的菜旁边点“催菜”，后厨那张单会变红并响一声，并记下催了几次。同一轮 5 分钟内只能催一次。",
+  "Save table settings": "保存桌边服务设置",
+  "The kitchen was told to hurry {displayName}.": "已通知后厨加快做 {displayName}。",
+  "This round was chased a moment ago. You can chase it again at {time}.":
+    "这一轮刚催过，{time} 后可以再催。",
+  "The kitchen is no longer making that dish. Check whether it is ready to serve.":
+    "后厨已经不在做这道菜了，请看看是否已经可以上菜。",
+  "Chasing a dish is turned off for this store.": "本店没有打开催菜。",
+  "The kitchen was not told. Your access may have changed.": "没有通知到后厨，你的权限可能已改变。",
+  "The kitchen was not told. Check the connection and try again.":
+    "没有通知到后厨，请检查网络后重试。",
+  "Chased once": "催过 1 次",
+  "Chased {count} times": "催过 {count} 次",
+  "Chase {displayName} with the kitchen": "向后厨催 {displayName}",
+  Chase: "催菜",
+  "Chased by the server": "服务员催过",
+  "Pickup is turned off for guests. No pickup orders are waiting.":
+    "客人自取已关闭。没有等候交付的自取单。",
+  "Pickup is turned off for guests. 1 order is still to hand over.":
+    "客人自取已关闭。还有 1 单等候交付。",
+  "Pickup is turned off for guests. {count} orders are still to hand over.":
+    "客人自取已关闭。还有 {count} 单等候交付。",
+  "Guests at this table have items in their shared cart that haven't been sent{value}. Add them to this round, or ask the guests to send or remove them on their phone.":
+    "这桌客人的共用购物车里还有没送出的菜{value}。可以把它们加进这一轮，或者请客人在手机上送出或删除。",
+  "Guests at this table have items in their shared cart that haven't been sent{value}, and guests can no longer send them after last orders. Add them to this round to order them.":
+    "这桌客人的共用购物车里还有没送出的菜{value}，过了最后点单时间客人已经不能自己送出。把它们加进这一轮即可下单。",
+  "Add them to this round": "加进这一轮",
 });

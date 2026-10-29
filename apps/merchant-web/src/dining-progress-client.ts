@@ -139,6 +139,8 @@ export function parseDiningProgress(value: unknown, expectedOrder: string) {
       ...(lineDetails === null ? {} : { details: lineDetails }),
       /** WP-2423 item 8 ⑥ part 4: a combo's dishes, each served on its own. */
       ...(item.comboParts === undefined ? {} : { comboParts: comboParts(item.comboParts) }),
+      /** WP-2423 item 8 ⑦: how often a server chased this dish, and when last. */
+      ...(item.chase === undefined ? {} : { chase: chaseOf(item.chase) }),
     });
   });
   if (data.closureStatus !== "Open" && data.closureStatus !== "Closed") return fail();
@@ -160,8 +162,24 @@ export function parseDiningProgress(value: unknown, expectedOrder: string) {
     tableAssignmentVersion: integer(data.tableAssignmentVersion, 1, 2147483646),
     phase: phase(data.phase),
     observedAt: data.observedAt,
+    /** WP-2423 item 8 ⑦: whether servers may chase a dish (the Store's switch). */
+    chaseDish: data.chaseDish === true,
     items: Object.freeze(items),
   });
+}
+function chaseOf(value: unknown) {
+  const chase = value as { count?: unknown; lastChasedAt?: unknown } | null;
+  if (
+    chase === null ||
+    typeof chase !== "object" ||
+    Object.keys(chase).sort().join(",") !== "count,lastChasedAt" ||
+    !Number.isSafeInteger(chase.count) ||
+    Number(chase.count) < 1 ||
+    typeof chase.lastChasedAt !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(chase.lastChasedAt)
+  )
+    return fail();
+  return Object.freeze({ count: Number(chase.count), lastChasedAt: chase.lastChasedAt });
 }
 export type DiningProgress = ReturnType<typeof parseDiningProgress>;
 /**

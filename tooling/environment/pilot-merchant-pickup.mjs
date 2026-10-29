@@ -7,7 +7,10 @@ import { createMerchantPickupProof } from "../../apps/api/dist/merchant-pickup-p
 import { createMerchantPickupNotCollected } from "../../apps/api/dist/merchant-pickup-not-collected.js";
 import { createMerchantPickupHandoff } from "../../apps/api/dist/merchant-pickup-handoff.js";
 import { createMerchantPickupIdentityCheck } from "../../apps/api/dist/merchant-pickup-identity-check.js";
-import { createMerchantPickupQuery } from "../../apps/api/dist/merchant-pickup-query.js";
+import {
+  createMerchantPickupQuery,
+  waitingPickupOrders,
+} from "../../apps/api/dist/merchant-pickup-query.js";
 export async function createInternalMerchantPickup(
   resources,
   merchant,
@@ -153,6 +156,16 @@ export async function createInternalMerchantPickup(
     pickupHandoff,
     pickupNotCollected,
     pickupIdentityCheck,
+    // WP-2423 item 8 ⑦ (v15 finding v): how many pickups are still to hand over (a number only).
+    waitingPickups: (tx) =>
+      active()
+        ? waitingPickupOrders(tx, {
+            ...store,
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+            now: resources.now,
+          })
+        : Promise.resolve(null),
     pickupQuery: logUnexpected(
       "INTERNAL_PICKUP_QUERY_UNAVAILABLE",
       createMerchantPickupQuery({

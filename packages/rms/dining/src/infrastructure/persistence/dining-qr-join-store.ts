@@ -629,3 +629,113 @@ export async function changeDiningRoundHoldSetting(
   );
   return loadDiningRoundHoldSetting(tx, scopeInput);
 }
+
+/**
+ * WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 4): the Store's dine-in service
+ * switches. Guests call staff from their phone; servers chase a dish with the kitchen. Both are
+ * off until the owner turns them on.
+ */
+export interface DiningServiceSetting {
+  /** 0: never changed (both off). */
+  readonly version: number;
+  readonly staffCall: boolean;
+  readonly chaseDish: boolean;
+  readonly changedAt: string | null;
+}
+
+/** The Store's current switches, in the caller's transaction. */
+export async function loadDiningServiceSetting(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+): Promise<DiningServiceSetting> {
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const found = rows(
+    await tx.query(
+      "SELECT version,staff_call,chase_dish,to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at FROM rms_dining.dining_service_setting WHERE brand_id=$1 AND store_id=$2 ORDER BY version DESC LIMIT 1",
+      [brand, store],
+    ),
+  )[0];
+  if (found === undefined)
+    return Object.freeze({ version: 0, staffCall: false, chaseDish: false, changedAt: null });
+  const version = Number(found.version);
+  if (
+    !Number.isSafeInteger(version) ||
+    version < 1 ||
+    typeof found.staff_call !== "boolean" ||
+    typeof found.chase_dish !== "boolean"
+  )
+    return fail();
+  return Object.freeze({
+    version,
+    staffCall: found.staff_call,
+    chaseDish: found.chase_dish,
+    changedAt: parseDiningInstant(found.occurred_at),
+  });
+}
+
+/**
+ * The owner changes the switches: the next version, with who and when. `expectedVersion` is the
+ * version they saw (another change in between is a conflict); the same operation again returns.
+ */
+export async function changeDiningServiceSetting(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+  input: {
+    readonly operationReference: string;
+    readonly expectedVersion: number;
+    readonly staffCall: boolean;
+    readonly chaseDish: boolean;
+    readonly actorReference: string;
+    readonly observedAt: string;
+  },
+): Promise<DiningServiceSetting> {
+  const tenant = parseDiningReference(scopeInput.tenantReference);
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  const operation = parseDiningReference(input.operationReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    `DiningServiceSetting:${brand}:${store}`,
+  ]);
+  const prior = rows(
+    await tx.query(
+      "SELECT staff_call,chase_dish FROM rms_dining.dining_service_setting WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      [brand, store, operation],
+    ),
+  )[0];
+  if (prior !== undefined) {
+    if (prior.staff_call !== input.staffCall || prior.chase_dish !== input.chaseDish)
+      throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+    return loadDiningServiceSetting(tx, scopeInput);
+  }
+  const current = await loadDiningServiceSetting(tx, scopeInput);
+  if (current.version !== input.expectedVersion)
+    throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+  if (current.staffCall === input.staffCall && current.chaseDish === input.chaseDish)
+    return current;
+  changed(
+    await tx.query(
+      "INSERT INTO rms_dining.dining_service_setting (tenant_id,brand_id,store_id,version,operation_id,staff_call,chase_dish,actor_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+      [
+        tenant,
+        brand,
+        store,
+        current.version + 1,
+        operation,
+        input.staffCall,
+        input.chaseDish,
+        parseDiningReference(input.actorReference),
+        parseDiningInstant(input.observedAt),
+      ],
+    ),
+  );
+  return loadDiningServiceSetting(tx, scopeInput);
+}

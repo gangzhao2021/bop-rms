@@ -34,6 +34,7 @@ import {
   createMerchantDiningRoundHoldSetting,
 } from "../../apps/api/dist/merchant-dining-held-round.js";
 import { createMerchantDiningJoinRegenerate } from "../../apps/api/dist/merchant-dining-join-regenerate.js";
+import { createMerchantDiningChase } from "../../apps/api/dist/merchant-dining-chase.js";
 import {
   createMerchantStoreFeatures,
   navigationForStoreFeatures,
@@ -194,6 +195,8 @@ export async function createInternalMerchant(
       throw new Error("INTERNAL_MERCHANT_SCOPE_DENIED");
     return selected;
   };
+  // Set once the pickup composition exists (the workspace is read per request).
+  let waitingPickups = null;
   const persistence = {
     ...session.persistence,
     ...(createInternalMerchantProduct === undefined
@@ -223,7 +226,15 @@ export async function createInternalMerchant(
     workspace: async (tx, input) => {
       const listed = workspace(input);
       const features = await readStoreFeatures(tx, selected, "AllModules");
-      return { ...listed, navigation: navigationForStoreFeatures(listed.navigation, features) };
+      // With pickup and counter ordering off, Pickup stays while orders are still to hand over.
+      const pickupWaiting =
+        features.pickup || features.counterOrder || waitingPickups === null
+          ? 0
+          : await waitingPickups(tx);
+      return {
+        ...listed,
+        navigation: navigationForStoreFeatures(listed.navigation, features, pickupWaiting),
+      };
     },
   };
   function workspace({ context }) {
@@ -1495,8 +1506,15 @@ export async function createInternalMerchant(
     references: { next: () => resources.credentials.reference() },
     locale: "en",
   });
-  const { pickupQuery, pickupProof, pickupHandoff, pickupNotCollected, pickupIdentityCheck } =
-    await createInternalMerchantPickup(resources, { persistence, service });
+  const {
+    pickupQuery,
+    pickupProof,
+    pickupHandoff,
+    pickupNotCollected,
+    pickupIdentityCheck,
+    waitingPickups: readWaitingPickups,
+  } = await createInternalMerchantPickup(resources, { persistence, service });
+  waitingPickups = readWaitingPickups;
   // WP-2423 Q4: store hours and holiday editing — a manager drafts, the owner approves and publishes.
   const storeConfiguration = await createInternalStoreConfiguration(resources, {
     persistence,
@@ -1746,6 +1764,12 @@ export async function createInternalMerchant(
       }),
       // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the Store features page.
       storeFeatures: createMerchantStoreFeatures({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
+      // WP-2423 item 8 ⑦: a server chases a dish (when the Store turned chasing on).
+      diningChase: createMerchantDiningChase({
         persistence,
         authentication: service,
         now: resources.now,

@@ -103,16 +103,28 @@ export function placeErrorText(
   canCreateTableCode = false,
 ) {
   switch (error.code) {
-    case "TableCartHasItems":
+    case "TableCartHasItems": {
+      const value =
+        error.pendingItems.length > 0
+          ? ` (${error.pendingItems.map((item) => `${item.quantity} × ${item.name}`).join(", ")})`
+          : "";
+      // WP-2423 item 8 ⑦ (v15 finding t): staff add them to this round; asking the guests only
+      // while they can still send (not after last orders).
+      if (error.tableCart !== null)
+        return error.tableCart.guestsCanSend
+          ? t(
+              "Guests at this table have items in their shared cart that haven't been sent{value}. Add them to this round, or ask the guests to send or remove them on their phone.",
+              { value },
+            )
+          : t(
+              "Guests at this table have items in their shared cart that haven't been sent{value}, and guests can no longer send them after last orders. Add them to this round to order them.",
+              { value },
+            );
       return t(
         "Guests at this table have items in their shared cart that haven't been sent{value}. Ask them to send or remove those items on their phone, then send this order again.",
-        {
-          value:
-            error.pendingItems.length > 0
-              ? ` (${error.pendingItems.map((item) => `${item.quantity} × ${item.name}`).join(", ")})`
-              : "",
-        },
+        { value },
       );
+    }
     case "TableCheckoutInProgress":
       return t(
         "A guest at this table is paying on their phone right now. Wait a minute, then send again.",
@@ -281,6 +293,8 @@ export function StaffOrderEntryPage({
   >("Building");
   const [problem, setProblem] = useState<string | null>(null);
   const [problemNeedsTableCode, setProblemNeedsTableCode] = useState(false);
+  // WP-2423 item 8 ⑦: the guests' unsent items the server named, to add to this round.
+  const [tableCartOffer, setTableCartOffer] = useState<number | null>(null);
   const [paidNote, setPaidNote] = useState<string | null>(null);
   // WP-2423 (v15 751dd768): re-read the sent, unpaid counter orders after a send or a payment.
   const [awaitingKey, setAwaitingKey] = useState(0);
@@ -453,13 +467,14 @@ export function StaffOrderEntryPage({
     tipChoice() !== null &&
     (!paper || tablePaysLater || paperInstant !== null);
 
-  const send = async () => {
+  const send = async (includeTableCart: number | null = null) => {
     const chosenTip = tipChoice();
     if (!canSend || chosenTip === null) return;
     placeOperation.current ??= serviceOperationReference();
     setPhase("Sending");
     setProblem(null);
     setProblemNeedsTableCode(false);
+    setTableCartOffer(null);
     try {
       const chosen = lines.map((line) => ({
         sellableReference: line.item.sellableReference,
@@ -477,6 +492,9 @@ export function StaffOrderEntryPage({
               lines: chosen.map((line, index) => ({ ...line, note: lines[index]?.note ?? null })),
               tip: chosenTip,
               recordedAfterOutage: paper,
+              ...(includeTableCart === null
+                ? {}
+                : { includeTableCart: { expectedCartVersion: includeTableCart } }),
             })
           : await client.placeOrder({
               operationReference: placeOperation.current,
@@ -507,6 +525,11 @@ export function StaffOrderEntryPage({
         ),
       );
       setProblemNeedsTableCode(failure.code === "TableHasNoQr");
+      setTableCartOffer(
+        failure.code === "TableCartHasItems" && failure.tableCart !== null
+          ? failure.tableCart.cartVersion
+          : null,
+      );
       if (failure.code === "ItemUnavailable" || failure.code === "ItemShort") refreshMenu();
       setPhase("Building");
     }
@@ -1065,6 +1088,18 @@ export function StaffOrderEntryPage({
             </p>
           ) : null}
           {problem !== null && ordering ? <p role="alert">{problem}</p> : null}
+          {problem !== null && ordering && tableCartOffer !== null ? (
+            <p>
+              <button
+                type="button"
+                className="counter-order__primary"
+                disabled={!canSend}
+                onClick={() => void send(tableCartOffer)}
+              >
+                {t("Add them to this round")}
+              </button>
+            </p>
+          ) : null}
           {problem !== null && ordering && problemNeedsTableCode && tableQrHref !== undefined ? (
             <p>
               <Link to={tableQrHref}>{t("Table QR codes")}</Link>

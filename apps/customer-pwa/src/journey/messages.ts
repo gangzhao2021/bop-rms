@@ -536,6 +536,12 @@ export const checkoutText = Object.freeze({
   get retryCheckout() {
     return t("Retry checkout");
   },
+  get backToYourTable() {
+    return t("Back to your table");
+  },
+  get backToTheMenu() {
+    return t("Back to the menu");
+  },
   get continueToPayment() {
     return t("Continue to payment");
   },

@@ -4,6 +4,7 @@ import {
   RetiredTableQrError,
   createPersistentCustomerEntryComposition,
 } from "./persistent-customer-entry.js";
+import { guestServiceModes } from "./merchant-store-features.js";
 const owner = vi.hoisted(() => ({ profile: vi.fn(), session: vi.fn() }));
 vi.mock("./persistent-public-store-profile.js", () => ({
   createPersistentPublicStoreProfilePorts: (...args: unknown[]) => owner.profile(...args),
@@ -125,4 +126,63 @@ it("WP-2423 Q11: answers a replaced or turned-off table code without a session",
   const other = setup();
   other.sources.mockRejectedValueOnce(new Error("ENTRY_UNAVAILABLE"));
   expect(await other.service.establish(other.f.input())).toEqual({ status: "EntryUnavailable" });
+});
+it("WP-2423 item 8 ⑦ 1b: a pickup code at a Store that turned pickup off answers dine-in only, through rollback", async () => {
+  const x = setup();
+  x.f.payload.channel = x.f.context.channel = "Pickup";
+  x.f.payload.publicTableReference =
+    x.f.context.publicTableReference =
+    x.f.context.tableReference =
+      null;
+  x.f.context.tableLifecycle = x.f.context.assignmentState = null;
+  // The Store's feature setting as the pilot reads it (pickup off), in the entry transaction.
+  x.tx.query.mockImplementation(async (sql: string) =>
+    sql.includes("FROM rms_store.store_feature_setting")
+      ? {
+          rows: [
+            {
+              version: 2,
+              template_code: "FullService",
+              counter_order: false,
+              pickup: false,
+              inventory: false,
+              loyalty: false,
+              compliance_documents: false,
+              occurred_at: "2026-10-29T15:00:00.000Z",
+            },
+          ],
+        }
+      : sql.includes("current_setting")
+        ? { rows: [{ brand: id(1), store: id(2) }] }
+        : { rows: [] },
+  );
+  x.sources.mockImplementationOnce(async () => {
+    x.events.push("sources");
+    return {
+      qr: x.f.options.qr,
+      operatingReader: {
+        readCurrent: async () =>
+          guestServiceModes(
+            x.tx,
+            { tenantReference: id(3), brandReference: id(1), storeReference: id(2) },
+            {
+              brandReference: id(1),
+              storeReference: id(2),
+              evaluatedAt: x.f.input().requestedAt,
+              state: "Open" as const,
+              availableServiceModes: ["DineIn", "Pickup"] as ("DineIn" | "Pickup")[],
+            },
+          ),
+      },
+      admission: x.f.options.admission,
+      binding: x.f.options.session.binding,
+    } as never;
+  });
+  expect(await x.service.establish(x.f.input())).toEqual({
+    status: "ServiceNotOffered",
+    storeDisplayName: expect.any(String),
+  });
+  expect(x.events).toEqual(["begin", "sources", "rollback"]);
+  expect(x.f.admission).not.toHaveBeenCalled();
+  expect(x.f.create).not.toHaveBeenCalled();
 });

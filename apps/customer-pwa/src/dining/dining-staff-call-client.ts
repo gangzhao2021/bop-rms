@@ -42,7 +42,8 @@ export interface DiningStaffCallClient {
 }
 
 export class DiningStaffCallClientError extends Error {
-  constructor(readonly code: "not-joined" | "unavailable") {
+  /** not-offered (WP-2423 item 8 ⑦): the store has not turned calling staff on. */
+  constructor(readonly code: "not-joined" | "not-offered" | "unavailable") {
     super("dining staff call " + code);
     this.name = "DiningStaffCallClientError";
   }
@@ -123,6 +124,7 @@ export function createHttpDiningStaffCallClient(
     if (!current()) throw new DiningStaffCallClientError("not-joined");
     if (response.status === 404 || response.status === 401)
       throw new DiningStaffCallClientError("not-joined");
+    if (response.status === 409) throw new DiningStaffCallClientError("not-offered");
     let payload: unknown;
     try {
       payload = await response.json();

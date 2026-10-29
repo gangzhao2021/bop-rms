@@ -46,4 +46,15 @@ describe("WP-2423 item 8 ⑦ DEC-STORE-FEATURES navigation", () => {
     expect(shown({ counterOrder: false })).toBe(true);
     expect(shown({ pickup: false, counterOrder: false })).toBe(false);
   });
+  it("keeps the Pickup screen while orders are still to hand over, or when that is not known (v15 finding v)", () => {
+    const shown = (waiting: number | null) =>
+      navigationForStoreFeatures(
+        navigation,
+        { ...all, pickup: false, counterOrder: false },
+        waiting,
+      ).some((item) => item.screenId === "FUL-PICKUP-QUEUE");
+    expect(shown(2)).toBe(true);
+    expect(shown(null)).toBe(true);
+    expect(shown(0)).toBe(false);
+  });
 });
