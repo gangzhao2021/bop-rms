@@ -929,6 +929,13 @@ export function createPersistentMerchantOrderQueue(options: {
                       const cancelled = itemCancellations.get(line.orderItemReference) ?? null;
                       return Object.freeze({
                         ...line,
+                        // The detail shows each option by name (v15 2026-10-29: the choice
+                        // reference added for combos made every order with options unreadable).
+                        options: Object.freeze(
+                          line.options.map((option) =>
+                            Object.freeze({ name: option.name, quantity: option.quantity }),
+                          ),
+                        ),
                         canCancel: cancelled === null && lineCancellable(line.orderItemReference),
                         cancellation:
                           cancelled === null

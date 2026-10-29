@@ -33,6 +33,35 @@ type MerchantOrderQueueItem = Awaited<
   ReturnType<NonNullable<MerchantBffRouterOptions["orderQueue"]>>
 >["items"][number];
 
+/** WP-2423 OPS-ORDER-DETAIL: the detail reply (exported so acceptance reads the wire form). */
+export function orderDetailResponse(
+  view: Awaited<ReturnType<NonNullable<MerchantBffRouterOptions["orderQueue"]>>>,
+  item: MerchantOrderQueueItem,
+) {
+  return {
+    screenId: "OPS-ORDER-DETAIL",
+    // The same Order row as the list (one mapping, so the two answers cannot drift apart).
+    order: orderQueueRow(item),
+    lines: view.lines,
+    // WP-2423: refunds of the online payment, when Payment's position could be read.
+    paymentPosition: view.paymentPosition,
+    // WP-2423 Q10: the pickup customer's contact for this order (detail only).
+    pickupContact:
+      view.pickupContact === null
+        ? null
+        : view.pickupContact.status === "Available"
+          ? {
+              status: "Available",
+              name: view.pickupContact.name,
+              channel: view.pickupContact.channel,
+              value: view.pickupContact.value,
+            }
+          : view.pickupContact.status === "Removed"
+            ? { status: "Removed", removedAt: view.pickupContact.removedAt }
+            : { status: "NotGiven" },
+  };
+}
+
 /**
  * WP-2423: one Order as the Orders list, Home and the order detail answer it. The browser's
  * Orders/Home/detail parsers read this row; `tooling/e2e/merchant-bff-response-contract` runs this
@@ -164,28 +193,7 @@ export function installMerchantOrderRoutes(
           response.status(404).json({ error: "order_not_found" });
           return;
         }
-        response.json({
-          screenId: "OPS-ORDER-DETAIL",
-          // The same Order row as the list (one mapping, so the two answers cannot drift apart).
-          order: orderQueueRow(item),
-          lines: view.lines,
-          // WP-2423: refunds of the online payment, when Payment's position could be read.
-          paymentPosition: view.paymentPosition,
-          // WP-2423 Q10: the pickup customer's contact for this order (detail only).
-          pickupContact:
-            view.pickupContact === null
-              ? null
-              : view.pickupContact.status === "Available"
-                ? {
-                    status: "Available",
-                    name: view.pickupContact.name,
-                    channel: view.pickupContact.channel,
-                    value: view.pickupContact.value,
-                  }
-                : view.pickupContact.status === "Removed"
-                  ? { status: "Removed", removedAt: view.pickupContact.removedAt }
-                  : { status: "NotGiven" },
-        });
+        response.json(orderDetailResponse(view, item));
       })
       .catch((error: unknown) => refundReadFailure(response, error));
   });
