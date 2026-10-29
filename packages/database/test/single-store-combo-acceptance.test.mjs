@@ -221,10 +221,6 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
           return { status: "Listed" };
         },
       };
-      const unused = {
-        query: async () => assert.fail("allergens are not declared in this journey"),
-        command: async () => assert.fail("allergens are not declared in this journey"),
-      };
       // Stand-ins for the allergen steps (each has its own acceptance), recording what was sent:
       // the combo declares no allergens of its own; each choice's recipe adds its dish's item.
       const declarations = [];
