@@ -412,6 +412,8 @@ export function createMerchantOneStoreDishes(options: {
     session: Session,
     body: SaveDishBody,
     choiceItems: ReadonlyMap<string, string> = new Map(),
+    /** Told the dish (product and size) as soon as it exists (a combo records it at once). */
+    onProduct?: (productReference: string, skuReference: string) => Promise<void>,
   ) => {
     const step = (purpose: string) => derivedReference(body.operationReference, purpose);
     const product = async (productReference: string) =>
@@ -450,6 +452,7 @@ export function createMerchantOneStoreDishes(options: {
     let detail = await product(productReference);
     if (detail.sizes.length !== 1) return fail("ManySizes");
     const size = detail.sizes[0] ?? fail("NotFound");
+    await onProduct?.(productReference, size.skuReference);
     const groups = body.choiceGroups.map((g) => ({
       optionSetReference: g.optionSetReference,
       enabledOptionReferences: g.options.map((o) => o.optionReference),
@@ -912,21 +915,20 @@ export function createMerchantOneStoreDishes(options: {
         })),
         // The combo itself declares no allergens of its own (its recipe holds the kitchen step);
         // each choice adds its dish's.
-        allergens: current?.productReference == null ? [] : null,
+        allergens: current?.dishRecorded === true ? null : [],
       },
       new Map(
         slots.flatMap((slot) =>
           slot.dishes.map((d) => [d.optionReference, dishLabel(d.skuReference).itemReference]),
         ),
       ),
+      // v15 2026-10-29 finding a: the dish is the combo's from the moment it exists, so a save
+      // stopped later (a choice recipe, a price) is finished by saving the combo again.
+      async (productReference, skuReference) => {
+        if (current?.dishRecorded === true) return;
+        await combos.recordDish({ ...session, bundleReference, productReference, skuReference });
+      },
     );
-    if (current?.productReference == null)
-      await combos.recordDish({
-        ...session,
-        bundleReference,
-        productReference: dish.productReference,
-        skuReference: dish.skuReference,
-      });
     return {
       status: "Saved" as const,
       bundleReference,
@@ -938,6 +940,12 @@ export function createMerchantOneStoreDishes(options: {
   /** "List it": the open price book, the waiting choice prices and the menu, alone at one store. */
   const listAll = async (session: Session, body: ListAllBody) => {
     const step = (purpose: string) => derivedReference(body.operationReference, purpose);
+    // v15 2026-10-29 finding c: nothing is published while the menu itself could not be listed
+    // (its tax, choice recipes or allergen list): prices never go live ahead of their menu.
+    await options.menus.command({
+      ...session,
+      body: { action: "Check", menuReference: body.menuReference },
+    });
     // Combos with saved changes first: each is listed alone at the Brand's one store.
     if (options.combos !== undefined)
       await options.combos.listDrafts({ ...session, operationReference: step("combos") });

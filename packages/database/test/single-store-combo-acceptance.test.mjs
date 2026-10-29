@@ -5,6 +5,13 @@ import { it } from "vitest";
 import { createCustomerMenuStoreFacts } from "../../../apps/api/src/customer-menu-store-facts.ts";
 import { createMerchantAvailability } from "../../../apps/api/src/merchant-availability.ts";
 import { createMerchantCombos } from "../../../apps/api/src/merchant-combos.ts";
+import { createMerchantDishAllergens } from "../../../apps/api/src/merchant-dish-allergens.ts";
+import { createMerchantOptionRecipes } from "../../../apps/api/src/merchant-option-recipes.ts";
+import { createAllergenRegistryVersion } from "../../rms/catalog/src/index.ts";
+import {
+  createPostgresKitchenRoutingConfigurationStore,
+  rebindKitchenRoutingEvidence,
+} from "../../rms/kitchen/src/index.ts";
 import {
   comboPartsByOrderItem,
   markDiningComboPartServed,
@@ -97,7 +104,17 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         [id(201), id(200)],
       );
 
-      // One store; the owner holds the product, choice group, price and availability permissions.
+      // One store; the owner holds the product, choice group, price, availability, recipe,
+      // allergen and inventory permissions (everything the one-page menu's saves use).
+      const recipeActions = [
+        "recipe.read",
+        "recipe.update",
+        "recipe.approve",
+        "recipe.publish",
+        "catalog.allergen.declare",
+        "inventory.item.create",
+        "inventory.item.activate",
+      ];
       await seedBrand(admin, { brandReference, policyReference: id(300), from });
       await admin.query(
         "INSERT INTO bop_tenant.store (store_id,brand_id,code,display_name,time_zone,locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,$2,'STORE_ONE','Synthetic STORE_ONE','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
@@ -108,7 +125,7 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         brandReference,
         roleId: id(310),
         code: "brand_owner",
-        actions: ["pricing.price-book.approve", "pricing.price-book.manage"],
+        actions: ["pricing.price-book.approve", "pricing.price-book.manage", ...recipeActions],
         from,
       });
       await seedBrandMember(admin, {
@@ -123,6 +140,105 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         enrolledAt: new Date(start - 2 * 3600_000).toISOString(),
       });
 
+      const sha256 = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");
+      const scope = { tenantReference, brandReference, storeReference };
+      const setup = async (work) => {
+        await admin.query("BEGIN");
+        try {
+          await admin.query(
+            "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+            [tenantReference, brandReference, storeReference],
+          );
+          const value = await work(admin);
+          await admin.query("COMMIT");
+          return value;
+        } catch (error) {
+          await admin.query("ROLLBACK");
+          throw error;
+        }
+      };
+      // TEST-ONLY kitchen station of the Store (owner write path, synthetic operator authority).
+      const routing = createPostgresKitchenRoutingConfigurationStore({
+        ...scope,
+        sha256,
+        authorizeRead: async () => true,
+        authorizeWrite: async () => true,
+        validateConfiguration: async () => true,
+        audit: async (record) => ({
+          auditId: op(),
+          brandId: brandReference,
+          storeId: storeReference,
+          actor: { type: "User", reference: record.actorReference },
+          actionCode: "KITCHEN_ROUTING_CONFIGURATION_RECORDED",
+          targetType: "KitchenRoutingConfiguration",
+          targetId: record.configuration.evidenceReference,
+          correlationId: record.operationReference,
+          reasonCode: record.reasonCode,
+          occurredAt: record.recordedAt,
+          sourceChannel: "MERCHANT_WEB",
+          afterSummary: { version: record.configuration.evidenceVersion },
+          dataClassification: "Restricted",
+          retentionPolicyCode: "KITCHEN_BUSINESS_RECORD",
+          retentionPolicyVersion: 1,
+        }),
+      });
+      const stationAt = new Date(start - 3600_000).toISOString();
+      await setup((t) =>
+        routing.commit({
+          transaction: t,
+          record: {
+            operationReference: op(),
+            actorReference: owner,
+            purposeCode: "SyntheticConfiguration",
+            permissionCode: "synthetic.configure",
+            reasonCode: "SYNTHETIC_SETUP",
+            recordedAt: stationAt,
+            expectedVersion: 0,
+            configuration: rebindKitchenRoutingEvidence(
+              {
+                brandReference,
+                storeReference,
+                evidenceReference: op(),
+                evidenceVersion: 1,
+                effectiveAt: stationAt,
+                evidenceDigest: sha256("placeholder"),
+                candidates: [
+                  {
+                    stationReference: id(13),
+                    stationVersion: 1,
+                    stationStatus: "Active",
+                    stationCapabilityReferences: [id(12)],
+                    routingRuleReference: id(14),
+                    routingRuleVersion: 1,
+                    routingRuleStatus: "Active",
+                    selector: { kind: "AllPreparedItems" },
+                    targetStationReference: id(13),
+                    routingRuleDigest: sha256("placeholder"),
+                  },
+                ],
+              },
+              stationAt,
+              sha256,
+            ),
+          },
+        }),
+      );
+      // TEST-ONLY Brand allergen list.
+      const [peanut, wheat] = [id(60), id(62)];
+      await setup((t) =>
+        createAllergenRegistryVersion(t, scope, {
+          registryVersionReference: id(63),
+          jurisdictionCode: "CA",
+          policyDocument: "TEST-ONLY synthetic allergen list",
+          entries: [
+            { allergenReference: peanut, code: "PEANUT", localizedNames: { "en-CA": "Peanuts" } },
+            { allergenReference: wheat, code: "WHEAT", localizedNames: { "en-CA": "Wheat" } },
+          ],
+          actorReference: owner,
+          at: stationAt,
+          auditReference: op(),
+        }),
+      );
       const persistence = {
         now: () => new Date().toISOString(),
         transactions: {
@@ -163,6 +279,7 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
             "pricing.price-book.manage",
             "pricing.price-book.approve",
             "pricing.price_book.approve",
+            ...recipeActions,
           ],
         },
       });
@@ -221,61 +338,23 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
           return { status: "Listed" };
         },
       };
-      // Stand-ins for the allergen steps (each has its own acceptance), recording what was sent:
-      // the combo declares no allergens of its own; each choice's recipe adds its dish's item.
+      // The real allergen and choice recipe commands, as the one-page menu uses them.
+      const realAllergens = createMerchantDishAllergens({ ...common, references: { next: op } });
       const declarations = [];
+      let asBefore = false;
       const declaredAllergens = {
-        command: async ({ body }) => {
-          declarations.push(body);
-          return { status: "Applied" };
+        command: async (input) => {
+          declarations.push(input.body);
+          return realAllergens.command(input);
         },
       };
-      const recipes = new Map();
+      const realOptionRecipes = createMerchantOptionRecipes(common);
       const optionRecipes = {
-        query: async () => ({
-          options: (
-            await admin.query(
-              `SELECT b.binding_id::text binding,o.option_id::text option,s.sku_id::text sku
-                 FROM rms_catalog.bundle_combo_choice c
-                 JOIN rms_catalog.product_option_binding b ON b.brand_id=c.brand_id AND b.option_set_id=c.option_set_id
-                 JOIN rms_catalog.option o ON o.option_id=c.option_id AND o.brand_id=c.brand_id
-                 JOIN rms_catalog.sku s ON s.product_id=b.product_id AND s.brand_id=b.brand_id
-                WHERE c.brand_id=$1`,
-              [brandReference],
-            )
-          ).rows.map((row) => {
-            const recipe = recipes.get(row.option);
-            return {
-              bindingReference: row.binding,
-              optionReference: row.option,
-              sizes: [{ skuReference: row.sku }],
-              covered: recipe?.published === true,
-              change:
-                recipe === undefined
-                  ? null
-                  : {
-                      changeVersionReference: recipe.reference,
-                      version: 1,
-                      published: recipe.published,
-                      reviews: recipe.reviews.map((kind) => ({ kind, decision: "Approved" })),
-                    },
-            };
-          }),
-        }),
-        command: async ({ body }) => {
-          if (body.action === "Save")
-            recipes.set(body.optionReference, {
-              reference: op(),
-              change: body.change,
-              published: false,
-              reviews: [],
-            });
-          for (const recipe of recipes.values())
-            if (recipe.reference === body.changeVersionReference) {
-              if (body.action === "Review") recipe.reviews.push(body.kind);
-              if (body.action === "Publish") recipe.published = recipe.reviews.length === 2;
-            }
-          return {};
+        query: realOptionRecipes.query,
+        command: async (input) => {
+          if (asBefore && input.body.action === "Save")
+            throw new Error("TEST stop at a choice recipe");
+          return realOptionRecipes.command(input);
         },
       };
       const availability = createMerchantAvailability(common);
@@ -288,7 +367,12 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         dishAllergens: declaredAllergens,
         optionRecipes,
         availability,
-        combos,
+        // v15 2026-10-29 a, as saves before this fix left it: the dish not recorded as the
+        // combo's, and the save stopped at a choice recipe.
+        combos: {
+          ...combos,
+          recordDish: async (input) => (asBefore ? undefined : combos.recordDish(input)),
+        },
         optionSets: createMerchantOptionSets(common),
         now: () => new Date().toISOString(),
       });
@@ -342,7 +426,7 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       };
 
       // The dishes the combo offers, saved on the one-page menu.
-      const dish = async (name, nameZh, priceMinor) => {
+      const dish = async (name, nameZh, priceMinor, allergens) => {
         const saved = await dishes.command({
           ...session,
           body: {
@@ -358,24 +442,35 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
             taxClassificationReference: taxClass,
             priceMinor,
             choiceGroups: [],
-            allergens: null,
+            allergens,
           },
         });
-        // Staff declared the dish's allergens (its own acceptance); a combo choice adds the item.
+        // Staff declared the dish's allergens: the item holding them (a combo choice adds it).
+        const item = (
+          await admin.query(
+            "SELECT inventory_item_id::text item FROM rms_recipe.staff_declared_allergen_source WHERE brand_id=$1 AND sku_id=$2",
+            [brandReference, saved.skuReference],
+          )
+        ).rows[0]?.item;
+        assert.ok(item, "the dish save declared its allergens");
         sellables.push({
           skuReference: saved.skuReference,
           productName: name,
           productNameZh: nameZh,
           sizeName: name,
           active: true,
-          allergens: { source: "StaffDeclared", itemReference: op() },
+          allergens: { source: "StaffDeclared", itemReference: item },
         });
         return saved.skuReference;
       };
-      const sour = await dish("Hot and sour soup (TEST)", "酸辣汤", "650");
-      const wonton = await dish("Wonton soup (TEST)", "馄饨汤", "700");
-      const rice = await dish("Fried rice (TEST)", "炒饭", "1200");
-      const noodles = await dish("Chow mein (TEST)", "炒面", "1300");
+      const sour = await dish("Hot and sour soup (TEST)", "酸辣汤", "650", [
+        { allergenReference: peanut, classification: "Contains" },
+      ]);
+      const wonton = await dish("Wonton soup (TEST)", "馄饨汤", "700", [
+        { allergenReference: wheat, classification: "Contains" },
+      ]);
+      const rice = await dish("Fried rice (TEST)", "炒饭", "1200", []);
+      const noodles = await dish("Chow mein (TEST)", "炒面", "1300", []);
 
       // 1. A combo for two: 汤 choose 1 (wonton +1.00), 主食 choose 1.
       const comboBody = (overrides = {}) => ({
@@ -414,8 +509,24 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         ],
         ...overrides,
       });
-      const first = comboBody();
+      // v15 2026-10-29 a: the first save stops right after the combo's dish was made. The combo
+      // is on the menu with that dish (it offers the combo's own choice groups); saving it again
+      // from Edit finishes that same dish, and no second combo or dish is made.
+      asBefore = true;
+      await assert.rejects(dishes.command({ ...session, body: comboBody() }), /TEST stop/u);
+      asBefore = false;
+      const stopped = (await combos.query(session)).combos;
+      assert.equal(stopped.length, 1);
+      assert.equal(stopped[0].dishRecorded, false);
+      assert.notEqual(stopped[0].productReference, null);
+      const first = comboBody({
+        bundleReference: stopped[0].bundleReference,
+        expectedAggregateVersion: stopped[0].aggregateVersion,
+        slots: comboBody().slots.map((slot, n) => ({ ...slot, code: "SLOT-" + (n + 1) })),
+      });
       const saved = await dishes.command({ ...session, body: first });
+      assert.equal(saved.productReference, stopped[0].productReference);
+      assert.equal((await combos.query(session)).combos[0].dishRecorded, true);
       // Retrying the same save continues (nothing is made twice).
       assert.deepEqual(await dishes.command({ ...session, body: first }), saved);
       const choices = (
@@ -442,31 +553,31 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         [{ product: saved.productReference, sku: saved.skuReference }],
       );
       // The combo declares no allergens of its own; each choice adds its dish's declared item.
-      // (The retried save sends the same operation again: a replay for the real command.)
+      // The combo declares no allergens of its own (each save that finishes it says so again).
+      const comboDeclarations = declarations.filter((d) => d.skuReference === saved.skuReference);
+      assert.ok(comboDeclarations.length > 0);
       assert.deepEqual(
-        [
-          ...new Map(
-            declarations.map((d) => [
-              d.operationReference,
-              [d.action, d.skuReference, d.allergens],
-            ]),
-          ).values(),
-        ],
-        [["DeclareDish", saved.skuReference, []]],
+        [...new Set(comboDeclarations.map((d) => JSON.stringify([d.action, d.allergens])))],
+        [JSON.stringify(["DeclareDish", []])],
       );
+      // Each choice's published recipe adds its dish's staff-declared allergen item (quantity 1).
       const itemOf = new Map(sellables.map((x) => [x.skuReference, x.allergens.itemReference]));
-      for (const choice of choices)
-        assert.deepEqual(recipes.get(choice.option)?.change, {
-          kind: "Add",
-          fromItemReference: null,
-          toItemReference: itemOf.get(choice.dish),
-          quantity: "1",
-          unitCostCents: null,
-          lossPercent: "0",
-        });
-      assert.equal(
-        [...recipes.values()].every((r) => r.published),
-        true,
+      const changes = (
+        await admin.query(
+          `SELECT c.option_id::text option,c.change_kind kind,c.to_item_id::text item,
+             c.quantity_microunits::text quantity,(p.change_version_id IS NOT NULL) published
+             FROM rms_recipe.option_recipe_change c
+             LEFT JOIN rms_recipe.option_recipe_change_publication p
+               ON p.change_version_id=c.change_version_id AND p.brand_id=c.brand_id
+            WHERE c.brand_id=$1 ORDER BY c.option_id`,
+          [brandReference],
+        )
+      ).rows;
+      assert.deepEqual(
+        changes.map((c) => [c.option, c.kind, c.item, c.quantity, c.published]),
+        [...choices]
+          .sort((a, b) => (a.option < b.option ? -1 : 1))
+          .map((c) => [c.option, "Add", itemOf.get(c.dish), "1000000", true]),
       );
       // The combo dish sits in its section and offers the two choice groups.
       assert.deepEqual(menu.sections[1].items, [
@@ -580,6 +691,8 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
           )
         ).rows,
         [
+          // The stopped save's version, never listed; the one listed; the edit.
+          { status: "Draft", price: "2880" },
           { status: "Published", price: "2880" },
           { status: "Draft", price: "2980" },
         ],

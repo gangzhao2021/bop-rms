@@ -97,6 +97,9 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   NoSection: t("That section is no longer on the menu. Read the menu again and choose a section."),
   ManySizes: t("This dish has more than one size. Change it on the Products page."),
   NotADish: t("A combo can only offer dishes on sale, not another combo. Choose its dishes again."),
+  StoppedPartWay: t(
+    "Saving stopped part-way. What was saved stays; guests see nothing new. Save it again to finish, and tell the manager if it stops again.",
+  ),
   DishAllergensMissing: t(
     "A dish in this combo has no allergens declared yet. Declare its allergens (Edit the dish), then save the combo.",
   ),

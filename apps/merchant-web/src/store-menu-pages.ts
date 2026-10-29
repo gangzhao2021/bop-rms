@@ -39,6 +39,11 @@ export type MenuErrorCode =
   | "DishAllergensMissing"
   /** A dish in the combo has a real recipe (combos offer dishes with declared allergens). */
   | "DishHasRecipe"
+  /**
+   * v15 2026-10-29: a one-page menu save stopped at a later step (another page's command refused
+   * it); what was saved before stays, and saving again goes on from there.
+   */
+  | "StoppedPartWay"
   | "Offline"
   | "Unavailable";
 export class MenuPageError extends Error {
@@ -767,10 +772,20 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
       throw new MenuPageError("Offline");
     }
     if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      const payload = (await response.json().catch(() => null)) as {
+        error?: unknown;
+        part?: unknown;
+      } | null;
       const code = String(payload?.error) as MenuErrorCode;
       throw new MenuPageError(
-        codes.has(code) ? code : response.status === 403 ? "PermissionDenied" : "Unavailable",
+        codes.has(code)
+          ? code
+          : response.status === 403
+            ? "PermissionDenied"
+            : // Another page's command refused a step of a one-page save (409 with its page).
+              response.status === 409 && typeof payload?.part === "string"
+              ? "StoppedPartWay"
+              : "Unavailable",
         code === "ReviewBlocked"
           ? parseMenuReviewProblem((payload as { problem?: unknown } | null)?.problem)
           : null,

@@ -1,6 +1,6 @@
 import { currentAllergenRegistry, listCurrentIngredientDeclarations } from "@rms/catalog";
 import { listInventoryRecipeIngredientFacts } from "@rms/inventory";
-import type { RecipeDraftFacts } from "@rms/recipe";
+import { listStaffDeclaredAllergenSources, type RecipeDraftFacts } from "@rms/recipe";
 
 /**
  * WP-2423 / DEC-ALLERGEN-DECLARATIONS: the Brand's stock-tracked inventory items a recipe may use,
@@ -16,7 +16,23 @@ export async function recipeIngredientItems(
     readonly storeReference: string;
   },
   at: string,
+  /**
+   * WP-2423 item 8 ⑥ part 4 (v15 2026-10-29): also the items holding a dish's allergens declared by
+   * staff (labelled AllergensDeclaredByStaff, never stock-tracked), which a combo's choice adds.
+   * They stay out of stock and costing: not stock-tracked, no cost.
+   */
+  options: { readonly staffDeclared?: boolean } = {},
 ) {
+  const staffItems = new Set<string>();
+  if (options.staffDeclared === true) {
+    for (const source of await listStaffDeclaredAllergenSources(tx as never, scope))
+      if (source.subject === "Dish") staffItems.add(source.itemReference);
+    // The Recipe read leaves the transaction at the Brand; the store's reads continue.
+    await (tx as { query(sql: string, values: unknown[]): Promise<unknown> }).query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [scope.brandReference, scope.storeReference],
+    );
+  }
   const items = await listInventoryRecipeIngredientFacts(tx as never, scope);
   const registry = await currentAllergenRegistry(tx as never, scope);
   const declarations = new Map(
@@ -32,7 +48,7 @@ export async function recipeIngredientItems(
   };
   const facts: RecipeDraftFacts["items"] = new Map(
     items
-      .filter((item) => item.stockTracked)
+      .filter((item) => item.stockTracked || staffItems.has(item.itemReference))
       .map((item) => {
         const d = declarationOf(item);
         return [

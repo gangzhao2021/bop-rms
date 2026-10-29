@@ -179,6 +179,16 @@ export type MenuCommandBody =
       readonly menuReference: string;
     }
   | {
+      /**
+       * WP-2423 item 8 ⑥ part 4 (v15 2026-10-29 finding c): would the menu's listing be refused
+       * for what the menu itself lacks (tax, choice recipes, the allergen list)? Checked by
+       * "List it" before it publishes any price, so prices never go live with a menu that can't.
+       * Choice prices are not checked here: "List it" publishes them first.
+       */
+      readonly action: "Check";
+      readonly menuReference: string;
+    }
+  | {
       readonly action: "Rebuild";
       readonly operationReference: string;
       readonly menuReference: string;
@@ -255,6 +265,8 @@ export function parseMenuCommandBody(value: unknown): MenuCommandBody {
       menuReference: ref(r.menuReference),
       expectedAggregateVersion: version(r.expectedAggregateVersion),
     };
+  if (r.action === "Check" && keys === "action,menuReference")
+    return { action: "Check", menuReference: ref(r.menuReference) };
   if (r.action === "List" && keys === "action,menuReference,operationReference")
     return {
       action: "List",
@@ -1011,6 +1023,48 @@ export function createMerchantMenus(options: {
     const body = parseMenuCommandBody(input.body);
     const current = await session(input);
     if (body.action === "List") return list(input, body, current.sessionReference);
+    if (body.action === "Check")
+      return retryTransactionConflict(() =>
+        options.persistence.transactions.run((tx) =>
+          withRememberedBrandAuthorization(tx, async () => {
+            const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+            if (!s.permissions.maySubmit) fail("PermissionDenied");
+            const summary = (await listBrandMenus(ptx(tx) as never, s.owner)).find(
+              (candidate) => candidate.menuReference === body.menuReference,
+            );
+            if (summary === undefined) return fail("NotFound");
+            // A listing already under way (submitted) goes on from where it is.
+            if (nextMenuListingStep(summary) !== "Submit") return { status: "Ready" as const };
+            const loaded = await draft(tx, s, body.menuReference);
+            if (loaded === null) return fail("NotFound");
+            if ((await currentAllergenRegistry(ptx(tx) as never, s.owner)) === null)
+              return fail("ReviewBlocked");
+            const at = options.persistence.now();
+            if (
+              (
+                await menuItemsWithoutTax(ptx(tx) as never, {
+                  owner: s.owner,
+                  observedAt: at,
+                  menu: loaded.aggregate.draft,
+                })
+              ).length > 0
+            )
+              fail("TaxNotCovered");
+            if (
+              (
+                await menuOptionsWithoutRecipes(ptx(tx) as never, {
+                  owner: s.owner,
+                  observedAt: at,
+                  menu: loaded.aggregate.draft,
+                })
+              ).length > 0
+            )
+              fail("OptionRecipeMissing");
+            await brandScope(tx, s.owner.brandReference);
+            return { status: "Ready" as const };
+          }),
+        ),
+      );
     try {
       if (body.action === "Submit" || body.action === "Approve" || body.action === "Publish") {
         // Facts the publication command needs that the client does not supply.

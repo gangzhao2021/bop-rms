@@ -1208,7 +1208,7 @@ test("@production a combo made on the one-page menu: parts, extra price, saved, 
   });
   // The combo is a row of its section with its parts; it waits for "List it".
   const row = page.locator(".one-menu__dish").filter({ hasText: "Combo for two (TEST)" });
-  await expect(row).toContainText("Combo: 点心 choose 1 · 面 choose 1");
+  await expect(row).toContainText("Combo: 点心 choose 1 · 面 choose 1 · allergens by choice");
   await expect(row).toContainText("→ $28.80 when listed");
   await expect(
     page.getByText("This menu has not been listed yet. Guests do not see it."),

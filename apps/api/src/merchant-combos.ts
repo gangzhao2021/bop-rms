@@ -97,9 +97,14 @@ export interface ComboView {
   readonly description: string;
   readonly descriptionZh: string;
   readonly priceMinor: string;
-  /** The dish the combo is compiled into (null until its first save finished). */
+  /** The dish the combo is compiled into (null until its first save made it). */
   readonly productReference: string | null;
   readonly skuReference: string | null;
+  /**
+   * The dish is recorded as the combo's. False for a dish a save made before it stopped (it binds
+   * the combo's own choice groups): saving the combo again finishes and records it.
+   */
+  readonly dishRecorded: boolean;
   /** Listed: guests get this version. Waiting: saved changes not listed yet. */
   readonly state: "Listed" | "Waiting";
   readonly slots: readonly ComboSlot[];
@@ -127,7 +132,9 @@ export async function readCombos(
     .filter((b) => b.lifecycle === "Draft" || b.lifecycle === "Published")
     .map((bundle) => {
       const version = bundle.currentVersion;
-      const dish = records.dishes.find((d) => d.bundleReference === bundle.bundleReference);
+      const dish =
+        records.dishes.find((d) => d.bundleReference === bundle.bundleReference) ??
+        records.unrecordedDishes.find((d) => d.bundleReference === bundle.bundleReference);
       const choices = records.choices.filter((c) => c.bundleReference === bundle.bundleReference);
       return {
         bundleReference: bundle.bundleReference,
@@ -141,6 +148,7 @@ export async function readCombos(
         priceMinor: version.fixedPrice?.amountMinor ?? "0",
         productReference: dish?.productReference ?? null,
         skuReference: dish?.skuReference ?? null,
+        dishRecorded: records.dishes.some((d) => d.bundleReference === bundle.bundleReference),
         state:
           bundle.lifecycle === "Published" &&
           records.listedVersions.includes(version.versionReference)

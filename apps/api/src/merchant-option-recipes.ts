@@ -300,7 +300,7 @@ export function createMerchantOptionRecipes(options: {
             scope,
             rows.map((row) => row.target),
           );
-          const ingredients = await recipeIngredientItems(tx, s, at);
+          const ingredients = await recipeIngredientItems(tx, s, at, { staffDeclared: true });
           // Who saved and who reviewed each change, by name ("You" for the viewer): Store members
           // first, then the Brand's member directory (a Brand Owner need not be assigned here).
           const directory = tx as unknown as MemberDirectoryTransaction;
@@ -425,7 +425,8 @@ export function createMerchantOptionRecipes(options: {
                   item.target.optionReference === body.optionReference,
               );
               if (row === undefined) return fail("NotFound");
-              const { facts } = await recipeIngredientItems(tx, s, at);
+              // A combo's choice adds its dish's staff-declared allergen item.
+              const { facts } = await recipeIngredientItems(tx, s, at, { staffDeclared: true });
               return await saveOptionRecipeChange(rtx(tx), scope, {
                 operationReference: body.operationReference,
                 actorReference: s.actor,

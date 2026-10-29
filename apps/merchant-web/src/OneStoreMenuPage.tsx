@@ -549,7 +549,7 @@ export function OneStoreMenuPage({
         {((combo) =>
           combo === undefined
             ? allergenSummary(dish, choices)
-            : t("Combo: {parts}", {
+            : t("Combo: {parts} · allergens by choice", {
                 parts: combo.slots
                   .map((slot) =>
                     t("{part} choose {count}", {
