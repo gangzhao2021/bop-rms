@@ -17,6 +17,8 @@ import {
 } from "./dining-serve-ready-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { ComboPartClientError, markComboPartServed } from "./combo-part-client.js";
+import { chaseDish, DiningChaseClientError } from "./dining-chase-client.js";
+import { SourceTime } from "./StoreTime.js";
 import type { ComboPartView } from "./combo-parts.js";
 
 /**
@@ -38,6 +40,8 @@ export interface DiningRoundsProgress {
   readonly serveRound: (sequence: number) => void;
   /** WP-2423 item 8 ⑥ part 4: one dish of a combo served; the last one serves the combo. */
   readonly serveComboPart: (item: Item, part: ComboPartView) => void;
+  /** WP-2423 item 8 ⑦: chase a dish still being made (when the Store turned chasing on). */
+  readonly chaseItem: (item: Item) => void;
   /** The item or round whose last step's answer was lost; its button retries the same request. */
   readonly retrying: ReadonlySet<string>;
 }
@@ -204,7 +208,9 @@ export function DiningRoundsProvider({
     } catch (error) {
       if (controller.signal.aborted) return;
       const lost =
-        (error instanceof DiningServeClientError || error instanceof DiningServeReadyClientError) &&
+        (error instanceof DiningServeClientError ||
+          error instanceof DiningServeReadyClientError ||
+          error instanceof DiningChaseClientError) &&
         error.code === "OutcomeUnknown";
       if (lost) setRetrying((current) => new Set(current).add(key));
       else {
@@ -278,6 +284,38 @@ export function DiningRoundsProvider({
           error instanceof ComboPartClientError && error.code === "NotReady"
             ? t("That dish is not done in the kitchen yet.")
             : refusedServe(error),
+      );
+    },
+    chaseItem: (item) => {
+      void run(
+        "chase:" + item.orderItemReference,
+        () => {
+          const operationReference = serviceOperationReference();
+          return {
+            execute: (token: string) =>
+              chaseDish(
+                token,
+                { orderItemReference: item.orderItemReference, operationReference },
+                fetcher,
+              ),
+          };
+        },
+        () => t("The kitchen was told to hurry {displayName}.", { displayName: item.displayName }),
+        (error) =>
+          error instanceof DiningChaseClientError && error.code === "TooSoon"
+            ? t("This round was chased a moment ago. You can chase it again at {time}.", {
+                time: new Date(error.retryAt ?? Date.now()).toLocaleTimeString([], {
+                  hour: "numeric",
+                  minute: "2-digit",
+                }),
+              })
+            : error instanceof DiningChaseClientError && error.code === "NotBeingMade"
+              ? t("The kitchen is no longer making that dish. Check whether it is ready to serve.")
+              : error instanceof DiningChaseClientError && error.code === "NotOffered"
+                ? t("Chasing a dish is turned off for this store.")
+                : error instanceof DiningChaseClientError && error.code === "PermissionDenied"
+                  ? t("The kitchen was not told. Your access may have changed.")
+                  : t("The kitchen was not told. Check the connection and try again."),
       );
     },
     serveRound: (sequence) => {
@@ -391,6 +429,28 @@ export function DiningRoundItemState({
         <span className="dining-progress-remaking" role="note">
           {t("Remaking — don't serve it until the kitchen marks the remake done.")}
         </span>
+      ) : null}
+      {item.chase !== undefined ? (
+        // WP-2423 item 8 ⑦: how often this dish was chased with the kitchen.
+        <span className="dining-round-item__chased">
+          {item.chase.count === 1
+            ? t("Chased once")
+            : t("Chased {count} times", { count: item.chase.count })}{" "}
+          · <SourceTime instant={item.chase.lastChasedAt} withDate={false} />
+        </span>
+      ) : null}
+      {open &&
+      rounds.view.chaseDish &&
+      (item.phase === "Submitted" || item.phase === "Accepted" || item.phase === "InProgress") ? (
+        <button
+          type="button"
+          className="dining-round-item__chase"
+          disabled={rounds.busy && !rounds.retrying.has("chase:" + item.orderItemReference)}
+          aria-label={t("Chase {displayName} with the kitchen", { displayName: item.displayName })}
+          onClick={() => rounds.chaseItem(item)}
+        >
+          {rounds.retrying.has("chase:" + item.orderItemReference) ? t("Try again") : t("Chase")}
+        </button>
       ) : null}
       {item.comboParts !== undefined ? (
         <ul className="dining-round-item__combo" aria-label={t("Dishes in this combo")}>

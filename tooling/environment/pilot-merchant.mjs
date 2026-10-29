@@ -34,6 +34,7 @@ import {
   createMerchantDiningRoundHoldSetting,
 } from "../../apps/api/dist/merchant-dining-held-round.js";
 import { createMerchantDiningJoinRegenerate } from "../../apps/api/dist/merchant-dining-join-regenerate.js";
+import { createMerchantDiningChase } from "../../apps/api/dist/merchant-dining-chase.js";
 import {
   createMerchantStoreFeatures,
   navigationForStoreFeatures,
@@ -1746,6 +1747,12 @@ export async function createInternalMerchant(
       }),
       // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the Store features page.
       storeFeatures: createMerchantStoreFeatures({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
+      // WP-2423 item 8 ⑦: a server chases a dish (when the Store turned chasing on).
+      diningChase: createMerchantDiningChase({
         persistence,
         authentication: service,
         now: resources.now,

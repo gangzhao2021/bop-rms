@@ -43,6 +43,8 @@ export interface KitchenBoardItem {
   readonly otherName?: string;
   /** WP-2423 item 8 ⑥ part 4: a combo's chosen dishes, each made and marked done on its own. */
   readonly comboParts?: readonly ComboPartView[];
+  /** WP-2423 item 8 ⑦: a server chased this dish (how often, and when last). */
+  readonly chase?: { readonly count: number; readonly lastChasedAt: string };
   readonly status: KitchenStatus;
   readonly requiredQuantity: number;
   readonly completedQuantity: number;
@@ -286,6 +288,7 @@ function item(value: unknown): KitchenBoardItem {
     value !== null && typeof value === "object" && Object.hasOwn(value, "otherName");
   const hasComboParts =
     value !== null && typeof value === "object" && Object.hasOwn(value, "comboParts");
+  const hasChase = value !== null && typeof value === "object" && Object.hasOwn(value, "chase");
   const input = closed(value, [
     "workItemReference",
     "ticketReference",
@@ -306,7 +309,11 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasExecution ? ["execution"] : []),
     ...(hasOtherName ? ["otherName"] : []),
     ...(hasComboParts ? ["comboParts"] : []),
+    ...(hasChase ? ["chase"] : []),
   ]);
+  const chase = hasChase ? closed(input.chase, ["count", "lastChasedAt"]) : null;
+  if (chase !== null && (!Number.isSafeInteger(chase.count) || Number(chase.count) < 1))
+    throw new Error("KITCHEN_BOARD_INVALID");
   if (
     (input.stationLabel !== null &&
       (typeof input.stationLabel !== "string" || !SAFE_TEXT.test(input.stationLabel))) ||
@@ -333,6 +340,14 @@ function item(value: unknown): KitchenBoardItem {
     displayName: input.displayName,
     ...(hasOtherName ? { otherName: input.otherName as string } : {}),
     ...(hasComboParts ? { comboParts: parseComboParts(input.comboParts) } : {}),
+    ...(chase === null
+      ? {}
+      : {
+          chase: Object.freeze({
+            count: Number(chase.count),
+            lastChasedAt: instant(chase.lastChasedAt),
+          }),
+        }),
     status: input.status as KitchenStatus,
     requiredQuantity: Number(input.requiredQuantity),
     completedQuantity: Number(input.completedQuantity),

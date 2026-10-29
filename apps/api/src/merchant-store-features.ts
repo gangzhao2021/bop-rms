@@ -1,5 +1,11 @@
 import { readClosedRecord } from "@bop/identity";
 import {
+  changeDiningServiceSetting,
+  DiningSessionError,
+  loadDiningServiceSetting,
+  type DiningServiceSetting,
+} from "@rms/dining";
+import {
   changeStoreFeatureSetting,
   loadStoreFeatureSetting,
   parseStoreAdministrationReference,
@@ -76,6 +82,13 @@ export interface StoreFeaturesView {
   readonly templateCode: StoreFeatureSetting["templateCode"];
   readonly modules: Pick<StoreFeatureModules, "counterOrder" | "pickup" | "inventory">;
   readonly changedAt: string | null;
+  /** Owner decision 4: guests call staff, servers chase a dish (Dining's own switches). */
+  readonly services: {
+    readonly version: number;
+    readonly staffCall: boolean;
+    readonly chaseDish: boolean;
+    readonly changedAt: string | null;
+  };
   readonly canChange: boolean;
 }
 
@@ -98,6 +111,12 @@ export function createMerchantStoreFeatures(options: {
     command: unknown;
   }): Promise<StoreFeaturesView> => {
     const authenticated = await options.authentication.authorize(input);
+    let serviceChange: null | {
+      operationReference: string;
+      expectedVersion: number;
+      staffCall: boolean;
+      chaseDish: boolean;
+    } = null;
     let change: null | {
       operationReference: string;
       expectedVersion: number;
@@ -110,7 +129,28 @@ export function createMerchantStoreFeatures(options: {
           ? Object.getOwnPropertyDescriptor(input.command, "action")?.value
           : undefined;
       if (action === "Read") readClosedRecord(input.command, ["action"]);
-      else if (action === "ApplyTemplate") {
+      else if (action === "ChangeServices") {
+        const raw = readClosedRecord(input.command, [
+          "action",
+          "operationReference",
+          "expectedVersion",
+          "staffCall",
+          "chaseDish",
+        ]);
+        if (
+          typeof raw.staffCall !== "boolean" ||
+          typeof raw.chaseDish !== "boolean" ||
+          !Number.isSafeInteger(raw.expectedVersion) ||
+          Number(raw.expectedVersion) < 0
+        )
+          return fail("STORE_FEATURES_INPUT_INVALID");
+        serviceChange = {
+          operationReference: String(parseStoreAdministrationReference(raw.operationReference)),
+          expectedVersion: Number(raw.expectedVersion),
+          staffCall: raw.staffCall,
+          chaseDish: raw.chaseDish,
+        };
+      } else if (action === "ApplyTemplate") {
         const raw = readClosedRecord(input.command, [
           "action",
           "operationReference",
@@ -204,20 +244,36 @@ export function createMerchantStoreFeatures(options: {
                 actorReference: String(current.actorReference),
                 observedAt: new Date(Date.parse(options.now())).toISOString(),
               });
-            return storeFeaturesView(setting, true);
+            const diningRunner = tx as unknown as Parameters<typeof loadDiningServiceSetting>[0];
+            let services = await loadDiningServiceSetting(diningRunner, scope);
+            if (serviceChange !== null)
+              services = await changeDiningServiceSetting(diningRunner, scope, {
+                ...serviceChange,
+                actorReference: String(current.actorReference),
+                observedAt: new Date(Date.parse(options.now())).toISOString(),
+              });
+            return storeFeaturesView(setting, services, true);
           },
         ),
       );
     } catch (error) {
       if (error instanceof MerchantStoreFeaturesError) throw error;
-      if (error instanceof StoreFeatureSettingConflictError)
+      if (
+        error instanceof StoreFeatureSettingConflictError ||
+        (error instanceof DiningSessionError &&
+          error.code === "DINING_SESSION_IDEMPOTENCY_CONFLICT")
+      )
         throw new MerchantStoreFeaturesError("STORE_FEATURES_CHANGED");
       throw new MerchantStoreFeaturesError("STORE_FEATURES_UNAVAILABLE");
     }
   };
 }
 
-function storeFeaturesView(setting: StoreFeatureSetting, canChange: boolean): StoreFeaturesView {
+function storeFeaturesView(
+  setting: StoreFeatureSetting,
+  services: DiningServiceSetting,
+  canChange: boolean,
+): StoreFeaturesView {
   return Object.freeze({
     version: setting.version,
     templateCode: setting.templateCode,
@@ -227,6 +283,12 @@ function storeFeaturesView(setting: StoreFeatureSetting, canChange: boolean): St
       inventory: setting.inventory,
     }),
     changedAt: setting.changedAt,
+    services: Object.freeze({
+      version: services.version,
+      staffCall: services.staffCall,
+      chaseDish: services.chaseDish,
+      changedAt: services.changedAt,
+    }),
     canChange,
   });
 }
@@ -249,15 +311,15 @@ const allModules: StoreFeatureModules = Object.freeze({
  */
 export async function readStoreFeatures(
   tx: QueryTransaction,
-  scope: { tenantReference: string; brandReference: string; storeReference: string },
+  scope: { brandReference: string; storeReference: string },
   unreadable: "AllModules" | "Refuse",
 ): Promise<StoreFeatureModules> {
   const before = (
     (await tx.query(
       "SELECT current_setting('bop.brand_id',true) brand,current_setting('bop.store_id',true) store",
       [],
-    )) as { rows: { brand: string | null; store: string | null }[] }
-  ).rows[0];
+    )) as { rows?: { brand: string | null; store: string | null }[] } | undefined
+  )?.rows?.[0];
   await tx.query("SAVEPOINT store_feature_setting_read", []);
   try {
     const setting = await loadStoreFeatureSetting(

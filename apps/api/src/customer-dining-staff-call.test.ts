@@ -98,6 +98,23 @@ it("WP-2423 Q28: a guest not seated at a table has nothing to call from", async 
   expect((await t.get()).status).toBe(404);
 });
 
+it("WP-2423 item 8 ⑦: says calling staff is not offered when the store has it off", async () => {
+  const t = await setup({
+    read: async () => {
+      throw new CustomerDiningStaffCallError("NotOffered");
+    },
+  });
+  const response = await t.get();
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: {
+      code: "dining_staff_call_not_offered",
+      messageKey: "customer.dining.staff_call.not_offered",
+    },
+  });
+});
+
 it("WP-2423 Q28: asks with a reason and the request's own key, and says when staff were already asked", async () => {
   const t = await setup({});
   const created = await t.ask({ reason: "TableNeeds" });

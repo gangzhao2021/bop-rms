@@ -8,6 +8,7 @@ import {
   KitchenQueueProjectionError,
   kitchenStaleTicketClosePermission,
   listClosedKitchenTickets,
+  listKitchenWorkChases,
   listKitchenWorkItemPreparationFacts,
   type KitchenQueueItemView,
 } from "@rms/kitchen";
@@ -145,8 +146,13 @@ const itemView = (
   item: KitchenQueueItemView,
   preparation: KitchenPreparation,
   parts: ReadonlyMap<string, readonly ComboPart[]> = new Map(),
+  chases: ReadonlyMap<string, { count: number; lastChasedAt: string }> = new Map(),
 ) => ({
   ...item,
+  // WP-2423 item 8 ⑦: a server chased this dish (the ticket turns red and sounds).
+  ...(chases.has(String(item.workItemReference))
+    ? { chase: chases.get(String(item.workItemReference)) }
+    : {}),
   // WP-2423 item 8 ⑥ part 4: a combo's chosen dishes, each made and marked done on its own.
   ...(parts.has(String(item.orderItemReference))
     ? { comboParts: parts.get(String(item.orderItemReference)) }
@@ -531,6 +537,25 @@ export function createMerchantKitchenQuery(options: {
                 ),
               new Map<string, readonly ComboPart[]>(),
             );
+          // WP-2423 item 8 ⑦: how often servers chased each dish; without it nothing is shown red.
+          const chasesOf = (items: readonly KitchenQueueItemView[]) =>
+            withOptionalRead(
+              tx,
+              async () =>
+                new Map(
+                  (
+                    await listKitchenWorkChases(tx as never, authority, {
+                      orderItemReferences: [
+                        ...new Set(items.map((item) => String(item.orderItemReference))),
+                      ],
+                    })
+                  ).map((chase) => [
+                    chase.workItemReference,
+                    { count: chase.count, lastChasedAt: chase.lastChasedAt },
+                  ]),
+                ),
+              new Map<string, { count: number; lastChasedAt: string }>(),
+            );
           const operatorStatus = (projection: ProjectionMetadata) =>
             kdsOperatorStatus({ session, ...authority, projection });
           if (query.kind === "List") {
@@ -548,6 +573,7 @@ export function createMerchantKitchenQuery(options: {
             const items = result.items.filter((item) => !closed.has(item.ticketReference));
             const preparation = await kitchenPreparation(tx, authority, items, roundDates);
             const parts = await comboParts(items);
+            const chases = await chasesOf(items);
             const canCloseEarlierDayTickets =
               (await scope.authorizeAction(kitchenStaleTicketClosePermission))?.effect === "Allow";
             // WP-2423 (v15 2026-10-16): today's paid orders still waiting for acceptance have no
@@ -596,7 +622,12 @@ export function createMerchantKitchenQuery(options: {
               canCloseEarlierDayTickets,
               ...(awaitingAcceptance === undefined ? {} : { awaitingAcceptance }),
               items: items.map((item) =>
-                itemView(item, preparation.get(item.workItemReference) ?? noPreparation, parts),
+                itemView(
+                  item,
+                  preparation.get(item.workItemReference) ?? noPreparation,
+                  parts,
+                  chases,
+                ),
               ),
             };
           }
@@ -606,6 +637,7 @@ export function createMerchantKitchenQuery(options: {
           });
           const preparation = await kitchenPreparation(tx, authority, [result.item], roundDates);
           const parts = await comboParts([result.item]);
+          const chases = await chasesOf([result.item]);
           return {
             ...result,
             operatorStatus: operatorStatus(result),
@@ -614,6 +646,7 @@ export function createMerchantKitchenQuery(options: {
               result.item,
               preparation.get(result.item.workItemReference) ?? noPreparation,
               parts,
+              chases,
             ),
           };
         },

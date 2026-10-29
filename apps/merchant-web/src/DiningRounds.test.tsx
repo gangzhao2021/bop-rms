@@ -126,6 +126,7 @@ const context = (view: ReturnType<typeof progress> | null): DiningRoundsProgress
   serveItem: () => undefined,
   serveRound: () => undefined,
   serveComboPart: () => undefined,
+  chaseItem: () => undefined,
 });
 const text = (html: string) =>
   html
@@ -245,6 +246,34 @@ describe("Orders v3: a table's order read round by round (Owner 2026-10-26)", ()
     expect(html).toContain("Remaking — don't serve it until the kitchen marks the remake done.");
     expect(readyToServe(view).map((item) => item.displayName)).toEqual(["TEST green tea"]);
     expect(render(view)).not.toContain('aria-label="Mark 1 × TEST beef noodles served"');
+  });
+});
+
+describe("WP-2423 item 8 ⑦: chasing a dish with the kitchen", () => {
+  const items = () => [
+    progressItem(1, 1, "TEST beef noodles", "InProgress", 0, {
+      chase: { count: 2, lastChasedAt: "2026-10-26T23:20:00.000Z" },
+    }),
+    progressItem(2, 1, "TEST green tea", "Ready"),
+    progressItem(3, 1, "TEST dumplings", "Fulfilled", 1),
+  ];
+  it("offers Chase only on dishes still being made, while the store has chasing on", () => {
+    const on = render(progress(items(), { chaseDish: true }));
+    expect(on).toContain('aria-label="Chase TEST beef noodles with the kitchen"');
+    expect(on).not.toContain('aria-label="Chase TEST green tea with the kitchen"');
+    expect(on).not.toContain('aria-label="Chase TEST dumplings with the kitchen"');
+    expect(text(on)).toContain("Chased 2 times");
+    const off = render(progress(items()));
+    expect(off).not.toContain("with the kitchen");
+  });
+  it("refuses a malformed chase count", () => {
+    expect(() =>
+      progress([
+        progressItem(1, 1, "TEST beef noodles", "InProgress", 0, {
+          chase: { count: 0, lastChasedAt: "2026-10-26T23:20:00.000Z" },
+        }),
+      ]),
+    ).toThrow();
   });
 });
 

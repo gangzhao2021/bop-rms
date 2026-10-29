@@ -5183,6 +5183,42 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 6 \"正餐模板默认关掉柜台点单、自取、取餐交付、库存与配方、会员与营销、合规文档，需要时在设置里打开\"): the modules a Store uses, versioned, changed by the owner"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_service_setting",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 4 \"催菜、叫服务员：都做，但都是门店开关，默认关…催菜在单桌详情每道没上的菜旁边，后厨那张单变红并响一声，记下催过几次；同一轮几分钟内只能催一次\"): the Store's call-staff and chase-dish switches, versioned, changed by the owner"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_service_setting",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 4 \"催菜、叫服务员：都做，但都是门店开关，默认关…催菜在单桌详情每道没上的菜旁边，后厨那张单变红并响一声，记下催过几次；同一轮几分钟内只能催一次\"): the Store's call-staff and chase-dish switches, versioned, changed by the owner"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_chase",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 4 \"催菜、叫服务员：都做，但都是门店开关，默认关…催菜在单桌详情每道没上的菜旁边，后厨那张单变红并响一声，记下催过几次；同一轮几分钟内只能催一次\"): a server chases a dish still being made; the kitchen shows it and how often"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_work_chase",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 4 \"催菜、叫服务员：都做，但都是门店开关，默认关…催菜在单桌详情每道没上的菜旁边，后厨那张单变红并响一声，记下催过几次；同一轮几分钟内只能催一次\"): a server chases a dish still being made; the kitchen shows it and how often"
     }
   ]
 }

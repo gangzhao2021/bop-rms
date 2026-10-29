@@ -17,6 +17,7 @@ import {
   diningStaffCallReasons,
   parseDiningReference,
   type DiningStaffCallReason,
+  loadDiningServiceSetting,
 } from "@rms/dining";
 import type { RequestHandler, Response } from "express";
 
@@ -30,7 +31,8 @@ export const customerDiningStaffCallRoute = "/api/v1/dine-in/staff-call";
 export const customerDiningStaffCallWithdrawRoute = "/api/v1/dine-in/staff-call/withdraw";
 
 export class CustomerDiningStaffCallError extends Error {
-  constructor(readonly code: "NotJoined" | "Unavailable" | "Invalid") {
+  /** NotOffered (WP-2423 item 8 ⑦): the Store has not turned calling staff on. */
+  constructor(readonly code: "NotJoined" | "NotOffered" | "Unavailable" | "Invalid") {
     super("dining staff call " + code);
     this.name = "CustomerDiningStaffCallError";
   }
@@ -120,6 +122,7 @@ export function createCustomerDiningStaffCall(options: CustomerDiningStaffCallOp
     credentials: Credentials,
     operationReference: string,
     fenced: boolean,
+    offered: "Required" | "Any",
     work: (
       store: ReturnType<typeof createPostgresDiningStaffCallStore>,
       command: Record<string, string>,
@@ -157,6 +160,18 @@ export function createCustomerDiningStaffCall(options: CustomerDiningStaffCallOp
           return { guest, member: bound(guest, scope) };
         };
         const first = await authorize();
+        // WP-2423 item 8 ⑦ (Owner decision 4): only while the Store offers calling staff; an open
+        // call can still be withdrawn after it was turned off.
+        if (
+          offered === "Required" &&
+          !(
+            await loadDiningServiceSetting(
+              transaction as unknown as Parameters<typeof loadDiningServiceSetting>[0],
+              scope,
+            )
+          ).staffCall
+        )
+          throw new CustomerDiningStaffCallError("NotOffered");
         const fingerprint = JSON.stringify(first.guest);
         const command = {
           operationReference,
@@ -228,7 +243,7 @@ export function createCustomerDiningStaffCall(options: CustomerDiningStaffCallOp
   return Object.freeze({
     async read(value: unknown): Promise<CustomerDiningStaffCallView> {
       const { credentials } = credentialsOf(value, ["sessionCredential", "csrfCredential"]);
-      return run(credentials, options.newReference(), false, async (store, command) => {
+      return run(credentials, options.newReference(), false, "Required", async (store, command) => {
         const status = await store.status(command);
         if (!status.seated) throw new CustomerDiningStaffCallError("NotJoined");
         return view(status);
@@ -249,7 +264,7 @@ export function createCustomerDiningStaffCall(options: CustomerDiningStaffCallOp
       }
       if (!diningStaffCallReasons.includes(raw.reason as DiningStaffCallReason))
         throw new CustomerDiningStaffCallError("Invalid");
-      return run(credentials, operation, true, async (store, command) => {
+      return run(credentials, operation, true, "Required", async (store, command) => {
         const result = await store.call(command, raw.reason);
         if (result.status === "Refused")
           return result.reason === "TooManyCalls" && result.retryAt !== null
@@ -275,7 +290,7 @@ export function createCustomerDiningStaffCall(options: CustomerDiningStaffCallOp
       } catch {
         throw new CustomerDiningStaffCallError("Invalid");
       }
-      return run(credentials, operation, true, async (store, command) => {
+      return run(credentials, operation, true, "Any", async (store, command) => {
         const result = await store.withdraw(command, call);
         if (result.status === "Closed")
           return result.kind === "Withdrawn" ? "Withdrawn" : "AlreadyClosed";
@@ -294,11 +309,17 @@ function protect(response: Response) {
   response.setHeader("Referrer-Policy", "no-referrer");
   response.setHeader("X-Robots-Tag", "noindex, nofollow");
 }
-function fail(response: Response, status: 400 | 404 | 503) {
+function fail(response: Response, status: 400 | 404 | 409 | 503) {
   protect(response);
   if (status === 503) response.setHeader("Retry-After", "5");
   const code =
-    status === 400 ? "request_invalid" : status === 404 ? "not_joined" : "service_unavailable";
+    status === 400
+      ? "request_invalid"
+      : status === 404
+        ? "not_joined"
+        : status === 409
+          ? "not_offered"
+          : "service_unavailable";
   response.status(status).json({
     schemaVersion: 1,
     error: { code: "dining_staff_call_" + code, messageKey: "customer.dining.staff_call." + code },
@@ -355,7 +376,9 @@ export class CustomerDiningStaffCallHandler {
         ? 404
         : error instanceof CustomerDiningStaffCallError && error.code === "Invalid"
           ? 400
-          : 503,
+          : error instanceof CustomerDiningStaffCallError && error.code === "NotOffered"
+            ? 409
+            : 503,
     );
   }
   read(): RequestHandler {

@@ -10,7 +10,8 @@ import {
   parseOrderingReference,
 } from "@rms/ordering";
 import type { ConsumerTransaction } from "@bop/eventing";
-import { listOpenKitchenReworkItems } from "@rms/kitchen";
+import { listKitchenWorkChases, listOpenKitchenReworkItems } from "@rms/kitchen";
+import { loadDiningServiceSetting } from "@rms/dining";
 import { readClosedRecord } from "@bop/identity";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -183,6 +184,40 @@ export function createMerchantDiningOrderProgress(options: {
                     ),
                   new Map<string, readonly ComboPart[]>(),
                 );
+          // WP-2423 item 8 ⑦ (Owner decision 4): whether servers may chase a dish, and how often
+          // each was chased; without them the page offers no chase.
+          const chaseDish = await withOptionalRead(
+            businessTransaction,
+            async () =>
+              (
+                await loadDiningServiceSetting(
+                  businessTransaction as unknown as Parameters<typeof loadDiningServiceSetting>[0],
+                  scope,
+                )
+              ).chaseDish,
+            false,
+          );
+          const chases = new Map<string, { count: number; lastChasedAt: string }>();
+          if (chaseDish)
+            for (const chase of await withOptionalRead(
+              businessTransaction,
+              () =>
+                listKitchenWorkChases(
+                  businessTransaction as unknown as Parameters<typeof listKitchenWorkChases>[0],
+                  scope,
+                  { orderItemReferences: labels.map((label) => label.orderItemReference) },
+                ),
+              [],
+            )) {
+              const prior = chases.get(chase.orderItemReference);
+              chases.set(chase.orderItemReference, {
+                count: (prior?.count ?? 0) + chase.count,
+                lastChasedAt:
+                  prior !== undefined && prior.lastChasedAt > chase.lastChasedAt
+                    ? prior.lastChasedAt
+                    : chase.lastChasedAt,
+              });
+            }
           const items = labels.map((label) => {
             const item = membership.get(label.orderItemReference);
             if (!item || String(item.orderBatchReference) !== String(label.orderBatchReference))
@@ -206,6 +241,9 @@ export function createMerchantDiningOrderProgress(options: {
               ...(parts.has(label.orderItemReference)
                 ? { comboParts: parts.get(label.orderItemReference) }
                 : {}),
+              ...(chases.has(label.orderItemReference)
+                ? { chase: chases.get(label.orderItemReference) }
+                : {}),
             });
           });
           const table = await createMerchantDiningTableContext({
@@ -226,6 +264,7 @@ export function createMerchantDiningOrderProgress(options: {
             sessionVersion: table.sessionVersion,
             tableAssignmentVersion: table.tableAssignmentVersion,
             items: Object.freeze(items),
+            chaseDish,
           });
         },
       ),

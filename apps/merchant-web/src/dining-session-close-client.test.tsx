@@ -67,6 +67,7 @@ const view: DiningProgress = {
   tableLabel: "T1",
   orderVersion: 3,
   currentOrderVersion: 4,
+  chaseDish: false,
   sessionVersion: 4,
   diningSessionReference: id(2),
   sessionPhase: "Active",

@@ -21,14 +21,23 @@ import {
 } from "../../../apps/customer-pwa/src/menu/menu-contract.ts";
 import {
   createPostgresKitchenRoutingConfigurationStore,
+  KitchenChaseTooSoonError,
+  listKitchenWorkChases,
+  listKitchenWorkItemsToMake,
   rebindKitchenRoutingEvidence,
+  recordKitchenWorkChase,
 } from "../../rms/kitchen/src/index.ts";
 import {
   comboPartsByOrderItem,
   markDiningComboPartServed,
   markKitchenComboPartDone,
 } from "../../../apps/api/src/merchant-combo-parts.ts";
-import { createDiningTable, parseDiningSession } from "../../rms/dining/src/index.ts";
+import {
+  changeDiningServiceSetting,
+  createDiningTable,
+  loadDiningServiceSetting,
+  parseDiningSession,
+} from "../../rms/dining/src/index.ts";
 import { createMerchantOneStoreDishes } from "../../../apps/api/src/merchant-one-store-dishes.ts";
 import { createMerchantOptionPrices } from "../../../apps/api/src/merchant-option-prices.ts";
 import { createMerchantOptionSets } from "../../../apps/api/src/merchant-option-sets.ts";
@@ -1185,6 +1194,85 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
           ["炒饭", "Fried rice (TEST)", false, false],
         ],
       );
+      // WP-2423 item 8 ⑦ (Owner decision 4): the owner turns chasing on (off until then); a
+      // server chases the combo while it is being made. A round is chased at most once in any 5
+      // minutes; the same chase again records nothing; a dish no longer being made is not chased.
+      assert.deepEqual(
+        await asStore(async (tx) => {
+          const before = await loadDiningServiceSetting(tx, diningScope);
+          const after = await changeDiningServiceSetting(tx, diningScope, {
+            operationReference: op(),
+            expectedVersion: 0,
+            staffCall: false,
+            chaseDish: true,
+            actorReference: owner,
+            observedAt: new Date(Math.floor(Date.now())).toISOString(),
+          });
+          return [before.version, before.chaseDish, after.version, after.chaseDish];
+        }),
+        [0, false, 1, true],
+      );
+      const making = await asStore((tx) =>
+        listKitchenWorkItemsToMake(tx, diningScope, orderItemReference),
+      );
+      assert.deepEqual(making, [
+        { workItemReference: workItem, orderBatchReference: ticketRow.batch },
+      ]);
+      const chaseAt = new Date(Date.now() - 400_000);
+      const chase = (chaseReference, at) =>
+        asStore((tx) =>
+          recordKitchenWorkChase(tx, diningScope, {
+            chaseReference,
+            workItemReference: workItem,
+            orderBatchReference: ticketRow.batch,
+            actorReference: owner,
+            chasedAt: at.toISOString(),
+          }),
+        );
+      const firstChase = op();
+      assert.deepEqual(await chase(firstChase, chaseAt), { recorded: true });
+      assert.deepEqual(await chase(firstChase, chaseAt), { recorded: false });
+      // Two minutes later: too soon, and it says when the round may be chased again.
+      await assert.rejects(chase(op(), new Date(chaseAt.getTime() + 120_000)), (error) => {
+        assert.ok(error instanceof KitchenChaseTooSoonError);
+        assert.equal(error.retryAt, new Date(chaseAt.getTime() + 300_000).toISOString());
+        return true;
+      });
+      // The database refuses it too, whatever the caller checked.
+      await assert.rejects(
+        asStore((tx) =>
+          tx.query(
+            "INSERT INTO rms_kitchen.kitchen_work_chase(brand_id,store_id,chase_id,kitchen_work_item_id,order_batch_id,actor_id,chased_at) VALUES($1,$2,$3,$4,$5,$6,$7)",
+            [
+              brandReference,
+              storeReference,
+              op(),
+              workItem,
+              ticketRow.batch,
+              owner,
+              new Date(chaseAt.getTime() + 60_000).toISOString(),
+            ],
+          ),
+        ),
+        /chased in the last 5 minutes/u,
+      );
+      // Six minutes later it may be chased again: the kitchen sees it twice.
+      assert.deepEqual(await chase(op(), new Date(chaseAt.getTime() + 360_000)), {
+        recorded: true,
+      });
+      assert.deepEqual(
+        (
+          await asStore((tx) =>
+            listKitchenWorkChases(tx, diningScope, { orderItemReferences: [orderItemReference] }),
+          )
+        ).map((c) => [c.workItemReference, c.count]),
+        [[workItem, 2]],
+      );
+      await assert.rejects(
+        asStore((tx) => tx.query("UPDATE rms_kitchen.kitchen_work_chase SET actor_id=$1", [op()])),
+        /append-only kitchen chase record|permission denied/u,
+      );
+
       const done = (optionReference, operationReference = op()) =>
         asStore((tx) =>
           markKitchenComboPartDone(tx, diningScope, {
@@ -1224,6 +1312,25 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
           ["馄饨汤", true, true],
           ["炒饭", true, true],
         ],
+      );
+      // The kitchen finished it (owner record): nothing of it is still being made, and the
+      // database refuses a chase of finished work.
+      await admin.query(
+        "UPDATE rms_kitchen.kitchen_work_item SET status='Completed',completed_quantity=1 WHERE kitchen_work_item_id=$1",
+        [workItem],
+      );
+      assert.deepEqual(
+        await asStore((tx) => listKitchenWorkItemsToMake(tx, diningScope, orderItemReference)),
+        [],
+      );
+      await assert.rejects(
+        asStore((tx) =>
+          tx.query(
+            "INSERT INTO rms_kitchen.kitchen_work_chase(brand_id,store_id,chase_id,kitchen_work_item_id,order_batch_id,actor_id,chased_at) VALUES($1,$2,$3,$4,$5,$6,date_trunc('milliseconds',now()) + interval '1 hour')",
+            [brandReference, storeReference, op(), workItem, ticketRow.batch, owner],
+          ),
+        ),
+        /needs a dish still being made/u,
       );
       // The database refuses a dish the work item does not have, and keeps each record.
       await assert.rejects(

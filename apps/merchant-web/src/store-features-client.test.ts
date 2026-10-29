@@ -6,6 +6,12 @@ const view = {
   templateCode: "Custom",
   modules: { counterOrder: true, pickup: true, inventory: false },
   changedAt: "2026-10-29T15:05:00.000Z",
+  services: {
+    version: 1,
+    staffCall: true,
+    chaseDish: false,
+    changedAt: "2026-10-29T15:06:00.000Z",
+  },
   canChange: true,
 };
 
@@ -22,6 +28,8 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
       { ...view, changedAt: "yesterday" },
       { ...view, modules: { counterOrder: true, inventory: false } },
       { ...view, modules: { ...view.modules, inventory: "no" } },
+      { ...view, services: { ...view.services, staffCall: "yes" } },
+      { ...view, services: undefined },
       null,
     ])
       expect(() => parseStoreFeatures(bad)).toThrow();

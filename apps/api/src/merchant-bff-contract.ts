@@ -162,6 +162,7 @@ import type {
 } from "./merchant-dining-held-round.js";
 import type { createMerchantDiningJoinRegenerate } from "./merchant-dining-join-regenerate.js";
 import type { createMerchantStoreFeatures } from "./merchant-store-features.js";
+import type { createMerchantDiningChase } from "./merchant-dining-chase.js";
 import type { createMerchantDiningHostSelection } from "./merchant-dining-host-selection.js";
 import type { createMerchantDiningHostTransfer } from "./merchant-dining-host-transfer.js";
 import type { createMerchantDiningSessionStart } from "./merchant-dining-session-start.js";
@@ -585,6 +586,8 @@ export interface MerchantBffRouterOptions {
   readonly diningRoundHoldSetting?: ReturnType<typeof createMerchantDiningRoundHoldSetting>;
   /** WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the modules the Store uses (Store features page). */
   readonly storeFeatures?: ReturnType<typeof createMerchantStoreFeatures>;
+  /** WP-2423 item 8 ⑦: a server chases a dish not yet served (the kitchen sees it). */
+  readonly diningChase?: ReturnType<typeof createMerchantDiningChase>;
   readonly diningJoinRegenerate?: ReturnType<typeof createMerchantDiningJoinRegenerate>;
   readonly diningHostSelection?: ReturnType<typeof createMerchantDiningHostSelection>;
   readonly diningHostTransfer?: ReturnType<typeof createMerchantDiningHostTransfer>;

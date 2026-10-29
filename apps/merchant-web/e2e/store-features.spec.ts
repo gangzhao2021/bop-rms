@@ -55,6 +55,12 @@ test("@production the owner applies the full-service setup, turns a module back 
     templateCode: null as string | null,
     modules: { counterOrder: true, pickup: true, inventory: true },
     changedAt: null as string | null,
+    services: {
+      version: 0,
+      staffCall: false,
+      chaseDish: false,
+      changedAt: null as string | null,
+    },
     canChange: true,
   };
   const commands: Record<string, unknown>[] = [];
@@ -63,6 +69,20 @@ test("@production the owner applies the full-service setup, turns a module back 
     const body = route.request().postDataJSON() as Record<string, unknown>;
     commands.push(body);
     if (body.action === "Read") return route.fulfill({ headers, json: current });
+    if (body.action === "ChangeServices") {
+      if (body.expectedVersion !== current.services.version)
+        return route.fulfill({ headers, status: 409, json: { error: "store_features_changed" } });
+      current = {
+        ...current,
+        services: {
+          version: current.services.version + 1,
+          staffCall: body.staffCall === true,
+          chaseDish: body.chaseDish === true,
+          changedAt: "2026-10-29T15:10:00.000Z",
+        },
+      };
+      return route.fulfill({ headers, json: current });
+    }
     if (conflictOnce) {
       conflictOnce = false;
       // Another owner session turned counter ordering back on first.
@@ -136,7 +156,7 @@ test("@production the owner applies the full-service setup, turns a module back 
   const pickup = page.getByRole("checkbox", { name: /Pickup orders from guests/u });
   await expect(counter).toBeChecked();
   await expect(inventory).toBeChecked();
-  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     expect(
@@ -181,7 +201,7 @@ test("@production the owner applies the full-service setup, turns a module back 
 
   // Inventory back on: saved as the next version, pickup is not sent.
   await inventory.check();
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(
     page.getByText("Saved. Staff see the change the next time a page opens."),
   ).toBeVisible();
@@ -195,7 +215,7 @@ test("@production the owner applies the full-service setup, turns a module back 
   // Someone else changed it meanwhile: the page says so and shows the latest.
   conflictOnce = true;
   await inventory.uncheck();
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(
     page.getByText(
       "Someone else changed these settings. The page now shows them; check and save again.",
@@ -203,4 +223,23 @@ test("@production the owner applies the full-service setup, turns a module back 
   ).toBeVisible();
   await expect(counter).toBeChecked();
   await expect(inventory).toBeChecked();
+
+  // At the table: both off at first; the owner turns them on, saved on their own.
+  const call = page.getByRole("checkbox", { name: /Guests can call staff/u });
+  const chase = page.getByRole("checkbox", { name: /Servers can chase a dish/u });
+  await expect(call).not.toBeChecked();
+  await expect(chase).not.toBeChecked();
+  await call.check();
+  await chase.check();
+  await page.getByRole("button", { name: "Save table settings" }).click();
+  await expect(
+    page.getByText("Saved. Staff see the change the next time a page opens."),
+  ).toBeVisible();
+  expect(commands.at(-1)).toMatchObject({
+    action: "ChangeServices",
+    expectedVersion: 0,
+    staffCall: true,
+    chaseDish: true,
+  });
+  await expect(page.getByRole("button", { name: "Save table settings" })).toBeDisabled();
 });

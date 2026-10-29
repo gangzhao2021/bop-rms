@@ -91,6 +91,8 @@ it("uses authenticated selected scope, server time and the owner delivery reader
     sessionVersion: 2,
     tableAssignmentVersion: 3,
     items: [],
+    // WP-2423 item 8 ⑦: the Store's chase switch (unreadable here, so off).
+    chaseDish: false,
   });
   expect(doubles.resolve).toHaveBeenCalledWith(
     f.tx,
