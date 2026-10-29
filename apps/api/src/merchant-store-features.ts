@@ -31,11 +31,12 @@ const fail = (code: MerchantStoreFeaturesErrorCode): never => {
 export const storeFeaturesPermission = "organization.manage";
 
 /**
- * Owner 2026-10-28 decision 6: the full-service template turns these off. Pickup and its handover
- * follow in the next slice (they also close guests' pickup ordering), until then it stays as set.
+ * Owner 2026-10-28 decision 6: the full-service template turns these off (pickup also closes
+ * guests' pickup ordering).
  */
 export const fullServiceTemplate = Object.freeze({
   counterOrder: false,
+  pickup: false,
   inventory: false,
   loyalty: false,
   complianceDocuments: false,
@@ -62,6 +63,8 @@ export function navigationForStoreFeatures<T extends { readonly screenId: string
   setting: StoreFeatureModules,
 ): readonly T[] {
   return navigation.filter((item) => {
+    // Counter orders are handed over on the Pickup screen too.
+    if (item.screenId === "FUL-PICKUP-QUEUE") return setting.pickup || setting.counterOrder;
     const module = storeFeatureScreens[item.screenId];
     return module === undefined || setting[module];
   });
@@ -99,7 +102,7 @@ export function createMerchantStoreFeatures(options: {
       operationReference: string;
       expectedVersion: number;
       template: "FullService" | null;
-      modules: Pick<StoreFeatureModules, "counterOrder" | "inventory"> | null;
+      modules: Pick<StoreFeatureModules, "counterOrder" | "pickup" | "inventory"> | null;
     } = null;
     try {
       const action =
@@ -133,8 +136,7 @@ export function createMerchantStoreFeatures(options: {
           "expectedVersion",
           "modules",
         ]);
-        // Pickup is not changed here yet (it also closes guests' pickup ordering).
-        const modules = readClosedRecord(raw.modules, ["counterOrder", "inventory"]);
+        const modules = readClosedRecord(raw.modules, ["counterOrder", "pickup", "inventory"]);
         if (
           raw.action !== "Change" ||
           !Number.isSafeInteger(raw.expectedVersion) ||
@@ -148,6 +150,7 @@ export function createMerchantStoreFeatures(options: {
           template: null,
           modules: {
             counterOrder: modules.counterOrder === true,
+            pickup: modules.pickup === true,
             inventory: modules.inventory === true,
           },
         };
@@ -274,4 +277,32 @@ export async function readStoreFeatures(
       before?.store ?? "",
     ]);
   }
+}
+
+/**
+ * WP-2423 item 8 ⑦ 1b: what guests are offered now, given the Store's modules. A Store that turned
+ * pickup off takes no guest pickup order: Pickup leaves the services offered and is named as
+ * turned off, so a guest at a pickup code is told the Store takes dine-in orders only. An
+ * unreadable setting offers no pickup (dine-in is not affected).
+ */
+export async function guestServiceModes<
+  T extends { readonly availableServiceModes: readonly string[] },
+>(
+  tx: QueryTransaction,
+  scope: { tenantReference: string; brandReference: string; storeReference: string },
+  status: T,
+): Promise<T & { readonly servicesTurnedOff: readonly "Pickup"[] }> {
+  const pickup = await readStoreFeatures(tx, scope, "Refuse").then(
+    (features) => features.pickup,
+    () => false,
+  );
+  return Object.freeze({
+    ...status,
+    availableServiceModes: Object.freeze(
+      pickup
+        ? [...status.availableServiceModes]
+        : status.availableServiceModes.filter((mode) => mode !== "Pickup"),
+    ),
+    servicesTurnedOff: Object.freeze(pickup ? [] : (["Pickup"] as const)),
+  });
 }

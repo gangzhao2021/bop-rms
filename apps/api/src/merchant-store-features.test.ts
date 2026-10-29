@@ -37,4 +37,13 @@ describe("WP-2423 item 8 ⑦ DEC-STORE-FEATURES navigation", () => {
     ]);
     expect(Object.keys(storeFeatureScreens)).not.toContain("CMP-ALLERGEN-REVIEW");
   });
+  it("keeps the Pickup screen while counter orders are handed over there", () => {
+    const shown = (modules: Partial<typeof all>) =>
+      navigationForStoreFeatures(navigation, { ...all, ...modules }).some(
+        (item) => item.screenId === "FUL-PICKUP-QUEUE",
+      );
+    expect(shown({ pickup: false })).toBe(true);
+    expect(shown({ counterOrder: false })).toBe(true);
+    expect(shown({ pickup: false, counterOrder: false })).toBe(false);
+  });
 });

@@ -82,7 +82,7 @@ test("@production the owner applies the full-service setup, turns a module back 
             ...current,
             version: current.version + 1,
             templateCode: "FullService",
-            modules: { ...current.modules, counterOrder: false, inventory: false },
+            modules: { counterOrder: false, pickup: false, inventory: false },
             changedAt: "2026-10-29T15:00:00.000Z",
           }
         : {
@@ -99,6 +99,7 @@ test("@production the owner applies the full-service setup, turns a module back 
   await expect(page.getByRole("heading", { name: "Store features", exact: true })).toBeVisible();
   const counter = page.getByRole("checkbox", { name: /Counter ordering/u });
   const inventory = page.getByRole("checkbox", { name: /Inventory and recipes/u });
+  const pickup = page.getByRole("checkbox", { name: /Pickup orders from guests/u });
   await expect(counter).toBeChecked();
   await expect(inventory).toBeChecked();
   await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
@@ -113,12 +114,21 @@ test("@production the owner applies the full-service setup, turns a module back 
   expect(axe.violations).toEqual([]);
   await expectNoInternalText(page);
 
-  // The full-service setup turns off counter ordering and inventory and recipes.
+  // The full-service setup turns off counter ordering, guests' pickup and inventory; turning
+  // pickup off is asked once more, with what to do about pickups still waiting.
   await page.getByRole("button", { name: "Use the full-service setup" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Hand over any pickup orders still waiting first.",
+  );
+  await page.getByRole("button", { name: "Keep pickup" }).click();
+  expect(commands.filter((c) => c.action === "ApplyTemplate")).toHaveLength(0);
+  await page.getByRole("button", { name: "Use the full-service setup" }).click();
+  await page.getByRole("button", { name: "Turn off pickup" }).click();
   await expect(page.getByText("The full-service restaurant setup is in use.")).toBeVisible();
   await expect(page.getByText("This store uses the full-service restaurant setup.")).toBeVisible();
   await expect(counter).not.toBeChecked();
   await expect(inventory).not.toBeChecked();
+  await expect(pickup).not.toBeChecked();
   expect(commands.at(-1)).toMatchObject({
     action: "ApplyTemplate",
     template: "FullService",
@@ -134,7 +144,7 @@ test("@production the owner applies the full-service setup, turns a module back 
   expect(commands.at(-1)).toMatchObject({
     action: "Change",
     expectedVersion: 1,
-    modules: { counterOrder: false, inventory: true },
+    modules: { counterOrder: false, pickup: false, inventory: true },
   });
   await expect(page.getByText(/Last changed/u)).toBeVisible();
 

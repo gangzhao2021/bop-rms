@@ -26,7 +26,7 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
     ])
       expect(() => parseStoreFeatures(bad)).toThrow();
   });
-  it("sends the owner's change without pickup, and says when another change came first", async () => {
+  it("sends the owner's change, and says when another change came first", async () => {
     const sent: unknown[] = [];
     const client = createStoreFeaturesClient("a".repeat(43), async (_url, init) => {
       sent.push(JSON.parse(String(init?.body)));
@@ -37,13 +37,13 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
     await client.change({
       operationReference: "0190a7f2-0000-7000-8000-000000000001",
       expectedVersion: 1,
-      modules: { counterOrder: true, inventory: false },
+      modules: { counterOrder: true, pickup: false, inventory: false },
     });
     expect(sent[0]).toEqual({
       action: "Change",
       operationReference: "0190a7f2-0000-7000-8000-000000000001",
       expectedVersion: 1,
-      modules: { counterOrder: true, inventory: false },
+      modules: { counterOrder: true, pickup: false, inventory: false },
     });
     await expect(client.read()).rejects.toMatchObject({ code: "Changed" });
   });

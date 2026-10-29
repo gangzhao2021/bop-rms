@@ -10,6 +10,7 @@ import {
 } from "../../rms/store/src/index.ts";
 import {
   fullServiceTemplate,
+  guestServiceModes,
   navigationForStoreFeatures,
   readStoreFeatures,
 } from "../../../apps/api/src/merchant-store-features.ts";
@@ -80,7 +81,13 @@ it("keeps a Store's modules as versioned owner choices, per Store, under the pil
         loyalty: true,
         complianceDocuments: true,
       };
-      // The owner applies the full-service template (pickup stays until its own switch).
+      // Guests at a Store never set are offered pickup.
+      const offered = { state: "Open", availableServiceModes: ["DineIn", "Pickup"] };
+      assert.deepEqual(await asApi((tx) => guestServiceModes(tx, scope, offered)), {
+        ...offered,
+        servicesTurnedOff: [],
+      });
+      // The owner applies the full-service template.
       const template = id(10);
       const applied = await asApi((tx) =>
         changeStoreFeatureSetting(tx, scope, {
@@ -102,7 +109,7 @@ it("keeps a Store's modules as versioned owner choices, per Store, under the pil
           applied.loyalty,
           applied.complianceDocuments,
         ],
-        [1, "FullService", false, true, false, false, false],
+        [1, "FullService", false, false, false, false, false],
       );
       // The same operation again returns what it made, and records nothing new.
       const again = await asApi((tx) =>
@@ -160,7 +167,18 @@ it("keeps a Store's modules as versioned owner choices, per Store, under the pil
         [2, "Custom", true, false],
       );
 
-      // The navigation lists counter ordering again and leaves out inventory and recipes, read
+      // Guests are no longer offered pickup (dine-in is unchanged); another Store still is.
+      assert.deepEqual(await asApi((tx) => guestServiceModes(tx, scope, offered)), {
+        state: "Open",
+        availableServiceModes: ["DineIn"],
+        servicesTurnedOff: ["Pickup"],
+      });
+      assert.deepEqual(
+        (await asApi((tx) => guestServiceModes(tx, other, offered))).availableServiceModes,
+        ["DineIn", "Pickup"],
+      );
+      // The navigation lists counter ordering again (and Pickup, where counter orders are handed
+      // over) and leaves out inventory and recipes, read
       // inside another read without disturbing its Brand and Store context.
       const navigation = [
         { screenId: "DIN-FLOOR-BOARD" },

@@ -13,14 +13,28 @@ import {
 
 interface Modules {
   readonly counterOrder: boolean;
+  readonly pickup: boolean;
   readonly inventory: boolean;
 }
+const modulesOf = (view: StoreFeatures): Modules => ({
+  counterOrder: view.modules.counterOrder,
+  pickup: view.modules.pickup,
+  inventory: view.modules.inventory,
+});
 const rows: readonly { key: keyof Modules; name: () => string; detail: () => string }[] = [
   {
     key: "counterOrder",
     name: () => t("Counter ordering"),
     detail: () =>
       t("Take walk-up orders at the counter. Rounds staff enter for a table are not affected."),
+  },
+  {
+    key: "pickup",
+    name: () => t("Pickup orders from guests"),
+    detail: () =>
+      t(
+        "Guests order ahead from the pickup QR code and collect at the counter. Turned off, a guest who scans it is told the store takes dine-in orders only.",
+      ),
   },
   {
     key: "inventory",
@@ -52,6 +66,8 @@ export function StoreFeaturesPage({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
   const [refresh, setRefresh] = useState(0);
+  // Turning guests' pickup off is asked once more (what staff do with pickups still waiting).
+  const [confirming, setConfirming] = useState<null | "Template" | "Save">(null);
   // One reference per intended change, kept until it is answered (a retry is recorded once).
   const operation = useRef<string | null>(null);
   useEffect(() => {
@@ -61,7 +77,7 @@ export function StoreFeaturesPage({
       .then((value) => {
         if (!active) return;
         setView(value);
-        setDraft({ counterOrder: value.modules.counterOrder, inventory: value.modules.inventory });
+        setDraft(modulesOf(value));
         setFailed(null);
       })
       .catch((error: unknown) => {
@@ -104,9 +120,58 @@ export function StoreFeaturesPage({
       </WorkspacePage>
     );
   const changed =
-    draft.counterOrder !== view.modules.counterOrder || draft.inventory !== view.modules.inventory;
+    draft.counterOrder !== view.modules.counterOrder ||
+    draft.pickup !== view.modules.pickup ||
+    draft.inventory !== view.modules.inventory;
   const fullService =
-    view.templateCode === "FullService" && !view.modules.counterOrder && !view.modules.inventory;
+    view.templateCode === "FullService" &&
+    !view.modules.counterOrder &&
+    !view.modules.pickup &&
+    !view.modules.inventory;
+  const applyTemplate = () =>
+    void run(
+      (operationReference) =>
+        client.applyFullService({ operationReference, expectedVersion: view.version }),
+      t("The full-service restaurant setup is in use."),
+    );
+  const save = () =>
+    void run(
+      (operationReference) =>
+        client.change({ operationReference, expectedVersion: view.version, modules: draft }),
+      t("Saved. Staff see the change the next time a page opens."),
+    );
+  // Whether this change turns guests' pickup off, and what staff then hand over where.
+  const pickupOff = (counterAfter: boolean) => (
+    <div className="store-features__confirm" role="alert">
+      <p>
+        {counterAfter
+          ? t(
+              "Guests will no longer be able to order pickup. Pickup orders already placed are still handed over on the Pickup page.",
+            )
+          : t(
+              "Guests will no longer be able to order pickup, and the Pickup page will be hidden. Hand over any pickup orders still waiting first.",
+            )}
+      </p>
+      <div className="store-features__actions">
+        <button
+          type="button"
+          className="store-features__save"
+          disabled={busy}
+          onClick={() => {
+            const action = confirming;
+            setConfirming(null);
+            if (action === "Template") applyTemplate();
+            else save();
+          }}
+        >
+          {t("Turn off pickup")}
+        </button>
+        <button type="button" disabled={busy} onClick={() => setConfirming(null)}>
+          {t("Keep pickup")}
+        </button>
+      </div>
+    </div>
+  );
   const run = async (
     action: (operationReference: string) => Promise<StoreFeatures>,
     done: string,
@@ -119,7 +184,7 @@ export function StoreFeaturesPage({
       const next = await action(operation.current);
       operation.current = null;
       setView(next);
-      setDraft({ counterOrder: next.modules.counterOrder, inventory: next.modules.inventory });
+      setDraft(modulesOf(next));
       setMessage({ tone: "status", text: done });
     } catch (error) {
       if (error instanceof StoreFeaturesClientError && error.code === "Changed") {
@@ -155,24 +220,19 @@ export function StoreFeaturesPage({
             {fullService
               ? t("This store uses the full-service restaurant setup.")
               : t(
-                  "For a sit-down restaurant: turns off counter ordering and inventory and recipes. You can turn any of them back on below.",
+                  "For a sit-down restaurant: turns off counter ordering, pickup orders from guests, and inventory and recipes. You can turn any of them back on below.",
                 )}
           </p>
           {fullService ? null : (
             <button
               type="button"
-              disabled={busy}
-              onClick={() =>
-                void run(
-                  (operationReference) =>
-                    client.applyFullService({ operationReference, expectedVersion: view.version }),
-                  t("The full-service restaurant setup is in use."),
-                )
-              }
+              disabled={busy || confirming !== null}
+              onClick={() => (view.modules.pickup ? setConfirming("Template") : applyTemplate())}
             >
               {t("Use the full-service setup")}
             </button>
           )}
+          {confirming === "Template" ? pickupOff(false) : null}
         </section>
         <fieldset className="store-features__modules" disabled={busy}>
           <legend>{t("What this store uses")}</legend>
@@ -197,18 +257,8 @@ export function StoreFeaturesPage({
           <button
             type="button"
             className="store-features__save"
-            disabled={busy || !changed}
-            onClick={() =>
-              void run(
-                (operationReference) =>
-                  client.change({
-                    operationReference,
-                    expectedVersion: view.version,
-                    modules: draft,
-                  }),
-                t("Saved. Staff see the change the next time a page opens."),
-              )
-            }
+            disabled={busy || !changed || confirming !== null}
+            onClick={() => (view.modules.pickup && !draft.pickup ? setConfirming("Save") : save())}
           >
             {t("Save")}
           </button>
@@ -218,6 +268,7 @@ export function StoreFeaturesPage({
             </span>
           )}
         </div>
+        {confirming === "Save" ? pickupOff(draft.counterOrder) : null}
         {message === null ? null : (
           <p role={message.tone} className="store-features__message">
             {message.text}

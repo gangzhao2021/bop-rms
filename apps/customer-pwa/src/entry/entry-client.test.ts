@@ -131,6 +131,37 @@ describe("customer entry browser boundary", () => {
     await expect(start()).resolves.toEqual({ kind: "ServiceUnavailable" });
   });
 
+  it("WP-2423 item 8 ⑦ 1b: reads a Store that takes dine-in orders only", async () => {
+    const body = (storeDisplayName: unknown) => ({
+      schemaVersion: 1,
+      code: "entry_service_not_offered",
+      messageKey: "customer.entry.pickup_not_offered",
+      recovery: { action: "AskStaff", storeSelection: "Hidden" },
+      store: { storeDisplayName },
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response(409, body("TEST Noodle House")))
+      .mockResolvedValueOnce(response(409, body("<b>")))
+      .mockResolvedValueOnce(response(409, { ...body("TEST"), extra: true }));
+    const start = () =>
+      createCustomerEntryClient({
+        fetch,
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      }).start();
+    await expect(start()).resolves.toEqual({
+      kind: "PickupNotOffered",
+      storeDisplayName: "TEST Noodle House",
+    });
+    await expect(start()).resolves.toEqual({ kind: "ServiceUnavailable" });
+    // An answer in an unknown form is never shown as a store's state.
+    await expect(start()).resolves.toEqual({ kind: "CommandFailed" });
+  });
+
   it("WP-2423 Q4: reads a closed or paused Store with today's hours", async () => {
     const body = (operatingState: string) => ({
       schemaVersion: 1,

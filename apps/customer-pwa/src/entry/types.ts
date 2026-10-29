@@ -32,6 +32,8 @@ export type CustomerEntryScreenState =
       nextOpening: Readonly<{ localDate: string; startLocalTime: string }> | null;
       localDate: string | null;
     }>
+  /** WP-2423 item 8 ⑦ 1b: a pickup code at a Store that takes dine-in orders only. */
+  | Readonly<{ kind: "PickupNotOffered"; storeDisplayName: string }>
   | Readonly<{ kind: "ServiceUnavailable" }>
   | Readonly<{ kind: "RateLimited"; retryAfterSeconds: number }>
   | Readonly<{ kind: "Offline" }>

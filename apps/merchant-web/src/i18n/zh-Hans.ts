@@ -6267,8 +6267,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "选择本店用哪些功能。改动对所有员工立即生效。",
   "Full-service restaurant": "正餐",
   "This store uses the full-service restaurant setup.": "本店使用正餐设置。",
-  "For a sit-down restaurant: turns off counter ordering and inventory and recipes. You can turn any of them back on below.":
-    "适合堂食正餐：关掉柜台点单和库存与配方。需要时可以在下面重新打开。",
   "The full-service restaurant setup is in use.": "已改用正餐设置。",
   "Use the full-service setup": "使用正餐设置",
   "What this store uses": "本店使用的功能",
@@ -6276,4 +6274,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Last changed": "上次修改",
   "Counter ordering is turned off for this store, so nothing was sent or charged. The owner can turn it back on in Store features.":
     "本店已关闭柜台点单，没有发送也没有扣款。店主可以在“门店功能”里重新打开。",
+  "Pickup orders from guests": "客人自取下单",
+  "Guests order ahead from the pickup QR code and collect at the counter. Turned off, a guest who scans it is told the store takes dine-in orders only.":
+    "客人扫自取二维码提前下单，到柜台取餐。关掉后，扫码的客人会看到本店只做堂食。",
+  "For a sit-down restaurant: turns off counter ordering, pickup orders from guests, and inventory and recipes. You can turn any of them back on below.":
+    "适合堂食正餐：关掉柜台点单、客人自取下单和库存与配方。需要时可以在下面重新打开。",
+  "Guests will no longer be able to order pickup. Pickup orders already placed are still handed over on the Pickup page.":
+    "客人将不能再下自取单。已经下的自取单仍在“取餐”页交付。",
+  "Guests will no longer be able to order pickup, and the Pickup page will be hidden. Hand over any pickup orders still waiting first.":
+    "客人将不能再下自取单，“取餐”页也会隐藏。请先交付还在等候的自取单。",
+  "Turn off pickup": "关闭自取",
+  "Keep pickup": "保留自取",
 });

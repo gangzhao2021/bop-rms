@@ -80,7 +80,7 @@ export function createStoreFeaturesClient(csrf: string, fetcher: typeof fetch = 
     change: (input: {
       operationReference: string;
       expectedVersion: number;
-      modules: { counterOrder: boolean; inventory: boolean };
+      modules: { counterOrder: boolean; pickup: boolean; inventory: boolean };
     }) =>
       send({
         action: "Change",

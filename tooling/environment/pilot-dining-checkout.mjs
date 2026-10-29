@@ -1,6 +1,7 @@
 import { createPostgresPublishedStoreOperatingStatusReader } from "../../packages/rms/store/src/index.ts";
 import { CheckoutSessionServiceError } from "../../packages/rms/ordering/src/index.ts";
 import { storeTakesOrder } from "../../apps/api/dist/customer-store-open-gate.js";
+import { guestServiceModes } from "../../apps/api/dist/merchant-store-features.js";
 import { createInternalAdditionalCheckout } from "./pilot-additional-checkout.mjs";
 import { createHash } from "node:crypto";
 import {
@@ -68,10 +69,15 @@ export function createInternalDiningCheckout(resources, entry, pickup, { openGat
     now,
   });
   const additional = createInternalAdditionalCheckout(resources, entry, preparation);
-  // WP-2423 Q4: the Store's current operating status, read fresh for every checkout and payment.
+  // WP-2423 Q4: the Store's current operating status, read fresh for every checkout and payment;
+  // item 8 ⑦ 1b: without pickup when the Store turned it off.
   const operatingNow = () =>
-    resources.transactions.run((tx) =>
-      createPostgresPublishedStoreOperatingStatusReader(resources.operating)(tx, now()),
+    resources.transactions.run(async (tx) =>
+      guestServiceModes(
+        tx,
+        resources.operating,
+        await createPostgresPublishedStoreOperatingStatusReader(resources.operating)(tx, now()),
+      ),
     );
   /** Whether the Store takes this guest's order now; throws only when the guest is unknown. */
   const takesOrder = async (input) => {

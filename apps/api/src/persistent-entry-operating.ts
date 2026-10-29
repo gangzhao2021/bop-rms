@@ -4,6 +4,7 @@ import {
 } from "@rms/store";
 import { createConfiguredPublicStoreResolution } from "./public-store-resolution.js";
 import type { CustomerEntryOperatingReader } from "./customer-entry-composition.js";
+import { guestServiceModes } from "./merchant-store-features.js";
 type Resolution = Parameters<typeof createConfiguredPublicStoreResolution>[0];
 type Operating = Parameters<typeof createPostgresPublishedStoreOperatingStatusReader>[0];
 /** Retains current public resolution and published Store authority in the caller's
@@ -48,7 +49,16 @@ export function createPersistentEntryOperatingReader(options: {
           current.storeReference !== storeReference
         )
           return null;
-        const status = await read(options.transaction, request.evaluatedAt);
+        // WP-2423 item 8 ⑦ 1b: guests are offered only what the Store's modules allow.
+        const status = await guestServiceModes(
+          options.transaction,
+          {
+            tenantReference: options.operating.tenantReference,
+            brandReference,
+            storeReference,
+          },
+          await read(options.transaction, request.evaluatedAt),
+        );
         if (
           status.businessDate.brandReference !== brandReference ||
           status.businessDate.storeReference !== storeReference ||
@@ -65,6 +75,7 @@ export function createPersistentEntryOperatingReader(options: {
           localTime: String(status.localTime),
           localDate: String(status.localDate),
           upcomingHours: status.upcomingHours,
+          servicesTurnedOff: status.servicesTurnedOff,
         });
       } catch {
         return null;

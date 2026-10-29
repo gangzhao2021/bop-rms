@@ -1233,4 +1233,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Ask staff about allergens in your choices.": "所选菜品的过敏原请询问店员。",
   "Your choices: no listed allergens declared.": "所选菜品：未申报所列过敏原。",
   "Your choices: {allergens}.": "所选菜品：{allergens}。",
+  "{store} takes dine-in orders only": "{store}只做堂食",
+  "Pickup orders aren’t taken here. To eat in, scan the QR code on your table or ask a staff member for a table.":
+    "本店不接自取单。要在店里用餐，请扫桌上的二维码，或请店员安排桌位。",
 });

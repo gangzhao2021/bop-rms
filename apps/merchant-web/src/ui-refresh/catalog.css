@@ -569,3 +569,18 @@
   align-items: center;
   margin-top: var(--bop-space-4);
 }
+.store-features__confirm {
+  margin: var(--bop-space-3) 0;
+  padding: var(--bop-space-2) 0 var(--bop-space-2) var(--bop-space-3);
+  border-left: 3px solid var(--bop-color-accent);
+}
+.store-features__confirm .store-features__actions {
+  margin-top: var(--bop-space-2);
+}
+.store-features__confirm button:not(.store-features__save) {
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+}
