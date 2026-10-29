@@ -1,3 +1,4 @@
+import { parseComboParts, type ComboPartView } from "./combo-parts.js";
 import { t } from "./i18n/i18n.js";
 export type KitchenStatus = "Queued" | "Held" | "In Progress" | "Completed" | "Cancelled";
 
@@ -40,6 +41,8 @@ export interface KitchenBoardItem {
   readonly displayName: string;
   /** WP-2423 item 8 ③ (decision 8): the English name under a Chinese one, when it has both. */
   readonly otherName?: string;
+  /** WP-2423 item 8 ⑥ part 4: a combo's chosen dishes, each made and marked done on its own. */
+  readonly comboParts?: readonly ComboPartView[];
   readonly status: KitchenStatus;
   readonly requiredQuantity: number;
   readonly completedQuantity: number;
@@ -281,6 +284,8 @@ function item(value: unknown): KitchenBoardItem {
     value !== null && typeof value === "object" && Object.hasOwn(value, "businessDate");
   const hasOtherName =
     value !== null && typeof value === "object" && Object.hasOwn(value, "otherName");
+  const hasComboParts =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "comboParts");
   const input = closed(value, [
     "workItemReference",
     "ticketReference",
@@ -300,6 +305,7 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasBusinessDate ? ["businessDate"] : []),
     ...(hasExecution ? ["execution"] : []),
     ...(hasOtherName ? ["otherName"] : []),
+    ...(hasComboParts ? ["comboParts"] : []),
   ]);
   if (
     (input.stationLabel !== null &&
@@ -326,6 +332,7 @@ function item(value: unknown): KitchenBoardItem {
     stationLabel: input.stationLabel as string | null,
     displayName: input.displayName,
     ...(hasOtherName ? { otherName: input.otherName as string } : {}),
+    ...(hasComboParts ? { comboParts: parseComboParts(input.comboParts) } : {}),
     status: input.status as KitchenStatus,
     requiredQuantity: Number(input.requiredQuantity),
     completedQuantity: Number(input.completedQuantity),

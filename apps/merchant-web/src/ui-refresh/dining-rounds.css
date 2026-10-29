@@ -342,3 +342,18 @@
     display: none;
   }
 }
+
+/* WP-2423 item 8 ⑥ part 4: a combo's dishes, each served on its own. */
+.dining-round-item__combo {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.dining-round-item__combo li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}

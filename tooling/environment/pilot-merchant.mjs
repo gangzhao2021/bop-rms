@@ -90,6 +90,7 @@ import { createMerchantKitchenRework } from "../../apps/api/dist/merchant-kitche
 import { createMerchantKitchenStaleClose } from "../../apps/api/dist/merchant-kitchen-stale-close.js";
 import { createMerchantOptionSets } from "../../apps/api/dist/merchant-option-sets.js";
 import { createMerchantCombos } from "../../apps/api/dist/merchant-combos.js";
+import { createMerchantComboPartCommands } from "../../apps/api/dist/merchant-combo-part-commands.js";
 import { logUnexpected, reportUnexpected } from "./pilot-merchant-pickup.mjs";
 import { createMerchantOptionPrices } from "../../apps/api/dist/merchant-option-prices.js";
 import { createMerchantOptionRecipes } from "../../apps/api/dist/merchant-option-recipes.js";
@@ -1779,6 +1780,12 @@ export async function createInternalMerchant(
       optionRecipes,
       ...(oneStoreDishes === undefined ? {} : { oneStoreDishes }),
       combos,
+      // WP-2423 item 8 ⑥ part 4: a combo's dish done in the kitchen or served at its table.
+      comboParts: createMerchantComboPartCommands({
+        persistence,
+        authentication: service,
+        locale: "en-CA",
+      }),
       storeTax,
       taxClassifications,
       stockCounts,

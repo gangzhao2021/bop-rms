@@ -480,3 +480,4 @@ export {
   createPostgresKitchenStaleTicketStore,
   listClosedKitchenTickets,
 } from "./infrastructure/persistence/kitchen-stale-ticket-store.js";
+export * from "./infrastructure/persistence/kitchen-combo-part-store.js";

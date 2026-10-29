@@ -31,6 +31,7 @@ import {
   withOptionalRead,
 } from "./merchant-round-business-date.js";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
+import { comboPartsByOrderItem, type ComboPart } from "./merchant-combo-parts.js";
 import { readPickupRefundDeadlines } from "./pickup-acceptance-deadline.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -140,8 +141,16 @@ const noPreparation: KitchenPreparation = Object.freeze({
   businessDate: null,
   customerNote: null,
 });
-const itemView = (item: KitchenQueueItemView, preparation: KitchenPreparation) => ({
+const itemView = (
+  item: KitchenQueueItemView,
+  preparation: KitchenPreparation,
+  parts: ReadonlyMap<string, readonly ComboPart[]> = new Map(),
+) => ({
   ...item,
+  // WP-2423 item 8 ⑥ part 4: a combo's chosen dishes, each made and marked done on its own.
+  ...(parts.has(String(item.orderItemReference))
+    ? { comboParts: parts.get(String(item.orderItemReference)) }
+    : {}),
   ticketAggregateVersion: item.ticketAggregateVersion.toString(10),
   workItemVersion: item.workItemVersion.toString(10),
   allergens: preparation.allergens,
@@ -506,6 +515,22 @@ export function createMerchantKitchenQuery(options: {
               timeZone: scope.store.timeZone,
               authorize: async () => authorized.guard(),
             })(transaction, orderBatchReferences);
+          // A combo's dishes; without them the combo still shows with its choices.
+          const comboParts = (items: readonly KitchenQueueItemView[]) =>
+            withOptionalRead(
+              tx,
+              () =>
+                comboPartsByOrderItem(
+                  tx,
+                  authority,
+                  "en-CA",
+                  items.map((item) => ({
+                    orderItemReference: String(item.orderItemReference),
+                    optionReferences: item.selectedOptions.map((o) => String(o.optionReference)),
+                  })),
+                ),
+              new Map<string, readonly ComboPart[]>(),
+            );
           const operatorStatus = (projection: ProjectionMetadata) =>
             kdsOperatorStatus({ session, ...authority, projection });
           if (query.kind === "List") {
@@ -522,6 +547,7 @@ export function createMerchantKitchenQuery(options: {
             ]);
             const items = result.items.filter((item) => !closed.has(item.ticketReference));
             const preparation = await kitchenPreparation(tx, authority, items, roundDates);
+            const parts = await comboParts(items);
             const canCloseEarlierDayTickets =
               (await scope.authorizeAction(kitchenStaleTicketClosePermission))?.effect === "Allow";
             // WP-2423 (v15 2026-10-16): today's paid orders still waiting for acceptance have no
@@ -570,7 +596,7 @@ export function createMerchantKitchenQuery(options: {
               canCloseEarlierDayTickets,
               ...(awaitingAcceptance === undefined ? {} : { awaitingAcceptance }),
               items: items.map((item) =>
-                itemView(item, preparation.get(item.workItemReference) ?? noPreparation),
+                itemView(item, preparation.get(item.workItemReference) ?? noPreparation, parts),
               ),
             };
           }
@@ -579,6 +605,7 @@ export function createMerchantKitchenQuery(options: {
             workItemReference: query.workItemReference,
           });
           const preparation = await kitchenPreparation(tx, authority, [result.item], roundDates);
+          const parts = await comboParts([result.item]);
           return {
             ...result,
             operatorStatus: operatorStatus(result),
@@ -586,6 +613,7 @@ export function createMerchantKitchenQuery(options: {
             item: itemView(
               result.item,
               preparation.get(result.item.workItemReference) ?? noPreparation,
+              parts,
             ),
           };
         },

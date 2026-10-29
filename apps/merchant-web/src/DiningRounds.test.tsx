@@ -125,6 +125,7 @@ const context = (view: ReturnType<typeof progress> | null): DiningRoundsProgress
   retrying: new Set(),
   serveItem: () => undefined,
   serveRound: () => undefined,
+  serveComboPart: () => undefined,
 });
 const text = (html: string) =>
   html

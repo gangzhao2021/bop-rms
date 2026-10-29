@@ -6234,4 +6234,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "套餐里有一道菜还没申报过敏原。请先编辑这道菜申报过敏原，再保存套餐。",
   "A dish in this combo has a recipe. For now a combo offers dishes whose allergens staff declared; choose another dish.":
     "套餐里有一道菜用的是配方。目前套餐只能放由店员申报过敏原的菜，请换一道菜。",
+  "Dishes in this combo": "套餐里的菜",
+  "Mark {displayName} done": "{displayName} 做好了",
+  "Mark {displayName} served": "{displayName} 已上",
+  "That dish is not done in the kitchen yet.": "这道菜厨房还没做好。",
 });

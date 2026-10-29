@@ -55,6 +55,7 @@ const moduleManifestInput =
         "dining_admission_consumption_operation",
         "dining_checkout_commitment",
         "dining_item_service_record",
+        "dining_combo_part_served",
         "dining_exception_task",
         "dining_table_release_operation",
         "dining_host_transfer_operation",

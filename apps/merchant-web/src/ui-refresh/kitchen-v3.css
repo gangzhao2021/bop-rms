@@ -559,3 +559,34 @@
   font-weight: 400;
   line-height: 1.3;
 }
+
+/* WP-2423 item 8 ⑥ part 4: a combo's dishes, each its own line under the combo, done on its own. */
+.kitchen-work-item__combo {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kitchen-work-item__combo li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 4px 0;
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.kitchen-work-item__combo-name {
+  font-size: var(--bop-kitchen-modifier);
+  font-weight: 600;
+}
+.kitchen-work-item__combo li[data-done] .kitchen-work-item__combo-name {
+  color: var(--bop-color-text-muted);
+  text-decoration: line-through;
+}
+.kitchen-work-item__combo-done {
+  color: var(--bop-color-text-muted);
+}
+.kitchen-work-item__combo .kitchen-work-item__done {
+  margin-left: auto;
+}

@@ -2797,6 +2797,8 @@ async function scanUnsupported(root, module, diagnostics) {
           [
             "src/infrastructure/persistence/dining-item-service-store.ts",
             "src/infrastructure/persistence/dining-item-service-reader.ts",
+            // WP-2423 item 8 ⑥ part 4: a combo's dishes served one by one.
+            "src/infrastructure/persistence/dining-combo-part-store.ts",
           ].includes(moduleRelative);
         const acceptedDiningAdmissionConsumptionAsset =
           module.packageName === "@rms/dining" &&
@@ -3055,7 +3057,11 @@ async function scanUnsupported(root, module, diagnostics) {
             "kitchen_rework_item",
             "kitchen_rework_operation",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
-          moduleRelative === "src/infrastructure/persistence/kitchen-rework-store.ts";
+          // WP-2423 item 8 ⑥ part 4: a combo's dishes marked done one by one.
+          [
+            "src/infrastructure/persistence/kitchen-rework-store.ts",
+            "src/infrastructure/persistence/kitchen-combo-part-store.ts",
+          ].includes(moduleRelative);
         // DEC-KITCHEN-STALE-TICKETS: a manager closes an earlier business day's ticket.
         const acceptedKitchenStaleTicketAsset =
           module.packageName === "@rms/kitchen" &&

@@ -83,3 +83,4 @@ export * from "./infrastructure/persistence/dining-staff-call-store.js";
 export { createDiningExceptionEpisodeResolution } from "./application/dining-exception-episode-resolution.js";
 export * from "./domain/dining-payment-timing.js";
 export * from "./infrastructure/persistence/dining-payment-timing-store.js";
+export * from "./infrastructure/persistence/dining-combo-part-store.js";

@@ -99,6 +99,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 item 8 ⑥ part 4: a combo's dish served (append-only).
+      table: "dining_combo_part_served",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/dining" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "dining_item_service_record",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/dining" },

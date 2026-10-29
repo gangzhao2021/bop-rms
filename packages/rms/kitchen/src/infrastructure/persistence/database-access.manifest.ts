@@ -131,6 +131,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "personal"],
     },
     {
+      // WP-2423 item 8 ⑥ part 4: a combo's dish marked done (append-only).
+      table: "kitchen_combo_part_done",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "kitchen_work_cancellation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/kitchen" },

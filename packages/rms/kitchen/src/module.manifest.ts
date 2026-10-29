@@ -80,6 +80,7 @@ const moduleManifestInput =
         "kitchen_ticket_closure",
         "kitchen_work_item",
         "kitchen_work_cancellation",
+        "kitchen_combo_part_done",
         "kitchen_work_lifecycle_operation",
         "kitchen_work_queue_projection",
         "kitchen_work_queue_projection_generation",

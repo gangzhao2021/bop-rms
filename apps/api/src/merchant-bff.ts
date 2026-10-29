@@ -16,6 +16,7 @@ import { installMerchantOrganizationRoutes } from "./merchant-bff-organization-r
 import { installMerchantTaxConfigRoutes } from "./merchant-bff-tax-config-routes.js";
 import { installMerchantReceiptTemplateRoutes } from "./merchant-bff-receipt-template-routes.js";
 import { installMerchantRefundRoutes } from "./merchant-bff-refund-routes.js";
+import { installMerchantComboPartRoutes } from "./merchant-bff-combo-part-routes.js";
 import { installMerchantKitchenRoutes } from "./merchant-bff-kitchen-routes.js";
 import { installMerchantSupplyRoutes } from "./merchant-bff-supply-routes.js";
 import { installMerchantCommerceRoutes } from "./merchant-bff-commerce-routes.js";
@@ -81,6 +82,7 @@ export function createMerchantBffRouter(options: MerchantBffRouterOptions): Rout
   installMerchantReceiptTemplateRoutes(router, options);
   installMerchantRefundRoutes(router, options);
   installMerchantKitchenRoutes(router, options);
+  installMerchantComboPartRoutes(router, options);
   installMerchantSupplyRoutes(router, options);
   installMerchantCommerceRoutes(router, options);
   installMerchantPickupRoutes(router, options);

@@ -701,6 +701,7 @@ export function newQueuedReferences(
 }
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -709,6 +710,8 @@ import {
   type RefObject,
 } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
+import { ComboPartDoneContext, markComboPartDone } from "./combo-part-client.js";
+import type { ComboPartView } from "./combo-parts.js";
 import { Link, useLocation, useParams } from "react-router";
 import {
   KitchenBoardClientError,
@@ -1021,7 +1024,9 @@ function WorkCard({
           </dd>
         </dl>
         <KitchenAllergenLine item={item} />
-        {!showModifiers && item.selectedOptions.length > 0 ? (
+        {item.comboParts !== undefined ? (
+          <KitchenComboParts item={item} actionable={showActions === true && inTicket === true} />
+        ) : !showModifiers && item.selectedOptions.length > 0 ? (
           <ul className="kitchen-work-item__options" aria-label={t("Modifiers")}>
             {item.selectedOptions.map((option, index) => (
               <li key={`${option.displayName}:${index}`}>
@@ -1090,7 +1095,9 @@ function WorkCard({
                 )}
                 {item.execution &&
                 item.status === "In Progress" &&
-                item.completedQuantity < item.requiredQuantity ? (
+                item.completedQuantity < item.requiredQuantity &&
+                // A combo is finished when every dish of it is done.
+                (item.comboParts === undefined || item.comboParts.every((part) => part.done)) ? (
                   <button
                     className="kitchen-work-item__done"
                     disabled={readOnly || !onAction}
@@ -2057,6 +2064,52 @@ export function KitchenBoardScreen({
   );
 }
 
+/**
+ * WP-2423 item 8 ⑥ part 4 (coordinator 2026-10-28 decision 3): a combo's chosen dishes, each its
+ * own line under the combo — Chinese name first — marked done on its own once the combo is started.
+ */
+function KitchenComboParts({
+  item,
+  actionable,
+}: {
+  readonly item: KitchenBoardItem;
+  readonly actionable: boolean;
+}) {
+  const markDone = useContext(ComboPartDoneContext);
+  const parts = item.comboParts ?? [];
+  return (
+    <ul className="kitchen-work-item__combo" aria-label={t("Dishes in this combo")}>
+      {parts.map((part) => {
+        const label = part.nameZh || part.name;
+        return (
+          <li key={part.optionReference} data-done={part.done ? "true" : undefined}>
+            <span className="kitchen-work-item__combo-name" lang={part.nameZh ? "zh-Hans" : "en"}>
+              {label}
+            </span>
+            {part.nameZh && part.name !== part.nameZh ? (
+              <span className="kitchen-work-item__other-name" lang="en">
+                {part.name}
+              </span>
+            ) : null}
+            {part.done ? (
+              <span className="kitchen-work-item__combo-done">{t("Done")}</span>
+            ) : actionable && markDone !== null && item.status === "In Progress" ? (
+              <button
+                type="button"
+                className="kitchen-work-item__done"
+                aria-label={t("Mark {displayName} done", { displayName: label })}
+                onClick={() => markDone(item.workItemReference, part)}
+              >
+                {t("Done")}
+              </button>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export function KitchenWorkItemScreen({
   view,
   onRefresh,
@@ -2385,6 +2438,32 @@ function KitchenBoardContent(
     restoreRetryFocus.current = document.activeElement instanceof HTMLButtonElement;
     actions.act(item, action);
   };
+  // WP-2423 item 8 ⑥ part 4: one dish of a combo done; the last one finishes the combo.
+  const comboPartDone = (workItemReference: string, part: ComboPartView) => {
+    if (stale !== undefined || browserOffline() || props.csrf === undefined) return;
+    void markComboPartDone(props.csrf, {
+      workItemReference,
+      optionReference: part.optionReference,
+    })
+      .then((allDone) => {
+        const item =
+          state.kind === "Found"
+            ? (actions.view ?? state.view).items.find(
+                (candidate) => candidate.workItemReference === workItemReference,
+              )
+            : undefined;
+        if (allDone && item !== undefined && item.status === "In Progress")
+          runAction(
+            {
+              ...item,
+              comboParts: (item.comboParts ?? []).map((p) => ({ ...p, done: true })),
+            },
+            "CompleteKitchenWorkItem",
+          );
+        else setRevision((value) => value + 1);
+      })
+      .catch(() => setRevision((value) => value + 1));
+  };
   const runActionAll = (items: readonly KitchenBoardItem[], action: KitchenAction) => {
     if (stale !== undefined || browserOffline()) return;
     restoreRetryFocus.current = document.activeElement instanceof HTMLButtonElement;
@@ -2465,7 +2544,7 @@ function KitchenBoardContent(
     </>
   );
   return (
-    <>
+    <ComboPartDoneContext.Provider value={comboPartDone}>
       {state.kind === "Found" ? (
         <KitchenBoardScreen
           view={actions.view ?? state.view}
@@ -2527,7 +2606,7 @@ function KitchenBoardContent(
           ) : null}
         </KitchenFrame>
       )}
-    </>
+    </ComboPartDoneContext.Provider>
   );
 }
 /**

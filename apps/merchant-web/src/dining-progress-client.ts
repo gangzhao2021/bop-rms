@@ -1,4 +1,12 @@
 import { t } from "./i18n/i18n.js";
+import { parseComboParts } from "./combo-parts.js";
+const comboParts = (value: unknown) => {
+  try {
+    return parseComboParts(value);
+  } catch {
+    throw new DiningProgressError("Unavailable");
+  }
+};
 export class DiningProgressError extends Error {
   constructor(readonly code: "PermissionDenied" | "NotFound" | "Unavailable") {
     super(t("Dining progress unavailable"));
@@ -129,6 +137,8 @@ export function parseDiningProgress(value: unknown, expectedOrder: string) {
         : { remakingQuantity: integer(item.remakingQuantity, 0, orderedQuantity) }),
       /** Options and the customer's note; absent when the read could not include them. */
       ...(lineDetails === null ? {} : { details: lineDetails }),
+      /** WP-2423 item 8 ⑥ part 4: a combo's dishes, each served on its own. */
+      ...(item.comboParts === undefined ? {} : { comboParts: comboParts(item.comboParts) }),
     });
   });
   if (data.closureStatus !== "Open" && data.closureStatus !== "Closed") return fail();

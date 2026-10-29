@@ -1,4 +1,6 @@
 import { staffContentLocale, staffNameLocales } from "./staff-content-locale.js";
+import { comboPartsByOrderItem, type ComboPart } from "./merchant-combo-parts.js";
+import { withOptionalRead } from "./merchant-round-business-date.js";
 import { createMerchantDiningTableContext } from "./merchant-dining-table-context.js";
 import {
   createPostgresMerchantOrderIndex,
@@ -129,7 +131,10 @@ export function createMerchantDiningOrderProgress(options: {
           // apart. Ordering's own order lines; if they can't be read the lines show by name only.
           let details: ReadonlyMap<
             string,
-            { options: readonly { name: string; quantity: number }[]; customerNote: string | null }
+            {
+              options: readonly { optionReference: string; name: string; quantity: number }[];
+              customerNote: string | null;
+            }
           > | null = null;
           try {
             if ((await allowed()) === true) {
@@ -158,6 +163,26 @@ export function createMerchantDiningOrderProgress(options: {
               remake.orderItemReference,
               (remaking.get(remake.orderItemReference) ?? 0) + remake.openQuantity,
             );
+          // WP-2423 item 8 ⑥ part 4: a combo's dishes, each served once the kitchen made it.
+          const parts =
+            details === null
+              ? new Map<string, readonly ComboPart[]>()
+              : await withOptionalRead(
+                  businessTransaction,
+                  () =>
+                    comboPartsByOrderItem(
+                      businessTransaction,
+                      scope,
+                      options.locale,
+                      [...(details ?? new Map()).entries()].map(([orderItemReference, line]) => ({
+                        orderItemReference,
+                        optionReferences: line.options.map(
+                          (o: { optionReference: string }) => o.optionReference,
+                        ),
+                      })),
+                    ),
+                  new Map<string, readonly ComboPart[]>(),
+                );
           const items = labels.map((label) => {
             const item = membership.get(label.orderItemReference);
             if (!item || String(item.orderBatchReference) !== String(label.orderBatchReference))
@@ -174,7 +199,13 @@ export function createMerchantDiningOrderProgress(options: {
               itemOrdinal: label.itemOrdinal,
               ...(detail === undefined
                 ? {}
-                : { options: detail.options, customerNote: detail.customerNote }),
+                : {
+                    options: detail.options.map((o) => ({ name: o.name, quantity: o.quantity })),
+                    customerNote: detail.customerNote,
+                  }),
+              ...(parts.has(label.orderItemReference)
+                ? { comboParts: parts.get(label.orderItemReference) }
+                : {}),
             });
           });
           const table = await createMerchantDiningTableContext({

@@ -16,6 +16,8 @@ import {
   DiningServeReadyClientError,
 } from "./dining-serve-ready-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
+import { ComboPartClientError, markComboPartServed } from "./combo-part-client.js";
+import type { ComboPartView } from "./combo-parts.js";
 
 /**
  * Orders v3 (Owner 2026-10-26, "订单这里看到多轮接单，但是看不到每一轮的明细"; "查看上桌进度展开以后无法合上"):
@@ -34,6 +36,8 @@ export interface DiningRoundsProgress {
   readonly busy: boolean;
   readonly serveItem: (item: Item) => void;
   readonly serveRound: (sequence: number) => void;
+  /** WP-2423 item 8 ⑥ part 4: one dish of a combo served; the last one serves the combo. */
+  readonly serveComboPart: (item: Item, part: ComboPartView) => void;
   /** The item or round whose last step's answer was lost; its button retries the same request. */
   readonly retrying: ReadonlySet<string>;
 }
@@ -247,6 +251,35 @@ export function DiningRoundsProvider({
         refusedServe,
       );
     },
+    serveComboPart: (item, part) => {
+      if (view === null) return;
+      const orderReference = view.orderReference;
+      void run(
+        "part:" + item.orderItemReference + ":" + part.optionReference,
+        () => ({
+          execute: (token: string) =>
+            markComboPartServed(
+              token,
+              {
+                orderReference,
+                orderItemReference: item.orderItemReference,
+                optionReference: part.optionReference,
+              },
+              fetcher,
+            ),
+        }),
+        (allServed) => {
+          // The last dish served: the combo is served with the existing command.
+          if (allServed === true && item.phase === "Ready" && servableQuantity(item) > 0)
+            window.setTimeout(() => progress.serveItem(item), 0);
+          return null;
+        },
+        (error) =>
+          error instanceof ComboPartClientError && error.code === "NotReady"
+            ? t("That dish is not done in the kitchen yet.")
+            : refusedServe(error),
+      );
+    },
     serveRound: (sequence) => {
       if (view === null) return;
       const lines = readyToServe(view, sequence).slice(0, DINING_SERVE_READY_MAX_LINES);
@@ -359,7 +392,39 @@ export function DiningRoundItemState({
           {t("Remaking — don't serve it until the kitchen marks the remake done.")}
         </span>
       ) : null}
-      {open && item.phase === "Ready" && servable > 0 ? (
+      {item.comboParts !== undefined ? (
+        <ul className="dining-round-item__combo" aria-label={t("Dishes in this combo")}>
+          {item.comboParts.map((part) => {
+            const label = part.nameZh || part.name;
+            const served = part.served || item.phase === "Fulfilled";
+            const partKey = "part:" + item.orderItemReference + ":" + part.optionReference;
+            return (
+              <li key={part.optionReference}>
+                <span lang={part.nameZh ? "zh-Hans" : "en"}>{label}</span>
+                <span className="dining-round-item__state">
+                  {served ? t("Served") : part.done ? t("Ready to serve") : t("Being made")}
+                </span>
+                {open && part.done && !served ? (
+                  <button
+                    type="button"
+                    className="dining-round-item__serve"
+                    disabled={rounds.busy && !rounds.retrying.has(partKey)}
+                    aria-label={t("Mark {displayName} served", { displayName: label })}
+                    onClick={() => rounds.serveComboPart(item, part)}
+                  >
+                    {rounds.retrying.has(partKey) ? t("Try again") : t("Mark served")}
+                  </button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {open &&
+      item.phase === "Ready" &&
+      servable > 0 &&
+      // A combo is served dish by dish (its last dish serves it).
+      (item.comboParts === undefined || item.comboParts.every((part) => part.served)) ? (
         <button
           type="button"
           className="dining-round-item__serve"

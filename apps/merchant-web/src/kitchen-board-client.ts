@@ -113,6 +113,7 @@ function item(value: unknown) {
     stationLabel: null,
     displayName,
     ...(otherName === null ? {} : { otherName }),
+    ...("comboParts" in raw ? { comboParts: raw.comboParts } : {}),
     status: raw.status,
     requiredQuantity: raw.requiredQuantity,
     completedQuantity: raw.completedQuantity,

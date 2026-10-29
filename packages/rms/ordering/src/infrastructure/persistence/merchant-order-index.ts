@@ -368,7 +368,12 @@ export interface MerchantOrderLine {
   readonly orderItemReference: string;
   readonly orderBatchReference: string;
   readonly name: string;
-  readonly options: readonly { readonly name: string; readonly quantity: number }[];
+  readonly options: readonly {
+    /** WP-2423 item 8 ⑥ part 4: the choice (a combo's dish is served on its own). */
+    readonly optionReference: string;
+    readonly name: string;
+    readonly quantity: number;
+  }[];
   readonly quantity: number;
   /** The customer's note for the kitchen (may describe allergies: show, never log). */
   readonly customerNote: string | null;
@@ -447,7 +452,12 @@ export async function loadMerchantOrderLines(
       name: name(snapshot.catalog.localizedNames),
       options: Object.freeze(
         snapshot.catalog.options.map((option) =>
-          Object.freeze({ name: name(option.localizedNames), quantity: option.quantity }),
+          Object.freeze({
+            // WP-2423 item 8 ⑥ part 4: which choice (a combo's dish is served on its own).
+            optionReference: String(option.optionReference),
+            name: name(option.localizedNames),
+            quantity: option.quantity,
+          }),
         ),
       ),
       quantity: snapshot.quantity,
