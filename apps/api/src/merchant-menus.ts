@@ -114,6 +114,31 @@ export interface MenuReviewProblem {
 const fail = (code: MerchantMenuError["code"]): never => {
   throw new MerchantMenuError(code);
 };
+/**
+ * v15 2026-10-29: a listing review refused with nothing named missing says why, as a short code
+ * (never a reference), so staff can pass it on and the cause is found from the page.
+ */
+const stopped = (reason: string): never => {
+  throw new MerchantMenuError("ReviewBlocked", {
+    missing: "Stopped",
+    reason: reason.slice(0, 120),
+    productName: null,
+    sizeName: null,
+    optionName: null,
+    quantity: null,
+    ingredientName: null,
+  });
+};
+/** Where an error was raised: the first source file and line past its `fail` helper. */
+export function throwSite(error: unknown): string {
+  const frames = (error instanceof Error ? (error.stack ?? "") : "").split("\n").slice(1);
+  for (const frame of frames) {
+    if (/\bat (fail|invalid|unavailable|dependency)\b/u.test(frame)) continue;
+    const match = /([A-Za-z0-9_.-]+\.(?:ts|js|mjs)):(\d+):\d+\)?\s*$/u.exec(frame);
+    if (match) return match[1] + ":" + match[2];
+  }
+  return "unknown";
+}
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 const ref = (value: unknown): string =>
@@ -1047,7 +1072,7 @@ export function createMerchantMenus(options: {
             const loaded = await draft(tx, s, body.menuReference);
             if (loaded === null) return fail("NotFound");
             if ((await currentAllergenRegistry(ptx(tx) as never, s.owner)) === null)
-              return fail("ReviewBlocked");
+              return stopped("Check:NoAllergenList");
             const at = options.persistence.now();
             if (
               (
@@ -1092,7 +1117,7 @@ export function createMerchantMenus(options: {
               const loaded = await draft(tx, s, body.menuReference);
               const registry = await currentAllergenRegistry(ptx(tx) as never, s.owner);
               if (loaded === null) return fail("NotFound");
-              if (registry === null) return fail("ReviewBlocked");
+              if (registry === null) return stopped("Submit:NoAllergenList");
               if (
                 (
                   await menuItemsWithoutTax(ptx(tx) as never, {
@@ -1125,7 +1150,7 @@ export function createMerchantMenus(options: {
         const commandBody =
           body.action === "Submit"
             ? loaded === null || registry === null
-              ? fail("ReviewBlocked")
+              ? stopped(loaded === null ? "Submit:NoDraft" : "Submit:NoAllergenList")
               : {
                   action: "CreateReview",
                   operationReference: body.operationReference,
@@ -1412,8 +1437,9 @@ export function createMerchantMenus(options: {
           return fail("NotRevisable");
         if (error.code === "CATALOG_LIFECYCLE_CONFLICT" && body.action === "DiscardDraft")
           return fail("NotDiscardable");
+        // v15 2026-10-29: the review stopped on something it could not read; say where.
         if (error.code === "CATALOG_DEPENDENCY_UNAVAILABLE" && body.action === "Submit")
-          return fail("ReviewBlocked");
+          return stopped("Submit:Unavailable@" + throwSite(error));
         if (error.code === "CATALOG_PERMISSION_DENIED" && body.action === "Approve")
           return fail("ApprovalRequired");
         return fail(catalogErrors[error.code] ?? "Invalid");

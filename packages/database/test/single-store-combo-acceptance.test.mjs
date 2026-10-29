@@ -510,6 +510,11 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       ]);
       const rice = await dish("Fried rice (TEST)", "炒饭", "1200", []);
       const noodles = await dish("Chow mein (TEST)", "炒面", "1300", []);
+      // As on v15: the menu was listed with its dishes before any combo was made.
+      await dishes.command({
+        ...session,
+        body: { action: "ListAll", operationReference: op(), menuReference },
+      });
 
       // 1. A combo for two: 汤 choose 1 (wonton +1.00), 主食 choose 1.
       const comboBody = (overrides = {}) => ({
