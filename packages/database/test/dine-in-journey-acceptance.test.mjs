@@ -1913,6 +1913,17 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
         await holdOf(dining.host.participantReference, R3.batch.sourceCartVersion + 1),
         null,
       );
+      // WP-2423 item 8 ⑦ (v15 finding t): a submitted round empties the table's Cart and moves
+      // its version on, so a phone still holding the earlier version (a guest retrying a send of
+      // items staff already added to their round) finds nothing left to send at that version.
+      const after3 = (
+        await one(
+          "SELECT c.aggregate_version AS version,(SELECT count(*)::int FROM rms_ordering.cart_line l WHERE l.cart_id=c.cart_id AND l.brand_id=c.brand_id AND l.store_id=c.store_id) AS lines FROM rms_ordering.cart c WHERE c.cart_id=$1",
+          [R3.batch.sourceCartReference],
+        )
+      )[0];
+      assert.ok(after3.version > R3.batch.sourceCartVersion, String(after3.version));
+      assert.equal(after3.lines, 0);
 
       // ── 5c'. WP-2423 lock order (v15 deadlocks 2026-10-13/14): two connections at once. Staff
       // acceptance and payment outcomes take the Order's disposition fence and then lock the
