@@ -1565,6 +1565,8 @@ async function scanUnsupported(root, module, diagnostics) {
               "src/infrastructure/persistence/menu-admin-read-store.ts",
               "src/infrastructure/persistence/availability-rule-store.ts",
               "src/infrastructure/persistence/option-set-store.ts",
+              // WP-2423 item 8 ⑥ part 4: combos (Bundles) and what they are compiled into.
+              "src/infrastructure/persistence/bundle-store.ts",
             ].includes(moduleRelative)) ||
           (module.packageName === "@rms/pricing" &&
             module.manifest.ownedDatabase?.schema === "rms_pricing" &&

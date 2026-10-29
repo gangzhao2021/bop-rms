@@ -390,3 +390,90 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
     expect(state.offered.get(id(12))).toBe("Hidden");
   });
 });
+
+describe("one-page menu combos (WP-2423 item 8 ⑥ part 4)", () => {
+  const combo = (overrides: Record<string, unknown> = {}) => ({
+    action: "SaveCombo",
+    operationReference: id(60),
+    menuReference: MENU,
+    bundleReference: null,
+    expectedAggregateVersion: null,
+    sectionCode: "COMBOS",
+    name: "Combo for two (TEST)",
+    nameZh: "二人套餐",
+    description: "",
+    descriptionZh: "",
+    taxClassificationReference: TAX,
+    priceMinor: "2880",
+    slots: [
+      {
+        code: null,
+        name: "Soup",
+        nameZh: "汤",
+        minimum: 1,
+        maximum: 1,
+        dishes: [
+          { skuReference: id(61), upgradeMinor: "0" },
+          { skuReference: id(62), upgradeMinor: "100" },
+        ],
+      },
+    ],
+    ...overrides,
+  });
+  const slot = (overrides: Record<string, unknown>) => ({
+    ...combo().slots[0],
+    ...overrides,
+  });
+
+  it("reads a combo: its slots, how many guests choose and each dish's extra price", () => {
+    expect(parseOneStoreDishBody(combo())).toMatchObject({
+      action: "SaveCombo",
+      bundleReference: null,
+      slots: [{ code: null, nameZh: "汤", minimum: 1, maximum: 1 }],
+    });
+    expect(
+      parseOneStoreDishBody(
+        combo({
+          bundleReference: id(63),
+          expectedAggregateVersion: 3,
+          slots: [slot({ code: "SLOT-1" }), slot({ code: null, name: "Main" })],
+        }),
+      ),
+    ).toMatchObject({ expectedAggregateVersion: 3, slots: [{ code: "SLOT-1" }, { code: null }] });
+  });
+
+  it("refuses a combo guests could not complete or that is not what it says", () => {
+    for (const body of [
+      combo({ slots: [] }),
+      combo({ slots: [slot({ minimum: 2, maximum: 1 })] }),
+      // More to choose than dishes offered.
+      combo({ slots: [slot({ minimum: 3, maximum: 3 })] }),
+      combo({ slots: [slot({ maximum: 0, minimum: 0 })] }),
+      // One dish twice in a slot.
+      combo({
+        slots: [
+          slot({
+            dishes: [
+              { skuReference: id(61), upgradeMinor: "0" },
+              { skuReference: id(61), upgradeMinor: "0" },
+            ],
+          }),
+        ],
+      }),
+      combo({ slots: [slot({ code: "SOUP" })] }),
+      combo({ slots: [slot({ code: "SLOT-1" }), slot({ code: "SLOT-1" })] }),
+      combo({ priceMinor: "28.80" }),
+      combo({ bundleReference: id(63) }),
+      combo({ description: "x".repeat(121) }),
+      { ...combo(), extra: true },
+    ])
+      expect(() => parseOneStoreDishBody(body)).toThrow(MerchantOneStoreDishError);
+  });
+
+  it("cannot save a combo where combos are not set up", async () => {
+    const { dishes } = fakes();
+    await expect(
+      dishes.command({ sessionCookie: "c", csrf: "x", body: combo() }),
+    ).rejects.toMatchObject({ code: "NotFound" });
+  });
+});

@@ -88,7 +88,15 @@ export interface OptionSetBody {
   }[];
 }
 export type OptionSetCommandBody =
-  | ({ readonly action: "Create"; readonly operationReference: string } & OptionSetBody)
+  | ({
+      readonly action: "Create";
+      readonly operationReference: string;
+      /**
+       * WP-2423 item 8 ⑥ part 4: a fixed code (a combo slot's set, whose name, e.g. 汤, other
+       * combos share); absent: the code comes from the name.
+       */
+      readonly internalCode?: string;
+    } & OptionSetBody)
   | ({
       readonly action: "Save";
       readonly operationReference: string;
@@ -154,11 +162,22 @@ export function parseOptionSetCommandBody(value: unknown): OptionSetCommandBody 
   const r = value as Record<string, unknown> | null;
   if (r === null || typeof r !== "object" || Array.isArray(r)) return fail("Invalid");
   const keys = Object.keys(r)
-    .filter((key) => key !== "nameZh")
+    .filter((key) => key !== "nameZh" && !(r.action === "Create" && key === "internalCode"))
     .sort()
     .join(",");
-  if (r.action === "Create" && keys === keysOf("action", "operationReference", ...bodyKeys))
-    return { action: "Create", operationReference: ref(r.operationReference), ...parseBody(r) };
+  if (r.action === "Create" && keys === keysOf("action", "operationReference", ...bodyKeys)) {
+    if (
+      r.internalCode !== undefined &&
+      (typeof r.internalCode !== "string" || !codePattern.test(r.internalCode))
+    )
+      return fail("Invalid");
+    return {
+      action: "Create",
+      operationReference: ref(r.operationReference),
+      ...(r.internalCode === undefined ? {} : { internalCode: r.internalCode }),
+      ...parseBody(r),
+    };
+  }
   if (
     r.action === "Save" &&
     keys ===
@@ -350,7 +369,7 @@ export function createMerchantOptionSets(options: {
           }
           try {
             if (body.action === "Create") {
-              const code = codeForName(body.name, "SET");
+              const code = body.internalCode ?? codeForName(body.name, "SET");
               const result = await service.create({
                 internalCode: code,
                 defaultLocale: options.locale,

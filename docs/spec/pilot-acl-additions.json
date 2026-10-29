@@ -4940,6 +4940,195 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU (coordinator 2026-10-28 accepted the dish editor's recipe generated from the allergens staff declare, with four conditions: labelled \"Allergens declared by staff\", kept out of inventory, costing and stock deduction, replaced by a real recipe once Inventory & recipes is on, and each single-store exception proven): the append-only label of each generated allergen source"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the combo authored on the one-page menu"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_availability_rule",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the availability rules of a combo version (none are written; read with the version)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the combo authored on the one-page menu"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): each saved version of a combo"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): each saved version of a combo"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_component_group",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the slots of a combo version"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_component_group",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the slots of a combo version"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_component_sellable",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the dishes a slot offers"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_component_sellable",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the dishes a slot offers"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_operation_record",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the record of each combo operation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_operation_record",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the record of each combo operation"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_operation_snapshot",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the exact result of each combo operation, for a retried request"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_operation_snapshot",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the exact result of each combo operation, for a retried request"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the combo's current version, lifecycle and version number"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_version",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): a combo version published in place (status, digest and time only, enforced by 2000_115)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_combo_dish",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the dish a combo is compiled into"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_combo_dish",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the dish a combo is compiled into"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_combo_choice",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the dish each choice of a combo slot stands for"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_combo_choice",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): the dish each choice of a combo slot stands for"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_single_store_listing",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): a combo version listed alone at a Brand with one store"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "bundle_single_store_listing",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B confirmed by the Owner 2026-10-28): a combo version listed alone at a Brand with one store"
     }
   ]
 }

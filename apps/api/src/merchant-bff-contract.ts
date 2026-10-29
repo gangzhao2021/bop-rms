@@ -118,6 +118,7 @@ import type { createMerchantOpeningCount } from "./merchant-opening-count.js";
 import type { createMerchantStoreReceipts } from "./merchant-store-receipts.js";
 import type { createMerchantRecipes } from "./merchant-recipes.js";
 import type { createMerchantDishAllergens } from "./merchant-dish-allergens.js";
+import type { createMerchantCombos } from "./merchant-combos.js";
 import type { createMerchantOneStoreDishes } from "./merchant-one-store-dishes.js";
 import type { createMerchantProducts } from "./merchant-products.js";
 import type { createMerchantPrices } from "./merchant-prices.js";
@@ -522,6 +523,8 @@ export interface MerchantBffRouterOptions {
   readonly dishAllergens?: ReturnType<typeof createMerchantDishAllergens>;
   /** WP-2423 item 8 ⑥: a dish saved from the one-page menu, and "List it" for all of it. */
   readonly oneStoreDishes?: ReturnType<typeof createMerchantOneStoreDishes>;
+  /** WP-2423 item 8 ⑥ part 4: the combos of the one-page menu (saved and listed through it). */
+  readonly combos?: ReturnType<typeof createMerchantCombos>;
   readonly products?: ReturnType<typeof createMerchantProducts>;
   readonly prices?: ReturnType<typeof createMerchantPrices>;
   readonly allergens?: ReturnType<typeof createMerchantAllergens>;

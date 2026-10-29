@@ -46,6 +46,7 @@ export * from "./application/selection-display-query-service.js";
 export * from "./infrastructure/persistence/availability-query-store.js";
 export * from "./infrastructure/persistence/availability-rule-store.js";
 export * from "./infrastructure/persistence/option-set-store.js";
+export * from "./infrastructure/persistence/bundle-store.js";
 export * from "./application/current-availability-query-service.js";
 export * from "./application/ports/current-availability-query-ports.js";
 

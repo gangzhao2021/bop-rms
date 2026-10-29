@@ -2,6 +2,7 @@
 import express, { type Router } from "express";
 import { MerchantRecipeError } from "./merchant-recipes.js";
 import { MerchantDishAllergenError } from "./merchant-dish-allergens.js";
+import { MerchantComboError } from "./merchant-combos.js";
 import {
   cookie,
   denied,
@@ -148,6 +149,40 @@ export function installMerchantCommerceRoutes(
 
   // WP-2423 item 8 ⑥: one dish saved from the one-page menu, and "List it" for all of it. A step
   // refused by its own page's command answers with that page's error and which page it was.
+  // WP-2423 item 8 ⑥ part 4: the combos of the one-page menu, for their editor.
+  router.post(
+    "/commerce/one-store-combos/query",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      const body = request.body as Record<string, unknown> | undefined;
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0 ||
+        body === undefined ||
+        Object.keys(body).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.combos) {
+        response.status(503).json({ error: "combos_unavailable" });
+        return;
+      }
+      void options.combos
+        .query({ sessionCookie, csrf })
+        .then((result) => response.json(result))
+        .catch((error: unknown) => {
+          const code = (error as { code?: unknown } | null)?.code;
+          if (error instanceof MerchantComboError && code === "PermissionDenied")
+            response.status(403).json({ error: code });
+          else denied(response);
+        });
+    },
+  );
   router.post(
     "/commerce/one-store-dishes/command",
     sameOriginMutation(options),

@@ -25,6 +25,42 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 item 8 ⑥ part 4: the exact result of each Bundle operation (append-only).
+      table: "bundle_operation_snapshot",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 item 8 ⑥ part 4: the dish a combo is compiled into (append-only).
+      table: "bundle_combo_dish",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 item 8 ⑥ part 4: the dish each combo choice stands for (append-only).
+      table: "bundle_combo_choice",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 item 8 ⑥ part 4: single-store listing mark of a combo version (append-only).
+      table: "bundle_single_store_listing",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       // WP-2423 Q19: sole-operator approval mark (append-only).
       table: "menu_sole_operator_approval",
       classification: "append-only-record",

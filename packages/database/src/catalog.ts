@@ -478,7 +478,11 @@ function validateSql(
           (file ===
             "migrations/2000-release-001/2000_111_alter_recipe_review_single_store_listing.sql" &&
             metadata.owner === "@rms/recipe" &&
-            metadata.schema === "rms_recipe")) &&
+            metadata.schema === "rms_recipe") ||
+          (file ===
+            "migrations/2000-release-001/2000_115_create_bundle_single_store_combo.sql" &&
+            metadata.owner === "@rms/catalog" &&
+            metadata.schema === "rms_catalog")) &&
         match[1] === "bop_tenant" &&
         match[2] === "brand_has_single_store" &&
         /^\s*\(/u.test(body.slice(match.index + match[0].length))

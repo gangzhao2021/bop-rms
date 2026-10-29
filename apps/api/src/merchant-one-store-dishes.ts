@@ -1,9 +1,11 @@
 import { derivedReference } from "./merchant-products.js";
 import type { createMerchantAvailability } from "./merchant-availability.js";
+import type { ComboSlot, ComboView, createMerchantCombos } from "./merchant-combos.js";
 import type { createMerchantDishAllergens } from "./merchant-dish-allergens.js";
 import type { createMerchantMenus } from "./merchant-menus.js";
 import type { createMerchantOptionPrices } from "./merchant-option-prices.js";
 import type { createMerchantOptionRecipes } from "./merchant-option-recipes.js";
+import type { createMerchantOptionSets } from "./merchant-option-sets.js";
 import type { createMerchantPrices } from "./merchant-prices.js";
 import type { createMerchantProducts } from "./merchant-products.js";
 
@@ -29,7 +31,9 @@ export class MerchantOneStoreDishError extends Error {
       /** The menu has no section with that code. */
       | "NoSection"
       /** Someone else's price changes are waiting; they list them (or discard them) first. */
-      | "OthersPending",
+      | "OthersPending"
+      /** A combo offers a dish that is not on the menu (or a combo itself). */
+      | "NotADish",
   ) {
     super(code);
     this.name = "MerchantOneStoreDishError";
@@ -81,9 +85,117 @@ export interface ListAllBody {
   readonly operationReference: string;
   readonly menuReference: string;
 }
-export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBody {
+/**
+ * WP-2423 item 8 ⑥ part 4: a combo saved from the one-page menu — its names, price, tax class,
+ * section and slots (each: names, how many guests choose, the dishes offered with any extra price).
+ */
+export interface SaveComboBody {
+  readonly action: "SaveCombo";
+  readonly operationReference: string;
+  readonly menuReference: string;
+  /** null: a new combo. */
+  readonly bundleReference: string | null;
+  readonly expectedAggregateVersion: number | null;
+  readonly sectionCode: string;
+  readonly name: string;
+  readonly nameZh: string;
+  readonly description: string;
+  readonly descriptionZh: string;
+  readonly taxClassificationReference: string;
+  readonly priceMinor: string;
+  readonly slots: readonly {
+    /** null: a new slot. */
+    readonly code: string | null;
+    readonly name: string;
+    readonly nameZh: string;
+    readonly minimum: number;
+    readonly maximum: number;
+    readonly dishes: readonly { readonly skuReference: string; readonly upgradeMinor: string }[];
+  }[];
+}
+const slotCode = /^SLOT-[1-9][0-9]?$/u;
+function parseSaveCombo(r: Record<string, unknown>): SaveComboBody {
+  if (
+    Object.keys(r).sort().join(",") !==
+      "action,bundleReference,description,descriptionZh,expectedAggregateVersion,menuReference,name,nameZh,operationReference,priceMinor,sectionCode,slots,taxClassificationReference" ||
+    !Array.isArray(r.slots) ||
+    r.slots.length < 1 ||
+    r.slots.length > 8 ||
+    (r.bundleReference === null) !== (r.expectedAggregateVersion === null) ||
+    (r.expectedAggregateVersion !== null &&
+      (!Number.isSafeInteger(r.expectedAggregateVersion) ||
+        (r.expectedAggregateVersion as number) < 1))
+  )
+    return fail("Invalid");
+  const slots = r.slots.map((candidate: unknown) => {
+    const g = candidate as Record<string, unknown> | null;
+    if (
+      g === null ||
+      typeof g !== "object" ||
+      Object.keys(g).sort().join(",") !== "code,dishes,maximum,minimum,name,nameZh" ||
+      (g.code !== null && (typeof g.code !== "string" || !slotCode.test(g.code))) ||
+      !Array.isArray(g.dishes) ||
+      g.dishes.length < 1 ||
+      g.dishes.length > 20 ||
+      !Number.isSafeInteger(g.minimum) ||
+      !Number.isSafeInteger(g.maximum)
+    )
+      return fail("Invalid");
+    const dishes = g.dishes.map((candidateDish: unknown) => {
+      const d = candidateDish as Record<string, unknown> | null;
+      if (
+        d === null ||
+        typeof d !== "object" ||
+        Object.keys(d).sort().join(",") !== "skuReference,upgradeMinor"
+      )
+        return fail("Invalid");
+      return { skuReference: ref(d.skuReference), upgradeMinor: amount(d.upgradeMinor) };
+    });
+    const minimum = g.minimum as number;
+    const maximum = g.maximum as number;
+    if (
+      minimum < 0 ||
+      maximum < 1 ||
+      minimum > maximum ||
+      maximum > dishes.length ||
+      new Set(dishes.map((d) => d.skuReference)).size !== dishes.length
+    )
+      return fail("Invalid");
+    return {
+      code: g.code as string | null,
+      name: text(g.name, 80, true),
+      nameZh: text(g.nameZh, 80, false),
+      minimum,
+      maximum,
+      dishes,
+    };
+  });
+  const codes = slots.flatMap((slot) => (slot.code === null ? [] : [slot.code]));
+  if (new Set(codes).size !== codes.length) return fail("Invalid");
+  const sectionCode = typeof r.sectionCode === "string" ? r.sectionCode : "";
+  if (!/^[A-Z][A-Z0-9_-]{0,63}$/u.test(sectionCode)) return fail("Invalid");
+  return {
+    action: "SaveCombo",
+    operationReference: ref(r.operationReference),
+    menuReference: ref(r.menuReference),
+    bundleReference: r.bundleReference === null ? null : ref(r.bundleReference),
+    expectedAggregateVersion: r.expectedAggregateVersion as number | null,
+    sectionCode,
+    name: text(r.name, 80, true),
+    nameZh: text(r.nameZh, 80, false),
+    // A Bundle description is at most 120 characters.
+    description: text(r.description, 120, false),
+    descriptionZh: text(r.descriptionZh, 120, false),
+    taxClassificationReference: ref(r.taxClassificationReference),
+    priceMinor: amount(r.priceMinor),
+    slots,
+  };
+}
+
+export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBody | SaveComboBody {
   const r = value as Record<string, unknown> | null;
   if (r === null || typeof r !== "object" || Array.isArray(r)) return fail("Invalid");
+  if (r.action === "SaveCombo") return parseSaveCombo(r);
   const keys = Object.keys(r).sort().join(",");
   if (r.action === "ListAll" && keys === "action,menuReference,operationReference")
     return {
@@ -226,6 +338,12 @@ export function createMerchantOneStoreDishes(options: {
   readonly dishAllergens: ReturnType<typeof createMerchantDishAllergens>;
   readonly optionRecipes: ReturnType<typeof createMerchantOptionRecipes>;
   readonly availability: Pick<ReturnType<typeof createMerchantAvailability>, "query" | "command">;
+  /** WP-2423 item 8 ⑥ part 4: combos (absent: combos cannot be saved; "List it" skips them). */
+  readonly combos?: Pick<
+    ReturnType<typeof createMerchantCombos>,
+    "query" | "saveBundle" | "recordDish" | "listDrafts"
+  >;
+  readonly optionSets?: Pick<ReturnType<typeof createMerchantOptionSets>, "query" | "command">;
   readonly now: () => string;
 }) {
   /**
@@ -613,9 +731,176 @@ export function createMerchantOneStoreDishes(options: {
     return { status: "Saved" as const, productReference, skuReference: sku };
   };
 
+  /**
+   * WP-2423 item 8 ⑥ part 4: a combo saved from the one-page menu. Each slot becomes a choice
+   * group (its own, coded for the combo) whose choices stand for the slot's dishes; the combo is
+   * saved as a Bundle draft with which dish each choice stands for; then it is saved as a dish at
+   * the combo price with those choice groups (extra prices per choice), through the dish save
+   * above. Every step is keyed by the operation, so retrying the same save continues.
+   */
+  const saveCombo = async (session: Session, body: SaveComboBody) => {
+    if (options.combos === undefined || options.optionSets === undefined) return fail("NotFound");
+    const { combos, optionSets } = options;
+    const step = (purpose: string) => derivedReference(body.operationReference, purpose);
+    const known = (await combos.query(session)).combos;
+    const current: ComboView | null =
+      body.bundleReference === null
+        ? null
+        : (known.find((c) => c.bundleReference === body.bundleReference) ?? fail("NotFound"));
+    const bundleOperation = step("bundle-save");
+    const bundleReference = body.bundleReference ?? derivedReference(bundleOperation, "bundle");
+    const menu = (await loadMenu(session, body.menuReference)) as MenuBuilder & {
+      sellables: readonly {
+        skuReference: string;
+        productName: string;
+        productNameZh: string;
+        sizeName: string;
+        active: boolean;
+      }[];
+    };
+    const comboSkus = new Set(
+      known.flatMap((c) => (c.skuReference === null ? [] : [c.skuReference])),
+    );
+    const dishLabel = (sku: string) => {
+      const found = menu.sellables.find((x) => x.skuReference === sku && x.active);
+      if (found === undefined || comboSkus.has(sku)) return fail("NotADish");
+      const sized = found.sizeName !== "" && found.sizeName !== found.productName;
+      return {
+        name: sized ? found.productName + " — " + found.sizeName : found.productName,
+        nameZh: found.productNameZh,
+      };
+    };
+    const used = new Set(body.slots.flatMap((slot) => (slot.code === null ? [] : [slot.code])));
+    const nextCode = () => {
+      let n = 1;
+      while (used.has("SLOT-" + n)) n++;
+      used.add("SLOT-" + n);
+      return "SLOT-" + n;
+    };
+    const slots: ComboSlot[] = [];
+    for (const [index, slot] of body.slots.entries()) {
+      const code = slot.code ?? nextCode();
+      const history = (current?.choiceHistory ?? []).filter((c) => c.groupCode === code);
+      const optionSetReference = history[0]?.optionSetReference ?? null;
+      const labels = slot.dishes.map((d) => dishLabel(d.skuReference));
+      const setBody = {
+        name: slot.name,
+        nameZh: slot.nameZh,
+        kind: slot.maximum === 1 ? ("One" as const) : ("Any" as const),
+        minimum: slot.minimum,
+        maximum: slot.maximum,
+        perOptionMaximum: 1,
+        options: slot.dishes.map((dish, i) => ({
+          optionReference:
+            history.find((c) => c.dishSkuReference === dish.skuReference)?.optionReference ?? null,
+          name: labels[i]?.name ?? "",
+          nameZh: labels[i]?.nameZh ?? "",
+          offered: true,
+          // A required slot starts with its first dish(es) chosen (the guest can change them).
+          defaultChoice: i < slot.minimum,
+        })),
+      };
+      const saved = (optionSetReference === null
+        ? await optionSets.command({
+            ...session,
+            body: {
+              action: "Create",
+              operationReference: step("slot-set-" + index),
+              internalCode: "COMBO-" + bundleReference.slice(-12).toUpperCase() + "-" + code,
+              ...setBody,
+            },
+          })
+        : await (async () => {
+            const existing = (await optionSets.query({ ...session, optionSetReference })) as {
+              optionSet: { aggregateVersion: number };
+            };
+            return optionSets.command({
+              ...session,
+              body: {
+                action: "Save",
+                operationReference: step("slot-set-" + index),
+                optionSetReference,
+                expectedAggregateVersion: existing.optionSet.aggregateVersion,
+                ...setBody,
+              },
+            });
+          })()) as unknown as {
+        optionSet: {
+          optionSetReference: string;
+          options: readonly { optionReference: string; name: string }[];
+        };
+      };
+      // The listed choices come first, in the order given.
+      slots.push({
+        code,
+        name: slot.name,
+        nameZh: slot.nameZh,
+        minimum: slot.minimum,
+        maximum: slot.maximum,
+        optionSetReference: saved.optionSet.optionSetReference,
+        dishes: slot.dishes.map((dish, i) => {
+          const option = saved.optionSet.options[i];
+          if (option === undefined || option.name !== labels[i]?.name) return fail("NotFound");
+          return { ...dish, optionReference: option.optionReference };
+        }),
+      });
+    }
+    await combos.saveBundle({
+      ...session,
+      body: {
+        operationReference: bundleOperation,
+        bundleReference: body.bundleReference,
+        expectedAggregateVersion: body.expectedAggregateVersion,
+        name: body.name,
+        nameZh: body.nameZh,
+        description: body.description,
+        descriptionZh: body.descriptionZh,
+        priceMinor: body.priceMinor,
+        slots,
+      },
+    });
+    const dish = await saveDish(session, {
+      action: "SaveDish",
+      operationReference: step("dish"),
+      menuReference: body.menuReference,
+      productReference: current?.productReference ?? null,
+      sectionCode: body.sectionCode,
+      name: body.name,
+      nameZh: body.nameZh,
+      description: body.description,
+      descriptionZh: body.descriptionZh,
+      taxClassificationReference: body.taxClassificationReference,
+      priceMinor: body.priceMinor,
+      choiceGroups: slots.map((slot) => ({
+        optionSetReference: slot.optionSetReference,
+        options: slot.dishes.map((d) => ({
+          optionReference: d.optionReference,
+          amountMinor: d.upgradeMinor,
+        })),
+      })),
+      allergens: null,
+    });
+    if (current?.productReference == null)
+      await combos.recordDish({
+        ...session,
+        bundleReference,
+        productReference: dish.productReference,
+        skuReference: dish.skuReference,
+      });
+    return {
+      status: "Saved" as const,
+      bundleReference,
+      productReference: dish.productReference,
+      skuReference: dish.skuReference,
+    };
+  };
+
   /** "List it": the open price book, the waiting choice prices and the menu, alone at one store. */
   const listAll = async (session: Session, body: ListAllBody) => {
     const step = (purpose: string) => derivedReference(body.operationReference, purpose);
+    // Combos with saved changes first: each is listed alone at the Brand's one store.
+    if (options.combos !== undefined)
+      await options.combos.listDrafts({ ...session, operationReference: step("combos") });
     const books = (await options.prices.query({ ...session, priceBookReference: null })) as {
       books: readonly { priceBookReference: string; lifecycle: string; aggregateVersion: number }[];
     };
@@ -683,7 +968,11 @@ export function createMerchantOneStoreDishes(options: {
   const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
     const body = parseOneStoreDishBody(input.body);
     const session = { sessionCookie: input.sessionCookie, csrf: input.csrf };
-    return body.action === "SaveDish" ? saveDish(session, body) : listAll(session, body);
+    return body.action === "SaveDish"
+      ? saveDish(session, body)
+      : body.action === "SaveCombo"
+        ? saveCombo(session, body)
+        : listAll(session, body);
   };
   return { command };
 }
