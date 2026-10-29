@@ -410,6 +410,19 @@ export function PickupQueueScreen({
       }
     >
       <>
+        {view.guestPickupOff === true ? (
+          // WP-2423 item 8 ⑦ (v15 finding v): guests can no longer order pickup here; what is
+          // still waiting is handed over as usual.
+          <p className="pickup-queue__off" role="note">
+            {waitingCount === 0
+              ? t("Pickup is turned off for guests. No pickup orders are waiting.")
+              : waitingCount === 1
+                ? t("Pickup is turned off for guests. 1 order is still to hand over.")
+                : t("Pickup is turned off for guests. {count} orders are still to hand over.", {
+                    count: waitingCount,
+                  })}
+          </p>
+        ) : null}
         {handedOver ? (
           <p className="pickup-queue__handed-over" role="status">
             {t("Order {handedOver} handed over.", { handedOver: handedOver })}

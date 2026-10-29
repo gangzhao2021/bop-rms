@@ -14,6 +14,7 @@ import {
   navigationForStoreFeatures,
   readStoreFeatures,
 } from "../../../apps/api/src/merchant-store-features.ts";
+import { waitingPickupOrders } from "../../../apps/api/src/merchant-pickup-query.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
@@ -209,6 +210,32 @@ it("keeps a Store's modules as versioned owner choices, per Store, under the pil
         "FUL-PICKUP-QUEUE",
         "STORE-CAPABILITY",
       ]);
+
+      // v15 finding v: Fulfillment's pickup queue, read for the navigation under the api role
+      // (none waiting in this database), restores the Brand and Store context it changes.
+      assert.deepEqual(
+        await asApi(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+            [scope.brandReference],
+          );
+          const waiting = await waitingPickupOrders(tx, {
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+            sha256: (value) => "sha256:" + value.length.toString(16).padStart(64, "0"),
+            validateCurrentSource: async () => false,
+            now: () => new Date().toISOString(),
+          });
+          const after = (
+            await tx.query(
+              "SELECT current_setting('bop.brand_id',true) brand,current_setting('bop.store_id',true) store",
+              [],
+            )
+          ).rows[0];
+          return [waiting, after.brand, after.store];
+        }),
+        [0, scope.brandReference, ""],
+      );
 
       // Another Store sees none of it and keeps every module.
       const elsewhere = await asApi((tx) => loadStoreFeatureSetting(tx, other));

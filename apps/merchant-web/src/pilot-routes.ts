@@ -95,7 +95,9 @@ export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
   route("/operations/kitchen"),
   route("/operations/kitchen/work-items/:id"),
   route("/operations/dining"),
-  route("/operations/pickup"),
+  // WP-2423 item 8 ⑦ (v15 finding v): listed while guests' pickup, counter ordering or pickups
+  // still to hand over need it; otherwise the address goes to Tables.
+  listedRoute("/operations/pickup", "FUL-PICKUP-QUEUE", "/operations/dining"),
   listedRoute("/operations/inventory/counts", "INV-COUNT-LIST", home),
   listedRoute("/operations/inventory/counts/:id", "INV-COUNT-LIST", home),
   listedRoute("/operations/inventory/waste", "INV-WASTE-RECORD", home),

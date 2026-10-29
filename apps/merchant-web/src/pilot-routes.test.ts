@@ -74,6 +74,11 @@ describe("merchant route classification", () => {
     expect(pilotHiddenRedirect("/app/supply/items/x", listed)).toBeNull();
     expect(pilotHiddenRedirect("/operations/receiving", listed)).toBe("/app");
     expect(pilotHiddenRedirect("/app/commerce/recipes", ["HOME-OVERVIEW"])).toBe("/app");
+    // v15 finding v: Pickup while it is listed (orders to hand over); otherwise Tables.
+    expect(
+      pilotHiddenRedirect("/operations/pickup", ["HOME-OVERVIEW", "FUL-PICKUP-QUEUE"]),
+    ).toBeNull();
+    expect(pilotHiddenRedirect("/operations/pickup", ["HOME-OVERVIEW"])).toBe("/operations/dining");
   });
 
   it("serves the Brand and Platform consoles only where the session lists them", () => {

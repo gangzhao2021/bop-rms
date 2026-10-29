@@ -6313,4 +6313,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Chase {displayName} with the kitchen": "向后厨催 {displayName}",
   Chase: "催菜",
   "Chased by the server": "服务员催过",
+  "Pickup is turned off for guests. No pickup orders are waiting.":
+    "客人自取已关闭。没有等候交付的自取单。",
+  "Pickup is turned off for guests. 1 order is still to hand over.":
+    "客人自取已关闭。还有 1 单等候交付。",
+  "Pickup is turned off for guests. {count} orders are still to hand over.":
+    "客人自取已关闭。还有 {count} 单等候交付。",
 });

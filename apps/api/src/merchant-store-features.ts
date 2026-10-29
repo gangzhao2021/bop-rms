@@ -67,10 +67,16 @@ export const storeFeatureScreens: Readonly<Record<string, keyof StoreFeatureModu
 export function navigationForStoreFeatures<T extends { readonly screenId: string }>(
   navigation: readonly T[],
   setting: StoreFeatureModules,
+  /**
+   * Pickup orders Fulfillment still has to hand over (null: not known). While any wait, the
+   * Pickup screen stays even with pickup and counter ordering off (v15 finding v).
+   */
+  pickupWaiting: number | null = 0,
 ): readonly T[] {
   return navigation.filter((item) => {
     // Counter orders are handed over on the Pickup screen too.
-    if (item.screenId === "FUL-PICKUP-QUEUE") return setting.pickup || setting.counterOrder;
+    if (item.screenId === "FUL-PICKUP-QUEUE")
+      return setting.pickup || setting.counterOrder || pickupWaiting !== 0;
     const module = storeFeatureScreens[item.screenId];
     return module === undefined || setting[module];
   });
