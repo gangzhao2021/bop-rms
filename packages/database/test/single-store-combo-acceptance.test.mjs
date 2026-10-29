@@ -8,7 +8,17 @@ import { createMerchantCombos } from "../../../apps/api/src/merchant-combos.ts";
 import { createMerchantMenus } from "../../../apps/api/src/merchant-menus.ts";
 import { createMerchantDishAllergens } from "../../../apps/api/src/merchant-dish-allergens.ts";
 import { createMerchantOptionRecipes } from "../../../apps/api/src/merchant-option-recipes.ts";
-import { createAllergenRegistryVersion } from "../../rms/catalog/src/index.ts";
+import { writeFileSync } from "node:fs";
+import {
+  createAllergenRegistryVersion,
+  createCustomerMenuQueryService,
+  createPostgresPublishedMenuQueryStore,
+} from "../../rms/catalog/src/index.ts";
+import { publicFound } from "../../../apps/api/src/customer-menu.ts";
+import {
+  guestUnreadableItems,
+  parseMenuFound,
+} from "../../../apps/customer-pwa/src/menu/menu-contract.ts";
 import {
   createPostgresKitchenRoutingConfigurationStore,
   rebindKitchenRoutingEvidence,
@@ -778,6 +788,72 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         [["CATALOG_BUNDLE_PUBLISH", { approvalMode: "SingleStoreListing" }]],
       );
       assert.equal((await combos.query(session)).combos[0].state, "Listed");
+      // The guest menu as the server sends it (the real projection and store facts, then the
+      // public form), read by the customer app's own menu reader (v15 2026-10-29: every guest
+      // menu failed on the combo's parts, sent in the quantity form).
+      const publicStore = id(9001);
+      const guestMenu = async () => {
+        const result = await createCustomerMenuQueryService({
+          stores: {
+            resolvePublic: async () => ({ brandReference, storeReference, status: "Active" }),
+          },
+          projections: createPostgresPublishedMenuQueryStore(reader, {
+            brandReference,
+            storeReference,
+          }),
+          storeFacts: createCustomerMenuStoreFacts({
+            transactions: reader,
+            currencyMetadata,
+            priceChannelCode: "CUSTOMER_WEB",
+          }),
+        }).getPublishedMenu({
+          publicStoreReference: publicStore,
+          channelCode: "CUSTOMER_PWA",
+          orderTypeCode: "DINE_IN",
+          locale: "en-CA",
+          sectionReference: null,
+          searchTerm: null,
+          requestedAt: new Date().toISOString(),
+        });
+        assert.equal(result.status, "Found");
+        return JSON.parse(JSON.stringify(publicFound(result)));
+      };
+      const payload = await guestMenu();
+      // Captured for the customer app's test (TEST data from this isolated database; format it
+      // with prettier after capturing).
+      if (process.env.BOP_CAPTURE_GUEST_MENU === "1")
+        writeFileSync(
+          new URL("../../../apps/customer-pwa/src/menu/combo-menu.captured.json", import.meta.url),
+          JSON.stringify(payload, null, 2) + "\n",
+        );
+      assert.deepEqual(guestUnreadableItems(payload), [], "guests can read every listed item");
+      const guestCombo = parseMenuFound(
+        payload,
+        {
+          publicStoreReference: publicStore,
+          channel: "DineIn",
+          locale: "en-CA",
+          brandDisplayName: "TEST",
+          storeDisplayName: "TEST",
+        },
+        "en",
+      )
+        .sections.flatMap((section) => section.sellables)
+        .find((item) => item.sellableReference === saved.skuReference);
+      assert.ok(guestCombo, "guests see the combo");
+      assert.deepEqual(
+        guestCombo.optionRules.map((rule) => [
+          rule.comboPart,
+          rule.minimumSelections,
+          rule.maximumSelections,
+          rule.options.filter((option) => option.selectedByDefault).length,
+        ]),
+        [
+          [true, 1, 1, 0],
+          [true, 1, 1, 0],
+        ],
+        "each part is choose-one with nothing chosen for the guest",
+      );
       const wontonChoice = choices.find((c) => c.dish === wonton).option;
       const sourChoice = choices.find((c) => c.dish === sour).option;
       const binding = (

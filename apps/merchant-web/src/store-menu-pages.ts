@@ -1,5 +1,7 @@
 import { t } from "./i18n/i18n.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
+// The guest app's own menu reader, so staff are told exactly what guests cannot be shown.
+import { guestUnreadableItems } from "../../customer-pwa/src/menu/menu-contract.js";
 /** WP-2423 / DEC-MENU-REVISION: CAT-MENU-LIST / CAT-MENU-BUILDER view contract and same-origin client. */
 export type MenuErrorCode =
   | "PermissionDenied"
@@ -488,6 +490,11 @@ export interface MenuClient {
   combos?(): Promise<unknown>;
   /** WP-2423 item 8 ⑥ (v15 finding g): a simple choice group made from the dish editor. */
   createChoiceGroup?(command: NewChoiceGroupCommand): Promise<unknown>;
+  /**
+   * Owner 2026-10-29: the listed items guests cannot be shown (the guest app could not read them),
+   * by name, from the menus guests see now (dine-in and pickup); null when that cannot be read.
+   */
+  guestUnreadable?(): Promise<readonly string[] | null>;
 }
 /** A choice group as the choice groups page creates it (saved directly, no review). */
 export interface NewChoiceGroupCommand {
@@ -825,6 +832,28 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
     oneStore: (command) => post("/merchant/commerce/one-store-dishes/command", command),
     combos: () => post("/merchant/commerce/one-store-combos/query", {}),
     createChoiceGroup: (command) => post("/merchant/commerce/option-sets/command", command),
+    guestUnreadable: async () => {
+      // Each menu guests can see now; one not listed (or not readable here) is skipped.
+      const menus = await Promise.all(
+        ["/merchant/counter/menu?orderType=DineIn", "/merchant/counter/menu"].map(async (path) => {
+          try {
+            const response = await fetcher(path, {
+              credentials: "same-origin",
+              redirect: "error",
+              cache: "no-store",
+              headers: { Accept: "application/json" },
+            });
+            return response.ok
+              ? [((await response.json()) as { menu?: unknown } | null)?.menu]
+              : [];
+          } catch {
+            return [];
+          }
+        }),
+      );
+      const read = menus.flat();
+      return read.length === 0 ? null : [...new Set(read.flatMap(guestUnreadableItems))];
+    },
   };
 }
 

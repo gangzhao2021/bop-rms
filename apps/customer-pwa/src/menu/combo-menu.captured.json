@@ -1,0 +1,310 @@
+{
+  "status": "Found",
+  "schemaVersion": 1,
+  "projection": {
+    "name": "catalog_published_menu_v1",
+    "version": 1,
+    "asOfUtc": "2026-10-29T06:12:46.692Z",
+    "sourceCheckpoint": "019a0005-0000-7324-b336-5ab00b124d26",
+    "sourceAggregateVersion": 2,
+    "freshnessStatus": "Fresh",
+    "freshnessTargetMilliseconds": 5000,
+    "stale": false,
+    "partial": true
+  },
+  "scope": {
+    "publicStoreReference": "01909a7f-0000-7000-8000-000000002329",
+    "channelCode": "CUSTOMER_PWA",
+    "orderTypeCode": "DINE_IN",
+    "effectiveAt": "2026-10-29T06:12:46.709Z"
+  },
+  "menu": {
+    "menuReference": "01909a7f-0000-7000-8000-0000000001f3",
+    "menuVersionReference": "019a0005-0000-7000-8000-000000007051",
+    "releaseReference": "019a0005-0000-78be-a56e-600aeb76ba04",
+    "locale": "en-CA",
+    "name": "TEST menu",
+    "effectiveFrom": "2026-10-29T06:12:46.634Z",
+    "effectiveUntil": null,
+    "sections": [
+      {
+        "sectionReference": "019a0005-0000-7000-8000-000000007052",
+        "name": "Soups (TEST)",
+        "sellables": [
+          {
+            "sellableReference": "019a0005-0000-78cb-822e-5b6c4e82a4ed",
+            "productVersionReference": "019a0005-0000-7e88-8d17-f1b52a2d52f7",
+            "name": "Hot and sour soup (TEST)",
+            "presentationRole": "Standard",
+            "pinned": false,
+            "availability": "Available",
+            "optionRules": [],
+            "allergenDisclosure": {
+              "registryVersionReference": "01909a7f-0000-7000-8000-00000000003f",
+              "items": [
+                {
+                  "allergenReference": "01909a7f-0000-7000-8000-00000000003c",
+                  "code": "PEANUT",
+                  "name": "Peanuts",
+                  "classification": "Contains"
+                }
+              ],
+              "allergenFreeClaim": false,
+              "assistanceCode": "ALLERGEN_ASSISTANCE_REQUIRED"
+            },
+            "displayPrice": {
+              "status": "Available",
+              "amount": "6.50",
+              "currency": "CAD",
+              "reason": null
+            },
+            "taxDisplayContext": {
+              "status": "Unavailable",
+              "taxInclusive": null,
+              "reason": "FINAL_QUOTE_REQUIRED"
+            },
+            "description": null,
+            "photo": null
+          },
+          {
+            "sellableReference": "019a0005-0000-77e8-9fdd-bad7f2ea7cd5",
+            "productVersionReference": "019a0005-0000-7e9c-85f8-42f11928b020",
+            "name": "Wonton soup (TEST)",
+            "presentationRole": "Standard",
+            "pinned": false,
+            "availability": "Available",
+            "optionRules": [],
+            "allergenDisclosure": {
+              "registryVersionReference": "01909a7f-0000-7000-8000-00000000003f",
+              "items": [
+                {
+                  "allergenReference": "01909a7f-0000-7000-8000-00000000003e",
+                  "code": "WHEAT",
+                  "name": "Wheat",
+                  "classification": "Contains"
+                }
+              ],
+              "allergenFreeClaim": false,
+              "assistanceCode": "ALLERGEN_ASSISTANCE_REQUIRED"
+            },
+            "displayPrice": {
+              "status": "Available",
+              "amount": "7.00",
+              "currency": "CAD",
+              "reason": null
+            },
+            "taxDisplayContext": {
+              "status": "Unavailable",
+              "taxInclusive": null,
+              "reason": "FINAL_QUOTE_REQUIRED"
+            },
+            "description": null,
+            "photo": null
+          },
+          {
+            "sellableReference": "019a0005-0000-7bff-ad45-757939faac6b",
+            "productVersionReference": "019a0005-0000-7d6e-96c9-61892ce4ebaf",
+            "name": "Fried rice (TEST)",
+            "presentationRole": "Standard",
+            "pinned": false,
+            "availability": "Available",
+            "optionRules": [],
+            "allergenDisclosure": {
+              "registryVersionReference": "01909a7f-0000-7000-8000-00000000003f",
+              "items": [],
+              "allergenFreeClaim": false,
+              "assistanceCode": "ALLERGEN_ASSISTANCE_REQUIRED"
+            },
+            "displayPrice": {
+              "status": "Available",
+              "amount": "12.00",
+              "currency": "CAD",
+              "reason": null
+            },
+            "taxDisplayContext": {
+              "status": "Unavailable",
+              "taxInclusive": null,
+              "reason": "FINAL_QUOTE_REQUIRED"
+            },
+            "description": null,
+            "photo": null
+          },
+          {
+            "sellableReference": "019a0005-0000-7d78-8804-36bf743053af",
+            "productVersionReference": "019a0005-0000-714f-86fa-aed94c9a06a5",
+            "name": "Chow mein (TEST)",
+            "presentationRole": "Standard",
+            "pinned": false,
+            "availability": "Available",
+            "optionRules": [],
+            "allergenDisclosure": {
+              "registryVersionReference": "01909a7f-0000-7000-8000-00000000003f",
+              "items": [],
+              "allergenFreeClaim": false,
+              "assistanceCode": "ALLERGEN_ASSISTANCE_REQUIRED"
+            },
+            "displayPrice": {
+              "status": "Available",
+              "amount": "13.00",
+              "currency": "CAD",
+              "reason": null
+            },
+            "taxDisplayContext": {
+              "status": "Unavailable",
+              "taxInclusive": null,
+              "reason": "FINAL_QUOTE_REQUIRED"
+            },
+            "description": null,
+            "photo": null
+          }
+        ]
+      },
+      {
+        "sectionReference": "019a0005-0000-7000-8000-000000007057",
+        "name": "Combos (TEST)",
+        "sellables": [
+          {
+            "sellableReference": "019a0005-0000-770b-a06c-d399fc884b0b",
+            "productVersionReference": "019a0005-0000-7a51-9731-c9ea24f3fdd8",
+            "name": "Combo for two (TEST)",
+            "presentationRole": "Standard",
+            "pinned": false,
+            "availability": "Available",
+            "optionRules": [
+              {
+                "semanticsVersion": 2,
+                "activationOptionReferences": [],
+                "name": "Soup",
+                "bindingReference": "019a0005-0000-75dc-b2ee-78d7c181fb67",
+                "optionSetVersionReference": "019a0005-0000-781e-a2de-ac36e43aa9ba",
+                "minimumSelections": 1,
+                "maximumSelections": 1,
+                "enabledOptionReferences": [
+                  "019a0005-0000-700e-a139-836bc0a21948",
+                  "019a0005-0000-7e03-a5da-cb60a05f5747"
+                ],
+                "defaultOptionReferences": ["019a0005-0000-700e-a139-836bc0a21948"],
+                "comboPart": true,
+                "options": [
+                  {
+                    "optionReference": "019a0005-0000-700e-a139-836bc0a21948",
+                    "name": "Wonton soup (TEST)",
+                    "maximumQuantity": 1,
+                    "conflictOptionReferences": [],
+                    "selectedByDefault": true,
+                    "defaultQuantity": 1,
+                    "incrementalPrice": {
+                      "status": "Available",
+                      "amount": "1.00",
+                      "currency": "CAD",
+                      "reason": null
+                    }
+                  },
+                  {
+                    "optionReference": "019a0005-0000-7e03-a5da-cb60a05f5747",
+                    "name": "Hot and sour soup (TEST)",
+                    "maximumQuantity": 1,
+                    "conflictOptionReferences": [],
+                    "selectedByDefault": false,
+                    "defaultQuantity": 0,
+                    "incrementalPrice": {
+                      "status": "Available",
+                      "amount": "0.00",
+                      "currency": "CAD",
+                      "reason": null
+                    }
+                  }
+                ]
+              },
+              {
+                "semanticsVersion": 2,
+                "activationOptionReferences": [],
+                "name": "Main",
+                "bindingReference": "019a0005-0000-7af3-8ea6-91349b711d09",
+                "optionSetVersionReference": "019a0005-0000-78fe-a828-8bbaca056810",
+                "minimumSelections": 1,
+                "maximumSelections": 1,
+                "enabledOptionReferences": ["019a0005-0000-7ff1-b281-5f098033e70c"],
+                "defaultOptionReferences": ["019a0005-0000-7ff1-b281-5f098033e70c"],
+                "comboPart": true,
+                "options": [
+                  {
+                    "optionReference": "019a0005-0000-7ff1-b281-5f098033e70c",
+                    "name": "Fried rice (TEST)",
+                    "maximumQuantity": 1,
+                    "conflictOptionReferences": [],
+                    "selectedByDefault": true,
+                    "defaultQuantity": 1,
+                    "incrementalPrice": {
+                      "status": "Available",
+                      "amount": "0.00",
+                      "currency": "CAD",
+                      "reason": null
+                    }
+                  }
+                ]
+              }
+            ],
+            "allergenDisclosure": {
+              "registryVersionReference": "01909a7f-0000-7000-8000-00000000003f",
+              "items": [
+                {
+                  "allergenReference": "01909a7f-0000-7000-8000-00000000003c",
+                  "code": "PEANUT",
+                  "name": "Peanuts",
+                  "classification": "Contains"
+                },
+                {
+                  "allergenReference": "01909a7f-0000-7000-8000-00000000003e",
+                  "code": "WHEAT",
+                  "name": "Wheat",
+                  "classification": "Contains"
+                }
+              ],
+              "allergenFreeClaim": false,
+              "assistanceCode": "ALLERGEN_ASSISTANCE_REQUIRED",
+              "byChoice": {
+                "options": [
+                  "019a0005-0000-700e-a139-836bc0a21948",
+                  "019a0005-0000-7e03-a5da-cb60a05f5747",
+                  "019a0005-0000-7ff1-b281-5f098033e70c"
+                ],
+                "outcomes": [
+                  [
+                    {
+                      "code": "WHEAT",
+                      "classification": "Contains"
+                    }
+                  ],
+                  [
+                    {
+                      "code": "PEANUT",
+                      "classification": "Contains"
+                    }
+                  ]
+                ],
+                "sets": [
+                  [0, 0, 2],
+                  [1, 1, 2]
+                ]
+              }
+            },
+            "displayPrice": {
+              "status": "Available",
+              "amount": "28.80",
+              "currency": "CAD",
+              "reason": null
+            },
+            "taxDisplayContext": {
+              "status": "Unavailable",
+              "taxInclusive": null,
+              "reason": "FINAL_QUOTE_REQUIRED"
+            },
+            "description": null,
+            "photo": null
+          }
+        ]
+      }
+    ]
+  }
+}

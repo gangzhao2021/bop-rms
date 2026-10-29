@@ -157,119 +157,126 @@ export function parseCounterMenu(value: unknown): CounterMenu {
         return Object.freeze({
           sectionReference: ref(section.sectionReference),
           name: text(section.name),
+          // Owner 2026-10-29: an item this screen cannot read is left out, never the whole menu.
           items: Object.freeze(
-            section.sellables.map((value: unknown) => {
-              const item = record(
-                value,
-                [
-                  "sellableReference",
-                  "productVersionReference",
-                  "name",
-                  "presentationRole",
-                  "pinned",
-                  "availability",
-                  "optionRules",
-                  "allergenDisclosure",
-                  "displayPrice",
-                  "taxDisplayContext",
-                ],
-                // The customer description and photo; the counter does not show them.
-                ["description", "photo"],
-              );
-              const price = record(item.displayPrice, ["status", "amount", "currency", "reason"]);
-              if (
-                (item.availability !== "Available" && item.availability !== "SoldOut") ||
-                !Array.isArray(item.optionRules)
-              )
-                return invalid();
-              return Object.freeze({
-                sellableReference: ref(item.sellableReference),
-                productVersionReference:
-                  item.productVersionReference === null ? null : ref(item.productVersionReference),
-                name: text(item.name),
-                available: item.availability === "Available",
-                priceMinor: price.status === "Available" ? displayMinor(price.amount) : null,
-                rules: Object.freeze(
-                  item.optionRules.map((value: unknown) => {
-                    const rule = record(
-                      value,
-                      [
-                        "name",
-                        "bindingReference",
-                        "optionSetVersionReference",
-                        "minimumSelections",
-                        "maximumSelections",
-                        "enabledOptionReferences",
-                        "defaultOptionReferences",
-                        "options",
-                      ],
-                      ["semanticsVersion", "activationOptionReferences"],
-                    );
-                    if (
-                      !Number.isInteger(rule.minimumSelections) ||
-                      !Number.isInteger(rule.maximumSelections) ||
-                      !Array.isArray(rule.options) ||
-                      !Array.isArray(rule.enabledOptionReferences)
-                    )
-                      return invalid();
-                    const enabled = new Set(rule.enabledOptionReferences as unknown[]);
-                    return Object.freeze({
-                      bindingReference: ref(rule.bindingReference),
-                      name: rule.name === null ? "Options" : text(rule.name),
-                      minimumSelections: rule.minimumSelections as number,
-                      maximumSelections: rule.maximumSelections as number,
-                      options: Object.freeze(
-                        rule.options
-                          .map((value: unknown) => {
-                            const option = record(
-                              value,
-                              [
-                                "optionReference",
-                                "name",
-                                "maximumQuantity",
-                                "conflictOptionReferences",
-                                "selectedByDefault",
-                                "incrementalPrice",
-                              ],
-                              ["defaultQuantity"],
-                            );
-                            const increment = record(option.incrementalPrice, [
-                              "status",
-                              "amount",
-                              "currency",
-                              "reason",
-                            ]);
-                            return Object.freeze({
-                              optionReference: ref(option.optionReference),
-                              name: text(option.name),
-                              priceMinor:
-                                increment.status === "Available"
-                                  ? displayMinor(increment.amount)
-                                  : null,
-                              maximumQuantity: Number(option.maximumQuantity),
-                              selectedByDefault: option.selectedByDefault === true,
-                              defaultQuantity:
-                                typeof option.defaultQuantity === "number" &&
-                                Number.isInteger(option.defaultQuantity) &&
-                                option.defaultQuantity > 0
-                                  ? option.defaultQuantity
-                                  : 1,
-                              conflictOptionReferences: Object.freeze(
-                                Array.isArray(option.conflictOptionReferences)
-                                  ? option.conflictOptionReferences.map(ref)
-                                  : invalid(),
-                              ),
-                            });
-                          })
-                          .filter((option: CounterMenuOption) =>
-                            enabled.has(option.optionReference),
-                          ),
-                      ),
-                    });
-                  }),
-                ),
-              });
+            section.sellables.flatMap((value: unknown) => {
+              try {
+                return [counterItem(value)];
+              } catch {
+                return [];
+              }
             }),
+          ),
+        });
+      }),
+    ),
+  });
+}
+
+function counterItem(value: unknown): CounterMenuItem {
+  const item = record(
+    value,
+    [
+      "sellableReference",
+      "productVersionReference",
+      "name",
+      "presentationRole",
+      "pinned",
+      "availability",
+      "optionRules",
+      "allergenDisclosure",
+      "displayPrice",
+      "taxDisplayContext",
+    ],
+    // The customer description and photo; the counter does not show them.
+    ["description", "photo"],
+  );
+  const price = record(item.displayPrice, ["status", "amount", "currency", "reason"]);
+  if (
+    (item.availability !== "Available" && item.availability !== "SoldOut") ||
+    !Array.isArray(item.optionRules)
+  )
+    return invalid();
+  return Object.freeze({
+    sellableReference: ref(item.sellableReference),
+    productVersionReference:
+      item.productVersionReference === null ? null : ref(item.productVersionReference),
+    name: text(item.name),
+    available: item.availability === "Available",
+    priceMinor: price.status === "Available" ? displayMinor(price.amount) : null,
+    rules: Object.freeze(
+      item.optionRules.map((value: unknown) => {
+        const rule = record(
+          value,
+          [
+            "name",
+            "bindingReference",
+            "optionSetVersionReference",
+            "minimumSelections",
+            "maximumSelections",
+            "enabledOptionReferences",
+            "defaultOptionReferences",
+            "options",
+          ],
+          ["semanticsVersion", "activationOptionReferences", "comboPart"],
+        );
+        // WP-2423 item 8 ⑥ part 4: a combo part; staff choose each dish, as guests do.
+        const comboPart = rule.comboPart === true;
+        if (
+          !Number.isInteger(rule.minimumSelections) ||
+          !Number.isInteger(rule.maximumSelections) ||
+          !Array.isArray(rule.options) ||
+          !Array.isArray(rule.enabledOptionReferences)
+        )
+          return invalid();
+        const enabled = new Set(rule.enabledOptionReferences as unknown[]);
+        return Object.freeze({
+          bindingReference: ref(rule.bindingReference),
+          name: rule.name === null ? "Options" : text(rule.name),
+          minimumSelections: rule.minimumSelections as number,
+          maximumSelections: rule.maximumSelections as number,
+          options: Object.freeze(
+            rule.options
+              .map((value: unknown) => {
+                const option = record(
+                  value,
+                  [
+                    "optionReference",
+                    "name",
+                    "maximumQuantity",
+                    "conflictOptionReferences",
+                    "selectedByDefault",
+                    "incrementalPrice",
+                  ],
+                  ["defaultQuantity"],
+                );
+                const increment = record(option.incrementalPrice, [
+                  "status",
+                  "amount",
+                  "currency",
+                  "reason",
+                ]);
+                return Object.freeze({
+                  optionReference: ref(option.optionReference),
+                  name: text(option.name),
+                  priceMinor:
+                    increment.status === "Available" ? displayMinor(increment.amount) : null,
+                  maximumQuantity: Number(option.maximumQuantity),
+                  selectedByDefault: !comboPart && option.selectedByDefault === true,
+                  defaultQuantity:
+                    typeof option.defaultQuantity === "number" &&
+                    Number.isInteger(option.defaultQuantity) &&
+                    option.defaultQuantity > 0
+                      ? option.defaultQuantity
+                      : 1,
+                  conflictOptionReferences: Object.freeze(
+                    Array.isArray(option.conflictOptionReferences)
+                      ? option.conflictOptionReferences.map(ref)
+                      : invalid(),
+                  ),
+                });
+              })
+              .filter((option: CounterMenuOption) => enabled.has(option.optionReference)),
           ),
         });
       }),

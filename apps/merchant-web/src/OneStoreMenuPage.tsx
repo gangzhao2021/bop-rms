@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { countOf, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
@@ -91,6 +91,8 @@ export function OneStoreMenuPage({
   // The combos could not be read: the menu still shows; combos cannot be edited until they are.
   const [combosFailed, setCombosFailed] = useState(false);
   const [stock, setStock] = useState<StoreAvailabilityView | null>(null);
+  // Owner 2026-10-29: listed dishes guests are not shown (the guest app cannot read them).
+  const [guestUnreadable, setGuestUnreadable] = useState<readonly string[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [rows, setRows] = useState<readonly MenuSectionRow[]>([]);
@@ -123,8 +125,9 @@ export function OneStoreMenuPage({
       client.combos === undefined
         ? null
         : client.combos().then(parseMenuCombos, () => "failed" as const),
+      client.guestUnreadable?.() ?? null,
     ])
-      .then(([menu, items, comboList]) => {
+      .then(([menu, items, comboList, unreadable]) => {
         if (!active) return;
         const builder = parseMenuBuilderView(menu);
         if (builder.menu.storeReferences.length !== 1) {
@@ -136,6 +139,7 @@ export function OneStoreMenuPage({
         setView(builder);
         setCombos(comboList === null || comboList === "failed" ? [] : comboList);
         setCombosFailed(comboList === "failed");
+        setGuestUnreadable(unreadable ?? []);
         setStock(found);
         setRows(next);
         setSaved(orderKey(next));
@@ -853,6 +857,21 @@ export function OneStoreMenuPage({
               <Link to={`/app/commerce/menus/${menuReference}`}>{t("Open the menu")}</Link>
             </p>
           )}
+        </div>
+      ) : null}
+      {guestUnreadable.length > 0 ? (
+        <div className="one-menu__pending" role="alert">
+          <p>
+            {t(
+              "Guests can't be shown {count}: {items}. They can still order everything else. Tell the operator so it can be fixed.",
+              {
+                count: countOf(guestUnreadable.length, "dish"),
+                items: guestUnreadable
+                  .map((name) => (name === "" ? t("a dish without a name") : name))
+                  .join(t(", ")),
+              },
+            )}
+          </p>
         </div>
       ) : null}
       {problem ? (

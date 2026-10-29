@@ -6245,4 +6245,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{item} 只保存了一部分。请点它的“编辑”，再保存一次完成。",
   "The menu review stopped at {item} without naming what is missing (code {reason}). Nothing was listed. Tell the operator this code.":
     "菜单审核在 {item} 处停下，但没有指出缺什么（代码 {reason}）。没有上架任何内容。请把这个代码告诉运维。",
+  "Guests can't be shown {count}: {items}. They can still order everything else. Tell the operator so it can be fixed.":
+    "有 {count}客人看不到：{items}。其余菜品客人照常可点。请告诉运维修复。",
+  "a dish without a name": "一道没有名称的菜",
 });

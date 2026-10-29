@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
@@ -1214,9 +1215,35 @@ test("@production a combo made on the one-page menu: parts, extra price, saved, 
     page.getByText("This menu has not been listed yet. Guests do not see it."),
   ).toBeVisible();
   await expectNoInternalText(page);
+  // Owner 2026-10-29: once listed, a dish the guest app cannot read is named to staff. The guest
+  // menu captured from the real projection, its combo changed into a form guests cannot read.
+  const guestMenu = JSON.parse(
+    readFileSync(
+      new URL("../../customer-pwa/src/menu/combo-menu.captured.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { menu: { sections: { sellables: Record<string, unknown>[] }[] } };
+  for (const section of guestMenu.menu.sections)
+    section.sellables = section.sellables.map((item) =>
+      item.name === "Combo for two (TEST)" ? { ...item, servedWith: "TEST" } : item,
+    );
+  const listed = () => dishCommands.some((c) => c.action === "ListAll");
+  await page.route("**/merchant/counter/menu*", (route) =>
+    route.fulfill({
+      headers,
+      status: listed() ? 200 : 503,
+      json: listed()
+        ? { screenId: "OPS-ORDER-ENTRY", menu: guestMenu }
+        : { error: "counter_menu_unavailable" },
+    }),
+  );
+  await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByRole("button", { name: "List it" }).click();
   await expect(page.getByText("Listed. Guests see the menu as it is now.")).toBeVisible();
   expect(dishCommands.at(-1)).toMatchObject({ action: "ListAll", menuReference: MENU });
+  await expect(page.getByRole("alert")).toHaveText(
+    "Guests can't be shown 1 dish: Combo for two (TEST). They can still order everything else. Tell the operator so it can be fixed.",
+  );
 
   // Editing it opens the combo, as saved.
   await page.getByRole("button", { name: "Edit Combo for two (TEST) 二人套餐" }).click();
