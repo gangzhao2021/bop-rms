@@ -3511,6 +3511,8 @@ describe("Database Schema Ownership Architecture Test", () => {
       "order_submission_record",
       "order_acceptance_record",
       "order_termination_record",
+      // DEC-DINE-IN-PAY-LATER: the Kitchen source also reads pay-later confirmations.
+      "order_pay_later_confirmation",
     ]);
     const asset = join(
       context.moduleRoot,
@@ -3532,6 +3534,8 @@ describe("Database Schema Ownership Architecture Test", () => {
     "order_submission_record",
     "order_acceptance_record",
     "order_termination_record",
+    // DEC-DINE-IN-PAY-LATER: the Kitchen source also reads pay-later confirmations.
+    "order_pay_later_confirmation",
   ])("rejects Ordering Kitchen source with changed %s", async (changed) => {
     const root = await fixture();
     const context = await writeModule(
@@ -3547,6 +3551,8 @@ describe("Database Schema Ownership Architecture Test", () => {
         "order_submission_record",
         "order_acceptance_record",
         "order_termination_record",
+        // DEC-DINE-IN-PAY-LATER: the Kitchen source also reads pay-later confirmations.
+        "order_pay_later_confirmation",
       ].filter((v) => v !== changed),
     );
     await mkdir(join(context.moduleRoot, "src/infrastructure/persistence"), { recursive: true });

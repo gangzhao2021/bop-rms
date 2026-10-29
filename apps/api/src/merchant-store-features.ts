@@ -99,6 +99,8 @@ export interface StoreFeaturesView {
     readonly version: number;
     readonly staffCall: boolean;
     readonly chaseDish: boolean;
+    /** Owner decision 2: staff record how many guests when opening a table. */
+    readonly askPartySize: boolean;
     readonly changedAt: string | null;
   };
   /** Owner decision 11: the three tip percentages offered, or tips off (Payment's own setting). */
@@ -135,6 +137,7 @@ export function createMerchantStoreFeatures(options: {
       expectedVersion: number;
       staffCall: boolean;
       chaseDish: boolean;
+      askPartySize?: boolean;
     } = null;
     let tipChange: null | {
       operationReference: string;
@@ -161,10 +164,13 @@ export function createMerchantStoreFeatures(options: {
           "expectedVersion",
           "staffCall",
           "chaseDish",
+          // Absent (an older page): kept as it is.
+          ...(Object.hasOwn(input.command as object, "askPartySize") ? ["askPartySize"] : []),
         ]);
         if (
           typeof raw.staffCall !== "boolean" ||
           typeof raw.chaseDish !== "boolean" ||
+          (raw.askPartySize !== undefined && typeof raw.askPartySize !== "boolean") ||
           !Number.isSafeInteger(raw.expectedVersion) ||
           Number(raw.expectedVersion) < 0
         )
@@ -174,6 +180,7 @@ export function createMerchantStoreFeatures(options: {
           expectedVersion: Number(raw.expectedVersion),
           staffCall: raw.staffCall,
           chaseDish: raw.chaseDish,
+          ...(typeof raw.askPartySize === "boolean" ? { askPartySize: raw.askPartySize } : {}),
         };
       } else if (action === "ChangeTips") {
         const raw = readClosedRecord(input.command, [
@@ -347,6 +354,7 @@ function storeFeaturesView(
       version: services.version,
       staffCall: services.staffCall,
       chaseDish: services.chaseDish,
+      askPartySize: services.askPartySize,
       changedAt: services.changedAt,
     }),
     tips: Object.freeze({

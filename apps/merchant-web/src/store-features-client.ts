@@ -16,6 +16,8 @@ export interface StoreFeatures {
     readonly version: number;
     readonly staffCall: boolean;
     readonly chaseDish: boolean;
+    /** Owner decision 2: staff record how many guests when opening a table. */
+    readonly askPartySize: boolean;
     readonly changedAt: string | null;
   };
   /**
@@ -80,7 +82,9 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
     Object.values(modules).some((entry) => typeof entry !== "boolean") ||
     services === null ||
     typeof services !== "object" ||
-    Object.keys(services).sort().join(",") !== "changedAt,chaseDish,staffCall,version" ||
+    Object.keys(services).sort().join(",") !==
+      "askPartySize,changedAt,chaseDish,staffCall,version" ||
+    typeof services.askPartySize !== "boolean" ||
     !Number.isSafeInteger(services.version) ||
     Number(services.version) < 0 ||
     typeof services.staffCall !== "boolean" ||
@@ -102,6 +106,7 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
       version: Number(services.version),
       staffCall: services.staffCall,
       chaseDish: services.chaseDish,
+      askPartySize: services.askPartySize,
       changedAt: services.changedAt as string | null,
     }),
     tips: Object.freeze({
@@ -143,6 +148,7 @@ export function createStoreFeaturesClient(csrf: string, fetcher: typeof fetch = 
       expectedVersion: number;
       staffCall: boolean;
       chaseDish: boolean;
+      askPartySize: boolean;
     }) => send({ action: "ChangeServices", ...input }),
     changeTips: (input: {
       operationReference: string;

@@ -178,13 +178,16 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false,
         assert.equal(new URL(page.url()).hash, "");
         if (dining) {
           try {
+            // WP-2423 item 8 ⑤: a guest with the table's code asks for the code field first
+            // (scanning the table's own QR joins without one).
+            await page.getByRole("button", { name: "I have a table code", exact: true }).click();
             await page.getByLabel("Join code or invitation", { exact: true }).fill(joinProof);
           } catch {
             throw new Error("protected dining input unavailable");
           } finally {
             joinProof = null;
           }
-          await page.getByRole("button", { name: "Join table", exact: true }).click();
+          await page.getByRole("button", { name: "Join with this code", exact: true }).click();
           await page
             .getByRole("heading", { name: "You’ve joined this table", exact: true })
             .waitFor();
@@ -296,13 +299,14 @@ async function verifySharedTable(browser, origin, dining, cart) {
       await page.goto(origin);
       await page.getByRole("heading", { name: "Synthetic Store", exact: true }).waitFor();
       try {
+        await page.getByRole("button", { name: "I have a table code", exact: true }).click();
         await page.getByLabel("Join code or invitation", { exact: true }).fill(proof);
       } catch {
         throw new Error("protected shared Dining input unavailable");
       } finally {
         proof = null;
       }
-      await page.getByRole("button", { name: "Join table", exact: true }).click();
+      await page.getByRole("button", { name: "Join with this code", exact: true }).click();
       await page.getByRole("heading", { name: "You’ve joined this table", exact: true }).waitFor();
       await page.getByRole("button", { name: "Continue to menu", exact: true }).click();
       await page.getByRole("link", { name: "View Latte", exact: true }).click();

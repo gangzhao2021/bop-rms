@@ -6315,6 +6315,21 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已保存。从现在起客人和店员看到的是这些小费选项。",
   "Saved. No one is asked for a tip from now on.": "已保存。从现在起不再询问小费。",
   "Save tips": "保存小费设置",
+  "Ask how many guests when opening a table": "开台时问人数",
+  "The number of guests could not be read. Check the connection.": "读不到人数，请检查网络。",
+  "Someone else changed the number of guests. It has been read again: check it.":
+    "别人刚改过人数，已重新读取，请核对。",
+  "This table is closed, so the number of guests can't change.": "这张桌已经关闭，人数不能再改。",
+  "The number of guests wasn't saved. Check the connection and save again.":
+    "人数没有保存，请检查网络后再保存。",
+  "Guests at this table": "这桌的人数",
+  "Your access doesn't allow this. Ask a manager.": "你的权限不能做这件事，请找经理。",
+  "How many guests at table {table}?": "{table} 桌几位？",
+  "Number of guests": "人数",
+  "1 guest": "1 位",
+  "{count} guests": "{count} 位",
+  "Staff enter the number of guests when they open a table, and can change it later on the table.":
+    "店员开台时输入人数，之后可以在这张桌上修改。",
   "Guests will no longer be able to order pickup. The Pickup page stays until the pickup orders still waiting are handed over, then it is hidden.":
     "客人将不能再下自取单。还在等候的自取单交付完之前，取餐页会保留，之后隐藏。",
   "Tips are turned off for this store, so nothing was sent or charged. Send it again with no tip.":

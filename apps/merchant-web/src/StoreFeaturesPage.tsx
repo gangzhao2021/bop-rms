@@ -78,6 +78,11 @@ const rows: readonly { key: keyof Modules; name: () => string; detail: () => str
  * be turned back on. A change takes effect at once for every staff member; someone else's change
  * in between is shown and asked again.
  */
+const servicesOf = (value: StoreFeatures) => ({
+  staffCall: value.services.staffCall,
+  chaseDish: value.services.chaseDish,
+  askPartySize: value.services.askPartySize,
+});
 const tipsDraftOf = (value: StoreFeatures) => ({
   enabled: value.tips.enabled,
   tiers: value.tips.tierPercents.map(String) as [string, string, string],
@@ -112,7 +117,11 @@ export function StoreFeaturesPage({
   const [failed, setFailed] = useState<"Denied" | "Unavailable" | null>(null);
   const [draft, setDraft] = useState<Modules | null>(null);
   // WP-2423 item 8 ⑦ (Owner decision 4): the table switches, saved on their own.
-  const [services, setServices] = useState<{ staffCall: boolean; chaseDish: boolean } | null>(null);
+  const [services, setServices] = useState<{
+    staffCall: boolean;
+    chaseDish: boolean;
+    askPartySize: boolean;
+  } | null>(null);
   // WP-2423 item 8 ⑦ (Owner decision 11): tips on or off, and the three percentages as typed.
   const [tips, setTips] = useState<{ enabled: boolean; tiers: [string, string, string] } | null>(
     null,
@@ -132,7 +141,7 @@ export function StoreFeaturesPage({
         if (!active) return;
         setView(value);
         setDraft(modulesOf(value));
-        setServices({ staffCall: value.services.staffCall, chaseDish: value.services.chaseDish });
+        setServices(servicesOf(value));
         setTips(tipsDraftOf(value));
         setFailed(null);
       })
@@ -269,7 +278,7 @@ export function StoreFeaturesPage({
       operation.current = null;
       setView(next);
       setDraft(modulesOf(next));
-      setServices({ staffCall: next.services.staffCall, chaseDish: next.services.chaseDish });
+      setServices(servicesOf(next));
       setTips(tipsDraftOf(next));
       setMessage({ tone: "status", text: done });
     } catch (error) {
@@ -393,6 +402,24 @@ export function StoreFeaturesPage({
               </span>
             </span>
           </label>
+          <label className="store-features__row">
+            <input
+              type="checkbox"
+              checked={services.askPartySize}
+              onChange={(event) => {
+                operation.current = null;
+                setServices({ ...services, askPartySize: event.target.checked });
+              }}
+            />
+            <span>
+              <strong>{t("Ask how many guests when opening a table")}</strong>
+              <span className="store-features__detail">
+                {t(
+                  "Staff enter the number of guests when they open a table, and can change it later on the table.",
+                )}
+              </span>
+            </span>
+          </label>
         </fieldset>
         <div className="store-features__actions">
           <button
@@ -401,7 +428,8 @@ export function StoreFeaturesPage({
             disabled={
               busy ||
               (services.staffCall === view.services.staffCall &&
-                services.chaseDish === view.services.chaseDish)
+                services.chaseDish === view.services.chaseDish &&
+                services.askPartySize === view.services.askPartySize)
             }
             onClick={() =>
               void run(

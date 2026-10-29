@@ -8,6 +8,7 @@ import type { Response, Router } from "express";
 import { DiningTableCheckoutError } from "./merchant-dining-table-checkout.js";
 import { MerchantDiningHeldRoundError } from "./merchant-dining-held-round.js";
 import { MerchantDiningChaseError } from "./merchant-dining-chase.js";
+import { MerchantDiningPartySizeError } from "./merchant-dining-party-size.js";
 
 /** WP-2423: the order progress reply (exported so acceptance reads the wire form). */
 export function orderProgressResponse(
@@ -192,6 +193,46 @@ export function installMerchantDiningRoutes(
                 ? 409
                 : 503;
         response.status(status).json({ error: error.code.toLowerCase() });
+      });
+  });
+  // WP-2423 item 8 ⑦ (decision 2): how many guests sit at the tables shown, and recording it.
+  router.post("/dining/party-size", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningPartySize) {
+      response.status(503).json({ error: "dining_party_size_unavailable" });
+      return;
+    }
+    void options
+      .diningPartySize({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        if (
+          !(error instanceof MerchantDiningPartySizeError) ||
+          error.code === "DINING_PARTY_SIZE_PERMISSION_DENIED"
+        ) {
+          denied(response);
+          return;
+        }
+        const status =
+          error.code === "DINING_PARTY_SIZE_INPUT_INVALID"
+            ? 400
+            : error.code === "DINING_PARTY_SIZE_UNAVAILABLE"
+              ? 503
+              : 409;
+        response
+          .status(status)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: error.code.replace(/^DINING_/u, "").toLowerCase() });
       });
   });
   router.post("/dining/round-hold-setting", sameOriginMutation(options), (request, response) => {

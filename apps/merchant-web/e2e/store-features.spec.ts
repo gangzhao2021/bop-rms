@@ -59,6 +59,7 @@ test("@production the owner applies the full-service setup, turns a module back 
       version: 0,
       staffCall: false,
       chaseDish: false,
+      askPartySize: false,
       changedAt: null as string | null,
     },
     tips: {
@@ -98,6 +99,7 @@ test("@production the owner applies the full-service setup, turns a module back 
           version: current.services.version + 1,
           staffCall: body.staffCall === true,
           chaseDish: body.chaseDish === true,
+          askPartySize: body.askPartySize === true,
           changedAt: "2026-10-29T15:10:00.000Z",
         },
       };
@@ -272,6 +274,21 @@ test("@production the owner applies the full-service setup, turns a module back 
     chaseDish: true,
   });
   await expect(page.getByRole("button", { name: "Save table settings" })).toBeDisabled();
+  // WP-2423 item 8 ⑦ (decision 2): not asked when opening a table until the owner turns it on.
+  const askGuests = page.getByRole("checkbox", {
+    name: /Ask how many guests when opening a table/u,
+  });
+  await expect(askGuests).not.toBeChecked();
+  await askGuests.check();
+  await page.getByRole("button", { name: "Save table settings" }).click();
+  expect(commands.at(-1)).toMatchObject({
+    action: "ChangeServices",
+    expectedVersion: 1,
+    staffCall: true,
+    chaseDish: true,
+    askPartySize: true,
+  });
+  await expect(askGuests).toBeChecked();
 
   // WP-2423 item 8 ⑦ (decision 11): tips 10 / 15 / 18 % at first; the owner sets 12 / 18 / 20.
   const lowest = page.getByRole("textbox", { name: "Lowest tip percentage" });

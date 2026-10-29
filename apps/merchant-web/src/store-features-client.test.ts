@@ -10,6 +10,7 @@ const view = {
     version: 1,
     staffCall: true,
     chaseDish: false,
+    askPartySize: false,
     changedAt: "2026-10-29T15:06:00.000Z",
   },
   tips: { version: 0, enabled: true, tierPercents: [10, 15, 18], changedAt: null },

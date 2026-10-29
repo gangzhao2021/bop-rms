@@ -5,7 +5,12 @@ import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
 import { loadOutboxEnvelope } from "../../bop/eventing/src/index.ts";
-import { changeDiningRoundHoldSetting, parseDiningSession } from "../../rms/dining/src/index.ts";
+import {
+  changeDiningRoundHoldSetting,
+  changeDiningServiceSetting,
+  parseDiningSession,
+} from "../../rms/dining/src/index.ts";
+import { createMerchantDiningPartySize } from "../../../apps/api/src/merchant-dining-party-size.ts";
 import {
   createOrderNumberAllocation,
   createPostgresOrderKitchenSourceStore,
@@ -1721,7 +1726,79 @@ async function journey(ending) {
          * nothing: no payment is taken, the Order is settled at zero and the table closes as usual,
          * and the comped dishes are still in the day's sales.
          */
+        /**
+         * WP-2423 item 8 ⑦ (decision 2): how many guests sit at the table, as the merchant API
+         * composes it. Not asked until the owner turns it on; recorded against the version seen
+         * (a stale one is refused, the same operation returns); the record is append-only.
+         */
+        const partySize = (who, command) =>
+          createMerchantDiningPartySize({
+            persistence: persistenceOf(who),
+            authentication: who.authentication,
+            now,
+          })({ ...as(who), command });
+        async function partySizeWhileOpen() {
+          const read = () =>
+            partySize(server, { action: "Read", diningSessionReferences: [sessionReference] });
+          assert.deepEqual(await read(), { askPartySize: false, partySizes: [] });
+          await transactions().run((tx) =>
+            changeDiningServiceSetting(tx, ownerScope, {
+              operationReference: fresh(),
+              expectedVersion: 0,
+              staffCall: false,
+              chaseDish: false,
+              askPartySize: true,
+              actorReference: id(0x701),
+              observedAt: now(),
+            }),
+          );
+          const first = fresh();
+          const record = (operationReference, expectedVersion, size) =>
+            partySize(server, {
+              action: "Record",
+              diningSessionReference: sessionReference,
+              operationReference,
+              expectedVersion,
+              partySize: size,
+            });
+          assert.deepEqual(await record(first, 0, 4), {
+            diningSessionReference: sessionReference,
+            partySize: 4,
+            version: 1,
+          });
+          // The same operation again returns it; the same with another number is a conflict.
+          assert.equal((await record(first, 0, 4)).version, 1);
+          await assert.rejects(record(first, 0, 5), { code: "DINING_PARTY_SIZE_CHANGED" });
+          // Another server saw no party size yet: refused, read again.
+          await assert.rejects(record(fresh(), 0, 3), { code: "DINING_PARTY_SIZE_CHANGED" });
+          // A fifth guest arrives.
+          assert.equal((await record(fresh(), 1, 5)).version, 2);
+          await assert.rejects(record(fresh(), 2, 100), {
+            code: "DINING_PARTY_SIZE_INPUT_INVALID",
+          });
+          assert.deepEqual(await read(), {
+            askPartySize: true,
+            partySizes: [{ diningSessionReference: sessionReference, partySize: 5, version: 2 }],
+          });
+          assert.deepEqual(
+            await rows(
+              "SELECT version,party_size,actor_id::text AS actor FROM rms_dining.dining_session_party_size WHERE session_id=$1 ORDER BY version",
+              [sessionReference],
+            ),
+            [
+              { version: 1, party_size: 4, actor: id(0x700) },
+              { version: 2, party_size: 5, actor: id(0x700) },
+            ],
+          );
+          await assert.rejects(
+            admin.query("UPDATE rms_dining.dining_session_party_size SET party_size=2"),
+            /append-only party size/u,
+          );
+          return record;
+        }
+
         async function compedWholeEnding() {
+          const recordPartySize = await partySizeWhileOpen();
           await cookAndServeRound1();
           // Closing summary: round 2's dish, taken off the bill before payment, is listed (never sold).
           assert.deepEqual((await tonightFacts()).cancelled.removedBeforePayment, {
@@ -1779,6 +1856,26 @@ async function journey(ending) {
           });
           assert.equal(closed.status, "Committed");
           assert.equal((await closing(server, "Finalize")).phase, "Closed");
+          // A closed table takes no new party size: the command says so and the database refuses.
+          await assert.rejects(recordPartySize(fresh(), 2, 6), {
+            code: "DINING_PARTY_SIZE_TABLE_CLOSED",
+          });
+          await assert.rejects(
+            transactions({ guc: true }).run((tx) =>
+              tx.query(
+                "INSERT INTO rms_dining.dining_session_party_size (tenant_id,brand_id,store_id,session_id,version,operation_id,party_size,actor_id,recorded_at) VALUES ($1,$2,$3,$4,3,$5,6,$6,date_trunc('milliseconds',now()))",
+                [
+                  tenant,
+                  ownerScope.brandReference,
+                  ownerScope.storeReference,
+                  sessionReference,
+                  fresh(),
+                  id(0x700),
+                ],
+              ),
+            ),
+            /party size only for an open table/u,
+          );
           const [table] = await rows(
             "SELECT t.table_snapshot->>'blockReasonCode' AS reason FROM rms_dining.dining_table t JOIN rms_dining.dining_session s ON s.table_id=t.table_id WHERE s.session_id=$1",
             [sessionReference],
@@ -1852,7 +1949,11 @@ async function journey(ending) {
             scope: ownerScope,
             providerAccountReference: provider,
             environment: "Test",
-            provider: { createIntent: untouched, retrieveIntent: untouched, cancelIntent: untouched },
+            provider: {
+              createIntent: untouched,
+              retrieveIntent: untouched,
+              cancelIntent: untouched,
+            },
             transactions: transactions(),
             now,
             nextReference: fresh,
@@ -1886,7 +1987,10 @@ async function journey(ending) {
             });
           const tipStore = createPostgresPaymentTipSelectionStore(
             transactions(),
-            { brandReference: ownerScope.brandReference, storeReference: ownerScope.storeReference },
+            {
+              brandReference: ownerScope.brandReference,
+              storeReference: ownerScope.storeReference,
+            },
             { now },
           );
           const tipAudit = (record) => ({

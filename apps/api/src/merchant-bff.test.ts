@@ -2037,7 +2037,13 @@ it("WP-2423 item 8 ⑦: reads and changes the Store's modules, and says when ano
     templateCode: "FullService" as const,
     modules: { counterOrder: false, pickup: true, inventory: false },
     changedAt: serverTime,
-    services: { version: 0, staffCall: false, chaseDish: false, changedAt: null },
+    services: {
+      version: 0,
+      staffCall: false,
+      chaseDish: false,
+      askPartySize: false,
+      changedAt: null,
+    },
     tips: { version: 0, enabled: true, tierPercents: [10, 15, 18], changedAt: null },
     canChange: true,
   };
