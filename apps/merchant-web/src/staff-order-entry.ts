@@ -12,6 +12,8 @@ export class CounterOrderClientError extends Error {
     readonly code:
       | "PermissionDenied"
       | "StoreNotTakingOrders"
+      /** WP-2423 item 8 ⑦: the Store turned counter ordering off (Store features). */
+      | "CounterOrderingOff"
       | "TableUnavailable"
       | "TableHasNoQr"
       | "TableCartHasItems"
@@ -514,6 +516,8 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       if (code === "counter_order_conflict") throw new CounterOrderClientError("Conflict");
       if (code === "counter_order_no_pickup_times")
         throw new CounterOrderClientError("NoPickupTimes");
+      if (code === "counter_ordering_turned_off")
+        throw new CounterOrderClientError("CounterOrderingOff");
       // WP-2423: a definite answer from the server that it could not place the order, as opposed
       // to no answer at all (a gateway or network failure keeps OutcomeUnknown).
       if (code === "counter_order_unavailable") throw new CounterOrderClientError("SystemProblem");

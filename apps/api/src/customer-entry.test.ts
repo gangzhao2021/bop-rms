@@ -405,6 +405,23 @@ describe("WP-1004 Customer-entry contract", () => {
     expect((await post(await listen(customerEntry(port)))).status).toBe(503);
   });
 
+  it("WP-2423 item 8 ⑦ 1b: says the Store takes dine-in orders only, and sets no cookie", async () => {
+    const port = new MutablePort();
+    port.result = { status: "ServiceNotOffered", storeDisplayName: "Synthetic Store" };
+    const response = await post(await listen(customerEntry(port)));
+    expect(response.status).toBe(409);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      code: "entry_service_not_offered",
+      messageKey: "customer.entry.pickup_not_offered",
+      recovery: { action: "AskStaff", storeSelection: "Hidden" },
+      store: { storeDisplayName: "Synthetic Store" },
+    });
+    port.result = { status: "ServiceNotOffered", storeDisplayName: "<script>" };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+  });
+
   it("WP-2423 Q11: tells a guest with a replaced or turned-off table code to ask staff, with no cookie", async () => {
     const port = new MutablePort();
     for (const [reason, messageKey] of [

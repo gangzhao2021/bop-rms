@@ -61,6 +61,15 @@ export interface CustomerEntryNotAccepting {
   readonly localDate: string | null;
 }
 
+/**
+ * WP-2423 item 8 ⑦ 1b: a pickup code at a Store that turned pickup off (it takes dine-in orders
+ * only); no Session is issued.
+ */
+export interface CustomerEntryServiceNotOffered {
+  readonly status: "ServiceNotOffered";
+  readonly storeDisplayName: string;
+}
+
 /** WP-2423 Q11: a genuine table code that staff replaced or turned off; no Session is issued. */
 export interface CustomerEntryQrRetired {
   readonly status: "QrRetired";
@@ -70,6 +79,7 @@ export interface CustomerEntryQrRetired {
 export type CustomerEntryPortResult =
   | CustomerEntryEstablished
   | CustomerEntryNotAccepting
+  | CustomerEntryServiceNotOffered
   | CustomerEntryQrRetired
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" };
@@ -343,6 +353,7 @@ function parsePortResult(
   | { readonly status: "EntryUnavailable" }
   | CustomerEntryQrRetired
   | CustomerEntryNotAccepting
+  | CustomerEntryServiceNotOffered
   | CustomerEntryEstablished {
   const statusRecord =
     typeof value === "object" && value !== null
@@ -364,6 +375,15 @@ function parsePortResult(
     if (raw.reason !== "Replaced" && raw.reason !== "TurnedOff")
       throw new TypeError("invalid retired result");
     return Object.freeze({ status: "QrRetired", reason: raw.reason });
+  }
+  if (status === "ServiceNotOffered") {
+    const raw = closedRecord(value, ["status", "storeDisplayName"]);
+    if (
+      typeof raw.storeDisplayName !== "string" ||
+      !/^[^\p{Cc}\p{Cf}<>]{1,120}$/u.test(raw.storeDisplayName)
+    )
+      throw new TypeError("invalid service-not-offered result");
+    return Object.freeze({ status: "ServiceNotOffered", storeDisplayName: raw.storeDisplayName });
   }
   if (status === "NotAccepting") {
     const raw = closedRecord(value, [
@@ -552,6 +572,17 @@ export class CustomerEntryHandler {
                 ? "customer.entry.qr_replaced"
                 : "customer.entry.qr_turned_off",
             recovery: { action: "AskStaff", storeSelection: "Hidden" },
+          });
+          return;
+        }
+        // WP-2423 item 8 ⑦ 1b: this Store takes no pickup orders (dine-in only).
+        if (result.status === "ServiceNotOffered") {
+          response.status(409).json({
+            schemaVersion: 1,
+            code: "entry_service_not_offered",
+            messageKey: "customer.entry.pickup_not_offered",
+            recovery: { action: "AskStaff", storeSelection: "Hidden" },
+            store: { storeDisplayName: result.storeDisplayName },
           });
           return;
         }

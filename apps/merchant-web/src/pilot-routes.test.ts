@@ -58,7 +58,22 @@ describe("merchant route classification", () => {
     expect(pilotHiddenRedirect("/app/commerce/tax", ["HOME-OVERVIEW", "TAX-CONFIG"])).toBeNull();
     // Without a session the page shows its own sign-in state.
     expect(pilotHiddenRedirect("/app/commerce/tax", null)).toBeNull();
-    expect(pilotHiddenRedirect("/app/organization/stores/x/capabilities", null)).toBe("/app");
+  });
+
+  it("WP-2423 item 8 ⑦: serves a module's screens only while the Store uses it", () => {
+    const listed = ["HOME-OVERVIEW", "STORE-CAPABILITY", "OPS-ORDER-ENTRY", "INV-ITEM-LIST"];
+    expect(pilotHiddenRedirect("/app/organization/stores/x/capabilities", listed)).toBeNull();
+    expect(pilotHiddenRedirect("/app/organization/stores/x/capabilities", ["HOME-OVERVIEW"])).toBe(
+      "/app",
+    );
+    expect(pilotHiddenRedirect("/operations/order-entry", listed)).toBeNull();
+    // Counter ordering turned off: the address goes to Tables.
+    expect(pilotHiddenRedirect("/operations/order-entry", ["HOME-OVERVIEW"])).toBe(
+      "/operations/dining",
+    );
+    expect(pilotHiddenRedirect("/app/supply/items/x", listed)).toBeNull();
+    expect(pilotHiddenRedirect("/operations/receiving", listed)).toBe("/app");
+    expect(pilotHiddenRedirect("/app/commerce/recipes", ["HOME-OVERVIEW"])).toBe("/app");
   });
 
   it("serves the Brand and Platform consoles only where the session lists them", () => {

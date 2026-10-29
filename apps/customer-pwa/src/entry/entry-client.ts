@@ -230,6 +230,27 @@ function parseError(
     (value as { code?: unknown }).code === "entry_not_accepting"
   )
     return parseNotAccepting(value);
+  // WP-2423 item 8 ⑦ 1b: the Store takes dine-in orders only.
+  if (
+    status === 409 &&
+    value !== null &&
+    typeof value === "object" &&
+    (value as { code?: unknown }).code === "entry_service_not_offered"
+  ) {
+    const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery", "store"]);
+    const recovery = exact(raw.recovery, ["action", "storeSelection"]);
+    const store = exact(raw.store, ["storeDisplayName"]);
+    if (
+      raw.schemaVersion !== 1 ||
+      raw.messageKey !== "customer.entry.pickup_not_offered" ||
+      recovery.action !== "AskStaff" ||
+      recovery.storeSelection !== "Hidden" ||
+      typeof store.storeDisplayName !== "string" ||
+      !/^[^\p{Cc}\p{Cf}<>]{1,120}$/u.test(store.storeDisplayName)
+    )
+      return Object.freeze({ kind: "ServiceUnavailable" });
+    return Object.freeze({ kind: "PickupNotOffered", storeDisplayName: store.storeDisplayName });
+  }
   const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery"]);
   const recovery = exact(raw.recovery, ["action", "storeSelection"]);
   if (raw.schemaVersion !== 1 || recovery.storeSelection !== "Hidden")

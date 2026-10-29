@@ -410,3 +410,43 @@ it.each(["closed", "paused", "mode", "scope", "time", "missing"])(
     expect(f.create).not.toHaveBeenCalled();
   },
 );
+
+it("WP-2423 item 8 ⑦ 1b: tells a guest at a pickup code that the Store takes dine-in only", async () => {
+  const pickupFixture = () => {
+    const f = fixture();
+    f.payload.channel = f.context.channel = "Pickup";
+    f.payload.publicTableReference =
+      f.context.publicTableReference =
+      f.context.tableReference =
+        null;
+    f.context.tableLifecycle = f.context.assignmentState = null;
+    return f;
+  };
+  const establish = (f: ReturnType<typeof fixture>, servicesTurnedOff: readonly "Pickup"[]) =>
+    createCustomerEntryComposition({
+      qr: f.options.qr,
+      profile: f.options.profile,
+      admission: f.options.admission,
+      session: f.options.session,
+      operatingReader: {
+        readCurrent: async () => ({
+          brandReference: id(1),
+          storeReference: id(2),
+          evaluatedAt: now,
+          state: "Open" as const,
+          availableServiceModes: servicesTurnedOff.length === 0 ? ["DineIn", "Pickup"] : ["DineIn"],
+          servicesTurnedOff,
+        }),
+      },
+    }).establish(f.input());
+  const off = pickupFixture();
+  expect(await establish(off, ["Pickup"])).toEqual({
+    status: "ServiceNotOffered",
+    storeDisplayName: expect.any(String),
+  });
+  expect(off.admission).not.toHaveBeenCalled();
+  expect(off.create).not.toHaveBeenCalled();
+  expect((await establish(pickupFixture(), [])).status).toBe("Established");
+  // A table code at the same Store still seats the guest.
+  expect((await establish(fixture(), ["Pickup"])).status).toBe("Established");
+});

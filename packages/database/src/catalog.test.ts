@@ -759,6 +759,7 @@ describe("migration catalog", () => {
       "2000_115_create_bundle_single_store_combo",
       "2000_116_create_kitchen_combo_part_done",
       "2000_117_create_dining_combo_part_served",
+      "2000_118_create_store_feature_setting",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

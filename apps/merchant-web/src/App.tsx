@@ -107,6 +107,7 @@ const TaxClassificationsPage = lazyPage(
   () => import("./TaxClassificationsPage.js"),
   "TaxClassificationsPage",
 );
+const StoreFeaturesPage = lazyPage(() => import("./StoreFeaturesPage.js"), "StoreFeaturesPage");
 const CurrentStoreCapabilityPage = lazyPage(
   () => import("./CurrentStoreCapabilityPage.js"),
   "CurrentStoreCapabilityPage",
@@ -838,7 +839,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           path="/app/organization/stores/:id/capabilities"
           element={
             <SessionPending pending={sessionPending}>
-              {state.kind === "Ready" && !state.switching ? (
+              {state.kind === "Ready" &&
+              !state.switching &&
+              state.workspace.navigation.some((item) => item.screenId === "STORE-CAPABILITY") ? (
+                // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the modules this Store uses.
+                <StoreFeaturesPage
+                  key={state.workspace.selectedScope.storeReference + state.csrf}
+                  csrf={state.csrf}
+                />
+              ) : state.kind === "Ready" && !state.switching ? (
                 <CurrentStoreCapabilityPage
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   scope={{ storeReference: state.workspace.selectedScope.storeReference }}

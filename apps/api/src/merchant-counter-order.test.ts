@@ -11,6 +11,11 @@ const state = vi.hoisted(() => ({
   guards: [] as (() => Promise<boolean>)[],
   during: [] as boolean[],
   rolledBack: 0,
+  // WP-2423 item 8 ⑦: whether the Store uses counter ordering (Store features).
+  counterOrder: true,
+}));
+vi.mock("./merchant-store-features.js", () => ({
+  readStoreFeatures: async () => ({ counterOrder: state.counterOrder }),
 }));
 vi.mock("./merchant-store-scope.js", () => ({
   createMerchantStoreScope: () => async () => ({
@@ -163,6 +168,19 @@ describe("counter order command — WP-2423 Q7", () => {
     state.guards = [];
     state.during = [];
     state.rolledBack = 0;
+    state.counterOrder = true;
+  });
+
+  it("WP-2423 item 8 ⑦: takes no new order while counter ordering is turned off; a retry still returns its order", async () => {
+    const { pipeline, send } = setup();
+    expect(await send()).toMatchObject({ status: "Placed" });
+    state.counterOrder = false;
+    // The same send again returns the order it placed.
+    expect(await send()).toMatchObject({ status: "AlreadyPlaced", orderReference: id(20) });
+    await expect(send({ operationReference: id(31) })).rejects.toMatchObject({
+      code: "COUNTER_ORDER_TURNED_OFF",
+    });
+    expect(pipeline.open).toHaveBeenCalledTimes(1);
   });
 
   it("saves the pickup checkout details before checkout, as every pickup Order needs", async () => {

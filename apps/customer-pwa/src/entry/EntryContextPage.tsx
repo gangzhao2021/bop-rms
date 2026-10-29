@@ -426,6 +426,20 @@ function EntryState({
       </div>
     );
 
+  if (state.kind === "PickupNotOffered")
+    return (
+      <div className="entry-state entry-state--warning" role="alert">
+        <StateHeading headingRef={headingRef}>
+          {t("{store} takes dine-in orders only", { store: state.storeDisplayName })}
+        </StateHeading>
+        <p>
+          {t(
+            "Pickup orders aren’t taken here. To eat in, scan the QR code on your table or ask a staff member for a table.",
+          )}
+        </p>
+      </div>
+    );
+
   if (state.kind === "TableCodeRetired")
     return (
       <div className="entry-state entry-state--warning" role="alert">

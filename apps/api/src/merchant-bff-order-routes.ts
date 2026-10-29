@@ -339,6 +339,7 @@ export function installMerchantOrderRoutes(
             COUNTER_ORDER_IN_PROGRESS: [409, "counter_order_in_progress"],
             COUNTER_ORDER_IDEMPOTENCY_CONFLICT: [409, "counter_order_conflict"],
             COUNTER_ORDER_NO_PICKUP_TIMES: [409, "counter_order_no_pickup_times"],
+            COUNTER_ORDER_TURNED_OFF: [409, "counter_ordering_turned_off"],
             COUNTER_ORDER_UNAVAILABLE: [503, "counter_order_unavailable"],
           } as const
         )[error.code];

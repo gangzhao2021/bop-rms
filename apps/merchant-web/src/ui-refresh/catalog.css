@@ -503,3 +503,84 @@
   color: var(--bop-color-text-muted);
   font-size: 14px;
 }
+
+/* WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the Store features page (white, row hairlines, no boxes). */
+.store-features {
+  max-width: 720px;
+}
+.store-features__intro,
+.store-features__detail,
+.store-features__changed {
+  color: var(--bop-color-text-muted);
+}
+.store-features__setup {
+  padding: var(--bop-space-4) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.store-features__setup h2 {
+  margin: 0 0 var(--bop-space-1);
+  font-size: 20px;
+}
+.store-features__setup button,
+.store-features__save {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+}
+.store-features__setup button:disabled,
+.store-features__save:disabled {
+  opacity: 0.5;
+}
+.store-features__modules {
+  margin: var(--bop-space-4) 0 0;
+  padding: 0;
+  border: 0;
+}
+.store-features__modules legend {
+  padding: 0;
+  font-weight: 600;
+}
+.store-features__row {
+  display: flex;
+  gap: var(--bop-space-3);
+  align-items: flex-start;
+  padding: var(--bop-space-3) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.store-features__row input {
+  width: 22px;
+  height: 22px;
+  margin: 2px 0 0;
+  flex: none;
+}
+.store-features__row > span {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bop-space-1);
+}
+.store-features__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-3);
+  align-items: center;
+  margin-top: var(--bop-space-4);
+}
+.store-features__confirm {
+  margin: var(--bop-space-3) 0;
+  padding: var(--bop-space-2) 0 var(--bop-space-2) var(--bop-space-3);
+  border-left: 3px solid var(--bop-color-accent);
+}
+.store-features__confirm .store-features__actions {
+  margin-top: var(--bop-space-2);
+}
+.store-features__confirm button:not(.store-features__save) {
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+}

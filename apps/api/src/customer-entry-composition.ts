@@ -52,6 +52,8 @@ export interface CustomerEntryOperatingReader {
         localDate?: string;
         /** WP-2423 item 8 ③ (decision 16): holidays, last orders and the next opening. */
         upcomingHours?: StoreUpcomingHours;
+        /** WP-2423 item 8 ⑦ 1b: services the Store turned off (never offered, whatever the hour). */
+        servicesTurnedOff?: readonly "Pickup"[];
       })
     | null
   >;
@@ -135,6 +137,7 @@ export function createCustomerEntryComposition(
         }[] = [];
         let upcoming: StoreUpcomingHours | null = null;
         let localDate: string | null = null;
+        let turnedOff: readonly string[] = [];
         if ("operatingReader" in options) {
           const current = await options.operatingReader.readCurrent({
             ...scope,
@@ -147,6 +150,7 @@ export function createCustomerEntryComposition(
           todayHours = current.todayHours ?? [];
           upcoming = current.upcomingHours ?? null;
           localDate = current.localDate ?? null;
+          turnedOff = current.servicesTurnedOff ?? [];
         } else {
           const operating = await createStoreOperatingStatusService({
             ...options.operating,
@@ -160,6 +164,12 @@ export function createCustomerEntryComposition(
           if (operating.status !== "Available") return unavailable;
           operatingStatus = operating.operatingStatus;
         }
+        // WP-2423 item 8 ⑦ 1b: a pickup code at a Store that turned pickup off.
+        if (turnedOff.includes(qr.context.channel))
+          return Object.freeze({
+            status: "ServiceNotOffered" as const,
+            storeDisplayName: profile.profile.storeDisplayName,
+          });
         if (
           operatingStatus.state !== "Open" ||
           !operatingStatus.availableServiceModes.includes(qr.context.channel)

@@ -28,11 +28,51 @@ import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { MerchantStoreReceiptProfileError } from "./merchant-store-receipt-profile.js";
 import { MerchantStorePublicProfileError } from "./merchant-store-public-profile.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
+import { MerchantStoreFeaturesError } from "./merchant-store-features.js";
 
 export function installMerchantStoreSetupRoutes(
   router: Router,
   options: MerchantBffRouterOptions,
 ): void {
+  // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: read or change the modules the Store uses.
+  router.post("/store/features", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.storeFeatures) {
+      response.status(503).json({ error: "store_features_unavailable" });
+      return;
+    }
+    void options
+      .storeFeatures({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        if (!(error instanceof MerchantStoreFeaturesError)) {
+          denied(response);
+          return;
+        }
+        const status =
+          error.code === "STORE_FEATURES_INPUT_INVALID"
+            ? 400
+            : error.code === "STORE_FEATURES_PERMISSION_DENIED"
+              ? 403
+              : error.code === "STORE_FEATURES_CHANGED"
+                ? 409
+                : 503;
+        response
+          .status(status)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: error.code.toLowerCase() });
+      });
+  });
   const storeSetupFailure = (response: express.Response, error: unknown): void => {
     if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof StoreSetupOperationError ? error.code : undefined;

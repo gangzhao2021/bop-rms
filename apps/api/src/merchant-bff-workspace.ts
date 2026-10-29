@@ -126,6 +126,23 @@ function navigationItem(value: unknown, selectedStoreReference: string): Merchan
       permission: "store.service.read",
     });
   }
+  // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the selected Store's features (the modules it uses).
+  if (input.screenId === "STORE-CAPABILITY") {
+    const href = "/app/organization/stores/" + selectedStoreReference + "/capabilities";
+    if (
+      typeof input.label !== "string" ||
+      !safeLabel.test(input.label) ||
+      input.href !== href ||
+      input.permission !== "organization.manage"
+    )
+      throw new Error("MERCHANT_WORKSPACE_DENIED");
+    return Object.freeze({
+      screenId: "STORE-CAPABILITY",
+      label: input.label,
+      href,
+      permission: "organization.manage",
+    });
+  }
   if (input.screenId === "STORE-SETUP") {
     const href = "/app/organization/stores/" + selectedStoreReference + "/setup";
     if (

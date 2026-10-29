@@ -17,6 +17,7 @@ import { MerchantOrderAcceptanceError } from "./merchant-order-acceptance-comman
 import { StaffOrderCancellationError } from "./merchant-order-staff-cancellation.js";
 import { StaffItemCancellationError } from "./merchant-order-item-staff-cancellation.js";
 import { CounterOrderError } from "./merchant-counter-order.js";
+import { MerchantStoreFeaturesError } from "./merchant-store-features.js";
 import { StaffDiningRoundError } from "./merchant-staff-dining-round.js";
 import { CounterMenuError } from "./merchant-counter-menu.js";
 import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.js";
@@ -2026,6 +2027,70 @@ it("protects Pickup queue and exposes only typed public failures", async () => {
       })
     ).status,
   ).toBe(503);
+});
+
+it("WP-2423 item 8 ⑦: reads and changes the Store's modules, and says when another change came first", async () => {
+  type Command = NonNullable<MerchantBffRouterOptions["storeFeatures"]>;
+  const view = {
+    version: 1,
+    templateCode: "FullService" as const,
+    modules: { counterOrder: false, pickup: true, inventory: false },
+    changedAt: serverTime,
+    canChange: true,
+  };
+  const command = vi.fn<Command>().mockResolvedValue(view);
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      storeFeatures: command,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const submit = (body: unknown, extra: Record<string, string> = {}) =>
+    request(root, "/merchant/store/features", {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: {
+        ...safeHeaders,
+        Cookie: "__Host-bop-merchant=" + sessionCookie,
+        "X-BOP-CSRF": csrf,
+        "Content-Type": "application/json",
+        ...extra,
+      },
+    });
+  expect((await submit({ action: "Read" }, { Origin: "https://foreign.invalid" })).status).toBe(
+    403,
+  );
+  expect(command).not.toHaveBeenCalled();
+  const read = await submit({ action: "Read" });
+  expect(read.status).toBe(200);
+  expect(read.headers.get("cache-control")).toBe("no-store");
+  expect(await read.json()).toEqual(view);
+  expect(command).toHaveBeenCalledWith({ sessionCookie, csrf, command: { action: "Read" } });
+  for (const [code, status, error] of [
+    ["STORE_FEATURES_CHANGED", 409, "store_features_changed"],
+    ["STORE_FEATURES_PERMISSION_DENIED", 403, "store_features_permission_denied"],
+    ["STORE_FEATURES_INPUT_INVALID", 400, "store_features_input_invalid"],
+    ["STORE_FEATURES_UNAVAILABLE", 503, "store_features_unavailable"],
+  ] as const) {
+    command.mockRejectedValueOnce(new MerchantStoreFeaturesError(code));
+    const refused = await submit({ action: "Read" });
+    expect(refused.status).toBe(status);
+    expect(await refused.json()).toEqual({ error });
+  }
+  command.mockRejectedValueOnce(new Error("private failure"));
+  const denied = await submit({ action: "Read" });
+  expect(denied.status).toBe(403);
+  expect(await denied.json()).toEqual({ error: "request_denied" });
 });
 
 it("protects Dining progress transport and returns only operational fields", async () => {
