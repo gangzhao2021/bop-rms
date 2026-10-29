@@ -7,6 +7,7 @@ import {
 } from "./customer-entry-composition.js";
 import type {
   CustomerEntryNotAccepting,
+  CustomerEntryServiceNotOffered,
   CustomerEntryPort,
   CustomerEntryPortInput,
 } from "./customer-entry.js";
@@ -55,7 +56,9 @@ export function createPersistentCustomerEntryComposition(
   return Object.freeze({
     async establish(input: CustomerEntryPortInput) {
       // WP-2423 Q4: a closed or paused Store is still rolled back, but its answer is kept.
-      let notAccepting: CustomerEntryNotAccepting | null = null;
+      // WP-2423 item 8 ⑦ 1b (v15 2026-10-29: a pickup code at a dine-in-only Store read as an
+      // unusable link): the Store takes no pickup orders, kept the same way.
+      let notAccepting: CustomerEntryNotAccepting | CustomerEntryServiceNotOffered | null = null;
       let retired: RetiredTableQrError | null = null;
       try {
         const requestedAt = parseCanonicalInstant(input.requestedAt);
@@ -90,7 +93,8 @@ export function createPersistentCustomerEntryComposition(
               store: createPostgresGuestSessionEntryStore({ run: async (work) => work(tx) }, scope),
             },
           }).establish(input);
-          if (result.status === "NotAccepting") notAccepting = result;
+          if (result.status === "NotAccepting" || result.status === "ServiceNotOffered")
+            notAccepting = result;
           if (result.status !== "Established") throw new Error("CUSTOMER_ENTRY_ROLLBACK");
           return result;
         });
