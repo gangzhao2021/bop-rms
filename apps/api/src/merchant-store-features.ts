@@ -6,6 +6,12 @@ import {
   type DiningServiceSetting,
 } from "@rms/dining";
 import {
+  changeStoreTipSetting,
+  loadStoreTipSetting,
+  StoreTipSettingConflictError,
+  type StoreTipSetting,
+} from "@rms/payment";
+import {
   changeStoreFeatureSetting,
   loadStoreFeatureSetting,
   parseStoreAdministrationReference,
@@ -95,6 +101,13 @@ export interface StoreFeaturesView {
     readonly chaseDish: boolean;
     readonly changedAt: string | null;
   };
+  /** Owner decision 11: the three tip percentages offered, or tips off (Payment's own setting). */
+  readonly tips: {
+    readonly version: number;
+    readonly enabled: boolean;
+    readonly tierPercents: readonly number[];
+    readonly changedAt: string | null;
+  };
   readonly canChange: boolean;
 }
 
@@ -122,6 +135,12 @@ export function createMerchantStoreFeatures(options: {
       expectedVersion: number;
       staffCall: boolean;
       chaseDish: boolean;
+    } = null;
+    let tipChange: null | {
+      operationReference: string;
+      expectedVersion: number;
+      tipsEnabled: boolean;
+      tierPercents: readonly number[];
     } = null;
     let change: null | {
       operationReference: string;
@@ -155,6 +174,31 @@ export function createMerchantStoreFeatures(options: {
           expectedVersion: Number(raw.expectedVersion),
           staffCall: raw.staffCall,
           chaseDish: raw.chaseDish,
+        };
+      } else if (action === "ChangeTips") {
+        const raw = readClosedRecord(input.command, [
+          "action",
+          "operationReference",
+          "expectedVersion",
+          "enabled",
+          "tierPercents",
+        ]);
+        const tiers = raw.tierPercents;
+        if (
+          typeof raw.enabled !== "boolean" ||
+          !Number.isSafeInteger(raw.expectedVersion) ||
+          Number(raw.expectedVersion) < 0 ||
+          !Array.isArray(tiers) ||
+          tiers.length !== 3 ||
+          tiers.some((n) => !Number.isSafeInteger(n) || Number(n) < 1 || Number(n) > 50) ||
+          !(Number(tiers[0]) < Number(tiers[1]) && Number(tiers[1]) < Number(tiers[2]))
+        )
+          return fail("STORE_FEATURES_INPUT_INVALID");
+        tipChange = {
+          operationReference: String(parseStoreAdministrationReference(raw.operationReference)),
+          expectedVersion: Number(raw.expectedVersion),
+          tipsEnabled: raw.enabled,
+          tierPercents: tiers.map(Number),
         };
       } else if (action === "ApplyTemplate") {
         const raw = readClosedRecord(input.command, [
@@ -258,7 +302,15 @@ export function createMerchantStoreFeatures(options: {
                 actorReference: String(current.actorReference),
                 observedAt: new Date(Date.parse(options.now())).toISOString(),
               });
-            return storeFeaturesView(setting, services, true);
+            const paymentRunner = tx as unknown as Parameters<typeof loadStoreTipSetting>[0];
+            let tips = await loadStoreTipSetting(paymentRunner, scope);
+            if (tipChange !== null)
+              tips = await changeStoreTipSetting(paymentRunner, scope, {
+                ...tipChange,
+                actorReference: String(current.actorReference),
+                observedAt: new Date(Date.parse(options.now())).toISOString(),
+              });
+            return storeFeaturesView(setting, services, tips, true);
           },
         ),
       );
@@ -266,6 +318,7 @@ export function createMerchantStoreFeatures(options: {
       if (error instanceof MerchantStoreFeaturesError) throw error;
       if (
         error instanceof StoreFeatureSettingConflictError ||
+        error instanceof StoreTipSettingConflictError ||
         (error instanceof DiningSessionError &&
           error.code === "DINING_SESSION_IDEMPOTENCY_CONFLICT")
       )
@@ -278,6 +331,7 @@ export function createMerchantStoreFeatures(options: {
 function storeFeaturesView(
   setting: StoreFeatureSetting,
   services: DiningServiceSetting,
+  tips: StoreTipSetting,
   canChange: boolean,
 ): StoreFeaturesView {
   return Object.freeze({
@@ -294,6 +348,12 @@ function storeFeaturesView(
       staffCall: services.staffCall,
       chaseDish: services.chaseDish,
       changedAt: services.changedAt,
+    }),
+    tips: Object.freeze({
+      version: tips.version,
+      enabled: tips.tipsEnabled,
+      tierPercents: Object.freeze([...tips.tierPercents]),
+      changedAt: tips.changedAt,
     }),
     canChange,
   });
@@ -373,4 +433,74 @@ export async function guestServiceModes<
     ),
     servicesTurnedOff: Object.freeze(pickup ? [] : (["Pickup"] as const)),
   });
+}
+
+/** WP-2423 item 8 ⑦ (Owner decision 11): the tip a guest or staff member may choose now. */
+export interface StoreTipChoices {
+  readonly enabled: boolean;
+  /** Three percentages of the subtotal before tax, ascending; "other amount" is always offered. */
+  readonly tierPercents: readonly number[];
+}
+export type ChosenTip =
+  | { readonly kind: "None" }
+  | { readonly kind: "Percent"; readonly percent: number }
+  | { readonly kind: "Amount"; readonly amountMinor: string };
+
+/** A tip percentage as sent: a whole number 1–50 (the Store's own tiers are checked later). */
+export const isTipPercent = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 50;
+
+/**
+ * The Store's tip choices inside another read or command (savepoint, the Brand and Store context
+ * restored after). An unreadable setting refuses: no tip is charged on a guess.
+ */
+export async function readStoreTipChoices(
+  tx: QueryTransaction,
+  scope: { brandReference: string; storeReference: string },
+  /** The choices in force at this instant (a payment recorded after an outage); null: now. */
+  asOf: string | null = null,
+): Promise<StoreTipChoices> {
+  const before = (
+    (await tx.query(
+      "SELECT current_setting('bop.brand_id',true) brand,current_setting('bop.store_id',true) store",
+      [],
+    )) as { rows?: { brand: string | null; store: string | null }[] } | undefined
+  )?.rows?.[0];
+  await tx.query("SAVEPOINT store_tip_setting_read", []);
+  try {
+    const setting = await loadStoreTipSetting(
+      tx as Parameters<typeof loadStoreTipSetting>[0],
+      scope,
+      asOf,
+    );
+    await tx.query("RELEASE SAVEPOINT store_tip_setting_read", []);
+    return Object.freeze({
+      enabled: setting.tipsEnabled,
+      tierPercents: Object.freeze([...setting.tierPercents]),
+    });
+  } catch (error) {
+    await tx.query("ROLLBACK TO SAVEPOINT store_tip_setting_read", []);
+    await tx.query("RELEASE SAVEPOINT store_tip_setting_read", []);
+    throw error;
+  } finally {
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      before?.brand ?? "",
+      before?.store ?? "",
+    ]);
+  }
+}
+
+/**
+ * Why a chosen tip can't be taken now: tips are off (only no tip, or an amount of zero), or the
+ * percentage is not one the Store offers any more (the screen read older choices). Null: taken.
+ */
+export function tipRefusal(
+  choices: StoreTipChoices,
+  tip: ChosenTip,
+): "TipsOff" | "TipChoicesChanged" | null {
+  const none = tip.kind === "None" || (tip.kind === "Amount" && tip.amountMinor === "0");
+  if (!choices.enabled) return none ? null : "TipsOff";
+  if (tip.kind === "Percent" && !choices.tierPercents.includes(tip.percent))
+    return "TipChoicesChanged";
+  return null;
 }

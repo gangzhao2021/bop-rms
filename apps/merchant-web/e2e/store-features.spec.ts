@@ -61,6 +61,12 @@ test("@production the owner applies the full-service setup, turns a module back 
       chaseDish: false,
       changedAt: null as string | null,
     },
+    tips: {
+      version: 0,
+      enabled: true,
+      tierPercents: [10, 15, 18],
+      changedAt: null as string | null,
+    },
     canChange: true,
   };
   const commands: Record<string, unknown>[] = [];
@@ -69,6 +75,20 @@ test("@production the owner applies the full-service setup, turns a module back 
     const body = route.request().postDataJSON() as Record<string, unknown>;
     commands.push(body);
     if (body.action === "Read") return route.fulfill({ headers, json: current });
+    if (body.action === "ChangeTips") {
+      if (body.expectedVersion !== current.tips.version)
+        return route.fulfill({ headers, status: 409, json: { error: "store_features_changed" } });
+      current = {
+        ...current,
+        tips: {
+          version: current.tips.version + 1,
+          enabled: body.enabled === true,
+          tierPercents: body.tierPercents as number[],
+          changedAt: "2026-10-29T15:20:00.000Z",
+        },
+      };
+      return route.fulfill({ headers, json: current });
+    }
     if (body.action === "ChangeServices") {
       if (body.expectedVersion !== current.services.version)
         return route.fulfill({ headers, status: 409, json: { error: "store_features_changed" } });
@@ -134,8 +154,11 @@ test("@production the owner applies the full-service setup, turns a module back 
       },
     ],
   });
-  await page.route("**/merchant/pickup/query", (route) =>
-    pickupReadable
+  // The queue's answer can be held back, to see the confirmation while it is still read.
+  let release: (() => void) | null = null;
+  await page.route("**/merchant/pickup/query", async (route) => {
+    if (release === null) await new Promise<void>((resolve) => (release = resolve));
+    return pickupReadable
       ? route.fulfill({
           headers,
           json: {
@@ -147,8 +170,8 @@ test("@production the owner applies the full-service setup, turns a module back 
             items: [waitingItem(1), waitingItem(2)],
           },
         })
-      : route.fulfill({ headers, status: 403, json: { error: "request_denied" } }),
-  );
+      : route.fulfill({ headers, status: 403, json: { error: "request_denied" } });
+  });
   await page.goto("/app/organization/stores/" + store + "/capabilities");
   await expect(page.getByRole("heading", { name: "Store features", exact: true })).toBeVisible();
   const counter = page.getByRole("checkbox", { name: /Counter ordering/u });
@@ -171,12 +194,19 @@ test("@production the owner applies the full-service setup, turns a module back 
   // The full-service setup turns off counter ordering, guests' pickup and inventory; turning
   // pickup off is asked once more, with what to do about pickups still waiting.
   await page.getByRole("button", { name: "Use the full-service setup" }).click();
+  // v15 live check: not confirmed while the waiting orders are still being counted.
+  await expect(page.getByRole("alert")).toContainText("Checking the pickup orders still waiting…");
+  await expect(page.getByRole("button", { name: "Turn off pickup" })).toBeDisabled();
+  (release as (() => void) | null)?.();
+  release = () => undefined;
   await expect(page.getByRole("alert")).toContainText(
     "2 pickup orders are still waiting to be handed over.",
   );
+  // The Pickup page stays while they wait (v15 finding v), so it is not said to be hidden.
   await expect(page.getByRole("alert")).toContainText(
-    "Hand over any pickup orders still waiting first.",
+    "The Pickup page stays until the pickup orders still waiting are handed over, then it is hidden.",
   );
+  await expect(page.getByRole("button", { name: "Turn off pickup" })).toBeEnabled();
   await page.getByRole("button", { name: "Keep pickup" }).click();
   // The queue can't be read: no number is shown, it says so (still only a warning).
   pickupReadable = false;
@@ -242,4 +272,42 @@ test("@production the owner applies the full-service setup, turns a module back 
     chaseDish: true,
   });
   await expect(page.getByRole("button", { name: "Save table settings" })).toBeDisabled();
+
+  // WP-2423 item 8 ⑦ (decision 11): tips 10 / 15 / 18 % at first; the owner sets 12 / 18 / 20.
+  const lowest = page.getByRole("textbox", { name: "Lowest tip percentage" });
+  const highest = page.getByRole("textbox", { name: "Highest tip percentage" });
+  await expect(lowest).toHaveValue("10");
+  const saveTips = page.getByRole("button", { name: "Save tips" });
+  await expect(saveTips).toBeDisabled();
+  // Out of order or out of range: said so, and not sent.
+  await lowest.fill("20");
+  await expect(
+    page.getByText("Enter three different whole numbers from 1 to 50, lowest first."),
+  ).toBeVisible();
+  await expect(saveTips).toBeDisabled();
+  await lowest.fill("12");
+  await page.getByRole("textbox", { name: "Middle tip percentage" }).fill("18");
+  await highest.fill("20");
+  await saveTips.click();
+  await expect(
+    page.getByText("Saved. Guests and staff are offered these tips from now on."),
+  ).toBeVisible();
+  expect(commands.at(-1)).toMatchObject({
+    action: "ChangeTips",
+    expectedVersion: 0,
+    enabled: true,
+    tierPercents: [12, 18, 20],
+  });
+  // Tips off: no percentages to set, and the card machine is mentioned.
+  await page.getByRole("checkbox", { name: /Guests and staff can add a tip/u }).uncheck();
+  await expect(lowest).toBeHidden();
+  await expect(page.getByText(/turn that off on the machine too/u)).toBeVisible();
+  await saveTips.click();
+  await expect(page.getByText("Saved. No one is asked for a tip from now on.")).toBeVisible();
+  expect(commands.at(-1)).toMatchObject({
+    action: "ChangeTips",
+    expectedVersion: 1,
+    enabled: false,
+    tierPercents: [12, 18, 20],
+  });
 });

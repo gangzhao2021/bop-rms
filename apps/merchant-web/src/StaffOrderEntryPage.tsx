@@ -200,6 +200,14 @@ export function placeErrorText(
         : t(
             "Pickup hours are over, so the counter can't take a new order now. A paper order taken earlier can still be entered under Paper order.",
           );
+    case "TipsOff":
+      return t(
+        "Tips are turned off for this store, so nothing was sent or charged. Send it again with no tip.",
+      );
+    case "TipChoicesChanged":
+      return t(
+        "The store's tip choices just changed, so nothing was sent or charged. Choose the tip again and send.",
+      );
     case "CounterOrderingOff":
       return t(
         "Counter ordering is turned off for this store, so nothing was sent or charged. The owner can turn it back on in Store features.",
@@ -282,7 +290,8 @@ export function StaffOrderEntryPage({
     quantity: number;
     note: string;
   } | null>(null);
-  const [tip, setTip] = useState<"0" | "10" | "15" | "18" | "Custom">("0");
+  // "0": no tip; a percentage the Store offers, as text; or an amount typed in.
+  const [tip, setTip] = useState<string>("0");
   const [customTip, setCustomTip] = useState("");
   const [paper, setPaper] = useState(false);
   const [paidAt, setPaidAt] = useState("");
@@ -445,9 +454,15 @@ export function StaffOrderEntryPage({
           ],
     );
   };
+  // WP-2423 item 8 ⑦ (Owner decision 11): the Store's own percentages; with tips off, no tip.
+  const tips = menu.kind === "Ready" ? menu.menu.tips : null;
+  const tipOptions = tips === null || !tips.enabled ? [] : ["0", ...tips.tierPercents.map(String)];
+  useEffect(() => {
+    if (tip !== "Custom" && tip !== "0" && tips !== null && !tipOptions.includes(tip)) setTip("0");
+  }, [tip, tips, tipOptions]);
   const tipChoice = (): CounterTip | null => {
-    if (tip === "0" || tablePaysLater) return { kind: "None" };
-    if (tip !== "Custom") return { kind: "Percent", percent: Number(tip) as 10 | 15 | 18 };
+    if (tip === "0" || tablePaysLater || tips?.enabled === false) return { kind: "None" };
+    if (tip !== "Custom") return { kind: "Percent", percent: Number(tip) };
     const match = /^(0|[1-9][0-9]{0,4})(?:\.([0-9]{1,2}))?$/u.exec(customTip.trim());
     if (!match) return null;
     return {
@@ -530,7 +545,13 @@ export function StaffOrderEntryPage({
           ? failure.tableCart.cartVersion
           : null,
       );
-      if (failure.code === "ItemUnavailable" || failure.code === "ItemShort") refreshMenu();
+      if (
+        failure.code === "ItemUnavailable" ||
+        failure.code === "ItemShort" ||
+        failure.code === "TipsOff" ||
+        failure.code === "TipChoicesChanged"
+      )
+        refreshMenu();
       setPhase("Building");
     }
   };
@@ -999,10 +1020,10 @@ export function StaffOrderEntryPage({
               </p>
             </div>
           ) : null}
-          {tablePaysLater ? null : (
+          {tablePaysLater || tipOptions.length === 0 ? null : (
             <fieldset className="counter-order__tip" disabled={!ordering}>
               <legend>{t("Tip")}</legend>
-              {(["0", "10", "15", "18"] as const).map((value) => (
+              {tipOptions.map((value) => (
                 <label key={value}>
                   <input
                     type="radio"

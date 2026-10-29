@@ -85,6 +85,7 @@ const moduleManifestInput =
         "payment_compensation_lease_history",
         "payment_compensation_operation_history",
         "payment_tip_selection",
+        "store_tip_setting",
         "payment_intent",
         "payment_attempt",
         "payment_intent_operation_record",

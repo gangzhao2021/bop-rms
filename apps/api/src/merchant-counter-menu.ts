@@ -4,6 +4,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { publicFound, type CustomerMenuPort } from "./customer-menu.js";
 import { counterOrderPermission } from "./merchant-counter-order.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { readStoreTipChoices, type StoreTipChoices } from "./merchant-store-features.js";
 
 export class CounterMenuError extends Error {
   readonly code: "COUNTER_MENU_PERMISSION_DENIED" | "COUNTER_MENU_UNAVAILABLE";
@@ -32,7 +33,11 @@ export function createMerchantCounterMenu(options: {
     sessionCookie: unknown;
     /** WP-2423 Q7 slice 2: a staff-entered table round sells the dine-in menu. */
     orderType?: "Pickup" | "DineIn";
-  }): Promise<CustomerMenuFound> => {
+  }): Promise<{
+    readonly menu: CustomerMenuFound;
+    /** WP-2423 item 8 ⑦: the tips the Store offers now (its percentages, or tips off). */
+    readonly tips: StoreTipChoices;
+  }> => {
     const scope = await options.persistence.transactions
       .run(async (transaction) => {
         const resolved = await resolveScope(
@@ -42,10 +47,14 @@ export function createMerchantCounterMenu(options: {
         );
         if ((await resolved.allowed()) !== true)
           throw new CounterMenuError("COUNTER_MENU_PERMISSION_DENIED");
-        return {
+        const scope = {
           brandReference: String(resolved.context.brand.brandReference),
           storeReference: String(resolved.store.storeReference),
         };
+        const tips = await readStoreTipChoices(transaction, scope).catch(() => {
+          throw new CounterMenuError("COUNTER_MENU_UNAVAILABLE");
+        });
+        return { ...scope, tips };
       })
       .catch((error: unknown) => {
         if (error instanceof CounterMenuError) throw error;
@@ -68,6 +77,6 @@ export function createMerchantCounterMenu(options: {
       throw new CounterMenuError("COUNTER_MENU_UNAVAILABLE");
     }
     if (result.status !== "Found") throw new CounterMenuError("COUNTER_MENU_UNAVAILABLE");
-    return publicFound(result);
+    return Object.freeze({ menu: publicFound(result), tips: scope.tips });
   };
 }

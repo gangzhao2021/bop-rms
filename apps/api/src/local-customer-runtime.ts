@@ -196,6 +196,11 @@ export interface LocalCustomerRuntimeOptions {
   readonly menuStoreFacts?: CustomerMenuQueryPorts["storeFacts"];
   // Optional scoped, bounded read-only transactions; the caller retains resource ownership.
   readonly cartTransactions?: CartQueryTransactionRunner;
+  /**
+   * WP-2423 item 8 ⑦: Payment's read of the Store's tip choices, given with the priced Cart (the
+   * pilot API's transactions). Absent: the quote says nothing about tips.
+   */
+  readonly tipTransactions?: CartQueryTransactionRunner;
   readonly cartReplacement?: CustomerCartReplacementPort;
   readonly cartBinding?: Omit<
     CustomerCartBindingCompositionOptions,
@@ -362,6 +367,7 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
         scope,
         sessions,
         now,
+        ...(options.tipTransactions === undefined ? {} : { tips: options.tipTransactions }),
       });
     const catalog = createCatalogSelectionDisplayQuery(projections);
     const stores =

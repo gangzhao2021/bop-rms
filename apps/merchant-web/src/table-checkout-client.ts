@@ -4,6 +4,10 @@
  * prices everything (the browser sends intent only: method, tip choice, cash handed over).
  */
 export type TableCheckoutErrorCode =
+  /** WP-2423 item 8 ⑦ (Owner decision 11): the Store turned tips off; nothing was recorded. */
+  | "TipsOff"
+  /** The tip percentage is not one the Store offers now (the bill is read again). */
+  | "TipChoicesChanged"
   | "PermissionDenied"
   | "NotStarted"
   | "NotPayLater"
@@ -61,6 +65,11 @@ export interface TableBill {
     readonly totalMinor: string;
   };
   readonly consistent: boolean;
+  /**
+   * WP-2423 item 8 ⑦ (Owner decision 11): the Store's tip percentages (of the subtotal before
+   * tax), or tips off. An older server sends none: 10 / 15 / 18 %.
+   */
+  readonly tips: { readonly enabled: boolean; readonly tierPercents: readonly number[] };
   readonly settlement: null | {
     /** S4: "Online" — a guest paid the whole table on their phone. */
     readonly method: "CardMachine" | "Cash" | "Online";
@@ -212,6 +221,7 @@ export function parseTableBill(value: unknown): TableBill {
             recordedAt: text(settlement.recordedAt),
             recordedAfterOutage: settlement.recordedAfterOutage === true,
           }),
+    tips: tipsOf(raw.tips),
     split: splitOf(raw.split),
     writeOff: writeOffOf(raw.writeOff),
     onlinePayment: onlinePaymentOf(raw.onlinePayment),
@@ -325,12 +335,29 @@ const codes: Readonly<Record<string, TableCheckoutErrorCode>> = {
   already_paid: "AlreadyPaid",
   guest_paying: "GuestPaying",
   split_locked: "SplitLocked",
+  tips_off: "TipsOff",
+  tip_choices_changed: "TipChoicesChanged",
   idempotency_conflict: "BillChanged",
   not_ready: "NotReady",
   not_at_checkout: "NotStarted",
   version_conflict: "BillChanged",
   already_closed: "AlreadyPaid",
 };
+
+function tipsOf(value: unknown): TableBill["tips"] {
+  if (value === undefined) return Object.freeze({ enabled: true, tierPercents: [10, 15, 18] });
+  const raw = (value ?? {}) as Record<string, unknown>;
+  const tiers = raw.tierPercents;
+  if (
+    typeof raw.enabled !== "boolean" ||
+    !Array.isArray(tiers) ||
+    tiers.length !== 3 ||
+    tiers.some((n) => !Number.isSafeInteger(n) || Number(n) < 1 || Number(n) > 50) ||
+    !(Number(tiers[0]) < Number(tiers[1]) && Number(tiers[1]) < Number(tiers[2]))
+  )
+    return invalid();
+  return Object.freeze({ enabled: raw.enabled, tierPercents: Object.freeze(tiers.map(Number)) });
+}
 
 function reductionOf(value: unknown) {
   // Absent from an older server: no comps then.
@@ -403,7 +430,7 @@ export function createTableCheckoutClient(fetcher: typeof fetch = fetch) {
         readonly method: "CardMachine" | "Cash";
         readonly tip:
           | { readonly kind: "None" }
-          | { readonly kind: "Percent"; readonly percent: 10 | 15 | 18 | 20 }
+          | { readonly kind: "Percent"; readonly percent: number }
           | { readonly kind: "Amount"; readonly amountMinor: string };
         readonly tenderedMinor: string | null;
         readonly slipReference: string | null;

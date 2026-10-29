@@ -55,7 +55,13 @@ export function retryAfterSeconds(response: Response): number | null {
   return seconds <= 3600 ? seconds : null;
 }
 function parseQuote(value: unknown, expectedCartVersion: number): CheckoutQuote {
-  const root = exact(value, ["schemaVersion", "quote"]);
+  const root = exact(
+    value,
+    Object.hasOwn(record(value), "tips")
+      ? ["schemaVersion", "quote", "tips"]
+      : ["schemaVersion", "quote"],
+  );
+  const tips = root.tips === undefined ? undefined : parseTips(root.tips);
   const raw = exact(root.quote, [
     "quoteReference",
     "quoteVersion",
@@ -136,6 +142,24 @@ function parseQuote(value: unknown, expectedCartVersion: number): CheckoutQuote 
             requiresReconfirmation: price.requiresReconfirmation as boolean,
             evaluatedAt: evaluatedAt as string,
           }),
+    ...(tips === undefined ? {} : { tips }),
+  });
+}
+/** WP-2423 item 8 ⑦: tips on or off, and three ascending whole percentages (1–50). */
+function parseTips(value: unknown) {
+  const raw = exact(value, ["enabled", "tierPercents"]);
+  const tiers = raw.tierPercents;
+  if (
+    typeof raw.enabled !== "boolean" ||
+    !Array.isArray(tiers) ||
+    tiers.length !== 3 ||
+    tiers.some((n) => !Number.isSafeInteger(n) || Number(n) < 1 || Number(n) > 50) ||
+    !(Number(tiers[0]) < Number(tiers[1]) && Number(tiers[1]) < Number(tiers[2]))
+  )
+    throw new Error("invalid");
+  return Object.freeze({
+    enabled: raw.enabled,
+    tierPercents: Object.freeze(tiers.map(Number)),
   });
 }
 

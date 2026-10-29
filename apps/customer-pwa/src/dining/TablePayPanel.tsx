@@ -12,9 +12,10 @@ import {
 } from "./table-payment-client.js";
 
 const money = (amountMinor: string) => formatMoney(amountMinor, "CAD");
-type TipChoice = "0" | "10" | "15" | "18";
+/** "0": no tip; otherwise one of the Store's percentages, as text. */
+type TipChoice = string;
 const tipOf = (choice: TipChoice): TableTip =>
-  choice === "0" ? { kind: "None" } : { kind: "Percent", percent: Number(choice) as 10 | 15 | 18 };
+  choice === "0" ? { kind: "None" } : { kind: "Percent", percent: Number(choice) };
 const tipMinor = (choice: TipChoice, subtotalMinor: string) =>
   ((BigInt(subtotalMinor) * BigInt(choice) + 50n) / 100n).toString();
 
@@ -33,6 +34,12 @@ function problemText(error: unknown) {
       return t("Your payment is still being processed. Check again in a moment.");
     case "not-found":
       return t("This phone isn’t part of the table any more. Ask a staff member for help.");
+    case "tips-off":
+      return t(
+        "The restaurant has just stopped taking tips. Check the bill and pay it without a tip.",
+      );
+    case "tip-choices-changed":
+      return t("The tip choices just changed. Choose a tip again to pay.");
     default:
       return t("We couldn’t reach the payment service. Check your connection and try again.");
   }
@@ -55,7 +62,7 @@ const TIP_KEY = "bop-table-tip-choice";
 const savedTip = (): TipChoice | null => {
   try {
     const value = window.sessionStorage.getItem(TIP_KEY);
-    return value === "0" || value === "10" || value === "15" || value === "18" ? value : null;
+    return value !== null && /^(0|[1-9][0-9]?)$/u.test(value) ? value : null;
   } catch {
     return null;
   }
@@ -145,14 +152,23 @@ export function TablePayPanel({
   if (view === null) return problem ? <p role="alert">{problem}</p> : null;
   if (!view.checkingOut && view.state !== "Paid") return null;
 
+  // WP-2423 item 8 ⑦: the Store's own tip percentages; with tips off the guest pays no tip and is
+  // asked nothing. A choice the Store no longer offers counts as not chosen.
+  const tipOptions = view.tips.enabled ? ["0", ...view.tips.tierPercents.map(String)] : [];
+  const chosenTip: TipChoice | null = !view.tips.enabled
+    ? "0"
+    : tip !== null && tipOptions.includes(tip)
+      ? tip
+      : null;
+
   const toPay = view.split?.parts.filter((entry) => entry.status === "ToPay") ?? [];
   const chosen =
     view.split === null
       ? null
       : (toPay.find((entry) => entry.partNumber === part) ?? toPay[0] ?? null);
   const pay = async () => {
-    if (busy || tip === null || (view.split !== null && chosen === null)) return;
-    const key = `${tip}:${chosen?.partNumber ?? "table"}`;
+    if (busy || chosenTip === null || (view.split !== null && chosen === null)) return;
+    const key = `${chosenTip}:${chosen?.partNumber ?? "table"}`;
     // A failed payment is followed by a new one; a lost answer is retried with the same one.
     if (operation.current?.key !== key || view.state === "Failed")
       operation.current = { key, reference: uuidv7() };
@@ -162,7 +178,11 @@ export function TablePayPanel({
     setClientSecret(null);
     try {
       setView(
-        await client.start(operation.current.reference, tipOf(tip), chosen?.partNumber ?? null),
+        await client.start(
+          operation.current.reference,
+          tipOf(chosenTip),
+          chosen?.partNumber ?? null,
+        ),
       );
     } catch (error) {
       setProblem(problemText(error));
@@ -244,7 +264,9 @@ export function TablePayPanel({
   const subtotal = chosen ? chosen.subtotalMinor : view.owed.subtotalMinor;
   const amountDue = chosen ? chosen.amountMinor : view.owed.totalMinor;
   const total =
-    tip === null ? null : (BigInt(amountDue) + BigInt(tipMinor(tip, subtotal))).toString();
+    chosenTip === null
+      ? null
+      : (BigInt(amountDue) + BigInt(tipMinor(chosenTip, subtotal))).toString();
   return (
     <section className="order-status__card dining-session__table-pay" aria-labelledby="table-pay">
       <h2 id="table-pay">{t("Pay the bill")}</h2>
@@ -355,39 +377,41 @@ export function TablePayPanel({
               </div>
             </dl>
           )}
-          <fieldset className="dining-session__tip">
-            <legend>
-              {view.split !== null
-                ? t("Tip (for your part)")
-                : t("Tip (once, for the whole table)")}
-            </legend>
-            {(["0", "10", "15", "18"] as const).map((choice) => (
-              <label key={choice}>
-                <input
-                  type="radio"
-                  name="table-tip"
-                  value={choice}
-                  checked={tip === choice}
-                  onChange={() => {
-                    setTip(choice);
-                    saveTip(choice);
-                  }}
-                />{" "}
-                {choice === "0"
-                  ? t("No tip")
-                  : t("{percent}% · {amount}", {
-                      percent: choice,
-                      amount: money(tipMinor(choice, subtotal)),
-                    })}
-              </label>
-            ))}
-          </fieldset>
+          {tipOptions.length === 0 ? null : (
+            <fieldset className="dining-session__tip">
+              <legend>
+                {view.split !== null
+                  ? t("Tip (for your part)")
+                  : t("Tip (once, for the whole table)")}
+              </legend>
+              {tipOptions.map((choice) => (
+                <label key={choice}>
+                  <input
+                    type="radio"
+                    name="table-tip"
+                    value={choice}
+                    checked={chosenTip === choice}
+                    onChange={() => {
+                      setTip(choice);
+                      saveTip(choice);
+                    }}
+                  />{" "}
+                  {choice === "0"
+                    ? t("No tip")
+                    : t("{percent}% · {amount}", {
+                        percent: choice,
+                        amount: money(tipMinor(choice, subtotal)),
+                      })}
+                </label>
+              ))}
+            </fieldset>
+          )}
           <button
             type="button"
             className="dining-session__pay-button"
             disabled={
               busy ||
-              tip === null ||
+              chosenTip === null ||
               !view.consistent ||
               view.owed.totalMinor === "0" ||
               (view.split !== null && chosen === null)

@@ -19,6 +19,10 @@ export class CounterOrderClientError extends Error {
       | "StoreNotTakingOrders"
       /** WP-2423 item 8 ⑦: the Store turned counter ordering off (Store features). */
       | "CounterOrderingOff"
+      /** WP-2423 item 8 ⑦ (Owner decision 11): the Store turned tips off; nothing was sent. */
+      | "TipsOff"
+      /** The tip percentage is not one the Store offers now (the choices are read again). */
+      | "TipChoicesChanged"
       | "TableUnavailable"
       | "TableHasNoQr"
       | "TableCartHasItems"
@@ -137,11 +141,30 @@ export interface CounterMenu {
     readonly name: string;
     readonly items: readonly CounterMenuItem[];
   }[];
+  /**
+   * WP-2423 item 8 ⑦ (Owner decision 11): the Store's tip percentages (of the subtotal before
+   * tax), or tips off. An older server sends none: 10 / 15 / 18 %.
+   */
+  readonly tips: { readonly enabled: boolean; readonly tierPercents: readonly number[] };
+}
+function counterTips(value: unknown): CounterMenu["tips"] {
+  if (value === undefined) return Object.freeze({ enabled: true, tierPercents: [10, 15, 18] });
+  const raw = record(value, ["enabled", "tierPercents"]);
+  const tiers = raw.tierPercents;
+  if (
+    typeof raw.enabled !== "boolean" ||
+    !Array.isArray(tiers) ||
+    tiers.length !== 3 ||
+    tiers.some((n) => !Number.isSafeInteger(n) || Number(n) < 1 || Number(n) > 50) ||
+    !(Number(tiers[0]) < Number(tiers[1]) && Number(tiers[1]) < Number(tiers[2]))
+  )
+    return invalid();
+  return Object.freeze({ enabled: raw.enabled, tierPercents: Object.freeze(tiers.map(Number)) });
 }
 
 /** The pickup menu customers see now: items, options, prices and sold-out state. */
 export function parseCounterMenu(value: unknown): CounterMenu {
-  const raw = record(value, ["screenId", "menu"]);
+  const raw = record(value, ["screenId", "menu"], ["tips"]);
   if (raw.screenId !== "OPS-ORDER-ENTRY") return invalid();
   const found = record(raw.menu, ["status", "schemaVersion", "projection", "scope", "menu"]);
   if (found.status !== "Found") return invalid();
@@ -157,6 +180,7 @@ export function parseCounterMenu(value: unknown): CounterMenu {
   ]);
   if (!Array.isArray(menu.sections) || menu.sections.length > 200) return invalid();
   return Object.freeze({
+    tips: counterTips(raw.tips),
     sections: Object.freeze(
       menu.sections.map((value: unknown) => {
         const section = record(value, ["sectionReference", "name", "sellables"]);
@@ -302,7 +326,7 @@ export interface TableRoundLine extends CounterOrderLine {
 }
 export type CounterTip =
   | { readonly kind: "None" }
-  | { readonly kind: "Percent"; readonly percent: 10 | 15 | 18 | 20 }
+  | { readonly kind: "Percent"; readonly percent: number }
   | { readonly kind: "Amount"; readonly amountMinor: string };
 
 export interface PlacedCounterOrder {
@@ -505,6 +529,8 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       if (code === "staff_round_not_finished") throw new CounterOrderClientError("NotFinished");
       if (code === "staff_round_in_progress") throw new CounterOrderClientError("InProgress");
       if (code === "staff_round_conflict") throw new CounterOrderClientError("Conflict");
+      if (code === "tips_turned_off") throw new CounterOrderClientError("TipsOff");
+      if (code === "tip_choices_changed") throw new CounterOrderClientError("TipChoicesChanged");
       // WP-2423: the server's own answer that it could not send the round (nothing was ordered or
       // charged; the next send is a new attempt), as opposed to no answer at all (OutcomeUnknown).
       if (code === "staff_round_unavailable") throw new CounterOrderClientError("SystemProblem");
@@ -536,6 +562,8 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
         throw new CounterOrderClientError("NoPickupTimes");
       if (code === "counter_ordering_turned_off")
         throw new CounterOrderClientError("CounterOrderingOff");
+      if (code === "tips_turned_off") throw new CounterOrderClientError("TipsOff");
+      if (code === "tip_choices_changed") throw new CounterOrderClientError("TipChoicesChanged");
       // WP-2423: a definite answer from the server that it could not place the order, as opposed
       // to no answer at all (a gateway or network failure keeps OutcomeUnknown).
       if (code === "counter_order_unavailable") throw new CounterOrderClientError("SystemProblem");

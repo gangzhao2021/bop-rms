@@ -314,7 +314,12 @@ export function MenuSearchPage({
   );
 }
 
-export function SellableDetailPage({ context, client, readOnlyNotice }: MenuPageProps) {
+export function SellableDetailPage({
+  context,
+  client,
+  readOnlyNotice,
+  storeProfile,
+}: MenuPageProps) {
   const resolvedClient = useClient(context, client);
   const input = useMemo(() => ({}), []);
   const loaded = useMenuLoad(resolvedClient, input);
@@ -338,6 +343,7 @@ export function SellableDetailPage({ context, client, readOnlyNotice }: MenuPage
       mode="detail"
       onRetry={loaded.retry}
       readOnlyNotice={readOnlyNotice}
+      storeProfile={storeProfile}
       state={state}
     />
   );

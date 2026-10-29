@@ -33,6 +33,7 @@ const bill = {
   ],
   owed: { subtotalMinor: "1800", taxMinor: "234", totalMinor: "2034" },
   consistent: true,
+  tips: { enabled: true, tierPercents: [10, 15, 18] },
   settlement: null,
   split: null,
   writeOff: null,

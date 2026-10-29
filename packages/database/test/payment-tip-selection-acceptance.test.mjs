@@ -101,6 +101,8 @@ it("persists explicit tips with immutable scoped replay, concurrency and atomic 
           role,
       );
       await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO " + role);
+      // WP-2423 item 8 ⑦: a tip above zero is taken only while the Store has tips on (2000_121).
+      await admin.query("GRANT SELECT ON rms_payment.store_tip_setting TO " + role);
       const store = owner(),
         initial = record(100);
       assert.equal((await append(store, initial)).status, "Created");

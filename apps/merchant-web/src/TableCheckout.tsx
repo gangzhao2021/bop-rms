@@ -20,7 +20,8 @@ import { TableSplitControls } from "./TableSplit.js";
 
 const cad = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
-type Tip = "0" | "10" | "15" | "18" | "Other";
+/** "0": no tip; one of the Store's percentages, as text; or an amount typed in. */
+type Tip = string;
 /** "12.50" → 1250; null when it isn't an amount of money. */
 export function dollarsToMinor(value: string): bigint | null {
   const match = /^(0|[1-9][0-9]{0,6})(?:\.([0-9]{1,2}))?$/u.exec(value.trim());
@@ -46,6 +47,14 @@ function errorText(error: unknown): string {
       return t("Start checkout first, so no more rounds are sent from this table.");
     case "NothingOwed":
       return t("This table owes nothing.");
+    case "TipsOff":
+      return t(
+        "Tips are turned off for this store, so nothing was recorded. The bill has been read again: take the payment with no tip.",
+      );
+    case "TipChoicesChanged":
+      return t(
+        "The store's tip choices just changed, so nothing was recorded. The bill has been read again: choose the tip again.",
+      );
     case "BillChanged":
       return t(
         "The bill changed (a round is still being sent, or something was changed). It has been read again: check it and try again.",
@@ -170,12 +179,22 @@ export function TableCheckout({
       ? BigInt(bill.owed.subtotalMinor)
       : 0n;
   const owed = selected ? BigInt(selected.amountMinor) : bill ? BigInt(bill.owed.totalMinor) : 0n;
+  // WP-2423 item 8 ⑦ (Owner decision 11): the Store's own percentages; with tips off, staff are
+  // asked nothing and no tip is taken. A percentage the Store no longer offers is chosen again.
+  const tipOptions =
+    bill === null || !bill.tips.enabled ? [] : ["0", ...bill.tips.tierPercents.map(String)];
+  const chosenTip: Tip | null =
+    bill !== null && !bill.tips.enabled
+      ? "0"
+      : tip !== null && (tip === "Other" || tipOptions.includes(tip))
+        ? tip
+        : null;
   const tipMinor =
-    tip === null
+    chosenTip === null
       ? null
-      : tip === "Other"
+      : chosenTip === "Other"
         ? dollarsToMinor(otherTip)
-        : (subtotal * BigInt(tip) + 50n) / 100n;
+        : (subtotal * BigInt(chosenTip) + 50n) / 100n;
   const due = tipMinor === null ? null : owed + tipMinor;
   const cashDue = due === null ? null : cashTotalMinor(due);
   const receivedMinor = dollarsToMinor(received);
@@ -269,7 +288,7 @@ export function TableCheckout({
     const intent = JSON.stringify([
       part,
       method,
-      tip,
+      chosenTip,
       tipMinor.toString(),
       received,
       slip.trim(),
@@ -285,11 +304,11 @@ export function TableCheckout({
         diningSessionReference: sessionReference,
         method,
         tip:
-          tip === "0" || tip === null
+          chosenTip === "0" || chosenTip === null
             ? { kind: "None" }
-            : tip === "Other"
+            : chosenTip === "Other"
               ? { kind: "Amount", amountMinor: tipMinor.toString() }
-              : { kind: "Percent", percent: Number(tip) as 10 | 15 | 18 },
+              : { kind: "Percent", percent: Number(chosenTip) },
         tenderedMinor: method === "Cash" ? String(receivedMinor) : null,
         slipReference: method === "CardMachine" && slip.trim() !== "" ? slip.trim() : null,
         takenAt: paper ? paperInstant : null,
@@ -305,7 +324,12 @@ export function TableCheckout({
       if (!(error instanceof TableCheckoutError) || error.code !== "OutcomeUnknown")
         operation.current = null;
       setProblem(errorText(error));
-      if (error instanceof TableCheckoutError && error.code === "BillChanged")
+      if (
+        error instanceof TableCheckoutError &&
+        (error.code === "BillChanged" ||
+          error.code === "TipsOff" ||
+          error.code === "TipChoicesChanged")
+      )
         setReload((value) => value + 1);
     } finally {
       setBusy(false);
@@ -484,40 +508,42 @@ export function TableCheckout({
                       </button>
                     </p>
                   ) : null}
-                  <fieldset className="table-checkout__tip" disabled={busy || locked}>
-                    <legend>{t("Tip")}</legend>
-                    {(["0", "10", "15", "18"] as const).map((value) => (
-                      <label key={value}>
+                  {tipOptions.length === 0 ? null : (
+                    <fieldset className="table-checkout__tip" disabled={busy || locked}>
+                      <legend>{t("Tip")}</legend>
+                      {tipOptions.map((value) => (
+                        <label key={value}>
+                          <input
+                            type="radio"
+                            name="table-tip"
+                            checked={chosenTip === value}
+                            onChange={() => setTip(value)}
+                          />
+                          {value === "0"
+                            ? t("No tip")
+                            : `${value}% · ${cad((subtotal * BigInt(value) + 50n) / 100n)}`}
+                        </label>
+                      ))}
+                      <label>
                         <input
                           type="radio"
                           name="table-tip"
-                          checked={tip === value}
-                          onChange={() => setTip(value)}
+                          checked={chosenTip === "Other"}
+                          onChange={() => setTip("Other")}
                         />
-                        {value === "0"
-                          ? t("No tip")
-                          : `${value}% · ${cad((subtotal * BigInt(value) + 50n) / 100n)}`}
+                        {t("Other amount")}
                       </label>
-                    ))}
-                    <label>
-                      <input
-                        type="radio"
-                        name="table-tip"
-                        checked={tip === "Other"}
-                        onChange={() => setTip("Other")}
-                      />
-                      {t("Other amount")}
-                    </label>
-                    {tip === "Other" ? (
-                      <input
-                        aria-label={t("Tip amount")}
-                        inputMode="decimal"
-                        value={otherTip}
-                        aria-invalid={dollarsToMinor(otherTip) === null}
-                        onChange={(event) => setOtherTip(event.currentTarget.value)}
-                      />
-                    ) : null}
-                  </fieldset>
+                      {chosenTip === "Other" ? (
+                        <input
+                          aria-label={t("Tip amount")}
+                          inputMode="decimal"
+                          value={otherTip}
+                          aria-invalid={dollarsToMinor(otherTip) === null}
+                          onChange={(event) => setOtherTip(event.currentTarget.value)}
+                        />
+                      ) : null}
+                    </fieldset>
+                  )}
                   <fieldset className="table-checkout__method" disabled={busy || locked}>
                     <legend>{t("How the table pays")}</legend>
                     <label>
@@ -680,7 +706,7 @@ export function TableCheckout({
                     >
                       {busy
                         ? t("Recording…")
-                        : tip === null
+                        : chosenTip === null
                           ? t("Choose a tip to take payment")
                           : due === null
                             ? t("Record payment")

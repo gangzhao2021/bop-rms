@@ -375,7 +375,10 @@ describe("counter order command — WP-2423 Q7", () => {
     expect(parseCounterOrderCommand(command()).tip).toEqual({ kind: "Percent", percent: 15 });
     for (const bad of [
       command({ lines: [] }),
-      command({ tip: { kind: "Percent", percent: 12 } }),
+      // A whole percentage 1–50 (the Store's own tiers are checked when the order is placed).
+      command({ tip: { kind: "Percent", percent: 51 } }),
+      command({ tip: { kind: "Percent", percent: 0 } }),
+      command({ tip: { kind: "Percent", percent: 12.5 } }),
       command({ tip: { kind: "Amount", amountMinor: "-1" } }),
       command({ recordedAfterOutage: "yes" }),
       command({ priceMinor: "1" }),

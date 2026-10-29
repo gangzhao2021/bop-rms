@@ -8,6 +8,12 @@ const state = vi.hoisted(() => ({
   batches: new Map<string, Record<string, unknown>>(),
   tablePermission: "Allow" as "Allow" | "Deny",
   allowed: true,
+  // WP-2423 item 8 ⑦ (Owner decision 11): the Store's tip choices.
+  tips: { enabled: true, tierPercents: [10, 15, 18] as readonly number[] },
+}));
+vi.mock("./merchant-store-features.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./merchant-store-features.js")>()),
+  readStoreTipChoices: async () => state.tips,
 }));
 vi.mock("./merchant-store-scope.js", () => ({
   createMerchantStoreScope: () => async () => ({
@@ -246,6 +252,21 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     state.batches.clear();
     state.tablePermission = "Allow";
     state.allowed = true;
+    state.tips = { enabled: true, tierPercents: [10, 15, 18] };
+  });
+
+  it("WP-2423 item 8 ⑦: a staff round takes only a tip the Store offers; with tips off, none", async () => {
+    const { send, pipeline } = setup();
+    state.tips = { enabled: false, tierPercents: [10, 15, 18] };
+    await expect(send()).rejects.toMatchObject({ code: "STAFF_ROUND_TIPS_OFF" });
+    await expect(send({ tip: { kind: "Amount", amountMinor: "300" } })).rejects.toMatchObject({
+      code: "STAFF_ROUND_TIPS_OFF",
+    });
+    // Refused before the table was entered or anything ordered.
+    expect(pipeline.takesOrder).not.toHaveBeenCalled();
+    state.tips = { enabled: true, tierPercents: [12, 16, 20] };
+    await expect(send()).rejects.toMatchObject({ code: "STAFF_ROUND_TIP_CHOICES_CHANGED" });
+    expect(pipeline.takesOrder).not.toHaveBeenCalled();
   });
 
   it("runs the table guest path in the customer's order and answers what to charge", async () => {
@@ -515,7 +536,8 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       { ...base, lines: [{ ...base.lines[0], note: "x".repeat(501) }] },
       { ...base, lines: [{ ...base.lines[0], note: "\u0007" }] },
       { ...base, lines: [{ sellableReference: id(2), quantity: 1, optionSelections: [] }] },
-      { ...base, tip: { kind: "Percent", percent: 12 } },
+      // A whole percentage 1–50 (the Store's tiers are checked when the round is sent).
+      { ...base, tip: { kind: "Percent", percent: 51 } },
       { ...base, extra: true },
     ])
       expect(() => parseStaffDiningRoundCommand(bad)).toThrow(StaffDiningRoundError);

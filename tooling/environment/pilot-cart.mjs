@@ -32,6 +32,8 @@ export function createInternalTestCart(resources, configuration) {
   });
   return {
     cartTransactions: transactions,
+    // WP-2423 item 8 ⑦: the guest's quote carries the Store's tip choices (Payment's read).
+    tipTransactions: transactions,
     cartBinding: {
       orderingTransactions: transactions,
       identityAudit: {

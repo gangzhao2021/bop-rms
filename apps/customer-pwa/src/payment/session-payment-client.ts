@@ -30,6 +30,8 @@ export class SessionPaymentClientError extends Error {
       | "pay_later_table"
       /** DEC-DINE-IN-PAY-LATER: the table pays each round as it is sent. */
       | "pay_first_table"
+      /** WP-2423 item 8 ⑦: the Store turned tips off; nothing was charged. */
+      | "tips_off"
       | "unknown",
   ) {
     super("Payment unavailable.");
@@ -73,6 +75,7 @@ export function createSessionPaymentClient() {
     payment_items_short: "items_short",
     payment_pay_later_table: "pay_later_table",
     payment_pay_first_table: "pay_first_table",
+    payment_tips_turned_off: "tips_off",
   } as const;
   async function post(session: string, suffix: string, body: object, key?: string) {
     if (!uuid.test(session)) throw new SessionPaymentClientError("invalid");

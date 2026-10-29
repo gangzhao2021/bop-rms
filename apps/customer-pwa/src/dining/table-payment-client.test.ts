@@ -100,3 +100,20 @@ it("WP-2423 item 8 ④: reads a split bill's parts and which part this guest is 
   (wrong.payment.split.parts[2] as { status: string }).status = "Whatever";
   expect(() => parseTablePaymentView(wrong)).toThrow();
 });
+
+it("WP-2423 item 8 ⑦: reads the Store's tip percentages or tips off (older servers: 10/15/18)", () => {
+  expect(parseTablePaymentView(body({})).tips).toEqual({
+    enabled: true,
+    tierPercents: [10, 15, 18],
+  });
+  expect(
+    parseTablePaymentView(body({ tips: { enabled: false, tierPercents: [12, 15, 20] } })).tips,
+  ).toEqual({ enabled: false, tierPercents: [12, 15, 20] });
+  for (const tierPercents of [
+    [10, 10, 18],
+    [0, 15, 18],
+    [10, 15, 51],
+    [10, 15],
+  ])
+    expect(() => parseTablePaymentView(body({ tips: { enabled: true, tierPercents } }))).toThrow();
+});

@@ -545,6 +545,10 @@ export const checkoutText = Object.freeze({
   get continueToPayment() {
     return t("Continue to payment");
   },
+  /** WP-2423 item 8 ⑦: no tip is chosen for the guest, "No tip" included. */
+  get chooseTipToContinue() {
+    return t("Choose a tip to continue");
+  },
   continueToPaymentWithTotal: (total: string) => t("Continue to payment · {total}", { total }),
   /** DEC-DINE-IN-PAY-LATER: a table that pays once at the end. */
   sendToKitchenWithTotal: (total: string) => t("Send to the kitchen · {total}", { total }),

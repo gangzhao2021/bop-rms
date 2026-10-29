@@ -199,7 +199,13 @@ export async function exerciseDiningSecondBatchSubmission({
   });
   assert.equal(saved.status, "Saved");
   assert.equal(saved.snapshot.detailsVersion, priorDetails.detailsVersion + 1);
-  await admin.query("GRANT SELECT,INSERT ON rms_payment.payment_tip_selection TO " + roles[2]);
+  await admin.query(
+    "GRANT SELECT,INSERT ON rms_payment.payment_tip_selection TO " +
+      roles[2] +
+      // WP-2423 item 8 ⑦: a tip is taken only while the Store has tips on (2000_121).
+      ";GRANT SELECT ON rms_payment.store_tip_setting TO " +
+      roles[2],
+  );
   const tipOptions = {
     preparation: f.options.preparation,
     transactions,

@@ -175,7 +175,7 @@ test.describe("@demo local-only Customer preview", () => {
     await expect(main).not.toContainText("Capacity Hold");
     await expect(main).not.toContainText("TRAINING_DATA_ONLY");
     await expect(main.getByRole("group", { name: "Tip amount" })).toBeVisible();
-    await expect(main.getByRole("button", { name: /Continue to payment/u })).toBeDisabled();
+    await expect(main.getByRole("button", { name: "Choose a tip to continue" })).toBeDisabled();
 
     for (const width of [1440, 390, 320]) {
       await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });

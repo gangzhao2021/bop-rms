@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import https from "node:https";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -184,6 +185,88 @@ it("DEC-PILOT-MAINTENANCE-PAGE: with the hosting's certificate the front termina
   await expect(get(port, "/", { ca: loopback.cert, servername: host })).rejects.toThrow();
   const down = await front({ hosting, upstreamPort: 1 });
   expect((await get(down, "/", { ...tls, headers: { accept: "text/html" } })).status).toBe(503);
+});
+
+it("v15 2026-10-29: one failed connect to the entry is tried again before the update page", async () => {
+  await fs.writeFile(path.join(runtime, "customer-tls-cert.pem"), loopback.cert);
+  const entryPort = await listen(upstream(loopback));
+  // In front of the entry: drops the first `refused` connections before any handshake (as one
+  // failed connect did on v15), then passes the rest through to the entry.
+  const gate = (refused) => {
+    let seen = 0;
+    const sockets = new Set();
+    const server = net.createServer((socket) => {
+      if (seen++ < refused) {
+        socket.destroy();
+        return;
+      }
+      const entry = net.connect({ host: "127.0.0.1", port: entryPort });
+      for (const each of [socket, entry]) {
+        sockets.add(each);
+        each.on("close", () => sockets.delete(each));
+      }
+      socket.pipe(entry).pipe(socket);
+      socket.on("error", () => entry.destroy());
+      entry.on("error", () => socket.destroy());
+    });
+    // Closing the gate ends the connections it passed through (the test's cleanup waits on it).
+    const close = server.close.bind(server);
+    server.close = (callback) => {
+      for (const each of sockets) each.destroy();
+      return close(callback);
+    };
+    return server;
+  };
+  const hosting = parsePilotHosting(
+    {
+      schemaVersion: 1,
+      environment: "Pilot",
+      customerOrigin: `https://${host}`,
+      secretsDirectory: "/run/secrets/bop-rms",
+      tls: {
+        mode: "front",
+        certificateFile: certificates.certificateFile,
+        keyFile: certificates.keyFile,
+      },
+    },
+    { env: { NODE_ENV: "production", BOP_PILOT_ENVIRONMENT: "Pilot" } },
+  );
+  const tls = { ca: certificates.root, servername: host, headers: { accept: "text/html" } };
+  const started = async (refused, lines) => {
+    const server = await startPilotFront({
+      runtimeDirectory: runtime,
+      listenHost: "127.0.0.1",
+      listenPort: 0,
+      hosting,
+      upstreamPort: await listen(gate(refused)),
+      log: (line) => lines.push(line),
+    });
+    open.push(server);
+    return server.address().port;
+  };
+  // The first connect fails, the second works: the guest's page is relayed, nothing is logged
+  // as down.
+  const onceLines = [];
+  const once = await started(1, onceLines);
+  expect(await get(once, "/menu", tls)).toMatchObject({
+    status: 200,
+    body: `upstream ${host} /menu`,
+  });
+  expect(onceLines.filter((line) => line.includes("ENTRY_DOWN"))).toEqual([]);
+  // Both fail: the update page, and the entry is reported down once.
+  const twiceLines = [];
+  const twice = await started(2, twiceLines);
+  const page = await get(twice, "/menu", tls);
+  expect(page.status).toBe(503);
+  expect(page.body).toContain("Ordering is paused for a moment");
+  expect(twiceLines.filter((line) => line.includes("ENTRY_DOWN"))).toHaveLength(1);
+  // During a planned update the page answers at once, without trying again.
+  await startPlannedMaintenance(runtime, { reason: "deploy synthetic", minutes: 5 });
+  const plannedLines = [];
+  const planned = await started(1, plannedLines);
+  const updating = await get(planned, "/menu", tls);
+  expect(updating.status).toBe(503);
+  expect(updating.body).toContain("We're updating");
 });
 
 it("DEC-PILOT-MAINTENANCE-PAGE: the page has no internal terms, no scripts and answers HEAD without a body", () => {

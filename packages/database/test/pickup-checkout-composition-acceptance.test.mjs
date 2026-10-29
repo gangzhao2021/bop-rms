@@ -296,7 +296,11 @@ it.each([
         );
         await admin.query("GRANT USAGE ON SCHEMA rms_payment,platform_audit TO " + roles[3]);
         await admin.query(
-          "GRANT SELECT,INSERT ON rms_payment.payment_tip_selection TO " + roles[3],
+          "GRANT SELECT,INSERT ON rms_payment.payment_tip_selection TO " +
+            roles[3] +
+            // WP-2423 item 8 ⑦: a tip is taken only while the Store has tips on (2000_121).
+            ";GRANT SELECT ON rms_payment.store_tip_setting TO " +
+            roles[3],
         );
         for (const role of roles.slice(1, 4)) {
           await admin.query("GRANT SELECT,INSERT ON platform_audit.audit_record TO " + role);

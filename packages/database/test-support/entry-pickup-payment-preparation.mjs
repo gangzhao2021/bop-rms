@@ -14,7 +14,13 @@ export async function exerciseEntryPickupPaymentPreparation({
   reference,
 }) {
   await admin.query("GRANT USAGE ON SCHEMA rms_payment TO " + role);
-  await admin.query("GRANT SELECT,INSERT ON rms_payment.payment_tip_selection TO " + role);
+  await admin.query(
+    "GRANT SELECT,INSERT ON rms_payment.payment_tip_selection TO " +
+      role +
+      // WP-2423 item 8 ⑦: a tip is taken only while the Store has tips on (2000_121).
+      ";GRANT SELECT ON rms_payment.store_tip_setting TO " +
+      role,
+  );
   // Pilot api grant (docs/spec/pilot-acl-matrix.json): the merchant order queue reads per-round
   // payment outcomes (WP-2423 Q6).
   await admin.query(

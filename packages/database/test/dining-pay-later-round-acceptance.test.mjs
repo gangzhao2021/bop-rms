@@ -51,7 +51,13 @@ import {
   createPostgresStoreSalesOrderSource,
   listStorePriceReductionsDecided,
 } from "../../rms/ordering/src/index.ts";
-import { createPostgresStoreSalesPaymentLedger } from "../../rms/payment/src/index.ts";
+import {
+  changeStoreTipSetting,
+  createPostgresPaymentTipSelectionStore,
+  createPostgresStoreSalesPaymentLedger,
+  parsePaymentTipSelection,
+} from "../../rms/payment/src/index.ts";
+import { readStoreTipChoices } from "../../../apps/api/src/merchant-store-features.ts";
 import {
   createMerchantDiningTableCashRefund,
   createMerchantDiningTablePaymentRead,
@@ -133,6 +139,12 @@ it("a split table that paid one part and left is written off for the rest", () =
 // refuses that and a cancellation without staff), asking again finds the same hold, and staff send
 // it with their release in one transaction. Then the table goes on and pays as usual.
 it("a new phone's first round waits for staff, who send it to the kitchen", () => journey("Held"));
+// WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 11): the owner turned tips off.
+// Neither staff at checkout nor a guest on their phone can add a tip (the commands refuse, and the
+// database refuses a tip selection by any path); the table pays with no tip, part of it is
+// refunded, and the Order's settlement, the day's ledger and reports follow with no tip.
+it("a store with tips off takes no tip from staff or guests; the table pays and is refunded without one", () =>
+  journey("TipsOff"));
 
 async function journey(ending) {
   await withIsolatedDatabase(
@@ -152,7 +164,9 @@ async function journey(ending) {
                     ? "wp2423_plsplwo"
                     : ending === "Held"
                       ? "wp2423_plheld"
-                      : "wp2423_plon",
+                      : ending === "TipsOff"
+                        ? "wp2423_pltips"
+                        : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -619,7 +633,7 @@ async function journey(ending) {
               operationReference: fresh(),
               diningSessionReference: sessionReference,
               method: "Cash",
-              tip: { kind: "Percent", percent: 15 },
+              tip: ending === "TipsOff" ? { kind: "None" } : { kind: "Percent", percent: 15 },
               tenderedMinor: "100000",
               slipReference: null,
               recordedAfterOutage: false,
@@ -1797,6 +1811,141 @@ async function journey(ending) {
             [],
           );
         }
+        /**
+         * WP-2423 item 8 ⑦ (decision 11): the owner turns tips off before the table pays. Staff
+         * can't record the payment with a tip, a guest can't start paying on their phone with
+         * one, and the database refuses a tip selection (a guest's checkout, a counter order, a
+         * staff round) whatever writes it. Nothing is recorded or charged by the refusals.
+         */
+        async function tipsOffRefusals() {
+          const whileOn = now();
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          const off = await transactions().run((tx) =>
+            changeStoreTipSetting(tx, ownerScope, {
+              operationReference: fresh(),
+              expectedVersion: 0,
+              tipsEnabled: false,
+              tierPercents: [10, 15, 18],
+              actorReference: id(0x701),
+              observedAt: now(),
+            }),
+          );
+          assert.deepEqual([off.version, off.tipsEnabled], [1, false]);
+          // The bill staff and guests read says tips are off.
+          assert.deepEqual((await bill()).tips, { enabled: false, tierPercents: [10, 15, 18] });
+          // The choices in force earlier (a payment taken during an outage is judged by them).
+          assert.deepEqual(
+            await transactions().run((tx) => readStoreTipChoices(tx, ownerScope, whileOn)),
+            { enabled: true, tierPercents: [10, 15, 18] },
+          );
+          // Staff at checkout: a percentage or a typed tip is refused.
+          for (const tip of [
+            { kind: "Percent", percent: 15 },
+            { kind: "Amount", amountMinor: "250" },
+          ])
+            await assert.rejects(settleWith(server, { tip }), { code: "TABLE_CHECKOUT_TIPS_OFF" });
+          // A guest on their phone: refused before the Provider is asked for anything.
+          const untouched = () => {
+            throw new Error("the Provider is not called for a refused tip");
+          };
+          const phone = createDiningTableOnlinePayments({
+            scope: ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+            provider: { createIntent: untouched, retrieveIntent: untouched, cancelIntent: untouched },
+            transactions: transactions(),
+            now,
+            nextReference: fresh,
+          });
+          await assert.rejects(
+            phone.start(
+              {
+                diningSessionReference: sessionReference,
+                guestSessionReference: guestSession,
+                allowed: async () => true,
+              },
+              { operationReference: fresh(), tip: { kind: "Percent", percent: 15 } },
+            ),
+            { code: "TABLE_ONLINE_PAYMENT_TIPS_OFF" },
+          );
+          // A tip selection (guest checkout, counter order, staff round): Payment's store refuses
+          // it, and the database refuses it even when written directly under the api role.
+          const selection = (n, amountMinor) =>
+            parsePaymentTipSelection({
+              selectionReference: id(0x7a0 + n),
+              paymentOperationReference: id(0x7b0 + n),
+              submissionReference: id(0x7c0 + n),
+              cartReference: id(0x7d0 + n),
+              cartVersion: 1,
+              quoteReference: id(0x7e0 + n),
+              guestSessionReference: guestSession,
+              brandReference: ownerScope.brandReference,
+              storeReference: ownerScope.storeReference,
+              tip: { amountMinor, currencyCode: "CAD" },
+              selectedAt: new Date(Date.now() - 1000).toISOString(),
+            });
+          const tipStore = createPostgresPaymentTipSelectionStore(
+            transactions(),
+            { brandReference: ownerScope.brandReference, storeReference: ownerScope.storeReference },
+            { now },
+          );
+          const tipAudit = (record) => ({
+            auditId: fresh(),
+            brandId: ownerScope.brandReference,
+            storeId: ownerScope.storeReference,
+            actor: { type: "System" },
+            actionCode: "PAYMENT_TIP_SELECT",
+            targetType: "PaymentTipSelection",
+            targetId: record.selectionReference,
+            reasonCode: "AUTHORIZED_PAYMENT_TIP_SELECT",
+            correlationId: fresh(),
+            occurredAt: record.selectedAt,
+            sourceChannel: "CUSTOMER_PWA",
+            dataClassification: "Restricted",
+            retentionPolicyCode: "AUDIT_DEFAULT",
+            retentionPolicyVersion: 1,
+          });
+          const tipped = selection(1, 125n);
+          await assert.rejects(tipStore.append({ record: tipped, audit: tipAudit(tipped) }), {
+            code: "PAYMENT_TIP_TURNED_OFF",
+          });
+          await assert.rejects(
+            transactions({ guc: true }).run((tx) =>
+              tx.query(
+                "INSERT INTO rms_payment.payment_tip_selection (selection_id,brand_id,store_id,payment_operation_id,submission_id,cart_id,cart_version,quote_id,guest_session_id,tip_minor,currency_code,selected_at) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,125,'CAD',$9)",
+                [
+                  tipped.selectionReference,
+                  ownerScope.brandReference,
+                  ownerScope.storeReference,
+                  tipped.paymentOperationReference,
+                  tipped.submissionReference,
+                  tipped.cartReference,
+                  tipped.quoteReference,
+                  guestSession,
+                  tipped.selectedAt,
+                ],
+              ),
+            ),
+            /tips are turned off at this store/u,
+          );
+          // No tip is still taken as usual.
+          const none = selection(2, 0n);
+          assert.equal(
+            (await tipStore.append({ record: none, audit: tipAudit(none) })).status,
+            "Created",
+          );
+          // Nothing was recorded by the refusals: no table payment, no phone payment, no tip.
+          assert.deepEqual(
+            (
+              await rows(
+                "SELECT (SELECT count(*) FROM rms_payment.dining_table_settlement WHERE order_id=$1)::int AS settled,(SELECT count(*) FROM rms_payment.dining_table_online_payment WHERE order_id=$1)::int AS online,(SELECT count(*) FROM rms_payment.payment_tip_selection WHERE tip_minor>0 AND selection_id IN ($2,$3))::int AS tipped",
+                [orderReference, tipped.selectionReference, none.selectionReference],
+              )
+            )[0],
+            { settled: 0, online: 0, tipped: 0 },
+          );
+        }
+
         async function paidOnlineEnding() {
           const intents = new Map();
           let created = 0;
@@ -2060,9 +2209,10 @@ async function journey(ending) {
         await assert.rejects(settleWith(server, { tenderedMinor: "100" }), {
           code: "TABLE_CHECKOUT_TENDER_SHORT",
         });
-        // Cash: 15 % tip on the bill before tax, rounded to 5 cents, change given.
+        // Cash: 15 % tip on the bill before tax (none with tips off), rounded to 5 cents, change
+        // given.
         const subtotalMinor = BigInt(open.owed.subtotalMinor);
-        const tipMinor = (subtotalMinor * 15n + 50n) / 100n;
+        const tipMinor = ending === "TipsOff" ? 0n : (subtotalMinor * 15n + 50n) / 100n;
         const due = round1Minor + round2Minor + tipMinor;
         const digit = due % 10n;
         const rounding =
@@ -2373,6 +2523,7 @@ async function journey(ending) {
           );
           return;
         }
+        if (ending === "TipsOff") await tipsOffRefusals();
         const operation = fresh();
         const paid = await settleWith(server, { operationReference: operation });
         assert.equal(paid.status, "Recorded");

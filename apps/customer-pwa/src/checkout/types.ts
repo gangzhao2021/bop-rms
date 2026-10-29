@@ -18,6 +18,11 @@ export interface CheckoutQuote {
     readonly requiresReconfirmation: boolean;
     readonly evaluatedAt: string;
   };
+  /**
+   * WP-2423 item 8 ⑦ (Owner decision 11): the tips the Store offers, as percentages of the
+   * subtotal before tax, or tips off. Absent from an older server: 10 / 15 / 18 %.
+   */
+  readonly tips?: { readonly enabled: boolean; readonly tierPercents: readonly number[] };
 }
 
 export type CheckoutState =

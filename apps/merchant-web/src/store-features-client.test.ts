@@ -12,6 +12,7 @@ const view = {
     chaseDish: false,
     changedAt: "2026-10-29T15:06:00.000Z",
   },
+  tips: { version: 0, enabled: true, tierPercents: [10, 15, 18], changedAt: null },
   canChange: true,
 };
 
@@ -30,6 +31,12 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
       { ...view, modules: { ...view.modules, inventory: "no" } },
       { ...view, services: { ...view.services, staffCall: "yes" } },
       { ...view, services: undefined },
+      // WP-2423 item 8 ⑦: three ascending whole percentages 1–50, and tips on or off.
+      { ...view, tips: undefined },
+      { ...view, tips: { ...view.tips, enabled: "yes" } },
+      { ...view, tips: { ...view.tips, tierPercents: [10, 10, 18] } },
+      { ...view, tips: { ...view.tips, tierPercents: [10, 15, 51] } },
+      { ...view, tips: { ...view.tips, tierPercents: [15, 18] } },
       null,
     ])
       expect(() => parseStoreFeatures(bad)).toThrow();
@@ -54,5 +61,34 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
       modules: { counterOrder: true, pickup: false, inventory: false },
     });
     await expect(client.read()).rejects.toMatchObject({ code: "Changed" });
+  });
+  it("WP-2423 item 8 ⑦: sends the owner's tip choices against the version they saw", async () => {
+    const sent: unknown[] = [];
+    const client = createStoreFeaturesClient("a".repeat(43), async (_url, init) => {
+      sent.push(JSON.parse(String(init?.body)));
+      return Response.json({
+        ...view,
+        tips: { version: 1, enabled: false, tierPercents: [12, 15, 20], changedAt: view.changedAt },
+      });
+    });
+    const next = await client.changeTips({
+      operationReference: "0190a7f2-0000-7000-8000-000000000002",
+      expectedVersion: 0,
+      enabled: false,
+      tierPercents: [12, 15, 20],
+    });
+    expect(sent[0]).toEqual({
+      action: "ChangeTips",
+      operationReference: "0190a7f2-0000-7000-8000-000000000002",
+      expectedVersion: 0,
+      enabled: false,
+      tierPercents: [12, 15, 20],
+    });
+    expect(next.tips).toEqual({
+      version: 1,
+      enabled: false,
+      tierPercents: [12, 15, 20],
+      changedAt: view.changedAt,
+    });
   });
 });

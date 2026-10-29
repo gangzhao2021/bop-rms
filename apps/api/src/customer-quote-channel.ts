@@ -8,6 +8,7 @@ import {
 } from "@bop/identity";
 import { parseOrderingInstant, parseOrderingReference } from "@rms/ordering";
 import type { CustomerQuotePort, QuoteCartCommand } from "./customer-quote.js";
+import { readStoreTipChoices } from "./merchant-store-features.js";
 
 /** Current credential/CSRF selects the channel; each quote owner retains its
  * current Cart/participant authorization and original-operation recovery.
@@ -18,6 +19,17 @@ export function createCustomerQuoteChannelPort(options: {
   now: () => string;
   pickup: CustomerQuotePort;
   dining: CustomerQuotePort;
+  /**
+   * WP-2423 item 8 ⑦: reads the Store's tip choices for the priced Cart (absent: the quote says
+   * nothing about tips). Unreadable: the quote is unavailable, never tips on a guess.
+   */
+  tips?: {
+    run<T>(
+      action: (tx: {
+        query(sql: string, values: readonly unknown[]): Promise<unknown>;
+      }) => Promise<T>,
+    ): Promise<T>;
+  };
 }): CustomerQuotePort {
   const scope = Object.freeze({
     brandReference: parseOrderingReference(options.scope.brandReference),
@@ -53,9 +65,16 @@ export function createCustomerQuoteChannelPort(options: {
           return { status: "NotFound" };
         if (session.channel === "DineIn" && session.diningState !== "DiningBound")
           return { status: "NotFound" };
-        return await (session.channel === "Pickup" ? options.pickup : options.dining).quoteCart(
-          input,
-        );
+        const result = await (
+          session.channel === "Pickup" ? options.pickup : options.dining
+        ).quoteCart(input);
+        if (
+          options.tips === undefined ||
+          (result.status !== "Created" && result.status !== "Current" && result.status !== "Requoted")
+        )
+          return result;
+        const tips = await options.tips.run((tx) => readStoreTipChoices(tx, scope));
+        return Object.freeze({ ...result, tips });
       } catch (error) {
         if (error instanceof GuestSessionError && error.code === "GUEST_SESSION_UNAVAILABLE")
           return { status: "NotFound" };

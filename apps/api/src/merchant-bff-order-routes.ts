@@ -264,9 +264,9 @@ export function installMerchantOrderRoutes(
         sessionCookie,
         orderType: request.query.orderType === "DineIn" ? "DineIn" : "Pickup",
       })
-      .then((menu) => {
+      .then(({ menu, tips }) => {
         response.set("Cache-Control", NO_STORE);
-        response.json({ screenId: "OPS-ORDER-ENTRY", menu });
+        response.json({ screenId: "OPS-ORDER-ENTRY", menu, tips });
       })
       .catch((error: unknown) => {
         if (error instanceof CounterMenuError && error.code === "COUNTER_MENU_UNAVAILABLE") {
@@ -340,6 +340,8 @@ export function installMerchantOrderRoutes(
             COUNTER_ORDER_IDEMPOTENCY_CONFLICT: [409, "counter_order_conflict"],
             COUNTER_ORDER_NO_PICKUP_TIMES: [409, "counter_order_no_pickup_times"],
             COUNTER_ORDER_TURNED_OFF: [409, "counter_ordering_turned_off"],
+            COUNTER_ORDER_TIPS_OFF: [409, "tips_turned_off"],
+            COUNTER_ORDER_TIP_CHOICES_CHANGED: [409, "tip_choices_changed"],
             COUNTER_ORDER_UNAVAILABLE: [503, "counter_order_unavailable"],
           } as const
         )[error.code];
@@ -408,6 +410,8 @@ export function installMerchantOrderRoutes(
             STAFF_ROUND_NOT_FINISHED: [409, "staff_round_not_finished"],
             STAFF_ROUND_IN_PROGRESS: [409, "staff_round_in_progress"],
             STAFF_ROUND_IDEMPOTENCY_CONFLICT: [409, "staff_round_conflict"],
+            STAFF_ROUND_TIPS_OFF: [409, "tips_turned_off"],
+            STAFF_ROUND_TIP_CHOICES_CHANGED: [409, "tip_choices_changed"],
             STAFF_ROUND_UNAVAILABLE: [503, "staff_round_unavailable"],
           } as const
         )[error.code];

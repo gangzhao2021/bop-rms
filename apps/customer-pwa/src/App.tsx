@@ -223,6 +223,8 @@ export function App({
               context={localizedMenuContext}
               client={demo?.menuClient}
               readOnlyNotice={demo?.menuReadOnlyNotice}
+              // The local demo reads no Store identity (it makes no application requests).
+              storeProfile={demo ? null : undefined}
             />
           }
         />

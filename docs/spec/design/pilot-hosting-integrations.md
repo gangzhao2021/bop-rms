@@ -89,6 +89,9 @@
    "At a table? A staff member can take your order in the meantime."，员工页（`/app`、`/operations`）加"在柜台或纸上继续点单
    （停机单）"；数据请求（`/api`、`/bff`、`/merchant`、`/media`）得到 JSON `SERVICE_UPDATING`/`SERVICE_UNAVAILABLE`。
    `Accept-Language` 为法语时给法语版本。不含内部代码或术语。窗口内入口仍可用时照常服务（构建期间旧版本继续服务）。
+   连接入口失败或超时时（v15 2026-10-29：入口进程一直在跑，只有一次连接失败，150 毫秒后的下一次就成功了），计划窗口外先停约
+   250 毫秒再试一次，两次都失败才给维护页并记 `PILOT_FRONT_ENTRY_DOWN`；计划窗口内照旧立即给“正在更新”。最坏等待为连接超时
+   3 秒 + 250 毫秒 + 3 秒，约 6.3 秒。
 2. **TLS 三种方式**：无 hosting.json 或 `tls.mode: proxy`——前端只中继 TLS 字节，浏览器仍与入口自身证书握手（与现状完全一致），
    维护页使用同一证书；`tls.mode: front`——前端用托管方的公网证书终止 TLS，再以本地入口证书为唯一信任根重新加密转发；
    证书文件变更后 60 秒内自动重载（续期无需重启）。
