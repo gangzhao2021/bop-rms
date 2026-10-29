@@ -24,7 +24,11 @@ WORKDIR /app
 COPY . .
 # The customer payment mode (internal simulation or Stripe) is runtime configuration served at
 # /bff/customer/payment-configuration from the mounted runtime directory, so one image serves both.
-RUN pnpm install --frozen-lockfile && pnpm build
+# The build shares the machine with the running pilot: at full parallelism it starved it on
+# 2026-10-29 (load 53 on 10 cores, services restarted, guests got the paused page), so package
+# builds run PILOT_BUILD_CONCURRENCY at a time.
+ARG PILOT_BUILD_CONCURRENCY=2
+RUN pnpm install --frozen-lockfile && pnpm build --concurrency=${PILOT_BUILD_CONCURRENCY}
 
 ENV NODE_ENV=development
 ARG PILOT_RUNTIME_DIRECTORY=.local/pilot-v14

@@ -2382,12 +2382,13 @@ opens a window first and closes it once the pages load:
    window is at most 15): `docker compose -f compose.pilot.yaml build pilot`.
    The build shares CPU and memory with the running store, so never build on a busy store host. On
    a store's own host, build outside opening hours, or build on another machine and copy the image
-   over (`docker save bop-rms-pilot:local | ssh <store host> docker load`). On the internal-test
-   machine, first check that nothing else heavy is running (`uptime`, `docker stats --no-stream`).
-   On 2026-10-29 a build there, while another project's tests ran (load 63 on 10 cores), starved
-   the running pilot: services missed their health checks and restarted, guests got "Ordering is
-   paused" for about 8 minutes outside any window, and the monitor on the same host stalled too,
-   so it never raised "Customer ordering page is not loading". After every build, look for pauses
+   over (`docker save bop-rms-pilot:local | ssh <store host> docker load`). On 2026-10-29 two
+   builds on the internal-test machine starved the running pilot (load 53–63 on 10 cores):
+   services missed their health checks and restarted, guests got "Ordering is paused" outside any
+   window (once for about 8 minutes), and the monitor on the same host stalled too, so it never
+   raised "Customer ordering page is not loading". The image now builds two packages at a time
+   (build argument `PILOT_BUILD_CONCURRENCY`, default 2); still check that nothing else heavy is
+   running first (`uptime`, `docker stats --no-stream`). After every build, look for pauses
    outside the window: `docker compose -f compose.pilot.yaml logs -t front | grep DOWN`.
 2. **Start the window** (uses the freshly built image, so it also works the first time):
    `docker compose -f compose.pilot.yaml run --rm --no-deps ops node tooling/environment/pilot-ops.mjs maintenance start "$PILOT_RUNTIME_DIRECTORY" --reason "deploy <revision>"`.
