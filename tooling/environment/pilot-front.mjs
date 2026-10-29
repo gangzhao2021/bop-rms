@@ -158,6 +158,10 @@ export async function startPilotFront({
   upstreamHost = "127.0.0.1",
   upstreamPort = UPSTREAM_PORT,
   connectTimeoutMs = 3000,
+  // v15 2026-10-29: one connect to the entry failed while the entry kept running (the next, 150
+  // ms later, worked). Outside a planned update the front tries once more after this pause before
+  // answering with the update page: at most 3 s + 0.25 s + 3 s.
+  retryPauseMs = 250,
   reloadEveryMs = 60_000,
   now = Date.now,
   log = (line) => console.log(line),
@@ -198,6 +202,35 @@ export async function startPilotFront({
     upstreamDown = down;
     log(down ? "PILOT_FRONT_ENTRY_DOWN (serving the update page)" : "PILOT_FRONT_ENTRY_BACK");
   };
+  /**
+   * Connects to the entry; null when it can't. `open` starts one attempt and says when it is
+   * ready; an attempt that errors or times out is retried once after a short pause, unless a
+   * planned update is on (then the page answers at once). `client` closing meanwhile stops it.
+   */
+  const connectUpstream = async (client, open) => {
+    const attempt = () =>
+      new Promise((resolve) => {
+        const { socket, ready } = open();
+        let settled = false;
+        const settle = (value) => {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+        };
+        socket.once(ready, () => settle(socket));
+        const fail = () => {
+          socket.destroy();
+          settle(null);
+        };
+        socket.once("error", fail);
+        socket.once("timeout", fail);
+      });
+    const first = await attempt();
+    if (first !== null || client.destroyed || (await isUpdating())) return first;
+    await new Promise((resolve) => setTimeout(resolve, retryPauseMs));
+    if (client.destroyed) return null;
+    return attempt();
+  };
   const relay = (a, b) => {
     a.pipe(b).on("error", () => a.destroy());
     b.pipe(a).on("error", () => b.destroy());
@@ -215,43 +248,55 @@ export async function startPilotFront({
     });
     server.on("secureConnection", (clear) => {
       clear.pause();
-      const upstream = tls.connect({
-        host: upstreamHost,
-        port: upstreamPort,
-        ...(current.upstreamCa ? { ca: current.upstreamCa } : {}),
-        ALPNProtocols: ["http/1.1"],
-        timeout: connectTimeoutMs,
-      });
-      upstream.once("secureConnect", () => {
+      void connectUpstream(clear, () => ({
+        socket: tls.connect({
+          host: upstreamHost,
+          port: upstreamPort,
+          ...(current.upstreamCa ? { ca: current.upstreamCa } : {}),
+          ALPNProtocols: ["http/1.1"],
+          timeout: connectTimeoutMs,
+        }),
+        ready: "secureConnect",
+      })).then((upstream) => {
+        if (upstream === null) {
+          // A browser that already went away is not answered (and says nothing about the entry).
+          if (clear.destroyed) return;
+          noteUpstream(true);
+          answerUnavailable(clear, isUpdating);
+          clear.resume();
+          return;
+        }
         upstream.setTimeout(0);
+        if (clear.destroyed) {
+          upstream.destroy();
+          return;
+        }
         noteUpstream(false);
         relay(clear, upstream);
         clear.resume();
       });
-      const fallback = () => {
-        upstream.destroy();
-        noteUpstream(true);
-        answerUnavailable(clear, isUpdating);
-        clear.resume();
-      };
-      upstream.once("timeout", fallback);
-      upstream.once("error", fallback);
     });
     server.on("tlsClientError", () => undefined);
   } else {
     server = net.createServer({ pauseOnConnect: true }, (socket) => {
       socket.on("error", () => socket.destroy());
-      const upstream = net.connect({ host: upstreamHost, port: upstreamPort });
-      const timer = setTimeout(() => upstream.destroy(Error("timeout")), connectTimeoutMs);
-      upstream.once("connect", () => {
-        clearTimeout(timer);
-        noteUpstream(false);
-        relay(socket, upstream);
-        socket.resume();
-      });
-      upstream.once("error", () => {
-        clearTimeout(timer);
-        upstream.destroy();
+      void connectUpstream(socket, () => {
+        const attempt = net.connect({ host: upstreamHost, port: upstreamPort });
+        attempt.setTimeout(connectTimeoutMs);
+        return { socket: attempt, ready: "connect" };
+      }).then((upstream) => {
+        if (upstream !== null) {
+          upstream.setTimeout(0);
+          if (socket.destroyed) {
+            upstream.destroy();
+            return;
+          }
+          noteUpstream(false);
+          relay(socket, upstream);
+          socket.resume();
+          return;
+        }
+        if (socket.destroyed) return;
         noteUpstream(true);
         const secure = new tls.TLSSocket(socket, {
           isServer: true,
