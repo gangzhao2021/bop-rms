@@ -37,7 +37,11 @@ Shell variables do not persist between Bash calls here, so prefix each command w
 1. **Pre-checks.** Working tree committed; note the revision `<sha>`. Tag the current image so
    rollback is one command: `docker tag bop-rms-pilot:local bop-rms-pilot:pre-<sha>`.
 2. **Build while the old version serves** (can exceed 10 min; run in the background with a long
-   timeout): `docker compose -f compose.pilot.yaml build pilot`. Then, still before the window,
+   timeout): `docker compose -f compose.pilot.yaml build pilot`. First check `uptime` and
+   `docker stats --no-stream`: the build shares the VM with the running pilot, and on 2026-10-29 a
+   build next to another project's tests (load 63) left guests on the "paused" page for 8 minutes
+   outside any window. Wait out other heavy work. After the build, look for pauses outside the
+   window with `docker logs -t bop-rms-pilot-front-1 | grep DOWN`. Then, still before the window,
    check the new image's service entries load (2026-10-27: a tooling file importing `express`
    passed on macOS through hoisting and crashed api/customer in the image):
    `docker run --rm -e NODE_ENV=development --entrypoint sh bop-rms-pilot:local -c "cd /app && for f in pilot-api-entry pilot-customer-entry; do timeout 30 node --import ./tooling/environment/register-workspace-typescript.mjs -e \"import('./tooling/environment/\$f.mjs').then(()=>console.log('OK \$f'))\" 2>&1 | grep -E 'OK|ERR_' | head -2; done"`
