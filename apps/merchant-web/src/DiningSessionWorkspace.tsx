@@ -34,6 +34,7 @@ import { newOperationReference } from "./operation-reference.js";
 import { TableSessionClose } from "./TableSessionClose.js";
 import { LastOrdersNotice } from "./LastOrdersNotice.js";
 import { TableCheckout } from "./TableCheckout.js";
+import { TablePartySize } from "./TablePartySize.js";
 import { TableOrderRounds } from "./TableOrderRounds.js";
 import { RoundHoldSettingControl, TableHeldRounds, TablePanelPhones } from "./TablePhones.js";
 import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
@@ -1274,6 +1275,16 @@ function TablePanel({
         </section>
       ) : null}
       {code ? <DiningEntryCode code={code} onHide={onHideCode} /> : null}
+      {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
+        // WP-2423 item 8 ⑦ (decision 2): how many guests, when the Store asks for it.
+        <TablePartySize
+          key={"party:" + table.currentDiningSessionReference}
+          diningSessionReference={table.currentDiningSessionReference}
+          tableLabel={table.stableLabel}
+          csrf={csrf}
+          locked={locked}
+        />
+      ) : null}
       {seated ? (
         <TableHeldRounds
           rounds={table.heldRounds ?? []}

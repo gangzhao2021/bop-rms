@@ -35,6 +35,7 @@ import {
 } from "../../apps/api/dist/merchant-dining-held-round.js";
 import { createMerchantDiningJoinRegenerate } from "../../apps/api/dist/merchant-dining-join-regenerate.js";
 import { createMerchantDiningChase } from "../../apps/api/dist/merchant-dining-chase.js";
+import { createMerchantDiningPartySize } from "../../apps/api/dist/merchant-dining-party-size.js";
 import {
   createMerchantStoreFeatures,
   navigationForStoreFeatures,
@@ -1770,6 +1771,12 @@ export async function createInternalMerchant(
       }),
       // WP-2423 item 8 ⑦: a server chases a dish (when the Store turned chasing on).
       diningChase: createMerchantDiningChase({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
+      // WP-2423 item 8 ⑦ (decision 2): how many guests sit at a table.
+      diningPartySize: createMerchantDiningPartySize({
         persistence,
         authentication: service,
         now: resources.now,

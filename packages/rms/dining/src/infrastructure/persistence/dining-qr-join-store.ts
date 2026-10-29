@@ -640,6 +640,8 @@ export interface DiningServiceSetting {
   readonly version: number;
   readonly staffCall: boolean;
   readonly chaseDish: boolean;
+  /** Owner decision 2 (2000_122): staff record how many guests when opening a table. */
+  readonly askPartySize: boolean;
   readonly changedAt: string | null;
 }
 
@@ -656,24 +658,32 @@ export async function loadDiningServiceSetting(
   ]);
   const found = rows(
     await tx.query(
-      "SELECT version,staff_call,chase_dish,to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at FROM rms_dining.dining_service_setting WHERE brand_id=$1 AND store_id=$2 ORDER BY version DESC LIMIT 1",
+      "SELECT version,staff_call,chase_dish,ask_party_size,to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at FROM rms_dining.dining_service_setting WHERE brand_id=$1 AND store_id=$2 ORDER BY version DESC LIMIT 1",
       [brand, store],
     ),
   )[0];
   if (found === undefined)
-    return Object.freeze({ version: 0, staffCall: false, chaseDish: false, changedAt: null });
+    return Object.freeze({
+      version: 0,
+      staffCall: false,
+      chaseDish: false,
+      askPartySize: false,
+      changedAt: null,
+    });
   const version = Number(found.version);
   if (
     !Number.isSafeInteger(version) ||
     version < 1 ||
     typeof found.staff_call !== "boolean" ||
-    typeof found.chase_dish !== "boolean"
+    typeof found.chase_dish !== "boolean" ||
+    typeof found.ask_party_size !== "boolean"
   )
     return fail();
   return Object.freeze({
     version,
     staffCall: found.staff_call,
     chaseDish: found.chase_dish,
+    askPartySize: found.ask_party_size,
     changedAt: parseDiningInstant(found.occurred_at),
   });
 }
@@ -690,6 +700,8 @@ export async function changeDiningServiceSetting(
     readonly expectedVersion: number;
     readonly staffCall: boolean;
     readonly chaseDish: boolean;
+    /** Absent: kept as it is. */
+    readonly askPartySize?: boolean;
     readonly actorReference: string;
     readonly observedAt: string;
   },
@@ -707,23 +719,32 @@ export async function changeDiningServiceSetting(
   ]);
   const prior = rows(
     await tx.query(
-      "SELECT staff_call,chase_dish FROM rms_dining.dining_service_setting WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      "SELECT staff_call,chase_dish,ask_party_size FROM rms_dining.dining_service_setting WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
       [brand, store, operation],
     ),
   )[0];
   if (prior !== undefined) {
-    if (prior.staff_call !== input.staffCall || prior.chase_dish !== input.chaseDish)
+    if (
+      prior.staff_call !== input.staffCall ||
+      prior.chase_dish !== input.chaseDish ||
+      (input.askPartySize !== undefined && prior.ask_party_size !== input.askPartySize)
+    )
       throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
     return loadDiningServiceSetting(tx, scopeInput);
   }
   const current = await loadDiningServiceSetting(tx, scopeInput);
   if (current.version !== input.expectedVersion)
     throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
-  if (current.staffCall === input.staffCall && current.chaseDish === input.chaseDish)
+  const askPartySize = input.askPartySize ?? current.askPartySize;
+  if (
+    current.staffCall === input.staffCall &&
+    current.chaseDish === input.chaseDish &&
+    current.askPartySize === askPartySize
+  )
     return current;
   changed(
     await tx.query(
-      "INSERT INTO rms_dining.dining_service_setting (tenant_id,brand_id,store_id,version,operation_id,staff_call,chase_dish,actor_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+      "INSERT INTO rms_dining.dining_service_setting (tenant_id,brand_id,store_id,version,operation_id,staff_call,chase_dish,actor_id,occurred_at,ask_party_size) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
       [
         tenant,
         brand,
@@ -734,8 +755,120 @@ export async function changeDiningServiceSetting(
         input.chaseDish,
         parseDiningReference(input.actorReference),
         parseDiningInstant(input.observedAt),
+        askPartySize,
       ],
     ),
   );
   return loadDiningServiceSetting(tx, scopeInput);
+}
+
+/**
+ * WP-2423 item 8 ⑦ (Owner decision 2): how many guests sit at each of these tables now (2000_122).
+ * A table never given a party size is absent from the map.
+ */
+export async function loadDiningPartySizes(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+  diningSessionReferences: readonly string[],
+): Promise<ReadonlyMap<string, { readonly partySize: number; readonly version: number }>> {
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  const sessions = diningSessionReferences.map((reference) => parseDiningReference(reference));
+  const found = new Map<string, { partySize: number; version: number }>();
+  if (sessions.length === 0) return found;
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const result = (await tx.query(
+    "SELECT DISTINCT ON (session_id) session_id::text AS session,version,party_size FROM rms_dining.dining_session_party_size WHERE brand_id=$1 AND store_id=$2 AND session_id=ANY($3::uuid[]) ORDER BY session_id,version DESC",
+    [brand, store, sessions],
+  )) as { rows?: unknown };
+  if (!Array.isArray(result.rows)) return fail();
+  for (const row of result.rows as Record<string, unknown>[]) {
+    const version = Number(row.version),
+      partySize = Number(row.party_size);
+    if (
+      !Number.isSafeInteger(version) ||
+      version < 1 ||
+      !Number.isSafeInteger(partySize) ||
+      partySize < 1 ||
+      partySize > 99
+    )
+      return fail();
+    found.set(String(row.session), Object.freeze({ partySize, version }));
+  }
+  return found;
+}
+
+/**
+ * Staff record how many guests sit at an open table: the table's next party-size version, with
+ * who and when. `expectedVersion` is the version they saw (0: none yet); another change in
+ * between is a conflict. The same operation again returns what it recorded.
+ */
+export async function recordDiningPartySize(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+  input: {
+    readonly diningSessionReference: string;
+    readonly operationReference: string;
+    readonly expectedVersion: number;
+    readonly partySize: number;
+    readonly actorReference: string;
+    readonly observedAt: string;
+  },
+): Promise<{ readonly partySize: number; readonly version: number }> {
+  const tenant = parseDiningReference(scopeInput.tenantReference);
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  const session = parseDiningReference(input.diningSessionReference);
+  const operation = parseDiningReference(input.operationReference);
+  if (
+    !Number.isSafeInteger(input.partySize) ||
+    input.partySize < 1 ||
+    input.partySize > 99 ||
+    !Number.isSafeInteger(input.expectedVersion) ||
+    input.expectedVersion < 0
+  )
+    return fail();
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    `DiningPartySize:${brand}:${store}:${session}`,
+  ]);
+  const prior = rows(
+    await tx.query(
+      "SELECT session_id::text AS session,party_size,version FROM rms_dining.dining_session_party_size WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      [brand, store, operation],
+    ),
+  )[0];
+  if (prior !== undefined) {
+    if (String(prior.session) !== session || Number(prior.party_size) !== input.partySize)
+      throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+    return Object.freeze({ partySize: input.partySize, version: Number(prior.version) });
+  }
+  const current = (await loadDiningPartySizes(tx, scopeInput, [session])).get(session);
+  if ((current?.version ?? 0) !== input.expectedVersion)
+    throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+  if (current?.partySize === input.partySize) return current;
+  const version = (current?.version ?? 0) + 1;
+  changed(
+    await tx.query(
+      "INSERT INTO rms_dining.dining_session_party_size (tenant_id,brand_id,store_id,session_id,version,operation_id,party_size,actor_id,recorded_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+      [
+        tenant,
+        brand,
+        store,
+        session,
+        version,
+        operation,
+        input.partySize,
+        parseDiningReference(input.actorReference),
+        parseDiningInstant(input.observedAt),
+      ],
+    ),
+  );
+  return Object.freeze({ partySize: input.partySize, version });
 }
