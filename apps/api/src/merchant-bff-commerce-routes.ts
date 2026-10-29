@@ -1,5 +1,6 @@
 /** Merchant BFF routes: commerce workbench (recipes, products, prices, allergens, menus, availability, option sets, tax classifications). Registered by createMerchantBffRouter (merchant-bff.ts). */
 import express, { type Router } from "express";
+import { MerchantKitchenNotPreparedError } from "./merchant-kitchen-not-prepared.js";
 import { MerchantRecipeError } from "./merchant-recipes.js";
 import { MerchantDishAllergenError } from "./merchant-dish-allergens.js";
 import { MerchantComboError } from "./merchant-combos.js";
@@ -143,6 +144,51 @@ export function installMerchantCommerceRoutes(
             return;
           }
           response.status(dishAllergenStatus[error.code]).json({ error: error.code });
+        });
+    },
+  );
+
+  // WP-2423 item 8 ⑦ (decision 2): the menu's "not prepared by the kitchen" mark of dishes.
+  router.post(
+    "/commerce/kitchen-not-prepared/command",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.kitchenNotPrepared) {
+        response.status(503).json({ error: "kitchen_not_prepared_unavailable" });
+        return;
+      }
+      void options
+        .kitchenNotPrepared({ sessionCookie, csrf, command: request.body })
+        .then((result) => response.set("Cache-Control", "no-store").json(result))
+        .catch((error: unknown) => {
+          if (
+            !(error instanceof MerchantKitchenNotPreparedError) ||
+            error.code === "KITCHEN_NOT_PREPARED_PERMISSION_DENIED"
+          ) {
+            denied(response);
+            return;
+          }
+          response
+            .status(
+              error.code === "KITCHEN_NOT_PREPARED_INPUT_INVALID"
+                ? 400
+                : error.code === "KITCHEN_NOT_PREPARED_CHANGED"
+                  ? 409
+                  : 503,
+            )
+            .set("Cache-Control", "no-store")
+            .json({ error: error.code.toLowerCase() });
         });
     },
   );

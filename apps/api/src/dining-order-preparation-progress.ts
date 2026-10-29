@@ -2,7 +2,10 @@ import {
   createPostgresDiningOrderItemStateReader,
   summarizeOrderItemProgress,
 } from "@rms/ordering";
-import { createPostgresKitchenCustomerStatusReader } from "@rms/kitchen";
+import {
+  createPostgresKitchenCustomerStatusReader,
+  listKitchenNotPreparedOrderItems,
+} from "@rms/kitchen";
 
 type OrderOptions = Parameters<typeof createPostgresDiningOrderItemStateReader>[0];
 type KitchenOptions = Parameters<typeof createPostgresKitchenCustomerStatusReader>[0];
@@ -30,6 +33,13 @@ export function createDiningOrderPreparationProgress(
         transaction: input.transaction,
         orderReference: order.orderReference,
       });
+      // WP-2423 item 8 ⑦ (decision 2): dishes the kitchen did not prepare (decided as each round
+      // reached it) are ready, and served, once ordered; they need no kitchen work.
+      const notPrepared = await listKitchenNotPreparedOrderItems(
+        input.transaction as unknown as Parameters<typeof listKitchenNotPreparedOrderItems>[0],
+        { brandReference: options.brandReference, storeReference: options.storeReference },
+        String(order.orderReference),
+      );
       const membership = new Map(order.items.map((item) => [item.orderItemReference, item]));
       const progress = new Map<string, "Queued" | "InProgress" | "Ready">();
       const kitchenCancelled = new Set<string>();
@@ -54,7 +64,10 @@ export function createDiningOrderPreparationProgress(
         }
       }
       const items = order.items.map((item) => {
-        const current = progress.get(item.orderItemReference);
+        const current =
+          item.acceptance !== null && notPrepared.has(String(item.orderItemReference))
+            ? ("Ready" as const)
+            : progress.get(item.orderItemReference);
         return Object.freeze({
           orderItemReference: item.orderItemReference,
           orderBatchReference: item.orderBatchReference,
@@ -91,7 +104,17 @@ export function createDiningOrderPreparationProgress(
           (item) =>
             item.acceptance === null ||
             Boolean(item.staffCancellation || item.itemStaffCancellation) ||
-            progress.has(item.orderItemReference),
+            progress.has(item.orderItemReference) ||
+            notPrepared.has(String(item.orderItemReference)),
+        ),
+        // The items no one serves: counted as served once ordered (delivery progress).
+        notPreparedItems: Object.freeze(
+          order.items
+            .filter(
+              (item) =>
+                item.acceptance !== null && notPrepared.has(String(item.orderItemReference)),
+            )
+            .map((item) => String(item.orderItemReference)),
         ),
         items: Object.freeze(items),
         observedAt: input.observedAt,

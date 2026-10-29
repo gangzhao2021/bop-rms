@@ -104,7 +104,7 @@ export async function seedMerchantAcceptanceSession({
     );
     await admin.query("GRANT UPDATE(slot_id) ON rms_fulfillment.capacity_slot TO " + role);
     await admin.query(
-      "GRANT SELECT ON rms_kitchen.kitchen_ticket,rms_kitchen.kitchen_work_item,rms_kitchen.kitchen_order_item_ready_result,rms_dining.dining_item_service_record TO " +
+      "GRANT SELECT ON rms_kitchen.kitchen_ticket,rms_kitchen.kitchen_batch_preparation_decision,rms_kitchen.kitchen_work_item,rms_kitchen.kitchen_order_item_ready_result,rms_dining.dining_item_service_record TO " +
         role,
     );
 

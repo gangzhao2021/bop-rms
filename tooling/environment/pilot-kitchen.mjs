@@ -13,7 +13,21 @@ import {
   createKitchenTicketIntakeAdapter,
   createConfirmedOrderConsumerService,
   createKitchenWorkPlanService,
+  createKitchenNotPreparedIntakeAdapter,
+  loadKitchenBatchPreparationDecision,
 } from "../../packages/rms/kitchen/src/index.ts";
+
+/**
+ * WP-2423 item 8 ⑦ (decision 2): the lines of a round the kitchen does not prepare, as Kitchen
+ * decided when the round reached it (none before then: the intake decides first).
+ */
+export function kitchenNotPreparedLines(scope) {
+  return async (transaction, round) =>
+    new Set(
+      (await loadKitchenBatchPreparationDecision(transaction, scope, round.orderBatchReference))
+        ?.notPreparedOrderItemReferences ?? [],
+    );
+}
 import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalKitchen(resources) {
   if (!isPilotRuntime()) throw new Error("INTERNAL_KITCHEN_ONLY");
@@ -74,6 +88,14 @@ export function createInternalKitchen(resources) {
       quoteVersion: 2,
       sha256: hash,
       authorize: async () => active(),
+      notPrepared: kitchenNotPreparedLines(scope),
+    });
+    // Every line of the round, before the kitchen decides which it does not prepare.
+    const allLines = createPostgresOrderKitchenSourceStore({
+      ...scope,
+      quoteVersion: 2,
+      sha256: hash,
+      authorize: async () => active(),
     });
     const repository = createPostgresKitchenTicketStore({
       ...scope,
@@ -116,7 +138,30 @@ export function createInternalKitchen(resources) {
     };
     return createConfirmedOrderConsumerService({
       authorization: { authorize: async () => active() },
-      intakes: createKitchenTicketIntakeAdapter(ports),
+      intakes: createKitchenNotPreparedIntakeAdapter({
+        inner: createKitchenTicketIntakeAdapter(ports),
+        scope,
+        now: resources.now,
+        allLines: async (tx, receipt) =>
+          (
+            await allLines.resolve({
+              transaction: tx,
+              query: {
+                ...scope,
+                orderReference: receipt.orderReference,
+                orderBatchReference: receipt.orderBatchReference,
+                confirmationReference: receipt.confirmationReference,
+                sourceEventReference: receipt.sourceEventReference,
+                sourceAggregateVersion: receipt.sourceAggregateVersion,
+                sourceSnapshotDigest: receipt.sourceSnapshotDigest,
+                observedAt: receipt.confirmedAt,
+              },
+            })
+          ).items.map((item) => ({
+            orderItemReference: String(item.orderItemReference),
+            productReference: String(item.productReference),
+          })),
+      }),
       digests: { sha256: hash },
     });
   }

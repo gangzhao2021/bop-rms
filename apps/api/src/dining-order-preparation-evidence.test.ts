@@ -6,6 +6,8 @@ vi.mock("@rms/ordering", async (original) => ({
 }));
 vi.mock("@rms/kitchen", () => ({
   createPostgresKitchenCustomerStatusReader: () => ({ loadByOrder: mock.kitchen }),
+  // WP-2423 item 8 ⑦: no dish of these orders is one the kitchen does not prepare.
+  listKitchenNotPreparedOrderItems: async () => new Set<string>(),
 }));
 import { createDiningOrderPreparationProgress } from "./dining-order-preparation-progress.js";
 const id = (n: number) => "0190fad1-0000-7000-8000-" + String(n).padStart(12, "0");

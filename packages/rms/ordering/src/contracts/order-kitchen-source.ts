@@ -78,6 +78,8 @@ export const orderKitchenSourceErrorCodes = [
   "ORDER_KITCHEN_SOURCE_PERMISSION_DENIED",
   "ORDER_KITCHEN_SOURCE_CONFLICT",
   "ORDER_KITCHEN_SOURCE_DEPENDENCY_UNAVAILABLE",
+  /** WP-2423 item 8 ⑦: every line of the round is a dish the kitchen does not prepare. */
+  "ORDER_KITCHEN_SOURCE_NOTHING_TO_PREPARE",
 ] as const;
 
 export type OrderKitchenSourceErrorCode = (typeof orderKitchenSourceErrorCodes)[number];

@@ -5,7 +5,10 @@ import {
   createOrderKitchenSourceQueryService,
   parseResolveConfirmedOrderKitchenSourceInput,
 } from "../../application/order-kitchen-source.js";
-import { createOrderKitchenSourceFromSnapshot } from "../../application/order-kitchen-snapshot.js";
+import {
+  createOrderKitchenSourceFromSnapshot,
+  excludeOrderKitchenSourceLines,
+} from "../../application/order-kitchen-snapshot.js";
 import { createPostgresOrderCreationQueryStore } from "./order-creation-query-store.js";
 import { createPostgresOrderPaymentDispositionReader } from "./order-payment-disposition-store.js";
 import { createPostgresOrderPayLaterConfirmationStore } from "./order-pay-later-confirmation-store.js";
@@ -30,6 +33,21 @@ export function createPostgresOrderKitchenSourceStore(options: {
     transaction: ConsumerTransaction,
     input: Parameters<OrderKitchenSourceQueryPorts["authorization"]["authorize"]>[0],
   ): Promise<boolean>;
+  /**
+   * WP-2423 item 8 ⑦ (decision 2): which of the round's lines the kitchen does not prepare
+   * (Kitchen's decision for the round, fixed when it reached the kitchen). Absent: every line.
+   */
+  notPrepared?(
+    transaction: ConsumerTransaction,
+    round: {
+      readonly orderReference: string;
+      readonly orderBatchReference: string;
+      readonly lines: readonly {
+        readonly orderItemReference: string;
+        readonly productReference: string;
+      }[];
+    },
+  ): Promise<ReadonlySet<string>>;
 }) {
   const scope = Object.freeze({
     brandReference: parseOrderingReference(options.brandReference),
@@ -262,7 +280,17 @@ export function createPostgresOrderKitchenSourceStore(options: {
         },
       },
     });
-    return source.resolve(query);
+    const full = await source.resolve(query);
+    if (options.notPrepared === undefined) return full;
+    const excluded = await options.notPrepared(tx, {
+      orderReference: String(full.orderReference),
+      orderBatchReference: String(full.orderBatchReference),
+      lines: full.items.map((item) => ({
+        orderItemReference: String(item.orderItemReference),
+        productReference: String(item.productReference),
+      })),
+    });
+    return excludeOrderKitchenSourceLines(full, excluded, options.sha256);
   }
   return Object.freeze({
     /** The source exactly as it is now: creating kitchen work requires the current revision. */

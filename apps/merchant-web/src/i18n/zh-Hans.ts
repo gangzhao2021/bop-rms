@@ -6316,6 +6316,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Saved. No one is asked for a tip from now on.": "已保存。从现在起不再询问小费。",
   "Save tips": "保存小费设置",
   "Ask how many guests when opening a table": "开台时问人数",
+  "Whether the kitchen prepares this dish could not be read.": "读不到这道菜是否经后厨。",
+  "This wasn't saved. It has been read again: check it and try again.":
+    "没有保存，已重新读取，请核对后再试。",
+  "After the dish is saved you can mark it as not prepared by the kitchen.":
+    "保存这道菜之后，可以把它标为不经后厨。",
+  "Not prepared by the kitchen": "不经后厨",
+  "This dish does not appear on the kitchen board; it counts as served once ordered and never holds up checkout. For example bottled drinks or the tea charge.":
+    "这道菜不进后厨看板，下单就算已上，不挡结账。比如瓶装饮料、茶位。",
   "The number of guests could not be read. Check the connection.": "读不到人数，请检查网络。",
   "Someone else changed the number of guests. It has been read again: check it.":
     "别人刚改过人数，已重新读取，请核对。",

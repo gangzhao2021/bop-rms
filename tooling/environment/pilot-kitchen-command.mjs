@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { kitchenNotPreparedLines } from "./pilot-kitchen.mjs";
 import { createMerchantKitchenCommand } from "../../apps/api/dist/merchant-kitchen-command.js";
 import {
   createPostgresKitchenQueueSourceReader,
@@ -67,6 +68,8 @@ export function createInternalKitchenCommand(resources, persistence, authenticat
     quoteVersion: 2,
     sha256: hash,
     authorize: async () => active(),
+    // WP-2423 item 8 ⑦: the round's source as the kitchen took it (without dishes it doesn't make).
+    notPrepared: kitchenNotPreparedLines(scope),
   });
   const lifecycle = {
     references: refs,
