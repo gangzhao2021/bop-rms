@@ -96,6 +96,10 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   ),
   NoSection: t("That section is no longer on the menu. Read the menu again and choose a section."),
   ManySizes: t("This dish has more than one size. Change it on the Products page."),
+  NotADish: t("A combo can only offer dishes on sale, not another combo. Choose its dishes again."),
+  DishUnavailable: t(
+    "A dish in a combo is no longer on sale. Edit the combo and choose its dishes again, then list it.",
+  ),
 };
 const stageText = {
   Editing: t("Draft — being edited"),

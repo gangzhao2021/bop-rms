@@ -98,6 +98,10 @@ function builder(version: number, order: number[][]) {
   };
 }
 async function session(page: Page) {
+  // No combos unless a test makes one (WP-2423 item 8 ⑥ part 4).
+  await page.route("**/merchant/commerce/one-store-combos/query", (route) =>
+    route.fulfill({ headers, json: { combos: [] } }),
+  );
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,
@@ -999,4 +1003,234 @@ test("@production a listing in progress shows as such, also after a reload, unti
     page.getByText("A listing is under way or stopped part-way.", { exact: false }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue listing" })).toBeVisible();
+});
+
+test("@production a combo made on the one-page menu: parts, extra price, saved, then List it", async ({
+  page,
+}) => {
+  // WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO: one price, a choice in each part.
+  released = null;
+  refuseListing = false;
+  await session(page);
+  const tax = id(75),
+    combo = id(34),
+    bundle = id(120);
+  const order = [
+    [30, 31],
+    [32, 33],
+  ];
+  const combos: Record<string, unknown>[] = [];
+  const dishCommands: Record<string, unknown>[] = [];
+  const view = () => {
+    const base = builder(3, order);
+    return {
+      ...base,
+      sellables: [
+        ...base.sellables,
+        ...(combos.length === 0 ? [] : [sellable(34, "Combo for two (TEST)", "二人套餐", null)]),
+      ].map((s) => ({
+        ...s,
+        productReference: id(Number.parseInt(s.skuReference.slice(-12), 16) + 100),
+        pendingPriceMinor: s.skuReference === combo ? "2880" : null,
+        allergens: { source: "None", declared: [] },
+      })),
+      allergenChoices: [],
+      keepsStock: false,
+    };
+  };
+  await page.route("**/merchant/commerce/menus/query", (route) => {
+    const body = route.request().postDataJSON() as { menuReference: string | null };
+    if (body.menuReference !== null) return route.fulfill({ headers, json: view() });
+    return route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-MENU-LIST",
+        sourceAsOf: at,
+        viewer: id(50),
+        permissions: view().permissions,
+        menus: [
+          {
+            menuReference: MENU,
+            internalCode: "MAIN",
+            aggregateVersion: 3,
+            currentVersionReference: id(2),
+            localizedNames: { "en-CA": "TEST menu" },
+            placements: 4,
+            publication: null,
+            latestRelease: null,
+          },
+        ],
+      },
+    });
+  });
+  await page.route("**/merchant/commerce/products/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-PRODUCT-LIST",
+        sourceAsOf: at,
+        locale: "en-CA",
+        permissions: {},
+        productTypes: [],
+        sellingUnits: [],
+        taxClasses: [
+          {
+            taxClassificationReference: tax,
+            rules: [
+              {
+                orderType: "DineIn",
+                taxComponentCode: "TEST_TAX",
+                treatment: "Taxable",
+                rate: "0.13",
+                priceInclusion: "Exclusive",
+              },
+            ],
+          },
+        ],
+        optionSetChoices: [],
+        products: [],
+      },
+    }),
+  );
+  await page.route("**/merchant/commerce/option-prices/query", (route) =>
+    route.fulfill({ headers, json: { screenId: "PRICE-OPTION-LIST", products: [] } }),
+  );
+  await page.route("**/merchant/commerce/one-store-combos/query", (route) =>
+    route.fulfill({ headers, json: { combos } }),
+  );
+  await page.route("**/merchant/commerce/one-store-dishes/command", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    dishCommands.push(body);
+    if (body.action === "SaveCombo") {
+      // The combo is compiled into a dish placed in its section; it waits to be listed.
+      order[1] = [...(order[1] ?? []).filter((n) => n !== 34), 34];
+      combos.splice(0, combos.length, {
+        bundleReference: bundle,
+        aggregateVersion: 1,
+        name: body.name,
+        nameZh: body.nameZh,
+        description: "",
+        descriptionZh: "",
+        priceMinor: body.priceMinor,
+        productReference: id(134),
+        skuReference: combo,
+        state: "Waiting",
+        slots: (body.slots as Record<string, unknown>[]).map((slot, n) => ({
+          ...slot,
+          code: "SLOT-" + (n + 1),
+        })),
+      });
+    }
+    if (body.action === "ListAll") {
+      released = id(8);
+      for (const c of combos) c.state = "Listed";
+    }
+    return route.fulfill({
+      headers,
+      json: { status: body.action === "ListAll" ? "Listed" : "Saved" },
+    });
+  });
+  await page.route("**/merchant/commerce/availability/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-AVAILABILITY",
+        sourceAsOf: at,
+        viewer: id(50),
+        timeZone: scope.timeZone,
+        permissions: { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true },
+        items: [30, 31, 32, 33, 34].map((n) => ({
+          skuReference: id(n),
+          skuCode: "SKU_" + n,
+          productName: "x",
+          sizeName: "x",
+          status: "Available",
+          soldOutUntil: null,
+        })),
+      },
+    }),
+  );
+
+  await page.goto("/app/commerce/menus");
+  await page.getByRole("button", { name: "New combo" }).click();
+  const editor = page.getByRole("form", { name: "New combo" });
+  await editor.getByLabel("English name").first().fill("Combo for two (TEST)");
+  await editor.getByLabel("Chinese name").first().fill("二人套餐");
+  await editor.getByLabel("Combo price ($)").fill("28.80");
+  await editor.getByLabel("Section").selectOption("NOODLE");
+  const first = editor.getByRole("group", { name: "Part 1" });
+  await first.getByLabel("English name").fill("Dim sum");
+  await first.getByLabel("Chinese name").fill("点心");
+  await first.getByRole("checkbox", { name: "Har gow (TEST) 虾饺" }).check();
+  await first.getByRole("checkbox", { name: "Siu mai (TEST) 烧卖" }).check();
+  await first.getByLabel("Extra ($) for Siu mai (TEST) 烧卖").fill("1.00");
+  await editor.getByRole("button", { name: "Add part" }).click();
+  const second = editor.getByRole("group", { name: "Part 2" });
+  await second.getByLabel("English name").fill("Noodles");
+  await second.getByLabel("Chinese name").fill("面");
+  await second.getByRole("checkbox", { name: "Dan dan noodles (TEST)" }).check();
+  const axe = await new AxeBuilder({ page }).include(".one-menu").analyze();
+  expect(axe.violations).toEqual([]);
+  await editor.getByRole("button", { name: "Save combo" }).click();
+  await expect(
+    page.getByText("Combo for two (TEST) saved. Guests see it when the menu is listed."),
+  ).toBeVisible();
+  expect(dishCommands.at(-1)).toMatchObject({
+    action: "SaveCombo",
+    menuReference: MENU,
+    bundleReference: null,
+    sectionCode: "NOODLE",
+    name: "Combo for two (TEST)",
+    nameZh: "二人套餐",
+    taxClassificationReference: tax,
+    priceMinor: "2880",
+    slots: [
+      {
+        code: null,
+        name: "Dim sum",
+        nameZh: "点心",
+        minimum: 1,
+        maximum: 1,
+        dishes: [
+          { skuReference: id(30), upgradeMinor: "0" },
+          { skuReference: id(31), upgradeMinor: "100" },
+        ],
+      },
+      {
+        code: null,
+        name: "Noodles",
+        nameZh: "面",
+        minimum: 1,
+        maximum: 1,
+        dishes: [{ skuReference: id(32), upgradeMinor: "0" }],
+      },
+    ],
+  });
+  // The combo is a row of its section with its parts; it waits for "List it".
+  const row = page.locator(".one-menu__dish").filter({ hasText: "Combo for two (TEST)" });
+  await expect(row).toContainText("Combo: 点心 choose 1 · 面 choose 1");
+  await expect(row).toContainText("→ $28.80 when listed");
+  await expect(
+    page.getByText("This menu has not been listed yet. Guests do not see it."),
+  ).toBeVisible();
+  await expectNoInternalText(page);
+  await page.getByRole("button", { name: "List it" }).click();
+  await expect(page.getByText("Listed. Guests see the menu as it is now.")).toBeVisible();
+  expect(dishCommands.at(-1)).toMatchObject({ action: "ListAll", menuReference: MENU });
+
+  // Editing it opens the combo, as saved.
+  await page.getByRole("button", { name: "Edit Combo for two (TEST) 二人套餐" }).click();
+  const again = page.getByRole("form", { name: "Combo for two (TEST) 二人套餐" });
+  await expect(again.getByLabel("Combo price ($)")).toHaveValue("28.80");
+  await expect(
+    again
+      .getByRole("group", { name: "Part 1" })
+      .getByRole("checkbox", { name: "Siu mai (TEST) 烧卖" }),
+  ).toBeChecked();
+  await expect(
+    again.getByRole("group", { name: "Part 1" }).getByLabel("Extra ($) for Siu mai (TEST) 烧卖"),
+  ).toHaveValue("1.00");
+  await expect(again.getByRole("checkbox", { name: "Combo for two (TEST) 二人套餐" })).toHaveCount(
+    0,
+  );
 });

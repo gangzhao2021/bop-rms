@@ -6204,4 +6204,30 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Choice {n} (Chinese)": "选项 {n}（中文）",
   "Add a choice": "再加一个选项",
   "Make the group": "建立规格组",
+  "New combo": "新套餐",
+  "Combo price ($)": "套餐价（$）",
+  "The combo could not be read. Check the connection and try again.":
+    "读不到这个套餐。请检查网络后重试。",
+  "Reading the combo…": "正在读取套餐…",
+  "Guests pay the combo price once and choose in each part. The kitchen makes each chosen dish on its own.":
+    "客人按套餐价付一次，每组里选菜。后厨把选中的每道菜分开做。",
+  Soup: "Soup",
+  "Guests may skip this part": "这一组客人可以不选",
+  "Add dishes to the menu first.": "请先把菜加到菜单上。",
+  "Dishes in {part}": "{part}里的菜",
+  "Remove {part}": "删除{part}",
+  "Remove part": "删除这一组",
+  "Add part": "加一组",
+  "Each part needs a name and at least as many dishes as guests choose.":
+    "每组要有名字，菜的数量不能少于客人要选的数量。",
+  "Save combo": "保存套餐",
+  "Combo: {parts}": "套餐：{parts}",
+  "{part} choose {count}": "{part}选 {count}",
+  "A combo can only offer dishes on sale, not another combo. Choose its dishes again.":
+    "套餐里只能放在售的菜，不能放另一个套餐。请重新选菜。",
+  "A dish in a combo is no longer on sale. Edit the combo and choose its dishes again, then list it.":
+    "套餐里有一道菜已经不卖了。请编辑套餐重新选菜，再上架。",
+  "The combos could not be read. Read the menu again to edit or add combos.":
+    "读不到套餐。请重新读取菜单，再编辑或新建套餐。",
+  "Read again": "重新读取",
 });

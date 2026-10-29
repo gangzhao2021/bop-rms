@@ -495,6 +495,10 @@ export async function recordComboDish(
   }
 }
 
+export interface MerchantComboSession {
+  readonly sessionCookie: unknown;
+  readonly csrf: unknown;
+}
 export function createMerchantCombos(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -504,12 +508,8 @@ export function createMerchantCombos(options: {
 }) {
   const resolveBrand = options.resolveScope ?? createMerchantBrandScope(options.persistence);
   type Tx = Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0];
-  interface Session {
-    readonly sessionCookie: unknown;
-    readonly csrf: unknown;
-  }
   const run = async <T>(
-    input: Session,
+    input: MerchantComboSession,
     work: (tx: Tx, authority: BrandAuthority) => Promise<T>,
   ): Promise<T> => {
     const current = await options.authentication
@@ -537,14 +537,14 @@ export function createMerchantCombos(options: {
     );
   };
   return {
-    query: (input: Session) =>
+    query: (input: MerchantComboSession) =>
       run(input, async (tx, authority) => ({
         combos: await readCombos(tx, {
           brandReference: authority.brandReference,
           locale: options.locale,
         }),
       })),
-    saveBundle: (input: Session & { readonly body: SaveComboBundleInput }) =>
+    saveBundle: (input: MerchantComboSession & { readonly body: SaveComboBundleInput }) =>
       run(input, (tx, authority) =>
         saveComboBundle(tx, authority, {
           at: options.persistence.now(),
@@ -553,7 +553,7 @@ export function createMerchantCombos(options: {
         }),
       ),
     recordDish: (
-      input: Session & {
+      input: MerchantComboSession & {
         readonly bundleReference: string;
         readonly productReference: string;
         readonly skuReference: string;
@@ -562,7 +562,7 @@ export function createMerchantCombos(options: {
       run(input, (tx, authority) =>
         recordComboDish(tx, authority, { at: options.persistence.now(), ...input }),
       ),
-    listDrafts: (input: Session & { readonly operationReference: string }) =>
+    listDrafts: (input: MerchantComboSession & { readonly operationReference: string }) =>
       run(input, (tx, authority) =>
         listComboDrafts(tx, authority, {
           at: options.persistence.now(),

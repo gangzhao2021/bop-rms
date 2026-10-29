@@ -31,6 +31,10 @@ export type MenuErrorCode =
   | "NoSection"
   /** The dish has more than one size; sizes are edited on the product page. */
   | "ManySizes"
+  /** WP-2423 item 8 ⑥ part 4: a combo offers something that is not a dish on sale. */
+  | "NotADish"
+  /** A dish the combo offers is no longer sold. */
+  | "DishUnavailable"
   | "Offline"
   | "Unavailable";
 export class MenuPageError extends Error {
@@ -251,6 +255,94 @@ export interface SaveDishCommand {
   }[];
   readonly allergens: DishAllergens["declared"] | null;
 }
+/** WP-2423 item 8 ⑥ part 4: a combo saved from the one-page menu. */
+export interface SaveComboCommand {
+  readonly action: "SaveCombo";
+  readonly operationReference: string;
+  readonly menuReference: string;
+  readonly bundleReference: string | null;
+  readonly expectedAggregateVersion: number | null;
+  readonly sectionCode: string;
+  readonly name: string;
+  readonly nameZh: string;
+  readonly description: string;
+  readonly descriptionZh: string;
+  readonly taxClassificationReference: string;
+  readonly priceMinor: string;
+  readonly slots: readonly {
+    readonly code: string | null;
+    readonly name: string;
+    readonly nameZh: string;
+    readonly minimum: number;
+    readonly maximum: number;
+    readonly dishes: readonly { readonly skuReference: string; readonly upgradeMinor: string }[];
+  }[];
+}
+/** A combo as its editor reads it. */
+export interface MenuCombo {
+  readonly bundleReference: string;
+  readonly aggregateVersion: number;
+  readonly name: string;
+  readonly nameZh: string;
+  readonly description: string;
+  readonly descriptionZh: string;
+  readonly priceMinor: string;
+  readonly productReference: string | null;
+  readonly skuReference: string | null;
+  /** Listed: guests get this version. Waiting: saved changes not listed yet. */
+  readonly state: "Listed" | "Waiting";
+  readonly slots: readonly {
+    readonly code: string;
+    readonly name: string;
+    readonly nameZh: string;
+    readonly minimum: number;
+    readonly maximum: number;
+    readonly dishes: readonly { readonly skuReference: string; readonly upgradeMinor: string }[];
+  }[];
+}
+const comboText = (value: unknown) => (typeof value === "string" ? value : "");
+export function parseMenuCombos(value: unknown): readonly MenuCombo[] {
+  const list = (value as { combos?: unknown } | null)?.combos;
+  if (!Array.isArray(list)) throw new MenuPageError("Unavailable");
+  return list.map((candidate: unknown) => {
+    const c = candidate as Record<string, unknown> | null;
+    if (
+      c === null ||
+      typeof c !== "object" ||
+      typeof c.bundleReference !== "string" ||
+      typeof c.aggregateVersion !== "number" ||
+      typeof c.priceMinor !== "string" ||
+      (c.state !== "Listed" && c.state !== "Waiting") ||
+      !Array.isArray(c.slots)
+    )
+      throw new MenuPageError("Unavailable");
+    return {
+      bundleReference: c.bundleReference,
+      aggregateVersion: c.aggregateVersion,
+      name: comboText(c.name),
+      nameZh: comboText(c.nameZh),
+      description: comboText(c.description),
+      descriptionZh: comboText(c.descriptionZh),
+      priceMinor: c.priceMinor,
+      productReference: typeof c.productReference === "string" ? c.productReference : null,
+      skuReference: typeof c.skuReference === "string" ? c.skuReference : null,
+      state: c.state,
+      slots: (c.slots as Record<string, unknown>[]).map((g) => ({
+        code: comboText(g.code),
+        name: comboText(g.name),
+        nameZh: comboText(g.nameZh),
+        minimum: Number(g.minimum),
+        maximum: Number(g.maximum),
+        dishes: (Array.isArray(g.dishes) ? (g.dishes as Record<string, unknown>[]) : []).map(
+          (d) => ({
+            skuReference: comboText(d.skuReference),
+            upgradeMinor: comboText(d.upgradeMinor),
+          }),
+        ),
+      })),
+    };
+  });
+}
 export interface ListAllCommand {
   readonly action: "ListAll";
   readonly operationReference: string;
@@ -364,7 +456,9 @@ export interface MenuClient {
    * choice groups for a new dish) and the choice prices. */
   loadDish?(productReference: string | null): Promise<{ product: unknown; optionPrices: unknown }>;
   /** WP-2423 item 8 ⑥: one dish saved, or everything listed. */
-  oneStore?(command: SaveDishCommand | ListAllCommand): Promise<unknown>;
+  oneStore?(command: SaveDishCommand | ListAllCommand | SaveComboCommand): Promise<unknown>;
+  /** WP-2423 item 8 ⑥ part 4: the combos of the one-page menu. */
+  combos?(): Promise<unknown>;
   /** WP-2423 item 8 ⑥ (v15 finding g): a simple choice group made from the dish editor. */
   createChoiceGroup?(command: NewChoiceGroupCommand): Promise<unknown>;
 }
@@ -650,6 +744,8 @@ const codes = new Set<MenuErrorCode>([
   "OthersPending",
   "NoSection",
   "ManySizes",
+  "NotADish",
+  "DishUnavailable",
 ]);
 export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): MenuClient {
   const post = async (path: string, body: unknown) => {
@@ -688,6 +784,7 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
       return { product, optionPrices };
     },
     oneStore: (command) => post("/merchant/commerce/one-store-dishes/command", command),
+    combos: () => post("/merchant/commerce/one-store-combos/query", {}),
     createChoiceGroup: (command) => post("/merchant/commerce/option-sets/command", command),
   };
 }

@@ -33,13 +33,16 @@ import {
 import { menuErrorText } from "./StoreMenuPages.js";
 import { allergenSummary } from "./DishAllergenEditor.js";
 import { DishEditor } from "./DishEditor.js";
+import { ComboEditor, comboDishChoices } from "./ComboEditor.js";
 import {
   MenuPageError,
   menuReviewProblemText,
   menuStage,
   parseMenuBuilderView,
+  parseMenuCombos,
   type MenuBuilderView,
   type MenuClient,
+  type MenuCombo,
 } from "./store-menu-pages.js";
 
 const filterText: Record<MenuFilter, string> = {
@@ -83,6 +86,10 @@ export function OneStoreMenuPage({
   readonly onMultiStore: () => void;
 }) {
   const [view, setView] = useState<MenuBuilderView | null>(null);
+  // WP-2423 item 8 ⑥ part 4: the combos (each compiled into a dish on the menu).
+  const [combos, setCombos] = useState<readonly MenuCombo[]>([]);
+  // The combos could not be read: the menu still shows; combos cannot be edited until they are.
+  const [combosFailed, setCombosFailed] = useState(false);
   const [stock, setStock] = useState<StoreAvailabilityView | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -110,8 +117,14 @@ export function OneStoreMenuPage({
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
     let active = true;
-    void Promise.all([client.load(menuReference), availability.load()])
-      .then(([menu, items]) => {
+    void Promise.all([
+      client.load(menuReference),
+      availability.load(),
+      client.combos === undefined
+        ? null
+        : client.combos().then(parseMenuCombos, () => "failed" as const),
+    ])
+      .then(([menu, items, comboList]) => {
         if (!active) return;
         const builder = parseMenuBuilderView(menu);
         if (builder.menu.storeReferences.length !== 1) {
@@ -121,6 +134,8 @@ export function OneStoreMenuPage({
         const found = parseStoreAvailabilityView(items);
         const next = menuRows(builder, found.items);
         setView(builder);
+        setCombos(comboList === null || comboList === "failed" ? [] : comboList);
+        setCombosFailed(comboList === "failed");
         setStock(found);
         setRows(next);
         setSaved(orderKey(next));
@@ -207,7 +222,9 @@ export function OneStoreMenuPage({
   const changedOrder = orderKey(rows) !== saved;
   const stage = menuStage(view.publication);
   // The menu as saved is not what guests see: never listed, edited since, or listing unfinished.
-  const orderPending = listingPending(view);
+  // A combo with saved changes is listed with the menu.
+  const orderPending = listingPending(view) || combos.some((c) => c.state === "Waiting");
+  const comboOf = (skuReference: string) => combos.find((c) => c.skuReference === skuReference);
 
   // One or more commands (a dish's sizes), one after another.
   const availabilityCommand = async (
@@ -419,7 +436,7 @@ export function OneStoreMenuPage({
   const dishActions = (dish: MenuDish) => {
     const label = dish.nameZh ? `${dish.name} ${dish.nameZh}` : dish.name;
     const actions = [];
-    if (mayEditDishes && dish.productReference !== null)
+    if (mayEditDishes && (dish.productReference !== null || comboOf(dish.skuReference)))
       actions.push(
         <button
           key="edit"
@@ -528,7 +545,21 @@ export function OneStoreMenuPage({
           })}
         </ul>
       )}
-      <span className="one-menu__allergens">{allergenSummary(dish, choices)}</span>
+      <span className="one-menu__allergens">
+        {((combo) =>
+          combo === undefined
+            ? allergenSummary(dish, choices)
+            : t("Combo: {parts}", {
+                parts: combo.slots
+                  .map((slot) =>
+                    t("{part} choose {count}", {
+                      part: slot.nameZh || slot.name,
+                      count: slot.maximum,
+                    }),
+                  )
+                  .join(" · "),
+              }))(comboOf(dish.skuReference))}
+      </span>
       <span className="one-menu__state">
         {dish.hidden ? t("Hidden") : dish.soldOut ? t("Sold out today") : ""}
       </span>
@@ -571,7 +602,27 @@ export function OneStoreMenuPage({
           </>
         ) : null}
       </span>
-      {editing === dish.skuReference ? (
+      {editing === dish.skuReference && comboOf(dish.skuReference) !== undefined ? (
+        <ComboEditor
+          menuReference={menuReference}
+          combo={comboOf(dish.skuReference) ?? null}
+          dishes={comboDishChoices(rows, combos)}
+          sections={rows}
+          sectionCode={
+            rows.find((row) => row.dishes.some((d) => d.skuReference === dish.skuReference))
+              ?.code ??
+            rows[0]?.code ??
+            ""
+          }
+          client={client}
+          onSaved={(message) => {
+            setEditing(null);
+            setProblem(message);
+            reload();
+          }}
+          onClose={() => setEditing(null)}
+        />
+      ) : editing === dish.skuReference ? (
         <DishEditor
           menuReference={menuReference}
           dish={dish}
@@ -636,6 +687,17 @@ export function OneStoreMenuPage({
           >
             {t("New dish")}
           </button>
+          {client.combos !== undefined && !combosFailed ? (
+            <button
+              type="button"
+              aria-expanded={editing === "new-combo"}
+              onClick={() =>
+                setEditing((current) => (current === "new-combo" ? null : "new-combo"))
+              }
+            >
+              {t("New combo")}
+            </button>
+          ) : null}
           <button
             type="button"
             aria-expanded={newSection !== null}
@@ -706,6 +768,30 @@ export function OneStoreMenuPage({
           }}
           onClose={() => setEditing(null)}
         />
+      ) : null}
+      {editing === "new-combo" && rows.length > 0 ? (
+        <ComboEditor
+          menuReference={menuReference}
+          combo={null}
+          dishes={comboDishChoices(rows, combos)}
+          sections={rows}
+          sectionCode={rows[rows.length - 1]?.code ?? ""}
+          client={client}
+          onSaved={(message) => {
+            setEditing(null);
+            setProblem(message);
+            reload();
+          }}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
+      {combosFailed ? (
+        <p className="one-menu__note" role="status">
+          {t("The combos could not be read. Read the menu again to edit or add combos.")}{" "}
+          <button type="button" onClick={reload}>
+            {t("Read again")}
+          </button>
+        </p>
       ) : null}
       {narrowing && view.permissions.mayEdit ? (
         <p className="one-menu__note">{t("Clear the search and filters to reorder dishes.")}</p>
