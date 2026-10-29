@@ -88,7 +88,7 @@ export function parseMenuReviewProblem(value: unknown): MenuReviewProblem | null
   if (!missingKinds.has(raw.missing as MenuReviewProblem["missing"])) return null;
   const quantity = raw.quantity;
   const reason =
-    typeof raw.reason === "string" && /^[A-Za-z0-9:_.-]{1,120}$/u.test(raw.reason)
+    typeof raw.reason === "string" && /^[A-Za-z0-9:_.@-]{1,120}$/u.test(raw.reason)
       ? raw.reason
       : undefined;
   return {
