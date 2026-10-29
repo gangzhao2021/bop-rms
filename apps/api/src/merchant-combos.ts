@@ -6,6 +6,7 @@ import {
   createBundleService,
   createPostgresBundleRepository,
   listBrandBundles,
+  listBrandOptionSets,
   listBundleComboRecords,
   parseCatalogHash,
   recordBundleComboChoices,
@@ -128,6 +129,13 @@ export async function readCombos(
   const ptx = tx as ProductLifecycleTransaction;
   const bundles = await listBrandBundles(ptx, { brandReference: input.brandReference });
   const records = await listBundleComboRecords(ptx, { brandReference: input.brandReference });
+  // v15 2026-10-29: each slot's dishes in the order staff gave them (their choice group's order),
+  // so an unchanged save from the editor changes nothing (nor moves a slot's first dish).
+  const optionOrder = new Map(
+    (await listBrandOptionSets(ptx, { brandReference: input.brandReference })).flatMap((set) =>
+      set.draft.options.map((option) => [String(option.optionReference), option.sortOrder]),
+    ),
+  );
   return bundles
     .filter((b) => b.lifecycle === "Draft" || b.lifecycle === "Published")
     .map((bundle) => {
@@ -163,13 +171,19 @@ export async function readCombos(
             minimum: group.minimumSelection,
             maximum: group.maximumSelection,
             optionSetReference: slotChoices[0]?.optionSetReference ?? "",
-            dishes: group.eligibleSellables.map((item) => ({
-              skuReference: item.sellableReference,
-              optionReference:
-                slotChoices.find((c) => c.dishSkuReference === item.sellableReference)
-                  ?.optionReference ?? "",
-              upgradeMinor: item.upgradePrice?.amountMinor ?? "0",
-            })),
+            dishes: group.eligibleSellables
+              .map((item) => ({
+                skuReference: item.sellableReference,
+                optionReference:
+                  slotChoices.find((c) => c.dishSkuReference === item.sellableReference)
+                    ?.optionReference ?? "",
+                upgradeMinor: item.upgradePrice?.amountMinor ?? "0",
+              }))
+              .sort(
+                (a, b) =>
+                  (optionOrder.get(a.optionReference) ?? Number.MAX_SAFE_INTEGER) -
+                  (optionOrder.get(b.optionReference) ?? Number.MAX_SAFE_INTEGER),
+              ),
           };
         }),
         choiceHistory: choices.map((c) => ({

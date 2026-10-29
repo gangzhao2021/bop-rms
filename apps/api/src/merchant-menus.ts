@@ -1439,7 +1439,14 @@ export function createMerchantMenus(options: {
           return fail("NotDiscardable");
         // v15 2026-10-29: the review stopped on something it could not read; say where.
         if (error.code === "CATALOG_DEPENDENCY_UNAVAILABLE" && body.action === "Submit")
-          return stopped("Submit:Unavailable@" + throwSite(error));
+          return stopped(
+            "Submit:Unavailable@" +
+              throwSite(error) +
+              // A product's choice group binding names the rule it breaks.
+              (typeof (error as { rule?: unknown }).rule === "string"
+                ? ":" + String((error as { rule?: unknown }).rule)
+                : ""),
+          );
         if (error.code === "CATALOG_PERMISSION_DENIED" && body.action === "Approve")
           return fail("ApprovalRequired");
         return fail(catalogErrors[error.code] ?? "Invalid");

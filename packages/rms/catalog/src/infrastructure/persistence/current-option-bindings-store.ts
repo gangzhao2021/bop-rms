@@ -6,8 +6,10 @@ import {
   parseProductOptionBinding,
 } from "../../contracts/product.js";
 import {
+  OptionBindingRuleError,
   parseOptionSetAggregate,
   validateProductOptionBinding,
+  type OptionBindingRule,
 } from "../../contracts/option-set.js";
 import type { AvailabilityQueryTransactionRunner } from "./availability-query-store.js";
 function closed(value: unknown, fields: readonly string[]): Readonly<Record<string, unknown>> {
@@ -194,11 +196,21 @@ export function createPostgresCurrentOptionBindingsStore(
             bindings,
           });
         });
-      } catch {
+      } catch (error) {
+        // v15 2026-10-29: a binding that no longer fits its option set says which rule it breaks.
+        if (error instanceof OptionBindingRuleError) throw new OptionBindingSourceError(error.rule);
         throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
       }
     },
   });
+}
+
+/** A current product binding that breaks a rule of its current option set (named). */
+export class OptionBindingSourceError extends CatalogError {
+  constructor(readonly rule: OptionBindingRule) {
+    super("CATALOG_DEPENDENCY_UNAVAILABLE");
+    this.name = "OptionBindingSourceError";
+  }
 }
 
 /** Current complete OptionSet version for Product Draft validation in the caller transaction. */
