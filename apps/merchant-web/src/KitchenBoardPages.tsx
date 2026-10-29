@@ -78,6 +78,10 @@ export function kitchenTicketTierText(tier: "ok" | "warning" | "late" | "done"):
   return tier === "late" ? t("Overdue") : tier === "warning" ? t("Running long") : null;
 }
 
+/** Not a combo, or a combo whose every chosen dish is done. */
+export const combosDishesDone = (item: KitchenBoardItem) =>
+  item.comboParts === undefined || item.comboParts.every((part) => part.done);
+
 /**
  * Kitchen v3 (Owner 2026-10-26): a ticket's one main step — the earliest step any of its open items
  * is at — and every item at that step. Accept, then Start, then Done (the rest of each quantity),
@@ -105,7 +109,11 @@ export function kitchenTicketNextStep(items: readonly KitchenBoardItem[]): {
       label: start.length > 1 ? t("Start all") : t("Start cooking"),
     };
   const done = at(
-    (item) => item.status === "In Progress" && item.completedQuantity < item.requiredQuantity,
+    (item) =>
+      item.status === "In Progress" &&
+      item.completedQuantity < item.requiredQuantity &&
+      // WP-2423 item 8 ⑥ part 4: a combo is finished by its dishes, each marked done on its own.
+      combosDishesDone(item),
   );
   if (done.length > 0)
     return { action: "CompleteKitchenWorkItem", items: done, label: t("Finished") };
@@ -1097,7 +1105,7 @@ function WorkCard({
                 item.status === "In Progress" &&
                 item.completedQuantity < item.requiredQuantity &&
                 // A combo is finished when every dish of it is done.
-                (item.comboParts === undefined || item.comboParts.every((part) => part.done)) ? (
+                combosDishesDone(item) ? (
                   <button
                     className="kitchen-work-item__done"
                     disabled={readOnly || !onAction}
@@ -1135,7 +1143,9 @@ function WorkCard({
                     {t("Start")}
                   </button>
                 ) : null}
-                {item.status === "In Progress" && item.completedQuantity < item.requiredQuantity ? (
+                {item.status === "In Progress" &&
+                item.completedQuantity < item.requiredQuantity &&
+                combosDishesDone(item) ? (
                   <button
                     disabled={readOnly || !onAction}
                     onClick={() => onAction?.(item, "CompleteKitchenWorkItem")}
@@ -2096,7 +2106,7 @@ function KitchenComboParts({
             ) : actionable && markDone !== null && item.status === "In Progress" ? (
               <button
                 type="button"
-                className="kitchen-work-item__done"
+                className="kitchen-work-item__combo-step"
                 aria-label={t("Mark {displayName} done", { displayName: label })}
                 onClick={() => markDone(item.workItemReference, part)}
               >

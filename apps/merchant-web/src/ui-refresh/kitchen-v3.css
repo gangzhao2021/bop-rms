@@ -587,6 +587,19 @@
 .kitchen-work-item__combo-done {
   color: var(--bop-color-text-muted);
 }
-.kitchen-work-item__combo .kitchen-work-item__done {
+/* Each dish's own step: an outlined button read from 1–2 m (the done state is plain text). */
+.kitchen-work-item__combo-step {
+  margin-left: auto;
+  min-width: 96px;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 2px solid var(--bop-color-text-default);
+  border-radius: var(--bop-radius-control);
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 17px;
+  font-weight: 700;
+}
+.kitchen-work-item__combo-done {
   margin-left: auto;
 }
