@@ -846,6 +846,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 <StoreFeaturesPage
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   csrf={state.csrf}
+                  storeReference={state.workspace.selectedScope.storeReference}
+                  storeLabel={state.workspace.selectedScope.storeLabel}
                 />
               ) : state.kind === "Ready" && !state.switching ? (
                 <CurrentStoreCapabilityPage

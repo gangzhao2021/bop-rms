@@ -95,6 +95,40 @@ test("@production the owner applies the full-service setup, turns a module back 
     return route.fulfill({ headers, json: current });
   });
 
+  // Fulfillment's current pickup queue (the Pickup page's read): two orders still waiting.
+  let pickupReadable = true;
+  const waitingItem = (n: number) => ({
+    fulfillmentReference: id(200 + n),
+    orderReference: id(300 + n),
+    phase: "Ready",
+    aggregateVersion: "2",
+    readyAt: "2026-10-29T14:50:00.000Z",
+    publicOrderReference: String.fromCharCode(65 + n).repeat(22),
+    proof: { kind: "HumanCode", generation: 1, expiresAt: "2026-10-29T16:00:00.000Z" },
+    items: [
+      {
+        fulfillmentItemReference: id(400 + n),
+        orderedQuantity: 1,
+        readyQuantity: 1,
+        handedOverQuantity: 0,
+      },
+    ],
+  });
+  await page.route("**/merchant/pickup/query", (route) =>
+    pickupReadable
+      ? route.fulfill({
+          headers,
+          json: {
+            source: "CurrentFulfillment",
+            workstation: null,
+            storeReference: store,
+            observedAt: "2026-10-29T15:00:00.000Z",
+            nextAfterFulfillmentReference: null,
+            items: [waitingItem(1), waitingItem(2)],
+          },
+        })
+      : route.fulfill({ headers, status: 403, json: { error: "request_denied" } }),
+  );
   await page.goto("/app/organization/stores/" + store + "/capabilities");
   await expect(page.getByRole("heading", { name: "Store features", exact: true })).toBeVisible();
   const counter = page.getByRole("checkbox", { name: /Counter ordering/u });
@@ -118,7 +152,17 @@ test("@production the owner applies the full-service setup, turns a module back 
   // pickup off is asked once more, with what to do about pickups still waiting.
   await page.getByRole("button", { name: "Use the full-service setup" }).click();
   await expect(page.getByRole("alert")).toContainText(
+    "2 pickup orders are still waiting to be handed over.",
+  );
+  await expect(page.getByRole("alert")).toContainText(
     "Hand over any pickup orders still waiting first.",
+  );
+  await page.getByRole("button", { name: "Keep pickup" }).click();
+  // The queue can't be read: no number is shown, it says so (still only a warning).
+  pickupReadable = false;
+  await page.getByRole("button", { name: "Use the full-service setup" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "The pickup queue could not be read, so it isn't known whether pickup orders are still waiting.",
   );
   await page.getByRole("button", { name: "Keep pickup" }).click();
   expect(commands.filter((c) => c.action === "ApplyTemplate")).toHaveLength(0);
