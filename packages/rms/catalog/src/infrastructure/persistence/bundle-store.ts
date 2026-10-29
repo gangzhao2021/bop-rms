@@ -86,6 +86,15 @@ export interface BundleComboRecords {
   }[];
   /** Bundle versions listed alone at the Brand's one store. */
   readonly listedVersions: readonly string[];
+  /**
+   * v15 2026-10-29: dishes a combo save made but did not record before it stopped — the products
+   * that offer the combo's own choice groups (each made for that combo alone), one size each.
+   */
+  readonly unrecordedDishes: readonly {
+    readonly bundleReference: string;
+    readonly productReference: string;
+    readonly skuReference: string;
+  }[];
 }
 
 /** What the Brand's combos are compiled into, and which of their versions were listed. */
@@ -106,7 +115,22 @@ export async function listBundleComboRecords(
     "SELECT bundle_version_id::text version FROM rms_catalog.bundle_single_store_listing WHERE brand_id=$1",
     [brand],
   );
+  const unrecorded = await tx.query<{ bundle: string; product: string; sku: string }>(
+    `SELECT DISTINCT c.bundle_id::text bundle,b.product_id::text product,s.sku_id::text sku
+       FROM rms_catalog.bundle_combo_choice c
+       JOIN rms_catalog.product_option_binding b ON b.brand_id=c.brand_id AND b.option_set_id=c.option_set_id
+       JOIN rms_catalog.sku s ON s.brand_id=b.brand_id AND s.product_id=b.product_id
+      WHERE c.brand_id=$1 AND NOT EXISTS (
+        SELECT 1 FROM rms_catalog.bundle_combo_dish d WHERE d.brand_id=c.brand_id AND d.bundle_id=c.bundle_id)
+      ORDER BY 1,2,3`,
+    [brand],
+  );
   return Object.freeze({
+    unrecordedDishes: unrecorded.rows.map((row) => ({
+      bundleReference: row.bundle,
+      productReference: row.product,
+      skuReference: row.sku,
+    })),
     dishes: dishes.rows.map((row) => ({
       bundleReference: row.bundle,
       productReference: row.product,

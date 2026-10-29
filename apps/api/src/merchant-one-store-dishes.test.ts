@@ -61,6 +61,8 @@ function fakes() {
     published: true,
     declared: null as unknown,
     optionRecipes: new Map<string, { published: boolean; reviews: string[] }>(),
+    /** The menu's own check refuses (a choice without a recipe). */
+    menuRefused: false,
     // Store availability by size: absent = never decided here (NotOffered).
     offered: new Map<string, string>([[id(12), "Hidden"]]),
   };
@@ -207,6 +209,11 @@ function fakes() {
       }),
       command: async ({ body }: { body: Record<string, unknown> }) => {
         record("menu", body);
+        if (body.action === "Check") {
+          if (state.menuRefused)
+            throw Object.assign(new Error("refused"), { code: "OptionRecipeMissing" });
+          return { status: "Ready" };
+        }
         if (body.action === "Revise") state.published = false;
         if (body.action === "SaveDraft")
           state.menu = { ...state.menu, sections: body.sections as typeof state.menu.sections };
@@ -328,6 +335,21 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
     expect(calls).toEqual(["allergens:DeclareDish"]);
   });
 
+  it("publishes nothing when the menu itself could not be listed (v15 2026-10-29 c)", async () => {
+    const { calls, state, dishes } = fakes();
+    await dishes.command({ ...session, body: save() });
+    calls.length = 0;
+    state.menuRefused = true;
+    await expect(
+      dishes.command({
+        ...session,
+        body: { action: "ListAll", operationReference: id(102), menuReference: MENU },
+      }),
+    ).rejects.toMatchObject({ code: "OptionRecipeMissing" });
+    expect(calls).toEqual(["menu:Check"]);
+    expect(state.assigned).toBeNull();
+  });
+
   it("lists the price book, the waiting choice prices and the menu, alone at the one store", async () => {
     const { calls, state, dishes } = fakes();
     await dishes.command({ ...session, body: save() });
@@ -337,6 +359,8 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
       body: { action: "ListAll", operationReference: id(101), menuReference: MENU },
     });
     expect(calls).toEqual([
+      // v15 2026-10-29 c: the menu is checked before any price is published.
+      "menu:Check",
       "price:Publish",
       "price:AssignToStore",
       "optionPrice:Publish",

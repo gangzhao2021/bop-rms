@@ -240,6 +240,16 @@ export function ComboEditor({
       onSaved(t("{item} saved. Guests see it when the menu is listed.", { item: command.name }));
     } catch (error) {
       if (!(error instanceof MenuPageError) || error.code !== "Offline") setOperation(null);
+      // v15 2026-10-29: a new combo that stopped after it was made is on the menu now; it is
+      // finished with Edit (saving this form again would make a second combo).
+      if (combo === null && error instanceof MenuPageError && error.code === "StoppedPartWay") {
+        onSaved(
+          t("{item} was saved only in part. Open it with Edit and save it again to finish it.", {
+            item: command.name,
+          }),
+        );
+        return;
+      }
       setProblem(
         error instanceof MenuPageError
           ? menuErrorText[error.code]

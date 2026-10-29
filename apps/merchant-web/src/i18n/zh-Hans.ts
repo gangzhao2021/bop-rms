@@ -6238,4 +6238,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Mark {displayName} done": "{displayName} 做好了",
   "Mark {displayName} served": "{displayName} 已上",
   "That dish is not done in the kitchen yet.": "这道菜厨房还没做好。",
+  "Combo: {parts} · allergens by choice": "套餐：{parts} · 过敏原按所选菜",
+  "Saving stopped part-way. What was saved stays; guests see nothing new. Save it again to finish, and tell the manager if it stops again.":
+    "保存中途停了。已保存的部分保留，客人看不到任何变化。请再保存一次完成；如果还停，请告诉经理。",
+  "{item} was saved only in part. Open it with Edit and save it again to finish it.":
+    "{item} 只保存了一部分。请点它的“编辑”，再保存一次完成。",
 });
