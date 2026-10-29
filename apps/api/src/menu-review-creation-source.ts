@@ -21,7 +21,11 @@ import {
   createMenuReviewPreparationSource,
   type MenuReviewPreparationInput,
 } from "./menu-review-preparation-source.js";
-import { MenuRecipeAllergenError, MenuReviewGapError } from "./menu-recipe-allergen-source.js";
+import {
+  MenuRecipeAllergenError,
+  MenuReviewGapError,
+  MenuReviewStoppedError,
+} from "./menu-recipe-allergen-source.js";
 
 export type MenuReviewCreationReferencePurpose =
   "Lifecycle" | "Validation" | "ReviewOperation" | "ContentAudit" | "DraftAudit" | "ReviewAudit";
@@ -304,6 +308,8 @@ export function createMenuReviewCreationSource(options: {
         if (error instanceof CatalogError) throw error;
         if (error instanceof MenuRecipeAllergenError && error.gap !== null)
           throw new MenuReviewGapError(error.gap);
+        if (error instanceof MenuRecipeAllergenError)
+          throw new MenuReviewStoppedError(error.reason, error.skuReference);
         return fail();
       }
     },

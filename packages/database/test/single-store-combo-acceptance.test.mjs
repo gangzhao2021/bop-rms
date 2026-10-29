@@ -5,6 +5,7 @@ import { it } from "vitest";
 import { createCustomerMenuStoreFacts } from "../../../apps/api/src/customer-menu-store-facts.ts";
 import { createMerchantAvailability } from "../../../apps/api/src/merchant-availability.ts";
 import { createMerchantCombos } from "../../../apps/api/src/merchant-combos.ts";
+import { createMerchantMenus } from "../../../apps/api/src/merchant-menus.ts";
 import { createMerchantDishAllergens } from "../../../apps/api/src/merchant-dish-allergens.ts";
 import { createMerchantOptionRecipes } from "../../../apps/api/src/merchant-option-recipes.ts";
 import { createAllergenRegistryVersion } from "../../rms/catalog/src/index.ts";
@@ -114,6 +115,16 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         "catalog.allergen.declare",
         "inventory.item.create",
         "inventory.item.activate",
+        "catalog.menu.read",
+        "catalog.menu.update",
+        "catalog.menu.submit",
+        "catalog.menu.approve",
+        "catalog.menu.publish",
+        // The legacy code the Menu service still checks (pilot roles hold its equivalents).
+        "catalog.menu.manage",
+        "publishing.draft.create",
+        "publishing.review.submit",
+        "publishing.review.approve",
       ];
       await seedBrand(admin, { brandReference, policyReference: id(300), from });
       await admin.query(
@@ -297,47 +308,75 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         persistence,
         authentication: { authorize: async () => ({ sessionReference: id(7) }) },
         locale: "en-CA",
-        resolveScope: grants.resolveScope,
+        // As the pilot: a transaction's decisions are remembered (merchant-brand-transaction-
+        // authorization), so a repeated decision does not select the Store again mid-write.
+        resolveScope: async (tx, ...rest) => {
+          const scope = await grants.resolveScope(tx, ...rest);
+          const decided = new Map();
+          return {
+            ...scope,
+            authorizeAction: async (action) => {
+              if (!decided.has(action)) decided.set(action, await scope.authorizeAction(action));
+              return decided.get(action);
+            },
+          };
+        },
         references: { next: op },
       };
-      // Stand-in menu: one draft with two sections; it lists the dishes saved so far.
-      const menu = {
-        aggregateVersion: 1,
-        versionReference: id(500),
-        name: "TEST menu",
-        sections: [
-          {
-            sectionReference: id(501),
-            code: "SOUPS",
-            name: "Soups (TEST)",
-            nameZh: "汤",
-            items: [],
-          },
-          {
-            sectionReference: id(502),
-            code: "COMBOS",
-            name: "Combos (TEST)",
-            nameZh: "套餐",
-            items: [],
-          },
+      // The store's one menu (TEST-only draft, as Brand setup leaves it): two sections, offered at
+      // this store for dine-in guests. Everything after runs through the real menu command.
+      const menuReference = id(499),
+        menuVersion = id(500);
+      await admin.query("INSERT INTO rms_catalog.menu VALUES($1,$2,'TEST_MENU',1,$3,$4,$3)", [
+        menuReference,
+        brandReference,
+        from,
+        owner,
+      ]);
+      await admin.query(
+        "INSERT INTO rms_catalog.menu_version(menu_version_id,menu_id,brand_id,status,default_locale,localized_names_json,created_at,updated_at) VALUES($1,$2,$3,'Draft','en-CA',$4,$5,$5)",
+        [
+          menuVersion,
+          menuReference,
+          brandReference,
+          JSON.stringify({ "en-CA": "TEST menu" }),
+          from,
         ],
-      };
+      );
+      await admin.query("INSERT INTO rms_catalog.menu_version_store VALUES($1,$2,$3,$4)", [
+        menuVersion,
+        menuReference,
+        brandReference,
+        storeReference,
+      ]);
+      await admin.query("INSERT INTO rms_catalog.menu_version_channel VALUES($1,$2,$3,$4)", [
+        menuVersion,
+        menuReference,
+        brandReference,
+        "CUSTOMER_PWA",
+      ]);
+      await admin.query("INSERT INTO rms_catalog.menu_version_order_type VALUES($1,$2,$3,$4)", [
+        menuVersion,
+        menuReference,
+        brandReference,
+        "DINE_IN",
+      ]);
+      for (const [n, code, name, nameZh] of [
+        [501, "SOUPS", "Soups (TEST)", "汤"],
+        [502, "COMBOS", "Combos (TEST)", "套餐"],
+      ])
+        await admin.query("INSERT INTO rms_catalog.menu_section VALUES($1,$2,$3,$4,$5,$6,$7)", [
+          id(n),
+          menuVersion,
+          menuReference,
+          brandReference,
+          code,
+          JSON.stringify({ "en-CA": name, "zh-Hans": nameZh }),
+          n - 501,
+        ]);
       const sellables = [];
-      let listed = false;
-      const menus = {
-        query: async () => ({
-          menu,
-          publication: listed ? { state: "Published" } : null,
-          sellables,
-        }),
-        command: async ({ body }) => {
-          if (body.action === "SaveDraft") menu.sections = body.sections;
-          if (body.action === "Revise") listed = false;
-          if (body.action === "List") listed = true;
-          menu.aggregateVersion += 1;
-          return { status: "Listed" };
-        },
-      };
+      const menus = createMerchantMenus({ ...common, currencyMetadata });
+      const menuView = async () => await menus.query({ ...session, menuReference });
       // The real allergen and choice recipe commands, as the one-page menu uses them.
       const realAllergens = createMerchantDishAllergens({ ...common, references: { next: op } });
       const declarations = [];
@@ -432,7 +471,7 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
           body: {
             action: "SaveDish",
             operationReference: op(),
-            menuReference: id(499),
+            menuReference,
             productReference: null,
             sectionCode: "SOUPS",
             name,
@@ -476,7 +515,7 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       const comboBody = (overrides = {}) => ({
         action: "SaveCombo",
         operationReference: op(),
-        menuReference: id(499),
+        menuReference,
         bundleReference: null,
         expectedAggregateVersion: null,
         sectionCode: "COMBOS",
@@ -580,9 +619,12 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
           .map((c) => [c.option, "Add", itemOf.get(c.dish), "1000000", true]),
       );
       // The combo dish sits in its section and offers the two choice groups.
-      assert.deepEqual(menu.sections[1].items, [
-        { skuReference: saved.skuReference, featured: false },
-      ]);
+      assert.deepEqual(
+        (await menuView()).menu.sections
+          .find((section) => section.code === "COMBOS")
+          .items.map((item) => item.skuReference),
+        [saved.skuReference],
+      );
       const view = (await combos.query(session)).combos;
       assert.equal(view.length, 1);
       assert.equal(view[0].state, "Waiting");
@@ -600,7 +642,7 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       // 2. "List it": the combo is published alone at the one store, and guests are offered it.
       await dishes.command({
         ...session,
-        body: { action: "ListAll", operationReference: op(), menuReference: id(499) },
+        body: { action: "ListAll", operationReference: op(), menuReference },
       });
       const listings = async () =>
         (
@@ -650,7 +692,7 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       // A second "List it" lists nothing again.
       await dishes.command({
         ...session,
-        body: { action: "ListAll", operationReference: op(), menuReference: id(499) },
+        body: { action: "ListAll", operationReference: op(), menuReference },
       });
       assert.equal((await listings()).length, 1);
 
@@ -731,7 +773,7 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       await assert.rejects(
         dishes.command({
           ...session,
-          body: { action: "ListAll", operationReference: op(), menuReference: id(499) },
+          body: { action: "ListAll", operationReference: op(), menuReference },
         }),
         (error) => error.name === "MerchantComboError" && error.code === "NotSingleStore",
       );
@@ -764,7 +806,7 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       // The edit is listed at one store again; guests now get 29.80.
       await dishes.command({
         ...session,
-        body: { action: "ListAll", operationReference: op(), menuReference: id(499) },
+        body: { action: "ListAll", operationReference: op(), menuReference },
       });
       assert.equal((await listings()).length, 2);
       assert.deepEqual((await guest(saved.skuReference)).price, {
