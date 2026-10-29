@@ -22,7 +22,12 @@ export interface PaymentTipSelection {
 }
 export class PaymentTipSelectionError extends Error {
   constructor(
-    readonly code: "PAYMENT_TIP_INVALID" | "PAYMENT_TIP_CONFLICT" | "PAYMENT_TIP_UNAVAILABLE",
+    readonly code:
+      | "PAYMENT_TIP_INVALID"
+      | "PAYMENT_TIP_CONFLICT"
+      | "PAYMENT_TIP_UNAVAILABLE"
+      /** WP-2423 item 8 ⑦: the Store has turned tips off; only "no tip" is taken. */
+      | "PAYMENT_TIP_TURNED_OFF",
   ) {
     super("payment tip selection is unavailable");
     this.name = "PaymentTipSelectionError";

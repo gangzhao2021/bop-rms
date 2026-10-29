@@ -16,6 +16,7 @@ import {
   type TableOnlinePaymentAuthority,
   type createDiningTableOnlinePayments,
 } from "./dining-table-online-payment.js";
+import { isTipPercent } from "./merchant-store-features.js";
 import type { DiningTableTip } from "./merchant-dining-table-checkout.js";
 
 /**
@@ -137,6 +138,8 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
       })),
       owed: bill.owed,
       consistent: bill.consistent,
+      // WP-2423 item 8 ⑦: the tips this Store offers (none chosen for the guest), or tips off.
+      tips: { enabled: bill.tips.enabled, tierPercents: bill.tips.tierPercents },
       state:
         paid !== null || (bill.split !== null && bill.split.paidParts === bill.split.parts.length)
           ? "Paid"
@@ -211,6 +214,8 @@ const errorBodies: Readonly<Record<string, [number, string]>> = {
   TABLE_ONLINE_PAYMENT_ANOTHER_GUEST_PAYING: [409, "table_another_guest_paying"],
   TABLE_ONLINE_PAYMENT_STILL_PROCESSING: [409, "table_payment_processing"],
   TABLE_ONLINE_PAYMENT_INPUT_INVALID: [400, "table_payment_invalid"],
+  TABLE_ONLINE_PAYMENT_TIPS_OFF: [409, "table_tips_turned_off"],
+  TABLE_ONLINE_PAYMENT_TIP_CHOICES_CHANGED: [409, "table_tip_choices_changed"],
 };
 
 /** HTTP: POST {action: "Read" | "Start", ...}; POST /handoff for the secure card form. */
@@ -313,9 +318,9 @@ export class CustomerDiningTablePaymentHandler {
             else if (
               tip.kind === "Percent" &&
               Object.keys(tip).length === 2 &&
-              [10, 15, 18, 20].includes(tip.percent as number)
+              isTipPercent(tip.percent)
             )
-              parsed = { kind: "Percent", percent: tip.percent as 10 | 15 | 18 | 20 };
+              parsed = { kind: "Percent", percent: tip.percent };
             else if (
               tip.kind === "Amount" &&
               Object.keys(tip).length === 2 &&

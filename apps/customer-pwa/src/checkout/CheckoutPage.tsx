@@ -51,8 +51,10 @@ import {
   SessionPaymentClientError,
 } from "../payment/session-payment-client.js";
 
-const tipPresets = [0, 10, 15, 18] as const;
-type TipChoice = (typeof tipPresets)[number] | "custom";
+/** A tip percentage of the subtotal before tax (0: no tip), or an amount the guest types. */
+type TipChoice = number | "custom";
+/** WP-2423 item 8 ⑦: what a Store never set offers (an older server sends no tips). */
+const defaultTips = Object.freeze({ enabled: true, tierPercents: [10, 15, 18] });
 
 /** Dollars-and-cents text for a minor-unit amount, for the custom tip field. */
 function minorToText(minor: string): string {
@@ -99,7 +101,9 @@ export function CheckoutPage({
     sessionController.getState,
     sessionController.getState,
   );
-  const [tipChoice, setTipChoice] = useState<TipChoice>(0);
+  // AGENTS.md (customer respect), Owner decision 11: no tip is chosen for the guest; every
+  // option, "No tip" included, is offered alike and the guest chooses before paying.
+  const [tipChoice, setTipChoice] = useState<TipChoice | null>(null);
   const [customTip, setCustomTip] = useState("");
   const selectedTip = useRef<{ selectionReference: string; amountMinor: string } | null>(null);
   const [readyDetails, setReadyDetails] = useState<CheckoutFormSelection | null>(null);
@@ -253,13 +257,25 @@ export function CheckoutPage({
     );
     return () => window.clearTimeout(timer);
   }, [now, quote, quoteExpired]);
-  const tipAmount = payLater
+  // The Store's tip percentages; with tips off the guest is asked nothing and pays no tip.
+  const tips = quote?.tips ?? defaultTips;
+  const tipPresets = [0, ...tips.tierPercents];
+  // Nothing in the cart (v15 live check): nothing to pay for, so no tip is asked either.
+  const asksTip = !payLater && tips.enabled && cart !== null && cart.cart.items.length > 0;
+  // A percentage the Store no longer offers (the quote was read again) is chosen again.
+  useEffect(() => {
+    if (typeof tipChoice === "number" && tipChoice !== 0 && !tips.tierPercents.includes(tipChoice))
+      setTipChoice(null);
+  }, [tipChoice, tips]);
+  const tipAmount = !asksTip
     ? "0"
-    : tipChoice === "custom"
-      ? parseTipAmount(customTip)
-      : quote === null
-        ? "0"
-        : percentOfMinor(quote.subtotal.amountMinor, tipChoice);
+    : tipChoice === null
+      ? null
+      : tipChoice === "custom"
+        ? parseTipAmount(customTip)
+        : quote === null
+          ? "0"
+          : percentOfMinor(quote.subtotal.amountMinor, tipChoice);
   const detailsReady =
     readyDetails !== null &&
     detailsSelection !== null &&
@@ -587,7 +603,7 @@ export function CheckoutPage({
               onSubmittableChange={setDetailsSubmittable}
             />
           ) : null}
-          {payLater ? null : (
+          {!asksTip ? null : (
             <section
               className="checkout-boundary checkout-tip"
               aria-labelledby="checkout-tip-heading"
@@ -622,7 +638,7 @@ export function CheckoutPage({
                   disabled={sessionState.status !== "idle" || state.status !== "ready"}
                   onClick={() => {
                     setTipChoice("custom");
-                    if (customTip === "" && quote !== null && tipChoice !== "custom")
+                    if (customTip === "" && quote !== null && typeof tipChoice === "number")
                       setCustomTip(
                         minorToText(percentOfMinor(quote.subtotal.amountMinor, tipChoice) ?? "0"),
                       );
@@ -718,14 +734,16 @@ export function CheckoutPage({
                       formatMoney(quote.total.amountMinor, quote.total.currency),
                     )
                   : checkoutText.sendToKitchen
-                : quote && tipAmount !== null
-                  ? checkoutText.continueToPaymentWithTotal(
-                      formatMoney(
-                        (BigInt(quote.total.amountMinor) + BigInt(tipAmount)).toString(),
-                        quote.total.currency,
-                      ),
-                    )
-                  : checkoutText.continueToPayment}
+                : asksTip && tipChoice === null
+                  ? checkoutText.chooseTipToContinue
+                  : quote && tipAmount !== null
+                    ? checkoutText.continueToPaymentWithTotal(
+                        formatMoney(
+                          (BigInt(quote.total.amountMinor) + BigInt(tipAmount)).toString(),
+                          quote.total.currency,
+                        ),
+                      )
+                    : checkoutText.continueToPayment}
             </button>
           )}
           <p className="checkout-continue__note">

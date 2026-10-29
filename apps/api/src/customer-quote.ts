@@ -22,16 +22,27 @@ export interface QuoteCartCommand {
   readonly requestedAt: string;
 }
 
+/** WP-2423 item 8 ⑦ (Owner decision 11): the tips the Store offers, worked out on the subtotal. */
+export interface QuoteTipChoices {
+  readonly enabled: boolean;
+  readonly tierPercents: readonly number[];
+}
 export type QuoteCartResult =
   | {
       readonly status: "Created";
       readonly quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
+      readonly tips?: QuoteTipChoices;
     }
   | {
       readonly status: "Current";
       readonly quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot;
+      readonly tips?: QuoteTipChoices;
     }
-  | { readonly status: "Requoted"; readonly requote: PriceQuoteRequoteResult }
+  | {
+      readonly status: "Requoted";
+      readonly requote: PriceQuoteRequoteResult;
+      readonly tips?: QuoteTipChoices;
+    }
   | {
       readonly status: "Expired";
       readonly resolution: {
@@ -153,9 +164,13 @@ const money = (value: PriceQuoteSnapshot["subtotal"]) =>
 function publicQuote(
   quote: PriceQuoteSnapshot | ConfiguredPriceQuoteSnapshot,
   requote?: PriceQuoteRequoteResult,
+  tips?: QuoteTipChoices,
 ) {
   return {
     schemaVersion: 1,
+    ...(tips === undefined
+      ? {}
+      : { tips: { enabled: tips.enabled, tierPercents: [...tips.tierPercents] } }),
     quote: {
       quoteReference: quote.quoteReference,
       quoteVersion: quote.quoteVersion,
@@ -264,7 +279,13 @@ export class CustomerQuoteHandler {
           response.setHeader("Location", `/api/v1/price-quotes/${quote.quoteReference}`);
           response
             .status(result.status === "Current" ? 200 : 201)
-            .json(publicQuote(quote, result.status === "Requoted" ? result.requote : undefined));
+            .json(
+              publicQuote(
+                quote,
+                result.status === "Requoted" ? result.requote : undefined,
+                result.tips,
+              ),
+            );
         } catch {
           sendError(response, "quote_service_unavailable");
         }

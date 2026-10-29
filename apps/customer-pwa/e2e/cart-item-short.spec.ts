@@ -204,6 +204,8 @@ for (const screen of [
       await expect(page.getByRole("heading", { name: "Total", exact: true })).toBeVisible();
       await page.getByLabel("Pickup name", { exact: true }).fill("Synthetic Guest");
       await page.getByLabel("Mobile number", { exact: true }).fill("416 555 0123");
+      // WP-2423 item 8 ⑦: no tip is chosen for the guest; the guest chooses one.
+      await page.getByRole("button", { name: "No tip", exact: true }).click();
       const proceed = page.getByRole("button", { name: /Continue to payment/u });
       await expect(proceed).toBeEnabled();
       await press(proceed);

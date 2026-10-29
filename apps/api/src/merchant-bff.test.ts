@@ -2038,6 +2038,7 @@ it("WP-2423 item 8 ⑦: reads and changes the Store's modules, and says when ano
     modules: { counterOrder: false, pickup: true, inventory: false },
     changedAt: serverTime,
     services: { version: 0, staffCall: false, chaseDish: false, changedAt: null },
+    tips: { version: 0, enabled: true, tierPercents: [10, 15, 18], changedAt: null },
     canChange: true,
   };
   const command = vi.fn<Command>().mockResolvedValue(view);
@@ -3143,7 +3144,11 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
     async () => refunded,
   );
   const menu = { status: "Found" } as never;
-  const counterMenu = vi.fn<NonNullable<MerchantBffRouterOptions["counterMenu"]>>(async () => menu);
+  const tips = { enabled: true, tierPercents: [12, 15, 20] };
+  const counterMenu = vi.fn<NonNullable<MerchantBffRouterOptions["counterMenu"]>>(async () => ({
+    menu,
+    tips,
+  }));
   const root = await serveCounter({
     counterMenu,
     counterOrder,
@@ -3290,7 +3295,7 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
   const menuResponse = await request(root, "/merchant/counter/menu", { headers: readHeaders });
   expect(menuResponse.status).toBe(200);
   expect(menuResponse.headers.get("cache-control")).toBe("no-store");
-  expect(await menuResponse.json()).toEqual({ screenId: "OPS-ORDER-ENTRY", menu });
+  expect(await menuResponse.json()).toEqual({ screenId: "OPS-ORDER-ENTRY", menu, tips });
   expect(counterMenu).toHaveBeenCalledWith({ sessionCookie, orderType: "Pickup" });
   // WP-2423 Q7 slice 2: a table round reads the dine-in menu; nothing else is accepted.
   expect(

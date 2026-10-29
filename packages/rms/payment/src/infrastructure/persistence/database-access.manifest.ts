@@ -268,6 +268,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "payment"],
     },
     {
+      // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the Store's tip choices (versioned).
+      table: "store_tip_setting",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "payment_tip_selection",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/payment" },

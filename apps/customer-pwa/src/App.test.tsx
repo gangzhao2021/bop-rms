@@ -83,8 +83,9 @@ describe("customer PWA shell", () => {
     );
     expect(html).toContain(">Checkout</h2>");
     expect(html).toContain("Loading checkout");
+    // WP-2423 item 8 ⑦: while the cart is still being read nothing is asked, not even a tip.
     expect(html).toContain("Continue to payment");
-    expect(html).toContain('id="checkout-tip"');
+    expect(html).not.toContain('id="checkout-tip"');
     expect(html).toContain('disabled=""');
   });
   it("maps the canonical clean Payment routes without trusting callback state", () => {

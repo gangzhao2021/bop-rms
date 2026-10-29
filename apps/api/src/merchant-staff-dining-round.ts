@@ -15,6 +15,7 @@ import {
 } from "@rms/ordering";
 import type { Money } from "@rms/pricing";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { readStoreTipChoices, tipRefusal } from "./merchant-store-features.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -56,6 +57,10 @@ export const staffDiningRoundErrorCodes = [
   "STAFF_ROUND_NOT_FINISHED",
   "STAFF_ROUND_IN_PROGRESS",
   "STAFF_ROUND_IDEMPOTENCY_CONFLICT",
+  /** WP-2423 item 8 ⑦ (Owner decision 11): the Store turned tips off; send it with no tip. */
+  "STAFF_ROUND_TIPS_OFF",
+  /** The tip percentage is not one the Store offers now: read the choices again. */
+  "STAFF_ROUND_TIP_CHOICES_CHANGED",
   "STAFF_ROUND_UNAVAILABLE",
 ] as const;
 export type StaffDiningRoundErrorCode = (typeof staffDiningRoundErrorCodes)[number];
@@ -574,6 +579,13 @@ export function createMerchantStaffDiningRound(options: {
           (found.intentHash !== intentHash || String(found.actorReference) !== scope.actorReference)
         )
           return fail("STAFF_ROUND_IDEMPOTENCY_CONFLICT");
+        // Only a tip the Store offers now (a retry returns its round as it was sent).
+        const refused =
+          found === null
+            ? tipRefusal(await readStoreTipChoices(tx, scope.selected), command.tip)
+            : null;
+        if (refused === "TipsOff") return fail("STAFF_ROUND_TIPS_OFF");
+        if (refused === "TipChoicesChanged") return fail("STAFF_ROUND_TIP_CHOICES_CHANGED");
         return found;
       });
       if (prior !== null) return await earlier(prior);

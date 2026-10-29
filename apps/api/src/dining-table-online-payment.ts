@@ -17,6 +17,7 @@ import {
   type DiningTableBill,
   type DiningTableTip,
 } from "./merchant-dining-table-checkout.js";
+import { tipRefusal } from "./merchant-store-features.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER S4 (decisions 3-5): a guest pays the whole table on their phone.
@@ -38,6 +39,10 @@ export type DiningTableOnlinePaymentErrorCode =
   | "TABLE_ONLINE_PAYMENT_ANOTHER_GUEST_PAYING"
   | "TABLE_ONLINE_PAYMENT_STILL_PROCESSING"
   | "TABLE_ONLINE_PAYMENT_INPUT_INVALID"
+  /** WP-2423 item 8 ⑦ (Owner decision 11): the Store turned tips off; pay with no tip. */
+  | "TABLE_ONLINE_PAYMENT_TIPS_OFF"
+  /** The tip percentage is not one the Store offers now: the bill is read again. */
+  | "TABLE_ONLINE_PAYMENT_TIP_CHOICES_CHANGED"
   | "TABLE_ONLINE_PAYMENT_UNAVAILABLE";
 export class DiningTableOnlinePaymentError extends Error {
   constructor(readonly code: DiningTableOnlinePaymentErrorCode) {
@@ -209,6 +214,9 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
     const owed = current.rounds.filter((round) => !round.paid && round.totalMinor !== "0");
     if (current.orderReference === null || owed.length === 0)
       return fail("TABLE_ONLINE_PAYMENT_NOTHING_OWED");
+    const refused = tipRefusal(current.tips, tip);
+    if (refused === "TipsOff") return fail("TABLE_ONLINE_PAYMENT_TIPS_OFF");
+    if (refused === "TipChoicesChanged") return fail("TABLE_ONLINE_PAYMENT_TIP_CHOICES_CHANGED");
     let tipMinor: bigint;
     try {
       tipMinor = tableTipMinor(

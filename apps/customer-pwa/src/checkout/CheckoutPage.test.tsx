@@ -92,8 +92,39 @@ describe("CUST-CHECKOUT page contract", () => {
     expect(html).toContain('aria-label="Tip amount"');
     expect(html).toContain("15%");
     expect(html).toContain("$0.15");
-    expect(html).toContain("Continue to payment");
+    // WP-2423 item 8 ⑦ (Owner decision 11): nothing is chosen for the guest, "No tip" included.
+    expect(html).not.toContain('aria-pressed="true"');
+    expect(html).toContain("Choose a tip to continue");
     expect(html).toMatch(/<button[^>]*class="checkout-continue__button"[^>]*disabled=""/u);
+  });
+
+  it("WP-2423 item 8 ⑦: offers the Store's own tip percentages, and asks nothing when tips are off", () => {
+    const tiers = render({
+      status: "ready",
+      cart,
+      quote: { ...quote, tips: { enabled: true, tierPercents: [12, 20, 25] } },
+    });
+    expect(tiers).toContain("12%<span>$0.12</span>");
+    expect(tiers).toContain("25%<span>$0.25</span>");
+    expect(tiers).not.toContain("15%");
+    expect(tiers).toContain("No tip");
+    expect(tiers).toContain("Other");
+    const off = render({
+      status: "ready",
+      cart,
+      quote: { ...quote, tips: { enabled: false, tierPercents: [10, 15, 18] } },
+    });
+    expect(off).not.toContain('aria-label="Tip amount"');
+    expect(off).not.toContain("Choose a tip");
+    // The total shown before payment is the order's own, with no tip.
+    expect(off).toContain("Continue to payment · $1.13");
+  });
+
+  it("v15 live check: an empty cart asks for no tip", () => {
+    expect(render({ status: "empty" })).not.toContain('aria-label="Tip amount"');
+    expect(
+      render({ status: "ready", cart: { ...cart, cart: { ...cart.cart, items: [] } }, quote }),
+    ).not.toContain('aria-label="Tip amount"');
   });
 
   it("marks an expired Quote and offers a fresh idempotent request", () => {

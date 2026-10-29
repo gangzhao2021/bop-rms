@@ -1,5 +1,10 @@
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
-import { readStoreFeatures } from "./merchant-store-features.js";
+import {
+  isTipPercent,
+  readStoreFeatures,
+  readStoreTipChoices,
+  tipRefusal,
+} from "./merchant-store-features.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import {
@@ -41,6 +46,10 @@ export const counterOrderErrorCodes = [
   "COUNTER_ORDER_NO_PICKUP_TIMES",
   /** WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the Store turned counter ordering off. */
   "COUNTER_ORDER_TURNED_OFF",
+  /** WP-2423 item 8 ⑦ (Owner decision 11): the Store turned tips off; send it with no tip. */
+  "COUNTER_ORDER_TIPS_OFF",
+  /** The tip percentage is not one the Store offers now: read the choices again. */
+  "COUNTER_ORDER_TIP_CHOICES_CHANGED",
   "COUNTER_ORDER_UNAVAILABLE",
 ] as const;
 export type CounterOrderErrorCode = (typeof counterOrderErrorCodes)[number];
@@ -291,7 +300,8 @@ export interface CounterGuestPipeline {
 
 export type CounterTipChoice =
   | { readonly kind: "None" }
-  | { readonly kind: "Percent"; readonly percent: 10 | 15 | 18 | 20 }
+  /** One of the Store's tip percentages (checked against them when the order is placed). */
+  | { readonly kind: "Percent"; readonly percent: number }
   | { readonly kind: "Amount"; readonly amountMinor: string };
 
 export interface CounterOrderLine {
@@ -384,9 +394,8 @@ function parseTip(value: unknown): CounterTipChoice {
   }
   if (kind === "Percent") {
     const raw = readClosedRecord(value, ["kind", "percent"]);
-    if (![10, 15, 18, 20].includes(raw.percent as number))
-      return fail("COUNTER_ORDER_INPUT_INVALID");
-    return Object.freeze({ kind: "Percent", percent: raw.percent as 10 | 15 | 18 | 20 });
+    if (!isTipPercent(raw.percent)) return fail("COUNTER_ORDER_INPUT_INVALID");
+    return Object.freeze({ kind: "Percent", percent: raw.percent });
   }
   if (kind === "Amount") {
     const raw = readClosedRecord(value, ["kind", "amountMinor"]);
@@ -592,6 +601,13 @@ export function createMerchantCounterOrder(options: {
         // A new order only while the Store uses counter ordering (a retry returns its order).
         if (found === null && !(await readStoreFeatures(tx, scope.selected, "Refuse")).counterOrder)
           return fail("COUNTER_ORDER_TURNED_OFF");
+        // Only a tip the Store offers now (a retry returns its order as it was placed).
+        const refused =
+          found === null
+            ? tipRefusal(await readStoreTipChoices(tx, scope.selected), command.tip)
+            : null;
+        if (refused === "TipsOff") return fail("COUNTER_ORDER_TIPS_OFF");
+        if (refused === "TipChoicesChanged") return fail("COUNTER_ORDER_TIP_CHOICES_CHANGED");
         return found;
       });
       if (prior !== null) return await earlier(prior);

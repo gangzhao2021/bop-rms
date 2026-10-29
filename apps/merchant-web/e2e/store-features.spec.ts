@@ -61,6 +61,12 @@ test("@production the owner applies the full-service setup, turns a module back 
       chaseDish: false,
       changedAt: null as string | null,
     },
+    tips: {
+      version: 0,
+      enabled: true,
+      tierPercents: [10, 15, 18],
+      changedAt: null as string | null,
+    },
     canChange: true,
   };
   const commands: Record<string, unknown>[] = [];
@@ -69,6 +75,20 @@ test("@production the owner applies the full-service setup, turns a module back 
     const body = route.request().postDataJSON() as Record<string, unknown>;
     commands.push(body);
     if (body.action === "Read") return route.fulfill({ headers, json: current });
+    if (body.action === "ChangeTips") {
+      if (body.expectedVersion !== current.tips.version)
+        return route.fulfill({ headers, status: 409, json: { error: "store_features_changed" } });
+      current = {
+        ...current,
+        tips: {
+          version: current.tips.version + 1,
+          enabled: body.enabled === true,
+          tierPercents: body.tierPercents as number[],
+          changedAt: "2026-10-29T15:20:00.000Z",
+        },
+      };
+      return route.fulfill({ headers, json: current });
+    }
     if (body.action === "ChangeServices") {
       if (body.expectedVersion !== current.services.version)
         return route.fulfill({ headers, status: 409, json: { error: "store_features_changed" } });
@@ -242,4 +262,42 @@ test("@production the owner applies the full-service setup, turns a module back 
     chaseDish: true,
   });
   await expect(page.getByRole("button", { name: "Save table settings" })).toBeDisabled();
+
+  // WP-2423 item 8 ⑦ (decision 11): tips 10 / 15 / 18 % at first; the owner sets 12 / 18 / 20.
+  const lowest = page.getByRole("textbox", { name: "Lowest tip percentage" });
+  const highest = page.getByRole("textbox", { name: "Highest tip percentage" });
+  await expect(lowest).toHaveValue("10");
+  const saveTips = page.getByRole("button", { name: "Save tips" });
+  await expect(saveTips).toBeDisabled();
+  // Out of order or out of range: said so, and not sent.
+  await lowest.fill("20");
+  await expect(
+    page.getByText("Enter three different whole numbers from 1 to 50, lowest first."),
+  ).toBeVisible();
+  await expect(saveTips).toBeDisabled();
+  await lowest.fill("12");
+  await page.getByRole("textbox", { name: "Middle tip percentage" }).fill("18");
+  await highest.fill("20");
+  await saveTips.click();
+  await expect(
+    page.getByText("Saved. Guests and staff are offered these tips from now on."),
+  ).toBeVisible();
+  expect(commands.at(-1)).toMatchObject({
+    action: "ChangeTips",
+    expectedVersion: 0,
+    enabled: true,
+    tierPercents: [12, 18, 20],
+  });
+  // Tips off: no percentages to set, and the card machine is mentioned.
+  await page.getByRole("checkbox", { name: /Guests and staff can add a tip/u }).uncheck();
+  await expect(lowest).toBeHidden();
+  await expect(page.getByText(/turn that off on the machine too/u)).toBeVisible();
+  await saveTips.click();
+  await expect(page.getByText("Saved. No one is asked for a tip from now on.")).toBeVisible();
+  expect(commands.at(-1)).toMatchObject({
+    action: "ChangeTips",
+    expectedVersion: 1,
+    enabled: false,
+    tierPercents: [12, 18, 20],
+  });
 });

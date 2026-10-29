@@ -139,6 +139,42 @@ async function signIn(page: Page) {
   );
 }
 
+// WP-2423 item 8 ⑦ (Owner decision 11): the counter offers the Store's own tip percentages; with
+// tips off it asks nothing and sends no tip; a refusal (tips turned off meanwhile) re-reads them.
+test("@production the counter offers the Store's tip percentages, and none while tips are off", async ({
+  page,
+}) => {
+  await signIn(page);
+  let tips = { enabled: true, tierPercents: [12, 18, 22] };
+  await page.route("**/merchant/counter/menu", (route) =>
+    route.fulfill({ headers, json: { ...menu, tips } }),
+  );
+  const placedBodies: Record<string, unknown>[] = [];
+  await page.route("**/merchant/counter/orders", (route) => {
+    placedBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+    // The owner turned tips off after the screen read them.
+    tips = { enabled: false, tierPercents: [12, 18, 22] };
+    return route.fulfill({ status: 409, headers, json: { error: "tips_turned_off" } });
+  });
+  await page.goto("/operations/order-entry");
+  const tip = page.getByRole("group", { name: "Tip" });
+  await expect(tip.getByRole("radio")).toHaveCount(5);
+  await expect(tip.getByRole("radio", { name: "12%" })).toBeVisible();
+  await expect(tip.getByRole("radio", { name: "15%" })).toHaveCount(0);
+  await expect(tip.getByRole("radio", { name: "No tip" })).toBeChecked();
+  await page.getByRole("button", { name: "Add Banana Bread" }).click();
+  await tip.getByRole("radio", { name: "22%" }).check();
+  await page.getByRole("button", { name: "Send order" }).click();
+  expect(placedBodies[0]).toMatchObject({ tip: { kind: "Percent", percent: 22 } });
+  await expect(
+    page.getByText(
+      "Tips are turned off for this store, so nothing was sent or charged. Send it again with no tip.",
+    ),
+  ).toBeVisible();
+  // The choices are read again: no tip to choose any more.
+  await expect(tip).toBeHidden();
+});
+
 test("@production staff take a counter pickup order, charge it on the card machine and record it", async ({
   page,
 }) => {

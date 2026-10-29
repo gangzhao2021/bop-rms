@@ -67,6 +67,8 @@ function PreparedSessionPaymentPage({
     | "closed"
     /** WP-2423: items ran out after checkout; no order was placed and nothing was charged. */
     | "items_short"
+    /** WP-2423 item 8 ⑦: the Store turned tips off before payment started; nothing was charged. */
+    | "tips_off"
     | "unavailable"
   >("loading");
   // WP-2423 Q10: a failed check of the checkout is retried in place, never a dead end.
@@ -158,10 +160,12 @@ function PreparedSessionPaymentPage({
             ? "closed"
             : error instanceof SessionPaymentClientError && error.code === "items_short"
               ? "items_short"
-              : error instanceof SessionPaymentClientError &&
-                  (error.code === "denied" || error.code === "conflict")
-                ? "denied"
-                : "unknown",
+              : error instanceof SessionPaymentClientError && error.code === "tips_off"
+                ? "tips_off"
+                : error instanceof SessionPaymentClientError &&
+                    (error.code === "denied" || error.code === "conflict")
+                  ? "denied"
+                  : "unknown",
         );
     } finally {
       flight.current = false;
@@ -267,10 +271,22 @@ function PreparedSessionPaymentPage({
           <Link to="/cart">{t("Back to your cart")}</Link>
         </section>
       ) : null}
+      {status === "tips_off" ? (
+        <section className="checkout-attention" role="alert">
+          <h2>{t("The restaurant stopped taking tips")}</h2>
+          <p>
+            {t(
+              "Tips were turned off while you were checking out, so you haven’t been charged. Go back to checkout to pay without a tip.",
+            )}
+          </p>
+          <Link to="/checkout">{t("Back to checkout")}</Link>
+        </section>
+      ) : null}
       {status !== "denied" &&
       status !== "retry" &&
       status !== "closed" &&
       status !== "items_short" &&
+      status !== "tips_off" &&
       status !== "unavailable" &&
       status !== "loading" ? (
         <section className="payment-page__amount" aria-label={t("Amount")}>

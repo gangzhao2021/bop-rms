@@ -1157,6 +1157,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Card payment isn’t available on this phone. Ask a staff member to take the payment.":
     "这部手机暂时不能刷卡付款，请找店员收款。",
   "Choose a tip to pay": "请选择小费后付款",
+  "Choose a tip to continue": "请选择小费后继续",
+  "The restaurant has just stopped taking tips. Check the bill and pay it without a tip.":
+    "餐厅刚刚停止收小费。请核对账单，不加小费付款。",
+  "The tip choices just changed. Choose a tip again to pay.":
+    "小费选项刚刚变了，请重新选择后付款。",
+  "The restaurant stopped taking tips": "餐厅已停止收小费",
+  "Tips were turned off while you were checking out, so you haven’t been charged. Go back to checkout to pay without a tip.":
+    "你结账时餐厅关掉了小费，还没有扣款。请回到结账页，不加小费付款。",
   "Your table is checking out. To add dishes, ask a staff member.":
     "这桌正在结账，要加菜请找店员。",
   Closed: "不营业",

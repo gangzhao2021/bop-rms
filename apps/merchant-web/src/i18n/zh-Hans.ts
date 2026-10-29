@@ -6299,6 +6299,30 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "On a table's order, “Chase” next to a dish not yet ready turns its kitchen ticket red with a sound, and counts the chases. A round can be chased once every 5 minutes.":
     "在桌子的订单里，没做好的菜旁边点“催菜”，后厨那张单会变红并响一声，并记下催了几次。同一轮 5 分钟内只能催一次。",
   "Save table settings": "保存桌边服务设置",
+  "Guests and staff can add a tip": "客人和店员可以加小费",
+  "At payment there are three percentages, No tip and Other amount. Nothing is chosen for the guest; the tip is worked out on the subtotal before tax.":
+    "付款时有三个百分比、“不加小费”和“其他金额”。不替客人预选；小费按税前小计计算。",
+  "No one is asked for a tip and none can be added. If your card machine asks for a tip, turn that off on the machine too.":
+    "不再询问小费，也不能加小费。如果刷卡机会提示小费，请在刷卡机上也关掉。",
+  "Tip percentages": "小费百分比",
+  "Lowest tip percentage": "最低小费百分比",
+  "Middle tip percentage": "中间小费百分比",
+  "Highest tip percentage": "最高小费百分比",
+  "Whole numbers from 1 to 50, lowest first.": "1 到 50 的整数，从低到高。",
+  "Enter three different whole numbers from 1 to 50, lowest first.":
+    "请输入三个不同的 1 到 50 的整数，从低到高。",
+  "Saved. Guests and staff are offered these tips from now on.":
+    "已保存。从现在起客人和店员看到的是这些小费选项。",
+  "Saved. No one is asked for a tip from now on.": "已保存。从现在起不再询问小费。",
+  "Save tips": "保存小费设置",
+  "Tips are turned off for this store, so nothing was sent or charged. Send it again with no tip.":
+    "本店已关掉小费，所以什么都没有发送或收款。请不加小费重新发送。",
+  "The store's tip choices just changed, so nothing was sent or charged. Choose the tip again and send.":
+    "本店的小费选项刚刚变了，所以什么都没有发送或收款。请重新选择小费后发送。",
+  "Tips are turned off for this store, so nothing was recorded. The bill has been read again: take the payment with no tip.":
+    "本店已关掉小费，所以没有记录这笔付款。账单已重新读取：请不加小费收款。",
+  "The store's tip choices just changed, so nothing was recorded. The bill has been read again: choose the tip again.":
+    "本店的小费选项刚刚变了，所以没有记录这笔付款。账单已重新读取：请重新选择小费。",
   "The kitchen was told to hurry {displayName}.": "已通知后厨加快做 {displayName}。",
   "This round was chased a moment ago. You can chase it again at {time}.":
     "这一轮刚催过，{time} 后可以再催。",

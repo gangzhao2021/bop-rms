@@ -18,7 +18,23 @@ export interface StoreFeatures {
     readonly chaseDish: boolean;
     readonly changedAt: string | null;
   };
+  /**
+   * WP-2423 item 8 ⑦ (Owner decision 11): the three tip percentages guests and staff are
+   * offered (with "no tip" and "other amount"), or tips off. Payment's own versioned setting.
+   */
+  readonly tips: {
+    readonly version: number;
+    readonly enabled: boolean;
+    readonly tierPercents: readonly [number, number, number];
+    readonly changedAt: string | null;
+  };
 }
+/** Three whole percentages, each 1–50, from lowest to highest. */
+export const validTipTiers = (tiers: readonly number[]): boolean =>
+  tiers.length === 3 &&
+  tiers.every((n) => Number.isSafeInteger(n) && n >= 1 && n <= 50) &&
+  (tiers[0] as number) < (tiers[1] as number) &&
+  (tiers[1] as number) < (tiers[2] as number);
 export class StoreFeaturesClientError extends Error {
   constructor(readonly code: "Denied" | "Changed" | "Unavailable") {
     super("store features " + code);
@@ -34,6 +50,20 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
   const raw = value as Record<string, unknown> | null;
   const modules = raw?.modules as Record<string, unknown> | null | undefined;
   const services = raw?.services as Record<string, unknown> | null | undefined;
+  const tips = raw?.tips as Record<string, unknown> | null | undefined;
+  if (
+    tips === null ||
+    typeof tips !== "object" ||
+    Object.keys(tips).sort().join(",") !== "changedAt,enabled,tierPercents,version" ||
+    !Number.isSafeInteger(tips.version) ||
+    Number(tips.version) < 0 ||
+    typeof tips.enabled !== "boolean" ||
+    !Array.isArray(tips.tierPercents) ||
+    !validTipTiers(tips.tierPercents as number[]) ||
+    (tips.changedAt !== null &&
+      (typeof tips.changedAt !== "string" || !instant.test(tips.changedAt)))
+  )
+    return fail();
   if (
     raw === null ||
     typeof raw !== "object" ||
@@ -74,6 +104,16 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
       chaseDish: services.chaseDish,
       changedAt: services.changedAt as string | null,
     }),
+    tips: Object.freeze({
+      version: Number(tips.version),
+      enabled: tips.enabled,
+      tierPercents: Object.freeze([...(tips.tierPercents as number[])]) as unknown as readonly [
+        number,
+        number,
+        number,
+      ],
+      changedAt: tips.changedAt as string | null,
+    }),
   });
 }
 
@@ -104,6 +144,12 @@ export function createStoreFeaturesClient(csrf: string, fetcher: typeof fetch = 
       staffCall: boolean;
       chaseDish: boolean;
     }) => send({ action: "ChangeServices", ...input }),
+    changeTips: (input: {
+      operationReference: string;
+      expectedVersion: number;
+      enabled: boolean;
+      tierPercents: readonly number[];
+    }) => send({ action: "ChangeTips", ...input }),
     applyFullService: (input: { operationReference: string; expectedVersion: number }) =>
       send({ action: "ApplyTemplate", template: "FullService", ...input }),
     change: (input: {

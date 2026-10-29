@@ -11,7 +11,7 @@ export type TablePaymentState =
   "NotPaid" | "Paying" | "AnotherGuestPaying" | "Failed" | "Paid" | "Closed";
 export type TableTip =
   | { readonly kind: "None" }
-  | { readonly kind: "Percent"; readonly percent: 10 | 15 | 18 | 20 }
+  | { readonly kind: "Percent"; readonly percent: number }
   | { readonly kind: "Amount"; readonly amountMinor: string };
 export interface TablePaymentView {
   readonly tableLabel: string | null;
@@ -27,6 +27,11 @@ export interface TablePaymentView {
     readonly totalMinor: string;
   };
   readonly consistent: boolean;
+  /**
+   * WP-2423 item 8 ⑦ (Owner decision 11): the Store's tip percentages (of the subtotal before
+   * tax), or tips off. An older server sends none: 10 / 15 / 18 %.
+   */
+  readonly tips: { readonly enabled: boolean; readonly tierPercents: readonly number[] };
   readonly state: TablePaymentState;
   readonly attempt: {
     readonly totalMinor: string;
@@ -65,6 +70,10 @@ export type TablePaymentErrorCode =
   | "another-guest-paying"
   | "processing"
   | "not-found"
+  /** WP-2423 item 8 ⑦: the Store turned tips off; the bill is paid without one. */
+  | "tips-off"
+  /** The Store's tip percentages changed: the guest chooses again. */
+  | "tip-choices-changed"
   | "unavailable";
 export class TablePaymentClientError extends Error {
   constructor(readonly code: TablePaymentErrorCode) {
@@ -128,6 +137,7 @@ export function parseTablePaymentView(value: unknown): TablePaymentView {
       totalMinor: amount(owed.totalMinor),
     }),
     consistent: p.consistent,
+    tips: tipsOf(p.tips),
     state: p.state as TablePaymentState,
     attempt:
       attempt === null || attempt === undefined
@@ -160,6 +170,21 @@ export function parseTablePaymentView(value: unknown): TablePaymentView {
             paidAt: typeof receipt.paidAt === "string" ? receipt.paidAt : fail(),
           }),
   });
+}
+
+function tipsOf(value: unknown): TablePaymentView["tips"] {
+  if (value === undefined) return Object.freeze({ enabled: true, tierPercents: [10, 15, 18] });
+  const raw = (value ?? {}) as Record<string, unknown>;
+  const tiers = raw.tierPercents;
+  if (
+    typeof raw.enabled !== "boolean" ||
+    !Array.isArray(tiers) ||
+    tiers.length !== 3 ||
+    tiers.some((n) => !Number.isSafeInteger(n) || Number(n) < 1 || Number(n) > 50) ||
+    !(Number(tiers[0]) < Number(tiers[1]) && Number(tiers[1]) < Number(tiers[2]))
+  )
+    return fail();
+  return Object.freeze({ enabled: raw.enabled, tierPercents: Object.freeze(tiers.map(Number)) });
 }
 
 function splitOf(value: unknown): TablePaymentView["split"] {
@@ -204,6 +229,8 @@ const errorCodes: Readonly<Record<string, TablePaymentErrorCode>> = {
   table_another_guest_paying: "another-guest-paying",
   table_payment_processing: "processing",
   table_not_found: "not-found",
+  table_tips_turned_off: "tips-off",
+  table_tip_choices_changed: "tip-choices-changed",
 };
 
 export function createTablePaymentClient(request: typeof fetch = globalThis.fetch) {

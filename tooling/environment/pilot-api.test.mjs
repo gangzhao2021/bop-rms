@@ -97,6 +97,7 @@ function dependencies() {
       createInternalCartReplacement: () => port("replacement"),
       createInternalTestCart: () => ({
         cartTransactions: transactions,
+        tipTransactions: transactions,
         cartBinding: port("cartBinding"),
       }),
       createInternalCheckoutDetails: () => ({

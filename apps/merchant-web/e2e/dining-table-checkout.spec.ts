@@ -344,6 +344,66 @@ test("@production DEC-DINE-IN-PAY-LATER: a table the guests left without paying 
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
 
+// WP-2423 item 8 ⑦ (Owner decision 11): with tips off, staff are asked no tip and the payment is
+// recorded with none; the Store's own percentages are offered while tips are on.
+test("@production a store with tips off takes the table's payment with no tip", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state);
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: ["ORDER_BALANCE_UNPAID"],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  let tips = { enabled: true, tierPercents: [12, 18, 20] };
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: { ...unpaidBill("Closing", 7), tips } }),
+  );
+  const sent: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/table-settle", (route) => {
+    sent.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({ headers, status: 409, json: { error: "tips_off" } });
+  });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  const tip = checkout.getByRole("group", { name: "Tip" });
+  await expect(tip.getByRole("radio", { name: /^12% · /u })).toBeVisible();
+  await expect(tip.getByRole("radio", { name: /^15%/u })).toHaveCount(0);
+  // Tips turned off meanwhile: refused, the bill is read again and no tip is asked.
+  await tip.getByRole("radio", { name: /^20% · /u }).check();
+  await checkout.getByRole("radio", { name: "Card machine" }).check();
+  tips = { enabled: false, tierPercents: [12, 18, 20] };
+  await checkout.getByRole("button", { name: /^Paid on card machine · /u }).click();
+  await checkout
+    .getByRole("alertdialog", { name: "Confirm the payment" })
+    .getByRole("button", { name: /^Confirm /u })
+    .click();
+  expect(sent[0]).toMatchObject({ tip: { kind: "Percent", percent: 20 } });
+  await expect(checkout).toContainText(
+    "Tips are turned off for this store, so nothing was recorded.",
+  );
+  await expect(tip).toBeHidden();
+  // With no tip to choose, the payment is the bill as it stands.
+  await expect(
+    checkout.getByRole("button", { name: "Paid on card machine · $33.93" }),
+  ).toBeEnabled();
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});
+
 test("@production DEC-DINE-IN-PAY-LATER S4: while a guest pays on their phone staff take nothing else, and can stop a payment the guest gave up on", async ({
   page,
 }) => {

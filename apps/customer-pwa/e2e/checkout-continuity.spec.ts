@@ -292,7 +292,9 @@ for (const screen of [
           expect(quoteCalls[1]).toEqual(quoteCalls[0]);
           expect(quoteCalls[0]?.body).toEqual({ cartVersion: 3 });
           // Policies not yet accepted: the single continue action stays disabled.
-          await expect(page.getByRole("button", { name: /Continue to payment/u })).toBeDisabled();
+          await expect(
+            page.getByRole("button", { name: /Continue to payment|Choose a tip to continue/u }),
+          ).toBeDisabled();
           expect(
             await page.evaluate(
               () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -486,6 +488,8 @@ for (const screen of [
                 }; };`,
               }),
             );
+            // WP-2423 item 8 ⑦: no tip is chosen for the guest; the guest chooses one.
+            await page.getByRole("button", { name: "No tip", exact: true }).click();
             const proceed = page.getByRole("button", { name: /Continue to payment/u });
             await expect(proceed).toBeEnabled();
             await page.getByRole("button", { name: "Other", exact: true }).click();

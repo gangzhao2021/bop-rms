@@ -31,6 +31,12 @@ import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { staffDiningRoundPermission } from "./merchant-staff-dining-round.js";
+import {
+  isTipPercent,
+  readStoreTipChoices,
+  tipRefusal,
+  type StoreTipChoices,
+} from "./merchant-store-features.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER: a pay-later table's checkout. Staff read the table's bill (each
@@ -56,6 +62,10 @@ export const diningTableCheckoutErrorCodes = [
   "TABLE_CHECKOUT_IDEMPOTENCY_CONFLICT",
   /** WP-2423 item 8 ④: the split can't change once a part was paid or a guest started paying. */
   "TABLE_CHECKOUT_SPLIT_LOCKED",
+  /** WP-2423 item 8 ⑦ (Owner decision 11): the Store turned tips off; record it with no tip. */
+  "TABLE_CHECKOUT_TIPS_OFF",
+  /** The tip percentage is not one the Store offers now: read the bill again. */
+  "TABLE_CHECKOUT_TIP_CHOICES_CHANGED",
   "TABLE_CHECKOUT_UNAVAILABLE",
 ] as const;
 export type DiningTableCheckoutErrorCode = (typeof diningTableCheckoutErrorCodes)[number];
@@ -72,7 +82,8 @@ const sha256 = (value: string) => "sha256:" + createHash("sha256").update(value)
 
 export type DiningTableTip =
   | { readonly kind: "None" }
-  | { readonly kind: "Percent"; readonly percent: 10 | 15 | 18 | 20 }
+  /** One of the Store's tip percentages (checked against them when it is taken). */
+  | { readonly kind: "Percent"; readonly percent: number }
   | { readonly kind: "Amount"; readonly amountMinor: string };
 
 /** A tip as a share of the bill before tax, rounded half up (as at the counter). */
@@ -128,6 +139,8 @@ export interface DiningTableBill {
   };
   /** False while a round is still being sent: the bill would not match the Order (refresh). */
   readonly consistent: boolean;
+  /** WP-2423 item 8 ⑦: the tips offered now (the Store's percentages, or tips off). */
+  readonly tips: StoreTipChoices;
   readonly settlement: null | {
     readonly method: "CardMachine" | "Cash" | "Online";
     readonly roundsMinor: string;
@@ -239,6 +252,7 @@ export async function readDiningTableBill(
     paymentTiming: timing,
     tableLabel,
     orderReference,
+    tips: await readStoreTipChoices(tx, scope),
   };
   const zero = { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" };
   if (orderReference === null)
@@ -661,9 +675,9 @@ export function parseDiningTableSettleCommand(value: unknown) {
     else if (
       tipRaw.kind === "Percent" &&
       Object.keys(tipRaw).length === 2 &&
-      [10, 15, 18, 20].includes(tipRaw.percent as number)
+      isTipPercent(tipRaw.percent)
     )
-      tip = { kind: "Percent", percent: tipRaw.percent as 10 | 15 | 18 | 20 };
+      tip = { kind: "Percent", percent: tipRaw.percent };
     else if (
       tipRaw.kind === "Amount" &&
       Object.keys(tipRaw).length === 2 &&
@@ -824,6 +838,13 @@ export function createMerchantDiningTableSettle(options: {
             const sequenceOf = new Map(
               bill.rounds.map((round) => [round.orderBatchReference, round] as const),
             );
+            // Only a tip the Store offers (for a payment taken during an outage: offered then).
+            const refused = tipRefusal(
+              await readStoreTipChoices(tx, scope, command.takenAt),
+              command.tip,
+            );
+            if (refused === "TipsOff") return fail("TABLE_CHECKOUT_TIPS_OFF");
+            if (refused === "TipChoicesChanged") return fail("TABLE_CHECKOUT_TIP_CHOICES_CHANGED");
             // A part's tip is on its own share of the bill before tax.
             const tipMinor = tableTipMinor(
               command.tip,

@@ -68,7 +68,9 @@ type ExplicitRejection =
   /** DEC-DINE-IN-PAY-LATER: this table pays at the end; rounds are sent, not paid. */
   | "pay_later_table"
   /** DEC-DINE-IN-PAY-LATER: this table pays each round as it is sent. */
-  | "pay_first_table";
+  | "pay_first_table"
+  /** WP-2423 item 8 ⑦: the Store turned tips off; pay again with no tip. */
+  | "tips_turned_off";
 function reject(response: Response, status: number, explicit?: ExplicitRejection) {
   const code =
     explicit ??
@@ -215,9 +217,12 @@ function failure(error: unknown) {
       } as const
     )[error.code];
   if (error instanceof PaymentTipSelectionError)
-    return { PAYMENT_TIP_INVALID: 400, PAYMENT_TIP_CONFLICT: 409, PAYMENT_TIP_UNAVAILABLE: 503 }[
-      error.code
-    ];
+    return {
+      PAYMENT_TIP_INVALID: 400,
+      PAYMENT_TIP_CONFLICT: 409,
+      PAYMENT_TIP_UNAVAILABLE: 503,
+      PAYMENT_TIP_TURNED_OFF: 409,
+    }[error.code];
   if (
     error instanceof OrderCreationError ||
     error instanceof CheckoutValidationError ||
@@ -286,6 +291,8 @@ function stockRejection(error: unknown): ExplicitRejection | undefined {
     return "pay_later_table";
   if (error instanceof CustomerDiningPayLaterError && error.code === "PayFirst")
     return "pay_first_table";
+  if (error instanceof PaymentTipSelectionError && error.code === "PAYMENT_TIP_TURNED_OFF")
+    return "tips_turned_off";
   if (
     (error instanceof CheckoutValidationError && error.code === "CHECKOUT_STOCK_SHORT") ||
     (error instanceof OrderCreationError && error.code === "ORDER_CREATE_STOCK_SHORT") ||

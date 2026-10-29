@@ -9,6 +9,7 @@ import {
   StoreFeaturesClientError,
   type StoreFeatures,
   type StoreFeaturesClient,
+  validTipTiers,
 } from "./store-features-client.js";
 import { createPickupClient } from "./pickup-client.js";
 import type { PickupClient } from "./pickup.js";
@@ -77,6 +78,11 @@ const rows: readonly { key: keyof Modules; name: () => string; detail: () => str
  * be turned back on. A change takes effect at once for every staff member; someone else's change
  * in between is shown and asked again.
  */
+const tipsDraftOf = (value: StoreFeatures) => ({
+  enabled: value.tips.enabled,
+  tiers: value.tips.tierPercents.map(String) as [string, string, string],
+});
+
 export function StoreFeaturesPage({
   csrf,
   storeReference,
@@ -107,6 +113,10 @@ export function StoreFeaturesPage({
   const [draft, setDraft] = useState<Modules | null>(null);
   // WP-2423 item 8 ⑦ (Owner decision 4): the table switches, saved on their own.
   const [services, setServices] = useState<{ staffCall: boolean; chaseDish: boolean } | null>(null);
+  // WP-2423 item 8 ⑦ (Owner decision 11): tips on or off, and the three percentages as typed.
+  const [tips, setTips] = useState<{ enabled: boolean; tiers: [string, string, string] } | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
   const [refresh, setRefresh] = useState(0);
@@ -123,6 +133,7 @@ export function StoreFeaturesPage({
         setView(value);
         setDraft(modulesOf(value));
         setServices({ staffCall: value.services.staffCall, chaseDish: value.services.chaseDish });
+        setTips(tipsDraftOf(value));
         setFailed(null);
       })
       .catch((error: unknown) => {
@@ -158,12 +169,19 @@ export function StoreFeaturesPage({
         </StatePanel>
       </WorkspacePage>
     );
-  if (view === null || draft === null || services === null)
+  if (view === null || draft === null || services === null || tips === null)
     return (
       <WorkspacePage title={t("Store features")}>
         <p role="status">{t("Reading store features…")}</p>
       </WorkspacePage>
     );
+  const tierPercents = tips.tiers.map((value) =>
+    /^[1-9][0-9]?$/u.test(value.trim()) ? Number(value.trim()) : Number.NaN,
+  );
+  const tiersValid = validTipTiers(tierPercents);
+  const tipsChanged =
+    tips.enabled !== view.tips.enabled ||
+    tierPercents.some((value, index) => value !== view.tips.tierPercents[index]);
   const changed =
     draft.counterOrder !== view.modules.counterOrder ||
     draft.pickup !== view.modules.pickup ||
@@ -246,6 +264,7 @@ export function StoreFeaturesPage({
       setView(next);
       setDraft(modulesOf(next));
       setServices({ staffCall: next.services.staffCall, chaseDish: next.services.chaseDish });
+      setTips(tipsDraftOf(next));
       setMessage({ tone: "status", text: done });
     } catch (error) {
       if (error instanceof StoreFeaturesClientError && error.code === "Changed") {
@@ -392,6 +411,94 @@ export function StoreFeaturesPage({
           >
             {t("Save table settings")}
           </button>
+        </div>
+        <fieldset className="store-features__modules" disabled={busy}>
+          <legend>{t("Tips")}</legend>
+          <label className="store-features__row">
+            <input
+              type="checkbox"
+              checked={tips.enabled}
+              onChange={(event) => {
+                operation.current = null;
+                setTips({ ...tips, enabled: event.target.checked });
+              }}
+            />
+            <span>
+              <strong>{t("Guests and staff can add a tip")}</strong>
+              <span className="store-features__detail">
+                {tips.enabled
+                  ? t(
+                      "At payment there are three percentages, No tip and Other amount. Nothing is chosen for the guest; the tip is worked out on the subtotal before tax.",
+                    )
+                  : t(
+                      "No one is asked for a tip and none can be added. If your card machine asks for a tip, turn that off on the machine too.",
+                    )}
+              </span>
+            </span>
+          </label>
+          {tips.enabled ? (
+            <div className="store-features__row store-features__tiers">
+              <span id="store-tip-tiers">{t("Tip percentages")}</span>
+              {tips.tiers.map((value, index) => (
+                <label key={index}>
+                  <input
+                    inputMode="numeric"
+                    aria-describedby="store-tip-tiers store-tip-tiers-help"
+                    aria-label={
+                      index === 0
+                        ? t("Lowest tip percentage")
+                        : index === 1
+                          ? t("Middle tip percentage")
+                          : t("Highest tip percentage")
+                    }
+                    aria-invalid={!tiersValid}
+                    value={value}
+                    onChange={(event) => {
+                      operation.current = null;
+                      const tiers = [...tips.tiers] as [string, string, string];
+                      tiers[index] = event.target.value;
+                      setTips({ ...tips, tiers });
+                    }}
+                  />
+                  %
+                </label>
+              ))}
+              <span id="store-tip-tiers-help" className="store-features__detail">
+                {tiersValid
+                  ? t("Whole numbers from 1 to 50, lowest first.")
+                  : t("Enter three different whole numbers from 1 to 50, lowest first.")}
+              </span>
+            </div>
+          ) : null}
+        </fieldset>
+        <div className="store-features__actions">
+          <button
+            type="button"
+            className="store-features__save"
+            disabled={busy || !tipsChanged || (tips.enabled && !tiersValid)}
+            onClick={() =>
+              void run(
+                (operationReference) =>
+                  client.changeTips({
+                    operationReference,
+                    expectedVersion: view.tips.version,
+                    enabled: tips.enabled,
+                    // Tips off keeps the percentages, for when they are turned back on.
+                    tierPercents: tiersValid ? tierPercents : [...view.tips.tierPercents],
+                  }),
+                tips.enabled
+                  ? t("Saved. Guests and staff are offered these tips from now on.")
+                  : t("Saved. No one is asked for a tip from now on."),
+              )
+            }
+          >
+            {t("Save tips")}
+          </button>
+          {view.tips.changedAt === null ? null : (
+            <span className="store-features__changed">
+              {t("Last changed")} <SourceTime instant={view.tips.changedAt} />
+            </span>
+          )}
         </div>
         {message === null ? null : (
           <p role={message.tone} className="store-features__message">

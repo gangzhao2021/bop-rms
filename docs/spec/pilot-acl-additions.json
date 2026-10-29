@@ -5219,6 +5219,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 4 \"催菜、叫服务员：都做，但都是门店开关，默认关…催菜在单桌详情每道没上的菜旁边，后厨那张单变红并响一声，记下催过几次；同一轮几分钟内只能催一次\"): a server chases a dish still being made; the kitchen shows it and how often"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "store_tip_setting",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 11 \"小费：保持 10% / 15% / 18% / 其他金额，不预选，按税前小计计算；新增门店设置：自定百分比档位，可以整个关掉小费\"): the Store's tip choices, versioned, changed by the owner; while off no tip is recorded"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "store_tip_setting",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 11 \"小费：保持 10% / 15% / 18% / 其他金额，不预选，按税前小计计算；新增门店设置：自定百分比档位，可以整个关掉小费\"): the Store's tip choices, versioned, changed by the owner; while off no tip is recorded"
     }
   ]
 }

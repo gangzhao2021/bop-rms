@@ -209,6 +209,8 @@ for (const screen of [
       await expect(page.getByRole("heading", { name: "Total", exact: true })).toBeVisible();
       await page.getByLabel("Pickup name", { exact: true }).fill("Synthetic Guest");
       await page.getByLabel("Mobile number", { exact: true }).fill("416 555 0123");
+      // WP-2423 item 8 ⑦: no tip is chosen for the guest; the guest chooses one.
+      await page.getByRole("button", { name: "No tip", exact: true }).click();
       const proceed = page.getByRole("button", { name: /Continue to payment/u });
       await expect(proceed).toBeEnabled();
       // v15 aa3d9fac D1: losing the connection is not a refusal. The page says it is offline,
@@ -313,6 +315,8 @@ for (const screen of [
       const phone = page.getByLabel("Mobile number", { exact: true });
       await name.fill("Synthetic Guest");
       await phone.fill("416 555 0123");
+      // WP-2423 item 8 ⑦: no tip is chosen for the guest; the guest chooses one.
+      await page.getByRole("button", { name: "No tip", exact: true }).click();
       const proceed = page.getByRole("button", { name: /Continue to payment/u });
       if (screen.touch) await proceed.tap();
       else await proceed.click();

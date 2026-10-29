@@ -13,9 +13,13 @@ const state = vi.hoisted(() => ({
   rolledBack: 0,
   // WP-2423 item 8 ⑦: whether the Store uses counter ordering (Store features).
   counterOrder: true,
+  // WP-2423 item 8 ⑦ (Owner decision 11): the Store's tip choices.
+  tips: { enabled: true, tierPercents: [10, 15, 18] as readonly number[] },
 }));
-vi.mock("./merchant-store-features.js", () => ({
+vi.mock("./merchant-store-features.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./merchant-store-features.js")>()),
   readStoreFeatures: async () => ({ counterOrder: state.counterOrder }),
+  readStoreTipChoices: async () => state.tips,
 }));
 vi.mock("./merchant-store-scope.js", () => ({
   createMerchantStoreScope: () => async () => ({
@@ -169,6 +173,33 @@ describe("counter order command — WP-2423 Q7", () => {
     state.during = [];
     state.rolledBack = 0;
     state.counterOrder = true;
+    state.tips = { enabled: true, tierPercents: [10, 15, 18] };
+  });
+
+  it("WP-2423 item 8 ⑦: takes only a tip the Store offers; with tips off only no tip, and a retry returns its order", async () => {
+    const { pipeline, send } = setup();
+    state.tips = { enabled: true, tierPercents: [12, 18, 22] };
+    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_TIP_CHOICES_CHANGED" });
+    expect(await send({ tip: { kind: "Percent", percent: 12 } })).toMatchObject({
+      status: "Placed",
+    });
+    state.tips = { enabled: false, tierPercents: [12, 18, 22] };
+    // The order already placed is returned as it was.
+    expect(await send({ tip: { kind: "Percent", percent: 12 } })).toMatchObject({
+      status: "AlreadyPlaced",
+    });
+    for (const tip of [
+      { kind: "Percent", percent: 12 },
+      { kind: "Amount", amountMinor: "200" },
+    ])
+      await expect(send({ operationReference: id(32), tip })).rejects.toMatchObject({
+        code: "COUNTER_ORDER_TIPS_OFF",
+      });
+    // Nothing was started for the refused orders.
+    expect(pipeline.open).toHaveBeenCalledTimes(1);
+    expect(
+      await send({ operationReference: id(33), tip: { kind: "Amount", amountMinor: "0" } }),
+    ).toMatchObject({ status: "Placed" });
   });
 
   it("WP-2423 item 8 ⑦: takes no new order while counter ordering is turned off; a retry still returns its order", async () => {
