@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   channelText,
@@ -293,5 +294,40 @@ describe("WP-2423 menu page helpers", () => {
     ).toBe("No changes to items, descriptions or photos.");
     expect(customerViewChangeSummary({ ...view, comparedWithPublishedAt: null })).toBeNull();
     expect(parseMenuCustomerView(undefined)).toBeNull();
+  });
+});
+
+describe("Owner 2026-10-29: staff are told which listed dishes guests cannot be shown", () => {
+  // The guest menu captured from the real projection after a real "List it" (TEST data; see
+  // apps/customer-pwa/src/menu/combo-menu-contract.test.ts), as the counter menu returns it.
+  const captured = () =>
+    JSON.parse(
+      readFileSync(
+        new URL("../../customer-pwa/src/menu/combo-menu.captured.json", import.meta.url),
+        "utf8",
+      ),
+    ) as { menu: { sections: { sellables: Record<string, unknown>[] }[] } };
+  const client = (dineIn: unknown, pickup: unknown) =>
+    createMenuClient("csrf", async (input) => {
+      const body = String(input).includes("orderType=DineIn") ? dineIn : pickup;
+      return body === null
+        ? Response.json({ error: "counter_menu_unavailable" }, { status: 503 })
+        : Response.json({ screenId: "OPS-ORDER-ENTRY", menu: body });
+    });
+  it("names nothing when guests can read every listed dish, combos included", async () => {
+    expect(await client(captured(), null).guestUnreadable?.()).toEqual([]);
+  });
+  it("names a dish the guest app cannot read, once, from either menu", async () => {
+    const broken = captured();
+    const soups = broken.menu.sections[0];
+    if (soups === undefined) throw new Error("fixture");
+    soups.sellables = soups.sellables.map((item) =>
+      item.name === "Wonton soup (TEST)" ? { ...item, servedWith: "TEST" } : item,
+    );
+    expect(await client(broken, broken).guestUnreadable?.()).toEqual(["Wonton soup (TEST)"]);
+    expect(await client(null, broken).guestUnreadable?.()).toEqual(["Wonton soup (TEST)"]);
+  });
+  it("says nothing when no guest menu can be read here", async () => {
+    expect(await client(null, null).guestUnreadable?.()).toBeNull();
   });
 });

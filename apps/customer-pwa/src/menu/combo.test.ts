@@ -60,7 +60,9 @@ describe("combos for guests (WP-2423 item 8 ⑥ part 4)", () => {
     expect(comboDishAllergens(combo, sour)).toEqual([peanut]);
     expect(comboDishAllergens(combo, wonton)).toEqual([wheat]);
     expect(comboDishAllergens(combo, rice)).toEqual([]);
-    expect(comboDishAllergens({ ...combo, allergensByChoice: undefined }, sour)).toBeNull();
+    const withoutChoices: MenuSellable = { ...combo };
+    delete (withoutChoices as { allergensByChoice?: unknown }).allergensByChoice;
+    expect(comboDishAllergens(withoutChoices, sour)).toBeNull();
   });
 
   it("names the part still to choose in, until every part is chosen", () => {

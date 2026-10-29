@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
@@ -497,5 +498,43 @@ describe("WP-2423 item 5: warns before the time to record the payment ends", () 
     ).toBe(
       "5 min left: record the payment by 16:30 or the order is released and its items go back to stock.",
     );
+  });
+});
+
+describe("the counter menu with a listed combo (WP-2423 item 8 ⑥ part 4)", () => {
+  // Captured from the real projection after a real "List it" (TEST data).
+  const captured = () =>
+    JSON.parse(
+      readFileSync(
+        new URL("../../customer-pwa/src/menu/combo-menu.captured.json", import.meta.url),
+        "utf8",
+      ),
+    ) as { menu: { sections: { sellables: Record<string, unknown>[] }[] } };
+  const names = (menu: ReturnType<typeof parseCounterMenu>) =>
+    menu.sections.flatMap((section) => section.items.map((item) => item.name));
+  it("offers the combo with nothing chosen in its parts", () => {
+    const menu = parseCounterMenu({ screenId: "OPS-ORDER-ENTRY", menu: captured() });
+    const combo = menu.sections
+      .flatMap((s) => s.items)
+      .find((i) => i.name === "Combo for two (TEST)");
+    expect(combo?.rules.map((rule) => rule.options.some((o) => o.selectedByDefault))).toEqual([
+      false,
+      false,
+    ]);
+    expect(names(menu)).toHaveLength(5);
+  });
+  it("leaves out only a dish it cannot read", () => {
+    const broken = captured();
+    const soups = broken.menu.sections[0];
+    if (soups === undefined) throw new Error("fixture");
+    soups.sellables = soups.sellables.map((item) =>
+      item.name === "Wonton soup (TEST)" ? { ...item, servedWith: "TEST" } : item,
+    );
+    expect(names(parseCounterMenu({ screenId: "OPS-ORDER-ENTRY", menu: broken }))).toEqual([
+      "Hot and sour soup (TEST)",
+      "Fried rice (TEST)",
+      "Chow mein (TEST)",
+      "Combo for two (TEST)",
+    ]);
   });
 });
