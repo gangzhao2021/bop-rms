@@ -2029,6 +2029,7 @@ it("protects Pickup queue and exposes only typed public failures", async () => {
 });
 
 it("protects Dining progress transport and returns only operational fields", async () => {
+  const comboItem = "01a1865e-ed36-75b9-95d6-9b666425aecd";
   type Reader = NonNullable<MerchantBffRouterOptions["diningOrderProgress"]>;
   const current = {
     orderReference: storeReference,
@@ -2053,6 +2054,31 @@ it("protects Dining progress transport and returns only operational fields", asy
         remainingQuantity: 0,
         itemServiceVersion: 1,
         auditReference: "private-audit",
+      },
+      // WP-2423 item 8 ⑥ part 4 (v15 2026-10-29: the reply left a combo's dishes out).
+      {
+        orderItemReference: comboItem,
+        orderBatchReference: storeReference,
+        displayName: "Dim sum lunch (TEST)",
+        batchSequence: 1,
+        itemOrdinal: 2,
+        phase: "Ready",
+        orderedQuantity: 1,
+        deliveredQuantity: 0,
+        remainingQuantity: 1,
+        itemServiceVersion: 0,
+        options: [{ name: "Siu mai (TEST)", quantity: 1 }],
+        customerNote: null,
+        comboParts: [
+          {
+            optionReference: storeReference,
+            nameZh: "烧卖",
+            name: "Siu mai (TEST)",
+            done: true,
+            served: false,
+            auditReference: "private-audit",
+          },
+        ],
       },
     ],
   };
@@ -2112,6 +2138,29 @@ it("protects Dining progress transport and returns only operational fields", asy
         deliveredQuantity: 2,
         remainingQuantity: 0,
         itemServiceVersion: 1,
+      },
+      {
+        orderItemReference: comboItem,
+        orderBatchReference: storeReference,
+        displayName: "Dim sum lunch (TEST)",
+        batchSequence: 1,
+        itemOrdinal: 2,
+        phase: "Ready",
+        orderedQuantity: 1,
+        deliveredQuantity: 0,
+        remainingQuantity: 1,
+        itemServiceVersion: 0,
+        options: [{ name: "Siu mai (TEST)", quantity: 1 }],
+        customerNote: null,
+        comboParts: [
+          {
+            optionReference: storeReference,
+            nameZh: "烧卖",
+            name: "Siu mai (TEST)",
+            done: true,
+            served: false,
+          },
+        ],
       },
     ],
   });

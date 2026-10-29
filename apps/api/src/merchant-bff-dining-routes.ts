@@ -8,6 +8,66 @@ import type { Response, Router } from "express";
 import { DiningTableCheckoutError } from "./merchant-dining-table-checkout.js";
 import { MerchantDiningHeldRoundError } from "./merchant-dining-held-round.js";
 
+/** WP-2423: the order progress reply (exported so acceptance reads the wire form). */
+export function orderProgressResponse(
+  current: NonNullable<
+    Awaited<ReturnType<NonNullable<MerchantBffRouterOptions["diningOrderProgress"]>>>
+  >,
+) {
+  return {
+    orderReference: current.orderReference,
+    tableLabel: current.tableLabel,
+    diningSessionReference: current.diningSessionReference,
+    sessionPhase: current.sessionPhase,
+    closureStatus: current.closureStatus,
+    closureVersion: current.closureVersion,
+    currentOrderVersion: current.currentOrderVersion,
+    sessionVersion: current.sessionVersion,
+    tableAssignmentVersion: current.tableAssignmentVersion,
+    orderVersion: current.orderVersion,
+    phase: current.phase,
+    observedAt: current.observedAt,
+    items: current.items.map((item) => ({
+      orderItemReference: item.orderItemReference,
+      orderBatchReference: item.orderBatchReference,
+      displayName: item.displayName,
+      batchSequence: item.batchSequence,
+      itemOrdinal: item.itemOrdinal,
+      phase: item.phase,
+      orderedQuantity: item.orderedQuantity,
+      deliveredQuantity: item.deliveredQuantity,
+      remainingQuantity: item.remainingQuantity,
+      itemServiceVersion: item.itemServiceVersion,
+      // WP-2423 (2026-10-18): portions the kitchen is making again.
+      remakingQuantity: item.remakingQuantity,
+      // WP-2423 (v15 2026-10-16): options and the customer's note, so identical lines
+      // ("Cup 3") can be told apart when serving. Absent when they could not be read.
+      ...("options" in item
+        ? {
+            options: item.options.map((option) => ({
+              name: option.name,
+              quantity: option.quantity,
+            })),
+            customerNote: item.customerNote,
+          }
+        : {}),
+      // WP-2423 item 8 ⑥ part 4: a combo's dishes, each served on its own (v15 2026-10-29:
+      // the reply left them out, so a combo was served only as a whole).
+      ...("comboParts" in item && item.comboParts !== undefined
+        ? {
+            comboParts: item.comboParts.map((part) => ({
+              optionReference: part.optionReference,
+              nameZh: part.nameZh,
+              name: part.name,
+              done: part.done,
+              served: part.served,
+            })),
+          }
+        : {}),
+    })),
+  };
+}
+
 function heldRoundFailure(response: Response, error: unknown) {
   if (!(error instanceof MerchantDiningHeldRoundError)) {
     denied(response);
@@ -690,45 +750,7 @@ export function installMerchantDiningRoutes(
           response.status(404).json({ error: "dining_order_progress_unavailable" });
           return;
         }
-        response.json({
-          orderReference: current.orderReference,
-          tableLabel: current.tableLabel,
-          diningSessionReference: current.diningSessionReference,
-          sessionPhase: current.sessionPhase,
-          closureStatus: current.closureStatus,
-          closureVersion: current.closureVersion,
-          currentOrderVersion: current.currentOrderVersion,
-          sessionVersion: current.sessionVersion,
-          tableAssignmentVersion: current.tableAssignmentVersion,
-          orderVersion: current.orderVersion,
-          phase: current.phase,
-          observedAt: current.observedAt,
-          items: current.items.map((item) => ({
-            orderItemReference: item.orderItemReference,
-            orderBatchReference: item.orderBatchReference,
-            displayName: item.displayName,
-            batchSequence: item.batchSequence,
-            itemOrdinal: item.itemOrdinal,
-            phase: item.phase,
-            orderedQuantity: item.orderedQuantity,
-            deliveredQuantity: item.deliveredQuantity,
-            remainingQuantity: item.remainingQuantity,
-            itemServiceVersion: item.itemServiceVersion,
-            // WP-2423 (2026-10-18): portions the kitchen is making again.
-            remakingQuantity: item.remakingQuantity,
-            // WP-2423 (v15 2026-10-16): options and the customer's note, so identical lines
-            // ("Cup 3") can be told apart when serving. Absent when they could not be read.
-            ...("options" in item
-              ? {
-                  options: item.options.map((option) => ({
-                    name: option.name,
-                    quantity: option.quantity,
-                  })),
-                  customerNote: item.customerNote,
-                }
-              : {}),
-          })),
-        });
+        response.json(orderProgressResponse(current));
       })
       .catch(() => denied(response));
   });

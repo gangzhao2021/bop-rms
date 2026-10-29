@@ -50,6 +50,10 @@ import { applyWorkflowRelease } from "../../../tooling/environment/workflow-rele
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import { createMerchantDiningTables } from "../../../apps/api/src/merchant-dining-tables.ts";
 import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
+import { orderProgressResponse } from "../../../apps/api/src/merchant-bff-dining-routes.ts";
+import { orderDetailResponse } from "../../../apps/api/src/merchant-bff-order-routes.ts";
+import { parseDiningProgress } from "../../../apps/merchant-web/src/dining-progress-client.ts";
+import { parseCurrentOrderDetail } from "../../../apps/merchant-web/src/current-order-queue-client.ts";
 import { createMerchantKitchenQuery } from "../../../apps/api/src/merchant-kitchen-query.ts";
 import { createMerchantPickupQuery } from "../../../apps/api/src/merchant-pickup-query.ts";
 import { createPersistentMerchantTaskInbox } from "../../../apps/api/src/persistent-merchant-task-inbox.ts";
@@ -2935,6 +2939,129 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       for (const reference of [remade.item.reworkReference, pay3.workItems[0], orderReference])
         assert.ok(!wireJson.includes(reference), reference);
       assert.doesNotMatch(wireJson, /DROPPED|rework/u);
+
+      // ── 7. WP-2423 item 8 ⑥ part 4 (v15 2026-10-29): a combo ordered at the table, as staff
+      // read it on the wire. The journey's ordered choice is recorded as standing for a combo's
+      // dish (owner seed of the Catalog combo records, TEST); the order detail, the table panel and
+      // order progress are the real reads, sent in their route form and read by the staff app's
+      // own parsers.
+      const comboLine = (
+        await one(
+          "SELECT order_item_id::text item,transaction_snapshot_json->'catalog' catalog FROM rms_ordering.order_item WHERE order_id=$1 AND jsonb_array_length(transaction_snapshot_json->'catalog'->'options')>0 ORDER BY order_batch_id,ordinal LIMIT 1",
+          [orderReference],
+        )
+      )[0];
+      assert.ok(comboLine, "the journey orders a dish with a choice");
+      const comboOption = comboLine.catalog.options[0].optionReference;
+      const comboSet = fresh(),
+        comboSetVersion = fresh(),
+        comboDish = { product: fresh(), version: fresh(), sku: fresh() };
+      const comboBundle = fresh(),
+        comboVersion = fresh(),
+        comboAt = new Date().toISOString();
+      await admin.query("BEGIN");
+      try {
+        await admin.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
+          [scope.brandReference],
+        );
+        // The dish the choice stands for, and the choice as Catalog records them (the journey's
+        // catalog snapshot is synthetic).
+        await admin.query(
+          "INSERT INTO rms_catalog.product (product_id,brand_id,internal_code,product_type,lifecycle,aggregate_version,created_at,created_by_actor_id,updated_at) VALUES ($1,$2,'TEST_DISH','PreparedFood','Active',1,$3,$4,$3)",
+          [comboDish.product, scope.brandReference, comboAt, fresh()],
+        );
+        await admin.query(
+          `INSERT INTO rms_catalog.product_version (product_version_id,product_id,brand_id,status,default_locale,localized_names_json,created_at,updated_at,category_classification_known) VALUES ($1,$2,$3,'Draft','en-CA','{"en-CA":"Wonton soup (TEST)","zh-Hans-CA":"馄饨汤"}'::jsonb,$4,$4,false)`,
+          [comboDish.version, comboDish.product, scope.brandReference, comboAt],
+        );
+        await admin.query(
+          `INSERT INTO rms_catalog.sku (sku_id,product_id,brand_id,product_version_id,sku_code,lifecycle,localized_names_json,variant_selections_json,variant_digest,unit_of_sale,unit_quantity,created_at,created_by_actor_id) VALUES ($1,$2,$3,$4,'TEST_DISH','Active','{"en-CA":"Wonton soup (TEST)"}'::jsonb,'[]'::jsonb,$5,'EACH',1,$6,$7)`,
+          [
+            comboDish.sku,
+            comboDish.product,
+            scope.brandReference,
+            comboDish.version,
+            "sha256:" + "0".repeat(64),
+            comboAt,
+            fresh(),
+          ],
+        );
+        // The choice as Catalog records it (the journey's catalog snapshot is synthetic).
+        await admin.query(
+          "INSERT INTO rms_catalog.option_set (option_set_id,brand_id,internal_code,lifecycle,aggregate_version,created_at,created_by_actor_id,updated_at) VALUES ($1,$2,'TEST_COMBO_SLOT','Draft',1,$3,$4,$3)",
+          [comboSet, scope.brandReference, comboAt, fresh()],
+        );
+        await admin.query(
+          `INSERT INTO rms_catalog.option_set_version (option_set_version_id,option_set_id,brand_id,status,default_locale,localized_names_json,localized_descriptions_json,display_style,minimum_selection,maximum_selection,allow_repeated_option,per_option_maximum_quantity,created_at,updated_at) VALUES ($1,$2,$3,'Draft','en-CA','{"en-CA":"TEST part"}'::jsonb,'{}'::jsonb,'SingleChoice',1,1,false,1,$4,$4)`,
+          [comboSetVersion, comboSet, scope.brandReference, comboAt],
+        );
+        await admin.query(
+          `INSERT INTO rms_catalog.option (option_id,option_set_version_id,option_set_id,brand_id,stable_code,lifecycle,localized_names_json,localized_descriptions_json,sort_order,default_eligible,created_at,created_by_actor_id) VALUES ($1,$2,$3,$4,'TEST_DISH','Active','{"en-CA":"TEST dish"}'::jsonb,'{}'::jsonb,0,true,$5,$6)`,
+          [comboOption, comboSetVersion, comboSet, scope.brandReference, comboAt, fresh()],
+        );
+        await admin.query(
+          "INSERT INTO rms_catalog.bundle (bundle_id,brand_id,internal_code,lifecycle,aggregate_version,current_version_id,created_at,created_by_actor_id,updated_at) VALUES ($1,$2,'TEST_COMBO','Draft',1,$3,$4,$5,$4)",
+          [comboBundle, scope.brandReference, comboVersion, comboAt, fresh()],
+        );
+        await admin.query(
+          `INSERT INTO rms_catalog.bundle_version (bundle_version_id,bundle_id,brand_id,status,default_locale,localized_names_json,localized_descriptions_json,price_mode,created_at,updated_at) VALUES ($1,$2,$3,'Draft','en-CA','{"en-CA":"TEST combo"}'::jsonb,'{}'::jsonb,'Computed',$4,$4)`,
+          [comboVersion, comboBundle, scope.brandReference, comboAt],
+        );
+        await admin.query(
+          "INSERT INTO rms_catalog.bundle_combo_choice (brand_id,option_id,option_set_id,bundle_id,group_code,dish_sku_id,actor_id,recorded_at) VALUES ($1,$2,$3,$4,'SLOT-1',$5,$6,$7)",
+          [
+            scope.brandReference,
+            comboOption,
+            comboSet,
+            comboBundle,
+            comboDish.sku,
+            fresh(),
+            comboAt,
+          ],
+        );
+        await admin.query("COMMIT");
+      } catch (error) {
+        await admin.query("ROLLBACK");
+        throw error;
+      }
+      // o. Order progress names the combo's dish so it can be served on its own.
+      const comboProgress = await createMerchantDiningOrderProgress({
+        persistence: merchantPersistence,
+        authentication: queueSession.authentication,
+        locale: "en-CA",
+      })({ ...staffSession, query: { orderReference } });
+      const progressWire = JSON.parse(JSON.stringify(orderProgressResponse(comboProgress)));
+      const shownProgress = parseDiningProgress(progressWire, orderReference).items.find(
+        (item) => item.orderItemReference === comboLine.item,
+      );
+      assert.deepEqual(
+        shownProgress?.comboParts?.map((part) => [
+          part.optionReference,
+          part.nameZh,
+          part.name,
+          part.done,
+          part.served,
+        ]),
+        [[comboOption, "馄饨汤", "Wonton soup (TEST)", false, false]],
+        "order progress sends the combo's dishes",
+      );
+      // p. The order detail (Orders and the table panel) reads every line, options included.
+      const comboDetail = await createPersistentMerchantOrderQueue({
+        persistence: merchantPersistence,
+        quoteVersion: 1,
+        acceptanceConfigured: true,
+      })({ sessionCookie: queueSession.sessionCookie, afterOrderReference: null, orderReference });
+      const detailWire = JSON.parse(
+        JSON.stringify(orderDetailResponse(comboDetail, comboDetail.items[0])),
+      );
+      const shownDetail = parseCurrentOrderDetail(detailWire, orderReference);
+      assert.ok(
+        shownDetail.lines.items
+          .find((line) => line.orderItemReference === comboLine.item)
+          ?.options.some((option) => option.quantity === 1),
+        "the staff app reads the order with its chosen dishes",
+      );
     } finally {
       vi.unstubAllEnvs();
       signedIn.cookies = new Set();

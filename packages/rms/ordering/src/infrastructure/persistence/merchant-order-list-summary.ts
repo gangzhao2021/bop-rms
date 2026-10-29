@@ -9,7 +9,7 @@ import {
 /**
  * Orders v2 (Owner 2026-10-26, "a row doesn't say what or who"): what each listed Order is and who
  * it is for, so a staff list row reads "1× Latte (Small) +2" and the pickup name. Item names, their
- * first option and quantities only — no prices or notes — and the pickup name only, never the phone
+ * options and quantities only — no prices or notes — and the pickup name only, never the phone
  * or email (the order detail keeps those). A removed contact has no name.
  */
 export interface MerchantOrderListSummary {
@@ -35,6 +35,22 @@ const rowsOf = (result: unknown): readonly Record<string, unknown>[] => {
   const rows = (result as { readonly rows?: unknown } | null)?.rows;
   return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : fail();
 };
+
+/**
+ * A line's chosen options as one text: every option, not only the first (v15 2026-10-29: a combo
+ * row named its first dish only), in the staff language's list form, at most 200 characters.
+ */
+export function orderListOptionText(
+  names: readonly string[],
+  locale: string | readonly string[],
+): string | null {
+  const separator = (typeof locale === "string" ? locale : locale[0])?.startsWith("zh")
+    ? "、"
+    : ", ";
+  const text = names.filter((name) => name.length > 0).join(separator);
+  if (text === "") return null;
+  return text.length > 200 ? text.slice(0, 199) + "…" : text;
+}
 
 /** Read only; the caller authorizes the Store and owns the transaction. At most 200 Orders. */
 export async function loadMerchantOrderListSummaries(
@@ -87,11 +103,14 @@ export async function loadMerchantOrderListSummaries(
     const entry = found.get(order) ?? { items: [], lineCount: 0 };
     entry.lineCount += 1;
     if (entry.items.length < 3) {
-      const first = snapshot.catalog.options[0];
+      const chosen = orderListOptionText(
+        snapshot.catalog.options.map((option) => name(option.localizedNames)),
+        locale,
+      );
       entry.items.push(
         Object.freeze({
           name: name(snapshot.catalog.localizedNames),
-          option: first === undefined ? null : name(first.localizedNames) || null,
+          option: chosen,
           quantity: snapshot.quantity,
         }),
       );

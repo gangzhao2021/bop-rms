@@ -83,10 +83,10 @@ export async function comboPartsByOrderItem(
           )
         ).map((row) => row.orderItemReference + ":" + row.optionReference),
   );
+  // A combo whose dishes cannot be named is left out (shown and served as one line).
   return new Map(
-    combos.map((item) => [
-      item.orderItemReference,
-      Object.freeze(
+    combos.flatMap((item) => {
+      const parts = Object.freeze(
         item.optionReferences.flatMap((option) => {
           const sku = skus.get(dishOf.get(option) ?? "");
           if (sku === undefined) return [];
@@ -102,8 +102,9 @@ export async function comboPartsByOrderItem(
             }),
           ];
         }),
-      ),
-    ]),
+      );
+      return parts.length === 0 ? [] : [[item.orderItemReference, parts] as const];
+    }),
   );
 }
 
