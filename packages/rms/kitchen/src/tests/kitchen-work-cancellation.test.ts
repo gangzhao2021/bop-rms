@@ -598,7 +598,12 @@ describe("Kitchen staff item cancellation (WP-2423 Q6 step 2)", () => {
       { order_item_id: id(206), status: "Queued", started: false },
       { order_item_id: id(206), status: "In Progress", started: true },
     ];
-    const query = vi.fn(async () => ({ rows, rowCount: rows.length }));
+    // WP-2423 item 8 ⑦: none of these lines was decided as not prepared by the kitchen.
+    const query = vi.fn(async (sql: string) =>
+      sql.includes("kitchen_batch_preparation_decision")
+        ? { rows: [], rowCount: 0 }
+        : { rows, rowCount: rows.length },
+    );
     const transaction = { query } as unknown as ConsumerTransaction;
     const scope = { brandReference: brand, storeReference: store };
     expect(

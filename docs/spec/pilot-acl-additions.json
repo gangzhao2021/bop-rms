@@ -5255,6 +5255,42 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 2 \"人数与茶位费：开台默认不问人数；门店可以打开“开台时问人数”\"): how many guests sit at a table, recorded by staff, versioned per table session"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_not_prepared_product",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 2; coordinator 2026-10-29 \"“不经后厨”做成菜品的通用标记…这道菜不进后厨看板，下单就算已上，不挡结账\"): a dish the kitchen does not prepare, and which lines of a round the kitchen did not prepare"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_not_prepared_product",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 2; coordinator 2026-10-29 \"“不经后厨”做成菜品的通用标记…这道菜不进后厨看板，下单就算已上，不挡结账\"): a dish the kitchen does not prepare, and which lines of a round the kitchen did not prepare"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_batch_preparation_decision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 2; coordinator 2026-10-29 \"“不经后厨”做成菜品的通用标记…这道菜不进后厨看板，下单就算已上，不挡结账\"): a dish the kitchen does not prepare, and which lines of a round the kitchen did not prepare"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_batch_preparation_decision",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 2; coordinator 2026-10-29 \"“不经后厨”做成菜品的通用标记…这道菜不进后厨看板，下单就算已上，不挡结账\"): a dish the kitchen does not prepare, and which lines of a round the kitchen did not prepare"
     }
   ]
 }

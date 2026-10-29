@@ -488,6 +488,18 @@ export interface MenuClient {
   oneStore?(command: SaveDishCommand | ListAllCommand | SaveComboCommand): Promise<unknown>;
   /** WP-2423 item 8 ⑥ part 4: the combos of the one-page menu. */
   combos?(): Promise<unknown>;
+  /** WP-2423 item 8 ⑦: a dish's "not prepared by the kitchen" mark (read, or change one). */
+  kitchenNotPrepared?(
+    command:
+      | { readonly action: "Read"; readonly productReferences: readonly string[] }
+      | {
+          readonly action: "Change";
+          readonly productReference: string;
+          readonly operationReference: string;
+          readonly expectedVersion: number;
+          readonly notPrepared: boolean;
+        },
+  ): Promise<unknown>;
   /** WP-2423 item 8 ⑥ (v15 finding g): a simple choice group made from the dish editor. */
   createChoiceGroup?(command: NewChoiceGroupCommand): Promise<unknown>;
   /**
@@ -831,6 +843,8 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
     },
     oneStore: (command) => post("/merchant/commerce/one-store-dishes/command", command),
     combos: () => post("/merchant/commerce/one-store-combos/query", {}),
+    kitchenNotPrepared: (command) =>
+      post("/merchant/commerce/kitchen-not-prepared/command", command),
     createChoiceGroup: (command) => post("/merchant/commerce/option-sets/command", command),
     guestUnreadable: async () => {
       // Each menu guests can see now; one not listed (or not readable here) is skipped.

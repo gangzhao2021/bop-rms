@@ -746,6 +746,16 @@ export async function listStoreKitchenOrderItemStates(
         state.cancelled > 0 ? "Cancelled" : state.started ? "Started" : "NotStarted",
       );
     }
+    // WP-2423 item 8 ⑦ (decision 2): a dish the kitchen does not prepare is served once ordered,
+    // so it counts as started (a comp may reduce it; it is never "taken off before cooking").
+    const notPrepared = await tx.query(
+      "SELECT unnest(not_prepared_order_item_ids)::text AS item FROM rms_kitchen.kitchen_batch_preparation_decision WHERE brand_id=$1 AND store_id=$2 AND order_batch_id=ANY($3::uuid[])",
+      [brand, store, batches],
+    );
+    for (const row of notPrepared.rows) {
+      const line = parseKitchenTicketReference(row.item);
+      if (!output.has(line)) output.set(line, "Started");
+    }
     return output;
   } catch {
     return unavailable();

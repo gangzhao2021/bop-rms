@@ -480,6 +480,22 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
       ],
     },
   ];
+  // WP-2423 item 8 ⑦: the Kitchen's "not prepared by the kitchen" mark of the dish.
+  const marks: Record<string, unknown>[] = [];
+  let marked = { notPrepared: false, version: 0 };
+  await page.route("**/merchant/commerce/kitchen-not-prepared/command", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    marks.push(body);
+    if (body.action === "Change") marked = { notPrepared: body.notPrepared === true, version: 1 };
+    const products =
+      body.action === "Read"
+        ? (body.productReferences as string[])
+        : [body.productReference as string];
+    return route.fulfill({
+      headers,
+      json: { products: products.map((productReference) => ({ productReference, ...marked })) },
+    });
+  });
   await page.route("**/merchant/commerce/products/query", (route) => {
     const body = route.request().postDataJSON() as { productReference: string | null };
     const base = {
@@ -630,6 +646,21 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   const axe = await new AxeBuilder({ page }).include(".one-menu").analyze();
   expect(axe.violations).toEqual([]);
   await expectNoInternalText(page);
+  // Not prepared by the kitchen: said in the owner's words, saved on its own.
+  await expect(editor).toContainText(
+    "This dish does not appear on the kitchen board; it counts as served once ordered and never holds up checkout.",
+  );
+  const kitchenMark = editor.getByRole("checkbox", { name: /Not prepared by the kitchen/u });
+  await expect(kitchenMark).not.toBeChecked();
+  // Shown as marked once the Kitchen recorded it.
+  await kitchenMark.click();
+  await expect(kitchenMark).toBeChecked();
+  expect(marks.at(-1)).toMatchObject({
+    action: "Change",
+    productReference: id(131),
+    expectedVersion: 0,
+    notPrepared: true,
+  });
   await editor.getByRole("button", { name: "Save dish" }).click();
   await expect(
     page.getByText("Siu mai (TEST) saved. Guests see it when the menu is listed."),

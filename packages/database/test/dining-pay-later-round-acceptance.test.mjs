@@ -41,8 +41,12 @@ import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchan
 import { createMerchantDiningTableClosePlan } from "../../../apps/api/src/merchant-dining-table-close-plan.ts";
 import { createKitchenInventoryConsumption } from "../../../apps/api/src/kitchen-inventory-consumption.ts";
 import {
+  changeKitchenNotPreparedProduct,
+  createConfirmedOrderIntakeReceipt,
+  createKitchenNotPreparedIntakeAdapter,
   createKitchenWorkLifecycleService,
   createPostgresKitchenWorkLifecycleStore,
+  loadKitchenBatchPreparationDecision,
 } from "../../rms/kitchen/src/index.ts";
 import { createMerchantDiningClosingCommand } from "../../../apps/api/src/merchant-dining-closing-command.ts";
 import { createDiningOrderCloseConfiguration } from "../../../apps/api/src/dining-order-close-configuration.ts";
@@ -1026,8 +1030,48 @@ async function journey(ending) {
          */
         async function cookAndServeRound1(
           rounds = [{ c: c1, event: event1, batch: R1.batch, items: items1 }],
+          options = {},
         ) {
           for (const round of rounds) {
+            if (options.notPrepared) {
+              // WP-2423 item 8 ⑦: a round of dishes the kitchen does not prepare has no kitchen
+              // source (its kitchen work is nothing), so no ticket, nothing to cook or serve.
+              await assert.rejects(
+                transactions().run((tx) =>
+                  createPostgresOrderKitchenSourceStore({
+                    ...scope,
+                    quoteVersion: 1,
+                    sha256,
+                    authorize: async () => true,
+                    notPrepared: async (transaction, round) =>
+                      new Set(
+                        (
+                          await loadKitchenBatchPreparationDecision(
+                            transaction,
+                            scope,
+                            round.orderBatchReference,
+                          )
+                        )?.notPreparedOrderItemReferences ?? [],
+                      ),
+                  }).resolve({
+                    transaction: tx,
+                    query: {
+                      brandReference: scope.brandReference,
+                      storeReference: scope.storeReference,
+                      orderReference,
+                      orderBatchReference: String(round.c.orderBatchReference),
+                      confirmationReference: String(round.c.confirmationReference),
+                      sourceEventReference: round.event.eventId,
+                      sourceAggregateVersion: round.event.aggregateVersion,
+                      sourceSnapshotDigest: String(round.c.sourceSnapshotDigest),
+                      observedAt: now(),
+                    },
+                  }),
+                ),
+                { code: "ORDER_KITCHEN_SOURCE_NOTHING_TO_PREPARE" },
+              );
+              continue;
+            }
             // ── Kitchen: round 1's ticket, one queued work item per dish (test-only owner seed, as
             // the dine-in item cancellation acceptance seeds it), whose source evidence is the real
             // Ordering kitchen source of the pay-later round as it is now.
@@ -1275,7 +1319,7 @@ async function journey(ending) {
               retentionPolicyVersion: 1,
             },
           });
-          for (const item of rounds.flatMap((round) => round.items))
+          for (const item of options.notPrepared ? [] : rounds.flatMap((round) => round.items))
             await serve({
               ...as(server),
               command: {
@@ -1797,9 +1841,129 @@ async function journey(ending) {
           return record;
         }
 
+        /**
+         * WP-2423 item 8 ⑦ (decision 2): the owner marks round 1's dish as not prepared by the
+         * kitchen before the round reaches it. The kitchen fixes that for the round as it takes it
+         * (a later change of the mark doesn't move it); a round of only such dishes makes no
+         * ticket and is still taken once; the dish counts as served once ordered.
+         */
+        async function notPreparedRound1() {
+          const all = await transactions().run((tx) =>
+            createPostgresOrderKitchenSourceStore({
+              ...scope,
+              quoteVersion: 1,
+              sha256,
+              authorize: async () => true,
+            }).resolve({
+              transaction: tx,
+              query: {
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+                orderReference,
+                orderBatchReference: String(c1.orderBatchReference),
+                confirmationReference: String(c1.confirmationReference),
+                sourceEventReference: event1.eventId,
+                sourceAggregateVersion: event1.aggregateVersion,
+                sourceSnapshotDigest: String(c1.sourceSnapshotDigest),
+                observedAt: now(),
+              },
+            }),
+          );
+          const lines = all.items.map((item) => ({
+            orderItemReference: String(item.orderItemReference),
+            productReference: String(item.productReference),
+          }));
+          assert.equal(lines.length, 1);
+          const mark = await transactions().run((tx) =>
+            changeKitchenNotPreparedProduct(tx, ownerScope, {
+              productReference: lines[0].productReference,
+              operationReference: fresh(),
+              expectedVersion: 0,
+              notPrepared: true,
+              actorReference: id(0x701),
+              observedAt: now(),
+            }),
+          );
+          assert.deepEqual(mark, { notPrepared: true, version: 1 });
+          const ticketsMade = [];
+          const intake = (tx) =>
+            createKitchenNotPreparedIntakeAdapter({
+              inner: {
+                resolveByIdentity: async () => ({ status: "NotFound" }),
+                accept: async (input) => {
+                  ticketsMade.push(input.receipt);
+                  return { status: "Created", receipt: input.receipt };
+                },
+              },
+              scope,
+              now,
+              allLines: async () => lines,
+            });
+          const receipt = createConfirmedOrderIntakeReceipt({
+            sourceEvent: event1,
+            semanticEventBindingDigest: sha256("semantic:" + event1.eventId),
+          });
+          const accepted = await transactions().run((tx) =>
+            intake(tx).accept({ receipt, transaction: tx }),
+          );
+          assert.equal(accepted.status, "Created");
+          // Nothing to prepare: no ticket was asked for, and the round is known as taken.
+          assert.deepEqual(ticketsMade, []);
+          const again = await transactions().run((tx) =>
+            intake(tx).resolveByIdentity({
+              brandReference: receipt.brandReference,
+              storeReference: receipt.storeReference,
+              sourceEventReference: receipt.sourceEventReference,
+              confirmationReference: receipt.confirmationReference,
+              orderBatchReference: receipt.orderBatchReference,
+              transaction: tx,
+            }),
+          );
+          assert.equal(again.status, "Resolved");
+          assert.equal(again.receipt.sourceAggregateVersion, receipt.sourceAggregateVersion);
+          assert.equal(
+            (await transactions().run((tx) => intake(tx).accept({ receipt, transaction: tx })))
+              .status,
+            "AlreadyAccepted",
+          );
+          // Clearing the mark later doesn't move what the kitchen decided for the round.
+          await transactions().run((tx) =>
+            changeKitchenNotPreparedProduct(tx, ownerScope, {
+              productReference: lines[0].productReference,
+              operationReference: fresh(),
+              expectedVersion: 1,
+              notPrepared: false,
+              actorReference: id(0x701),
+              observedAt: now(),
+            }),
+          );
+          assert.deepEqual(
+            await rows(
+              "SELECT not_prepared_order_item_ids::text[] AS items,all_not_prepared FROM rms_kitchen.kitchen_batch_preparation_decision WHERE order_batch_id=$1",
+              [String(c1.orderBatchReference)],
+            ),
+            [{ items: [lines[0].orderItemReference], all_not_prepared: true }],
+          );
+          await assert.rejects(
+            admin.query(
+              "UPDATE rms_kitchen.kitchen_batch_preparation_decision SET all_not_prepared=false",
+            ),
+            /append-only kitchen preparation record/u,
+          );
+        }
+
         async function compedWholeEnding() {
           const recordPartySize = await partySizeWhileOpen();
-          await cookAndServeRound1();
+          await notPreparedRound1();
+          const servedOnOrdering = await cookAndServeRound1(undefined, { notPrepared: true });
+          // The dish no one cooked or served counts as served (round 2's was taken off the bill).
+          assert.deepEqual(
+            servedOnOrdering.items.map((item) => [item.batchSequence, item.phase]),
+            [
+              [1, "Fulfilled"],
+              [2, "Cancelled"],
+            ],
+          );
           // Closing summary: round 2's dish, taken off the bill before payment, is listed (never sold).
           assert.deepEqual((await tonightFacts()).cancelled.removedBeforePayment, {
             dishCount: items2.reduce((sum, item) => sum + item.quantity, 0),

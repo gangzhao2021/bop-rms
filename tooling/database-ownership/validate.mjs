@@ -3061,6 +3061,8 @@ async function scanUnsupported(root, module, diagnostics) {
           [
             "src/infrastructure/persistence/kitchen-rework-store.ts",
             "src/infrastructure/persistence/kitchen-combo-part-store.ts",
+            // WP-2423 item 8 ⑦: dishes the kitchen does not prepare.
+            "src/infrastructure/persistence/kitchen-not-prepared-store.ts",
           ].includes(moduleRelative);
         // DEC-KITCHEN-STALE-TICKETS: a manager closes an earlier business day's ticket.
         const acceptedKitchenStaleTicketAsset =

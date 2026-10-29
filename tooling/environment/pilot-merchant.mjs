@@ -36,6 +36,7 @@ import {
 import { createMerchantDiningJoinRegenerate } from "../../apps/api/dist/merchant-dining-join-regenerate.js";
 import { createMerchantDiningChase } from "../../apps/api/dist/merchant-dining-chase.js";
 import { createMerchantDiningPartySize } from "../../apps/api/dist/merchant-dining-party-size.js";
+import { createMerchantKitchenNotPrepared } from "../../apps/api/dist/merchant-kitchen-not-prepared.js";
 import {
   createMerchantStoreFeatures,
   navigationForStoreFeatures,
@@ -1777,6 +1778,12 @@ export async function createInternalMerchant(
       }),
       // WP-2423 item 8 ⑦ (decision 2): how many guests sit at a table.
       diningPartySize: createMerchantDiningPartySize({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
+      // WP-2423 item 8 ⑦: the menu's "not prepared by the kitchen" mark of dishes.
+      kitchenNotPrepared: createMerchantKitchenNotPrepared({
         persistence,
         authentication: service,
         now: resources.now,

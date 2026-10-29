@@ -41,7 +41,12 @@ export function createDiningOrderDeliveryProgress(
         });
         const progress = resolveOrderItemDeliveryProgress({
           ...item,
-          deliveredQuantity: delivered.servedQuantity,
+          // WP-2423 item 8 ⑦: a dish the kitchen does not prepare is served once ordered.
+          deliveredQuantity:
+            item.phase !== "Cancelled" &&
+            current.notPreparedItems.includes(String(item.orderItemReference))
+              ? item.orderedQuantity
+              : delivered.servedQuantity,
         });
         items.push(
           Object.freeze({

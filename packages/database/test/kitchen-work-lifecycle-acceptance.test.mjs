@@ -1368,7 +1368,7 @@ it("a kitchen step never waits for the queue rebuild's foreign-key checks", asyn
            platform_helpers.current_store_id(),platform_helpers.is_uuid_v7(uuid) TO ${role}`,
       );
       await admin.query(
-        `GRANT SELECT ON rms_kitchen.kitchen_ticket,rms_kitchen.kitchen_work_item,
+        `GRANT SELECT ON rms_kitchen.kitchen_ticket,rms_kitchen.kitchen_batch_preparation_decision,rms_kitchen.kitchen_work_item,
            rms_kitchen.kitchen_work_lifecycle_operation,rms_kitchen.kitchen_order_item_ready_result,
            rms_kitchen.kitchen_work_cancellation TO ${role}`,
       );

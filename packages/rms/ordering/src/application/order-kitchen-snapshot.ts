@@ -118,3 +118,37 @@ export function createOrderKitchenSourceFromSnapshot(input: {
 function unavailable(): never {
   throw new OrderKitchenSourceError("ORDER_KITCHEN_SOURCE_DEPENDENCY_UNAVAILABLE");
 }
+
+/**
+ * WP-2423 item 8 ⑦ (decision 2): the round's kitchen source without the lines of dishes the
+ * kitchen does not prepare. The remaining lines are numbered again from 1 and every digest is
+ * computed over what the kitchen makes; a round with nothing left to prepare has no source.
+ */
+export function excludeOrderKitchenSourceLines(
+  value: unknown,
+  notPreparedOrderItemReferences: ReadonlySet<string>,
+  sha256: (value: string) => string,
+) {
+  const source = parseConfirmedOrderKitchenSourceEvidence(value);
+  if (notPreparedOrderItemReferences.size === 0) return source;
+  const hash = (input: string) => parseOrderingHash(sha256(input));
+  const kept = source.items.filter(
+    (item) => !notPreparedOrderItemReferences.has(String(item.orderItemReference)),
+  );
+  if (kept.length === 0)
+    throw new OrderKitchenSourceError("ORDER_KITCHEN_SOURCE_NOTHING_TO_PREPARE");
+  if (kept.length === source.items.length) return source;
+  const items = kept.map((item, index) => {
+    const line = { ...item, ordinal: index + 1, lineDigest: "sha256:" + "0".repeat(64) };
+    return { ...line, lineDigest: hash(createOrderKitchenSourceLineBinding(line)) };
+  });
+  const without = parseConfirmedOrderKitchenSourceEvidence({
+    ...source,
+    items,
+    evidenceDigest: "sha256:" + "0".repeat(64),
+  });
+  return parseConfirmedOrderKitchenSourceEvidence({
+    ...without,
+    evidenceDigest: hash(createOrderKitchenSourceEvidenceBinding(without)),
+  });
+}

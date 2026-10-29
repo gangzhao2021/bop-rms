@@ -116,6 +116,7 @@ export {
   parseKitchenWorkCreatedEnvelope,
 } from "./application/kitchen-work-created-event.js";
 export { createKitchenTicketIntakeAdapter } from "./application/kitchen-ticket-intake-adapter.js";
+export { createKitchenNotPreparedIntakeAdapter } from "./application/kitchen-not-prepared-intake.js";
 export type {
   KitchenStableReferencePurpose,
   KitchenTicketCommitResult,
@@ -481,3 +482,4 @@ export {
   listClosedKitchenTickets,
 } from "./infrastructure/persistence/kitchen-stale-ticket-store.js";
 export * from "./infrastructure/persistence/kitchen-combo-part-store.js";
+export * from "./infrastructure/persistence/kitchen-not-prepared-store.js";
