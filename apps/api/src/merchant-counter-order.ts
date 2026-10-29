@@ -1,4 +1,5 @@
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
+import { readStoreFeatures } from "./merchant-store-features.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import {
@@ -38,6 +39,8 @@ export const counterOrderErrorCodes = [
    * order can be entered; staff take it on paper and enter it once pickup times are back.
    */
   "COUNTER_ORDER_NO_PICKUP_TIMES",
+  /** WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the Store turned counter ordering off. */
+  "COUNTER_ORDER_TURNED_OFF",
   "COUNTER_ORDER_UNAVAILABLE",
 ] as const;
 export type CounterOrderErrorCode = (typeof counterOrderErrorCodes)[number];
@@ -586,6 +589,9 @@ export function createMerchantCounterOrder(options: {
           (found.intentHash !== intentHash || String(found.actorReference) !== scope.actorReference)
         )
           return fail("COUNTER_ORDER_IDEMPOTENCY_CONFLICT");
+        // A new order only while the Store uses counter ordering (a retry returns its order).
+        if (found === null && !(await readStoreFeatures(tx, scope.selected, "Refuse")).counterOrder)
+          return fail("COUNTER_ORDER_TURNED_OFF");
         return found;
       });
       if (prior !== null) return await earlier(prior);

@@ -188,6 +188,10 @@ export function placeErrorText(
         : t(
             "Pickup hours are over, so the counter can't take a new order now. A paper order taken earlier can still be entered under Paper order.",
           );
+    case "CounterOrderingOff":
+      return t(
+        "Counter ordering is turned off for this store, so nothing was sent or charged. The owner can turn it back on in Store features.",
+      );
     case "NotPriced":
       return t("This order could not be priced. Check the items and options and send again.");
     case "NotFinished":

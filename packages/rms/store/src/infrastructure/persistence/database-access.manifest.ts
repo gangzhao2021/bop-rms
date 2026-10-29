@@ -3,6 +3,15 @@ const databaseAccessManifestInput = {
   module: { moduleName: "store", packageName: "@rms/store", layer: "RMS" },
   tables: [
     {
+      // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the modules a Store uses (versioned).
+      table: "store_feature_setting",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/store" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "store_receipt_profile",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/store" },
@@ -186,6 +195,24 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "store-features.read.store_feature_setting",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_store", table: "store_feature_setting" },
+      principal: { kind: "module", id: "@rms/store" },
+      readPattern: "owner-repository",
+      source: "packages/rms/store/src/infrastructure/persistence/service-control-store.ts",
+    },
+    {
+      id: "store-features.write.store_feature_setting",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_store", table: "store_feature_setting" },
+      principal: { kind: "module", id: "@rms/store" },
+      readPattern: null,
+      source: "packages/rms/store/src/infrastructure/persistence/service-control-store.ts",
+    },
     {
       id: "store-presence.read.store_presence_session",
       operation: "read",

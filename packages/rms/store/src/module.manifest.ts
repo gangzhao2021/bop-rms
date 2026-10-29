@@ -43,6 +43,7 @@ const moduleManifestInput = {
       "store_service_resume_content",
       "store_presence_session",
       "store_receipt_profile",
+      "store_feature_setting",
     ],
   },
   ownedJobs: [],

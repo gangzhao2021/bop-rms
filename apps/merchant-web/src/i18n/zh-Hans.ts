@@ -6248,4 +6248,32 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Guests can't be shown {count}: {items}. They can still order everything else. Tell the operator so it can be fixed.":
     "有 {count}客人看不到：{items}。其余菜品客人照常可点。请告诉运维修复。",
   "a dish without a name": "一道没有名称的菜",
+  "Store features": "门店功能",
+  "Counter ordering": "柜台点单",
+  "Take walk-up orders at the counter. Rounds staff enter for a table are not affected.":
+    "在柜台给到店客人点单。店员替桌子下的轮次不受影响。",
+  "Inventory and recipes": "库存与配方",
+  "Stock items, receiving, counts, waste and recipes. Turned off, these pages are hidden; stock already recorded is kept, and sold out is still set in Item availability.":
+    "库存品、收货、盘点、损耗和配方。关掉后这些页面不显示；已记录的库存保留，售完仍在“可售状态”里设置。",
+  "Only the owner changes store features": "只有店主能改门店功能",
+  "Store features could not be read. Check the connection and try again.":
+    "读不到门店功能。请检查网络后重试。",
+  "Reading store features…": "正在读取门店功能…",
+  "Someone else changed these settings. The page now shows them; check and save again.":
+    "有人刚改过这些设置。页面已显示最新的，请核对后再保存。",
+  "Only the owner changes store features.": "只有店主能改门店功能。",
+  "Not saved. Check the connection and try again.": "没有保存。请检查网络后重试。",
+  "Choose what this store uses. A change takes effect at once for all staff.":
+    "选择本店用哪些功能。改动对所有员工立即生效。",
+  "Full-service restaurant": "正餐",
+  "This store uses the full-service restaurant setup.": "本店使用正餐设置。",
+  "For a sit-down restaurant: turns off counter ordering and inventory and recipes. You can turn any of them back on below.":
+    "适合堂食正餐：关掉柜台点单和库存与配方。需要时可以在下面重新打开。",
+  "The full-service restaurant setup is in use.": "已改用正餐设置。",
+  "Use the full-service setup": "使用正餐设置",
+  "What this store uses": "本店使用的功能",
+  "Saved. Staff see the change the next time a page opens.": "已保存。员工下次打开页面时看到改动。",
+  "Last changed": "上次修改",
+  "Counter ordering is turned off for this store, so nothing was sent or charged. The owner can turn it back on in Store features.":
+    "本店已关闭柜台点单，没有发送也没有扣款。店主可以在“门店功能”里重新打开。",
 });

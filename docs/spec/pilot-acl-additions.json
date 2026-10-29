@@ -5165,6 +5165,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (coordinator 2026-10-28 decision 3: each chosen dish of a combo is done and served on its own): a combo's dish served at the table"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_feature_setting",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 6 \"正餐模板默认关掉柜台点单、自取、取餐交付、库存与配方、会员与营销、合规文档，需要时在设置里打开\"): the modules a Store uses, versioned, changed by the owner"
+    },
+    {
+      "type": "table",
+      "schema": "rms_store",
+      "object": "store_feature_setting",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 6 \"正餐模板默认关掉柜台点单、自取、取餐交付、库存与配方、会员与营销、合规文档，需要时在设置里打开\"): the modules a Store uses, versioned, changed by the owner"
     }
   ]
 }

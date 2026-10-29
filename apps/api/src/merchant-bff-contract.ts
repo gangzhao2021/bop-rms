@@ -161,6 +161,7 @@ import type {
   createMerchantDiningRoundHoldSetting,
 } from "./merchant-dining-held-round.js";
 import type { createMerchantDiningJoinRegenerate } from "./merchant-dining-join-regenerate.js";
+import type { createMerchantStoreFeatures } from "./merchant-store-features.js";
 import type { createMerchantDiningHostSelection } from "./merchant-dining-host-selection.js";
 import type { createMerchantDiningHostTransfer } from "./merchant-dining-host-transfer.js";
 import type { createMerchantDiningSessionStart } from "./merchant-dining-session-start.js";
@@ -282,7 +283,11 @@ export function merchantNavigationActions(item: {
 
 export interface MerchantNavigationItem {
   readonly screenId:
-    keyof typeof merchantNavigation | "STORE-SETUP" | "STORE-HOURS-SERVICE" | "ORG-BRAND-DETAIL";
+    | keyof typeof merchantNavigation
+    | "STORE-SETUP"
+    | "STORE-CAPABILITY"
+    | "STORE-HOURS-SERVICE"
+    | "ORG-BRAND-DETAIL";
   readonly label: string;
   readonly href: string;
   readonly permission: string;
@@ -578,6 +583,8 @@ export interface MerchantBffRouterOptions {
   readonly diningHeldRound?: ReturnType<typeof createMerchantDiningHeldRound>;
   /** WP-2423 item 8 ⑤: the Store's "a new phone's first round waits for staff". */
   readonly diningRoundHoldSetting?: ReturnType<typeof createMerchantDiningRoundHoldSetting>;
+  /** WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the modules the Store uses (Store features page). */
+  readonly storeFeatures?: ReturnType<typeof createMerchantStoreFeatures>;
   readonly diningJoinRegenerate?: ReturnType<typeof createMerchantDiningJoinRegenerate>;
   readonly diningHostSelection?: ReturnType<typeof createMerchantDiningHostSelection>;
   readonly diningHostTransfer?: ReturnType<typeof createMerchantDiningHostTransfer>;

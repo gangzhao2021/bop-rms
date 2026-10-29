@@ -277,3 +277,162 @@ export function createPostgresStoreServiceControlState(options: {
     return Object.freeze({ expectedVersion, activePauses, observedAt: at });
   };
 }
+
+/**
+ * WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 6): the modules a Store uses. A
+ * Store never set keeps every module (version 0). The caller decides what a template turns off.
+ */
+export interface StoreFeatureModules {
+  readonly counterOrder: boolean;
+  readonly pickup: boolean;
+  readonly inventory: boolean;
+  readonly loyalty: boolean;
+  readonly complianceDocuments: boolean;
+}
+export interface StoreFeatureSetting extends StoreFeatureModules {
+  /** 0: never set (every module on). */
+  readonly version: number;
+  readonly templateCode: "FullService" | "Custom" | null;
+  readonly changedAt: string | null;
+}
+export type StoreFeatureTemplate = "FullService";
+const featureModules = [
+  ["counterOrder", "counter_order"],
+  ["pickup", "pickup"],
+  ["inventory", "inventory"],
+  ["loyalty", "loyalty"],
+  ["complianceDocuments", "compliance_documents"],
+] as const;
+/** A change that saw another version first, or reused an operation for something else. */
+export class StoreFeatureSettingConflictError extends Error {
+  constructor() {
+    super("STORE_FEATURE_SETTING_CHANGED");
+    this.name = "StoreFeatureSettingConflictError";
+  }
+}
+interface StoreFeatureScope {
+  readonly tenantReference: string;
+  readonly brandReference: string;
+  readonly storeReference: string;
+}
+const rowsOf = (result: unknown): readonly Record<string, unknown>[] => {
+  const rows = (result as { readonly rows?: unknown } | null)?.rows;
+  return Array.isArray(rows)
+    ? (rows as Record<string, unknown>[])
+    : fail("STORE_FEATURE_SETTING_UNAVAILABLE");
+};
+const featureScope = async (tx: Transaction, scope: StoreFeatureScope) => {
+  const brand = parseBrandReference(scope.brandReference);
+  const store = parseStoreReference(scope.storeReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  return { brand, store };
+};
+
+/** The Store's current modules, in the caller's transaction (Store RLS). */
+export async function loadStoreFeatureSetting(
+  tx: Transaction,
+  scope: StoreFeatureScope,
+): Promise<StoreFeatureSetting> {
+  const { brand, store } = await featureScope(tx, scope);
+  const found = rowsOf(
+    await tx.query(
+      "SELECT version,template_code,counter_order,pickup,inventory,loyalty,compliance_documents,to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at FROM rms_store.store_feature_setting WHERE brand_id=$1 AND store_id=$2 ORDER BY version DESC LIMIT 1",
+      [brand, store],
+    ),
+  )[0];
+  if (found === undefined)
+    return Object.freeze({
+      version: 0,
+      templateCode: null,
+      counterOrder: true,
+      pickup: true,
+      inventory: true,
+      loyalty: true,
+      complianceDocuments: true,
+      changedAt: null,
+    });
+  const version = Number(found.version);
+  if (
+    !Number.isSafeInteger(version) ||
+    version < 1 ||
+    (found.template_code !== "FullService" && found.template_code !== "Custom") ||
+    featureModules.some(([, column]) => typeof found[column] !== "boolean")
+  )
+    return fail("STORE_FEATURE_SETTING_UNAVAILABLE");
+  return Object.freeze({
+    version,
+    templateCode: found.template_code,
+    ...(Object.fromEntries(
+      featureModules.map(([key, column]) => [key, found[column] === true]),
+    ) as unknown as StoreFeatureModules),
+    changedAt: parseCanonicalInstant(String(found.occurred_at)),
+  });
+}
+
+/**
+ * The owner changes the modules: the next version, with who and when. `expectedVersion` is the
+ * version they saw (another change in between is a conflict); the same operation again returns
+ * the setting it made. `template` names the template the modules were applied from; without one
+ * the choice is "Custom".
+ */
+export async function changeStoreFeatureSetting(
+  tx: Transaction,
+  scope: StoreFeatureScope,
+  input: {
+    readonly operationReference: string;
+    readonly expectedVersion: number;
+    readonly template: StoreFeatureTemplate | null;
+    readonly modules: StoreFeatureModules;
+    readonly actorReference: string;
+    readonly observedAt: string;
+  },
+): Promise<StoreFeatureSetting> {
+  const { brand, store } = await featureScope(tx, scope);
+  const operation = parseStoreAdministrationReference(input.operationReference);
+  const modules = input.modules;
+  if (featureModules.some(([key]) => typeof modules[key] !== "boolean"))
+    return fail("STORE_SERVICE_COMMAND_INVALID");
+  const templateCode = input.template ?? "Custom";
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    `StoreFeatureSetting:${brand}:${store}`,
+  ]);
+  const prior = rowsOf(
+    await tx.query(
+      "SELECT template_code,counter_order,pickup,inventory,loyalty,compliance_documents FROM rms_store.store_feature_setting WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      [brand, store, operation],
+    ),
+  )[0];
+  if (prior !== undefined) {
+    if (
+      prior.template_code !== templateCode ||
+      featureModules.some(([key, column]) => prior[column] !== modules[key])
+    )
+      throw new StoreFeatureSettingConflictError();
+    return loadStoreFeatureSetting(tx, scope);
+  }
+  const current = await loadStoreFeatureSetting(tx, scope);
+  if (current.version !== input.expectedVersion) throw new StoreFeatureSettingConflictError();
+  if (
+    current.templateCode === templateCode &&
+    featureModules.every(([key]) => current[key] === modules[key])
+  )
+    return current;
+  await tx.query(
+    "INSERT INTO rms_store.store_feature_setting (tenant_id,brand_id,store_id,version,operation_id,template_code,counter_order,pickup,inventory,loyalty,compliance_documents,actor_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+    [
+      parseStoreAdministrationReference(scope.tenantReference),
+      brand,
+      store,
+      current.version + 1,
+      operation,
+      templateCode,
+      ...featureModules.map(([key]) => modules[key]),
+      parseStoreAdministrationReference(input.actorReference),
+      parseCanonicalInstant(input.observedAt),
+    ],
+  );
+  return loadStoreFeatureSetting(tx, scope);
+}

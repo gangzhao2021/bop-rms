@@ -34,6 +34,11 @@ import {
   createMerchantDiningRoundHoldSetting,
 } from "../../apps/api/dist/merchant-dining-held-round.js";
 import { createMerchantDiningJoinRegenerate } from "../../apps/api/dist/merchant-dining-join-regenerate.js";
+import {
+  createMerchantStoreFeatures,
+  navigationForStoreFeatures,
+  readStoreFeatures,
+} from "../../apps/api/dist/merchant-store-features.js";
 import { createMerchantDiningSessionStart } from "../../apps/api/dist/merchant-dining-session-start.js";
 import { createMerchantDiningTableCommand } from "../../apps/api/dist/merchant-dining-table-command.js";
 import { createMerchantDiningTables } from "../../apps/api/dist/merchant-dining-tables.js";
@@ -214,7 +219,15 @@ export async function createInternalMerchant(
           }
         : targetScope,
     targetScope,
-    workspace: async (_tx, { context }) => ({
+    // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: screens of modules the Store turned off are not listed.
+    workspace: async (tx, input) => {
+      const listed = workspace(input);
+      const features = await readStoreFeatures(tx, selected, "AllModules");
+      return { ...listed, navigation: navigationForStoreFeatures(listed.navigation, features) };
+    },
+  };
+  function workspace({ context }) {
+    return {
       screenId: "HOME-OVERVIEW",
       selectedScope: {
         brandLabel: context.brand.displayName,
@@ -244,6 +257,13 @@ export async function createInternalMerchant(
           screenId: "STORE-SETUP",
           label: "Store setup",
           href: "/app/organization/stores/" + selected.storeReference + "/setup",
+          permission: "organization.manage",
+        },
+        // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the modules the Store uses.
+        {
+          screenId: "STORE-CAPABILITY",
+          label: "Store features",
+          href: "/app/organization/stores/" + selected.storeReference + "/capabilities",
           permission: "organization.manage",
         },
         // WP-2423 / DEC-CAT-PRODUCT-ADMIN: Brand Products (merchant-products).
@@ -460,8 +480,8 @@ export async function createInternalMerchant(
           permission: "identity.store_device.manage",
         },
       ],
-    }),
-  };
+    };
+  }
   const queue = await loadTaskQueue();
   if (
     !matchesPilotEnvironment(queue.environment) ||
@@ -1720,6 +1740,12 @@ export async function createInternalMerchant(
       diningQrJoin,
       // WP-2423 item 8 ⑤ decision 5: "a new phone's first round waits for staff".
       diningRoundHoldSetting: createMerchantDiningRoundHoldSetting({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
+      // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the Store features page.
+      storeFeatures: createMerchantStoreFeatures({
         persistence,
         authentication: service,
         now: resources.now,
