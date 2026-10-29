@@ -6243,4 +6243,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "保存中途停了。已保存的部分保留，客人看不到任何变化。请再保存一次完成；如果还停，请告诉经理。",
   "{item} was saved only in part. Open it with Edit and save it again to finish it.":
     "{item} 只保存了一部分。请点它的“编辑”，再保存一次完成。",
+  "The menu review stopped at {item} without naming what is missing (code {reason}). Nothing was listed. Tell the operator this code.":
+    "菜单审核在 {item} 处停下，但没有指出缺什么（代码 {reason}）。没有上架任何内容。请把这个代码告诉运维。",
 });

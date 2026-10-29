@@ -227,7 +227,15 @@ export function installMerchantCommerceRoutes(
                       ? 503
                       : 409,
             )
-            .json({ error: code, part: error.name.slice(8, -5) });
+            .json({
+              error: code,
+              part: error.name.slice(8, -5),
+              // v15 2026-10-29: what the menu review found missing, named (as the menus page
+              // shows it), or why it stopped; staff words and codes only, never references.
+              ...((error as { problem?: unknown }).problem
+                ? { problem: (error as { problem?: unknown }).problem }
+                : {}),
+            });
         });
     },
   );

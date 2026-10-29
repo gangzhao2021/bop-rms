@@ -38,7 +38,11 @@ import {
   listStaffDeclaredAllergenSources,
   type RecipeAuthoringTransaction,
 } from "@rms/recipe";
-import { MenuReviewGapError, type MenuReviewGap } from "./menu-recipe-allergen-source.js";
+import {
+  MenuReviewGapError,
+  MenuReviewStoppedError,
+  type MenuReviewGap,
+} from "./menu-recipe-allergen-source.js";
 import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -98,7 +102,9 @@ export class MerchantMenuError extends Error {
 }
 /** A menu review gap in staff terms: names only, never references or internal codes. */
 export interface MenuReviewProblem {
-  readonly missing: MenuReviewGap["missing"];
+  /** "Stopped": nothing was named missing; `reason` says why it stopped (v15 2026-10-29). */
+  readonly missing: MenuReviewGap["missing"] | "Stopped";
+  readonly reason?: string;
   readonly productName: string | null;
   readonly sizeName: string | null;
   readonly optionName: string | null;
@@ -895,6 +901,9 @@ export function createMerchantMenus(options: {
       validUntil: (input) => input.validationValidUntil,
     },
     binding: async (tx, input) => {
+      // The review content is the Brand's (read without a Store), whatever this transaction read
+      // before (v15 2026-10-29: the approval found no review while a Store was still selected).
+      await brandScope(tx, input.brandReference);
       const row = (
         await tx.query<{ digest: string }>(
           "SELECT snapshot_digest digest FROM rms_catalog.menu_review_content WHERE brand_id=$1 AND menu_id=$2 AND menu_version_id=$3 ORDER BY snapshot_digest LIMIT 2",
@@ -1360,6 +1369,29 @@ export function createMerchantMenus(options: {
       );
     } catch (error) {
       if (error instanceof MerchantMenuError) throw error;
+      if (error instanceof MenuReviewStoppedError) {
+        // v15 2026-10-29: where and why the review stopped (the item named, the reason a code).
+        const at =
+          error.skuReference === null
+            ? null
+            : await describeGap(input.sessionCookie, current.sessionReference, {
+                skuReference: error.skuReference,
+                storeReference: "",
+                missing: "Recipe",
+                optionReference: null,
+                quantity: null,
+                ingredientReference: null,
+              }).catch(() => null);
+        throw new MerchantMenuError("ReviewBlocked", {
+          missing: "Stopped",
+          reason: error.reason,
+          productName: at?.productName ?? null,
+          sizeName: at?.sizeName ?? null,
+          optionName: null,
+          quantity: null,
+          ingredientName: null,
+        });
+      }
       if (error instanceof MenuReviewGapError)
         throw new MerchantMenuError(
           "ReviewBlocked",

@@ -21,6 +21,7 @@ import {
 import {
   createCompleteMenuRecipeAllergenSource,
   MenuRecipeAllergenError,
+  reviewStopReason,
 } from "./menu-recipe-allergen-source.js";
 
 export interface MenuReviewPreparationInput {
@@ -32,8 +33,8 @@ export interface MenuReviewPreparationInput {
   observedAt: string;
   budget: { maximumConfigurations: number; maximumSearchSteps: number };
 }
-const fail = (): never => {
-  throw new MenuRecipeAllergenError();
+const fail = (reason = "MenuReview"): never => {
+  throw new MenuRecipeAllergenError(null, reason);
 };
 
 /** Prepare only. Caller keeps tx open through immutable content/Publishing writes,
@@ -336,9 +337,10 @@ export function createMenuReviewPreparationSource(options: {
         if (!(await authorize("Catalog"))) return fail();
         return Object.freeze({ record, validation, resolvedConfigurations });
       } catch (error) {
-        // WP-2423 (v15 2026-10-22): keep what is missing so staff are told which item to fix.
-        if (error instanceof MenuRecipeAllergenError && error.gap !== null) throw error;
-        return fail();
+        // WP-2423 (v15 2026-10-22): keep what is missing so staff are told which item to fix;
+        // v15 2026-10-29: otherwise why it stopped, and where.
+        if (error instanceof MenuRecipeAllergenError) throw error;
+        throw new MenuRecipeAllergenError(null, reviewStopReason(error));
       }
     },
   });

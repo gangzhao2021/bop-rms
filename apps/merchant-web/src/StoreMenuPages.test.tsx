@@ -216,6 +216,18 @@ describe("WP-2423 menu page helpers", () => {
       quantity: null,
       ingredientName: null,
     };
+    // v15 2026-10-29: a review that stopped without naming a gap says where, and its code.
+    expect(
+      menuReviewProblemText({
+        ...base,
+        productName: "二人套餐",
+        sizeName: null,
+        missing: "Stopped",
+        reason: "AllergenEvidenceDiffers",
+      }),
+    ).toBe(
+      "The menu review stopped at 二人套餐 without naming what is missing (code AllergenEvidenceDiffers). Nothing was listed. Tell the operator this code.",
+    );
     expect(menuReviewProblemText({ ...base, missing: "Recipe" })).toBe(
       "Latte has no published recipe for this menu's Stores. Publish one under Recipes and assign it to this size, then submit again.",
     );

@@ -30,10 +30,36 @@ type Gap = Omit<MenuReviewGap, "skuReference" | "storeReference">;
 
 export class MenuRecipeAllergenError extends Error {
   readonly code = "MENU_RECIPE_ALLERGEN_UNAVAILABLE";
-  constructor(readonly gap: MenuReviewGap | null = null) {
+  constructor(
+    readonly gap: MenuReviewGap | null = null,
+    /**
+     * v15 2026-10-29: why a review stopped when nothing is named missing — a short code (never a
+     * reference), so staff and the operator can tell the cause.
+     */
+    readonly reason = "Unknown",
+    /** The menu item it stopped at, when known (named by the merchant API, never sent). */
+    readonly skuReference: string | null = null,
+  ) {
     super("Menu recipe provenance is unavailable");
     this.name = "MenuRecipeAllergenError";
   }
+}
+/** The Catalog failure a menu review raises when it stopped without naming what is missing. */
+export class MenuReviewStoppedError extends CatalogError {
+  constructor(
+    readonly reason: string,
+    readonly skuReference: string | null,
+  ) {
+    super("CATALOG_DEPENDENCY_UNAVAILABLE");
+    this.name = "MenuReviewStoppedError";
+  }
+}
+/** A short code for an unexpected error (its class and code, never its message). */
+export function reviewStopReason(error: unknown): string {
+  if (error instanceof MenuRecipeAllergenError) return error.reason;
+  const name = error instanceof Error ? error.name : typeof error;
+  const code = (error as { code?: unknown } | null)?.code;
+  return ("Unexpected:" + name + (typeof code === "string" ? ":" + code : "")).slice(0, 120);
 }
 /** The Catalog failure a menu review raises when it knows what is missing. */
 export class MenuReviewGapError extends CatalogError {
@@ -42,8 +68,8 @@ export class MenuReviewGapError extends CatalogError {
     this.name = "MenuReviewGapError";
   }
 }
-function fail(): never {
-  throw new MenuRecipeAllergenError();
+function fail(reason = "Unknown"): never {
+  throw new MenuRecipeAllergenError(null, reason);
 }
 class IngredientGap extends Error {
   constructor(
@@ -126,7 +152,7 @@ function expectedEvidence(recipe: ReviewedRecipe) {
       expected.set(assertion.evidenceReference, subject);
     }
   }
-  if (!expected.size) return fail();
+  if (!expected.size) return fail("NoAllergenEvidence");
   return expected;
 }
 /** The current evidence records must say exactly what the recipe pinned. */
@@ -283,7 +309,7 @@ export function createCompleteMenuRecipeAllergenSource(
             });
           }
         });
-        const observedAt = recipes[0]?.observedAt ?? fail();
+        const observedAt = recipes[0]?.observedAt ?? fail("NoConfiguration");
         const pinned = [...new Set(expected.flatMap((item) => [...item.keys()]))].sort();
         const read = (evidenceReferences: readonly string[]) =>
           createPostgresAllergenReviewFactsStore({
@@ -351,7 +377,7 @@ export function createCompleteMenuRecipeAllergenSource(
           });
         });
         if ((await options.authorize(tx, { ...input.recipe, selections: [] }, "Recipe")) !== true)
-          return fail();
+          return fail("NotAuthorized");
         type Evidence = ReviewFacts["evidence"][number];
         let registry: Pick<ReviewFacts, "registryVersionReference" | "registry"> | null = null;
         const evidence = new Map<string, Evidence>();
@@ -364,16 +390,16 @@ export function createCompleteMenuRecipeAllergenSource(
             registry !== null &&
             canonicalizeRfc8785(registry) !== canonicalizeRfc8785(currentRegistry)
           )
-            return fail();
+            return fail("AllergenListChanged");
           registry = currentRegistry;
           for (const item of resolved.allergens.evidence) {
             const existing = evidence.get(item.evidenceReference);
             if (existing && canonicalizeRfc8785(existing) !== canonicalizeRfc8785(item))
-              return fail();
+              return fail("AllergenEvidenceDiffers");
             evidence.set(item.evidenceReference, item);
           }
         }
-        if (!registry) return fail();
+        if (!registry) return fail("NoAllergenList");
         const allergens = Object.freeze({
           ...registry,
           evidence: Object.freeze(
@@ -403,8 +429,11 @@ export function createCompleteMenuRecipeAllergenSource(
             ),
         });
       } catch (error) {
-        if (error instanceof MenuRecipeAllergenError) throw error;
-        return fail();
+        if (error instanceof MenuRecipeAllergenError)
+          throw error.gap !== null || error.skuReference !== null
+            ? error
+            : new MenuRecipeAllergenError(null, error.reason, input.recipe.skuReference);
+        throw new MenuRecipeAllergenError(null, reviewStopReason(error), input.recipe.skuReference);
       }
     },
   });

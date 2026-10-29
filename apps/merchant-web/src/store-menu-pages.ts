@@ -58,7 +58,14 @@ export class MenuPageError extends Error {
 }
 export interface MenuReviewProblem {
   readonly missing:
-    "Recipe" | "SubRecipe" | "OptionRecipe" | "AllergenDeclaration" | "AllergenList";
+    | "Recipe"
+    | "SubRecipe"
+    | "OptionRecipe"
+    | "AllergenDeclaration"
+    | "AllergenList"
+    /** v15 2026-10-29: nothing was named missing; `reason` is the code of why it stopped. */
+    | "Stopped";
+  readonly reason?: string;
   readonly productName: string | null;
   readonly sizeName: string | null;
   readonly optionName: string | null;
@@ -66,6 +73,7 @@ export interface MenuReviewProblem {
   readonly ingredientName: string | null;
 }
 const missingKinds = new Set<MenuReviewProblem["missing"]>([
+  "Stopped",
   "Recipe",
   "SubRecipe",
   "OptionRecipe",
@@ -79,8 +87,13 @@ export function parseMenuReviewProblem(value: unknown): MenuReviewProblem | null
   const raw = value as Record<string, unknown>;
   if (!missingKinds.has(raw.missing as MenuReviewProblem["missing"])) return null;
   const quantity = raw.quantity;
+  const reason =
+    typeof raw.reason === "string" && /^[A-Za-z0-9:_.-]{1,120}$/u.test(raw.reason)
+      ? raw.reason
+      : undefined;
   return {
     missing: raw.missing as MenuReviewProblem["missing"],
+    ...(reason === undefined ? {} : { reason }),
     productName: optionalText(raw.productName),
     sizeName: optionalText(raw.sizeName),
     optionName: optionalText(raw.optionName),
@@ -106,6 +119,11 @@ export function menuReviewProblemText(problem: MenuReviewProblem): string {
         ? `${problem.optionName} × ${problem.quantity}`
         : problem.optionName;
   switch (problem.missing) {
+    case "Stopped":
+      return t(
+        "The menu review stopped at {item} without naming what is missing (code {reason}). Nothing was listed. Tell the operator this code.",
+        { item: item, reason: problem.reason ?? "Unknown" },
+      );
     case "Recipe":
       return t(
         "{item} has no published recipe for this menu's Stores. Publish one under Recipes and assign it to this size, then submit again.",
