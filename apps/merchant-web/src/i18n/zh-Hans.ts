@@ -6285,4 +6285,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "客人将不能再下自取单，“取餐”页也会隐藏。请先交付还在等候的自取单。",
   "Turn off pickup": "关闭自取",
   "Keep pickup": "保留自取",
+  "Checking the pickup orders still waiting…": "正在查看还在等候的自取单…",
+  "The pickup queue could not be read, so it isn't known whether pickup orders are still waiting. Check the Pickup page.":
+    "读不到取餐队列，不知道是否还有等候交付的自取单。请到“取餐”页查看。",
+  "No pickup orders are waiting to be handed over.": "没有等候交付的自取单。",
+  "1 pickup order is still waiting to be handed over.": "还有 1 张自取单等候交付。",
+  "{count} pickup orders are still waiting to be handed over.": "还有 {count} 张自取单等候交付。",
 });

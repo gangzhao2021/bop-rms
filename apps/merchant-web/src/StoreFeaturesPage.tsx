@@ -10,6 +10,31 @@ import {
   type StoreFeatures,
   type StoreFeaturesClient,
 } from "./store-features-client.js";
+import { createPickupClient } from "./pickup-client.js";
+import type { PickupClient } from "./pickup.js";
+
+/**
+ * Pickup orders still waiting to be handed over, from Fulfillment's current pickup queue (the
+ * same read as the Pickup page), page by page; null when the queue can't be read.
+ */
+export async function waitingPickupOrders(client: PickupClient): Promise<number | null> {
+  let after: string | null = null;
+  let count = 0;
+  try {
+    for (let page = 0; page < 20; page++) {
+      const view = (await client.loadQueue({
+        afterFulfillmentReference: after,
+        includeCompleted: false,
+      })) as { items: readonly unknown[]; nextAfterFulfillmentReference: string | null };
+      count += view.items.length;
+      if (view.nextAfterFulfillmentReference === null) return count;
+      after = view.nextAfterFulfillmentReference;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 interface Modules {
   readonly counterOrder: boolean;
@@ -54,12 +79,29 @@ const rows: readonly { key: keyof Modules; name: () => string; detail: () => str
  */
 export function StoreFeaturesPage({
   csrf,
+  storeReference,
+  storeLabel,
   client: injected,
+  pickup: injectedPickup,
 }: {
   readonly csrf: string;
+  readonly storeReference: string;
+  readonly storeLabel: string;
   readonly client?: StoreFeaturesClient;
+  readonly pickup?: PickupClient;
 }) {
   const client = useMemo(() => injected ?? createStoreFeaturesClient(csrf), [injected, csrf]);
+  const pickupQueue = useMemo(
+    () => injectedPickup ?? createPickupClient({ csrf, storeReference, storeLabel }),
+    [injectedPickup, csrf, storeReference, storeLabel],
+  );
+  // Before guests' pickup is turned off: how many pickup orders are still waiting.
+  const [waiting, setWaiting] = useState<"Reading" | number | null>("Reading");
+  const ask = (action: "Template" | "Save") => {
+    setConfirming(action);
+    setWaiting("Reading");
+    void waitingPickupOrders(pickupQueue).then(setWaiting);
+  };
   const [view, setView] = useState<StoreFeatures | null>(null);
   const [failed, setFailed] = useState<"Denied" | "Unavailable" | null>(null);
   const [draft, setDraft] = useState<Modules | null>(null);
@@ -144,6 +186,21 @@ export function StoreFeaturesPage({
   const pickupOff = (counterAfter: boolean) => (
     <div className="store-features__confirm" role="alert">
       <p>
+        {waiting === "Reading"
+          ? t("Checking the pickup orders still waiting…")
+          : waiting === null
+            ? t(
+                "The pickup queue could not be read, so it isn't known whether pickup orders are still waiting. Check the Pickup page.",
+              )
+            : waiting === 0
+              ? t("No pickup orders are waiting to be handed over.")
+              : waiting === 1
+                ? t("1 pickup order is still waiting to be handed over.")
+                : t("{count} pickup orders are still waiting to be handed over.", {
+                    count: waiting,
+                  })}
+      </p>
+      <p>
         {counterAfter
           ? t(
               "Guests will no longer be able to order pickup. Pickup orders already placed are still handed over on the Pickup page.",
@@ -227,7 +284,7 @@ export function StoreFeaturesPage({
             <button
               type="button"
               disabled={busy || confirming !== null}
-              onClick={() => (view.modules.pickup ? setConfirming("Template") : applyTemplate())}
+              onClick={() => (view.modules.pickup ? ask("Template") : applyTemplate())}
             >
               {t("Use the full-service setup")}
             </button>
@@ -258,7 +315,7 @@ export function StoreFeaturesPage({
             type="button"
             className="store-features__save"
             disabled={busy || !changed || confirming !== null}
-            onClick={() => (view.modules.pickup && !draft.pickup ? setConfirming("Save") : save())}
+            onClick={() => (view.modules.pickup && !draft.pickup ? ask("Save") : save())}
           >
             {t("Save")}
           </button>
