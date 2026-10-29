@@ -175,6 +175,8 @@ export function createStaffTableAbandonment(options: {
  */
 export function createStaffTableGuestPipeline(options: {
   takesOrder(input: { readonly recordedAfterOutage: boolean }): Promise<boolean>;
+  /** WP-2423 item 8 ⑦: whether guests can still send a round themselves (not after last orders). */
+  guestsCanSend?(): Promise<boolean>;
   openTable: StaffTableGuestPipeline["openTable"];
   abandonTable: StaffTableGuestPipeline["abandonTable"];
   /** The table's current printed QR token (as a guest scans it); null when it has none. */
@@ -217,6 +219,7 @@ export function createStaffTableGuestPipeline(options: {
   return Object.freeze<StaffTableGuestPipeline>({
     ...steps,
     takesOrder: (input) => options.takesOrder(input),
+    ...(options.guestsCanSend === undefined ? {} : { guestsCanSend: options.guestsCanSend }),
     openTable: (staff, input) => options.openTable(staff, input),
     abandonTable: (staff, input) => options.abandonTable(staff, input),
     async enter(input) {

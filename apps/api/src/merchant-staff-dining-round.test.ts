@@ -399,6 +399,58 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     expect(pipeline.addItem).not.toHaveBeenCalled();
   });
 
+  it("WP-2423 item 8 ⑦: adds the guests' unsent items to the round only as staff saw them", async () => {
+    const withCart = (cartVersion: number) => ({
+      status: "Selected" as const,
+      cartReference: id(6),
+      cartVersion,
+      pendingItems: [{ name: "Hong Kong milk tea", quantity: 1 }],
+    });
+    // After last orders guests can't send: the refusal says so, with the cart version shown.
+    const refused = setup();
+    Object.assign(refused.pipeline, { guestsCanSend: vi.fn(async () => false) });
+    refused.pipeline.selectCart.mockResolvedValueOnce(withCart(3));
+    await expect(refused.send()).rejects.toMatchObject({
+      code: "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
+      tableCart: { cartVersion: 3, guestsCanSend: false },
+    });
+    // The cart changed since (a guest added or removed something): refused again, newly named.
+    const changed = setup();
+    changed.pipeline.selectCart.mockResolvedValueOnce(withCart(4));
+    await expect(
+      changed.send({ operationReference: id(41), includeTableCart: { expectedCartVersion: 3 } }),
+    ).rejects.toMatchObject({
+      code: "STAFF_ROUND_TABLE_CART_HAS_ITEMS",
+      tableCart: { cartVersion: 4, guestsCanSend: true },
+    });
+    expect(changed.pipeline.addItem).not.toHaveBeenCalled();
+    // As shown: the round's own lines join the guests' items and the whole cart is sent once,
+    // recorded as this staff member's round.
+    const added = setup();
+    added.pipeline.selectCart.mockResolvedValueOnce(withCart(3));
+    const placed = await added.send({
+      operationReference: id(42),
+      includeTableCart: { expectedCartVersion: 3 },
+    });
+    expect(placed).toMatchObject({ status: "Placed", orderReference: id(20) });
+    expect(added.calls.slice(-4)).toEqual([
+      "quote",
+      "saveDetails",
+      "startCheckout",
+      "preparePayment",
+    ]);
+    expect([...state.entries.values()].at(-1)).toMatchObject({
+      actorReference: "0198a7c0-0000-7000-8000-000000000004",
+    });
+    // The same operation with or without the guests' items is not the same round.
+    await expect(added.send({ operationReference: id(42) })).rejects.toMatchObject({
+      code: "STAFF_ROUND_IDEMPOTENCY_CONFLICT",
+    });
+    await expect(
+      added.send({ operationReference: id(42), includeTableCart: { expectedCartVersion: 0 } }),
+    ).rejects.toMatchObject({ code: "STAFF_ROUND_INPUT_INVALID" });
+  });
+
   it("names the sold-out line and a guest paying at the table, and a table that can't be seated", async () => {
     const soldOut = setup();
     soldOut.pipeline.addItem.mockResolvedValueOnce({ status: "NotAvailable" });

@@ -482,6 +482,8 @@ async function createInternalStaffDiningRound(
     takesOrder: async (input) =>
       // Staff open tables and send rounds after last orders too (recorded as their action).
       input.recordedAfterOutage || storeTakesOrder(await operatingNow(), "SeatedDineIn", "Staff"),
+    // WP-2423 item 8 ⑦ (v15 finding t): after last orders a guest can't send the table's Cart.
+    guestsCanSend: async () => storeTakesOrder(await operatingNow(), "SeatedDineIn", "Guest"),
     openTable: createStaffTableCode({
       loadTable: (tableReference) =>
         transactions.run(async (tx) => {

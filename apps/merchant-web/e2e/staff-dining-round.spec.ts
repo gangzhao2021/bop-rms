@@ -194,7 +194,13 @@ test("@production staff take an order for a table from the Tables page, charge i
       return route.fulfill({
         status: 409,
         headers,
-        json: { error: "table_cart_has_items", items: [{ name: "Iced Latte", quantity: 1 }] },
+        // WP-2423 item 8 ⑦ (v15 finding t): after last orders guests can't send it themselves.
+        json: {
+          error: "table_cart_has_items",
+          items: [{ name: "Iced Latte", quantity: 1 }],
+          cartVersion: 5,
+          guestsCanSend: false,
+        },
       });
     }
     if (soldOutOnce && (body.lines as unknown[]).length === 2) {
@@ -275,10 +281,14 @@ test("@production staff take an order for a table from the Tables page, charge i
   // A guest left items in the table's shared cart: staff are told what, in plain words.
   await page.getByRole("button", { name: "Send order" }).click();
   await expect(page.getByRole("alert")).toContainText(
-    "Guests at this table have items in their shared cart that haven't been sent (1 × Iced Latte).",
+    "Guests at this table have items in their shared cart that haven't been sent (1 × Iced Latte), and guests can no longer send them after last orders. Add them to this round to order them.",
   );
+  await expect(page.getByRole("alert")).not.toContainText("Ask them to send");
+  // Staff add them to this round, as shown (that cart version), as a new request.
+  await page.getByRole("button", { name: "Add them to this round" }).click();
+  expect(rounds.at(-1)).toMatchObject({ includeTableCart: { expectedCartVersion: 5 } });
+  expect(rounds.at(-1)?.operationReference).not.toBe(rounds.at(-2)?.operationReference);
   // Gyoza sold out meanwhile: named, nothing charged.
-  await page.getByRole("button", { name: "Send order" }).click();
   await expect(page.getByRole("alert")).toContainText(
     "Gyoza can't be sold right now (sold out or off the menu).",
   );

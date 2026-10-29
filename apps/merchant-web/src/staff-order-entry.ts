@@ -8,6 +8,11 @@ const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a
 const minorPattern = /^(0|[1-9][0-9]{0,15})$/u;
 
 export class CounterOrderClientError extends Error {
+  /**
+   * WP-2423 item 8 ⑦ (v15 finding t): TableCartHasItems, the version of the table's cart those
+   * items are in (staff add them to the round against it) and whether guests can still send.
+   */
+  tableCart: { readonly cartVersion: number; readonly guestsCanSend: boolean } | null = null;
   constructor(
     readonly code:
       | "PermissionDenied"
@@ -451,6 +456,8 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       readonly lines: readonly TableRoundLine[];
       readonly tip: CounterTip;
       readonly recordedAfterOutage: boolean;
+      /** WP-2423 item 8 ⑦: add the guests' unsent items, as shown (that cart version). */
+      readonly includeTableCart?: { readonly expectedCartVersion: number };
     }): Promise<PlacedCounterOrder> {
       const response = await post("/merchant/dining/staff-rounds", command);
       if (response.ok) return parsePlacedCounterOrder(await response.json(), true);
@@ -460,8 +467,8 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       // WP-2423: an item is short (or can't be sold); nothing was sent or charged.
       const refusal = itemRefusal(body);
       if (refusal !== null) throw refusal;
-      if (code === "table_cart_has_items")
-        throw new CounterOrderClientError(
+      if (code === "table_cart_has_items") {
+        const refusal = new CounterOrderClientError(
           "TableCartHasItems",
           null,
           null,
@@ -477,6 +484,17 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
               })
             : [],
         );
+        if (
+          Number.isSafeInteger(body.cartVersion) &&
+          Number(body.cartVersion) >= 1 &&
+          typeof body.guestsCanSend === "boolean"
+        )
+          refusal.tableCart = {
+            cartVersion: Number(body.cartVersion),
+            guestsCanSend: body.guestsCanSend,
+          };
+        throw refusal;
+      }
       if (code === "table_checkout_in_progress")
         throw new CounterOrderClientError("TableCheckoutInProgress");
       if (code === "table_unavailable") throw new CounterOrderClientError("TableUnavailable");

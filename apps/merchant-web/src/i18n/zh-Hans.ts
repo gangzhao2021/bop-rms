@@ -6319,4 +6319,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "客人自取已关闭。还有 1 单等候交付。",
   "Pickup is turned off for guests. {count} orders are still to hand over.":
     "客人自取已关闭。还有 {count} 单等候交付。",
+  "Guests at this table have items in their shared cart that haven't been sent{value}. Add them to this round, or ask the guests to send or remove them on their phone.":
+    "这桌客人的共用购物车里还有没送出的菜{value}。可以把它们加进这一轮，或者请客人在手机上送出或删除。",
+  "Guests at this table have items in their shared cart that haven't been sent{value}, and guests can no longer send them after last orders. Add them to this round to order them.":
+    "这桌客人的共用购物车里还有没送出的菜{value}，过了最后点单时间客人已经不能自己送出。把它们加进这一轮即可下单。",
+  "Add them to this round": "加进这一轮",
 });

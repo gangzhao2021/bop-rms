@@ -3493,6 +3493,18 @@ it("WP-2423 Q7 slice 2: protects the staff table round transport and maps refusa
     error: "table_cart_has_items",
     items: [{ name: "Iced Latte", quantity: 1 }],
   });
+  // WP-2423 item 8 ⑦: with the cart version to add them against, and whether guests can send.
+  const withCart = new StaffDiningRoundError("STAFF_ROUND_TABLE_CART_HAS_ITEMS", null, [
+    { name: "Iced Latte", quantity: 1 },
+  ]);
+  withCart.tableCart = { cartVersion: 4, guestsCanSend: false };
+  staffDiningRound.mockRejectedValueOnce(withCart);
+  expect(await (await submit()).json()).toEqual({
+    error: "table_cart_has_items",
+    items: [{ name: "Iced Latte", quantity: 1 }],
+    cartVersion: 4,
+    guestsCanSend: false,
+  });
   staffDiningRound.mockRejectedValueOnce(new Error("synthetic-private"));
   const denied = await submit();
   expect(denied.status).toBe(403);
