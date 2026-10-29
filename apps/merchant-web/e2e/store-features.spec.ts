@@ -154,8 +154,11 @@ test("@production the owner applies the full-service setup, turns a module back 
       },
     ],
   });
-  await page.route("**/merchant/pickup/query", (route) =>
-    pickupReadable
+  // The queue's answer can be held back, to see the confirmation while it is still read.
+  let release: (() => void) | null = null;
+  await page.route("**/merchant/pickup/query", async (route) => {
+    if (release === null) await new Promise<void>((resolve) => (release = resolve));
+    return pickupReadable
       ? route.fulfill({
           headers,
           json: {
@@ -167,8 +170,8 @@ test("@production the owner applies the full-service setup, turns a module back 
             items: [waitingItem(1), waitingItem(2)],
           },
         })
-      : route.fulfill({ headers, status: 403, json: { error: "request_denied" } }),
-  );
+      : route.fulfill({ headers, status: 403, json: { error: "request_denied" } });
+  });
   await page.goto("/app/organization/stores/" + store + "/capabilities");
   await expect(page.getByRole("heading", { name: "Store features", exact: true })).toBeVisible();
   const counter = page.getByRole("checkbox", { name: /Counter ordering/u });
@@ -191,12 +194,19 @@ test("@production the owner applies the full-service setup, turns a module back 
   // The full-service setup turns off counter ordering, guests' pickup and inventory; turning
   // pickup off is asked once more, with what to do about pickups still waiting.
   await page.getByRole("button", { name: "Use the full-service setup" }).click();
+  // v15 live check: not confirmed while the waiting orders are still being counted.
+  await expect(page.getByRole("alert")).toContainText("Checking the pickup orders still waiting…");
+  await expect(page.getByRole("button", { name: "Turn off pickup" })).toBeDisabled();
+  (release as (() => void) | null)?.();
+  release = () => undefined;
   await expect(page.getByRole("alert")).toContainText(
     "2 pickup orders are still waiting to be handed over.",
   );
+  // The Pickup page stays while they wait (v15 finding v), so it is not said to be hidden.
   await expect(page.getByRole("alert")).toContainText(
-    "Hand over any pickup orders still waiting first.",
+    "The Pickup page stays until the pickup orders still waiting are handed over, then it is hidden.",
   );
+  await expect(page.getByRole("button", { name: "Turn off pickup" })).toBeEnabled();
   await page.getByRole("button", { name: "Keep pickup" }).click();
   // The queue can't be read: no number is shown, it says so (still only a warning).
   pickupReadable = false;

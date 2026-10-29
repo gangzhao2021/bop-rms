@@ -226,15 +226,21 @@ export function StoreFeaturesPage({
           ? t(
               "Guests will no longer be able to order pickup. Pickup orders already placed are still handed over on the Pickup page.",
             )
-          : t(
-              "Guests will no longer be able to order pickup, and the Pickup page will be hidden. Hand over any pickup orders still waiting first.",
-            )}
+          : typeof waiting === "number" && waiting > 0
+            ? // v15 live check: the page stays while pickup orders wait (finding v).
+              t(
+                "Guests will no longer be able to order pickup. The Pickup page stays until the pickup orders still waiting are handed over, then it is hidden.",
+              )
+            : t(
+                "Guests will no longer be able to order pickup, and the Pickup page will be hidden. Hand over any pickup orders still waiting first.",
+              )}
       </p>
       <div className="store-features__actions">
         <button
           type="button"
           className="store-features__save"
-          disabled={busy}
+          // Asked once the waiting count is known (or known to be unreadable).
+          disabled={busy || waiting === "Reading"}
           onClick={() => {
             const action = confirming;
             setConfirming(null);

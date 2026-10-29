@@ -6315,6 +6315,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "已保存。从现在起客人和店员看到的是这些小费选项。",
   "Saved. No one is asked for a tip from now on.": "已保存。从现在起不再询问小费。",
   "Save tips": "保存小费设置",
+  "Guests will no longer be able to order pickup. The Pickup page stays until the pickup orders still waiting are handed over, then it is hidden.":
+    "客人将不能再下自取单。还在等候的自取单交付完之前，取餐页会保留，之后隐藏。",
   "Tips are turned off for this store, so nothing was sent or charged. Send it again with no tip.":
     "本店已关掉小费，所以什么都没有发送或收款。请不加小费重新发送。",
   "The store's tip choices just changed, so nothing was sent or charged. Choose the tip again and send.":
