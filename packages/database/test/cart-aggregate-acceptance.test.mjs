@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import orderingManifest from "../../rms/ordering/src/module.manifest.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -26,57 +27,12 @@ async function prove(context) {
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema = 'rms_ordering' ORDER BY table_name`,
     );
-    assert.deepEqual(tables.rows, [
-      { table_name: "additional_dining_batch_record" },
-      { table_name: "cart" },
-      { table_name: "cart_binding_record" },
-      { table_name: "cart_lifecycle_operation_record" },
-      { table_name: "cart_line" },
-      { table_name: "cart_operation_record" },
-      { table_name: "cart_quote_attachment" },
-      { table_name: "cart_quote_attachment_line" },
-      { table_name: "cart_quote_expiry_record" },
-      { table_name: "checkout_contact_redaction" },
-      { table_name: "checkout_details_record" },
-      { table_name: "checkout_session_allocation" },
-      { table_name: "checkout_session_record" },
-      { table_name: "counter_order_entry" },
-      { table_name: "digital_receipt_record" },
-      { table_name: "dining_cart_operation" },
-      { table_name: "dining_cart_replacement" },
-      { table_name: "order_acceptance_hold" },
-      { table_name: "order_acceptance_hold_resolution" },
-      { table_name: "order_acceptance_record" },
-      { table_name: "order_amendment" },
-      { table_name: "order_amendment_change" },
-      { table_name: "order_amendment_operation_record" },
-      { table_name: "order_amendment_state_record" },
-      { table_name: "order_batch" },
-      { table_name: "order_batch_checkout_cancellation" },
-      { table_name: "order_batch_checkout_expiry" },
-      { table_name: "order_cancellation_request_version" },
-      { table_name: "order_capacity_link" },
-      { table_name: "order_checkout_details_link" },
-      { table_name: "order_closure_version" },
-      { table_name: "order_fulfillment_completion_record" },
-      { table_name: "order_header" },
-      { table_name: "order_item" },
-      { table_name: "order_item_staff_cancellation" },
-      { table_name: "order_kitchen_progress_fact" },
-      { table_name: "order_number_allocation" },
-      { table_name: "order_number_counter" },
-      { table_name: "order_payment_acceptance_wait" },
-      { table_name: "order_payment_disposition_record" },
-      { table_name: "order_payment_failure_record" },
-      { table_name: "order_pickup_not_collected_fact" },
-      { table_name: "order_revision" },
-      { table_name: "order_staff_cancellation" },
-      { table_name: "order_status_projection" },
-      { table_name: "order_status_projection_generation" },
-      { table_name: "order_submission_record" },
-      { table_name: "order_termination_record" },
-      { table_name: "staff_dining_round_entry" },
-    ]);
+    // Every Ordering table, as the module owns them (module.manifest.ts, held to the
+    // migrations by the module-manifest gate): no table without an owner, none missing.
+    assert.deepEqual(
+      tables.rows.map((row) => row.table_name).sort(),
+      [...orderingManifest.ownedDatabase.tables].sort(),
+    );
     const forced = await admin.query(
       `SELECT relname, relforcerowsecurity FROM pg_class
        WHERE oid IN (

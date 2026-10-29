@@ -72,6 +72,10 @@ export async function exerciseCapturedOrderKitchen({
     "GRANT SELECT ON rms_ordering.counter_order_entry,rms_ordering.staff_dining_round_entry,rms_payment.card_machine_payment,rms_payment.card_machine_refund TO " +
       role,
   );
+  // DEC-DINE-IN-PAY-LATER: the order queue reads which rounds were sent unpaid (pilot ACL: api
+  // SELECT on order_pay_later_confirmation, docs/spec/pilot-acl-additions.json).
+  await admin.query("GRANT SELECT ON rms_ordering.order_pay_later_confirmation TO " + role);
+  await admin.query("GRANT SELECT ON rms_ordering.checkout_contact_redaction TO " + role);
   await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_eventing.consumer_inbox TO " + role);
   const record = {
     acceptanceReference: next(),
