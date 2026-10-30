@@ -1044,6 +1044,54 @@ async function journey(ending) {
           );
           // Exactly the guests are charged: nothing is added back.
           assert.deepEqual(placed, []);
+          // Staff set a tea count other than the guests, with the reason (here one more: the
+          // coordinator's v15 live check proves a lower count against real tea rounds). It is
+          // recorded with who, when and why, and the tea follows it.
+          placed.length = 0;
+          const higher = fewer + 1;
+          const counted = await tea(server, {
+            action: "SetTeaCount",
+            diningSessionReference: sessionReference,
+            operationReference: fresh(),
+            expectedVersion: 0,
+            teaQuantity: higher,
+            reason: "Other",
+          });
+          assert.deepEqual(counted.override, { teaQuantity: higher, reason: "Other", version: 1 });
+          assert.deepEqual([counted.expected, counted.guests], [higher, fewer]);
+          assert.deepEqual(
+            await rows(
+              "SELECT version,tea_quantity,reason_code,actor_id::text AS actor FROM rms_dining.dining_session_tea_override WHERE session_id=$1",
+              [sessionReference],
+            ),
+            [{ version: 1, tea_quantity: higher, reason_code: "Other", actor: id(0x700) }],
+          );
+          assert.deepEqual(
+            placed.map((command) => command.lines[0].quantity),
+            [higher - fewer],
+          );
+          // A stale tea count version is refused (another server set it first).
+          await assert.rejects(
+            tea(server, {
+              action: "SetTeaCount",
+              diningSessionReference: sessionReference,
+              operationReference: fresh(),
+              expectedVersion: 0,
+              teaQuantity: fewer,
+              reason: "GuestDeclined",
+            }),
+          );
+          await assert.rejects(
+            admin.query("UPDATE rms_dining.dining_session_tea_override SET tea_quantity=9"),
+            /append-only tea override/u,
+          );
+          // A party size recorded later: the tea follows the guests again.
+          await party(2, fewer + 2);
+          const after = await readTea();
+          assert.deepEqual(
+            [after.override, after.expected, after.guests],
+            [null, fewer + 2, fewer + 2],
+          );
           return;
         }
         // The Comped ending keeps round 2 on the bill: its one dish is comped instead (v15 case).

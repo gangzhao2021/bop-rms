@@ -1,3 +1,5 @@
+import { loadDiningTeaChargeSetting } from "@rms/dining";
+import { guestCartWithoutTea } from "./customer-cart-tea-guard.js";
 import {
   CustomerPaymentIntentHandler,
   type CustomerPaymentIntentPort,
@@ -455,10 +457,29 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
             pickup: port,
             dining: diningPort,
           });
+    // WP-2423 item 8 ⑦ 4b-3: the per-head tea is staff's (it follows the party size); a guest's
+    // phone can't add it, whatever it sends. Staff rounds use the port itself, not this route.
+    const teaTransactions = options.tipTransactions;
+    const guestPort =
+      teaTransactions === undefined
+        ? composedPort
+        : guestCartWithoutTea(composedPort, () =>
+            teaTransactions
+              .run((tx) =>
+                loadDiningTeaChargeSetting(
+                  tx as unknown as Parameters<typeof loadDiningTeaChargeSetting>[0],
+                  // The read sets only the Brand and Store context; no tenant is needed.
+                  { ...scope, tenantReference: scope.brandReference } as Parameters<
+                    typeof loadDiningTeaChargeSetting
+                  >[1],
+                ),
+              )
+              .then((setting) => setting.teaSellableReference),
+          );
     customerCart = new CustomerCartHandler({
       allowedOrigin: options.allowedOrigin,
       now,
-      port: composedPort,
+      port: guestPort,
       ...(options.cartReplacement === undefined ? {} : { replacement: options.cartReplacement }),
     });
   }

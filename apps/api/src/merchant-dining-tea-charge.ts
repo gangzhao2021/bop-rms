@@ -3,9 +3,13 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import {
   createPostgresDiningSessionReadStore,
+  diningTeaOverrideReasons,
   loadDiningPartySizes,
   loadDiningTeaChargeSetting,
+  loadDiningTeaOverride,
   parseDiningReference,
+  recordDiningTeaOverride,
+  type DiningTeaOverrideReason,
 } from "@rms/dining";
 import { listOrderSkuLines } from "@rms/ordering";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -45,8 +49,18 @@ export interface DiningTeaChargeView {
     | "Mismatch";
   /** Tea charged now (servings on the bill). */
   readonly charged: number;
-  /** Guests to charge (the party size). */
+  /** Tea to charge: the party size, or the count staff set for it (with its reason). */
   readonly expected: number | null;
+  /** The party size recorded (null: none). */
+  readonly guests: number | null;
+  /** Staff charge tea for other than the guests, and why (null: tea follows the guests). */
+  readonly override: {
+    readonly teaQuantity: number;
+    readonly reason: DiningTeaOverrideReason;
+    readonly version: number;
+  } | null;
+  /** The latest tea count version (what a new count is set against). */
+  readonly overrideVersion: number;
   /** Why it didn't match, when a step was refused. */
   readonly problem: "NeedsManager" | "Unavailable" | null;
 }
@@ -129,6 +143,12 @@ export function createMerchantDiningTeaCharge(options: {
           const party = (await loadDiningPartySizes(runner, scope, [diningSessionReference])).get(
             diningSessionReference,
           );
+          const override = await loadDiningTeaOverride(runner, scope, diningSessionReference);
+          // A count set for an earlier party size no longer holds: tea follows the guests again.
+          const holds =
+            override !== null && party !== undefined && override.partySizeVersion === party.version
+              ? override
+              : null;
           const tea = setting.teaSellableReference;
           const order =
             tea === null || bill.orderReference === null
@@ -145,7 +165,12 @@ export function createMerchantDiningTeaCharge(options: {
             orderReference: bill.orderReference,
             orderVersion: order.orderVersion,
             open: order.lines.filter((line) => !line.takenOff),
-            expected: party?.partySize ?? null,
+            guests: party?.partySize ?? null,
+            partyVersion: party?.version ?? 0,
+            override: holds,
+            overrideVersion: override?.version ?? 0,
+            expected: holds !== null ? holds.teaQuantity : (party?.partySize ?? null),
+            scope,
           });
         },
       ),
@@ -170,6 +195,16 @@ export function createMerchantDiningTeaCharge(options: {
                   : "Mismatch",
       charged,
       expected: state.expected,
+      guests: state.guests,
+      override:
+        state.override === null
+          ? null
+          : Object.freeze({
+              teaQuantity: state.override.teaQuantity,
+              reason: state.override.reason,
+              version: state.override.version,
+            }),
+      overrideVersion: state.overrideVersion,
       problem,
     });
   };
@@ -179,7 +214,12 @@ export function createMerchantDiningTeaCharge(options: {
     command: unknown;
   }): Promise<DiningTeaChargeView> => {
     await options.authentication.authorize(input);
-    let command: { action: "Read" | "Sync"; session: string; operation: string | null };
+    let command: {
+      action: "Read" | "Sync" | "SetTeaCount";
+      session: string;
+      operation: string | null;
+      count?: { expectedVersion: number; teaQuantity: number; reason: DiningTeaOverrideReason };
+    };
     try {
       const action =
         input.command !== null && typeof input.command === "object"
@@ -189,14 +229,43 @@ export function createMerchantDiningTeaCharge(options: {
         input.command,
         action === "Sync"
           ? ["action", "diningSessionReference", "operationReference"]
-          : ["action", "diningSessionReference"],
+          : action === "SetTeaCount"
+            ? [
+                "action",
+                "diningSessionReference",
+                "operationReference",
+                "expectedVersion",
+                "teaQuantity",
+                "reason",
+              ]
+            : ["action", "diningSessionReference"],
       );
-      if (raw.action !== "Read" && raw.action !== "Sync") throw new Error();
+      if (raw.action !== "Read" && raw.action !== "Sync" && raw.action !== "SetTeaCount")
+        throw new Error();
+      if (
+        raw.action === "SetTeaCount" &&
+        (!Number.isSafeInteger(raw.expectedVersion) ||
+          Number(raw.expectedVersion) < 0 ||
+          !Number.isSafeInteger(raw.teaQuantity) ||
+          Number(raw.teaQuantity) < 0 ||
+          Number(raw.teaQuantity) > 99 ||
+          !(diningTeaOverrideReasons as readonly string[]).includes(String(raw.reason)))
+      )
+        throw new Error();
       command = {
         action: raw.action,
         session: String(parseDiningReference(raw.diningSessionReference)),
         operation:
-          raw.action === "Sync" ? String(parseDiningReference(raw.operationReference)) : null,
+          raw.action === "Read" ? null : String(parseDiningReference(raw.operationReference)),
+        ...(raw.action === "SetTeaCount"
+          ? {
+              count: {
+                expectedVersion: Number(raw.expectedVersion),
+                teaQuantity: Number(raw.teaQuantity),
+                reason: raw.reason as DiningTeaOverrideReason,
+              },
+            }
+          : {}),
       };
     } catch {
       return fail("DINING_TEA_CHARGE_INPUT_INVALID");
@@ -204,6 +273,47 @@ export function createMerchantDiningTeaCharge(options: {
     try {
       let state = await read(input.sessionCookie, command.session);
       if (command.action === "Read") return viewOf(state);
+      if (command.action === "SetTeaCount") {
+        // The count is for the party size now recorded (none recorded: nothing to set it for).
+        if (state.partyVersion === 0 || state.paid || state.tea === null || !state.payLater)
+          return viewOf(state);
+        const count = command.count as NonNullable<typeof command.count>;
+        const scope = state.scope;
+        const actor = await options.persistence.transactions.run((tx) =>
+          withMerchantTransactionAuthorization(
+            {
+              transaction: tx,
+              resolve: async () => {
+                const current = await resolve(tx, input.sessionCookie, "dining.operate").catch(() =>
+                  fail("DINING_TEA_CHARGE_PERMISSION_DENIED"),
+                );
+                if ((await current.allowed()) !== true)
+                  return fail("DINING_TEA_CHARGE_PERMISSION_DENIED");
+                return current;
+              },
+              recheck: async (current) => (await current.allowed()) === true,
+              denied: () => fail("DINING_TEA_CHARGE_PERMISSION_DENIED"),
+            },
+            async (authority) =>
+              recordDiningTeaOverride(
+                tx as unknown as Parameters<typeof recordDiningTeaOverride>[0],
+                scope,
+                {
+                  diningSessionReference: command.session,
+                  operationReference: stepReference(command.operation as string, "count"),
+                  expectedVersion: count.expectedVersion,
+                  partySizeVersion: state.partyVersion,
+                  teaQuantity: count.teaQuantity,
+                  reason: count.reason,
+                  actorReference: String(authority.scope.actorReference),
+                  observedAt: new Date(Date.parse(options.now())).toISOString(),
+                },
+              ),
+          ),
+        );
+        void actor;
+        state = await read(input.sessionCookie, command.session);
+      }
       const base = command.operation as string;
       const target = state.expected;
       if (state.tea === null || !state.payLater || target === null || state.paid)
@@ -234,7 +344,8 @@ export function createMerchantDiningTeaCharge(options: {
               orderItemReferences: [line.orderItemReference],
               expectedOrderVersion: state.orderVersion,
               operationReference: stepReference(base, "remove:" + line.orderItemReference),
-              reasonCode: "GUEST_LEFT",
+              // Fewer guests: they left; a count staff set lower: at the guests' request.
+              reasonCode: state.override !== null ? "CUSTOMER_REQUEST" : "GUEST_LEFT",
             },
           }),
         );

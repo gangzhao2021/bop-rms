@@ -47,6 +47,25 @@ function firstRound(p: ReturnType<typeof payload>) {
 }
 
 describe("WP-2423 Q8 dining session client", () => {
+  it("WP-2423 item 8 ⑦ 4b-3: decodes the per-head tea on the bill, and rejects anything else", () => {
+    const base = payload() as { session: { summary: Record<string, unknown> } };
+    const withTea = structuredClone(base);
+    withTea.session.summary.teaCharge = { perGuest: cad("150"), guests: 4 };
+    expect(parseDiningSessionView(withTea).summary?.teaCharge).toEqual({
+      perGuest: cad("150"),
+      guests: 4,
+    });
+    for (const teaCharge of [
+      { perGuest: cad("150"), guests: 0 },
+      { perGuest: cad("150") },
+      { perGuest: "1.50", guests: 4 },
+    ]) {
+      const value = structuredClone(base);
+      value.session.summary.teaCharge = teaCharge;
+      expect(() => parseDiningSessionView(value)).toThrow();
+    }
+  });
+
   it("decodes the closed table view", () => {
     const view = parseDiningSessionView(payload());
     expect(view.rounds[0]?.orderedBy).toBe("You");

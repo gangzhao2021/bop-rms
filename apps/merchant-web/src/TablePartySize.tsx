@@ -14,6 +14,12 @@ export interface TablePartySizeClient {
     diningSessionReference: string,
     signal?: AbortSignal,
   ): Promise<{ askPartySize: boolean; partySize: number | null; version: number }>;
+  /** The party size of each of these tables (absent: none recorded). */
+  readMany?(
+    csrf: string,
+    diningSessionReferences: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<ReadonlyMap<string, number>>;
   record(
     csrf: string,
     command: {
@@ -86,6 +92,23 @@ export function createTablePartySizeClient(fetcher: typeof fetch = fetch): Table
         version: found === undefined ? 0 : (found.version as number),
       };
     },
+    async readMany(csrf: string, diningSessionReferences: readonly string[], signal?: AbortSignal) {
+      const raw = await post(
+        csrf,
+        { action: "Read", diningSessionReferences: [...diningSessionReferences] },
+        signal,
+      );
+      const entries = Array.isArray(raw.partySizes)
+        ? (raw.partySizes as Record<string, unknown>[])
+        : [];
+      const found = new Map<string, number>();
+      for (const entry of entries) {
+        const value = size(entry.partySize);
+        if (typeof entry.diningSessionReference === "string" && value !== null)
+          found.set(entry.diningSessionReference, value);
+      }
+      return found;
+    },
     async record(csrf: string, command: Parameters<TablePartySizeClient["record"]>[1]) {
       if (!reference.test(command.diningSessionReference))
         throw new TablePartySizeError("Unavailable");
@@ -105,12 +128,28 @@ export interface TableTeaView {
   readonly charged: number;
   readonly expected: number | null;
   readonly problem: "NeedsManager" | "Unavailable" | null;
+  /** The guests counted (the party size), when the server says. */
+  readonly guests?: number | null;
+  /** A tea count staff set for other than the guests, and why. */
+  readonly override?: {
+    readonly teaQuantity: number;
+    readonly reason: "ChildNotCharged" | "GuestDeclined" | "Other";
+  } | null;
+  readonly overrideVersion?: number;
 }
 export type TableTeaClient = (
   csrf: string,
   command:
     | { action: "Read"; diningSessionReference: string }
-    | { action: "Sync"; diningSessionReference: string; operationReference: string },
+    | { action: "Sync"; diningSessionReference: string; operationReference: string }
+    | {
+        action: "SetTeaCount";
+        diningSessionReference: string;
+        operationReference: string;
+        expectedVersion: number;
+        teaQuantity: number;
+        reason: "ChildNotCharged" | "GuestDeclined" | "Other";
+      },
 ) => Promise<TableTeaView>;
 export function createTableTeaClient(fetcher: typeof fetch = fetch): TableTeaClient {
   return async (csrf, command) => {
@@ -175,6 +214,38 @@ export function TablePartySize({
       active = false;
     };
   }, [teaClient, csrf, diningSessionReference]);
+  // Staff charge tea for other than the guests (a child not charged…), with the reason.
+  const [teaCount, setTeaCount] = useState<{
+    quantity: string;
+    reason: "ChildNotCharged" | "GuestDeclined" | "Other";
+  } | null>(null);
+  const saveTeaCount = async () => {
+    if (teaBusy || teaCount === null || tea === null) return;
+    const quantity = /^(0|[1-9][0-9]?)$/u.test(teaCount.quantity.trim())
+      ? Number(teaCount.quantity.trim())
+      : null;
+    if (quantity === null) return;
+    teaOperation.current ??= newOperationReference();
+    setTeaBusy(true);
+    try {
+      setTea(
+        await teaClient(csrf, {
+          action: "SetTeaCount",
+          diningSessionReference,
+          operationReference: teaOperation.current,
+          expectedVersion: tea.overrideVersion ?? 0,
+          teaQuantity: quantity,
+          reason: teaCount.reason,
+        }),
+      );
+      teaOperation.current = null;
+      setTeaCount(null);
+    } catch {
+      setTea((current) => (current === null ? null : { ...current, problem: "Unavailable" }));
+    } finally {
+      setTeaBusy(false);
+    }
+  };
   const syncTea = async () => {
     if (teaBusy) return;
     teaOperation.current ??= newOperationReference();
@@ -208,6 +279,14 @@ export function TablePartySize({
   const [reload, setReload] = useState(0);
   // One reference per intended number, kept until it is answered (a retry is recorded once).
   const operation = useRef<{ key: string; reference: string } | null>(null);
+  // v15 live check (4a): a table just opened asks at once, with the number keyboard up.
+  const firstAsk = useRef<HTMLInputElement>(null);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (focused.current || view === null || !view.askPartySize || view.partySize !== null) return;
+    focused.current = true;
+    firstAsk.current?.focus();
+  }, [view]);
   useEffect(() => {
     const controller = new AbortController();
     client
@@ -293,6 +372,7 @@ export function TablePartySize({
               ? t("How many guests at table {table}?", { table: tableLabel })
               : t("Number of guests")}
             <input
+              ref={view.partySize === null ? firstAsk : undefined}
               inputMode="numeric"
               autoComplete="off"
               value={draft}
@@ -355,8 +435,82 @@ export function TablePartySize({
               {teaBusy ? t("Saving…") : t("Match the tea to the guests")}
             </button>
           ) : null}
+          {tea.override ? (
+            <span className="dish-editor__note">
+              {" "}
+              {t("Tea for {count} instead of {guests} guests: {reason}", {
+                count: tea.override.teaQuantity,
+                guests: tea.guests ?? 0,
+                reason:
+                  tea.override.reason === "ChildNotCharged"
+                    ? t("child not charged")
+                    : tea.override.reason === "GuestDeclined"
+                      ? t("guest declined tea")
+                      : t("other reason"),
+              })}
+            </span>
+          ) : null}{" "}
+          {tea.status !== "Paid" && teaCount === null ? (
+            <button
+              type="button"
+              className="table-panel__text-step"
+              disabled={teaBusy || locked}
+              onClick={() =>
+                setTeaCount({
+                  quantity: String(tea.expected ?? tea.charged),
+                  reason: "ChildNotCharged",
+                })
+              }
+            >
+              {t("Change tea count")}
+            </button>
+          ) : null}
         </p>
       )}
+      {teaCount !== null && tea !== null ? (
+        <form
+          className="table-panel__tea-count"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveTeaCount();
+          }}
+        >
+          <label>
+            {t("Tea to charge")}
+            <input
+              inputMode="numeric"
+              autoComplete="off"
+              value={teaCount.quantity}
+              onChange={(event) =>
+                setTeaCount({ ...teaCount, quantity: event.currentTarget.value })
+              }
+            />
+          </label>
+          <label>
+            {t("Why")}
+            <select
+              value={teaCount.reason}
+              onChange={(event) =>
+                setTeaCount({
+                  ...teaCount,
+                  reason: event.currentTarget.value as
+                    "ChildNotCharged" | "GuestDeclined" | "Other",
+                })
+              }
+            >
+              <option value="ChildNotCharged">{t("Child not charged")}</option>
+              <option value="GuestDeclined">{t("Guest declined tea")}</option>
+              <option value="Other">{t("Other reason")}</option>
+            </select>
+          </label>
+          <button type="submit" disabled={teaBusy || locked}>
+            {teaBusy ? t("Saving…") : t("Save tea count")}
+          </button>
+          <button type="button" disabled={teaBusy} onClick={() => setTeaCount(null)}>
+            {t("Cancel")}
+          </button>
+        </form>
+      ) : null}
       {tea?.status === "Mismatch" && tea.problem === "NeedsManager" ? (
         <p role="alert">
           {t(

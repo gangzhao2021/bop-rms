@@ -6332,6 +6332,20 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Mark that item “Not prepared by the kitchen” on the menu, so it never goes to the kitchen board.":
     "请在菜单里把这一项标为“不经后厨”，这样它不会进后厨看板。",
   "Save tea charge": "保存茶位设置",
+  "Reading this table…": "正在读取这张桌…",
+  "This item uses stock (it has a recipe), so it can't be the tea charge. Choose an item without a recipe.":
+    "这一项会扣库存（有配方），不能作为茶位。请选一项没有配方的。",
+  "Tea for {count} instead of {guests} guests: {reason}":
+    "按 {count} 位收茶位（人数 {guests}）：{reason}",
+  "child not charged": "小孩不收",
+  "guest declined tea": "客人不要茶",
+  "other reason": "其他原因",
+  "Change tea count": "修改茶位数量",
+  "Tea to charge": "收几位茶位",
+  Why: "原因",
+  "Child not charged": "小孩不收",
+  "Guest declined tea": "客人不要茶",
+  "Save tea count": "保存茶位数量",
   "Tea on the bill: {charged} · guests: {expected}": "账单上的茶位：{charged} · 人数：{expected}",
   "Tea on the bill: {charged}": "账单上的茶位：{charged}",
   "Match the tea to the guests": "按人数调整茶位",

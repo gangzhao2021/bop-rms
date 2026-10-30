@@ -1475,3 +1475,34 @@ export async function recordStaffDeclaredAllergenSource(
   );
   return { status: "Applied" };
 }
+
+/**
+ * WP-2423 item 8 ⑦ 4b-3 (coordinator 2026-10-29): whether this SKU uses stock at the Store — it has
+ * a current recipe binding there (not one generated only to declare allergens). The per-head tea
+ * charge must not: taking tea off an unpaid bill would then have stock to return.
+ */
+export async function skuRecipeUsesStock(
+  tx: {
+    query(
+      sql: string,
+      values: readonly unknown[],
+    ): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+  },
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  skuReference: string,
+): Promise<boolean> {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+  if (
+    ![scope.brandReference, scope.storeReference, skuReference].every((value) => uuid.test(value))
+  )
+    throw new Error("RECIPE_USES_STOCK_INPUT_INVALID");
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    scope.brandReference,
+    scope.storeReference,
+  ]);
+  const { rows } = await tx.query(
+    "SELECT EXISTS (SELECT 1 FROM rms_recipe.recipe_scope_binding b WHERE b.brand_id=$1 AND (b.store_id=$2 OR b.store_id IS NULL) AND b.sku_id=$3 AND b.option_binding_id IS NULL AND b.effective_from<=now() AND (b.effective_until IS NULL OR b.effective_until>now()) AND NOT EXISTS (SELECT 1 FROM rms_recipe.recipe_scope_binding_end e WHERE e.brand_id=b.brand_id AND e.recipe_scope_binding_id=b.recipe_scope_binding_id) AND NOT EXISTS (SELECT 1 FROM rms_recipe.staff_declared_allergen_source s WHERE s.brand_id=b.brand_id AND s.recipe_id=b.recipe_id)) AS uses",
+    [scope.brandReference, scope.storeReference, skuReference],
+  );
+  return rows[0]?.uses === true;
+}

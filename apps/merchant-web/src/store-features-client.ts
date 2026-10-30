@@ -44,7 +44,7 @@ export const validTipTiers = (tiers: readonly number[]): boolean =>
   (tiers[0] as number) < (tiers[1] as number) &&
   (tiers[1] as number) < (tiers[2] as number);
 export class StoreFeaturesClientError extends Error {
-  constructor(readonly code: "Denied" | "Changed" | "Unavailable") {
+  constructor(readonly code: "Denied" | "Changed" | "TeaUsesStock" | "Unavailable") {
     super("store features " + code);
     this.name = "StoreFeaturesClientError";
   }
@@ -163,7 +163,10 @@ export function createStoreFeaturesClient(csrf: string, fetcher: typeof fetch = 
       return fail();
     }
     if (response.status === 403) return fail("Denied");
-    if (response.status === 409) return fail("Changed");
+    if (response.status === 409) {
+      const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      return fail(payload?.error === "store_features_tea_uses_stock" ? "TeaUsesStock" : "Changed");
+    }
     if (!response.ok) return fail();
     return parseStoreFeatures(await response.json().catch(() => null));
   };

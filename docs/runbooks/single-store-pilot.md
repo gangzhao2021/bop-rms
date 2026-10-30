@@ -654,6 +654,12 @@ system (staff cannot open this document offline).
 - **Comps and discounts**: only the incident lead (a manager) decides. Write on the slip which dish,
   comp / percent off / amount off, the reason and the manager's name. Never just leave a dish off the
   bill (AGENTS.md: no sales suppression); it is recorded in recovery step 5 before the payment.
+- **Guests and tea** (WP-2423 item 8 ⑦, when the store asks for the party size and has a tea
+  charge): write the number of guests on the table's first slip and add the tea by hand, one per
+  guest at the menu's tea price (fewer only where staff agreed, for example a child not charged:
+  write why and who agreed). It is never left off the bill. When screens come back, record the
+  number of guests on the table (the tea then follows it) or, if the tea was charged differently,
+  change the tea count on the table with the reason.
 - **The bill**: the last bill seen on `Tables` (if it was open) plus the paper rounds, at the menu
   prices including tax. The guests choose the tip (none is chosen for them).
 - **Payment**: on the store card machine as usual, or in cash (rounded to 5 cents, change given).

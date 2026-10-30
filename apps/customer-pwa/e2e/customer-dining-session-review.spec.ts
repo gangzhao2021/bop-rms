@@ -261,6 +261,26 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
   });
 
   // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): a round staff entered for the table.
+  test("WP-2423 item 8 ⑦ 4b-3: tells the table the per-head tea staff added", async ({ page }) => {
+    await enterTable(page, () => ({
+      status: 200,
+      json: {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          summary: { ...session.session.summary, teaCharge: { perGuest: cad("150"), guests: 4 } },
+        },
+      },
+    }));
+    const summary = page.getByRole("main").getByRole("region", { name: "Table total" });
+    await expect(summary.getByRole("note")).toHaveText(
+      "Tea $1.50 per person · 4 at this table (added by staff).",
+    );
+    await expectNoInternalText(page);
+    await page.setViewportSize({ width: 320, height: 844 });
+    await expectNoHorizontalOverflow(page);
+  });
+
   test("shows rounds staff entered for the table and how they are paid", async ({ page }) => {
     const [round1] = session.session.rounds;
     if (round1 === undefined) throw new Error("fixture");

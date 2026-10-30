@@ -1,4 +1,6 @@
 import type { ConsumerTransaction } from "@bop/eventing";
+import { loadDiningTeaChargeSetting } from "@rms/dining";
+import { listOrderSkuLines } from "@rms/ordering";
 import {
   GuestSessionError,
   GuestSessionService,
@@ -129,6 +131,8 @@ export interface CustomerDiningSessionFacts {
       readonly paidRoundsMinor: bigint;
     } | null;
     readonly unpaidCancellations: ReadonlySet<string>;
+    /** WP-2423 item 8 ⑦ 4b-3: the order items that are the table's per-head tea (still charged). */
+    readonly teaItems?: ReadonlySet<string>;
     readonly staffCancellations: ReadonlyMap<
       string,
       {
@@ -245,6 +249,8 @@ export interface CustomerDiningSessionView {
     readonly due: CustomerMoney;
     /** WP-2423 item 8 ④: the table pays in parts (count, how many are paid). */
     readonly splitParts?: { readonly count: number; readonly paid: number };
+    /** WP-2423 item 8 ⑦ 4b-3: the per-head tea on the bill: what one guest's tea costs, and how many. */
+    readonly teaCharge?: { readonly perGuest: CustomerMoney; readonly guests: number };
     /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment, once paid. */
     readonly tableTip?: CustomerMoney;
     readonly cashRounding?: CustomerMoney;
@@ -505,6 +511,20 @@ export function composeCustomerDiningSession(
       ...(order.splitParts == null
         ? {}
         : { splitParts: { count: order.splitParts.count, paid: order.splitParts.paid } }),
+      ...(() => {
+        const tea = order.batches
+          .flatMap((batch) => batch.items)
+          .filter((item) => order.teaItems?.has(item.orderItemReference) === true);
+        const guests = tea.reduce((sum, item) => sum + item.quantity, 0);
+        const first = tea[0];
+        if (first === undefined || guests === 0 || first.quantity < 1) return {};
+        return {
+          teaCharge: Object.freeze({
+            perGuest: money(first.lineTotal.amountMinor / BigInt(first.quantity)),
+            guests,
+          }),
+        };
+      })(),
       ...(prices === undefined
         ? {}
         : {
@@ -961,6 +981,26 @@ function postgresDependencies(
       // payment with its own tip and cash rounding, added up below).
       const [splitPlan] =
         tableStore !== null ? await tableStore.listSplitPlans(transaction, [orderReference]) : [];
+      // WP-2423 item 8 ⑦ 4b-3: the table's per-head tea (a table that pays at the end).
+      const teaSetting =
+        paymentTiming === "PayLater" && options.diningScope !== undefined
+          ? await loadDiningTeaChargeSetting(
+              transaction as unknown as Parameters<typeof loadDiningTeaChargeSetting>[0],
+              options.diningScope as Parameters<typeof loadDiningTeaChargeSetting>[1],
+            )
+          : null;
+      const teaItems = new Set(
+        teaSetting?.teaSellableReference
+          ? (
+              await listOrderSkuLines(transaction as never, options.diningScope as never, {
+                orderReference: String(orderReference),
+                sellableReference: teaSetting.teaSellableReference,
+              })
+            ).lines
+              .filter((line) => !line.takenOff)
+              .map((line) => line.orderItemReference)
+          : [],
+      );
       const splitPaid =
         splitPlan !== undefined &&
         splitPlan.mode !== "Whole" &&
@@ -1002,6 +1042,7 @@ function postgresDependencies(
           payLaterRounds,
           settledRounds,
           heldRounds,
+          ...(teaItems.size === 0 ? {} : { teaItems }),
           splitParts:
             splitPlan === undefined || splitPlan.mode === "Whole" || splitPaid
               ? null

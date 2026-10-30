@@ -150,6 +150,15 @@ export class CustomerDiningSessionHandler {
                   ...(view.summary.splitParts === undefined
                     ? {}
                     : { splitParts: view.summary.splitParts }),
+                  // WP-2423 item 8 ⑦ 4b-3: the per-head tea: one guest's tea and how many.
+                  ...(view.summary.teaCharge === undefined
+                    ? {}
+                    : {
+                        teaCharge: {
+                          perGuest: money(view.summary.teaCharge.perGuest),
+                          guests: view.summary.teaCharge.guests,
+                        },
+                      }),
                   // DEC-DINE-IN-PAY-LATER: the table's one payment's tip and cash rounding.
                   ...(view.summary.cashRounding === undefined || view.summary.tableTip === undefined
                     ? {}

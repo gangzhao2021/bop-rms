@@ -2,12 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
 import { SourceTime } from "./StoreTime.js";
-import { createCounterOrderClient, type CounterMenuItem } from "./staff-order-entry.js";
+import { createAvailabilityClient, parseStoreAvailabilityView } from "./store-availability-page.js";
 import {
   StoreFeaturesClientError,
   type StoreFeatures,
   type StoreFeaturesClient,
 } from "./store-features-client.js";
+
+/** A menu item the tea charge can be (hidden items included: tea is usually hidden). */
+export interface TeaChoice {
+  readonly sellableReference: string;
+  readonly name: string;
+}
 
 /**
  * WP-2423 item 8 ⑦ 4b-2 (Owner decision 2, coordinator 2026-10-29): the per-head tea charge. None
@@ -28,9 +34,9 @@ export function StoreTeaCharge({
   readonly client: StoreFeaturesClient;
   readonly locked: boolean;
   readonly onSaved: (next: StoreFeatures) => void;
-  readonly menu?: () => Promise<readonly CounterMenuItem[]>;
+  readonly menu?: () => Promise<readonly TeaChoice[]>;
 }) {
-  const [items, setItems] = useState<readonly CounterMenuItem[] | null>(null);
+  const [items, setItems] = useState<readonly TeaChoice[] | null>(null);
   const [menuProblem, setMenuProblem] = useState(false);
   const [chosen, setChosen] = useState<string>(view.teaCharge.teaSellableReference ?? "");
   const [busy, setBusy] = useState(false);
@@ -41,9 +47,14 @@ export function StoreTeaCharge({
     let active = true;
     const load =
       injectedMenu ??
+      // Every item the Store sells (the guest menu leaves hidden ones out, and tea is usually hidden).
       (async () =>
-        (await createCounterOrderClient(csrf).loadMenu(undefined, "DineIn")).sections.flatMap(
-          (section) => section.items,
+        parseStoreAvailabilityView(await createAvailabilityClient(csrf).load()).items.map(
+          (item) => ({
+            sellableReference: item.skuReference,
+            name:
+              item.sizeName === "" ? item.productName : `${item.productName} · ${item.sizeName}`,
+          }),
         ));
     void load()
       .then((value) => {
@@ -84,20 +95,21 @@ export function StoreTeaCharge({
       setMessage({
         tone: "alert",
         text:
-          error instanceof StoreFeaturesClientError && error.code === "Changed"
+          error instanceof StoreFeaturesClientError && error.code === "TeaUsesStock"
             ? t(
-                "Someone else changed these settings. The page now shows them; check and save again.",
+                "This item uses stock (it has a recipe), so it can't be the tea charge. Choose an item without a recipe.",
               )
-            : t("This wasn't saved. Check the connection and try again."),
+            : error instanceof StoreFeaturesClientError && error.code === "Changed"
+              ? t(
+                  "Someone else changed these settings. The page now shows them; check and save again.",
+                )
+              : t("This wasn't saved. Check the connection and try again."),
       });
     } finally {
       setBusy(false);
     }
   };
-  const named = (item: CounterMenuItem) =>
-    item.priceMinor === null
-      ? item.name
-      : `${item.name} · $${(Number(item.priceMinor) / 100).toFixed(2)}`;
+  const named = (item: TeaChoice) => item.name;
   return (
     <fieldset className="store-features__modules" disabled={busy || locked}>
       <legend>{t("Tea charge")}</legend>

@@ -1158,6 +1158,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这部手机暂时不能刷卡付款，请找店员收款。",
   "Choose a tip to pay": "请选择小费后付款",
   "Choose a tip to continue": "请选择小费后继续",
+  "Tea {price} per person · {count} at this table (added by staff).":
+    "茶位 每位 {price} · 本桌 {count} 位（由店员按人数加上）。",
   "The restaurant has just stopped taking tips. Check the bill and pay it without a tip.":
     "餐厅刚刚停止收小费。请核对账单，不加小费付款。",
   "The tip choices just changed. Choose a tip again to pay.":

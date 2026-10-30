@@ -155,52 +155,26 @@ test("@production the owner applies the full-service setup, turns a module back 
     return route.fulfill({ headers, json: current });
   });
 
-  // WP-2423 item 8 ⑦ 4b-2: the dine-in menu the tea charge item is chosen from.
-  await page.route("**/merchant/counter/menu?orderType=DineIn", (route) =>
+  // WP-2423 item 8 ⑦ 4b-2: every item the Store sells (hidden ones too); tea is chosen from it.
+  await page.route("**/merchant/commerce/availability/query", (route) =>
     route.fulfill({
       headers,
       json: {
-        screenId: "OPS-ORDER-ENTRY",
-        menu: {
-          status: "Found",
-          schemaVersion: 1,
-          projection: {},
-          scope: {},
-          menu: {
-            menuReference: id(501),
-            menuVersionReference: id(502),
-            releaseReference: id(503),
-            locale: "en-CA",
-            name: "Menu",
-            effectiveFrom: "2026-10-01T00:00:00.000Z",
-            effectiveUntil: null,
-            sections: [
-              {
-                sectionReference: id(504),
-                name: "Tea",
-                sellables: [
-                  {
-                    sellableReference: id(505),
-                    productVersionReference: id(506),
-                    name: "Tea (TEST)",
-                    presentationRole: "Hidden",
-                    pinned: false,
-                    availability: "Available",
-                    optionRules: [],
-                    allergenDisclosure: {},
-                    displayPrice: {
-                      status: "Available",
-                      amount: "1.50",
-                      currency: "CAD",
-                      reason: null,
-                    },
-                    taxDisplayContext: {},
-                  },
-                ],
-              },
-            ],
+        screenId: "CAT-AVAILABILITY",
+        sourceAsOf: "2026-10-29T15:00:00.000Z",
+        viewer: id(500),
+        timeZone: "America/Toronto",
+        permissions: { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true },
+        items: [
+          {
+            skuReference: id(505),
+            skuCode: "SKU_TEA",
+            productName: "Tea (TEST)",
+            sizeName: "",
+            status: "Available",
+            soldOutUntil: null,
           },
-        },
+        ],
       },
     }),
   );
@@ -366,7 +340,7 @@ test("@production the owner applies the full-service setup, turns a module back 
   ).toBeVisible();
   const teaItem = page.getByRole("combobox", { name: "Tea charge item" });
   await expect(teaItem).toHaveValue("");
-  await teaItem.selectOption({ label: "Tea (TEST) · $1.50" });
+  await teaItem.selectOption({ label: "Tea (TEST)" });
   await page.getByRole("button", { name: "Save tea charge" }).click();
   await expect(
     page.getByText("Saved. Tea is added for each guest from the next party size recorded."),

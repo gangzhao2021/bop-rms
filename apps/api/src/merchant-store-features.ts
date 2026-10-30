@@ -1,4 +1,5 @@
 import { readClosedRecord } from "@bop/identity";
+import { skuRecipeUsesStock } from "@rms/recipe";
 import {
   changeDiningServiceSetting,
   changeDiningTeaChargeSetting,
@@ -32,6 +33,8 @@ export type MerchantStoreFeaturesErrorCode =
   | "STORE_FEATURES_PERMISSION_DENIED"
   /** The setting changed since it was read: read it again. */
   | "STORE_FEATURES_CHANGED"
+  /** WP-2423 item 8 ⑦ 4b-3: the tea charge item uses stock (a recipe); tea must not. */
+  | "STORE_FEATURES_TEA_USES_STOCK"
   | "STORE_FEATURES_UNAVAILABLE";
 export class MerchantStoreFeaturesError extends Error {
   constructor(readonly code: MerchantStoreFeaturesErrorCode) {
@@ -352,6 +355,17 @@ export function createMerchantStoreFeatures(options: {
                 observedAt: new Date(Date.parse(options.now())).toISOString(),
               });
             let teaCharge = await loadDiningTeaChargeSetting(diningRunner, scope);
+            // Tea never uses stock: taking it off an unpaid bill would have stock to return.
+            if (
+              teaChange !== null &&
+              teaChange.teaSellableReference !== null &&
+              (await skuRecipeUsesStock(
+                tx as unknown as Parameters<typeof skuRecipeUsesStock>[0],
+                scope,
+                teaChange.teaSellableReference,
+              ))
+            )
+              return fail("STORE_FEATURES_TEA_USES_STOCK");
             if (teaChange !== null)
               teaCharge = await changeDiningTeaChargeSetting(diningRunner, scope, {
                 ...teaChange,
