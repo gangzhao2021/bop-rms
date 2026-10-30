@@ -107,6 +107,7 @@ export class CustomerDiningSessionHandler {
             cancelsAt: round.cancelsAt,
             storeCancellationReason: round.storeCancellationReason,
             ...(round.waitingReason ? { waitingReason: round.waitingReason } : {}),
+            ...(round.tea === true ? { tea: true } : {}),
             items: round.items.map((item) => ({
               displayName: item.displayName,
               quantity: item.quantity,

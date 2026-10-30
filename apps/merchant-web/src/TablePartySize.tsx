@@ -189,6 +189,7 @@ export function TablePartySize({
   locked,
   client: provided,
   tea: providedTea,
+  onRecorded,
 }: {
   readonly diningSessionReference: string;
   readonly tableLabel: string;
@@ -196,6 +197,8 @@ export function TablePartySize({
   readonly locked: boolean;
   readonly client?: TablePartySizeClient;
   readonly tea?: TableTeaClient;
+  /** v15 2026-10-29: the number just recorded, so the table list shows it without a reload. */
+  readonly onRecorded?: (partySize: number) => void;
 }) {
   const [client] = useState(() => provided ?? createTablePartySizeClient());
   const [teaClient] = useState(() => providedTea ?? createTableTeaClient());
@@ -332,6 +335,7 @@ export function TablePartySize({
       });
       operation.current = null;
       setView({ ...view, ...saved });
+      onRecorded?.(saved.partySize);
       // The tea follows the guests now counted (tables that pay at the end).
       void syncTea();
       setEditing(false);

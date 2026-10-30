@@ -133,6 +133,8 @@ export interface CustomerDiningSessionFacts {
     readonly unpaidCancellations: ReadonlySet<string>;
     /** WP-2423 item 8 ⑦ 4b-3: the order items that are the table's per-head tea (still charged). */
     readonly teaItems?: ReadonlySet<string>;
+    /** v15 2026-10-29: every order item that is the per-head tea, taken off or not. */
+    readonly teaLines?: ReadonlySet<string>;
     readonly staffCancellations: ReadonlyMap<
       string,
       {
@@ -223,6 +225,8 @@ export interface CustomerDiningSessionView {
     readonly storeCancellationReason: DiningStoreCancellationReason | null;
     /** WP-2423 item 8 ⑤: why the round waits for staff (with status WaitingForStaff). */
     readonly waitingReason?: OrderRoundHoldReason | null;
+    /** v15 2026-10-29: present (true) when the round is only the per-head tea staff added. */
+    readonly tea?: true;
     readonly items: readonly {
       readonly displayName: string;
       readonly quantity: number;
@@ -459,6 +463,9 @@ export function composeCustomerDiningSession(
       cancelsAt,
       storeCancellationReason: reason,
       waitingReason: waiting,
+      ...(batch.items.every((item) => order.teaLines?.has(item.orderItemReference) === true)
+        ? { tea: true as const }
+        : {}),
       items: Object.freeze(
         items.map((item) =>
           Object.freeze({
@@ -520,15 +527,32 @@ export function composeCustomerDiningSession(
         ? {}
         : { splitParts: { count: order.splitParts.count, paid: order.splitParts.paid } }),
       ...(() => {
+        // v15 2026-10-29: the tea still on the bill (never the lines taken off), priced before tax
+        // as the menu and the bill's item prices are; no price before tax, no note.
         const tea = order.batches
+          .filter(
+            (batch) =>
+              !order.unpaidCancellations.has(batch.orderBatchReference) &&
+              order.staffCancellations.get(batch.orderBatchReference) === undefined,
+          )
           .flatMap((batch) => batch.items)
-          .filter((item) => order.teaItems?.has(item.orderItemReference) === true);
+          .filter((item) => {
+            const phase = order.delivery.get(item.orderItemReference)?.phase;
+            return (
+              order.teaItems?.has(item.orderItemReference) === true &&
+              item.quantity > 0 &&
+              phase !== "Cancelled" &&
+              phase !== "Rejected" &&
+              itemCancellation(item.orderItemReference) === undefined
+            );
+          });
         const guests = tea.reduce((sum, item) => sum + item.quantity, 0);
-        const first = tea[0];
-        if (first === undefined || guests === 0 || first.quantity < 1) return {};
+        const priced = tea.find((item) => prices?.get(item.orderItemReference) !== undefined);
+        const before = priced === undefined ? undefined : prices?.get(priced.orderItemReference);
+        if (priced === undefined || before === undefined || guests === 0) return {};
         return {
           teaCharge: Object.freeze({
-            perGuest: money(first.lineTotal.amountMinor / BigInt(first.quantity)),
+            perGuest: money(before.subtotal.amountMinor / BigInt(priced.quantity)),
             guests,
           }),
         };
@@ -997,18 +1021,18 @@ function postgresDependencies(
               options.diningScope as Parameters<typeof loadDiningTeaChargeSetting>[1],
             )
           : null;
+      const teaSkuLines = teaSetting?.teaSellableReference
+        ? (
+            await listOrderSkuLines(transaction as never, options.diningScope as never, {
+              orderReference: String(orderReference),
+              sellableReference: teaSetting.teaSellableReference,
+            })
+          ).lines
+        : [];
       const teaItems = new Set(
-        teaSetting?.teaSellableReference
-          ? (
-              await listOrderSkuLines(transaction as never, options.diningScope as never, {
-                orderReference: String(orderReference),
-                sellableReference: teaSetting.teaSellableReference,
-              })
-            ).lines
-              .filter((line) => !line.takenOff)
-              .map((line) => line.orderItemReference)
-          : [],
+        teaSkuLines.filter((line) => !line.takenOff).map((line) => line.orderItemReference),
       );
+      const teaLines = new Set(teaSkuLines.map((line) => line.orderItemReference));
       const splitPaid =
         splitPlan !== undefined &&
         splitPlan.mode !== "Whole" &&
@@ -1051,6 +1075,7 @@ function postgresDependencies(
           settledRounds,
           heldRounds,
           ...(teaItems.size === 0 ? {} : { teaItems }),
+          ...(teaLines.size === 0 ? {} : { teaLines }),
           splitParts:
             splitPlan === undefined || splitPlan.mode === "Whole" || splitPaid
               ? null

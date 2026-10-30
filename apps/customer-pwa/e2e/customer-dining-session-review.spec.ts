@@ -300,6 +300,42 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     const main = page.getByRole("main");
     await expect(main).toContainText("Staff took this round off the bill. It is not charged.");
     await expect(main).not.toContainText("refunded");
+  });
+
+  test("v15 2026-10-29: the tea rounds staff took off show as one line", async ({ page }) => {
+    const [round1] = session.session.rounds;
+    if (round1 === undefined) throw new Error("fixture");
+    const teaRound = (roundNumber: number, taken: boolean) => ({
+      ...round1,
+      roundNumber,
+      tea: true,
+      orderedBy: "Staff",
+      status: taken ? "StoreCancelled" : "Queued",
+      payment: taken ? "NotCharged" : "OnTableBill",
+    });
+    await enterTable(page, () => ({
+      status: 200,
+      json: {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          paymentTiming: "PayLater",
+          rounds: [
+            { ...round1, payment: "OnTableBill" },
+            teaRound(2, true),
+            teaRound(3, true),
+            teaRound(4, false),
+          ],
+        },
+      },
+    }));
+    const main = page.getByRole("main");
+    await expect(main).toContainText("Tea adjusted by staff: 2 tea rounds taken off, not charged.");
+    // The rounds taken off are not listed one by one; the tea still charged is.
+    await expect(main.getByRole("article", { name: /^Round 2 /u })).toHaveCount(0);
+    await expect(main.getByRole("article", { name: /^Round 3 /u })).toHaveCount(0);
+    await expect(main.getByRole("article", { name: /^Round 4 /u })).toHaveCount(1);
+    await expect(main).not.toContainText("Staff took this round off the bill.");
     await expectNoInternalText(page);
   });
 

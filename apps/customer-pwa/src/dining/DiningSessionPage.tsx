@@ -132,6 +132,10 @@ function adjustments(total: DiningMoney, subtotal: DiningMoney, tax: DiningMoney
   return rest === 0n ? null : formatMoney(rest, total.currencyCode);
 }
 
+/** v15 2026-10-29: a tea round staff took off a table's unpaid bill (never charged). */
+const teaTakenOff = (round: DiningRound) =>
+  round.tea === true && round.status === "StoreCancelled" && round.payment === "NotCharged";
+
 function RoundNote({ round }: { readonly round: DiningRound }) {
   if (round.status === "PaymentFailed")
     return (
@@ -739,34 +743,46 @@ export function DiningSessionScreen({
       {view && view.rounds.length > 0 ? (
         <section className="order-status__batches" aria-labelledby="dining-rounds-heading">
           <h2 id="dining-rounds-heading">{t("Rounds")}</h2>
-          {view.rounds.map((round) => (
-            <RoundCard
-              key={round.roundNumber}
-              round={round}
-              menu={menu}
-              againStatus={
-                again === null
-                  ? undefined
-                  : {
-                      key: again.key,
-                      node: <OrderAgainStatus controller={orderAgain} item={again.item} />,
-                    }
-              }
-              onOrderAgain={
-                canOrderAgain
-                  ? (item, key) => {
-                      if (item.orderAgain === undefined) return;
-                      setAgain({ key, item });
-                      void orderAgain.submit(item.orderAgain.sellableReference, {
-                        quantity: 1,
-                        customerNote: null,
-                        optionSelections: item.orderAgain.optionSelections,
-                      });
-                    }
-                  : undefined
-              }
-            />
-          ))}
+          {/* v15 2026-10-29: tea rounds staff took off (the tea followed the guests) are kept on
+              the record but shown to guests as one line. */}
+          {((count) =>
+            count === 0 ? null : (
+              <p className="dining-session__tea-adjusted">
+                {t("Tea adjusted by staff: {count} tea rounds taken off, not charged.", {
+                  count: String(count),
+                })}
+              </p>
+            ))(view.rounds.filter(teaTakenOff).length)}
+          {view.rounds
+            .filter((round) => !teaTakenOff(round))
+            .map((round) => (
+              <RoundCard
+                key={round.roundNumber}
+                round={round}
+                menu={menu}
+                againStatus={
+                  again === null
+                    ? undefined
+                    : {
+                        key: again.key,
+                        node: <OrderAgainStatus controller={orderAgain} item={again.item} />,
+                      }
+                }
+                onOrderAgain={
+                  canOrderAgain
+                    ? (item, key) => {
+                        if (item.orderAgain === undefined) return;
+                        setAgain({ key, item });
+                        void orderAgain.submit(item.orderAgain.sellableReference, {
+                          quantity: 1,
+                          customerNote: null,
+                          optionSelections: item.orderAgain.optionSelections,
+                        });
+                      }
+                    : undefined
+                }
+              />
+            ))}
         </section>
       ) : null}
       {state.status === "ready" ? (

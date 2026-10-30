@@ -1140,6 +1140,9 @@ export function DiningSessionWorkspace({
               tableQrHref={tableQrHref}
               checkoutRevision={checkoutRevision}
               refreshKey={String(loadedAt.current)}
+              onPartySize={(session, size) =>
+                setPartySizes((current) => new Map(current).set(session, size))
+              }
               blockReasonCode={blockReasonCode}
               onBlockReason={setBlockReasonCode}
               onHostLocked={setHostLocked}
@@ -1214,9 +1217,12 @@ function TablePanel({
   onClosed,
   onReread,
   hostTransferDisabled,
+  onPartySize,
 }: {
   /** The Order host transfer's own retry stays pressable while it holds the page. */
   readonly hostTransferDisabled: boolean;
+  /** v15 2026-10-29: a party size just recorded, for the table list. */
+  readonly onPartySize?: (diningSessionReference: string, partySize: number) => void;
   /** Read the tables again, keeping this table's open steps (and their messages) as they are. */
   readonly onReread: () => void;
   readonly table: StaffDiningTable;
@@ -1310,6 +1316,10 @@ function TablePanel({
           tableLabel={table.stableLabel}
           csrf={csrf}
           locked={locked}
+          onRecorded={(size) => {
+            if (table.currentDiningSessionReference !== null)
+              onPartySize?.(table.currentDiningSessionReference, size);
+          }}
         />
       ) : null}
       {seated ? (

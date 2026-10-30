@@ -1253,4 +1253,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Back to your table": "回到本桌",
   "Back to the menu": "回到菜单",
   "Staff took this round off the bill. It is not charged.": "店员已从账单去掉这一轮，不收费。",
+  "Tea adjusted by staff: {count} tea rounds taken off, not charged.":
+    "茶位已由店员调整：撤下 {count} 轮茶位，不收费。",
 });

@@ -142,8 +142,12 @@ test("@production staff record how many guests sit at a table and change it", as
   await count.fill("0");
   await expect(save).toBeDisabled();
   await count.fill("4");
+  const listed = page.getByText(/ · 4 guests$/u);
+  await expect(listed).toHaveCount(0);
   await save.click();
   await expect(guests).toContainText("4 guests");
+  // v15 2026-10-29: the table list shows the number at once, without reading the page again.
+  await expect(listed).toBeVisible();
   // Saving the guests brings the tea to them: four on the bill.
   await expect(guests).toContainText("Tea on the bill: 4");
   expect(teaSent.at(-1)).toMatchObject({ action: "Sync", diningSessionReference: id(2) });

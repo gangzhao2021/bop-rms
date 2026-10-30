@@ -47,6 +47,8 @@ export interface DiningRound {
   readonly storeCancellationReason: DiningCancellationReason | null;
   /** WP-2423 item 8 ⑤: why the round waits for staff (status WaitingForStaff). */
   readonly waitingReason?: DiningWaitingReason;
+  /** v15 2026-10-29: the round is only the per-head tea staff added (absent: not). */
+  readonly tea?: true;
   readonly items: readonly {
     readonly displayName: string;
     readonly quantity: number;
@@ -247,9 +249,11 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
     const priced = value !== null && typeof value === "object" && Object.hasOwn(value, "subtotal");
     const waiting =
       value !== null && typeof value === "object" && Object.hasOwn(value, "waitingReason");
+    const tea = value !== null && typeof value === "object" && Object.hasOwn(value, "tea");
     const round = record(value, [
       ...(priced ? ["subtotal", "tax"] : []),
       ...(waiting ? ["waitingReason"] : []),
+      ...(tea ? ["tea"] : []),
       "roundNumber",
       "orderedBy",
       "submittedAt",
@@ -340,6 +344,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
             ] as const),
           }
         : {}),
+      ...(tea ? { tea: round.tea === true ? (true as const) : invalid() } : {}),
       items,
       ...(breakdown === null ? {} : breakdown),
       itemsTotal,
