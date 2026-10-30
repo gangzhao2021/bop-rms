@@ -127,6 +127,8 @@ it("manages which items a Store sells with Brand and Store authority", async () 
         sizeName: "Regular (12 oz)",
         status: "NotOffered",
         soldOutUntil: null,
+        // 6db10fc2: never offered at this Store yet ("List it" offers such a size).
+        decidedHere: false,
         stockSoldOut: null,
       });
       // Store authority never offers an item.
@@ -141,6 +143,7 @@ it("manages which items a Store sells with Brand and Store authority", async () 
       const offer = { action: "Offer", operationReference: next(), skuReference: sku };
       assert.equal((await call(offer)).item.status, "Available");
       assert.equal((await call(offer)).status, "Unchanged");
+      assert.equal((await status()).decidedHere, true);
       // WP-2423 Q17: the cook marks it sold out for the rest of today and back, and nothing else.
       scope.as(cook);
       const cookView = await availability.query({ sessionCookie: "s", csrf: "c" });
