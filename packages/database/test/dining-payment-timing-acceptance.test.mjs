@@ -4,20 +4,17 @@ import { URL } from "node:url";
 import { createHash, createHmac } from "node:crypto";
 import pg from "pg";
 import { it } from "vitest";
-import { createTaskRecord } from "../../bop/task/src/index.ts";
 import { createBrand, createStore, createTenantContext } from "../../bop/tenant/src/index.ts";
 import {
   createDiningTable,
   transitionDiningTable,
   createDiningTableService,
   createDiningSessionService,
-  createDiningClosingService,
   createPostgresDiningTableStore,
   createPostgresDiningSessionStartStore,
   createPostgresDiningJoinRegenerationStore,
   createPostgresDiningSessionJoinStore,
   createPostgresDiningSessionMoveStore,
-  createPostgresDiningClosingStore,
   createPostgresDiningPaymentTimingStore,
 } from "../../rms/dining/src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";

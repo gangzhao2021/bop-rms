@@ -1,4 +1,5 @@
-import { LanguageSwitch, t } from "./i18n/i18n.js";
+import { t } from "./i18n/i18n.js";
+import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 import { Link, useLocation } from "react-router";
 
 /**

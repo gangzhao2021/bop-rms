@@ -271,6 +271,10 @@ const dineIn = {
       // DEC-DINE-IN-PAY-LATER (rule 19): dishes that can come off / came off the unpaid bill.
       unpaidRemovableItems: [id(0x9037)],
       unpaidRemovedItems: [id(0x9038)],
+      // WP-2423 item 8 ① segment 2: comps and discounts; Orders v3: when the round was sent.
+      compableItems: [],
+      compedItems: [],
+      submittedAt: at(1),
     },
     {
       orderBatchReference: id(0x9032),
@@ -287,6 +291,10 @@ const dineIn = {
       staffRound: null,
       unpaidRemovableItems: [],
       unpaidRemovedItems: [],
+      // WP-2423 item 8 ① segment 2: comps and discounts; Orders v3: when the round was sent.
+      compableItems: [],
+      compedItems: [],
+      submittedAt: at(2),
     },
     {
       orderBatchReference: id(0x9033),
@@ -302,6 +310,10 @@ const dineIn = {
       staffRound: { recordedAfterOutage: false, paidOnCardMachine: null, amountDueMinor: "1200" },
       unpaidRemovableItems: [],
       unpaidRemovedItems: [],
+      // WP-2423 item 8 ① segment 2: comps and discounts; Orders v3: when the round was sent.
+      compableItems: [],
+      compedItems: [],
+      submittedAt: at(3),
     },
     {
       orderBatchReference: id(0x9034),
@@ -327,6 +339,10 @@ const dineIn = {
       },
       unpaidRemovableItems: [],
       unpaidRemovedItems: [],
+      // WP-2423 item 8 ① segment 2: comps and discounts; Orders v3: when the round was sent.
+      compableItems: [],
+      compedItems: [],
+      submittedAt: at(4),
     },
   ],
 } satisfies QueueItem;
@@ -390,6 +406,10 @@ const heldPickup = {
       staffRound: null,
       unpaidRemovableItems: [],
       unpaidRemovedItems: [],
+      // WP-2423 item 8 ① segment 2: comps and discounts; Orders v3: when the round was sent.
+      compableItems: [],
+      compedItems: [],
+      submittedAt: at(5),
     },
   ],
 } satisfies QueueItem;
@@ -459,6 +479,10 @@ const earlierCounterPickup = {
       staffRound: null,
       unpaidRemovableItems: [],
       unpaidRemovedItems: [],
+      // WP-2423 item 8 ① segment 2: comps and discounts; Orders v3: when the round was sent.
+      compableItems: [],
+      compedItems: [],
+      submittedAt: at(6),
     },
   ],
 } satisfies QueueItem;
@@ -496,6 +520,7 @@ const detailView = {
       discount: money("0"),
       tax: money("260"),
       fee: money("0"),
+      tip: money("0"),
       total: money("2260"),
     },
   } as Queue["lines"],
@@ -512,6 +537,7 @@ const pickupDetailView = {
       discount: money("0"),
       tax: money("130"),
       fee: money("0"),
+      tip: money("0"),
       total: money("1130"),
     },
   } as Queue["lines"],
@@ -570,6 +596,18 @@ const kitchenItem = (n: number, status: "Queued" | "Completed"): KitchenList["it
     { optionReference: id(0x630 + n), quantity: 1, localizedNames: { "en-CA": "Extra spicy" } },
   ],
   stationReference: id(0x640),
+  // WP-2423 item 8 ⑧: no kitchen section; item 8 ⑥: not a combo; item 8 ⑦: a server chased it.
+  kitchenSection: null,
+  comboParts: [
+    {
+      optionReference: id(0x650 + n),
+      nameZh: "担担面",
+      name: "Dan dan noodles",
+      done: false,
+      served: false,
+    },
+  ],
+  chase: { count: 1, lastChasedAt: at(20) },
   workItemCreatedAt: at(16),
   acceptedAt: at(16),
   orderItemReadyAt: status === "Completed" ? at(25) : null,
@@ -588,6 +626,8 @@ const kitchenItem = (n: number, status: "Queued" | "Completed"): KitchenList["it
     orderNumber: "T7-12",
     orderType: "DineIn",
     tableLabel: "T7",
+    movedFromTableLabel: null,
+    mergedFromTableLabel: null,
     enteredByStaff: false,
   },
   businessDate: "2026-10-16",
@@ -599,9 +639,25 @@ const kitchenView = {
   storeReference,
   canCloseEarlierDayTickets: true,
   // Warn before timeouts: a paid pickup nobody accepted carries its refund deadline to the kitchen.
+  // WP-2423 item 8 ⑧: the Store's kitchen sections (none named here).
+  kitchenSections: [],
   awaitingAcceptance: [
-    { orderNumber: "9", orderType: "Pickup", tableLabel: null, acceptBy: at(40) },
-    { orderNumber: "T7-13", orderType: "DineIn", tableLabel: "T7", acceptBy: null },
+    {
+      orderNumber: "9",
+      orderType: "Pickup",
+      tableLabel: null,
+      movedFromTableLabel: null,
+      mergedFromTableLabel: null,
+      acceptBy: at(40),
+    },
+    {
+      orderNumber: "T7-13",
+      orderType: "DineIn",
+      tableLabel: "T7",
+      movedFromTableLabel: null,
+      mergedFromTableLabel: null,
+      acceptBy: null,
+    },
   ],
   items: [kitchenItem(1, "Queued"), kitchenItem(2, "Completed")],
   nextCursor: null,
@@ -622,10 +678,21 @@ const tablesView = {
       lifecycle: "Published",
       operationalState: "Available",
       aggregateVersion: 3,
+      blockReasonCode: null,
       currentDiningSessionReference: id(0x511),
       elapsedMinutes: 30,
       qrCodeValidUntil: at(59),
-      session: { phase: "Active", version: 5, orderReference: dineIn.orderReference },
+      paymentTiming: "PayLater",
+      staffCall: null,
+      heldRounds: [],
+      newPhones: [],
+      session: {
+        phase: "Active",
+        version: 5,
+        orderReference: dineIn.orderReference,
+        paymentStarted: false,
+        mergedTables: [],
+      },
       guestRoundsAwaitingPayment: [
         {
           orderReference: dineIn.orderReference,
@@ -731,6 +798,8 @@ const settlementView = {
 const pickupView = {
   workstation: { deviceReference: id(0x301), pickupLocationReference: id(0x302) },
   storeReference,
+  // WP-2423 item 8 ⑦: guest pickup is on at this Store.
+  guestPickupOff: false,
   items: [
     {
       fulfillmentReference: id(0x311),

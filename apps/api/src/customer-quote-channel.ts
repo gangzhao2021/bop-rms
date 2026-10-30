@@ -70,7 +70,9 @@ export function createCustomerQuoteChannelPort(options: {
         ).quoteCart(input);
         if (
           options.tips === undefined ||
-          (result.status !== "Created" && result.status !== "Current" && result.status !== "Requoted")
+          (result.status !== "Created" &&
+            result.status !== "Current" &&
+            result.status !== "Requoted")
         )
           return result;
         const tips = await options.tips.run((tx) => readStoreTipChoices(tx, scope));
