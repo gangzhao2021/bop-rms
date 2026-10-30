@@ -83,6 +83,8 @@ const moduleManifestInput =
         "kitchen_combo_part_done",
         "kitchen_work_chase",
         "kitchen_not_prepared_product",
+        "kitchen_section_list",
+        "kitchen_product_section",
         "kitchen_batch_preparation_decision",
         "kitchen_work_lifecycle_operation",
         "kitchen_work_queue_projection",

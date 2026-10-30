@@ -23,6 +23,16 @@ import { createMerchantDiningPartySize } from "../../../apps/api/src/merchant-di
 import { createMerchantDiningTableMove } from "../../../apps/api/src/merchant-dining-table-move.ts";
 import { createMerchantDiningTableCommand } from "../../../apps/api/src/merchant-dining-table-command.ts";
 import { parseDiningJoinCapability } from "../../bop/public-capability/src/index.ts";
+import {
+  createCustomerSessionBootstrapHandler,
+  createCustomerSessionBootstrapRead,
+} from "../../../apps/api/src/customer-session-bootstrap.ts";
+import { restoreCustomerSession } from "../../../apps/customer-pwa/src/session/session-bootstrap.ts";
+import { createHttpDiningSessionClient } from "../../../apps/customer-pwa/src/dining/dining-session-client.ts";
+import {
+  getMovedTableLabel,
+  setCustomerCsrfCredential,
+} from "../../../apps/customer-pwa/src/session/customer-transaction-context.ts";
 import { createMerchantDiningTeaCharge } from "../../../apps/api/src/merchant-dining-tea-charge.ts";
 import {
   createOrderNumberAllocation,
@@ -332,7 +342,7 @@ async function journey(ending) {
           },
           at: time(-minutes(45)),
         });
-        await seedAdditionalDiningGuest({
+        const tablePhone = await seedAdditionalDiningGuest({
           client: admin,
           runner: ownerRunner,
           f: R1.f,
@@ -1232,6 +1242,103 @@ async function journey(ending) {
             ),
             { tableLabel: target === B ? "T-B" : "T-F", fromTableLabel: dining.table.stableLabel },
           );
+
+          // v15 2026-10-30: the phone that joined at the old table reloads the table page. The
+          // visit is restored first (the page's CSRF token lives in memory), which its table binding
+          // no longer allows; the restore says where the party sits now instead of "nothing to
+          // restore", and the table page says so (the real restore handler and the guest app's own
+          // restore and table clients, the phone's cookie, the pilot API role).
+          const bootstrap = createCustomerSessionBootstrapHandler({
+            allowedOrigin: "https://synthetic-journey.invalid",
+            port: createCustomerSessionBootstrapRead({
+              scope,
+              transactions: transactions(),
+              credentials: tablePhone.identity.session.credentials,
+              now: () => new Date().toISOString(),
+              // The pilot's binding: the phone's table (the one it scanned and joined at).
+              binding: (transaction) => ({
+                validate: async (session, observedAt) =>
+                  (await createDiningGuestBindingQuery({
+                    scope,
+                    now: () => observedAt,
+                    repository: createPostgresDiningGuestBindingStore(
+                      { run: (work) => work(transaction) },
+                      ownerScope,
+                    ),
+                  }).resolve({
+                    purpose: "GuestSessionBinding",
+                    diningSessionReference: session.diningSessionReference,
+                    participantReference: session.diningParticipantReference,
+                    tableReference: fromTable,
+                  }))
+                    ? "Current"
+                    : "Unavailable",
+              }),
+            }),
+          });
+          const restoreOnReload = async () => {
+            setCustomerCsrfCredential(null);
+            await restoreCustomerSession(async () => {
+              const wire = await new Promise((resolve, reject) => {
+                const headers = {};
+                const response = {
+                  statusCode: 0,
+                  setHeader: (name, value) => {
+                    headers[name.toLowerCase()] = value;
+                  },
+                  status(code) {
+                    this.statusCode = code;
+                    return this;
+                  },
+                  json(body) {
+                    resolve({
+                      status: this.statusCode,
+                      headers: { ...headers, "content-type": "application/json" },
+                      body: JSON.stringify(body),
+                    });
+                    return this;
+                  },
+                  end() {
+                    resolve({ status: this.statusCode, headers, body: null });
+                    return this;
+                  },
+                };
+                Promise.resolve(
+                  bootstrap(
+                    {
+                      get: (name) =>
+                        ({ "sec-fetch-site": "same-origin", "x-bop-session-bootstrap": "1" })[
+                          name.toLowerCase()
+                        ],
+                      query: {},
+                      body: undefined,
+                      headers: { cookie: "__Host-bop-guest=" + tablePhone.sessionCredential },
+                    },
+                    response,
+                    reject,
+                  ),
+                ).catch(reject);
+              });
+              return new globalThis.Response(wire.body, {
+                status: wire.status,
+                headers: wire.headers,
+              });
+            });
+            return createHttpDiningSessionClient(async () => {
+              throw new Error("the table page reads nothing without the visit's token");
+            })
+              .load()
+              .then(
+                () => "loaded",
+                (error) => [error.code, error.tableLabel ?? null],
+              );
+          };
+          assert.deepEqual(await restoreOnReload(), ["moved", target === B ? "T-B" : "T-F"]);
+          assert.equal(getMovedTableLabel(), target === B ? "T-B" : "T-F");
+          // A new visit (the phone scans the new table's code) forgets it.
+          setCustomerCsrfCredential("x".repeat(43));
+          assert.equal(getMovedTableLabel(), null);
+          setCustomerCsrfCredential(null);
 
           // ── Refused, with nothing recorded: a table with another party (merging is not
           // offered), one without a code, one being cleaned; and a table checking out.

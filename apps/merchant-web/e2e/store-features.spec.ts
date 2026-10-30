@@ -161,6 +161,22 @@ test("@production the owner applies the full-service setup, turns a module back 
     return route.fulfill({ headers, json: current });
   });
 
+  // WP-2423 item 8 ⑧: the kitchen sections (none yet).
+  let sections = { version: 0, sections: [] as { sectionReference: string; name: string }[] };
+  const sectionCommands: Record<string, unknown>[] = [];
+  await page.route("**/merchant/commerce/kitchen-sections/command", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    sectionCommands.push(body);
+    if (body.action === "ChangeSections") {
+      if (body.expectedVersion !== sections.version)
+        return route.fulfill({ headers, status: 409, json: { error: "kitchen_sections_changed" } });
+      sections = {
+        version: sections.version + 1,
+        sections: body.sections as { sectionReference: string; name: string }[],
+      };
+    }
+    return route.fulfill({ headers, json: { ...sections, products: [] } });
+  });
   // Fulfillment's current pickup queue (the Pickup page's read): two orders still waiting.
   let pickupReadable = true;
   const waitingItem = (n: number) => ({
@@ -340,6 +356,28 @@ test("@production the owner applies the full-service setup, turns a module back 
     expectedVersion: 0,
     teaSellableReference: id(505),
   });
+
+  // WP-2423 item 8 ⑧ (decision 5): the owner names the kitchen's sections; a name used twice is
+  // refused before anything is sent.
+  const newSection = page.getByRole("textbox", { name: "New section name" });
+  await newSection.fill("炒锅");
+  await page.getByRole("button", { name: "Add section" }).click();
+  await newSection.fill("炒锅");
+  await expect(page.getByRole("button", { name: "Add section" })).toBeDisabled();
+  await newSection.fill("蒸柜");
+  await page.getByRole("button", { name: "Add section" }).click();
+  await expect(page.getByRole("textbox", { name: "Section 2 name" })).toHaveValue("蒸柜");
+  await page.getByRole("button", { name: "Save sections" }).click();
+  await expect(page.getByText("Saved. Give each dish its section on the menu.")).toBeVisible();
+  expect(sectionCommands.at(-1)).toMatchObject({
+    action: "ChangeSections",
+    expectedVersion: 0,
+    sections: [
+      { sectionReference: expect.stringMatching(/^[0-9a-f-]{36}$/u), name: "炒锅" },
+      { sectionReference: expect.stringMatching(/^[0-9a-f-]{36}$/u), name: "蒸柜" },
+    ],
+  });
+  await expect(page.getByRole("button", { name: "Save sections" })).toBeDisabled();
 
   // WP-2423 item 8 ⑦ (decision 11): tips 10 / 15 / 18 % at first; the owner sets 12 / 18 / 20.
   const lowest = page.getByRole("textbox", { name: "Lowest tip percentage" });

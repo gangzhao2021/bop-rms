@@ -488,6 +488,18 @@ export interface MenuClient {
   oneStore?(command: SaveDishCommand | ListAllCommand | SaveComboCommand): Promise<unknown>;
   /** WP-2423 item 8 ⑥ part 4: the combos of the one-page menu. */
   combos?(): Promise<unknown>;
+  /** WP-2423 item 8 ⑧: the kitchen sections (档口) and a dish's section (read, or change one). */
+  kitchenSections?(
+    command:
+      | { readonly action: "Read"; readonly productReferences: readonly string[] }
+      | {
+          readonly action: "ChangeDish";
+          readonly productReference: string;
+          readonly operationReference: string;
+          readonly expectedVersion: number;
+          readonly sectionReference: string | null;
+        },
+  ): Promise<unknown>;
   /** WP-2423 item 8 ⑦: a dish's "not prepared by the kitchen" mark (read, or change one). */
   kitchenNotPrepared?(
     command:
@@ -845,6 +857,7 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
     combos: () => post("/merchant/commerce/one-store-combos/query", {}),
     kitchenNotPrepared: (command) =>
       post("/merchant/commerce/kitchen-not-prepared/command", command),
+    kitchenSections: (command) => post("/merchant/commerce/kitchen-sections/command", command),
     createChoiceGroup: (command) => post("/merchant/commerce/option-sets/command", command),
     guestUnreadable: async () => {
       // Each menu guests can see now; one not listed (or not readable here) is skipped.

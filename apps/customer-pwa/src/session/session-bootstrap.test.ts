@@ -6,10 +6,13 @@ import {
   getEndedVisitReceiptAccess,
   setCustomerCsrfCredential,
   setEndedVisitReceiptAccess,
+  getMovedTableLabel,
+  setMovedTableLabel,
 } from "./customer-transaction-context.js";
 afterEach(() => {
   setCustomerCsrfCredential(null);
   setEndedVisitReceiptAccess(null);
+  setMovedTableLabel(null);
 });
 const response = (
   value: unknown = { schemaVersion: 1, csrfToken: "B".repeat(43) },
@@ -227,4 +230,25 @@ it("WP-2423 (v15 3cd0f8dd M5): keeps an ended visit's receipt access apart, rest
   ).toBeNull();
   setCustomerCsrfCredential("D".repeat(43));
   expect(getEndedVisitReceiptAccess(order.orderReference, before)).toBeNull();
+});
+
+it("v15 2026-10-30: keeps where a moved party sits, restoring nothing to act with", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValue(response({ schemaVersion: 1, movedTable: { tableLabel: "DEMO-02" } }));
+  const menu = vi.fn();
+  expect(await restoreCustomerSession(fetcher, menu)).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(menu).not.toHaveBeenCalled();
+  expect(getMovedTableLabel()).toBe("DEMO-02");
+  // Joining a table (a new visit token) forgets it.
+  setCustomerCsrfCredential("D".repeat(43));
+  expect(getMovedTableLabel()).toBeNull();
+  setCustomerCsrfCredential(null);
+  // Anything but a plain table label is ignored.
+  for (const movedTable of [{ tableLabel: "<b>" }, { tableLabel: "T7", extra: 1 }, "T7", null]) {
+    fetcher.mockResolvedValue(response({ schemaVersion: 1, movedTable }));
+    expect(await restoreCustomerSession(fetcher)).toBe(false);
+    expect(getMovedTableLabel()).toBeNull();
+  }
 });

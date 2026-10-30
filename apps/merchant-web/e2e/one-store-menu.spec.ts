@@ -513,6 +513,30 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
       json: { products: products.map((productReference) => ({ productReference, ...marked })) },
     });
   });
+  // WP-2423 item 8 ⑧: the Store's kitchen sections and the dish's section.
+  const sectionCommands: Record<string, unknown>[] = [];
+  let dishSection = { sectionReference: null as string | null, version: 0 };
+  await page.route("**/merchant/commerce/kitchen-sections/command", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    sectionCommands.push(body);
+    if (body.action === "ChangeDish")
+      dishSection = { sectionReference: body.sectionReference as string | null, version: 1 };
+    const products =
+      body.action === "Read"
+        ? (body.productReferences as string[])
+        : [body.productReference as string];
+    return route.fulfill({
+      headers,
+      json: {
+        version: 1,
+        sections: [
+          { sectionReference: id(140), name: "炒锅" },
+          { sectionReference: id(141), name: "蒸柜" },
+        ],
+        products: products.map((productReference) => ({ productReference, ...dishSection })),
+      },
+    });
+  });
   await page.route("**/merchant/commerce/products/query", (route) => {
     const body = route.request().postDataJSON() as { productReference: string | null };
     const base = {
@@ -678,6 +702,17 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
     productReference: id(131),
     expectedVersion: 0,
     notPrepared: true,
+  });
+  // WP-2423 item 8 ⑧: its kitchen section, saved on its own (the Kitchen's record).
+  const kitchenSection = editor.getByRole("combobox", { name: "Kitchen section" });
+  await expect(kitchenSection).toHaveValue("");
+  await kitchenSection.selectOption({ label: "蒸柜" });
+  await expect(kitchenSection).toHaveValue(id(141));
+  expect(sectionCommands.at(-1)).toMatchObject({
+    action: "ChangeDish",
+    productReference: id(131),
+    expectedVersion: 0,
+    sectionReference: id(141),
   });
   await editor.getByRole("button", { name: "Save dish" }).click();
   await expect(

@@ -4,6 +4,7 @@ import {
   parseOrderingReference,
 } from "@rms/ordering";
 import { createPublicStoreProfileService, parseGetPublicStoreRequest } from "@rms/store";
+import { loadDiningParticipantMove } from "@rms/dining";
 import {
   createPersistentPublicStoreProfilePorts,
   type PersistentPublicStoreProfileOptions,
@@ -98,6 +99,40 @@ export function createCustomerSessionBootstrapRead(
       });
     },
     /**
+     * v15 2026-10-30: the table a dine-in guest's party sits at now, when staff moved it after this
+     * phone joined (its table binding then no longer holds, so nothing else is restored). Only the
+     * table's label: no CSRF credential and nothing the phone could act with. Null otherwise.
+     */
+    async readMovedTable(sessionCredential: string) {
+      return options.transactions.run(async (transaction) => {
+        // The guest Session alone (credential, expiry, revocation); not the table it joined at.
+        const guest = await new GuestSessionService({
+          store: createPostgresGuestSessionEntryStore(
+            { run: async (work) => work(transaction) },
+            options.scope,
+          ),
+          credentials: options.credentials,
+          binding: { validate: async () => "Current" as const },
+          now: options.now,
+          admission: { consume: async () => null },
+        }).resolve({ sessionCredential, activity: "Background" });
+        if (
+          String(guest.brandReference) !== options.scope.brandReference ||
+          String(guest.storeReference) !== options.scope.storeReference ||
+          guest.channel !== "DineIn" ||
+          guest.diningState !== "DiningBound" ||
+          guest.diningSessionReference === null ||
+          guest.diningParticipantReference === null
+        )
+          return null;
+        const moved = await loadDiningParticipantMove(transaction as never, options.scope, {
+          diningSessionReference: String(guest.diningSessionReference),
+          participantReference: String(guest.diningParticipantReference),
+        });
+        return moved === null ? null : { tableLabel: moved.tableLabel };
+      });
+    },
+    /**
      * WP-2423 (v15 3cd0f8dd M5): a visit that ended (its table closed, or it sat idle) and placed an
      * order: the CSRF credential that lets this device read that order's receipt (read only, until
      * the Session's absolute expiry) and which order it is. Nothing else is restored: no menu, cart
@@ -170,6 +205,8 @@ export function createCustomerSessionBootstrapHandler(options?: {
       order: { orderReference: string; orderNumber: string; orderType: "Pickup" | "DineIn" };
       receiptAvailableUntil: string;
     }>;
+    /** v15 2026-10-30: the table the guest's party was moved to (absent or null: not moved). */
+    readMovedTable?(sessionCredential: string): Promise<{ tableLabel: string } | null>;
   };
 }): RequestHandler {
   const origin = options && new URL(options.allowedOrigin).origin;
@@ -210,6 +247,17 @@ export function createCustomerSessionBootstrapHandler(options?: {
       reject(400);
       return;
     }
+    const readMovedTable = async (sessionCredential: string) => {
+      if (options.port.readMovedTable === undefined) return null;
+      try {
+        const moved = await options.port.readMovedTable(sessionCredential);
+        return moved !== null && /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(moved.tableLabel)
+          ? { tableLabel: moved.tableLabel }
+          : null;
+      } catch {
+        return null;
+      }
+    };
     /** The ended visit's receipt access, validated; null when there is none to give. */
     const readEndedVisit = async (sessionCredential: string) => {
       if (options.port.readEndedVisit === undefined) return null;
@@ -286,6 +334,13 @@ export function createCustomerSessionBootstrapHandler(options?: {
       // restore, exactly like a first visit: an empty 204 with no CSRF token, so the guest page
       // does not log a failed request. Every other Session failure still says so.
       if (error instanceof GuestSessionError && error.code === "GUEST_SESSION_UNAVAILABLE") {
+        // v15 2026-10-30: staff moved this guest's party; the page says where it sits now (the
+        // phone scans that table's code to join it again). Nothing to act with is issued.
+        const moved = await readMovedTable(credential);
+        if (moved !== null) {
+          response.status(200).json({ schemaVersion: 1, movedTable: moved });
+          return;
+        }
         // WP-2423 (v15 3cd0f8dd M5): a guest who left can still open their receipt here.
         const ended = await readEndedVisit(credential);
         if (ended === null) response.status(204).end();

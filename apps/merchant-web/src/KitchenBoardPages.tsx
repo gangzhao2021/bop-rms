@@ -657,6 +657,30 @@ function storeKitchenSound(on: boolean): void {
   }
 }
 
+/**
+ * WP-2423 item 8 ⑧ (Owner decision 5): the kitchen section (档口) this screen shows, kept on this
+ * device only ("All": every section; "None": dishes with no section).
+ */
+const KITCHEN_SECTION_KEY = "bop.kitchen.section";
+function storedKitchenSection(): string {
+  try {
+    return globalThis.localStorage?.getItem(KITCHEN_SECTION_KEY) ?? "All";
+  } catch {
+    return "All";
+  }
+}
+function storeKitchenSection(section: string): void {
+  try {
+    // "All" is the default: nothing is kept for it.
+    if (section === "All") globalThis.localStorage?.removeItem(KITCHEN_SECTION_KEY);
+    else globalThis.localStorage?.setItem(KITCHEN_SECTION_KEY, section);
+  } catch {
+    // Private browsing: the choice holds until this page reloads.
+  }
+}
+/** The section a work item is in: its name, or "None" for a dish with no section. */
+const sectionOf = (item: KitchenBoardItem) => item.kitchenSection ?? "None";
+
 /** WP-2423 Q33: new work, announced across the board until a cook says they saw it. */
 export function KitchenArrivals({
   view,
@@ -1344,6 +1368,7 @@ export function KitchenBoardScreen({
   const location = useLocation();
   const restored = restoredQueueScope(location.state);
   const [station, setStation] = useState(restored?.station ?? "All");
+  const [section, setSection] = useState(storedKitchenSection);
   const [status, setStatus] = useState(restored?.status ?? "Active");
   const [allergen, setAllergen] = useState(restored?.allergen ?? "All");
   const [exception, setException] = useState(restored?.exception ?? "All");
@@ -1478,8 +1503,55 @@ export function KitchenBoardScreen({
         )}
       </>
     );
+  // WP-2423 item 8 ⑧: the Store's sections in its order (a screen can be set to one before it has
+  // work), then any other a dish on the board is in (a dish with none is in "No section"); the one
+  // chosen on this device stays chosen even while it has no work.
+  const sectionNames = [
+    ...new Set([
+      ...(view.kitchenSections ?? []),
+      ...view.items
+        .flatMap((item) =>
+          item.kitchenSection === undefined || item.kitchenSection === null
+            ? []
+            : [item.kitchenSection],
+        )
+        .sort((a, b) => a.localeCompare(b)),
+    ]),
+  ];
+  const sectionFilterAvailable =
+    sectionNames.length > 0 || (section !== "All" && section !== "None");
+  const sectionChoices = [
+    ...sectionNames,
+    ...(section !== "All" && section !== "None" && !sectionNames.includes(section)
+      ? [section]
+      : []),
+  ];
+  const activeSection = sectionFilterAvailable ? section : "All";
+  const chooseSection = (value: string) => {
+    setSection(value);
+    storeKitchenSection(value);
+  };
+  // What waits in the other sections, so nothing is hidden quietly: orders (tickets) per section.
+  const otherSections =
+    activeSection === "All"
+      ? []
+      : [
+          ...searchMatches
+            .filter((item) => isActiveKitchenWork(item) && sectionOf(item) !== activeSection)
+            .reduce((found, item) => {
+              const tickets = found.get(sectionOf(item)) ?? new Set<string>();
+              tickets.add(item.ticketReference);
+              return found.set(sectionOf(item), tickets);
+            }, new Map<string, Set<string>>()),
+        ]
+          .map(([name, tickets]) => ({ name, count: tickets.size }))
+          .sort((a, b) =>
+            a.name === "None" ? 1 : b.name === "None" ? -1 : a.name.localeCompare(b.name),
+          );
+  const sectionText = (name: string) => (name === "None" ? t("No section") : name);
   const items = searchMatches.filter(
     (item) =>
+      (activeSection === "All" || sectionOf(item) === activeSection) &&
       (activeStation === "All" || item.stationLabel === activeStation) &&
       (status === "All" ||
         (status === "Active" ? isActiveKitchenWork(item) : item.status === status)) &&
@@ -1504,6 +1576,7 @@ export function KitchenBoardScreen({
   }
   const stationLanes = [...stationLaneMap.values()];
   const hasFilters =
+    activeSection !== "All" ||
     activeStation !== "All" ||
     status !== "Active" ||
     activeAllergen !== "All" ||
@@ -1579,6 +1652,31 @@ export function KitchenBoardScreen({
       role="search"
       aria-label={t("Filter Kitchen work items")}
     >
+      {sectionFilterAvailable && workspaceFrame ? (
+        // WP-2423 item 8 ⑧: the kitchen section this screen shows (kept on this device); on the
+        // kitchen display it sits in the header instead.
+        <label>
+          <span
+            className={
+              layout === "mobile" ? "kitchen-board-filter-label" : "kitchen-filter-visually-hidden"
+            }
+          >
+            {t("Kitchen section")}
+          </span>
+          <select
+            value={activeSection}
+            onChange={(event) => chooseSection(event.currentTarget.value)}
+          >
+            <option value="All">{t("All sections")}</option>
+            {sectionChoices.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+            <option value="None">{t("No section")}</option>
+          </select>
+        </label>
+      ) : null}
       {/* WP-2423: a filter is offered only when every loaded item carries that fact. */}
       {stationFilterAvailable ? (
         <label>
@@ -1659,6 +1757,7 @@ export function KitchenBoardScreen({
           type="button"
           disabled={!hasFilters}
           onClick={() => {
+            chooseSection("All");
             setStation("All");
             setStatus("Active");
             setAllergen("All");
@@ -1730,6 +1829,24 @@ export function KitchenBoardScreen({
                 onRemake={onRemake}
                 orderLabel={dayLabel}
               />
+            ) : null}
+            {sectionFilterAvailable && !workspaceFrame ? (
+              // WP-2423 item 8 ⑧: the section this kitchen screen shows, kept on this device.
+              <label className="kitchen-section-choice">
+                <span>{t("Kitchen section")}</span>
+                <select
+                  value={activeSection}
+                  onChange={(event) => chooseSection(event.currentTarget.value)}
+                >
+                  <option value="All">{t("All sections")}</option>
+                  {sectionChoices.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                  <option value="None">{t("No section")}</option>
+                </select>
+              </label>
             ) : null}
             {/* The workspace view keeps its own search row. */}
             {workspaceFrame ? null : (
@@ -1902,6 +2019,26 @@ export function KitchenBoardScreen({
               })}
             </div>
           </details>
+        ) : null}
+        {activeSection !== "All" ? (
+          // WP-2423 item 8 ⑧: this screen shows one section; the others' orders are counted here.
+          <p className="kitchen-section-others" role="status">
+            {t("Showing {section}.", { section: sectionText(activeSection) })}{" "}
+            {otherSections.length === 0
+              ? t("No orders wait in other sections.")
+              : t("Other sections: {list}.", {
+                  list: otherSections
+                    .map((entry) =>
+                      entry.count === 1
+                        ? t("{section} 1 order", { section: sectionText(entry.name) })
+                        : t("{section} {count} orders", {
+                            section: sectionText(entry.name),
+                            count: String(entry.count),
+                          }),
+                    )
+                    .join(" · "),
+                })}
+          </p>
         ) : null}
         {items.length > 0 && awaitingNotice !== null ? (
           <p className="kitchen-search-awaiting" role="status">

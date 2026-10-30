@@ -6451,4 +6451,29 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Moving…": "正在换桌…",
   Move: "换桌",
   "Move to table {table}": "换到 {table} 桌",
+  "The dish's kitchen section could not be read.": "读不到这道菜的档口。",
+  "No kitchen sections yet. Name them on Store features to show one section per kitchen screen.":
+    "还没有档口。请在“门店功能”里添加档口，后厨屏就可以只显示一个档口。",
+  "Kitchen section": "档口",
+  "No section": "未分档口",
+  "All sections": "全部档口",
+  "Showing {section}.": "正在显示 {section}。",
+  "No orders wait in other sections.": "其他档口没有待做的单。",
+  "Other sections: {list}.": "其他档口：{list}。",
+  "{section} {count} orders": "{section} {count} 单",
+  "{section} 1 order": "{section} 1 单",
+  "The kitchen sections could not be read.": "读不到档口。",
+  "Saved. Give each dish its section on the menu.": "已保存。请在菜单里给每道菜选档口。",
+  "Someone else changed the sections. They are read again: check and save again.":
+    "有人刚改了档口，已重新读取：请检查后再保存。",
+  "Kitchen sections": "档口",
+  "Name the sections of your kitchen (for example wok, steamer, roast). Give each dish its section on the menu; a kitchen screen can then show one section, and says how many orders wait in the others.":
+    "给后厨的档口起名（例如 炒锅、蒸柜、烧腊）。在菜单里给每道菜选档口；后厨屏就可以只显示一个档口，并显示其他档口还有几单。",
+  "Section {number} name": "第 {number} 个档口的名字",
+  "Remove {section}": "删除 {section}",
+  "this section": "这个档口",
+  "New section name": "新档口的名字",
+  "Each section needs its own name of up to 24 characters.":
+    "每个档口要有不重复的名字，最多 24 个字。",
+  "Save sections": "保存档口",
 });

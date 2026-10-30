@@ -16,13 +16,14 @@ async function setup(enabled = true) {
   const readEndedVisit = vi
     .fn()
     .mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  const readMovedTable = vi.fn().mockResolvedValue(null);
   const server = createServer(
     createApp(
       enabled
         ? {
             customerSessionBootstrap: createCustomerSessionBootstrapHandler({
               allowedOrigin: "https://store.example",
-              port: { read, readEndedVisit },
+              port: { read, readEndedVisit, readMovedTable },
             }),
           }
         : {},
@@ -40,6 +41,7 @@ async function setup(enabled = true) {
   return {
     read,
     readEndedVisit,
+    readMovedTable,
     request: (extra: Record<string, string> = {}, suffix = "") =>
       fetch(url + suffix, { headers: { ...headers, ...extra } }),
   };
@@ -125,6 +127,24 @@ it("WP-2423 (v15 3cd0f8dd M5): gives a visit that ended its receipt access, noth
   expect((await f.request()).status).toBe(204);
   // A visit with no order (or past the 24 h bound) has nothing to restore.
   f.readEndedVisit.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  expect((await f.request()).status).toBe(204);
+});
+it("v15 2026-10-30: tells a phone whose party staff moved where it sits now, nothing else", async () => {
+  const f = await setup();
+  f.read.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  f.readMovedTable.mockResolvedValue({ tableLabel: "DEMO-02" });
+  const r = await f.request();
+  expect(r.status).toBe(200);
+  expect(r.headers.get("cache-control")).toBe("no-store");
+  expect(r.headers.get("set-cookie")).toBeNull();
+  // No CSRF token: the phone can't act for the party until it joins the new table.
+  expect(await r.json()).toEqual({ schemaVersion: 1, movedTable: { tableLabel: "DEMO-02" } });
+  expect(f.readMovedTable).toHaveBeenCalledWith("A".repeat(43));
+  expect(f.readEndedVisit).not.toHaveBeenCalled();
+  // A label that isn't plain text, or a failed read, is nothing to restore.
+  f.readMovedTable.mockResolvedValue({ tableLabel: "<b>" });
+  expect((await f.request()).status).toBe(204);
+  f.readMovedTable.mockRejectedValue(new Error("down"));
   expect((await f.request()).status).toBe(204);
 });
 it("conceals other Session failures and fails safely without configuration", async () => {

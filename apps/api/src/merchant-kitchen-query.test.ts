@@ -110,6 +110,8 @@ it("derives current authority, preserves integer strings, and rechecks permissio
     canCloseEarlierDayTickets: false,
     // The Store's business day could not be read here: the search says nothing about acceptance.
     awaitingAcceptance: null,
+    // WP-2423 item 8 ⑧: the Store has named no kitchen sections.
+    kitchenSections: [],
     items: [
       {
         workItemReference: id(5),
@@ -121,6 +123,7 @@ it("derives current authority, preserves integer strings, and rechecks permissio
         orderLabel: null,
         businessDate: null,
         customerNote: null,
+        kitchenSection: null,
       },
     ],
   });
@@ -153,6 +156,7 @@ it("returns detail with exact version strings", async () => {
       orderLabel: null,
       businessDate: null,
       customerNote: null,
+      kitchenSection: null,
     },
   });
 });

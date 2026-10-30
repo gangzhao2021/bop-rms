@@ -9580,3 +9580,20 @@ tr[data-drop-target="true"] {
   font: inherit;
   font-weight: 600;
 }
+/* WP-2423 item 8 ⑧: the kitchen section this screen shows, in the kitchen display's header. */
+.kitchen-section-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bop-space-2);
+  max-width: 100%;
+  font-weight: 600;
+}
+.kitchen-section-choice select {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+}
+.kitchen-section-others {
+  margin: var(--bop-space-2) 0;
+  font-weight: 600;
+}

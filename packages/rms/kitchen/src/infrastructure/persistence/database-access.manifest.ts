@@ -131,6 +131,24 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "personal"],
     },
     {
+      // WP-2423 item 8 ⑧ (decision 5): the Store's kitchen sections (档口), a versioned list.
+      table: "kitchen_section_list",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 item 8 ⑧ (decision 5): the kitchen section of a dish (versioned mark).
+      table: "kitchen_product_section",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       // WP-2423 item 8 ⑦ (decision 2): a dish the kitchen does not prepare (versioned mark).
       table: "kitchen_not_prepared_product",
       classification: "append-only-record",

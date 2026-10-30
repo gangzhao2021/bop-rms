@@ -260,3 +260,90 @@ for (const screen of [
     });
   });
 }
+
+/**
+ * v15 2026-10-30: the moved party's phone, in the order things happen. It joins the table (scans
+ * T6's code), sends a round, staff move the party to T7, and the guest reloads the same table page:
+ * it says the table moved (not "join your table first"); scanning T7's code joins again and the
+ * round is there. Synthetic HTTP standing in for the server, which the database acceptance test
+ * proves (the restore of a moved phone's visit says where the party sits, nothing else).
+ */
+test.describe("@production a moved party's phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, serviceWorkers: "block" });
+  test("reloads its table page after the move and joins the new table again", async ({ page }) => {
+    const failures: string[] = [];
+    page.on("pageerror", () => failures.push("page error"));
+    const sent: { body: unknown; key: string | undefined }[] = [];
+    await stubTable(page, sent);
+    // The server's side of the story: staff moved the party; the phone joined the new table.
+    const table = { moved: false, rejoined: false };
+    const movedAway = () => table.moved && !table.rejoined;
+    const ok = (route: import("@playwright/test").Route, json: Record<string, unknown>) =>
+      route.fulfill({
+        status: 200,
+        headers: { "cache-control": "no-store" },
+        json: { operationReference: route.request().headers()["idempotency-key"], ...json },
+      });
+    // Restoring the visit on a reload (the page keeps its token in memory only).
+    await page.route("**/api/v1/customer/session/csrf", (route) =>
+      movedAway()
+        ? route.fulfill({
+            status: 200,
+            headers: { "cache-control": "no-store" },
+            json: { schemaVersion: 1, movedTable: { tableLabel: "T7" } },
+          })
+        : route.fulfill({ status: 204, headers: { "cache-control": "no-store" } }),
+    );
+    await page.route("**/bff/customer/dining/qr-join", (route) => {
+      table.rejoined = table.moved;
+      return ok(route, { status: "Joined", admissionReference: id(30) });
+    });
+    const expiresAt = new Date(Date.now() + 600_000).toISOString();
+    await page.route("**/bff/customer/dining-binding/prepare", (route) =>
+      ok(route, {
+        status: "Prepared",
+        candidateCsrfToken: "n".repeat(43),
+        recoveryProof: "r".repeat(43),
+        expiresAt,
+      }),
+    );
+    await page.route("**/bff/customer/dining-binding/activate", (route) =>
+      ok(route, { status: "Activated", csrfToken: "n".repeat(43) }),
+    );
+
+    // Joins at T6 and sends a round.
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await page.getByRole("button", { name: "Join this table", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
+    await page.evaluate(() => {
+      history.pushState(null, "", "/checkout");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await page.getByRole("button", { name: /Send to the kitchen · \$22\.60/u }).click();
+    await expect(page).toHaveURL(/\/dine-in\/session$/u);
+    await expect(page.getByText("On the table's bill").first()).toBeVisible();
+
+    // Staff move the party to T7; the guest reloads the same page.
+    table.moved = true;
+    await page.reload();
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Your table moved to table T7" })).toBeVisible();
+    await expect(main).toContainText("Scan the code on table T7");
+    await expect(main).not.toContainText("Join your table first");
+    await expectNoInternalText(page);
+
+    // Scans T7's code and joins again: the round is on the table page.
+    await page.goto("/#qr=ddd.eee.fff");
+    await page.getByRole("button", { name: "Join this table", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
+    expect(table.rejoined).toBe(true);
+    await page.evaluate(() => {
+      history.pushState(null, "", "/dine-in/session");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await expect(page.getByText("On the table's bill").first()).toBeVisible();
+    await expect(page.getByRole("main")).not.toContainText("Your table moved");
+    expect(sent).toHaveLength(1);
+    expect(failures).toEqual([]);
+  });
+});
