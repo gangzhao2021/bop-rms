@@ -65,7 +65,10 @@ Shell variables do not persist between Bash calls here, so prefix each command w
    and `customer.log`, and roll back inside the window if the cause is not a quick restart.
    - `curl -fsS http://localhost:4300/ready`
    - `curl -fsS --cacert .local/pilot-runtime/pilot-v15/customer-tls-cert.pem -H 'Host: 127.0.0.1:4443' https://127.0.0.1:4443/` and `/app`
-     (`https://localhost:4443` answers 421 by design)
+     (`https://localhost:4443` answers 421 by design) and `/menu`. In a wait loop, write the
+     options out on each curl: zsh does not split `$C="--cacert … -H …"` into words, so every curl
+     fails as an unknown option (2026-10-30). End the window only when the loop saw all 200s,
+     never just because the loop timed out.
    - `docker compose -f compose.pilot.yaml exec -T ops node tooling/environment/pilot-ops.mjs maintenance end "$PILOT_RUNTIME_DIRECTORY"`
 7. **Health:** `.local/pilot-runtime/pilot-v15/*.health.json` — 14 service files whose
    `snapshot.state` is `running`, plus `supervisor.health.json` whose `services` are all running;
