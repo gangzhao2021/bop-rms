@@ -9,7 +9,11 @@ import {
   unpaidCancelledBatches,
 } from "./CurrentOrderQueuePage.js";
 import { DiningRoundsProvider } from "./DiningRounds.js";
-import { PayLaterItemRemoveAction } from "./PayLaterItemRemoveAction.js";
+import {
+  PayLaterItemRemoveAction,
+  PayLaterRemoveRefusalNotice,
+  type PayLaterRemoveRefusal,
+} from "./PayLaterItemRemoveAction.js";
 import { compedText, ItemCompAction } from "./ItemCompAction.js";
 import { orderMoney } from "./order-money.js";
 import { useStoreBusinessDay } from "./StoreBusinessDay.js";
@@ -53,6 +57,13 @@ export function TableOrderRounds({
     | { readonly kind: "Ready"; readonly detail: CurrentOrderDetail }
   >({ kind: "Loading" });
   const [served, setServed] = useState(0);
+  // Coordinator 2026-10-30: dishes that couldn't come off the bill, to comp instead.
+  const [compRequest, setCompRequest] = useState<
+    { readonly items: readonly string[]; readonly nonce: number } | undefined
+  >(undefined);
+  const [removeRefusals, setRemoveRefusals] = useState<
+    Readonly<Record<string, PayLaterRemoveRefusal>>
+  >({});
   useEffect(() => {
     const controller = new AbortController();
     void client
@@ -112,7 +123,11 @@ export function TableOrderRounds({
         />
       </DiningRoundsProvider>
       {detail.order.batches
-        .filter((batch) => batch.unpaidRemovableItems.length > 0)
+        .filter(
+          (batch) =>
+            batch.unpaidRemovableItems.length > 0 ||
+            removeRefusals[batch.orderBatchReference] !== undefined,
+        )
         .map((batch) => (
           // DEC-DINE-IN-PAY-LATER (rule 2), item 8 ①: dishes come off the unpaid bill right here.
           <fieldset
@@ -120,12 +135,33 @@ export function TableOrderRounds({
             disabled={locked}
             className="order-cancel-actions table-order-rounds__remove"
           >
+            {removeRefusals[batch.orderBatchReference] !== undefined ? (
+              <PayLaterRemoveRefusalNotice
+                refusal={removeRefusals[batch.orderBatchReference] as PayLaterRemoveRefusal}
+                order={detail.order}
+                compInstead={(items) => setCompRequest({ items, nonce: Date.now() })}
+                refundHref={`/operations/orders/${orderReference}`}
+                onDone={() =>
+                  setRemoveRefusals((current) =>
+                    Object.fromEntries(
+                      Object.entries(current).filter(([key]) => key !== batch.orderBatchReference),
+                    ),
+                  )
+                }
+              />
+            ) : null}
             <PayLaterItemRemoveAction
               order={detail.order}
               batch={batch}
               lines={detail.lines.items}
               csrf={csrf}
               fetcher={fetcher}
+              onRefused={(refusal) =>
+                setRemoveRefusals((current) => ({
+                  ...current,
+                  [batch.orderBatchReference]: refusal,
+                }))
+              }
               onSettled={() => {
                 setServed((count) => count + 1);
                 onChanged?.();
@@ -163,6 +199,7 @@ export function TableOrderRounds({
       {detail.order.batches.some((batch) => batch.compableItems.length > 0) ? (
         <fieldset disabled={locked} className="order-cancel-actions table-order-rounds__comp">
           <ItemCompAction
+            preselect={compRequest}
             order={detail.order}
             lines={detail.lines.items}
             csrf={csrf}

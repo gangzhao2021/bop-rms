@@ -29,7 +29,11 @@ import {
   StaffItemCancelAction,
   itemCancellationStatus,
 } from "./StaffItemCancelAction.js";
-import { PayLaterItemRemoveAction } from "./PayLaterItemRemoveAction.js";
+import {
+  PayLaterItemRemoveAction,
+  PayLaterRemoveRefusalNotice,
+  type PayLaterRemoveRefusal,
+} from "./PayLaterItemRemoveAction.js";
 import { orderMoney } from "./order-money.js";
 export { orderMoney } from "./order-money.js";
 import { CardMachineRefundAction } from "./CardMachineRefundAction.js";
@@ -2294,6 +2298,10 @@ export function CurrentOrderQueuePage({
   );
   const servingOrders = useRef(new Set<string>());
   const [servingBusy, setServingBusy] = useState(false);
+  // Coordinator 2026-10-30: per round, dishes that couldn't come off the bill and what to do.
+  const [removeRefusals, setRemoveRefusals] = useState<
+    Readonly<Record<string, PayLaterRemoveRefusal>>
+  >({});
   const refreshButton = useRef<HTMLButtonElement>(null);
   const restoreFocus = useRef(false);
   const [after, setAfter] = useState<string | null>(null);
@@ -3112,6 +3120,23 @@ export function CurrentOrderQueuePage({
                         onSettled={refreshInPlace}
                       />
                     </fieldset>
+                  ) : removeRefusals[batch.orderBatchReference] !== undefined ? (
+                    <PayLaterRemoveRefusalNotice
+                      refusal={removeRefusals[batch.orderBatchReference] as PayLaterRemoveRefusal}
+                      order={order}
+                      // Comps are given on the table's page; money back on the order's page.
+                      compHref="/operations/dining"
+                      refundHref={`/operations/orders/${order.orderReference}`}
+                      onDone={() =>
+                        setRemoveRefusals((current) =>
+                          Object.fromEntries(
+                            Object.entries(current).filter(
+                              ([key]) => key !== batch.orderBatchReference,
+                            ),
+                          ),
+                        )
+                      }
+                    />
                   ) : batch.unpaidRemovableItems.length > 0 ? (
                     // DEC-DINE-IN-PAY-LATER (rule 2): dishes come off an unpaid table's bill.
                     <fieldset disabled={servingBusy} className="order-cancel-actions">
@@ -3123,6 +3148,12 @@ export function CurrentOrderQueuePage({
                           lines={detail.lines.items}
                           csrf={csrf}
                           fetcher={fetcher}
+                          onRefused={(refusal) =>
+                            setRemoveRefusals((current) => ({
+                              ...current,
+                              [batch.orderBatchReference]: refusal,
+                            }))
+                          }
                           onSettled={() => reload(after)}
                         />
                       ) : (
