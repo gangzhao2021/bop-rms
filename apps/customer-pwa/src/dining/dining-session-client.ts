@@ -5,6 +5,7 @@ import {
   getCustomerCsrfCredential,
   getMovedTableLabel,
   getMovedTableMerged,
+  getSettledTableLabel,
 } from "../session/customer-transaction-context.js";
 
 /** WP-2423 Q8 (CUST-DINE-IN-SESSION): the table's shared, read-only view for a joined guest. */
@@ -144,7 +145,9 @@ export interface DiningSessionView {
 
 /** "processing": the table's first round was just sent and its order is still being prepared. */
 /** "moved" (WP-2423 item 8 ⑧): staff moved the party to `tableLabel` after this phone joined. */
-export type DiningSessionClientErrorCode = "not-joined" | "processing" | "moved" | "unavailable";
+/** "settled": the table was closed and its bill settled while this phone's guest sat at it. */
+export type DiningSessionClientErrorCode =
+  "not-joined" | "processing" | "moved" | "settled" | "unavailable";
 export class DiningSessionClientError extends Error {
   constructor(
     readonly code: DiningSessionClientErrorCode,
@@ -465,6 +468,8 @@ export function createHttpDiningSessionClient(
     if (csrf === null || !credential.test(csrf)) {
       const moved = getMovedTableLabel();
       if (moved !== null) throw new DiningSessionClientError("moved", moved, getMovedTableMerged());
+      const settled = getSettledTableLabel();
+      if (settled !== null) throw new DiningSessionClientError("settled", settled);
       throw new DiningSessionClientError("not-joined");
     }
     let response: Response;

@@ -17,13 +17,14 @@ async function setup(enabled = true) {
     .fn()
     .mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
   const readMovedTable = vi.fn().mockResolvedValue(null);
+  const readSettledTable = vi.fn().mockResolvedValue(null);
   const server = createServer(
     createApp(
       enabled
         ? {
             customerSessionBootstrap: createCustomerSessionBootstrapHandler({
               allowedOrigin: "https://store.example",
-              port: { read, readEndedVisit, readMovedTable },
+              port: { read, readEndedVisit, readMovedTable, readSettledTable },
             }),
           }
         : {},
@@ -42,6 +43,7 @@ async function setup(enabled = true) {
     read,
     readEndedVisit,
     readMovedTable,
+    readSettledTable,
     request: (extra: Record<string, string> = {}, suffix = "") =>
       fetch(url + suffix, { headers: { ...headers, ...extra } }),
   };
@@ -145,6 +147,45 @@ it("v15 2026-10-30: tells a phone whose party staff moved where it sits now, not
   f.readMovedTable.mockResolvedValue({ tableLabel: "<b>" });
   expect((await f.request()).status).toBe(204);
   f.readMovedTable.mockRejectedValue(new Error("down"));
+  expect((await f.request()).status).toBe(204);
+});
+it("thanks a guest whose table was settled, with their receipt only when their visit placed the order", async () => {
+  const f = await setup();
+  f.read.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  f.readSettledTable.mockResolvedValue({ tableLabel: "DEMO-02" });
+  const r = await f.request();
+  expect(r.status).toBe(200);
+  expect(r.headers.get("cache-control")).toBe("no-store");
+  expect(r.headers.get("set-cookie")).toBeNull();
+  // No CSRF token at the top level: nothing to order or pay with.
+  expect(await r.json()).toEqual({ schemaVersion: 1, settledTable: { tableLabel: "DEMO-02" } });
+  expect(f.readSettledTable).toHaveBeenCalledWith("A".repeat(43));
+  const order = {
+    orderReference: "018f8a00-0000-7000-8000-000000000016",
+    orderNumber: "22",
+    orderType: "DineIn",
+  };
+  const ended = {
+    csrfToken: "C".repeat(43),
+    order,
+    receiptAvailableUntil: "2026-10-18T18:01:49.437Z",
+  };
+  f.readEndedVisit.mockResolvedValue(ended);
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    settledTable: { tableLabel: "DEMO-02" },
+    endedVisit: ended,
+  });
+  // A moved party is told where it sits (never "settled"); a bad label or failed read is ignored.
+  f.readMovedTable.mockResolvedValueOnce({ tableLabel: "DEMO-03" });
+  expect(await (await f.request()).json()).toEqual({
+    schemaVersion: 1,
+    movedTable: { tableLabel: "DEMO-03" },
+  });
+  f.readEndedVisit.mockRejectedValue(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"));
+  f.readSettledTable.mockResolvedValue({ tableLabel: "<b>" });
+  expect((await f.request()).status).toBe(204);
+  f.readSettledTable.mockRejectedValue(new Error("down"));
   expect((await f.request()).status).toBe(204);
 });
 it("conceals other Session failures and fails safely without configuration", async () => {

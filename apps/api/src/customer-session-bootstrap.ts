@@ -1,10 +1,15 @@
 import {
   createPostgresGuestCheckoutRecovery,
   findLatestGuestSessionOrder,
+  listStoreDiningSessionOrders,
   parseOrderingReference,
 } from "@rms/ordering";
 import { createPublicStoreProfileService, parseGetPublicStoreRequest } from "@rms/store";
-import { listDiningSessionMergedInto, loadDiningParticipantMove } from "@rms/dining";
+import {
+  listDiningSessionMergedInto,
+  loadDiningParticipantMove,
+  loadDiningParticipantSettledTable,
+} from "@rms/dining";
 import {
   createPersistentPublicStoreProfilePorts,
   type PersistentPublicStoreProfileOptions,
@@ -143,6 +148,59 @@ export function createCustomerSessionBootstrapRead(
       });
     },
     /**
+     * WP-2423 (coordinator 2026-10-30, Owner authorized): the table this dine-in guest sat at, when
+     * it was closed normally (its bill settled) while the guest was still at it — so a guest who
+     * paid and reloads is thanked instead of asked to join. A merged-away party is told at the
+     * table it was merged into once that one closed. Only the label; nothing the phone can act
+     * with. Null: still open, cancelled, removed by staff, never joined, or closed with no order.
+     */
+    async readSettledTable(sessionCredential: string) {
+      return options.transactions.run(async (transaction) => {
+        // The ended visit's Session (Active and within its absolute lifetime); no binding.
+        const guest = (
+          await new GuestSessionService({
+            store: createPostgresGuestSessionEntryStore(
+              { run: async (work) => work(transaction) },
+              options.scope,
+            ),
+            credentials: options.credentials,
+            binding: { validate: async () => "Current" as const },
+            now: options.now,
+            admission: { consume: async () => null },
+          }).recoverEndedVisitCsrf({ sessionCredential, observedAt: options.now() })
+        ).session;
+        if (
+          String(guest.brandReference) !== options.scope.brandReference ||
+          String(guest.storeReference) !== options.scope.storeReference ||
+          guest.channel !== "DineIn" ||
+          guest.diningState !== "DiningBound" ||
+          guest.diningSessionReference === null ||
+          guest.diningParticipantReference === null
+        )
+          return null;
+        const session = String(guest.diningSessionReference);
+        const merged = (
+          await listDiningSessionMergedInto(transaction as never, options.scope, [session])
+        ).get(session);
+        if (merged !== undefined)
+          return merged.phase === "Closed" ? { tableLabel: merged.tableLabel } : null;
+        const settled = await loadDiningParticipantSettledTable(
+          transaction as never,
+          options.scope,
+          {
+            diningSessionReference: session,
+            participantReference: String(guest.diningParticipantReference),
+          },
+        );
+        if (settled === null) return null;
+        // A party that left without ordering had nothing to settle.
+        const orders = await listStoreDiningSessionOrders(transaction as never, options.scope, [
+          session,
+        ]);
+        return orders.has(session) ? settled : null;
+      });
+    },
+    /**
      * WP-2423 (v15 3cd0f8dd M5): a visit that ended (its table closed, or it sat idle) and placed an
      * order: the CSRF credential that lets this device read that order's receipt (read only, until
      * the Session's absolute expiry) and which order it is. Nothing else is restored: no menu, cart
@@ -215,6 +273,8 @@ export function createCustomerSessionBootstrapHandler(options?: {
       order: { orderReference: string; orderNumber: string; orderType: "Pickup" | "DineIn" };
       receiptAvailableUntil: string;
     }>;
+    /** The table this guest sat at when it was closed and settled (absent or null: not so). */
+    readSettledTable?(sessionCredential: string): Promise<{ tableLabel: string } | null>;
     /** v15 2026-10-30: the table the guest's party was moved to (absent or null: not moved). */
     readMovedTable?(
       sessionCredential: string,
@@ -265,6 +325,17 @@ export function createCustomerSessionBootstrapHandler(options?: {
         const moved = await options.port.readMovedTable(sessionCredential);
         return moved !== null && /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(moved.tableLabel)
           ? { tableLabel: moved.tableLabel, ...(moved.merged === true ? { merged: true } : {}) }
+          : null;
+      } catch {
+        return null;
+      }
+    };
+    const readSettledTable = async (sessionCredential: string) => {
+      if (options.port.readSettledTable === undefined) return null;
+      try {
+        const settled = await options.port.readSettledTable(sessionCredential);
+        return settled !== null && /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(settled.tableLabel)
+          ? { tableLabel: settled.tableLabel }
           : null;
       } catch {
         return null;
@@ -355,6 +426,17 @@ export function createCustomerSessionBootstrapHandler(options?: {
         }
         // WP-2423 (v15 3cd0f8dd M5): a guest who left can still open their receipt here.
         const ended = await readEndedVisit(credential);
+        // The table was settled while this guest sat at it: thank them (with that receipt, if
+        // this visit placed the order) instead of asking them to join.
+        const settled = await readSettledTable(credential);
+        if (settled !== null) {
+          response.status(200).json({
+            schemaVersion: 1,
+            settledTable: settled,
+            ...(ended === null ? {} : { endedVisit: ended }),
+          });
+          return;
+        }
         if (ended === null) response.status(204).end();
         else response.status(200).json({ schemaVersion: 1, endedVisit: ended });
         return;

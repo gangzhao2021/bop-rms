@@ -61,6 +61,30 @@ export function getMovedTableLabel(): string | null {
   return movedTableLabel;
 }
 
+/**
+ * Coordinator 2026-10-30 (Owner authorized): the table this device's guest sat at when it was
+ * closed and its bill settled; the dine-in page thanks them instead of asking them to join.
+ * Memory only.
+ */
+let settledTableLabel: string | null = null;
+
+export function setSettledTableLabel(value: string | null): void {
+  settledTableLabel = value;
+}
+
+export function getSettledTableLabel(): string | null {
+  return settledTableLabel;
+}
+
+/** The order this device's ended dine-in visit placed (its receipt is readable), else null. */
+export function getEndedDineInOrderReference(now: number = Date.now()): string | null {
+  return endedVisitReceipt !== null &&
+    endedVisitReceipt.orderType === "DineIn" &&
+    now < Date.parse(endedVisitReceipt.receiptAvailableUntil)
+    ? endedVisitReceipt.orderReference
+    : null;
+}
+
 export function setCustomerCsrfCredential(value: string | null): void {
   csrfContext = Symbol();
   csrfCredential = value;
@@ -68,6 +92,7 @@ export function setCustomerCsrfCredential(value: string | null): void {
   if (value !== null) {
     endedVisitReceipt = null;
     movedTableLabel = null;
+    settledTableLabel = null;
   }
   paymentOperationReference = null;
   checkoutSessionReference = null;

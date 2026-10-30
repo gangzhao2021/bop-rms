@@ -4,7 +4,10 @@ import {
   DiningSessionClientError,
   parseDiningSessionView,
 } from "./dining-session-client.js";
-import { setCustomerCsrfCredential } from "../session/customer-transaction-context.js";
+import {
+  setCustomerCsrfCredential,
+  setSettledTableLabel,
+} from "../session/customer-transaction-context.js";
 
 const cad = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
 function payload() {
@@ -105,6 +108,23 @@ describe("WP-2423 Q8 dining session client", () => {
     const value = payload();
     mutate(value);
     expect(() => parseDiningSessionView(value)).toThrow(DiningSessionClientError);
+  });
+
+  it("says the table was settled for a guest whose visit ended at a settled table", async () => {
+    setCustomerCsrfCredential(null);
+    const request = vi.fn();
+    const client = createHttpDiningSessionClient(request as unknown as typeof fetch);
+    await expect(client.load()).rejects.toMatchObject({ code: "not-joined" });
+    setSettledTableLabel("DEMO-02");
+    try {
+      await expect(client.load()).rejects.toMatchObject({
+        code: "settled",
+        tableLabel: "DEMO-02",
+      });
+    } finally {
+      setSettledTableLabel(null);
+    }
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("sends only the CSRF header to the fixed route and maps refusals to not joined", async () => {

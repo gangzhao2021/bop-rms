@@ -6,6 +6,7 @@ import {
   setCheckoutSessionReference,
   setEndedVisitReceiptAccess,
   setMovedTableLabel,
+  setSettledTableLabel,
 } from "./customer-transaction-context.js";
 function menuContext(value: unknown): MenuJourneyContext | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
@@ -149,6 +150,34 @@ export async function restoreCustomerSession(
     ) {
       const ended = endedVisit(value.endedVisit);
       if (ended !== null) setEndedVisitReceiptAccess(ended);
+      return false;
+    }
+    // Coordinator 2026-10-30: the table was settled while this guest sat at it (with the ended
+    // visit's receipt access when this visit placed the order). Nothing to act with is restored.
+    if (
+      current() &&
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === ("endedVisit" in value ? 3 : 2) &&
+      "schemaVersion" in value &&
+      value.schemaVersion === 1 &&
+      "settledTable" in value
+    ) {
+      const settled = value.settledTable;
+      if (
+        settled !== null &&
+        typeof settled === "object" &&
+        !Array.isArray(settled) &&
+        Object.keys(settled).length === 1 &&
+        "tableLabel" in settled &&
+        typeof settled.tableLabel === "string" &&
+        /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(settled.tableLabel)
+      ) {
+        setSettledTableLabel(settled.tableLabel);
+        const ended = "endedVisit" in value ? endedVisit(value.endedVisit) : null;
+        if (ended !== null) setEndedVisitReceiptAccess(ended);
+      }
       return false;
     }
     // v15 2026-10-30: staff moved the party after this phone joined: only where it sits now.
