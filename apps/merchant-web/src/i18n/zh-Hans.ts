@@ -6422,4 +6422,33 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "What it is": "它是什么",
   "A dish: declare its allergens": "菜品：声明过敏原",
   "Cancelled unpaid rounds · not charged": "已取消的未付款轮次 · 不收费",
+  "Moved from table {table}": "由 {table} 桌换来",
+  "has a party (two parties can't share a table)": "有客人（不能两桌合用一张桌）",
+  "being cleaned": "待清洁",
+  "not in use": "暂停使用",
+  "no table code": "没有桌码",
+  "Moved to table {table}. Guests scan the code on table {table} to keep ordering; table {from} is marked for cleaning.":
+    "已换到 {table} 桌。客人扫 {table} 桌的桌码即可继续点单；{from} 桌已标为待清洁。",
+  "That table has a party now. Two parties can't share a table; choose a free one.":
+    "那张桌现在有客人。不能两桌合用一张桌，请选一张空桌。",
+  "That table is not free to use now (being cleaned or not in use).":
+    "那张桌现在不能用（待清洁或暂停使用）。",
+  "That table has no table code guests can scan. Choose another table.":
+    "那张桌没有客人能扫的桌码。请换一张桌。",
+  "That table seats fewer guests than this party. Choose a bigger table.":
+    "那张桌坐不下这桌客人。请换一张大一点的桌。",
+  "This table is checking out, so it stays where it is.": "这桌正在结账，不能换桌。",
+  "You don't have permission to move tables.": "你没有换桌的权限。",
+  "The tables changed meanwhile. They are read again: check and retry.":
+    "桌台刚有变化，已重新读取：请检查后再试。",
+  "The move wasn't confirmed. Check the connection and retry.":
+    "换桌没有确认成功。请检查网络后重试。",
+  "Move this party to another table": "把这桌客人换到另一张桌",
+  "Move to…": "换到…",
+  "Choose a table": "选择一张桌",
+  "{table} · seats {count}": "{table} · {count} 座",
+  "{table} — {reason}": "{table}——{reason}",
+  "Moving…": "正在换桌…",
+  Move: "换桌",
+  "Move to table {table}": "换到 {table} 桌",
 });

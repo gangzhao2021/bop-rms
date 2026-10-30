@@ -1,4 +1,4 @@
-import type { GuestSession } from "@bop/identity";
+import { GuestSessionError, type GuestSession } from "@bop/identity";
 import { OrderStatusProjectionError } from "@rms/ordering";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -361,6 +361,39 @@ describe("WP-2423 Q8 createCustomerDiningSessionRead authorization", () => {
   ])("refuses %s before any owner read", async (_name, refused) => {
     const { read, factsPort } = setup(() => refused);
     await expect(read.read(credentials)).rejects.toMatchObject({
+      code: "ORDER_STATUS_PERMISSION_DENIED",
+    });
+    expect(factsPort).not.toHaveBeenCalled();
+  });
+
+  it("WP-2423 item 8 ⑧: a phone of a party staff moved is told where the party sits now", async () => {
+    const factsPort = vi.fn<CustomerDiningSessionDependencies["facts"]>();
+    const readWith = (moved: { tableLabel: string } | null) =>
+      createCustomerDiningSessionRead(
+        {
+          scope,
+          credentials: {} as never,
+          binding: () => ({}) as never,
+          now: () => at,
+          transactions: { run: async (work) => work({} as never) },
+        },
+        () => ({
+          // The phone joined the old table: its table check fails.
+          identity: () => ({
+            authorize: async () => {
+              throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+            },
+          }),
+          facts: factsPort,
+          moved: async () => moved,
+        }),
+      ).read(credentials);
+    await expect(readWith({ tableLabel: "T7" })).rejects.toMatchObject({
+      name: "DiningTableMovedError",
+      tableLabel: "T7",
+    });
+    // Not moved: the same refusal as before, and no facts read.
+    await expect(readWith(null)).rejects.toMatchObject({
       code: "ORDER_STATUS_PERMISSION_DENIED",
     });
     expect(factsPort).not.toHaveBeenCalled();

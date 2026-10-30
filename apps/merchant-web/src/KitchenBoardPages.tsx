@@ -1080,6 +1080,12 @@ function WorkCard({
         {item.orderLabel?.enteredByStaff ? (
           <p className="kitchen-work-item__staff">{t("Entered by staff")}</p>
         ) : null}
+        {item.orderLabel?.movedFromTableLabel ? (
+          // WP-2423 item 8 ⑧: the party moved; the ticket goes to the table it sits at now.
+          <p className="kitchen-work-item__staff">
+            {t("Moved from table {table}", { table: item.orderLabel.movedFromTableLabel })}
+          </p>
+        ) : null}
         {item.customerNote ? (
           <p className="kitchen-work-item__note">
             <span>{t("Note:")}</span> {item.customerNote}

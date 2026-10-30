@@ -125,7 +125,13 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
       orderItemReference: id(8),
       stationReference: id(15),
       localizedDisplayNames: { "en-CA": "Synthetic stew" },
-      orderLabel: { orderNumber: "15", orderType: "DineIn", tableLabel: "T5" },
+      // WP-2423 item 8 ⑧: the party was moved from T3 to T5.
+      orderLabel: {
+        orderNumber: "15",
+        orderType: "DineIn",
+        tableLabel: "T5",
+        movedFromTableLabel: "T3",
+      },
       status: "In Progress",
       completedQuantity: 1,
     },
@@ -451,6 +457,8 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await orderInput.press("Enter");
   await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "Synthetic stew", exact: true })).toBeVisible();
+  // WP-2423 item 8 ⑧: the ticket goes to the party's table now and names the one it came from.
+  await expect(page.getByText("Moved from table T3")).toBeVisible();
   await page.getByRole("button", { name: "Clear search" }).click();
   // A match the filters hide is named as such, not reported missing.
   await page.getByRole("combobox", { name: "Work state", exact: true }).selectOption("Queued");

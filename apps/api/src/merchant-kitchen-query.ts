@@ -24,7 +24,7 @@ import {
   listStoreOrderBusinessDates,
   listStoreOrdersAwaitingAcceptance,
 } from "@rms/ordering";
-import { listDiningSessionTableLabels } from "@rms/dining";
+import { listDiningSessionMovedFrom, listDiningSessionTableLabels } from "@rms/dining";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
@@ -116,6 +116,8 @@ export interface KitchenOrderLabel {
   readonly orderNumber: string;
   readonly orderType: "Pickup" | "DineIn";
   readonly tableLabel: string | null;
+  /** WP-2423 item 8 ⑧ (Owner decision 3): the table the party was moved from, or null. */
+  readonly movedFromTableLabel: string | null;
   /**
    * WP-2423 Q7 slice 2: staff entered this order or round for the guests (a counter order or a
    * table round entered by staff), so the kitchen reads "Entered by staff".
@@ -226,13 +228,15 @@ export async function kitchenPreparation(
     roundBusinessDates === undefined || rounds.length === 0
       ? new Map<string, string>()
       : await roundBusinessDates(transaction, rounds);
-  const tables = await listDiningSessionTableLabels(transaction, scope, [
+  const diningSessions = [
     ...new Set(
       [...orders.values()].flatMap((order) =>
         order.diningSessionReference === null ? [] : [order.diningSessionReference],
       ),
     ),
-  ]);
+  ];
+  const tables = await listDiningSessionTableLabels(transaction, scope, diningSessions);
+  const movedFrom = await listDiningSessionMovedFrom(transaction, scope, diningSessions);
   // WP-2423 Q7 slice 2: counter orders and table rounds staff entered (Ordering's staff records).
   const staffOwners = { ...scope, authorize: async () => true };
   const counterOrders = await createPostgresCounterOrderEntryStore(staffOwners).listByOrders(
@@ -271,6 +275,10 @@ export async function kitchenPreparation(
                     order.diningSessionReference === null
                       ? null
                       : (tables.get(order.diningSessionReference) ?? null),
+                  movedFromTableLabel:
+                    order.diningSessionReference === null
+                      ? null
+                      : (movedFrom.get(order.diningSessionReference) ?? null),
                   enteredByStaff,
                 }),
         }),
@@ -313,6 +321,10 @@ export async function kitchenAwaitingAcceptance(
     sessions.length === 0
       ? new Map<string, string>()
       : await listDiningSessionTableLabels(transaction, scope, sessions);
+  const movedFrom =
+    sessions.length === 0
+      ? new Map<string, string>()
+      : await listDiningSessionMovedFrom(transaction, scope, sessions);
   return Object.freeze(
     orders.map((order) =>
       Object.freeze({
@@ -322,6 +334,10 @@ export async function kitchenAwaitingAcceptance(
           order.diningSessionReference === null
             ? null
             : (tables.get(order.diningSessionReference) ?? null),
+        movedFromTableLabel:
+          order.diningSessionReference === null
+            ? null
+            : (movedFrom.get(order.diningSessionReference) ?? null),
         acceptBy:
           order.orderType === "Pickup" ? (refundDeadlines.get(order.orderReference) ?? null) : null,
       }),

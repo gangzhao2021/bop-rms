@@ -9,6 +9,7 @@ import { DiningTableCheckoutError } from "./merchant-dining-table-checkout.js";
 import { MerchantDiningHeldRoundError } from "./merchant-dining-held-round.js";
 import { MerchantDiningChaseError } from "./merchant-dining-chase.js";
 import { MerchantDiningPartySizeError } from "./merchant-dining-party-size.js";
+import { MerchantDiningTableMoveError } from "./merchant-dining-table-move.js";
 import { MerchantDiningTeaChargeError } from "./merchant-dining-tea-charge.js";
 
 /** WP-2423: the order progress reply (exported so acceptance reads the wire form). */
@@ -197,6 +198,46 @@ export function installMerchantDiningRoutes(
       });
   });
   // WP-2423 item 8 ⑦ (decision 2): how many guests sit at the tables shown, and recording it.
+  // WP-2423 item 8 ⑧ (Owner decision 3): move a table's party to another free table.
+  router.post("/dining/table-move", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningTableMove) {
+      response.status(503).json({ error: "dining_table_move_unavailable" });
+      return;
+    }
+    void options
+      .diningTableMove({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        if (
+          !(error instanceof MerchantDiningTableMoveError) ||
+          error.code === "DINING_TABLE_MOVE_PERMISSION_DENIED"
+        ) {
+          denied(response);
+          return;
+        }
+        const status =
+          error.code === "DINING_TABLE_MOVE_INPUT_INVALID"
+            ? 400
+            : error.code === "DINING_TABLE_MOVE_UNAVAILABLE"
+              ? 503
+              : 409;
+        response
+          .status(status)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: error.code.replace(/^DINING_/u, "").toLowerCase() });
+      });
+  });
   router.post("/dining/party-size", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
       csrf = exactHeader(request, "x-bop-csrf");

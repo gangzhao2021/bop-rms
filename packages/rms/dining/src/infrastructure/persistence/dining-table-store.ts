@@ -465,3 +465,83 @@ export async function listDiningSessionTableLabels(
   }
   return labels;
 }
+
+const tableLabel = (value: unknown): string | null =>
+  typeof value === "string" && /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(value) && value.trim() === value
+    ? value
+    : null;
+
+/**
+ * WP-2423 item 8 ⑧ (Owner decision 3): for each of these sessions moved to another table, the
+ * table it was last moved from (the kitchen names it beside the current one). Sessions never moved
+ * are absent.
+ */
+export async function listDiningSessionMovedFrom(
+  transaction: DiningTableTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  sessionReferences: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  if (sessionReferences.length === 0) return new Map();
+  if (sessionReferences.length > 200) throw new Error("DINING_TABLE_INPUT_INVALID");
+  const brand = reference(scope.brandReference),
+    store = reference(scope.storeReference),
+    sessions = sessionReferences.map((value) => reference(value));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const result = (await transaction.query(
+    "SELECT DISTINCT ON (m.session_id) m.session_id::text session_id,m.record_json->'sourceTable'->>'stableLabel' label FROM rms_dining.dining_session_move_operation m " +
+      "WHERE m.brand_id=$1 AND m.store_id=$2 AND m.session_id=ANY($3::uuid[]) ORDER BY m.session_id,m.occurred_at DESC,m.operation_id DESC",
+    [brand, store, sessions],
+  )) as { rows?: unknown } | null;
+  const found = result?.rows;
+  if (!Array.isArray(found) || found.length > sessions.length)
+    throw new Error("DINING_TABLE_UNAVAILABLE");
+  const labels = new Map<string, string>();
+  for (const row of found) {
+    const value = row as { session_id?: unknown; label?: unknown };
+    const session = reference(value.session_id);
+    if (!sessions.includes(session)) throw new Error("DINING_TABLE_UNAVAILABLE");
+    const label = tableLabel(value.label);
+    if (label !== null) labels.set(session, label);
+  }
+  return labels;
+}
+
+/**
+ * WP-2423 item 8 ⑧ (Owner decision 3): when staff moved this participant's table after the
+ * participant joined it, the table the party sits at now (a phone joined at the old table is no
+ * longer the table's: the guest scans the new table's code). Null when the table was not moved
+ * since, or the party has left.
+ */
+export async function loadDiningParticipantMove(
+  transaction: DiningTableTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: { readonly diningSessionReference: string; readonly participantReference: string },
+): Promise<{ readonly tableLabel: string; readonly fromTableLabel: string } | null> {
+  const brand = reference(scope.brandReference),
+    store = reference(scope.storeReference),
+    session = reference(input.diningSessionReference),
+    participant = reference(input.participantReference);
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const result = (await transaction.query(
+    "SELECT t.table_snapshot->>'stableLabel' label,f.table_snapshot->>'stableLabel' from_label FROM rms_dining.dining_identity_admission a " +
+      "JOIN rms_dining.dining_session s ON s.tenant_id=a.tenant_id AND s.brand_id=a.brand_id AND s.store_id=a.store_id AND s.session_id=a.session_id " +
+      "JOIN rms_dining.dining_table t ON t.tenant_id=s.tenant_id AND t.brand_id=s.brand_id AND t.store_id=s.store_id AND t.table_id=s.table_id " +
+      "JOIN rms_dining.dining_table f ON f.tenant_id=a.tenant_id AND f.brand_id=a.brand_id AND f.store_id=a.store_id AND f.table_id=(a.admission_snapshot->>'tableReference')::uuid " +
+      "WHERE a.brand_id=$1 AND a.store_id=$2 AND a.session_id=$3 AND a.participant_id=$4 AND s.phase IN ('Active','Closing') " +
+      "AND f.table_id<>s.table_id AND EXISTS (SELECT 1 FROM rms_dining.dining_session_move_operation m WHERE m.tenant_id=a.tenant_id AND m.brand_id=a.brand_id AND m.store_id=a.store_id AND m.session_id=a.session_id AND m.source_table_id=f.table_id)",
+    [brand, store, session, participant],
+  )) as { rows?: unknown } | null;
+  const found = result?.rows;
+  if (!Array.isArray(found) || found.length > 1) throw new Error("DINING_TABLE_UNAVAILABLE");
+  const row = found[0] as { label?: unknown; from_label?: unknown } | undefined;
+  if (row === undefined) return null;
+  const label = tableLabel(row.label),
+    from = tableLabel(row.from_label);
+  return label === null || from === null ? null : { tableLabel: label, fromTableLabel: from };
+}

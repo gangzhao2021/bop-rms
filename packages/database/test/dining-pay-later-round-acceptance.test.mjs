@@ -9,10 +9,17 @@ import {
   changeDiningRoundHoldSetting,
   changeDiningServiceSetting,
   changeDiningTeaChargeSetting,
+  createDiningGuestBindingQuery,
+  createDiningTable,
+  createPostgresDiningGuestBindingStore,
+  listDiningSessionMovedFrom,
+  listDiningSessionTableLabels,
+  loadDiningParticipantMove,
   parseDiningSession,
   recordDiningPartySize,
 } from "../../rms/dining/src/index.ts";
 import { createMerchantDiningPartySize } from "../../../apps/api/src/merchant-dining-party-size.ts";
+import { createMerchantDiningTableMove } from "../../../apps/api/src/merchant-dining-table-move.ts";
 import { createMerchantDiningTeaCharge } from "../../../apps/api/src/merchant-dining-tea-charge.ts";
 import {
   createOrderNumberAllocation,
@@ -163,6 +170,13 @@ it("a store with tips off takes no tip from staff or guests; the table pays and 
 // may not take dishes off leaves it for a manager; none before a party size.
 it("the per-head tea charge follows a pay-later table's party size until it pays", () =>
   journey("TeaCharge"));
+// WP-2423 item 8 ⑧ (Owner decision 3): staff move the party to another free table with a code;
+// everything the party has goes with it, once (two staff at once: one move wins), the old table
+// is marked for cleaning, the kitchen names the table it came from, the old table's phones no
+// longer act for the party (and are told where it sits now); a table with a party, without a
+// code or blocked is refused, and so is a table checking out.
+it("staff move a table's party to another free table, once; the old table waits for cleaning", () =>
+  journey("Moved"));
 
 async function journey(ending) {
   await withIsolatedDatabase(
@@ -186,7 +200,9 @@ async function journey(ending) {
                         ? "wp2423_pltips"
                         : ending === "TeaCharge"
                           ? "wp2423_pltea"
-                          : "wp2423_plon",
+                          : ending === "Moved"
+                            ? "wp2423_plmove"
+                            : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -902,6 +918,271 @@ async function journey(ending) {
               )
             )[0].version,
           );
+        if (ending === "Moved") {
+          // TEST-ONLY tables beside the party's: free B and F (with codes), C without a code,
+          // D being cleaned, E with another party.
+          const fromTable = dining.table.tableReference;
+          const tableAt = (n, label, overrides = {}) =>
+            createDiningTable({
+              ...ownerScope,
+              tableReference: id(0x900 + n),
+              stableLabel: label,
+              areaReference: dining.table.areaReference,
+              areaCode: "ROOM",
+              capacity: 4,
+              accessibilityAttributes: [],
+              lifecycle: "Published",
+              qrStatus: "Active",
+              qrVersion: 1,
+              operationalState: "Available",
+              blockReasonCode: null,
+              activeDiningSessionReference: null,
+              aggregateVersion: 1,
+              createdAt: time(-minutes(60)),
+              observedAt: time(-minutes(60)),
+              ...overrides,
+            });
+          const otherParty = id(0x9e0);
+          const seeded = [
+            tableAt(1, "T-B"),
+            tableAt(2, "T-C", { qrStatus: "Inactive", qrVersion: 0 }),
+            tableAt(3, "T-D", {
+              operationalState: "TemporarilyBlocked",
+              blockReasonCode: "CLEANING",
+            }),
+            tableAt(4, "T-E", { activeDiningSessionReference: otherParty }),
+            tableAt(5, "T-F"),
+          ];
+          for (const table of seeded)
+            await admin.query(
+              "INSERT INTO rms_dining.dining_table (table_id,tenant_id,brand_id,store_id,version,table_snapshot,created_at,observed_at) VALUES ($1,$2,$3,$4,1,$5::jsonb,$6,$6)",
+              [
+                table.tableReference,
+                tenant,
+                scope.brandReference,
+                scope.storeReference,
+                JSON.stringify(table),
+                table.createdAt,
+              ],
+            );
+          const [B, C, D, E, F] = seeded.map((table) => table.tableReference);
+          await admin.query(
+            "INSERT INTO rms_dining.dining_session (session_id,tenant_id,brand_id,store_id,table_id,version,phase,session_snapshot,started_at) VALUES ($1,$2,$3,$4,$5,2,'Active',$6::jsonb,$7)",
+            [
+              otherParty,
+              tenant,
+              scope.brandReference,
+              scope.storeReference,
+              E,
+              JSON.stringify(
+                parseDiningSession({
+                  ...dining.session,
+                  diningSessionReference: otherParty,
+                  tableReference: E,
+                  hostParticipantReference: id(0x9e1),
+                }),
+              ),
+              dining.session.startedAt,
+            ],
+          );
+          const tableVersion = async (table) =>
+            Number(
+              (
+                await rows("SELECT version FROM rms_dining.dining_table WHERE table_id=$1", [table])
+              )[0].version,
+            );
+          const move = (who, operationReference, to, versions = {}) =>
+            Promise.all([tableVersion(versions.from ?? fromTable), tableVersion(to)]).then(
+              ([fromVersion, toVersion]) =>
+                createMerchantDiningTableMove({
+                  persistence: persistenceOf(who),
+                  authentication: who.authentication,
+                  newReference: fresh,
+                  retentionPolicyCode: "AUDIT_DEFAULT",
+                  retentionPolicyVersion: 1,
+                })({
+                  ...as(who),
+                  command: {
+                    action: "Move",
+                    operationReference,
+                    tableReference: versions.from ?? fromTable,
+                    expectedTableVersion: versions.fromVersion ?? fromVersion,
+                    targetTableReference: to,
+                    expectedTargetTableVersion: versions.toVersion ?? toVersion,
+                  },
+                }),
+            );
+          const partyBefore = await rows(
+            "SELECT party_size,version FROM rms_dining.dining_session_party_size WHERE session_id=$1 ORDER BY version",
+            [sessionReference],
+          );
+          const fromVersion = await tableVersion(fromTable);
+
+          // ── Two staff move the party at the same moment, to B and to F: one move wins, the
+          // other is told the tables changed (never two moves, never a party at two tables).
+          const [toB, toF] = [fresh(), fresh()];
+          const raced = await Promise.allSettled([
+            move(server, toB, B, { fromVersion }),
+            move(manager, toF, F, { fromVersion }),
+          ]);
+          const won = raced.filter((outcome) => outcome.status === "fulfilled");
+          assert.equal(won.length, 1, JSON.stringify(raced.map((outcome) => outcome.status)));
+          const lost = raced.find((outcome) => outcome.status === "rejected");
+          assert.equal(lost?.reason?.code, "DINING_TABLE_MOVE_CHANGED", String(lost?.reason));
+          const moved = won[0].value;
+          const target = moved.tableReference;
+          assert.ok(target === B || target === F);
+          const winner = target === B ? toB : toF;
+          assert.deepEqual(
+            [moved.status, moved.diningSessionReference, moved.fromTableLabel],
+            ["Applied", sessionReference, dining.table.stableLabel],
+          );
+          // The table it left is free and waits for cleaning at once (not only after a retry).
+          const leftTable = () =>
+            rows(
+              "SELECT table_snapshot->>'activeDiningSessionReference' party,table_snapshot->>'operationalState' state,table_snapshot->>'blockReasonCode' reason FROM rms_dining.dining_table WHERE table_id=$1",
+              [fromTable],
+            );
+          assert.deepEqual(await leftTable(), [
+            { party: null, state: "TemporarilyBlocked", reason: "CLEANING" },
+          ]);
+          // The same request again: the same move, nothing recorded twice.
+          const again = await move(target === B ? server : manager, winner, target, {
+            fromVersion,
+            toVersion: 1,
+          }).catch((error) => error);
+          assert.equal(again.status, "AlreadyApplied", String(again));
+          const moves = await rows(
+            "SELECT operation_id::text op,source_table_id::text src,target_table_id::text dst,record_json->'audit'->'actor'->>'reference' actor,record_json->'command'->>'expectedSourceTableVersion' sv,record_json->'session'->>'version' version FROM rms_dining.dining_session_move_operation WHERE session_id=$1",
+            [sessionReference],
+          );
+          assert.deepEqual(
+            moves.map((row) => [row.op, row.src, row.dst, row.actor, Number(row.sv)]),
+            [[winner, fromTable, target, target === B ? id(0x700) : id(0x701), fromVersion]],
+          );
+          assert.equal(
+            (
+              await rows(
+                "SELECT count(*)::int n FROM platform_audit.audit_record WHERE action_code='DINING_SESSION_MOVE_TABLE' AND target_id=$1",
+                [sessionReference],
+              )
+            )[0].n,
+            1,
+          );
+          // The party (its order, rounds, party size, tea) is the session's: it sits at the
+          // target now; the table it left is free and waits for cleaning.
+          assert.deepEqual(
+            await rows(
+              "SELECT table_id::text t,phase FROM rms_dining.dining_session WHERE session_id=$1",
+              [sessionReference],
+            ),
+            [{ t: target, phase: "Active" }],
+          );
+          assert.deepEqual(
+            await rows(
+              "SELECT table_snapshot->>'activeDiningSessionReference' party,table_snapshot->>'operationalState' state,table_snapshot->>'blockReasonCode' reason FROM rms_dining.dining_table WHERE table_id=$1",
+              [fromTable],
+            ),
+            [{ party: null, state: "TemporarilyBlocked", reason: "CLEANING" }],
+          );
+          assert.deepEqual(
+            await rows(
+              "SELECT party_size,version FROM rms_dining.dining_session_party_size WHERE session_id=$1 ORDER BY version",
+              [sessionReference],
+            ),
+            partyBefore,
+          );
+          assert.equal(
+            (
+              await rows(
+                "SELECT dining_session_id::text s FROM rms_ordering.order_header WHERE order_id=$1",
+                [orderReference],
+              )
+            )[0].s,
+            sessionReference,
+          );
+          // The kitchen names the table the party came from beside the one it sits at.
+          assert.deepEqual(
+            await transactions().run(async (tx) => [
+              ...(await listDiningSessionTableLabels(tx, scope, [sessionReference])),
+              ...(await listDiningSessionMovedFrom(tx, scope, [sessionReference])),
+            ]),
+            [
+              [sessionReference, target === B ? "T-B" : "T-F"],
+              [sessionReference, dining.table.stableLabel],
+            ],
+          );
+          // The old table's phone no longer acts for the party (it joined at the old table, and
+          // the table codes are bound to it); it is told where the party sits now.
+          const binding = (table) =>
+            transactions().run((tx) =>
+              createDiningGuestBindingQuery({
+                scope,
+                now: () => new Date().toISOString(),
+                repository: createPostgresDiningGuestBindingStore(
+                  { run: (work) => work(tx) },
+                  ownerScope,
+                ),
+              }).resolve({
+                purpose: "GuestSessionBinding",
+                diningSessionReference: sessionReference,
+                participantReference: id(0x601),
+                tableReference: table,
+              }),
+            );
+          assert.equal(await binding(fromTable), null);
+          assert.equal(await binding(target), null);
+          assert.deepEqual(
+            await transactions().run((tx) =>
+              loadDiningParticipantMove(tx, scope, {
+                diningSessionReference: sessionReference,
+                participantReference: id(0x601),
+              }),
+            ),
+            { tableLabel: target === B ? "T-B" : "T-F", fromTableLabel: dining.table.stableLabel },
+          );
+
+          // ── Refused, with nothing recorded: a table with another party (merging is not
+          // offered), one without a code, one being cleaned; and a table checking out.
+          const from = { from: target };
+          for (const [to, code] of [
+            [E, "DINING_TABLE_MOVE_TARGET_OCCUPIED"],
+            [C, "DINING_TABLE_MOVE_TARGET_NO_CODE"],
+            [D, "DINING_TABLE_MOVE_TARGET_UNAVAILABLE"],
+          ])
+            await assert.rejects(move(server, fresh(), to, from), { code });
+          assert.equal((await closing(server, "Begin")).phase, "Closing");
+          const other = target === B ? F : B;
+          await assert.rejects(move(server, fresh(), other, from), {
+            code: "DINING_TABLE_MOVE_CHECKING_OUT",
+          });
+          assert.equal(
+            (
+              await rows(
+                "SELECT count(*)::int n FROM rms_dining.dining_session_move_operation WHERE session_id=$1",
+                [sessionReference],
+              )
+            )[0].n,
+            1,
+          );
+          // The move record is append-only: the pilot role can't change it (and nothing does).
+          const changed = await transactions({ guc: true })
+            .run((tx) =>
+              tx.query(
+                "UPDATE rms_dining.dining_session_move_operation SET occurred_at=occurred_at WHERE session_id=$1",
+                [sessionReference],
+              ),
+            )
+            .then(
+              (result) => result.rowCount,
+              (error) => String(error),
+            );
+          assert.ok(
+            changed === 0 || /permission denied/u.test(String(changed)),
+            "the move record changed: " + String(changed),
+          );
+          return;
+        }
         if (ending === "TeaCharge") {
           // The tea charge is round 2's dish (a synthetic stand-in for the Store's tea item).
           const [{ sku }] = await rows(

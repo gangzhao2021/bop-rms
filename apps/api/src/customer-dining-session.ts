@@ -6,6 +6,7 @@ import { markRequestFailure } from "./request-correlation.js";
 import { customerDisplayLocale } from "./customer-display-locale.js";
 import {
   DiningOrderStillProcessingError,
+  DiningTableMovedError,
   type CustomerDiningSessionView,
   type CustomerMoney,
 } from "./customer-dining-session-read.js";
@@ -180,6 +181,19 @@ export class CustomerDiningSessionHandler {
         };
         response.status(200).json({ schemaVersion: 1, session });
       } catch (error) {
+        // WP-2423 item 8 ⑧: staff moved the party; this phone scans the new table's code.
+        if (error instanceof DiningTableMovedError) {
+          protect(response);
+          response.status(409).json({
+            schemaVersion: 1,
+            error: {
+              code: "dining_table_moved",
+              messageKey: "customer.dining.session.table_moved",
+            },
+            tableLabel: error.tableLabel,
+          });
+          return;
+        }
         // v15 2026-10-27: the first round's Order is still being prepared — read again shortly.
         if (error instanceof DiningOrderStillProcessingError) {
           protect(response);

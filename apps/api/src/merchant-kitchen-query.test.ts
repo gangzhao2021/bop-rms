@@ -262,7 +262,7 @@ it("WP-2423 Q3: serves the published menu disclosure per work item and restores 
             ],
             rowCount: 1,
           }
-        : sql.includes("FROM rms_dining.dining_session")
+        : sql.includes("FROM rms_dining.dining_session s")
           ? { rows: [{ session_id: id(40), label: "T4" }], rowCount: 1 }
           : sql.includes("published_menu_projection_sellable")
             ? {
@@ -286,6 +286,8 @@ it("WP-2423 Q3: serves the published menu disclosure per work item and restores 
     orderNumber: "14",
     orderType: "DineIn",
     tableLabel: "T4",
+    // WP-2423 item 8 ⑧: the party was not moved.
+    movedFromTableLabel: null,
     // WP-2423 Q7 slice 2: no staff record names this order or round.
     enteredByStaff: false,
   });
@@ -483,7 +485,7 @@ it("WP-2423 v15: names today's orders waiting for acceptance on the first page o
           ],
           rowCount: 2,
         }
-      : sql.includes("rms_dining.dining_session")
+      : sql.includes("FROM rms_dining.dining_session s")
         ? { rows: [{ session_id: id(22), label: "T4" }], rowCount: 1 }
         : sql.includes("capacity_asap_commitment")
           ? { rows: [{ order_id: id(20), expires_at: "2026-09-19T12:02:00.000Z" }], rowCount: 1 }
@@ -498,9 +500,16 @@ it("WP-2423 v15: names today's orders waiting for acceptance on the first page o
       orderNumber: "13",
       orderType: "Pickup",
       tableLabel: null,
+      movedFromTableLabel: null,
       acceptBy: "2026-09-19T12:02:00.000Z",
     },
-    { orderNumber: "7", orderType: "DineIn", tableLabel: "T4", acceptBy: null },
+    {
+      orderNumber: "7",
+      orderType: "DineIn",
+      tableLabel: "T4",
+      movedFromTableLabel: null,
+      acceptBy: null,
+    },
   ]);
   const deadlines = query.mock.calls.find(([sql]) =>
     String(sql).includes("capacity_asap_commitment"),

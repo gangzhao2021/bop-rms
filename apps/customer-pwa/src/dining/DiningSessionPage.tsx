@@ -492,6 +492,8 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
 export type DiningSessionState =
   | { readonly status: "loading" }
   | { readonly status: "not-joined" }
+  /** WP-2423 item 8 ⑧: staff moved the party to this table after this phone joined. */
+  | { readonly status: "moved"; readonly tableLabel: string }
   | {
       readonly status: "unavailable";
       readonly view: DiningSessionView | null;
@@ -569,6 +571,12 @@ export function DiningSessionPage({
       }
       if (error instanceof DiningSessionClientError && error.code === "not-joined")
         setState({ status: "not-joined" });
+      else if (
+        error instanceof DiningSessionClientError &&
+        error.code === "moved" &&
+        error.tableLabel !== null
+      )
+        setState({ status: "moved", tableLabel: error.tableLabel });
       // Keep the last loaded table on screen; say it may be out of date.
       else
         setState((prior) => ({
@@ -688,6 +696,17 @@ export function DiningSessionScreen({
       {state.status === "loading" ? (
         <section role="status">
           <h2>{t("Loading your table")}</h2>
+        </section>
+      ) : null}
+      {state.status === "moved" ? (
+        <section className="order-status__card" role="alert">
+          <h2>{t("Your table moved to table {table}", { table: state.tableLabel })}</h2>
+          <p>
+            {t(
+              "Staff moved your party to table {table}. Everything your table ordered moved with you. Scan the code on table {table} to keep ordering and paying together.",
+              { table: state.tableLabel },
+            )}
+          </p>
         </section>
       ) : null}
       {state.status === "not-joined" ? (
