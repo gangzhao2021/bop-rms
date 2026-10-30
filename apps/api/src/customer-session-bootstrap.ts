@@ -156,19 +156,20 @@ export function createCustomerSessionBootstrapRead(
      */
     async readSettledTable(sessionCredential: string) {
       return options.transactions.run(async (transaction) => {
-        // The ended visit's Session (Active and within its absolute lifetime); no binding.
-        const guest = (
-          await new GuestSessionService({
-            store: createPostgresGuestSessionEntryStore(
-              { run: async (work) => work(transaction) },
-              options.scope,
-            ),
-            credentials: options.credentials,
-            binding: { validate: async () => "Current" as const },
-            now: options.now,
-            admission: { consume: async () => null },
-          }).recoverEndedVisitCsrf({ sessionCredential, observedAt: options.now() })
-        ).session;
+        // The ended visit's Session (Active and within its absolute lifetime); no binding. Its
+        // CSRF value reads that visit's receipts only (M5), here the settled table's receipt.
+        const ended = await new GuestSessionService({
+          store: createPostgresGuestSessionEntryStore(
+            { run: async (work) => work(transaction) },
+            options.scope,
+          ),
+          credentials: options.credentials,
+          binding: { validate: async () => "Current" as const },
+          now: options.now,
+          admission: { consume: async () => null },
+        }).recoverEndedVisitCsrf({ sessionCredential, observedAt: options.now() });
+        const guest = ended.session;
+        const receipt = { csrfToken: String(ended.csrfCredential) };
         if (
           String(guest.brandReference) !== options.scope.brandReference ||
           String(guest.storeReference) !== options.scope.storeReference ||
@@ -183,7 +184,7 @@ export function createCustomerSessionBootstrapRead(
           await listDiningSessionMergedInto(transaction as never, options.scope, [session])
         ).get(session);
         if (merged !== undefined)
-          return merged.phase === "Closed" ? { tableLabel: merged.tableLabel } : null;
+          return merged.phase === "Closed" ? { tableLabel: merged.tableLabel, ...receipt } : null;
         const settled = await loadDiningParticipantSettledTable(
           transaction as never,
           options.scope,
@@ -197,7 +198,7 @@ export function createCustomerSessionBootstrapRead(
         const orders = await listStoreDiningSessionOrders(transaction as never, options.scope, [
           session,
         ]);
-        return orders.has(session) ? settled : null;
+        return orders.has(session) ? { ...settled, ...receipt } : null;
       });
     },
     /**
@@ -274,7 +275,9 @@ export function createCustomerSessionBootstrapHandler(options?: {
       receiptAvailableUntil: string;
     }>;
     /** The table this guest sat at when it was closed and settled (absent or null: not so). */
-    readSettledTable?(sessionCredential: string): Promise<{ tableLabel: string } | null>;
+    readSettledTable?(
+      sessionCredential: string,
+    ): Promise<{ tableLabel: string; csrfToken: string } | null>;
     /** v15 2026-10-30: the table the guest's party was moved to (absent or null: not moved). */
     readMovedTable?(
       sessionCredential: string,
@@ -335,7 +338,10 @@ export function createCustomerSessionBootstrapHandler(options?: {
       try {
         const settled = await options.port.readSettledTable(sessionCredential);
         return settled !== null && /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(settled.tableLabel)
-          ? { tableLabel: settled.tableLabel }
+          ? {
+              tableLabel: settled.tableLabel,
+              csrfToken: parseGuestRawCredential(settled.csrfToken),
+            }
           : null;
       } catch {
         return null;
@@ -424,19 +430,15 @@ export function createCustomerSessionBootstrapHandler(options?: {
           response.status(200).json({ schemaVersion: 1, movedTable: moved });
           return;
         }
-        // WP-2423 (v15 3cd0f8dd M5): a guest who left can still open their receipt here.
-        const ended = await readEndedVisit(credential);
-        // The table was settled while this guest sat at it: thank them (with that receipt, if
-        // this visit placed the order) instead of asking them to join.
+        // The table was settled while this guest sat at it: thank them, with the table's receipt
+        // (read only), instead of asking them to join.
         const settled = await readSettledTable(credential);
         if (settled !== null) {
-          response.status(200).json({
-            schemaVersion: 1,
-            settledTable: settled,
-            ...(ended === null ? {} : { endedVisit: ended }),
-          });
+          response.status(200).json({ schemaVersion: 1, settledTable: settled });
           return;
         }
+        // WP-2423 (v15 3cd0f8dd M5): a guest who left can still open their receipt here.
+        const ended = await readEndedVisit(credential);
         if (ended === null) response.status(204).end();
         else response.status(200).json({ schemaVersion: 1, endedVisit: ended });
         return;

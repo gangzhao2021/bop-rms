@@ -66,6 +66,10 @@ import {
 } from "../../../apps/api/src/store-sales-report.ts";
 import { createMerchantDiningServeCommand } from "../../../apps/api/src/merchant-dining-serve-command.ts";
 import { createDiningTableOnlinePayments } from "../../../apps/api/src/dining-table-online-payment.ts";
+import {
+  createCustomerDiningTablePayment,
+  customerSettledTableReceiptBody,
+} from "../../../apps/api/src/customer-dining-table-payment.ts";
 import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
 import { createMerchantDiningTableClosePlan } from "../../../apps/api/src/merchant-dining-table-close-plan.ts";
 import { createKitchenInventoryConsumption } from "../../../apps/api/src/kitchen-inventory-consumption.ts";
@@ -202,6 +206,53 @@ it("staff move a table's party to another free table, once; the old table waits 
 // bill holds both tables' rounds, each on its own Order; the table pays once and both Orders close.
 it("staff merge another table's party into this table; it pays once and closes", () =>
   journey("Merged"));
+
+/**
+ * Coordinator 2026-10-30 (Owner authorized): what a guest's phone sees after its table closed — the
+ * visit restore (the real bootstrap read) and then the settled table's receipt read with the ended
+ * visit's value (the real table-payment port and public body), as the pilot API role. The phone's
+ * table binding no longer holds (its table closed). Null when the restore says nothing was settled.
+ */
+async function settledReceiptFor({ scope, ownerScope, transactions, phone, provider }) {
+  const access = {
+    scope,
+    transactions,
+    credentials: phone.identity.session.credentials,
+    now: () => new Date().toISOString(),
+    binding: () => ({ validate: async () => "Unavailable" }),
+  };
+  const settled = await createCustomerSessionBootstrapRead(access).readSettledTable(
+    phone.sessionCredential,
+  );
+  if (settled === null) return null;
+  const port = createCustomerDiningTablePayment({
+    access,
+    payments: createDiningTableOnlinePayments({
+      scope: ownerScope,
+      providerAccountReference: provider,
+      environment: "Test",
+      provider: {},
+      transactions,
+      now: () => new Date().toISOString(),
+      nextReference: () => {
+        throw new Error("a receipt read records nothing");
+      },
+    }),
+    providerEnvironment: "Test",
+  });
+  const body = customerSettledTableReceiptBody(
+    await port.settledReceipt({
+      sessionCredential: phone.sessionCredential,
+      csrfCredential: settled.csrfToken,
+    }),
+  );
+  // Public fields only: no references, card details, staff or Provider identifiers.
+  assert.doesNotMatch(
+    JSON.stringify(body),
+    /[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}|slip|TEST 0001|actor|provider|tendered/iu,
+  );
+  return { settledTableLabel: settled.tableLabel, ...body.receipt };
+}
 
 async function journey(ending) {
   await withIsolatedDatabase(
@@ -4244,6 +4295,69 @@ async function journey(ending) {
             )[0].n,
             3,
           );
+          // Coordinator 2026-10-30: the split table, every part paid, closes; a phone of the table
+          // reloads and reads the whole bill and how each part was paid.
+          await cookAndServeRound1();
+          const progress = await createMerchantDiningOrderProgress({
+            persistence: persistenceOf(server),
+            locale: "en-CA",
+            authentication: server.authentication,
+          })({ ...as(server), query: { orderReference } });
+          const closedOrder = await createMerchantDiningOrderCloseCommand({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            resolveConfiguration: createDiningOrderCloseConfiguration({
+              ...ownerScope,
+              providerAccountReference: provider,
+              environment: "Test",
+            }),
+            newReference: fresh,
+            audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+          })({
+            ...as(server),
+            command: {
+              orderReference,
+              operationReference: fresh(),
+              expectedOrderVersion: progress.currentOrderVersion,
+              expectedClosureVersion: progress.closureVersion,
+              reasonCode: "ORDER_COMPLETED",
+            },
+          });
+          assert.equal(closedOrder.status, "Committed");
+          assert.equal((await closing(server, "Finalize")).phase, "Closed");
+          const receipt = await settledReceiptFor({
+            scope,
+            ownerScope,
+            transactions: transactions(),
+            phone: tablePhone,
+            provider,
+          });
+          assert.equal(receipt.split, true);
+          assert.deepEqual(
+            receipt.payments.map((payment) => [payment.partNumber, payment.method]),
+            [
+              [1, "CardMachine"],
+              [2, "Cash"],
+              [3, "Online"],
+            ],
+          );
+          const paidParts = done.split.parts;
+          assert.deepEqual(
+            receipt.payments.map((payment) => payment.totalMinor),
+            paidParts.map((part) => part.payment.totalMinor),
+          );
+          assert.equal(
+            receipt.paidMinor,
+            paidParts.reduce((sum, part) => sum + BigInt(part.payment.totalMinor), 0n).toString(),
+          );
+          assert.equal(
+            receipt.tipMinor,
+            paidParts.reduce((sum, part) => sum + BigInt(part.payment.tipMinor), 0n).toString(),
+          );
+          assert.equal(
+            BigInt(receipt.ordersTotalMinor),
+            BigInt(receipt.subtotalMinor) + BigInt(receipt.taxMinor),
+          );
           return;
         }
         if (ending === "TipsOff") await tipsOffRefusals();
@@ -4525,7 +4639,44 @@ async function journey(ending) {
             },
           });
           assert.equal(closed.status, "Committed");
+          const receiptOf = () =>
+            settledReceiptFor({
+              scope,
+              ownerScope,
+              transactions: transactions(),
+              phone: tablePhone,
+              provider,
+            });
+          // Not before the table closes: the guest is still at an open table.
+          assert.equal(await receiptOf(), null);
           assert.equal((await closing(server, "Finalize")).phase, "Closed");
+          // Coordinator 2026-10-30: a phone of the table, reloading after it was paid in cash and
+          // closed, reads the table's receipt (whoever placed the rounds): every round, before tax,
+          // tax, the cash rounding, the total and that it was cash.
+          const receipt = await receiptOf();
+          const settlement = paid.bill.settlement;
+          assert.equal(receipt.settledTableLabel, receipt.tableLabel);
+          assert.deepEqual(receipt.payments, [
+            {
+              partNumber: null,
+              method: "Cash",
+              tipMinor: settlement.tipMinor,
+              roundingMinor: settlement.roundingMinor,
+              totalMinor: settlement.totalMinor,
+              paidAt: settlement.recordedAt,
+            },
+          ]);
+          assert.equal(receipt.split, false);
+          assert.equal(receipt.paidMinor, settlement.totalMinor);
+          assert.equal(receipt.roundingMinor, settlement.roundingMinor);
+          assert.equal(receipt.tipMinor, settlement.tipMinor);
+          assert.equal(
+            BigInt(receipt.ordersTotalMinor),
+            BigInt(receipt.subtotalMinor) + BigInt(receipt.taxMinor),
+          );
+          assert.equal(receipt.ordersTotalMinor, settlement.roundsMinor);
+          assert.ok(receipt.rounds.length >= 1);
+          assert.ok(receipt.rounds.every((round) => round.items.length > 0));
         }
         // ── Append-only, and another Store of the Brand sees none of it.
         await assert.rejects(

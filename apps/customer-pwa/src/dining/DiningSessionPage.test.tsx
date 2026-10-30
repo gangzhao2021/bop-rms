@@ -11,7 +11,7 @@ import {
 import type { DiningRound, DiningSessionView } from "./dining-session-client.js";
 import { formatClockTime } from "../journey/format.js";
 import { CustomerPage } from "../journey/CustomerPage.js";
-import { setEndedVisitReceiptAccess } from "../session/customer-transaction-context.js";
+import { parseSettledTableReceipt, SettledTableReceiptView } from "./SettledTableReceipt.js";
 
 const cad = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
 const at = "2026-10-13T18:00:00.000Z";
@@ -241,30 +241,96 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(stale).toContain("Round 1 · Ordered by you");
   });
 
-  it("thanks a guest whose table was settled, linking their receipt only when it exists", () => {
+  it("thanks a guest whose table was settled and loads the table's receipt", () => {
     const plain = render({ status: "settled", tableLabel: "DEMO-02" });
     expect(plain).toContain("This table is settled. Thank you for dining with us.");
     expect(plain).toContain("Table DEMO-02 has paid and closed.");
     expect(plain).toContain("New party? Scan the table code");
-    expect(plain).not.toContain("See your receipt");
+    expect(plain).toContain("Loading receipt");
+    expect(plain).not.toContain("/orders/");
     expect(plain).not.toContain("Join your table first");
     expect(plain).not.toMatch(/staff member|Need a staff/iu);
     expect(plain).not.toContain("Order more from the menu");
     expect(plain).not.toContain("Everything ordered at this table");
-    setEndedVisitReceiptAccess({
-      csrfToken: "C".repeat(43),
-      orderReference: "018f8a00-0000-7000-8000-000000000016",
-      orderNumber: "22",
-      orderType: "DineIn",
-      receiptAvailableUntil: "2099-10-18T18:01:49.437Z",
+  });
+
+  it("shows a settled table's receipt: dishes, tax, tip, cash rounding and how it was paid", () => {
+    const receipt = (payments: unknown[], extra: Record<string, unknown> = {}) =>
+      renderToStaticMarkup(
+        <SettledTableReceiptView
+          receipt={parseSettledTableReceipt({
+            schemaVersion: 1,
+            receipt: {
+              tableLabel: "DEMO-03",
+              rounds: [
+                {
+                  roundNumber: 1,
+                  fromTableLabel: null,
+                  items: [
+                    { displayName: "Milk tea", subtotalMinor: "450", reduced: null },
+                    { displayName: "Tea", subtotalMinor: "0", reduced: "Comp" },
+                  ],
+                },
+                {
+                  roundNumber: 2,
+                  fromTableLabel: "T-M",
+                  items: [{ displayName: "Ramen", subtotalMinor: "1200", reduced: "Discount" }],
+                },
+              ],
+              subtotalMinor: "1650",
+              taxMinor: "215",
+              ordersTotalMinor: "1865",
+              tipMinor: "0",
+              roundingMinor: "0",
+              paidMinor: "1865",
+              split: false,
+              payments,
+              ...extra,
+            },
+          })}
+        />,
+      );
+    const cash = receipt([{ partNumber: null, method: "Cash", totalMinor: "1865" }], {
+      roundingMinor: "1",
+      paidMinor: "1866",
+      tipMinor: "0",
     });
-    try {
-      const withReceipt = render({ status: "settled", tableLabel: "DEMO-02" });
-      expect(withReceipt).toContain('href="/orders/018f8a00-0000-7000-8000-000000000016/receipt"');
-      expect(withReceipt).toContain("See your receipt");
-    } finally {
-      setEndedVisitReceiptAccess(null);
-    }
+    for (const text of [
+      "Receipt",
+      "Round 1",
+      "Milk tea",
+      "Tea · On the house",
+      "Round 2 · From table T-M",
+      "Ramen · Discounted",
+      "Subtotal before tax",
+      "$16.50",
+      "Tax",
+      "$2.15",
+      "Cash rounding",
+      "$0.01",
+      "Total paid",
+      "$18.66",
+      "Paid by",
+      "Cash",
+    ])
+      expect(cash).toContain(text);
+    expect(cash).not.toContain("Tip");
+    const split = receipt(
+      [
+        { partNumber: 1, method: "Online", totalMinor: "1100" },
+        { partNumber: 2, method: "CardMachine", totalMinor: "1000" },
+      ],
+      { split: true, tipMinor: "235", paidMinor: "2100" },
+    );
+    expect(split).toContain("Part 1 paid by");
+    expect(split).toContain("Card on a guest’s phone · $11.00");
+    expect(split).toContain("Part 2 paid by");
+    expect(split).toContain("Card at the table · $10.00");
+    expect(split).toContain("Tip");
+    expect(split).toContain("$2.35");
+    // Public fields only.
+    expect(cash + split).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-7|CardMachine|Online\b|@/u);
+    expect(() => parseSettledTableReceipt({ receipt: { tableLabel: "<b>" } })).toThrow();
   });
 
   it("shows an empty table plainly and only keeps polling while something is in progress", () => {

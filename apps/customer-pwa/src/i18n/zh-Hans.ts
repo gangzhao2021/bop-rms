@@ -251,7 +251,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Join your table first": "请先加入你的桌位",
   "This table is settled. Thank you for dining with us.": "这桌已结账，谢谢光临",
   "Table {table} has paid and closed.": "桌号 {table}，已付清。",
-  "See your receipt": "查看你的收据",
+  "From table {table}": "来自 {table} 桌",
+  Discounted: "已打折",
+  "On the house": "店家赠送",
+  "Part {number} paid by": "第 {number} 份付款方式",
+  "We couldn’t load the receipt. Check your connection and try again.":
+    "收据没能加载。请检查网络后重试。",
   "New party? Scan the table code": "新的一桌？扫桌上的码",
   "Keep a copy": "保留一份",
   "Keep browsing": "继续浏览",

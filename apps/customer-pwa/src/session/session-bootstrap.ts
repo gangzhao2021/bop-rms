@@ -6,7 +6,7 @@ import {
   setCheckoutSessionReference,
   setEndedVisitReceiptAccess,
   setMovedTableLabel,
-  setSettledTableLabel,
+  setSettledTable,
 } from "./customer-transaction-context.js";
 function menuContext(value: unknown): MenuJourneyContext | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
@@ -152,14 +152,14 @@ export async function restoreCustomerSession(
       if (ended !== null) setEndedVisitReceiptAccess(ended);
       return false;
     }
-    // Coordinator 2026-10-30: the table was settled while this guest sat at it (with the ended
-    // visit's receipt access when this visit placed the order). Nothing to act with is restored.
+    // Coordinator 2026-10-30: the table was settled while this guest sat at it, with the ended
+    // visit's value that reads that table's receipt. Nothing to order or pay with is restored.
     if (
       current() &&
       value !== null &&
       typeof value === "object" &&
       !Array.isArray(value) &&
-      Object.keys(value).length === ("endedVisit" in value ? 3 : 2) &&
+      Object.keys(value).length === 2 &&
       "schemaVersion" in value &&
       value.schemaVersion === 1 &&
       "settledTable" in value
@@ -169,15 +169,15 @@ export async function restoreCustomerSession(
         settled !== null &&
         typeof settled === "object" &&
         !Array.isArray(settled) &&
-        Object.keys(settled).length === 1 &&
+        Object.keys(settled).length === 2 &&
         "tableLabel" in settled &&
         typeof settled.tableLabel === "string" &&
-        /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(settled.tableLabel)
-      ) {
-        setSettledTableLabel(settled.tableLabel);
-        const ended = "endedVisit" in value ? endedVisit(value.endedVisit) : null;
-        if (ended !== null) setEndedVisitReceiptAccess(ended);
-      }
+        /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(settled.tableLabel) &&
+        "csrfToken" in settled &&
+        typeof settled.csrfToken === "string" &&
+        /^[A-Za-z0-9_-]{43}$/u.test(settled.csrfToken)
+      )
+        setSettledTable({ tableLabel: settled.tableLabel, csrfToken: settled.csrfToken });
       return false;
     }
     // v15 2026-10-30: staff moved the party after this phone joined: only where it sits now.

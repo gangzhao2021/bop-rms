@@ -63,26 +63,23 @@ export function getMovedTableLabel(): string | null {
 
 /**
  * Coordinator 2026-10-30 (Owner authorized): the table this device's guest sat at when it was
- * closed and its bill settled; the dine-in page thanks them instead of asking them to join.
- * Memory only.
+ * closed and its bill settled, and the ended visit's CSRF value that reads that table's receipt
+ * (read only); the dine-in page thanks them instead of asking them to join. Memory only.
  */
-let settledTableLabel: string | null = null;
+let settledTable: { readonly tableLabel: string; readonly csrfToken: string } | null = null;
 
-export function setSettledTableLabel(value: string | null): void {
-  settledTableLabel = value;
+export function setSettledTable(
+  value: { readonly tableLabel: string; readonly csrfToken: string } | null,
+): void {
+  settledTable = value === null ? null : Object.freeze({ ...value });
 }
 
 export function getSettledTableLabel(): string | null {
-  return settledTableLabel;
+  return settledTable?.tableLabel ?? null;
 }
 
-/** The order this device's ended dine-in visit placed (its receipt is readable), else null. */
-export function getEndedDineInOrderReference(now: number = Date.now()): string | null {
-  return endedVisitReceipt !== null &&
-    endedVisitReceipt.orderType === "DineIn" &&
-    now < Date.parse(endedVisitReceipt.receiptAvailableUntil)
-    ? endedVisitReceipt.orderReference
-    : null;
+export function getSettledTableReceiptCsrf(): string | null {
+  return settledTable?.csrfToken ?? null;
 }
 
 export function setCustomerCsrfCredential(value: string | null): void {
@@ -92,7 +89,7 @@ export function setCustomerCsrfCredential(value: string | null): void {
   if (value !== null) {
     endedVisitReceipt = null;
     movedTableLabel = null;
-    settledTableLabel = null;
+    settledTable = null;
   }
   paymentOperationReference = null;
   checkoutSessionReference = null;

@@ -542,14 +542,39 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expectNoInternalText(page);
   });
 
-  test("a guest whose table was paid and closed is thanked on reload, not asked to join", async ({
+  test("a guest whose table was paid and closed is thanked on reload and sees the table's receipt", async ({
     page,
   }) => {
-    // Coordinator 2026-10-30: staff close the paid table; this phone's visit ends with it. On a
-    // reload the restore says the table was settled (with this visit's receipt when it placed the
-    // order). The server side is proven by the database acceptance test (dining pay-later merge).
+    // Coordinator 2026-10-30: staff took cash for the table and closed it; this phone's visit
+    // ended with it. On a reload the restore says the table was settled, and the page reads the
+    // table's receipt with the ended visit's value. The server side (cash and split bills) is
+    // proven by the database acceptance test (dining pay-later: moved and split endings).
     let settled = false;
-    let receipt = true;
+    let receipt: { status: number; json: unknown } = {
+      status: 200,
+      json: {
+        schemaVersion: 1,
+        receipt: {
+          tableLabel: "12",
+          rounds: [
+            {
+              roundNumber: 1,
+              fromTableLabel: null,
+              items: [{ displayName: "Milk tea", subtotalMinor: "450", reduced: null }],
+            },
+          ],
+          subtotalMinor: "450",
+          taxMinor: "59",
+          ordersTotalMinor: "509",
+          tipMinor: "0",
+          roundingMinor: "1",
+          paidMinor: "510",
+          split: false,
+          payments: [{ partNumber: null, method: "Cash", totalMinor: "510" }],
+        },
+      },
+    };
+    const receiptReads: string[] = [];
     await page.route("**/api/v1/customer/session/csrf", (route) =>
       settled
         ? route.fulfill({
@@ -557,20 +582,18 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
             headers: { "cache-control": "no-store" },
             json: {
               schemaVersion: 1,
-              settledTable: { tableLabel: "12" },
-              ...(receipt
-                ? {
-                    endedVisit: {
-                      csrfToken: "e".repeat(43),
-                      order: { orderReference: id(40), orderNumber: "1042", orderType: "DineIn" },
-                      receiptAvailableUntil: new Date(Date.now() + 3_600_000).toISOString(),
-                    },
-                  }
-                : {}),
+              settledTable: { tableLabel: "12", csrfToken: "e".repeat(43) },
             },
           })
         : route.fulfill({ status: 204, headers: { "cache-control": "no-store" } }),
     );
+    await page.route("**/api/v1/dine-in/table-payment", (route) => {
+      const body = route.request().postData() ?? "";
+      if (!body.includes("SettledReceipt"))
+        return route.fulfill({ status: 404, headers: { "cache-control": "no-store" }, json: {} });
+      receiptReads.push(route.request().headers()["x-csrf-token"] + " " + body);
+      return route.fulfill({ ...receipt, headers: { "cache-control": "no-store" } });
+    });
     await enterTable(page, () => ({ status: 200, json: session }));
     const main = page.getByRole("main");
     await expect(main.getByRole("heading", { name: "Round 1 · Ordered by you" })).toBeVisible();
@@ -581,11 +604,16 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
       main.getByRole("heading", { name: "This table is settled. Thank you for dining with us." }),
     ).toBeVisible();
     await expect(main).toContainText("Table 12 has paid and closed.");
-    await expect(main.getByRole("link", { name: "See your receipt" })).toHaveAttribute(
-      "href",
-      `/orders/${id(40)}/receipt`,
-    );
     await expect(main).toContainText("New party? Scan the table code");
+    const card = main.getByRole("region", { name: "Receipt" });
+    await expect(card).toContainText("Milk tea");
+    await expect(card).toContainText("Subtotal before tax$4.50");
+    await expect(card).toContainText("Tax$0.59");
+    await expect(card).toContainText("Cash rounding$0.01");
+    await expect(card).toContainText("Total paid$5.10");
+    await expect(card).toContainText("Paid byCash");
+    expect(receiptReads).toEqual(["e".repeat(43) + ' {"action":"SettledReceipt"}']);
+    await expect(main.getByRole("link", { name: /receipt/iu })).toHaveCount(0);
     await expect(main).not.toContainText("Join your table first");
     await expect(main.getByRole("button", { name: /staff/iu })).toHaveCount(0);
     await expect(main.getByRole("link", { name: "Order more from the menu" })).toHaveCount(0);
@@ -598,17 +626,49 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await page.getByRole("button", { name: "切换到中文" }).click();
     await expect(main.getByRole("heading", { name: "这桌已结账，谢谢光临" })).toBeVisible();
     await expect(main).toContainText("新的一桌？扫桌上的码");
-    await expect(main.getByRole("link", { name: "查看你的收据" })).toBeVisible();
+    await expect(main.getByRole("region", { name: "收据" })).toContainText("现金");
     await page.screenshot({
       path: "test-results/customer-dining-settled-zh-390.png",
       fullPage: true,
     });
 
-    // A guest at that table whose visit placed no order: thanked, with no receipt offered.
-    receipt = false;
+    await page.getByRole("button", { name: "English" }).click();
+
+    // A split bill: every part and how it was paid.
+    receipt = {
+      status: 200,
+      json: {
+        schemaVersion: 1,
+        receipt: {
+          ...(receipt.json as { receipt: Record<string, unknown> }).receipt,
+          tipMinor: "68",
+          roundingMinor: "0",
+          paidMinor: "577",
+          split: true,
+          payments: [
+            { partNumber: 1, method: "CardMachine", totalMinor: "322" },
+            { partNumber: 2, method: "Online", totalMinor: "255" },
+          ],
+        },
+      },
+    };
     await page.reload();
-    await expect(main.getByRole("heading", { name: "这桌已结账，谢谢光临" })).toBeVisible();
-    await expect(main.getByRole("link", { name: "查看你的收据" })).toHaveCount(0);
+    await expect(card).toContainText("Part 1 paid byCard at the table · $3.22");
+    await expect(card).toContainText("Part 2 paid byCard on a guest’s phone · $2.55");
+    await expect(card).toContainText("Tip$0.68");
+    await page.screenshot({
+      path: "test-results/customer-dining-settled-split-390.png",
+      fullPage: true,
+    });
+
+    // Written off (nothing paid): thanked, with no receipt.
+    receipt = { status: 404, json: { schemaVersion: 1, error: { code: "table_not_found" } } };
+    await page.reload();
+    await expect(
+      main.getByRole("heading", { name: "This table is settled. Thank you for dining with us." }),
+    ).toBeVisible();
+    await expect(main.getByRole("region", { name: "Receipt" })).toHaveCount(0);
+    await expect(main).not.toContainText("Loading receipt");
   });
 
   test("asks a guest who has not joined to join first", async ({ page }) => {

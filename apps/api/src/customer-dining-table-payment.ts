@@ -1,10 +1,12 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
+  GuestSessionError,
   GuestSessionService,
   createPostgresGuestSessionEntryStore,
   parseGuestRawCredential,
   readClosedRecord,
 } from "@bop/identity";
+import { listDiningSessionMergedInto, loadDiningParticipantSettledTable } from "@rms/dining";
 import type { CartQueryTransactionRunner } from "@rms/ordering";
 import { createRetrieveIntentRequest, type RetrieveIntentRequest } from "@rms/payment";
 import express, { type RequestHandler, type Response } from "express";
@@ -76,9 +78,74 @@ export function createCustomerDiningTablePayment(options: CustomerDiningTablePay
       },
     });
   };
+  /**
+   * Coordinator 2026-10-30 (Owner authorized): the bill of the table this guest sat at once it was
+   * closed and settled (or of the table its party was merged into, once that closed), for the
+   * visit that ended with it — the ended visit's receipt access, read only (as M5). Not a
+   * participant of a closed table, removed by staff, or still open: refused as not found.
+   */
+  const settledIn = async (tx: ConsumerTransaction, credentials: Credentials) => {
+    const runner: CartQueryTransactionRunner = { run: async (work) => work(tx) };
+    const guest = await new GuestSessionService({
+      store: createPostgresGuestSessionEntryStore(runner, scope),
+      credentials: options.access.credentials,
+      binding: { validate: async () => "Current" as const },
+      now: options.access.now,
+      admission: { consume: async () => null },
+    }).authorizeEndedVisit({ ...credentials, observedAt: options.access.now() });
+    const participant = assertDiningParticipant(guest, scope);
+    const own = participant.diningSessionReference;
+    const merged = (await listDiningSessionMergedInto(tx as never, scope, [own])).get(own);
+    const billSession =
+      merged !== undefined
+        ? merged.phase === "Closed"
+          ? merged.diningSessionReference
+          : null
+        : (await loadDiningParticipantSettledTable(tx as never, scope, {
+              diningSessionReference: own,
+              participantReference: String(guest.diningParticipantReference),
+            })) === null
+          ? null
+          : own;
+    if (billSession === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    return Object.freeze({
+      diningSessionReference: billSession,
+      guestSessionReference: participant.guestSessionReference,
+    });
+  };
   return Object.freeze({
     async read(credentials: Credentials) {
       return options.payments.refresh(await authority(credentials));
+    },
+    /** The settled table's bill and how it was paid, for a guest whose visit ended with it. */
+    async settledReceipt(credentials: Credentials) {
+      const first = await options.access.transactions.run((tx) => settledIn(tx, credentials));
+      const view = await options.payments.read(
+        Object.freeze({
+          ...first,
+          allowed: async (tx: ConsumerTransaction) => {
+            try {
+              const again = await settledIn(tx, credentials);
+              return (
+                again.diningSessionReference === first.diningSessionReference &&
+                again.guestSessionReference === first.guestSessionReference
+              );
+            } catch {
+              return false;
+            }
+          },
+        }),
+      );
+      const bill = view.bill;
+      const paidInFull =
+        bill.settlement !== null ||
+        (bill.split !== null &&
+          bill.split.parts.length > 0 &&
+          bill.split.parts.every((part) => part.payment !== null));
+      // Written off, or closed with nothing paid: there is no receipt to show.
+      if (bill.sessionPhase !== "Closed" || !paidInFull)
+        throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      return view;
     },
     async start(
       credentials: Credentials,
@@ -201,6 +268,68 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
   };
 }
 
+/**
+ * The settled table's receipt in public fields only: the rounds and dishes (comps shown as such),
+ * before tax, tax, and each payment's method, tip, cash rounding and amount — never card details,
+ * who took it, references or codes. A split bill lists every part and how it was paid.
+ */
+export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentView) {
+  const bill = view.bill;
+  const rounds = bill.rounds.filter((round) => round.items.length > 0);
+  const sum = (values: readonly string[]) =>
+    values.reduce((total, value) => total + BigInt(value), 0n).toString();
+  const payment = (
+    partNumber: number | null,
+    paid: {
+      readonly method: "CardMachine" | "Cash" | "Online";
+      readonly tipMinor: string;
+      readonly roundingMinor: string;
+      readonly totalMinor: string;
+      readonly recordedAt: string;
+    },
+  ) => ({
+    partNumber,
+    method: paid.method,
+    tipMinor: paid.tipMinor,
+    roundingMinor: paid.roundingMinor,
+    totalMinor: paid.totalMinor,
+    paidAt: paid.recordedAt,
+  });
+  const payments =
+    bill.settlement !== null
+      ? [payment(null, bill.settlement)]
+      : (bill.split?.parts ?? []).flatMap((part) =>
+          part.payment === null ? [] : [payment(part.partNumber, part.payment)],
+        );
+  return {
+    schemaVersion: 1,
+    receipt: {
+      tableLabel: bill.tableLabel,
+      rounds: rounds.map((round) => ({
+        roundNumber: round.roundNumber,
+        fromTableLabel: round.fromTableLabel,
+        items: round.items.map((item) => ({
+          displayName: item.displayName,
+          subtotalMinor: item.subtotalMinor,
+          reduced:
+            item.reduction === null ? null : item.reduction.kind === "Comp" ? "Comp" : "Discount",
+        })),
+        subtotalMinor: round.subtotalMinor,
+        taxMinor: round.taxMinor,
+        totalMinor: round.totalMinor,
+      })),
+      subtotalMinor: sum(rounds.map((round) => round.subtotalMinor)),
+      taxMinor: sum(rounds.map((round) => round.taxMinor)),
+      ordersTotalMinor: sum(rounds.map((round) => round.totalMinor)),
+      tipMinor: sum(payments.map((entry) => entry.tipMinor)),
+      roundingMinor: sum(payments.map((entry) => entry.roundingMinor)),
+      paidMinor: sum(payments.map((entry) => entry.totalMinor)),
+      split: bill.settlement === null,
+      payments,
+    },
+  };
+}
+
 const credential = /^[A-Za-z0-9_-]{43}$/u;
 function protect(response: Response) {
   response.setHeader("Cache-Control", "no-store");
@@ -283,6 +412,7 @@ export class CustomerDiningTablePaymentHandler {
         const credentials = this.credentials(request);
         let command:
           | { action: "Read" }
+          | { action: "SettledReceipt" }
           | {
               action: "Start";
               operationReference: string;
@@ -295,6 +425,9 @@ export class CustomerDiningTablePaymentHandler {
           if (body.action === "Read") {
             readClosedRecord(body, ["action"]);
             command = { action: "Read" };
+          } else if (body.action === "SettledReceipt") {
+            readClosedRecord(body, ["action"]);
+            command = { action: "SettledReceipt" };
           } else if (body.action === "Start") {
             const raw = readClosedRecord(body, [
               "action",
@@ -351,6 +484,12 @@ export class CustomerDiningTablePaymentHandler {
           return;
         }
         try {
+          if (command.action === "SettledReceipt") {
+            response
+              .status(200)
+              .json(customerSettledTableReceiptBody(await this.#port.settledReceipt(credentials)));
+            return;
+          }
           const view =
             command.action === "Read"
               ? await this.#port.read(credentials)
