@@ -6455,6 +6455,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No kitchen sections yet. Name them on Store features to show one section per kitchen screen.":
     "还没有档口。请在“门店功能”里添加档口，后厨屏就可以只显示一个档口。",
   "Kitchen section": "档口",
+  "Nothing in {item} changed; there is nothing new to list.": "{item} 没有改动，不需要重新上架。",
   "No section": "未分档口",
   "All sections": "全部档口",
   "Showing {section}.": "正在显示 {section}。",
