@@ -663,7 +663,9 @@ system (staff cannot open this document offline).
 - **Moving a table** (WP-2423 item 8 ⑧): on the table's first slip write "moved from table A to
   table B" and the time, and carry the slips to table B. When screens come back, open table A on
   `Tables` and use `Move to…` to record it (table A is then marked for cleaning); guests scan
-  table B's code to keep ordering. A table with a party can't be joined to another yet.
+  table B's code and tap `Join this table` to keep ordering (any phone can; no host is needed,
+  and their order and bill are there). If the host's phone rejoined and needs to be host again,
+  use `Dining host transfer` on the table. A table with a party can't be joined to another yet.
 - **Setting up the tea item** (owner, once): on `Menu`, press `New dish`, enter its name and
   price, and under its allergens choose `A charge, no stock ingredients (such as tea)`; save, mark
   it `Not prepared by the kitchen`, and press `List it`. Do not hide it: guests never see the tea item on their menu, and a

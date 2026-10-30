@@ -315,7 +315,10 @@ export function releaseClosedDiningSession(
     session.tableReference !== table.tableReference ||
     table.activeDiningSessionReference !== session.diningSessionReference ||
     table.lifecycle !== "Published" ||
-    session.tableAssignmentVersion >= table.aggregateVersion ||
+    // The table must not be older than the party's assignment to it. Seating records the table's
+    // version before it seated the party; a move (WP-2423 item 8 ⑧, v15 2026-10-30) records the
+    // target's version after it took the party (its move record requires so), so equal is current.
+    session.tableAssignmentVersion > table.aggregateVersion ||
     observedAt < table.observedAt ||
     observedAt < session.startedAt
   )

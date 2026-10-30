@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { readClosedRecord } from "@bop/identity";
 import {
   createDiningTableService,
+  createPostgresDiningJoinRegenerationStore,
+  createPostgresDiningMovedJoinStore,
   createPostgresDiningSessionMoveStore,
   createPostgresDiningSessionReadStore,
   createPostgresDiningTableStore,
@@ -9,7 +11,9 @@ import {
   loadDiningPartySizes,
   parseDiningInstant,
   parseDiningReference,
+  type DiningCredentialPort,
 } from "@rms/dining";
+import { regenerateDiningJoin } from "./merchant-dining-join-regenerate.js";
 import { markDiningTableNeedsCleaning } from "./dining-table-needs-cleaning.js";
 import { derivedReference } from "./merchant-products.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -73,6 +77,9 @@ export function createMerchantDiningTableMove(options: {
   newReference(): string;
   retentionPolicyCode: string;
   retentionPolicyVersion: number;
+  /** The table's join codes: reissued for the table the party moved to. */
+  credentials: DiningCredentialPort;
+  pepperVersion: number;
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
   return async (input: {
@@ -164,6 +171,56 @@ export function createMerchantDiningTableMove(options: {
                 newReference: options.newReference,
                 authorize: guard,
               });
+            // v15 2026-10-30: the party's join code, reissued for the table it sits at now (linked
+            // to the move), so its guests can scan that table's code to join it again — the host
+            // too, whose phone joined at the old table. Once per move, also on a retry.
+            const rejoin = async (sessionReference: string, observedAt: string) => {
+              const operationReference = derivedReference(command.operationReference, "rejoin");
+              const regenerations = createPostgresDiningJoinRegenerationStore(
+                runner as never,
+                scope as never,
+                options.credentials,
+              );
+              if (
+                (await regenerations.resolveRegenerationOperation(
+                  parseDiningReference(operationReference),
+                )) !== null
+              )
+                return;
+              const state = await createPostgresDiningMovedJoinStore(
+                runner as never,
+                scope as never,
+                options.credentials,
+                hashes,
+              ).resolveMovedJoinState(parseDiningReference(sessionReference));
+              // A party that never had a join code (staff seated it) has none to reissue.
+              if (state === null) return;
+              const permission = await current.authorizeAction("dining.operate");
+              if (permission?.effect !== "Allow")
+                return fail("DINING_TABLE_MOVE_PERMISSION_DENIED");
+              await regenerateDiningJoin(tx, {
+                scope,
+                tenantContext: current.context,
+                permission,
+                actorReference: actor,
+                guard,
+                credentials: options.credentials,
+                pepperVersion: options.pepperVersion,
+                newReference: options.newReference,
+                retentionPolicyCode: options.retentionPolicyCode,
+                retentionPolicyVersion: options.retentionPolicyVersion,
+                command: {
+                  diningSessionReference: sessionReference,
+                  tableReference: String(state.session.tableReference),
+                  expectedAssignmentVersion: state.session.tableAssignmentVersion,
+                  expectedSessionVersion: state.session.version,
+                  expectedCapabilityVersion: state.capability.version,
+                  expectedGeneration: state.capability.generation,
+                  operationReference,
+                },
+                requestedAt: observedAt,
+              });
+            };
             const result = (
               record: {
                 readonly session: { readonly diningSessionReference: string };
@@ -192,6 +249,10 @@ export function createMerchantDiningTableMove(options: {
               )
                 return fail("DINING_TABLE_MOVE_INPUT_INVALID");
               await clean(command.tableReference, prior.command.observedAt);
+              await rejoin(
+                String(prior.session.diningSessionReference),
+                String(current.context.resolvedAt),
+              );
               return result(prior, "AlreadyApplied");
             }
             const source = await tables.loadTable(parseDiningReference(command.tableReference));
@@ -286,6 +347,7 @@ export function createMerchantDiningTableMove(options: {
               observedAt,
             });
             await clean(command.tableReference, observedAt);
+            await rejoin(String(sessionReference), observedAt);
             return result(moved.result, moved.status);
           },
         ),

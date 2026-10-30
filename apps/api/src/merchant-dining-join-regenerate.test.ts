@@ -14,6 +14,10 @@ vi.mock("@rms/dining", async (original) => ({
   createPostgresDiningTableStore: () => ({ loadTable: mock.table }),
   createPostgresDiningSessionStartStore: () => ({ loadSession: mock.session }),
   createPostgresDiningJoinRegenerationStore: () => ({}),
+  createPostgresDiningMovedJoinStore: () => ({
+    resolveMovedJoinState: vi.fn(),
+    reissueAfterMove: vi.fn(),
+  }),
 }));
 const id = (n: number) => "01909988-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 type Options = Parameters<typeof createMerchantDiningJoinRegenerate>[0];

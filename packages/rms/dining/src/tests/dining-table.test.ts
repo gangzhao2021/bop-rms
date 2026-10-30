@@ -231,13 +231,23 @@ it.each(["brandReference", "storeReference", "tableReference"] as const)(
 );
 it("rejects stale assignment chronology and backdated release", () => {
   const { session, occupied } = closedOccupancy();
+  // A table older than the party's assignment to it is never released.
   expect(() =>
     releaseClosedDiningSession(
-      { ...session, tableAssignmentVersion: occupied.aggregateVersion },
+      { ...session, tableAssignmentVersion: occupied.aggregateVersion + 1 },
       occupied,
       at,
     ),
   ).toThrow();
+  // WP-2423 item 8 ⑧ (v15 2026-10-30): a party moved to this table holds the version the table
+  // took it at (the move record's rule); once closed, its table is released.
+  expect(
+    releaseClosedDiningSession(
+      { ...session, tableAssignmentVersion: occupied.aggregateVersion },
+      occupied,
+      at,
+    ).activeDiningSessionReference,
+  ).toBeNull();
   expect(() =>
     releaseClosedDiningSession(session, occupied, parseDiningInstant("2026-08-14T03:59:59.000Z")),
   ).toThrow();
