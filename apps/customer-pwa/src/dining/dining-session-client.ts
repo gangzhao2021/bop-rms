@@ -3,6 +3,7 @@ import { withNameLocale } from "../i18n/i18n.js";
 import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
+  getMovedTableLabel,
 } from "../session/customer-transaction-context.js";
 
 /** WP-2423 Q8 (CUST-DINE-IN-SESSION): the table's shared, read-only view for a joined guest. */
@@ -456,8 +457,13 @@ export function createHttpDiningSessionClient(
   const once = async (signal?: AbortSignal) => {
     const csrf = getCustomerCsrfCredential();
     const current = captureCustomerCsrfContext();
-    // Without this browser's session there is no table to show (not an error to retry).
-    if (csrf === null || !credential.test(csrf)) throw new DiningSessionClientError("not-joined");
+    // Without this browser's session there is no table to show (not an error to retry), unless
+    // staff moved its party since it joined (v15 2026-10-30: told on restoring the visit).
+    if (csrf === null || !credential.test(csrf)) {
+      const moved = getMovedTableLabel();
+      if (moved !== null) throw new DiningSessionClientError("moved", moved);
+      throw new DiningSessionClientError("not-joined");
+    }
     let response: Response;
     try {
       response = await boundedFetch(request, withNameLocale("/api/v1/dine-in/session"), {

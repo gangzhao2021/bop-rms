@@ -40,11 +40,28 @@ export function getEndedVisitReceiptAccess(
     : null;
 }
 
+/**
+ * v15 2026-10-30: staff moved this device's party to another table after it joined; the label of
+ * the table it sits at now (the guest scans that table's code to join it again). Memory only.
+ */
+let movedTableLabel: string | null = null;
+
+export function setMovedTableLabel(value: string | null): void {
+  movedTableLabel = value;
+}
+
+export function getMovedTableLabel(): string | null {
+  return movedTableLabel;
+}
+
 export function setCustomerCsrfCredential(value: string | null): void {
   csrfContext = Symbol();
   csrfCredential = value;
   // A new visit replaces the ended one on this device (its cookie replaces the old Session).
-  if (value !== null) endedVisitReceipt = null;
+  if (value !== null) {
+    endedVisitReceipt = null;
+    movedTableLabel = null;
+  }
   paymentOperationReference = null;
   checkoutSessionReference = null;
   checkoutTipSelection = null;

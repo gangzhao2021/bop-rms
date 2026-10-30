@@ -5,6 +5,7 @@ import {
   setCustomerCsrfCredential,
   setCheckoutSessionReference,
   setEndedVisitReceiptAccess,
+  setMovedTableLabel,
 } from "./customer-transaction-context.js";
 function menuContext(value: unknown): MenuJourneyContext | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
@@ -148,6 +149,30 @@ export async function restoreCustomerSession(
     ) {
       const ended = endedVisit(value.endedVisit);
       if (ended !== null) setEndedVisitReceiptAccess(ended);
+      return false;
+    }
+    // v15 2026-10-30: staff moved the party after this phone joined: only where it sits now.
+    if (
+      current() &&
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 2 &&
+      "schemaVersion" in value &&
+      value.schemaVersion === 1 &&
+      "movedTable" in value
+    ) {
+      const moved = value.movedTable;
+      if (
+        moved !== null &&
+        typeof moved === "object" &&
+        !Array.isArray(moved) &&
+        Object.keys(moved).length === 1 &&
+        "tableLabel" in moved &&
+        typeof moved.tableLabel === "string" &&
+        /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(moved.tableLabel)
+      )
+        setMovedTableLabel(moved.tableLabel);
       return false;
     }
     if (
