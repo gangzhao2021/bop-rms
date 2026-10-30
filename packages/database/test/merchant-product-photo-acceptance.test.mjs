@@ -161,7 +161,8 @@ it("uploads a product photo, saves it with a description and refuses unsafe phot
       const latte = await create("LATTE", "Latte");
       const mocha = await create("MOCHA", "Mocha");
       // A new product has no description or photo.
-      assert.deepEqual(latte.presentation, { description: "", photo: null });
+      // No Chinese description is "" to staff, as no English one is (3689fd3d); none is stored.
+      assert.deepEqual(latte.presentation, { description: "", descriptionZh: "", photo: null });
 
       // A phone photo with camera and location data (synthetic).
       const jpeg = await sharp({
@@ -240,6 +241,7 @@ it("uploads a product photo, saves it with a description and refuses unsafe phot
       });
       assert.deepEqual(saved.product.presentation, {
         description: "Double espresso with steamed milk.",
+        descriptionZh: "",
         photo: {
           imageReference: uploaded.photo.imageReference,
           altText: "Latte in a white cup",
@@ -321,7 +323,11 @@ it("uploads a product photo, saves it with a description and refuses unsafe phot
 
       // Removing the photo and description is recorded; readers and outsiders cannot upload.
       const cleared = await save(renamed.product, { description: "", photo: null });
-      assert.deepEqual(cleared.product.presentation, { description: "", photo: null });
+      assert.deepEqual(cleared.product.presentation, {
+        description: "",
+        descriptionZh: "",
+        photo: null,
+      });
       scope.as(reader);
       await rejects(upload(latte.productReference, jpeg), "PermissionDenied");
       scope.as(outsider);

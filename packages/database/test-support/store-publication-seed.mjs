@@ -215,7 +215,12 @@ export async function seedStorePublication(
         tx,
         {
           ...approvalInput,
-          reviewedPublication: { ...configuration, businessDayStartLocalTime: "06:00:00" },
+          // A different start whatever the caller seeded (some seed it from the current hour).
+          reviewedPublication: {
+            ...configuration,
+            businessDayStartLocalTime:
+              configuration.businessDayStartLocalTime === "06:00:00" ? "07:00:00" : "06:00:00",
+          },
         },
         configuration.updatedAt,
       ),
