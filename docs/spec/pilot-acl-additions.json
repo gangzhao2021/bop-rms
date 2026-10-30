@@ -5435,6 +5435,42 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑨ (Owner decision 3, coordinator 2026-10-30 \"并桌\"): DEC-DINING-TABLE-MERGE — the merge record, the order merge and the bill's Orders"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_tax_rounding_adjustment",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-TAX-WHOLE-RECEIPT step 2 (coordinator 2026-10-30, Owner authorized): the bill's tax rounding, recorded by the system rule"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_tax_rounding_adjustment",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-TAX-WHOLE-RECEIPT step 2 (coordinator 2026-10-30, Owner authorized): the bill's tax rounding, recorded by the system rule"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_tax_rounding_adjustment_line",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-TAX-WHOLE-RECEIPT step 2 (coordinator 2026-10-30, Owner authorized): the bill's tax rounding, recorded by the system rule"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_tax_rounding_adjustment_line",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-TAX-WHOLE-RECEIPT step 2 (coordinator 2026-10-30, Owner authorized): the bill's tax rounding, recorded by the system rule"
     }
   ]
 }

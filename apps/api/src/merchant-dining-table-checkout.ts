@@ -20,6 +20,9 @@ import {
   listOrderBillOrders,
   listStoreDiningSessionOrders,
   createPostgresStaffDiningRoundEntryStore,
+  computeBillTaxRounding,
+  loadBillTaxRounding,
+  recordBillTaxRounding,
 } from "@rms/ordering";
 import {
   createPostgresDiningTableSettlementStore,
@@ -131,8 +134,11 @@ export interface DiningTableBill {
       };
     }[];
     readonly subtotalMinor: string;
+    /** Includes the round's share of the bill's tax rounding (`taxRoundingMinor`). */
     readonly taxMinor: string;
     readonly totalMinor: string;
+    /** WP-2423 DEC-TAX-WHOLE-RECEIPT: the round's share of the bill's tax rounding. */
+    readonly taxRoundingMinor: string;
     readonly paid: boolean;
     /**
      * WP-2423 item 8 ④: which phone at the table sent the round (1, 2, … in the order they first
@@ -142,6 +148,11 @@ export interface DiningTableBill {
     /** WP-2423 item 8 ⑨: the table the round came from when it was merged in (null: this one). */
     readonly fromTableLabel: string | null;
   }[];
+  /**
+   * WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding (whole-bill tax minus what the rounds
+   * were charged), already in the rounds' tax; shown on its own line as "Tax rounding".
+   */
+  readonly taxRoundingMinor: string;
   /** Still owed: the rounds not yet paid, before tax, tax and total. */
   readonly owed: {
     readonly subtotalMinor: string;
@@ -235,6 +246,11 @@ export async function readDiningTableBill(
     readonly diningSessionReference: string;
     readonly observedAt: string;
     authorize(): Promise<boolean>;
+    /**
+     * WP-2423 DEC-TAX-WHOLE-RECEIPT: a command about to take or plan a payment records the bill's
+     * tax rounding first (a new version when the bill changed; never once anything is paid).
+     */
+    readonly recordTaxRounding?: { readonly nextReference: () => string } | undefined;
   },
 ): Promise<
   DiningTableBill & {
@@ -276,6 +292,7 @@ export async function readDiningTableBill(
     return Object.freeze({
       ...base,
       rounds: Object.freeze([]),
+      taxRoundingMinor: "0",
       owed: zero,
       consistent: true,
       settlement: null,
@@ -352,6 +369,51 @@ export async function readDiningTableBill(
         if (!unpaidBatches.has(slice.orderBatchReference))
           paidBatches.add(slice.orderBatchReference);
   }
+  // WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill is one receipt. Its tax per tax type is rounded once
+  // over every dish; the difference from what each round was charged is the bill's "Tax rounding",
+  // a share of it on each round. Recorded by the system rule before a payment is taken, and the
+  // recorded version is kept once anything is paid (bills paid before the rule have none).
+  let recordedRounding = await loadBillTaxRounding(tx, owner, orderReference);
+  const anyPayment = settlements.length > 0 || onlinePayments.length > 0 || writeOff !== undefined;
+  let taxRoundingLines: readonly { orderBatchReference: string; amountMinor: bigint }[] =
+    recordedRounding?.lines ?? [];
+  if (!anyPayment) {
+    const computed = computeBillTaxRounding(
+      confirmations.map((confirmation) => ({
+        orderReference: String(confirmation.orderReference),
+        orderBatchReference: String(confirmation.orderBatchReference),
+        items: prices
+          .filter(
+            (item) => String(item.orderBatchReference) === String(confirmation.orderBatchReference),
+          )
+          .map((item) => {
+            const reduction = reductions.get(String(item.orderItemReference)) ?? null;
+            return {
+              orderItemReference: String(item.orderItemReference),
+              netMinor: item.subtotal.amountMinor - item.discountMinor,
+              taxComponents: item.taxComponents,
+              reduction:
+                reduction === null
+                  ? null
+                  : { netMinor: reduction.netMinor, taxMinor: reduction.taxMinor },
+            };
+          }),
+      })),
+    );
+    if (input.recordTaxRounding !== undefined)
+      recordedRounding = await recordBillTaxRounding(tx, owner, {
+        billOrderReference: orderReference,
+        computed,
+        adjustmentReference: input.recordTaxRounding.nextReference(),
+        recordedAt: input.observedAt,
+      });
+    taxRoundingLines = computed.lines;
+  }
+  const taxRoundingOf = (batch: string) =>
+    taxRoundingLines
+      .filter((line) => line.orderBatchReference === batch)
+      .reduce((sum, line) => sum + line.amountMinor, 0n);
+  const taxRoundingMinor = taxRoundingLines.reduce((sum, line) => sum + line.amountMinor, 0n);
   // Which phone sent each round: phones are numbered in the order they joined the table
   // (WP-2423 item 8 ⑤ decision 3, the same numbers staff see in the table's phone list); staff
   // rounds have none.
@@ -411,14 +473,16 @@ export async function readDiningTableBill(
       (sum, item) => sum + item.subtotal.amountMinor - (off(item)?.netMinor ?? 0n),
       0n,
     );
-    const tax = items.reduce(
-      (sum, item) => sum + item.tax.amountMinor - (off(item)?.taxMinor ?? 0n),
-      0n,
-    );
-    const total = items.reduce(
-      (sum, item) => sum + item.total.amountMinor - (off(item)?.totalMinor ?? 0n),
-      0n,
-    );
+    // The round's share of the bill's tax rounding is part of its tax (and what it is paid).
+    const taxRounding = taxRoundingOf(batch);
+    const tax =
+      items.reduce((sum, item) => sum + item.tax.amountMinor - (off(item)?.taxMinor ?? 0n), 0n) +
+      taxRounding;
+    const total =
+      items.reduce(
+        (sum, item) => sum + item.total.amountMinor - (off(item)?.totalMinor ?? 0n),
+        0n,
+      ) + taxRounding;
     const paid = paidBatches.has(batch);
     // A round whose every dish was taken off owes nothing (and is never a payment line).
     if (total === 0n) {
@@ -456,6 +520,7 @@ export async function readDiningTableBill(
       subtotalMinor: subtotal.toString(),
       taxMinor: tax.toString(),
       totalMinor: total.toString(),
+      taxRoundingMinor: taxRounding.toString(),
       paid,
       orderedBy: orderedByOf(batch),
       fromTableLabel: fromTableOf.get(String(confirmation.orderReference)) ?? null,
@@ -582,14 +647,18 @@ export async function readDiningTableBill(
     ),
     pricedTotalMinor: pricedOrders.reduce((sum, entry) => sum + entry.pricedTotalMinor, 0n),
   };
+  // Ordering's priced total holds the recorded tax rounding; a bill shown before it is recorded
+  // carries the one it would record instead.
   const consistent =
     priced.pendingAmendmentCount === 0 &&
-    priced.pricedTotalMinor === paidAllocation + owedTotal &&
+    priced.pricedTotalMinor - (recordedRounding?.totalMinor ?? 0n) + taxRoundingMinor ===
+      paidAllocation + owedTotal &&
     (settlement === null || settlement.roundsMinor === paidAllocation) &&
     split?.stale !== true;
   return Object.freeze({
     ...base,
     rounds: Object.freeze(rounds),
+    taxRoundingMinor: taxRoundingMinor.toString(),
     owed: Object.freeze({
       subtotalMinor: owedSubtotal.toString(),
       taxMinor: owedTax.toString(),
@@ -865,6 +934,8 @@ export function createMerchantDiningTableSettle(options: {
               diningSessionReference: command.diningSessionReference,
               observedAt,
               authorize: guard,
+              // Before a payment is taken, the bill's tax rounding is recorded (system rule).
+              recordTaxRounding: { nextReference: () => options.nextReference() },
             });
             if (bill.paymentTiming !== "PayLater") return fail("TABLE_CHECKOUT_NOT_PAY_LATER");
             if (bill.sessionPhase !== "Closing") return fail("TABLE_CHECKOUT_NOT_STARTED");
@@ -1107,13 +1178,17 @@ export function createMerchantDiningTableSplit(options: {
               authorize: async () => (await guard()) === true,
             });
             const observedAt = instant(options.persistence.now());
-            const read = () =>
+            const read = (record = false) =>
               readDiningTableBill(tx, scope, {
                 diningSessionReference: command.diningSessionReference,
                 observedAt,
                 authorize: guard,
+                // A split plans what each part pays: the bill's tax rounding is recorded first.
+                ...(record
+                  ? { recordTaxRounding: { nextReference: () => options.nextReference() } }
+                  : {}),
               });
-            const bill = await read();
+            const bill = await read(true);
             if (bill.paymentTiming !== "PayLater") return fail("TABLE_CHECKOUT_NOT_PAY_LATER");
             if (bill.sessionPhase !== "Closing") return fail("TABLE_CHECKOUT_NOT_STARTED");
             if (bill.orderReference === null) return fail("TABLE_CHECKOUT_NOTHING_OWED");

@@ -141,11 +141,15 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
   const bill = async (
     tx: ConsumerTransaction,
     authority: TableOnlinePaymentAuthority,
+    record = false,
   ): Promise<Awaited<ReturnType<typeof readDiningTableBill>>> =>
     readDiningTableBill(tx, scope, {
       diningSessionReference: authority.diningSessionReference,
       observedAt: milliseconds(options.now()),
       authorize: () => authority.allowed(tx),
+      // WP-2423 DEC-TAX-WHOLE-RECEIPT: before a payment is started, the bill's tax rounding is
+      // recorded (system rule).
+      ...(record ? { recordTaxRounding: { nextReference: () => options.nextReference() } } : {}),
     });
   const attemptsOf = async (
     tx: ConsumerTransaction,
@@ -447,7 +451,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
         ...(partNumber === null ? {} : { partNumber }),
       });
       const plan = await options.transactions.run(async (tx) => {
-        const current = await bill(tx, authority);
+        const current = await bill(tx, authority, true);
         const attempts =
           current.orderReference === null
             ? []

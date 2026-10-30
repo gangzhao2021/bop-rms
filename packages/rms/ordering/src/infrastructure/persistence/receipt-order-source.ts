@@ -1,3 +1,4 @@
+import type { BillTaxRoundingItem } from "../../domain/bill-tax-rounding.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { parseOrderingReference, parseOrderingInstant } from "../../domain/cart.js";
 import { DigitalReceiptError } from "../../domain/digital-receipt.js";
@@ -155,6 +156,12 @@ export interface OrderItemPrice {
     readonly optionReference: string;
     readonly quantity: number;
   }[];
+  /**
+   * WP-2423 DEC-TAX-WHOLE-RECEIPT: the dish's frozen discount and tax per tax type, for the bill's
+   * whole-receipt tax (its taxable amount and rate, and what it was charged).
+   */
+  readonly discountMinor: bigint;
+  readonly taxComponents: readonly BillTaxRoundingItem["taxComponents"][number][];
 }
 
 /**
@@ -221,6 +228,20 @@ export async function listOrderItemPrices(
               Object.freeze({
                 optionReference: String(option.optionReference),
                 quantity: option.quantity,
+              }),
+            ),
+          ),
+          discountMinor: snapshot.pricing.discount.amountMinor,
+          taxComponents: Object.freeze(
+            snapshot.pricing.taxComponents.map((component) =>
+              Object.freeze({
+                taxComponentCode: component.taxComponentCode,
+                treatment: component.treatment,
+                rate: component.rate,
+                roundingMode: component.roundingMode,
+                calculationOrder: component.calculationOrder,
+                compoundOnPriorTax: component.compoundOnPriorTax,
+                taxAmountMinor: component.taxAmount.amountMinor,
               }),
             ),
           ),

@@ -3531,6 +3531,12 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
           module.manifest.ownedDatabase?.tables?.includes("order_header") &&
           moduleRelative === "src/infrastructure/persistence/dining-session-order-lookup.ts";
+        // WP-2423 DEC-TAX-WHOLE-RECEIPT step 2: the bill's tax rounding (append-only).
+        const acceptedOrderTaxRoundingAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          module.manifest.ownedDatabase?.tables?.includes("order_tax_rounding_adjustment") &&
+          moduleRelative === "src/infrastructure/persistence/order-tax-rounding-store.ts";
         // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the order merge (append-only).
         const acceptedOrderMergeAsset =
           module.packageName === "@rms/ordering" &&
@@ -3965,6 +3971,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningSessionOrderInventoryAsset &&
           !acceptedDiningSessionOrderLookupAsset &&
           !acceptedOrderMergeAsset &&
+          !acceptedOrderTaxRoundingAsset &&
           !acceptedDiningCartQueryAsset &&
           !acceptedDiningCartSelectionAsset &&
           !acceptedDiningCartReplacementAsset &&

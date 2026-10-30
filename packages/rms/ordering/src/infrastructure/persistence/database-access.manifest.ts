@@ -19,6 +19,23 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 DEC-TAX-WHOLE-RECEIPT step 2: the bill's tax rounding (system rule, append-only).
+      table: "order_tax_rounding_adjustment",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "order_tax_rounding_adjustment_line",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): a merged table's Order on the other's bill.
       table: "order_merge",
       classification: "append-only-record",
@@ -442,6 +459,42 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "order-tax-rounding.read.order_tax_rounding_adjustment",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_tax_rounding_adjustment" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-tax-rounding-store.ts",
+    },
+    {
+      id: "order-tax-rounding.write.order_tax_rounding_adjustment",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_tax_rounding_adjustment" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-tax-rounding-store.ts",
+    },
+    {
+      id: "order-tax-rounding.read.order_tax_rounding_adjustment_line",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_tax_rounding_adjustment_line" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-tax-rounding-store.ts",
+    },
+    {
+      id: "order-tax-rounding.write.order_tax_rounding_adjustment_line",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_tax_rounding_adjustment_line" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-tax-rounding-store.ts",
+    },
     {
       id: "order-item-price-reduction.read.order_item_price_reduction",
       operation: "read",
