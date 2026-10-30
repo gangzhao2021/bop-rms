@@ -4,7 +4,8 @@ import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { CustomerCurrentOrder } from "../session/session-bootstrap.js";
-import { getLastSettledTable, SettledTableReceiptView } from "../dining/SettledTableReceipt.js";
+import { SettledTableReceiptPanel } from "../dining/SettledTableReceipt.js";
+import { getSettledTableLabel } from "../session/customer-transaction-context.js";
 import {
   createStoreProfileClient,
   type StoreProfileLoader,
@@ -31,7 +32,15 @@ const unavailableClient: CustomerEntryClient = Object.freeze({
 export interface EntryContextPageProps {
   readonly diningAdmission?: DiningAdmissionUi | undefined;
   readonly client?: CustomerEntryClient | undefined;
-  readonly onEstablished?: ((context: CustomerEntryEstablishedContext) => void) | undefined;
+  /** The public context the menu needs (also after a scan of a table not open yet). */
+  readonly onEstablished?:
+    | ((
+        context: Pick<
+          CustomerEntryEstablishedContext,
+          "publicStoreReference" | "channel" | "locale" | "brandDisplayName" | "storeDisplayName"
+        >,
+      ) => void)
+    | undefined;
   /**
    * WP-2423 Q10: an order this browser already placed. Starting a new visit would replace the
    * Session that can open it, so the page offers the order first and starts only when asked.
@@ -89,7 +98,8 @@ export function EntryContextPage({
         const next = await client[action]();
         if (!active) return;
         setResult({ client, state: next });
-        if (next.kind === "Established") established.current?.(next.context);
+        if (next.kind === "Established" || next.kind === "TableNotOpen")
+          established.current?.(next.context);
       } catch {
         if (active) setResult({ client, state: Object.freeze({ kind: "ServiceUnavailable" }) });
       } finally {
@@ -427,6 +437,39 @@ function EntryState({
       </div>
     );
 
+  // Coordinator 2026-10-30: no party is seated at this table, so no visit was started. A guest
+  // whose table was just settled (this browser's earlier visit, still in place) is thanked with
+  // its receipt; anyone else is asked to have staff seat them.
+  if (state.kind === "TableNotOpen") {
+    const settled = getSettledTableLabel();
+    return (
+      <div>
+        {settled === null ? (
+          <>
+            <StateHeading headingRef={headingRef}>{t("This table isn’t open yet")}</StateHeading>
+            <p className="entry-context">{t("Ask staff to seat you, then scan again.")}</p>
+          </>
+        ) : (
+          <>
+            <StateHeading headingRef={headingRef}>
+              {t("This table is settled. Thank you for dining with us.")}
+            </StateHeading>
+            <p className="entry-context">
+              {t("Table {table} has paid and closed.", { table: settled })}
+            </p>
+            <SettledTableReceiptPanel />
+            <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
+          </>
+        )}
+        {onContinue ? (
+          <button className="entry-action" type="button" onClick={onContinue}>
+            {t("Look at the menu first")}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
   if (state.kind === "PickupNotOffered")
     return (
       <div className="entry-state entry-state--warning" role="alert">
@@ -487,41 +530,6 @@ function EntryState({
 
   const { context } = state;
   const locationOpen = context.operatingState === "Open";
-  // Coordinator 2026-10-30: staff seat a party before its phones can join and order.
-  const notSeated = context.channel === "DineIn" && context.tableOpen === false;
-  if (locationOpen && notSeated) {
-    // A guest whose table was just settled (this device's visit ended with it) scanning again
-    // before staff seat a new party: thanked, with that table's receipt, read before this scan.
-    const settled = getLastSettledTable();
-    return (
-      <div>
-        {settled === null ? (
-          <>
-            <StateHeading headingRef={headingRef}>{t("This table isn’t open yet")}</StateHeading>
-            <p className="entry-context">{t("Ask staff to seat you, then scan again.")}</p>
-          </>
-        ) : (
-          <>
-            <StateHeading headingRef={headingRef}>
-              {t("This table is settled. Thank you for dining with us.")}
-            </StateHeading>
-            <p className="entry-context">
-              {t("Table {table} has paid and closed.", { table: settled.tableLabel })}
-            </p>
-            {settled.receipt === null ? null : (
-              <SettledTableReceiptView receipt={settled.receipt} />
-            )}
-            <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
-          </>
-        )}
-        {onContinue ? (
-          <button className="entry-action" type="button" onClick={onContinue}>
-            {t("Look at the menu first")}
-          </button>
-        ) : null}
-      </div>
-    );
-  }
   return (
     <div>
       <StateHeading headingRef={headingRef}>{t("Ready to order")}</StateHeading>

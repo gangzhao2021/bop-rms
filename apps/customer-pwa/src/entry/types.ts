@@ -36,6 +36,20 @@ export type CustomerEntryScreenState =
     }>
   /** WP-2423 item 8 ⑦ 1b: a pickup code at a Store that takes dine-in orders only. */
   | Readonly<{ kind: "PickupNotOffered"; storeDisplayName: string }>
+  /**
+   * Coordinator 2026-10-30: no party is seated at the scanned table; no visit was started (staff
+   * seat the party, then the code is scanned again). The menu can be browsed.
+   */
+  | Readonly<{
+      kind: "TableNotOpen";
+      context: Readonly<{
+        publicStoreReference: string;
+        channel: "DineIn";
+        locale: string;
+        brandDisplayName: string;
+        storeDisplayName: string;
+      }>;
+    }>
   | Readonly<{ kind: "ServiceUnavailable" }>
   | Readonly<{ kind: "RateLimited"; retryAfterSeconds: number }>
   | Readonly<{ kind: "Offline" }>

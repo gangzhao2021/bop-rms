@@ -82,6 +82,8 @@ export async function exerciseEntryDiningJoin({
   session,
   cookie,
   csrfToken,
+  /** Coordinator 2026-10-30: the first phone scans once staff seated the party (table open). */
+  enterFirst,
   enterAnother,
   /** DEC-DINING-GUEST-INVITATION: run the Host invitation journey (HumanCode table) and stop. */
   hostInvitation = false,
@@ -231,6 +233,7 @@ export async function exerciseEntryDiningJoin({
     joinKind: hostInvitation ? "HumanCode" : "Invitation",
     requestedAt: at,
   });
+  if (enterFirst !== undefined) ({ cookie, csrfToken } = await enterFirst());
   const diningBinding = createPostgresDiningGuestBindingStore({ run }, scope);
   const join = createCustomerDiningJoinComposition({
     scope: identityScope,

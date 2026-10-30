@@ -755,25 +755,16 @@ export async function exercisePersistentProfileEntry({
     // Coordinator 2026-10-30: the scan says whether staff seated a party at the table (pilot api
     // SELECT on dining_session, docs/spec/pilot-acl-additions.json).
     await admin.query("GRANT SELECT ON rms_dining.dining_session TO " + role);
-    const diningResponse = await request();
-    assert.equal(diningResponse.status, 201);
-    const diningBody = await diningResponse.json();
-    assert.equal(diningBody.channel, "DineIn");
-    assert.equal(diningBody.tableOpen, false);
-    assert.equal(diningBody.publicTableReference, diningTable.publicTableReference);
-    assert.equal(diningResponse.headers.getSetCookie().length, 1);
-    assert.equal(Object.hasOwn(diningBody, "sessionCredential"), false);
-    const diningRows = await admin.query(
-      "SELECT dining_state,public_table_id FROM bop_identity.guest_session WHERE brand_id=$1 AND store_id=$2 AND qr_id=$3",
-      [scope.brandReference, scope.storeReference, diningTable.qrReference],
-    );
-    assert.equal(diningRows.rows.length, 1);
-    assert.equal(diningRows.rows[0].dining_state, "ContextOnly");
-    assert.equal(diningRows.rows[0].public_table_id, diningTable.publicTableReference);
-    const afterDining = await count();
-    assert.equal(afterDining.sessions, saved.sessions + 1);
-    assert.equal(afterDining.admissions, saved.admissions + 1);
-    assert.equal(afterDining.admissionAudits, saved.admissionAudits + 1);
+    // Before staff seat a party the table isn't open: nobody can join or order there, so the scan
+    // starts no visit (no cookie, nothing recorded) and gives only the menu's public context.
+    const notOpen = await request();
+    assert.equal(notOpen.status, 409);
+    assert.equal(notOpen.headers.getSetCookie().length, 0);
+    const notOpenBody = await notOpen.json();
+    assert.equal(notOpenBody.code, "entry_table_not_open");
+    assert.equal(notOpenBody.store.publicStoreReference, f.payload.publicStoreReference);
+    assert.equal(Object.hasOwn(notOpenBody, "csrfToken"), false);
+    assert.deepEqual(await count(), saved);
     const diningContextOptions = {
       transactions: { run },
       binding: publicOptions.binding,
@@ -803,23 +794,50 @@ export async function exercisePersistentProfileEntry({
       admission: { consume: async () => null },
       now: () => currentTime,
     });
-    const diningCredential = diningResponse.headers.getSetCookie()[0].split(";")[0].split("=")[1];
+    let diningCredential;
     const resolveDiningSession = () =>
       diningSessions.resolve({
         sessionCredential: diningCredential,
         activity: "Background",
         observedAt: at,
       });
-    const authenticatedDining = await resolveDiningSession();
-    assert.equal(authenticatedDining.diningState, "ContextOnly");
-    for (const purpose of ["DiningJoin", "DiningAdmission"]) {
-      const context = await diningContext.resolve({
-        session: authenticatedDining,
-        observedAt: at,
-        purpose,
-      });
-      assert.equal(context.tableReference, diningTable.tableReference);
-    }
+    // Staff seated the party: the first phone's scan now starts its visit at the open table.
+    const enterFirst = async () => {
+      const diningResponse = await request();
+      assert.equal(diningResponse.status, 201);
+      const diningBody = await diningResponse.json();
+      assert.equal(diningBody.channel, "DineIn");
+      assert.equal(diningBody.tableOpen, true);
+      assert.equal(diningBody.publicTableReference, diningTable.publicTableReference);
+      assert.equal(diningResponse.headers.getSetCookie().length, 1);
+      assert.equal(Object.hasOwn(diningBody, "sessionCredential"), false);
+      const diningRows = await admin.query(
+        "SELECT dining_state,public_table_id FROM bop_identity.guest_session WHERE brand_id=$1 AND store_id=$2 AND qr_id=$3",
+        [scope.brandReference, scope.storeReference, diningTable.qrReference],
+      );
+      assert.equal(diningRows.rows.length, 1);
+      assert.equal(diningRows.rows[0].dining_state, "ContextOnly");
+      assert.equal(diningRows.rows[0].public_table_id, diningTable.publicTableReference);
+      const afterDining = await count();
+      assert.equal(afterDining.sessions, saved.sessions + 1);
+      assert.equal(afterDining.admissions, saved.admissions + 1);
+      assert.equal(afterDining.admissionAudits, saved.admissionAudits + 1);
+      diningCredential = diningResponse.headers.getSetCookie()[0].split(";")[0].split("=")[1];
+      const authenticatedDining = await resolveDiningSession();
+      assert.equal(authenticatedDining.diningState, "ContextOnly");
+      for (const purpose of ["DiningJoin", "DiningAdmission"]) {
+        const context = await diningContext.resolve({
+          session: authenticatedDining,
+          observedAt: at,
+          purpose,
+        });
+        assert.equal(context.tableReference, diningTable.tableReference);
+      }
+      return {
+        cookie: diningResponse.headers.getSetCookie()[0].split(";")[0],
+        csrfToken: diningBody.csrfToken,
+      };
+    };
     const joinedDining = await exerciseEntryDiningJoin({
       customerEntry,
       acquire,
@@ -852,8 +870,7 @@ export async function exercisePersistentProfileEntry({
           csrfToken: body.csrfToken,
         };
       },
-      cookie: diningResponse.headers.getSetCookie()[0].split(";")[0],
-      csrfToken: diningBody.csrfToken,
+      enterFirst,
     });
     const afterBinding = await count();
     await diningTable.revoke();

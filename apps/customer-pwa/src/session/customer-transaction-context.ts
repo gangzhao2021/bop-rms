@@ -82,6 +82,20 @@ export function getSettledTableReceiptCsrf(): string | null {
   return settledTable?.csrfToken ?? null;
 }
 
+/**
+ * Coordinator 2026-10-30: this device scanned a table no party is seated at; no visit was started
+ * (ordering waits until staff seat the party and the code is scanned again). Memory only.
+ */
+let unseatedTableScan = false;
+
+export function setUnseatedTableScan(value: boolean): void {
+  unseatedTableScan = value;
+}
+
+export function isUnseatedTableScan(): boolean {
+  return unseatedTableScan;
+}
+
 export function setCustomerCsrfCredential(value: string | null): void {
   csrfContext = Symbol();
   csrfCredential = value;
@@ -90,6 +104,7 @@ export function setCustomerCsrfCredential(value: string | null): void {
     endedVisitReceipt = null;
     movedTableLabel = null;
     settledTable = null;
+    unseatedTableScan = false;
   }
   paymentOperationReference = null;
   checkoutSessionReference = null;

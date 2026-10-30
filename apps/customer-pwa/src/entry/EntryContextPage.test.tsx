@@ -3,7 +3,6 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { CurrentOrderView, EntryContextView } from "./EntryContextPage.js";
 import type { CustomerEntryEstablishedContext, CustomerEntryScreenState } from "./types.js";
-import { forgetSettledTable, rememberSettledTable } from "../dining/SettledTableReceipt.js";
 import { setSettledTable } from "../session/customer-transaction-context.js";
 
 const context: CustomerEntryEstablishedContext = Object.freeze({
@@ -28,57 +27,36 @@ function render(state: CustomerEntryScreenState): string {
 }
 
 describe("CUST-ENTRY-CONTEXT", () => {
-  it("a table no party is seated at says so before joining, and keeps the menu to browse", () => {
-    const html = render({ kind: "Established", context: { ...context, tableOpen: false } });
+  it("a table no party is seated at says so, keeps the menu, and starts no visit", () => {
+    const notOpen: CustomerEntryScreenState = {
+      kind: "TableNotOpen",
+      context: {
+        publicStoreReference: context.publicStoreReference,
+        channel: "DineIn",
+        locale: "en-CA",
+        brandDisplayName: context.brandDisplayName,
+        storeDisplayName: context.storeDisplayName,
+      },
+    };
+    const html = render(notOpen);
     expect(html).toContain("This table isn’t open yet");
     expect(html).toContain("Ask staff to seat you, then scan again.");
     expect(html).toContain("Look at the menu first");
     expect(html).not.toContain("Ready to order");
     expect(html).not.toContain("is confirmed for dine-in");
     expect(html).not.toContain("Join this table");
-    // Open (or unknown) tables are unchanged.
-    expect(render({ kind: "Established", context: { ...context, tableOpen: true } })).toContain(
-      "Ready to order",
-    );
-  });
-
-  it("a guest whose table was just settled scans again: thanked, with the receipt read before", async () => {
+    expect(html).not.toContain(context.publicStoreReference);
+    // A guest whose own visit ended with a settled table (still on this browser) is thanked.
     setSettledTable({ tableLabel: "DEMO-03", csrfToken: "C".repeat(43) });
-    await rememberSettledTable({
-      read: async () => ({
-        tableLabel: "DEMO-03",
-        rounds: [
-          {
-            roundNumber: 1,
-            fromTableLabel: null,
-            items: [{ displayName: "Milk tea", subtotalMinor: "450", reduced: null }],
-          },
-        ],
-        subtotalMinor: "450",
-        taxMinor: "59",
-        ordersTotalMinor: "509",
-        tipMinor: "0",
-        roundingMinor: "1",
-        paidMinor: "510",
-        split: false,
-        payments: [{ partNumber: null, method: "Cash", totalMinor: "510" }],
-      }),
-    });
-    setSettledTable(null);
     try {
-      const html = render({ kind: "Established", context: { ...context, tableOpen: false } });
-      expect(html).toContain("This table is settled. Thank you for dining with us.");
-      expect(html).toContain("Table DEMO-03 has paid and closed.");
-      expect(html).toContain("Milk tea");
-      expect(html).toContain("$5.10");
-      expect(html).toContain("New party? Ask staff to seat you, then scan again.");
-      expect(html).not.toContain("This table isn’t open yet");
-      // At an open table, the new party's visit goes on as usual.
-      expect(render({ kind: "Established", context: { ...context, tableOpen: true } })).toContain(
-        "Ready to order",
-      );
+      const settled = render(notOpen);
+      expect(settled).toContain("This table is settled. Thank you for dining with us.");
+      expect(settled).toContain("Table DEMO-03 has paid and closed.");
+      expect(settled).toContain("Loading receipt");
+      expect(settled).toContain("New party? Ask staff to seat you, then scan again.");
+      expect(settled).not.toContain("This table isn’t open yet");
     } finally {
-      forgetSettledTable();
+      setSettledTable(null);
     }
   });
 

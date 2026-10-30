@@ -1,3 +1,7 @@
+import {
+  isUnseatedTableScan,
+  setUnseatedTableScan,
+} from "../session/customer-transaction-context.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { consumeCustomerQrFragment, createCustomerEntryClient } from "./entry-client.js";
 import {
@@ -160,6 +164,48 @@ describe("customer entry browser boundary", () => {
     await expect(start()).resolves.toEqual({ kind: "ServiceUnavailable" });
     // An answer in an unknown form is never shown as a store's state.
     await expect(start()).resolves.toEqual({ kind: "CommandFailed" });
+  });
+
+  it("reads a table no party is seated at: the menu's public context, and ordering waits", async () => {
+    const body = {
+      schemaVersion: 1,
+      code: "entry_table_not_open",
+      messageKey: "customer.entry.table_not_open",
+      recovery: { action: "AskStaff", storeSelection: "Hidden" },
+      store: {
+        brandDisplayName: "TEST Brand",
+        storeDisplayName: "TEST Noodle House",
+        publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+        locale: "en-CA",
+      },
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response(409, body))
+      .mockResolvedValueOnce(response(409, { ...body, store: { ...body.store, locale: "x" } }));
+    const start = () =>
+      createCustomerEntryClient({
+        fetch,
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      }).start();
+    setUnseatedTableScan(false);
+    await expect(start()).resolves.toEqual({
+      kind: "TableNotOpen",
+      context: {
+        publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+        channel: "DineIn",
+        locale: "en-CA",
+        brandDisplayName: "TEST Brand",
+        storeDisplayName: "TEST Noodle House",
+      },
+    });
+    expect(isUnseatedTableScan()).toBe(true);
+    await expect(start()).resolves.toEqual({ kind: "ServiceUnavailable" });
+    setUnseatedTableScan(false);
   });
 
   it("WP-2423 Q4: reads a closed or paused Store with today's hours", async () => {

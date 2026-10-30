@@ -75,6 +75,20 @@ export interface CustomerEntryServiceNotOffered {
   readonly storeDisplayName: string;
 }
 
+/**
+ * Coordinator 2026-10-30: no party is seated at the scanned table (free, or waiting for cleaning).
+ * Nobody can join or order there until staff seat a party, so no Session is issued (a browser's
+ * earlier visit, e.g. a guest whose table was just settled, keeps its receipt); the public context
+ * lets the guest look at the menu.
+ */
+export interface CustomerEntryTableNotOpen {
+  readonly status: "TableNotOpen";
+  readonly brandDisplayName: string;
+  readonly storeDisplayName: string;
+  readonly publicStoreReference: string;
+  readonly locale: string;
+}
+
 /** WP-2423 Q11: a genuine table code that staff replaced or turned off; no Session is issued. */
 export interface CustomerEntryQrRetired {
   readonly status: "QrRetired";
@@ -85,6 +99,7 @@ export type CustomerEntryPortResult =
   | CustomerEntryEstablished
   | CustomerEntryNotAccepting
   | CustomerEntryServiceNotOffered
+  | CustomerEntryTableNotOpen
   | CustomerEntryQrRetired
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" };
@@ -366,6 +381,7 @@ function parsePortResult(
   | CustomerEntryQrRetired
   | CustomerEntryNotAccepting
   | CustomerEntryServiceNotOffered
+  | CustomerEntryTableNotOpen
   | CustomerEntryEstablished {
   const statusRecord =
     typeof value === "object" && value !== null
@@ -387,6 +403,32 @@ function parsePortResult(
     if (raw.reason !== "Replaced" && raw.reason !== "TurnedOff")
       throw new TypeError("invalid retired result");
     return Object.freeze({ status: "QrRetired", reason: raw.reason });
+  }
+  if (status === "TableNotOpen") {
+    const raw = closedRecord(value, [
+      "status",
+      "brandDisplayName",
+      "storeDisplayName",
+      "publicStoreReference",
+      "locale",
+    ]);
+    const label = (text: unknown) =>
+      typeof text === "string" &&
+      /^[^\p{Cc}\p{Cf}<>{}[\]`*_#]{1,120}$/u.test(text) &&
+      text === text.trim()
+        ? text
+        : (() => {
+            throw new TypeError("invalid table-not-open result");
+          })();
+    if (typeof raw.locale !== "string" || !localePattern.test(raw.locale))
+      throw new TypeError("invalid table-not-open result");
+    return Object.freeze({
+      status: "TableNotOpen",
+      brandDisplayName: label(raw.brandDisplayName),
+      storeDisplayName: label(raw.storeDisplayName),
+      publicStoreReference: parseUuidV7(raw.publicStoreReference),
+      locale: raw.locale,
+    });
   }
   if (status === "ServiceNotOffered") {
     const raw = closedRecord(value, ["status", "storeDisplayName"]);
@@ -584,6 +626,22 @@ export class CustomerEntryHandler {
                 ? "customer.entry.qr_replaced"
                 : "customer.entry.qr_turned_off",
             recovery: { action: "AskStaff", storeSelection: "Hidden" },
+          });
+          return;
+        }
+        // Coordinator 2026-10-30: no party is seated at this table; no visit is started.
+        if (result.status === "TableNotOpen") {
+          response.status(409).json({
+            schemaVersion: 1,
+            code: "entry_table_not_open",
+            messageKey: "customer.entry.table_not_open",
+            recovery: { action: "AskStaff", storeSelection: "Hidden" },
+            store: {
+              brandDisplayName: result.brandDisplayName,
+              storeDisplayName: result.storeDisplayName,
+              publicStoreReference: result.publicStoreReference,
+              locale: result.locale,
+            },
           });
           return;
         }
