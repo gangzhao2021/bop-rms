@@ -11,6 +11,7 @@ import {
 } from "../../bop/audit/src/index.ts";
 import { createStoreConfigurationVersion } from "../../rms/store/src/index.ts";
 import { verifyPersistentMerchantBffHttp } from "./persistent-merchant-bff-http.mjs";
+import { grantPilotApiAcl } from "./pilot-api-acl.mjs";
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import {
@@ -991,6 +992,10 @@ export async function verifyPersistentMerchantBff({
   );
   // DEC-KITCHEN-STALE-TICKETS: the Kitchen board leaves out tickets a manager closed (pilot api grant).
   await admin.query("GRANT SELECT ON rms_kitchen.kitchen_ticket_closure TO " + role);
+  // WP-2423: the staff tables board composes Dining, Ordering and Payment reads (payment timing,
+  // rounds awaiting payment, merges, staff calls, tea), so the role holds the rendered pilot API
+  // ACL rather than a hand list that drifts behind each new source.
+  await grantPilotApiAcl(admin, role);
   // WP-2423 Q2/Q3: the Kitchen board reads published menu allergens (pilot api SELECT grants).
   await admin.query("GRANT USAGE ON SCHEMA rms_catalog TO " + role);
   await admin.query(
