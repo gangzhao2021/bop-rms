@@ -9,6 +9,7 @@ import {
   parseDiningReference,
   loadDiningSessionPhones,
   listDiningSessionsMergedIn,
+  listDiningSessionMergesInto,
 } from "@rms/dining";
 import {
   createPostgresPayLaterItemCancellationStore,
@@ -18,6 +19,7 @@ import {
   listOrderPriceReductions,
   listOrderBillOrders,
   listStoreDiningSessionOrders,
+  createPostgresStaffDiningRoundEntryStore,
 } from "@rms/ordering";
 import {
   createPostgresDiningTableSettlementStore,
@@ -137,6 +139,8 @@ export interface DiningTableBill {
      * ordered; no name), or null for a round staff entered for the table.
      */
     readonly orderedBy: number | null;
+    /** WP-2423 item 8 ⑨: the table the round came from when it was merged in (null: this one). */
+    readonly fromTableLabel: string | null;
   }[];
   /** Still owed: the rounds not yet paid, before tax, tax and total. */
   readonly owed: {
@@ -362,7 +366,32 @@ export async function readDiningTableBill(
     for (const phone of await loadDiningSessionPhones(tx as never, scope, party))
       phoneOf.set(String(phone.participantReference), offset + phone.phoneNumber);
   }
+  // Rounds staff entered for the table (DEC-STAFF-DINE-IN-ROUND) were sent by no phone.
+  const staffRounds = new Set(
+    (
+      await createPostgresStaffDiningRoundEntryStore({
+        ...owner,
+        authorize: allowed,
+      }).listByOrders(tx, billOrders)
+    ).keys(),
+  );
+  // WP-2423 item 8 ⑨: the table each merged Order came from.
+  const fromTableOf = new Map<string, string>();
+  if (billOrders.length > 1) {
+    const merges =
+      (await listDiningSessionMergesInto(tx as never, scope, [session])).get(session) ?? [];
+    const orders = await listStoreDiningSessionOrders(
+      tx,
+      owner,
+      merges.map((merge) => merge.diningSessionReference),
+    );
+    for (const merge of merges) {
+      const order = orders.get(merge.diningSessionReference);
+      if (order !== undefined) fromTableOf.set(String(order), merge.fromTableLabel);
+    }
+  }
   const orderedByOf = (batch: string): number | null => {
+    if (staffRounds.has(batch)) return null;
     const participant = prices.find(
       (item) => String(item.orderBatchReference) === batch,
     )?.addedByParticipantReference;
@@ -429,6 +458,7 @@ export async function readDiningTableBill(
       totalMinor: total.toString(),
       paid,
       orderedBy: orderedByOf(batch),
+      fromTableLabel: fromTableOf.get(String(confirmation.orderReference)) ?? null,
     });
   });
   // A split's parts: what each was paid with, and what is still owed by the parts unpaid.

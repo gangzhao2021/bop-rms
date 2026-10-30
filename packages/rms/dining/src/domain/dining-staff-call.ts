@@ -16,7 +16,13 @@ import {
 export const diningStaffCallWindowMs = 30 * 60_000;
 export const diningStaffCallMaximumPerWindow = 6;
 
-export const diningStaffCallReasons = ["Question", "TableNeeds", "OrderProblem"] as const;
+// "ReadyToPay" (2026-10-30): the table is ready to pay (asked mostly while checking out).
+export const diningStaffCallReasons = [
+  "Question",
+  "TableNeeds",
+  "OrderProblem",
+  "ReadyToPay",
+] as const;
 export type DiningStaffCallReason = (typeof diningStaffCallReasons)[number];
 
 export type DiningStaffCallClosureKind = "Answered" | "Withdrawn";

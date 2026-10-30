@@ -32,6 +32,7 @@ const reasonText = (): Record<DiningStaffCallReason, string> => ({
   Question: t("A question"),
   TableNeeds: t("Something for the table (water, cutlery, napkins)"),
   OrderProblem: t("A problem with my order"),
+  ReadyToPay: t("We're ready to pay"),
 });
 
 export function DiningStaffCallPanel({

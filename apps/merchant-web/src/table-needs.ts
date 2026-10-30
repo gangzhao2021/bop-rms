@@ -25,12 +25,16 @@ export interface TableNeed {
 }
 
 /** WP-2423 Q28 DEC-DINING-STAFF-CALL: what the guest asked for, in staff words. */
-export function staffCallReasonText(reason: "Question" | "TableNeeds" | "OrderProblem"): string {
+export function staffCallReasonText(
+  reason: "Question" | "TableNeeds" | "OrderProblem" | "ReadyToPay",
+): string {
   return reason === "TableNeeds"
     ? t("Something for the table")
     : reason === "OrderProblem"
       ? t("A problem with their order")
-      : t("A question");
+      : reason === "ReadyToPay"
+        ? t("Ready to pay")
+        : t("A question");
 }
 
 /** WP-2423 item 8 ⑤: why a guest's round waits for staff, in staff words. */

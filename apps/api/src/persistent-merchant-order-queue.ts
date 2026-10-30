@@ -13,6 +13,8 @@ import {
   listStoreOrderAcceptanceHolds,
   listStoreUnfulfillablePaidOrders,
   listOrderItemPrices,
+  listOrderBillOrders,
+  listOrderDiningSessions,
   loadMerchantOrderLines,
   loadMerchantOrderListSummaries,
   loadOrderPickupContact,
@@ -56,6 +58,7 @@ import {
 } from "./merchant-order-staff-cancellation.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
+import { readDiningTableBill } from "./merchant-dining-table-checkout.js";
 import { readItemCancellationRefund } from "./merchant-order-item-staff-cancellation.js";
 import { readCustomerReceiptFinancial } from "./customer-receipt-financial.js";
 import {
@@ -825,6 +828,34 @@ export function createPersistentMerchantOrderQueue(options: {
                     },
                   });
                   continue;
+                }
+                // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): a table with tables merged into it
+                // has one bill — every Order on it (Payment's own figure, as the table panel).
+                if (
+                  tenantReference !== null &&
+                  (await listOrderBillOrders(businessTransaction, scoped, order)).length > 1
+                ) {
+                  const session = (
+                    await listOrderDiningSessions(businessTransaction, scoped, [order])
+                  ).get(order);
+                  if (session !== undefined) {
+                    const merged = await readDiningTableBill(
+                      businessTransaction,
+                      { tenantReference, ...scoped },
+                      {
+                        diningSessionReference: session,
+                        observedAt: new Date(Date.parse(String(source.now()))).toISOString(),
+                        authorize: async () => stillAllowed(),
+                      },
+                    );
+                    tableBills.set(order, {
+                      totalMinor: merged.rounds
+                        .reduce((sum, round) => sum + BigInt(round.totalMinor), 0n)
+                        .toString(),
+                      paid: null,
+                    });
+                    continue;
+                  }
                 }
                 const sent = new Set(
                   rounds

@@ -43,6 +43,26 @@ export function createPostgresDiningParticipationStore(
   return createParticipationStore(runner, scopeInput, "None");
 }
 
+/**
+ * DEC-DINING-STAFF-CALL (coordinator 2026-10-30, Owner-authorized): a guest at a table checking out
+ * (Closing) is still seated for calling staff — "ready to pay", "the bill is wrong". Fresh owner
+ * facts only, as `createPostgresDiningParticipationStore`; ordering keeps requiring Active.
+ */
+export function createPostgresDiningStaffCallParticipationStore(
+  runner: DiningTableTransactionRunner,
+  scopeInput: DiningTableStoreScope,
+): DiningCartParticipationOptions["repository"] {
+  return createParticipationStore(runner, scopeInput, "None", true);
+}
+
+/** The staff call's write fence: the participant fence, with a table checking out still seated. */
+export function createPostgresDiningStaffCallParticipantFence(
+  runner: DiningTableTransactionRunner,
+  scopeInput: DiningTableStoreScope,
+): DiningCartParticipationOptions["repository"] {
+  return createParticipationStore(runner, scopeInput, "Participant", true);
+}
+
 /** Borrow the caller's write transaction and retain these locks until its commit.
  * This proves current Dining Host participation only, never Guest identity or CSRF.
  * Acquire before any Cart lock. Do not release the transaction after this read.
@@ -69,6 +89,7 @@ function createParticipationStore(
   runner: DiningTableTransactionRunner,
   scopeInput: DiningTableStoreScope,
   fence: "None" | "Host" | "Participant",
+  checkingOutSeated = false,
 ): DiningCartParticipationOptions["repository"] {
   const scope = closed(scopeInput, ["tenantReference", "brandReference", "storeReference"]);
   const tenant = parseDiningReference(scope.tenantReference);
@@ -169,7 +190,7 @@ function createParticipationStore(
           if (
             (fence === "Host" && session.hostParticipantReference !== input.participant) ||
             (fence !== "None" && session.tableReference !== lockedTable) ||
-            session.phase !== "Active" ||
+            (session.phase !== "Active" && !(checkingOutSeated && session.phase === "Closing")) ||
             participant.status !== "Active" ||
             currentTable.tableReference !== session.tableReference ||
             currentTable.activeDiningSessionReference !== session.diningSessionReference ||

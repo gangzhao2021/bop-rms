@@ -23,8 +23,8 @@ import {
 } from "../../domain/dining-staff-call.js";
 import { captureSessionData } from "../../application/dining-session-snapshot.js";
 import {
-  createPostgresDiningParticipantFence,
-  createPostgresDiningParticipationStore,
+  createPostgresDiningStaffCallParticipantFence,
+  createPostgresDiningStaffCallParticipationStore,
 } from "./dining-participation-store.js";
 import type {
   DiningTableStoreScope,
@@ -169,7 +169,7 @@ export function createPostgresDiningStaffCallStore(
     ).map((row) => (typeof row.at === "string" ? row.at : fail()));
   const seated = (
     current: Awaited<
-      ReturnType<ReturnType<typeof createPostgresDiningParticipationStore>["readCurrent"]>
+      ReturnType<ReturnType<typeof createPostgresDiningStaffCallParticipationStore>["readCurrent"]>
     >,
     command: DiningStaffCallGuestCommand,
   ) => {
@@ -177,7 +177,8 @@ export function createPostgresDiningStaffCallStore(
     const session = parseDiningSession(current.session);
     return (
       session.diningSessionReference === command.diningSessionReference &&
-      session.phase === "Active" &&
+      // DEC-DINING-STAFF-CALL (2026-10-30): a table checking out still calls staff.
+      (session.phase === "Active" || session.phase === "Closing") &&
       current.participant.status === "Active"
     );
   };
@@ -210,7 +211,7 @@ export function createPostgresDiningStaffCallStore(
     }
   };
   const fenced = (tx: DiningTableTransaction, command: DiningStaffCallGuestCommand) =>
-    createPostgresDiningParticipantFence({ run: (work) => work(tx) }, scope).readCurrent({
+    createPostgresDiningStaffCallParticipantFence({ run: (work) => work(tx) }, scope).readCurrent({
       brandReference: brand,
       storeReference: store,
       diningSessionReference: command.diningSessionReference,
@@ -298,7 +299,7 @@ export function createPostgresDiningStaffCallStore(
     /** What this guest's phone shows: no write, no lock. */
     async status(value: unknown): Promise<DiningStaffCallGuestStatus> {
       return guest(value, false, async (tx, command) => {
-        const current = await createPostgresDiningParticipationStore(
+        const current = await createPostgresDiningStaffCallParticipationStore(
           { run: (work) => work(tx) },
           scope,
         ).readCurrent({
@@ -456,7 +457,7 @@ export function createPostgresDiningStaffCallStore(
       return open;
     },
 
-    /** Staff: how many open calls at this Store's Active Sessions (navigation count). */
+    /** Staff: how many open calls at this Store's open tables (navigation count; checking out too). */
     async countOpen(
       tx: DiningTableTransaction,
       authorize: () => Promise<boolean> | boolean,
@@ -465,7 +466,7 @@ export function createPostgresDiningStaffCallStore(
       await context(tx);
       const row = rows(
         await tx.query(
-          "SELECT count(*)::int AS open FROM rms_dining.dining_staff_call c JOIN rms_dining.dining_session s ON s.tenant_id=c.tenant_id AND s.brand_id=c.brand_id AND s.store_id=c.store_id AND s.session_id=c.session_id WHERE c.tenant_id=$1 AND c.brand_id=$2 AND c.store_id=$3 AND s.phase='Active' AND NOT EXISTS (SELECT 1 FROM rms_dining.dining_staff_call_closure x WHERE x.brand_id=c.brand_id AND x.store_id=c.store_id AND x.call_id=c.call_id)",
+          "SELECT count(*)::int AS open FROM rms_dining.dining_staff_call c JOIN rms_dining.dining_session s ON s.tenant_id=c.tenant_id AND s.brand_id=c.brand_id AND s.store_id=c.store_id AND s.session_id=c.session_id WHERE c.tenant_id=$1 AND c.brand_id=$2 AND c.store_id=$3 AND s.phase IN ('Active','Closing') AND NOT EXISTS (SELECT 1 FROM rms_dining.dining_staff_call_closure x WHERE x.brand_id=c.brand_id AND x.store_id=c.store_id AND x.call_id=c.call_id)",
           [tenant, brand, store],
         ),
       )[0];
