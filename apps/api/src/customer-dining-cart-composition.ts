@@ -507,6 +507,10 @@ export function createCustomerCartChannelPort(options: {
         String(session.storeReference) !== fixedScope.storeReference
       )
         return { status: "SessionExpired" };
+      // Coordinator 2026-10-30: a phone that scanned a table but hasn't joined it orders nothing
+      // yet (staff seat the party first); it is told so, not that its visit expired.
+      if (session.channel === "DineIn" && session.diningState !== "DiningBound")
+        return { status: "NotSeated" };
       return await call(session.channel === "Pickup" ? pickup : dining, input);
     } catch {
       return unavailable;

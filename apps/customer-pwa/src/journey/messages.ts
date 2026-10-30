@@ -225,6 +225,9 @@ export const cartText = Object.freeze({
     get "table-checking-out"() {
       return t("Your table is checking out.");
     },
+    get "not-seated"() {
+      return t("You can order once staff seat you.");
+    },
     get expired() {
       return t("Your cart expired. See the message on this page.");
     },
@@ -278,6 +281,12 @@ export const cartText = Object.freeze({
         t(
           "This session isn’t part of the table any more, or only the person who started the table can restart this cart. Scan the table QR code again or ask staff for help.",
         ),
+      ] as const;
+    },
+    get notSeated() {
+      return [
+        t("You can order once staff seat you"),
+        t("You can order once staff seat you. Ask a staff member, then scan again."),
       ] as const;
     },
     get tableCheckingOut() {

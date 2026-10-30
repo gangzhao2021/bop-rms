@@ -278,6 +278,7 @@ function ErrorState({
       checkoutInProgressMessage(state.retryAfterSeconds),
     ],
     "table-checking-out": failure.tableCheckingOut,
+    "not-seated": failure.notSeated,
     "command-failed": failure.commandFailed,
     unavailable: failure.unavailable,
   } as const;

@@ -215,6 +215,28 @@ describe("WP-1004 Customer-entry contract", () => {
     ]);
   });
 
+  it("says whether a party is seated at the scanned table, and only at a table", async () => {
+    const port = new MutablePort();
+    const serverPort = await listen(customerEntry(port));
+    port.result = established({ tableOpen: false });
+    const response = await post(serverPort);
+    expect(response.status).toBe(201);
+    expect(((await response.json()) as { tableOpen?: unknown }).tableOpen).toBe(false);
+    port.result = established({ tableOpen: true });
+    expect(((await (await post(serverPort)).json()) as { tableOpen?: unknown }).tableOpen).toBe(
+      true,
+    );
+    // A pickup code carries no table state; a malformed one is refused, not passed on.
+    port.result = established({
+      channel: "Pickup",
+      publicTableReference: null,
+      tableOpen: false,
+    });
+    expect((await post(serverPort)).status).toBe(503);
+    port.result = established({ tableOpen: "no" as never });
+    expect((await post(serverPort)).status).toBe(503);
+  });
+
   it("sets no-store, non-index and referrer controls without CORS or retry invention", async () => {
     const response = await post(await listen(customerEntry(new MutablePort())));
 

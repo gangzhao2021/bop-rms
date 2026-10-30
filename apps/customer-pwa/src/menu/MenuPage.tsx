@@ -1195,6 +1195,7 @@ export function ConfigureStatus({
     "table-checking-out": t(
       "Your table is checking out, so new dishes can’t be sent. To add more, ask a staff member.",
     ),
+    "not-seated": t("You can order once staff seat you. Ask a staff member, then scan again."),
     unavailable: t("We couldn’t add this right now. Please try again."),
     "outcome-unknown": t("The connection dropped before we could confirm. Retry to check."),
   } as const;

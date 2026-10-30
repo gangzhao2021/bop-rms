@@ -752,10 +752,14 @@ export async function exercisePersistentProfileEntry({
       qrReference: diningTable.qrReference,
       revocationVersion: diningTable.qrVersion,
     });
+    // Coordinator 2026-10-30: the scan says whether staff seated a party at the table (pilot api
+    // SELECT on dining_session, docs/spec/pilot-acl-additions.json).
+    await admin.query("GRANT SELECT ON rms_dining.dining_session TO " + role);
     const diningResponse = await request();
     assert.equal(diningResponse.status, 201);
     const diningBody = await diningResponse.json();
     assert.equal(diningBody.channel, "DineIn");
+    assert.equal(diningBody.tableOpen, false);
     assert.equal(diningBody.publicTableReference, diningTable.publicTableReference);
     assert.equal(diningResponse.headers.getSetCookie().length, 1);
     assert.equal(Object.hasOwn(diningBody, "sessionCredential"), false);
@@ -841,6 +845,8 @@ export async function exercisePersistentProfileEntry({
         const response = await request(base);
         assert.equal(response.status, 201);
         const body = await response.json();
+        // Staff seated the party: another phone's scan finds the table open.
+        assert.equal(body.tableOpen, true);
         return {
           cookie: response.headers.getSetCookie()[0].split(";")[0],
           csrfToken: body.csrfToken,
