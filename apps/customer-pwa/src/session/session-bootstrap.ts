@@ -167,12 +167,13 @@ export async function restoreCustomerSession(
         moved !== null &&
         typeof moved === "object" &&
         !Array.isArray(moved) &&
-        Object.keys(moved).length === 1 &&
+        Object.keys(moved).length === ("merged" in moved ? 2 : 1) &&
+        (!("merged" in moved) || moved.merged === true) &&
         "tableLabel" in moved &&
         typeof moved.tableLabel === "string" &&
         /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(moved.tableLabel)
       )
-        setMovedTableLabel(moved.tableLabel);
+        setMovedTableLabel(moved.tableLabel, "merged" in moved);
       return false;
     }
     if (

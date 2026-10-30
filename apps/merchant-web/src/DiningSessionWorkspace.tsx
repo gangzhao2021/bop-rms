@@ -36,6 +36,7 @@ import { LastOrdersNotice } from "./LastOrdersNotice.js";
 import { TableCheckout } from "./TableCheckout.js";
 import { TablePartySize, createTablePartySizeClient } from "./TablePartySize.js";
 import { TableMove } from "./TableMove.js";
+import { TableMerge } from "./TableMerge.js";
 import { TableOrderRounds } from "./TableOrderRounds.js";
 import { RoundHoldSettingControl, TableHeldRounds, TablePanelPhones } from "./TablePhones.js";
 import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
@@ -1348,6 +1349,17 @@ function TablePanel({
           onMoved={onMoved}
         />
       ) : null}
+      {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
+        // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): merge this party into another seated table.
+        <TableMerge
+          key={"merge:" + table.currentDiningSessionReference}
+          table={table}
+          tables={tables}
+          csrf={csrf}
+          locked={locked}
+          onMerged={onMoved}
+        />
+      ) : null}
       {seated ? (
         <TableHeldRounds
           rounds={table.heldRounds ?? []}
@@ -1384,6 +1396,30 @@ function TablePanel({
       ) : seated ? (
         <p className="table-panel__notice">{t("Nothing ordered yet.")}</p>
       ) : null}
+      {seated
+        ? // WP-2423 item 8 ⑨: the rounds of the tables merged into this one (on its bill), served
+          // from here too.
+          (table.session?.mergedTables ?? []).map((merged) =>
+            merged.orderReference === null ? null : (
+              <section
+                key={merged.orderReference}
+                className="table-panel__merged"
+                aria-label={t("From table {table}", { table: merged.fromTableLabel })}
+              >
+                <h3>{t("From table {table}", { table: merged.fromTableLabel })}</h3>
+                <TableOrderRounds
+                  orderReference={merged.orderReference}
+                  csrf={csrf}
+                  timeZone={timeZone}
+                  refreshKey={refreshKey + ":" + String(checkoutRevision)}
+                  locked={locked}
+                  onChanged={onChanged}
+                  roundPhones={roundPhones}
+                />
+              </section>
+            ),
+          )
+        : null}
       {seated && table.paymentTiming === "PayLater" && table.session ? (
         // DEC-DINE-IN-PAY-LATER: the table pays once at the end, here (servers too, v18).
         <TableCheckout

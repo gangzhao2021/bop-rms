@@ -2832,6 +2832,12 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === "src/infrastructure/persistence/dining-move-store.ts";
+        // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the merge record (append-only).
+        const acceptedDiningMergeAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          module.manifest.ownedDatabase?.tables?.includes("dining_session_merge_operation") &&
+          moduleRelative === "src/infrastructure/persistence/dining-merge-store.ts";
         // WP-2282 admits only the scoped Closing owner transaction.
         const acceptedDiningExceptionTaskAsset =
           module.packageName === "@rms/dining" &&
@@ -3525,6 +3531,12 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_ordering" &&
           module.manifest.ownedDatabase?.tables?.includes("order_header") &&
           moduleRelative === "src/infrastructure/persistence/dining-session-order-lookup.ts";
+        // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the order merge (append-only).
+        const acceptedOrderMergeAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          module.manifest.ownedDatabase?.tables?.includes("order_merge") &&
+          moduleRelative === "src/infrastructure/persistence/order-merge-store.ts";
         // WP-2423 Q9-G1 admits only the order acceptance hold adapter (append-only holds).
         const acceptedOrderAcceptanceHoldAsset =
           module.packageName === "@rms/ordering" &&
@@ -3850,6 +3862,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningPaymentTimingAsset &&
           !acceptedOrderPayLaterConfirmationAsset &&
           !acceptedDiningMoveAsset &&
+          !acceptedDiningMergeAsset &&
           !acceptedDiningMovedJoinAsset &&
           !acceptedDiningAdmissionConsumptionAsset &&
           !acceptedDiningCheckoutCommitmentAsset &&
@@ -3951,6 +3964,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedOrderCancellationRequestAsset &&
           !acceptedDiningSessionOrderInventoryAsset &&
           !acceptedDiningSessionOrderLookupAsset &&
+          !acceptedOrderMergeAsset &&
           !acceptedDiningCartQueryAsset &&
           !acceptedDiningCartSelectionAsset &&
           !acceptedDiningCartReplacementAsset &&

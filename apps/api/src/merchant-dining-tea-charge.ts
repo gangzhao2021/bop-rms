@@ -11,7 +11,7 @@ import {
   recordDiningTeaOverride,
   type DiningTeaOverrideReason,
 } from "@rms/dining";
-import { listOrderSkuLines } from "@rms/ordering";
+import { listOrderBillOrders, listOrderSkuLines } from "@rms/ordering";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { readDiningTableBill, scopeOf } from "./merchant-dining-table-checkout.js";
@@ -150,13 +150,33 @@ export function createMerchantDiningTeaCharge(options: {
               ? override
               : null;
           const tea = setting.teaSellableReference;
-          const order =
+          // WP-2423 item 8 ⑨: a merged table's tea lines are on this bill too (each on its own
+          // Order); the tea is charged once for the merged party.
+          const consumer = tx as unknown as ConsumerTransaction;
+          const orders =
             tea === null || bill.orderReference === null
-              ? { orderVersion: 0, lines: [] }
-              : await listOrderSkuLines(tx as unknown as ConsumerTransaction, scope, {
-                  orderReference: bill.orderReference,
-                  sellableReference: tea,
-                });
+              ? []
+              : await Promise.all(
+                  (await listOrderBillOrders(consumer, scope, bill.orderReference)).map(
+                    async (orderReference) => ({
+                      orderReference,
+                      ...(await listOrderSkuLines(consumer, scope, {
+                        orderReference,
+                        sellableReference: tea,
+                      })),
+                    }),
+                  ),
+                );
+          const order = {
+            orderVersion: orders[0]?.orderVersion ?? 0,
+            lines: orders.flatMap((entry) =>
+              entry.lines.map((line) => ({
+                ...line,
+                orderReference: entry.orderReference,
+                orderVersion: entry.orderVersion,
+              })),
+            ),
+          };
           return Object.freeze({
             tea,
             tableReference: String(session.tableReference),
@@ -339,10 +359,10 @@ export function createMerchantDiningTeaCharge(options: {
             sessionCookie: input.sessionCookie,
             csrf: input.csrf,
             command: {
-              orderReference: state.orderReference,
+              orderReference: line.orderReference,
               orderBatchReference: line.orderBatchReference,
               orderItemReferences: [line.orderItemReference],
-              expectedOrderVersion: state.orderVersion,
+              expectedOrderVersion: line.orderVersion,
               operationReference: stepReference(base, "remove:" + line.orderItemReference),
               // Fewer guests: they left; a count staff set lower: at the guests' request.
               reasonCode: state.override !== null ? "CUSTOMER_REQUEST" : "GUEST_LEFT",

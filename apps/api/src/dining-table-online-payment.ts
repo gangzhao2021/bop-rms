@@ -13,6 +13,7 @@ import {
 } from "@rms/payment";
 import {
   readDiningTableBill,
+  roundOrdersOf,
   tableTipMinor,
   type DiningTableBill,
   type DiningTableTip,
@@ -310,6 +311,8 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
           all.filter((entry) => entry.onlinePaymentReference === attempt.onlinePaymentReference),
         );
       await owner.record(tx, {
+        // WP-2423 item 8 ⑨: a merged table's rounds stay on their own Order.
+        roundOrders: roundOrdersOf(current.rounds),
         settlementReference: options.nextReference(),
         operationReference: attempt.operationReference,
         intentDigest: attempt.intentDigest,

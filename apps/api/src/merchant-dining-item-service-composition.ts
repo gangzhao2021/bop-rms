@@ -30,6 +30,7 @@ export function createMerchantDiningItemServiceComposition(options: {
       transaction: ConsumerTransaction;
       record: unknown;
       guestSessionReference: string;
+      orderDiningSessionReference?: string;
     }) {
       const record = parseDiningItemServiceRecord(input.record);
       if (
@@ -50,7 +51,9 @@ export function createMerchantDiningItemServiceComposition(options: {
         transaction: input.transaction,
         brandReference: options.scope.brandReference,
         storeReference: options.scope.storeReference,
-        diningSessionReference: record.diningSessionReference,
+        // WP-2423 item 8 ⑨: a merged table's Order keeps its own session (the record names the
+        // party it was served at).
+        diningSessionReference: input.orderDiningSessionReference ?? record.diningSessionReference,
         orderReference: record.orderReference,
         guestSessionReference: input.guestSessionReference,
         observedAt,

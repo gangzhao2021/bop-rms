@@ -5,6 +5,8 @@ vi.mock("@rms/dining", async (original) => ({
   ...(await original<typeof import("@rms/dining")>()),
   createPostgresDiningClosingStore: () => ({ load: mock.session }),
   createPostgresDiningTableStore: () => ({ loadTable: mock.table }),
+  // WP-2423 item 8 ⑨: no party here was merged into another.
+  listDiningSessionMergedInto: async () => new Map(),
 }));
 const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const session = {

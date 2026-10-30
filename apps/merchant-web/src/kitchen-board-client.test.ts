@@ -349,6 +349,7 @@ it("WP-2423 v15: carries today's orders waiting for acceptance from the first pa
       tableLabel: null,
       enteredByStaff: false,
       movedFromTableLabel: null,
+      mergedFromTableLabel: null,
       acceptBy: null,
     },
   ]);
@@ -364,6 +365,7 @@ it("WP-2423 item 8 ⑧: reads the table a dine-in party was moved from, only for
       orderType: "DineIn",
       tableLabel: "T6",
       movedFromTableLabel: "T4",
+      mergedFromTableLabel: null,
     }),
   ).toMatchObject({ tableLabel: "T6", movedFromTableLabel: "T4" });
   expect(() =>
@@ -372,6 +374,7 @@ it("WP-2423 item 8 ⑧: reads the table a dine-in party was moved from, only for
       orderType: "Pickup",
       tableLabel: null,
       movedFromTableLabel: "T4",
+      mergedFromTableLabel: null,
     }),
   ).toThrow();
 });
@@ -400,6 +403,7 @@ it("Warn before timeouts: reads a paid pickup's refund deadline with one small f
       tableLabel: null,
       enteredByStaff: false,
       movedFromTableLabel: null,
+      mergedFromTableLabel: null,
       acceptBy: "2026-10-17T13:58:00.000Z",
     },
     {
@@ -408,6 +412,7 @@ it("Warn before timeouts: reads a paid pickup's refund deadline with one small f
       tableLabel: "T4",
       enteredByStaff: false,
       movedFromTableLabel: null,
+      mergedFromTableLabel: null,
       acceptBy: null,
     },
   ]);

@@ -178,6 +178,7 @@ import type { createMerchantDiningServeReadyCommand } from "./merchant-dining-se
 import type { createMerchantDiningTables } from "./merchant-dining-tables.js";
 import type { createMerchantDiningTableCommand } from "./merchant-dining-table-command.js";
 import type { createMerchantDiningTableMove } from "./merchant-dining-table-move.js";
+import type { createMerchantDiningTableMerge } from "./merchant-dining-table-merge.js";
 import type { createMerchantDiningTableQr } from "./merchant-dining-table-qr.js";
 import type { createMerchantDiningOrderProgress } from "./merchant-dining-order-progress.js";
 import type { createMerchantDiningTableClosePlan } from "./merchant-dining-table-close-plan.js";
@@ -636,6 +637,8 @@ export interface MerchantBffRouterOptions {
   readonly diningTableCommand?: ReturnType<typeof createMerchantDiningTableCommand>;
   /** WP-2423 item 8 ⑧ (Owner decision 3): move a table's party to another free table. */
   readonly diningTableMove?: ReturnType<typeof createMerchantDiningTableMove>;
+  /** WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): merge a table's party into another seated table. */
+  readonly diningTableMerge?: ReturnType<typeof createMerchantDiningTableMerge>;
   /** WP-2423 Q11: table QR codes (DIN-TABLE-LIST). */
   readonly diningTableQr?: ReturnType<typeof createMerchantDiningTableQr>;
   readonly diningOrderProgress?: ReturnType<typeof createMerchantDiningOrderProgress>;

@@ -31,11 +31,25 @@ const hash = (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
  * `submitter` (DEC-DINING-ANY-PARTICIPANT-SUBMIT) is another seated guest's Guest session who
  * submits and pays this round; the Cart lines keep the fixture guest as the one who added them.
  */
-export function journeyRound({ at, prefix, submitter = null }) {
+export function journeyRound({ at, prefix, submitter = null, party = null }) {
   const f = orderWriteFixture({ at, dineIn: true });
   const record = f.request.record,
     batch = record.order.batches[0],
     evidence = f.request.checkoutValidationEvidence;
+  // WP-2423 item 8 ⑨: `party` ({ prefix }) is another table's party in the same Store — its own
+  // Order, dining session, guest, Cart and participants (TEST-only identities).
+  const own =
+    party === null
+      ? []
+      : [
+          record.order.orderReference,
+          record.order.diningSessionReference,
+          record.guestSessionReference,
+          f.cart.cartReference,
+          f.cart.createdByActorReference,
+          ...f.cart.items.map((item) => item.addedByParticipantReference),
+        ];
+  const ownPrefix = party?.prefix;
   const replaced = new Set([
     batch.orderBatchReference,
     batch.submissionReference,
@@ -47,6 +61,7 @@ export function journeyRound({ at, prefix, submitter = null }) {
     ...record.items.flatMap((item) => [item.orderItemReference, item.cartItemReference]),
   ]);
   const remap = (value) => {
+    if (typeof value === "string" && own.includes(value)) return ownPrefix + value.slice(8);
     if (typeof value === "string" && replaced.has(value)) return prefix + value.slice(8);
     if (Array.isArray(value)) return value.map(remap);
     if (value !== null && typeof value === "object")
@@ -106,9 +121,12 @@ export async function seedJourneyDining({
   startedAt,
   guestParticipant,
   tableVersion = 1,
+  // WP-2423 item 8 ⑨: another table in the same Store (its suffix, label and audit numbers).
+  table: other = { suffix: "a001", label: "SYNTHETIC-JOURNEY", auditBase: 0xb000 },
 }) {
   const record = round.f.request.record;
-  const tableReference = round.f.scope.storeReference.slice(0, 24) + "00000000a001";
+  const tableReference =
+    round.f.scope.storeReference.slice(0, 24) + "0000000" + other.suffix.padStart(5, "0");
   const session = parseDiningSession({
     diningSessionReference: record.order.diningSessionReference,
     brandReference: scope.brandReference,
@@ -135,7 +153,7 @@ export async function seedJourneyDining({
   const table = createDiningTable({
     ...scope,
     tableReference,
-    stableLabel: "SYNTHETIC-JOURNEY",
+    stableLabel: other.label,
     areaReference: tableReference.slice(0, 24) + "00000000a002",
     areaCode: "ROOM",
     capacity: 4,
@@ -188,7 +206,8 @@ export async function seedJourneyDining({
     );
   let sequence = 0;
   const audit = (commitment) => ({
-    auditId: tableReference.slice(0, 24) + (0xb000 + ++sequence).toString(16).padStart(12, "0"),
+    auditId:
+      tableReference.slice(0, 24) + (other.auditBase + ++sequence).toString(16).padStart(12, "0"),
     brandId: scope.brandReference,
     storeId: scope.storeReference,
     actor: { type: "System" },

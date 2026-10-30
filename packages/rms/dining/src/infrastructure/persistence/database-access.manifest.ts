@@ -168,6 +168,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "credential"],
     },
     {
+      // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): one record per table merge.
+      table: "dining_session_merge_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/dining" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "dining_session_move_operation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/dining" },

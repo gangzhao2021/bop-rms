@@ -5,6 +5,7 @@ import {
   createPostgresDiningSessionReadStore,
   createPostgresDiningTableQrStore,
   createPostgresDiningTableStore,
+  listDiningSessionMergesInto,
   loadDiningSessionPhones,
   parseDiningInstant,
   parseDiningReference,
@@ -18,6 +19,7 @@ import {
 } from "@rms/ordering";
 import {
   createPostgresCardMachinePaymentStore,
+  createPostgresDiningTableSettlementStore,
   listStoreOrderBatchesPaidOnline,
 } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -304,6 +306,42 @@ export function createMerchantDiningTables(options: {
           const sessionOfOrder = new Map(
             [...sessionOrders].map(([session, order]) => [String(order), String(session)]),
           );
+          // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the parties merged into each open table and
+          // their Orders (on its bill; staff serve and close their rounds at this table).
+          const mergesInto = await listDiningSessionMergesInto(
+            tx as never,
+            scoped,
+            activeReferences.map(String),
+          );
+          const mergedSessions = [...mergesInto.values()].flat();
+          const mergedOrders =
+            mergedSessions.length === 0
+              ? new Map<string, string>()
+              : await listStoreDiningSessionOrders(
+                  tx as unknown as Parameters<typeof listStoreDiningSessionOrders>[0],
+                  scoped,
+                  mergedSessions.map((entry) => entry.diningSessionReference),
+                );
+          // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): tables whose bill has a payment, a part, a
+          // split or a write-off (they are not merged); one read per kind for every open table.
+          const billOrders = [...sessionOfOrder.keys()];
+          const tablePayments = createPostgresDiningTableSettlementStore({
+            scope: ownerScope,
+            authorize: async (_tx, value) =>
+              sessionOfOrder.has(String(value.orderReference)) && (await authorize()) === true,
+          });
+          const paymentStarted = new Set<string>(
+            billOrders.length === 0
+              ? []
+              : [
+                  ...(await tablePayments.listByOrders(tx as never, billOrders)),
+                  ...(await tablePayments.listOnlinePaymentsByOrders(tx as never, billOrders)),
+                  ...(await tablePayments.listWriteOffsByOrders(tx as never, billOrders)),
+                  ...(await tablePayments.listSplitPlans(tx as never, billOrders)).filter(
+                    (plan) => plan.mode !== "Whole",
+                  ),
+                ].map((entry) => sessionOfOrder.get(String(entry.orderReference)) ?? ""),
+          );
           const waitingRounds = await createPostgresOrderRoundStaffHoldStore({
             brandReference: ownerScope.brandReference,
             storeReference: ownerScope.storeReference,
@@ -432,6 +470,23 @@ export function createMerchantDiningTables(options: {
                             sessionFacts.get(table.activeDiningSessionReference)?.version ?? null,
                           orderReference:
                             sessionOrders.get(table.activeDiningSessionReference) ?? null,
+                          // WP-2423 item 8 ⑨: something on the bill was paid, split or written
+                          // off (not merged).
+                          paymentStarted: paymentStarted.has(
+                            String(table.activeDiningSessionReference),
+                          ),
+                          // WP-2423 item 8 ⑨: the tables merged into this one (their Orders are
+                          // on its bill), oldest first.
+                          mergedTables: Object.freeze(
+                            (mergesInto.get(String(table.activeDiningSessionReference)) ?? []).map(
+                              (entry) =>
+                                Object.freeze({
+                                  fromTableLabel: entry.fromTableLabel,
+                                  orderReference:
+                                    mergedOrders.get(entry.diningSessionReference) ?? null,
+                                }),
+                            ),
+                          ),
                         }),
                   guestRoundsAwaitingPayment: Object.freeze(
                     (table.activeDiningSessionReference === null

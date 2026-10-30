@@ -29,6 +29,13 @@ vi.mock("@rms/ordering", async (original) => ({
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<typeof import("@rms/payment")>()),
   createPostgresCardMachinePaymentStore: vi.fn(() => ({ listByBatches: mock.cardPaid })),
+  // WP-2423 item 8 ⑨: nothing paid, split or written off at these tables.
+  createPostgresDiningTableSettlementStore: vi.fn(() => ({
+    listByOrders: async () => [],
+    listOnlinePaymentsByOrders: async () => [],
+    listWriteOffsByOrders: async () => [],
+    listSplitPlans: async () => [],
+  })),
   listStoreOrderBatchesPaidOnline: mock.paidOnline,
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => mock.resolve }));
@@ -41,6 +48,8 @@ vi.mock("@rms/dining", async (original) => ({
   createPostgresDiningTableStore: mock.store,
   createPostgresDiningSessionReadStore: vi.fn(() => ({ loadSessions: mock.loadSessions })),
   createPostgresDiningTableQrStore: vi.fn(() => ({ loadLatestForTables: mock.codes })),
+  // WP-2423 item 8 ⑨: no party was merged into these tables.
+  listDiningSessionMergesInto: async () => new Map(),
   createPostgresDiningStaffCallStore: vi.fn(() => ({ listOpen: mock.staffCalls })),
   loadDiningSessionPhones: mock.phones,
   // DEC-DINE-IN-PAY-LATER: the Store opens tables pay first; no open table was opened otherwise.
@@ -474,7 +483,14 @@ it("WP-2423 D4: gives each open session's phase, version and Order to staff who 
   expect(f.authorizeAction).toHaveBeenCalledWith("dining.session.close");
   expect(f.authorizeAction).toHaveBeenCalledWith("order.close");
   expect(mock.sessionOrders.mock.calls[0]?.[2]).toEqual([id(5)]);
-  expect(view.items[0]?.session).toEqual({ phase: "Active", version: 3, orderReference: id(40) });
+  expect(view.items[0]?.session).toEqual({
+    phase: "Active",
+    version: 3,
+    orderReference: id(40),
+    // WP-2423 item 8 ⑨: nothing paid or split, nothing merged into it.
+    paymentStarted: false,
+    mergedTables: [],
+  });
   // Without the closing permission: nothing to close with, but the table's Order is still listed
   // (item 8 ①: the list shows each table's dishes and bill).
   f.authorizeAction.mockImplementation(async (action?: unknown) => ({
@@ -485,7 +501,13 @@ it("WP-2423 D4: gives each open session's phase, version and Order to staff who 
   const denied = await f.read(f.input);
   expect(denied.canCloseSessions).toBe(false);
   expect(mock.sessionOrders).toHaveBeenCalledOnce();
-  expect(denied.items[0]?.session).toEqual({ phase: "Active", version: 3, orderReference: id(40) });
+  expect(denied.items[0]?.session).toEqual({
+    phase: "Active",
+    version: 3,
+    orderReference: id(40),
+    paymentStarted: false,
+    mergedTables: [],
+  });
 });
 
 it("WP-2423: offers the Order host section only to staff who may transfer the host", async () => {

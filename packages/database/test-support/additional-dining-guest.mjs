@@ -19,9 +19,17 @@ import {
  * `second` (WP-2423 Q8) seeds another participant's Guest session at the same table: its own
  * references and session, no tip selection (it pays for no round here).
  */
-export async function seedAdditionalDiningGuest({ client, runner, f, dining, at, second = null }) {
-  const id = (n) =>
-    (second?.idPrefix ?? "01909992-0000-7000-8000-") + n.toString(16).padStart(12, "0");
+export async function seedAdditionalDiningGuest({
+  client,
+  runner,
+  f,
+  dining,
+  at,
+  second = null,
+  // WP-2423 item 8 ⑨: another table's guest in the same test (its own TEST identities).
+  idPrefix = "01909992-0000-7000-8000-",
+}) {
+  const id = (n) => (second?.idPrefix ?? idPrefix) + n.toString(16).padStart(12, "0");
   const credentials = createGuestSessionCredentialProvider(new Uint8Array(32).fill(9));
   const sessionCredential = credentials.generateCredential("Session");
   const csrfCredential = credentials.generateCredential("Csrf");

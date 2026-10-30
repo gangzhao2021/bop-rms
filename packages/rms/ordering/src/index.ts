@@ -335,6 +335,13 @@ export {
   listStoreDiningSessionOrders,
 } from "./infrastructure/persistence/dining-session-order-lookup.js";
 
+export {
+  diningSessionHasUnsentCart,
+  listOrderBillOrders,
+  listOrderMergedInto,
+  recordOrderMerge,
+} from "./infrastructure/persistence/order-merge-store.js";
+
 export { createAdditionalReceiptSnapshot } from "./application/additional-receipt-snapshot.js";
 
 export { createPostgresOrderPaymentAcceptanceWaitStore } from "./infrastructure/persistence/order-payment-acceptance-wait-store.js";

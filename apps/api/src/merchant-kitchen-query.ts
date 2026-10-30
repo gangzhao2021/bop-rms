@@ -26,7 +26,11 @@ import {
   listStoreOrderBusinessDates,
   listStoreOrdersAwaitingAcceptance,
 } from "@rms/ordering";
-import { listDiningSessionMovedFrom, listDiningSessionTableLabels } from "@rms/dining";
+import {
+  listDiningSessionMergedInto,
+  listDiningSessionMovedFrom,
+  listDiningSessionTableLabels,
+} from "@rms/dining";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
@@ -120,6 +124,11 @@ export interface KitchenOrderLabel {
   readonly tableLabel: string | null;
   /** WP-2423 item 8 ⑧ (Owner decision 3): the table the party was moved from, or null. */
   readonly movedFromTableLabel: string | null;
+  /**
+   * WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the table this party was merged from (it eats at
+   * `tableLabel` now), or null.
+   */
+  readonly mergedFromTableLabel: string | null;
   /**
    * WP-2423 Q7 slice 2: staff entered this order or round for the guests (a counter order or a
    * table round entered by staff), so the kitchen reads "Entered by staff".
@@ -243,6 +252,7 @@ export async function kitchenPreparation(
   ];
   const tables = await listDiningSessionTableLabels(transaction, scope, diningSessions);
   const movedFrom = await listDiningSessionMovedFrom(transaction, scope, diningSessions);
+  const mergedInto = await listDiningSessionMergedInto(transaction, scope, diningSessions);
   // WP-2423 item 8 ⑧ (decision 5): each dish's kitchen section, for the screen's section filter.
   const sections = await listKitchenWorkItemSections(
     transaction,
@@ -287,11 +297,18 @@ export async function kitchenPreparation(
                   tableLabel:
                     order.diningSessionReference === null
                       ? null
-                      : (tables.get(order.diningSessionReference) ?? null),
+                      : (mergedInto.get(order.diningSessionReference)?.tableLabel ??
+                        tables.get(order.diningSessionReference) ??
+                        null),
                   movedFromTableLabel:
-                    order.diningSessionReference === null
+                    order.diningSessionReference === null ||
+                    mergedInto.has(order.diningSessionReference)
                       ? null
                       : (movedFrom.get(order.diningSessionReference) ?? null),
+                  mergedFromTableLabel:
+                    order.diningSessionReference === null
+                      ? null
+                      : (mergedInto.get(order.diningSessionReference)?.fromTableLabel ?? null),
                   enteredByStaff,
                 }),
         }),
@@ -351,6 +368,8 @@ export async function kitchenAwaitingAcceptance(
           order.diningSessionReference === null
             ? null
             : (movedFrom.get(order.diningSessionReference) ?? null),
+        // A merged table's rounds are paid at the end: none of them waits for acceptance.
+        mergedFromTableLabel: null,
         acceptBy:
           order.orderType === "Pickup" ? (refundDeadlines.get(order.orderReference) ?? null) : null,
       }),

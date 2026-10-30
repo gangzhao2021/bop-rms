@@ -1,3 +1,4 @@
+import { listDiningSessionMergedInto } from "./dining-merge-store.js";
 import { parseDiningReference, parseDiningInstant } from "../../domain/dining-session.js";
 import { parseDiningItemServiceRecord } from "../../domain/dining-item-service-record.js";
 import type { DiningTableTransaction, DiningTableStoreScope } from "./dining-table-store.js";
@@ -67,6 +68,15 @@ export function createPostgresDiningItemServiceReader(options: {
           ],
         )) as { rows?: Record<string, unknown>[] };
         if (!Array.isArray(result.rows) || result.rows.length > 999) return fail();
+        // WP-2423 item 8 ⑨: a merged table's dishes are served at the party it joined.
+        const servedAt = new Set<string>([
+          query.diningSessionReference,
+          ...[
+            ...(
+              await listDiningSessionMergedInto(tx as never, scope, [query.diningSessionReference])
+            ).values(),
+          ].map((merged) => merged.diningSessionReference),
+        ]);
         let servedQuantity = 0;
         let itemServiceVersion = 0;
         let lastServedAt: string | null = null;
@@ -80,7 +90,7 @@ export function createPostgresDiningItemServiceReader(options: {
             fact.tenantReference !== scope.tenantReference ||
             fact.brandReference !== scope.brandReference ||
             fact.storeReference !== scope.storeReference ||
-            fact.diningSessionReference !== query.diningSessionReference ||
+            !servedAt.has(fact.diningSessionReference) ||
             fact.orderReference !== query.orderReference ||
             fact.orderBatchReference !== query.orderBatchReference ||
             fact.orderItemReference !== query.orderItemReference ||

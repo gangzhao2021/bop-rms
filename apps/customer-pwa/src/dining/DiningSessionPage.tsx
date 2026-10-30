@@ -493,7 +493,7 @@ export type DiningSessionState =
   | { readonly status: "loading" }
   | { readonly status: "not-joined" }
   /** WP-2423 item 8 ⑧: staff moved the party to this table after this phone joined. */
-  | { readonly status: "moved"; readonly tableLabel: string }
+  | { readonly status: "moved"; readonly tableLabel: string; readonly merged: boolean }
   | {
       readonly status: "unavailable";
       readonly view: DiningSessionView | null;
@@ -576,7 +576,7 @@ export function DiningSessionPage({
         error.code === "moved" &&
         error.tableLabel !== null
       )
-        setState({ status: "moved", tableLabel: error.tableLabel });
+        setState({ status: "moved", tableLabel: error.tableLabel, merged: error.merged });
       // Keep the last loaded table on screen; say it may be out of date.
       else
         setState((prior) => ({
@@ -700,13 +700,28 @@ export function DiningSessionScreen({
       ) : null}
       {state.status === "moved" ? (
         <section className="order-status__card" role="alert">
-          <h2>{t("Your table moved to table {table}", { table: state.tableLabel })}</h2>
-          <p>
-            {t(
-              "Staff moved your party to table {table}. Everything your table ordered moved with you. Scan the code on table {table} to keep ordering and paying together.",
-              { table: state.tableLabel },
-            )}
-          </p>
+          {state.merged ? (
+            // WP-2423 item 8 ⑨: staff merged this table into the party at that table.
+            <>
+              <h2>{t("Your table was merged into table {table}", { table: state.tableLabel })}</h2>
+              <p>
+                {t(
+                  "Staff joined your party to table {table}. Everything your table ordered is on that table's bill. Scan the code on table {table} to keep ordering and paying together.",
+                  { table: state.tableLabel },
+                )}
+              </p>
+            </>
+          ) : (
+            <>
+              <h2>{t("Your table moved to table {table}", { table: state.tableLabel })}</h2>
+              <p>
+                {t(
+                  "Staff moved your party to table {table}. Everything your table ordered moved with you. Scan the code on table {table} to keep ordering and paying together.",
+                  { table: state.tableLabel },
+                )}
+              </p>
+            </>
+          )}
         </section>
       ) : null}
       {state.status === "not-joined" ? (

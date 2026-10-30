@@ -4,7 +4,7 @@ import {
   parseOrderingReference,
 } from "@rms/ordering";
 import { createPublicStoreProfileService, parseGetPublicStoreRequest } from "@rms/store";
-import { loadDiningParticipantMove } from "@rms/dining";
+import { listDiningSessionMergedInto, loadDiningParticipantMove } from "@rms/dining";
 import {
   createPersistentPublicStoreProfilePorts,
   type PersistentPublicStoreProfileOptions,
@@ -125,6 +125,16 @@ export function createCustomerSessionBootstrapRead(
           guest.diningParticipantReference === null
         )
           return null;
+        // WP-2423 item 8 ⑨: the party was merged into another table's (it eats there now).
+        const merged = (
+          await listDiningSessionMergedInto(transaction as never, options.scope, [
+            String(guest.diningSessionReference),
+          ])
+        ).get(String(guest.diningSessionReference));
+        if (merged !== undefined)
+          return merged.phase === "Active" || merged.phase === "Closing"
+            ? { tableLabel: merged.tableLabel, merged: true }
+            : null;
         const moved = await loadDiningParticipantMove(transaction as never, options.scope, {
           diningSessionReference: String(guest.diningSessionReference),
           participantReference: String(guest.diningParticipantReference),
@@ -206,7 +216,9 @@ export function createCustomerSessionBootstrapHandler(options?: {
       receiptAvailableUntil: string;
     }>;
     /** v15 2026-10-30: the table the guest's party was moved to (absent or null: not moved). */
-    readMovedTable?(sessionCredential: string): Promise<{ tableLabel: string } | null>;
+    readMovedTable?(
+      sessionCredential: string,
+    ): Promise<{ tableLabel: string; merged?: boolean } | null>;
   };
 }): RequestHandler {
   const origin = options && new URL(options.allowedOrigin).origin;
@@ -252,7 +264,7 @@ export function createCustomerSessionBootstrapHandler(options?: {
       try {
         const moved = await options.port.readMovedTable(sessionCredential);
         return moved !== null && /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(moved.tableLabel)
-          ? { tableLabel: moved.tableLabel }
+          ? { tableLabel: moved.tableLabel, ...(moved.merged === true ? { merged: true } : {}) }
           : null;
       } catch {
         return null;

@@ -8,6 +8,8 @@ const mock = vi.hoisted(() => ({
 }));
 vi.mock("../infrastructure/persistence/dining-table-settlement-store.js", () => ({
   createPostgresDiningTableSettlementStore: () => ({
+    // WP-2423 item 8 ⑨: an Order not merged into another table is its own bill.
+    billOrderOf: async (_tx: unknown, order: string) => order,
     listByOrders: mock.table,
     listCashRefundsByOrders: mock.cashRefunds,
   }),
@@ -289,8 +291,20 @@ it("DEC-DINE-IN-PAY-LATER: a table settlement pays its rounds and tip; cash roun
       tipMinor: 512n,
       totalMinor: 3900n,
       lines: [
-        { orderBatchReference: id(81), roundMinor: 2260n, tipMinor: 0n, roundingMinor: 0n },
-        { orderBatchReference: id(82), roundMinor: 1130n, tipMinor: 512n, roundingMinor: -2n },
+        {
+          orderReference: id(4),
+          orderBatchReference: id(81),
+          roundMinor: 2260n,
+          tipMinor: 0n,
+          roundingMinor: 0n,
+        },
+        {
+          orderReference: id(4),
+          orderBatchReference: id(82),
+          roundMinor: 1130n,
+          tipMinor: 512n,
+          roundingMinor: -2n,
+        },
       ],
     },
   ]);
@@ -317,7 +331,13 @@ it("DEC-DINE-IN-PAY-LATER: cash given back counts as refunded, the Order's share
       tipMinor: 512n,
       totalMinor: 3900n,
       lines: [
-        { orderBatchReference: id(81), roundMinor: 3390n, tipMinor: 512n, roundingMinor: -2n },
+        {
+          orderReference: id(4),
+          orderBatchReference: id(81),
+          roundMinor: 3390n,
+          tipMinor: 512n,
+          roundingMinor: -2n,
+        },
       ],
     },
   ]);

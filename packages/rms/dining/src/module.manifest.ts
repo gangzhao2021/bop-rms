@@ -52,6 +52,7 @@ const moduleManifestInput =
         "dining_session_join_operation",
         "dining_closing_operation",
         "dining_session_move_operation",
+        "dining_session_merge_operation",
         "dining_admission_consumption_operation",
         "dining_checkout_commitment",
         "dining_item_service_record",

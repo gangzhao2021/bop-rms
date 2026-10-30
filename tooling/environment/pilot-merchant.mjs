@@ -47,6 +47,7 @@ import {
 import { createMerchantDiningSessionStart } from "../../apps/api/dist/merchant-dining-session-start.js";
 import { createMerchantDiningTableCommand } from "../../apps/api/dist/merchant-dining-table-command.js";
 import { createMerchantDiningTableMove } from "../../apps/api/dist/merchant-dining-table-move.js";
+import { createMerchantDiningTableMerge } from "../../apps/api/dist/merchant-dining-table-merge.js";
 import { createMerchantDiningTables } from "../../apps/api/dist/merchant-dining-tables.js";
 import {
   createMerchantDiningStaffCallAnswer,
@@ -1824,6 +1825,14 @@ export async function createInternalMerchant(
         // v15 2026-10-30: the party's join code is reissued for the table it moved to.
         credentials: await createInternalDiningCredentials(resources),
         pepperVersion: 1,
+      }),
+      // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): merge a table's party into another's.
+      diningTableMerge: createMerchantDiningTableMerge({
+        persistence,
+        authentication: service,
+        newReference: () => resources.credentials.reference(),
+        retentionPolicyCode: "AUDIT_DEFAULT",
+        retentionPolicyVersion: 1,
       }),
       ...(createInternalTableQr === undefined
         ? {}

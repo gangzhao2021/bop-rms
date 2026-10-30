@@ -67,6 +67,8 @@ export interface DiningTableSettlementRecord {
   readonly part: DiningTableSplitPartReference | null;
   /** One line per round the table owed; the tip and rounding are on the last line. */
   readonly lines: readonly {
+    /** WP-2423 item 8 ⑨: the Order of the round (a merged table's round keeps its own). */
+    readonly orderReference: string;
     readonly orderBatchReference: string;
     readonly submissionReference: string;
     readonly lineNumber: number;
@@ -334,7 +336,7 @@ const settlementSelect = `SELECT s.settlement_id::text AS settlement,s.tenant_id
  s.slip_reference,s.recording_reason,${instant("s.taken_at")} AS taken_at,${instant("s.recorded_at")} AS recorded_at,
  s.actor_id::text AS actor,s.audit_id::text AS audit,s.online_payment_id::text AS online_payment,
  s.split_plan_id::text AS split_plan,s.part_number,
- (SELECT coalesce(jsonb_agg(jsonb_build_object('batch',r.order_batch_id,'submission',r.submission_id,
+ (SELECT coalesce(jsonb_agg(jsonb_build_object('order',r.order_id,'batch',r.order_batch_id,'submission',r.submission_id,
    'line',r.line_number,'round',r.round_minor::text,'tip',r.tip_minor::text,'rounding',r.rounding_minor::text)
    ORDER BY r.line_number),'[]'::jsonb) FROM rms_payment.dining_table_settlement_round r
    WHERE r.settlement_id=s.settlement_id AND r.brand_id=s.brand_id AND r.store_id=s.store_id) AS lines
@@ -393,6 +395,7 @@ function settlementFrom(row: Record<string, unknown>): DiningTableSettlementReco
     lines: Object.freeze(
       lines.map((value: Record<string, unknown>) =>
         Object.freeze({
+          orderReference: ref(value.order),
           orderBatchReference: ref(value.batch),
           submissionReference: ref(value.submission),
           lineNumber: Number(value.line),
@@ -437,6 +440,55 @@ function writeOffFrom(row: Record<string, unknown>): OrderUnpaidWriteOffRecord {
  * for a write-off, the approving manager) and supplies server-resolved owner facts only: the rounds
  * the table owes and what each comes to.
  */
+/**
+ * WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): staff merged a table into another; from now on the
+ * merged table's Order is paid on the other table's bill (2000_130). Refused when either table has
+ * any payment, split or write-off. The same operation again returns what it recorded. Caller
+ * authorizes and owns the transaction (the dining and order merge commit with it).
+ */
+export async function recordDiningTableBillOrder(
+  tx: AuditTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: {
+    readonly operationReference: string;
+    readonly billOrderReference: string;
+    readonly memberOrderReference: string;
+    readonly recordedAt: string;
+  },
+): Promise<{ readonly status: "Recorded" | "AlreadyRecorded" }> {
+  const brand = ref(scope.brandReference),
+    store = ref(scope.storeReference),
+    operation = ref(input.operationReference),
+    bill = ref(input.billOrderReference),
+    member = ref(input.memberOrderReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const prior = rows(
+    await tx.query(
+      "SELECT bill_order_id::text bill,member_order_id::text member FROM rms_payment.dining_table_bill_order WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      [brand, store, operation],
+    ),
+  )[0];
+  if (prior !== undefined) {
+    if (prior.bill !== bill || prior.member !== member)
+      return fail("DINING_TABLE_SETTLEMENT_IDEMPOTENCY_CONFLICT");
+    return Object.freeze({ status: "AlreadyRecorded" as const });
+  }
+  try {
+    await tx.query(
+      "INSERT INTO rms_payment.dining_table_bill_order (brand_id,store_id,bill_order_id,member_order_id,operation_id,recorded_at) VALUES ($1,$2,$3,$4,$5,$6)",
+      [brand, store, bill, member, operation, parsePaymentInstant(input.recordedAt)],
+    );
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === "23514")
+      return fail("DINING_TABLE_SETTLEMENT_ALREADY_PAID");
+    throw error;
+  }
+  return Object.freeze({ status: "Recorded" as const });
+}
+
 export function createPostgresDiningTableSettlementStore(options: {
   scope: { tenantReference: string; brandReference: string; storeReference: string };
   authorize(transaction: AuditTransaction, input: { orderReference: string }): Promise<boolean>;
@@ -602,6 +654,21 @@ export function createPostgresDiningTableSettlementStore(options: {
     },
 
     /** The settlements of these Orders (a table Order has at most one). */
+    /**
+     * WP-2423 item 8 ⑨: the bill an Order is paid on — itself, or the bill of the table it was
+     * merged into (2000_130), followed to the end.
+     */
+    async billOrderOf(tx: AuditTransaction, orderReference: string): Promise<string> {
+      const order = ref(orderReference);
+      await context(tx);
+      const [found] = rows(
+        await tx.query(
+          "WITH RECURSIVE up(order_id,depth) AS (SELECT $3::uuid,0 UNION ALL SELECT b.bill_order_id,up.depth+1 FROM rms_payment.dining_table_bill_order b JOIN up ON b.brand_id=$1 AND b.store_id=$2 AND b.member_order_id=up.order_id WHERE up.depth<50) SELECT order_id::text order_id FROM up ORDER BY depth DESC LIMIT 1",
+          [brand, store, order],
+        ),
+      );
+      return found === undefined ? order : ref(found.order_id);
+    },
     async listByOrders(tx: AuditTransaction, orderReferences: readonly string[]) {
       if (orderReferences.length === 0) return Object.freeze([]);
       if (orderReferences.length > 200) return fail();
@@ -658,6 +725,11 @@ export function createPostgresDiningTableSettlementStore(options: {
         readonly diningSessionReference: string;
         readonly orderReference: string;
         readonly split: DiningTableSplit | { readonly mode: "Whole"; readonly billMinor: bigint };
+        /**
+         * WP-2423 item 8 ⑨: the Order each round belongs to, when the bill includes a merged table's
+         * Order (2000_130); a round not named is of `orderReference`.
+         */
+        readonly roundOrders?: ReadonlyMap<string, string>;
         readonly recordedAt: string;
         readonly actorReference: string;
         readonly auditReference: string;
@@ -747,7 +819,7 @@ export function createPostgresDiningTableSettlementStore(options: {
               part.partNumber,
               brand,
               store,
-              order,
+              ref(input.roundOrders?.get(slice.orderBatchReference) ?? order),
               ref(slice.orderBatchReference),
               slice.roundMinor.toString(),
               slice.subtotalMinor.toString(),
@@ -812,6 +884,8 @@ export function createPostgresDiningTableSettlementStore(options: {
         readonly onlinePaymentReference?: string;
         /** WP-2423 item 8 ④: this payment is one part of the current split plan (`rounds` its slices). */
         readonly part?: DiningTableSplitPartReference;
+        /** WP-2423 item 8 ⑨: the Order each round belongs to (a merged table's); default `orderReference`. */
+        readonly roundOrders?: ReadonlyMap<string, string>;
       },
     ) {
       const order = ref(input.orderReference);
@@ -894,7 +968,7 @@ export function createPostgresDiningTableSettlementStore(options: {
             ref(input.settlementReference),
             brand,
             store,
-            order,
+            ref(input.roundOrders?.get(line.orderBatchReference) ?? order),
             ref(line.orderBatchReference),
             ref(line.submissionReference),
             index + 1,

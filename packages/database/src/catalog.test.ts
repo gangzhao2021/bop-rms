@@ -769,6 +769,9 @@ describe("migration catalog", () => {
       "2000_125_create_dining_tea_override",
       "2000_126_alter_staff_declared_no_ingredients",
       "2000_127_create_kitchen_section",
+      "2000_128_create_dining_table_merge",
+      "2000_129_create_order_merge",
+      "2000_130_create_dining_table_bill_order",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

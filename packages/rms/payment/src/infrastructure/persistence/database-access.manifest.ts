@@ -3,6 +3,15 @@ const databaseAccessManifestInput = {
   module: { moduleName: "payment", packageName: "@rms/payment", layer: "RMS" },
   tables: [
     {
+      // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the Orders a merged table's bill includes.
+      table: "dining_table_bill_order",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
       table: "dining_table_split_plan",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/payment" },

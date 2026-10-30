@@ -4,6 +4,7 @@ import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
   getMovedTableLabel,
+  getMovedTableMerged,
 } from "../session/customer-transaction-context.js";
 
 /** WP-2423 Q8 (CUST-DINE-IN-SESSION): the table's shared, read-only view for a joined guest. */
@@ -148,6 +149,8 @@ export class DiningSessionClientError extends Error {
   constructor(
     readonly code: DiningSessionClientErrorCode,
     readonly tableLabel: string | null = null,
+    /** WP-2423 item 8 ⑨: staff merged the party into the party at `tableLabel`. */
+    readonly merged = false,
   ) {
     super("dining session is " + code);
     this.name = "DiningSessionClientError";
@@ -461,7 +464,7 @@ export function createHttpDiningSessionClient(
     // staff moved its party since it joined (v15 2026-10-30: told on restoring the visit).
     if (csrf === null || !credential.test(csrf)) {
       const moved = getMovedTableLabel();
-      if (moved !== null) throw new DiningSessionClientError("moved", moved);
+      if (moved !== null) throw new DiningSessionClientError("moved", moved, getMovedTableMerged());
       throw new DiningSessionClientError("not-joined");
     }
     let response: Response;
@@ -490,7 +493,11 @@ export function createHttpDiningSessionClient(
         typeof body.tableLabel === "string" &&
         /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(body.tableLabel)
       )
-        throw new DiningSessionClientError("moved", body.tableLabel);
+        throw new DiningSessionClientError(
+          "moved",
+          body.tableLabel,
+          (body as { merged?: unknown }).merged === true,
+        );
     }
     if (response.status === 503) {
       const body = (await response.json().catch(() => null)) as {

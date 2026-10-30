@@ -45,9 +45,16 @@ export function getEndedVisitReceiptAccess(
  * the table it sits at now (the guest scans that table's code to join it again). Memory only.
  */
 let movedTableLabel: string | null = null;
+/** WP-2423 item 8 ⑨: staff merged the party into the party at that table (not just moved it). */
+let movedTableMerged = false;
 
-export function setMovedTableLabel(value: string | null): void {
+export function setMovedTableLabel(value: string | null, merged = false): void {
   movedTableLabel = value;
+  movedTableMerged = value !== null && merged;
+}
+
+export function getMovedTableMerged(): boolean {
+  return movedTableMerged;
 }
 
 export function getMovedTableLabel(): string | null {

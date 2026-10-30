@@ -1110,6 +1110,12 @@ function WorkCard({
             {t("Moved from table {table}", { table: item.orderLabel.movedFromTableLabel })}
           </p>
         ) : null}
+        {item.orderLabel?.mergedFromTableLabel ? (
+          // WP-2423 item 8 ⑨: the party was merged into this table; its dishes go here now.
+          <p className="kitchen-work-item__staff">
+            {t("Merged from table {table}", { table: item.orderLabel.mergedFromTableLabel })}
+          </p>
+        ) : null}
         {item.customerNote ? (
           <p className="kitchen-work-item__note">
             <span>{t("Note:")}</span> {item.customerNote}

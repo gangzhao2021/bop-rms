@@ -15,12 +15,15 @@ import {
   createPostgresDiningQrJoinStore,
   listDiningSessionMovedFrom,
   listDiningSessionTableLabels,
+  listDiningSessionMergedInto,
   loadDiningParticipantMove,
   parseDiningSession,
   recordDiningPartySize,
 } from "../../rms/dining/src/index.ts";
 import { createMerchantDiningPartySize } from "../../../apps/api/src/merchant-dining-party-size.ts";
 import { createMerchantDiningTableMove } from "../../../apps/api/src/merchant-dining-table-move.ts";
+import { createMerchantDiningTableMerge } from "../../../apps/api/src/merchant-dining-table-merge.ts";
+import { recordDiningTableBillOrder } from "../../rms/payment/src/index.ts";
 import { createMerchantDiningTableCommand } from "../../../apps/api/src/merchant-dining-table-command.ts";
 import { parseDiningJoinCapability } from "../../bop/public-capability/src/index.ts";
 import {
@@ -31,6 +34,7 @@ import { restoreCustomerSession } from "../../../apps/customer-pwa/src/session/s
 import { createHttpDiningSessionClient } from "../../../apps/customer-pwa/src/dining/dining-session-client.ts";
 import {
   getMovedTableLabel,
+  getMovedTableMerged,
   setCustomerCsrfCredential,
 } from "../../../apps/customer-pwa/src/session/customer-transaction-context.ts";
 import { createMerchantDiningTeaCharge } from "../../../apps/api/src/merchant-dining-tea-charge.ts";
@@ -191,6 +195,12 @@ it("the per-head tea charge follows a pay-later table's party size until it pays
 it("staff move a table's party to another free table, once; the old table waits for cleaning", () =>
   journey("Moved"));
 
+// WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): staff merge another table's party, with its own
+// Order, into this table: once (two staff at once: one merges); that table waits for cleaning; the
+// bill holds both tables' rounds, each on its own Order; the table pays once and both Orders close.
+it("staff merge another table's party into this table; it pays once and closes", () =>
+  journey("Merged"));
+
 async function journey(ending) {
   await withIsolatedDatabase(
     {
@@ -215,7 +225,9 @@ async function journey(ending) {
                           ? "wp2423_pltea"
                           : ending === "Moved"
                             ? "wp2423_plmove"
-                            : "wp2423_plon",
+                            : ending === "Merged"
+                              ? "wp2423_plmerge"
+                              : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -931,6 +943,491 @@ async function journey(ending) {
               )
             )[0].version,
           );
+        if (ending === "Merged") {
+          // ── WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the party at another table (T-M, its own
+          // Order and round) merges into this table. TEST-only identities.
+          const M = journeyRound({
+            at: time(-minutes(30)),
+            prefix: "01a00021",
+            party: { prefix: "01a0002f" },
+          });
+          const mRecord = M.f.request.record;
+          const mOrder = mRecord.order.orderReference;
+          const mGuest = mRecord.guestSessionReference;
+          assert.notEqual(mOrder, orderReference);
+          const mDining = await seedJourneyDining({
+            client: admin,
+            scope: ownerScope,
+            round: M,
+            startedAt: time(-minutes(35)),
+            guestParticipant: id(0x611),
+            tableVersion: 2,
+            table: { suffix: "a101", label: "T-M", auditBase: 0xb100 },
+          });
+          const mSession = mDining.session.diningSessionReference;
+          const mHost = await seedAdditionalDiningGuest({
+            client: admin,
+            runner: ownerRunner,
+            f: M.f,
+            dining: {
+              ...mDining,
+              participant: mDining.host,
+              link: { paymentOperationReference: id(0x1100) },
+            },
+            at: time(-minutes(34)),
+            idPrefix: "01909994-0000-7000-8000-",
+          });
+          const mItems = M.items();
+          await seedAcceptanceOrderHistory(admin, {
+            ...mRecord,
+            items: mItems,
+            orderNumberAllocation: createOrderNumberAllocation({
+              orderReference: mOrder,
+              allocatedAt: mRecord.createdAt,
+              sequence: 7n,
+              businessDateResolution: M.f.request.businessDateResolution,
+            }),
+          });
+          await seedJourneyQuote({
+            runner: ownerRunner,
+            scope: ownerScope,
+            snapshot: { items: mItems, batch: M.batch },
+            prefix: "01a10021",
+          });
+          const mSent = await send(mRecord.submissionReference, mGuest);
+          assert.equal(mSent.status, "Confirmed");
+          const mEvent = await transactions({ guc: true }).run((tx) =>
+            loadOutboxEnvelope(tx, mSent.confirmation.orderConfirmedEventReference),
+          );
+          const tableVersion = async (table) =>
+            Number(
+              (
+                await rows("SELECT version FROM rms_dining.dining_table WHERE table_id=$1", [table])
+              )[0].version,
+            );
+          const fromTable = mDining.table.tableReference,
+            toTable = dining.table.tableReference;
+          const merge = (who, operationReference, versions = {}) =>
+            Promise.all([tableVersion(fromTable), tableVersion(toTable)]).then(([from, to]) =>
+              createMerchantDiningTableMerge({
+                persistence: persistenceOf(who),
+                authentication: who.authentication,
+                newReference: fresh,
+                retentionPolicyCode: "AUDIT_DEFAULT",
+                retentionPolicyVersion: 1,
+              })({
+                ...as(who),
+                command: {
+                  action: "Merge",
+                  operationReference,
+                  tableReference: fromTable,
+                  expectedTableVersion: versions.from ?? from,
+                  targetTableReference: toTable,
+                  expectedTargetTableVersion: versions.to ?? to,
+                },
+              }),
+            );
+          // TEST-ONLY dining credentials (the pilot's are internal, keyed per environment).
+          const joinKey = randomBytes(32);
+          const diningCredentials = {
+            generateReference: fresh,
+            generateJoinCredential: (kind) =>
+              kind === "HumanCode"
+                ? String(randomInt(0, 1000000)).padStart(6, "0")
+                : randomBytes(16).toString("base64url"),
+            hashJoinCredential: (kind, value) =>
+              createHmac("sha256", joinKey).update(`DiningJoin:${kind}:${value}`).digest("hex"),
+            hashOperationIntent: (value) => createHash("sha256").update(value).digest("hex"),
+            equals: (a, b) => a === b,
+          };
+          // The table's join code, as a table started with one has it (the guests' QR joins renew
+          // it). TEST-ONLY code value.
+          const seedCode = async (table, session, startedAt, assignmentVersion) => {
+            const joinCode = parseDiningJoinCapability({
+              capabilityReference: fresh(),
+              purpose: "DiningJoin",
+              kind: "HumanCode",
+              storeReference: scope.storeReference,
+              tableReference: table,
+              diningSessionReference: session,
+              selectorHash: diningCredentials.hashJoinCredential(
+                "HumanCode",
+                "TEST-" + table.slice(-4),
+              ),
+              pepperVersion: 1,
+              assignmentVersion,
+              generation: 1,
+              status: "Active",
+              version: 1,
+              issuedAt: startedAt,
+              expiresAt: new Date(Date.parse(startedAt) + 15 * 60_000).toISOString(),
+              consumedAt: null,
+              revokedAt: null,
+            });
+            await admin.query(
+              "INSERT INTO rms_dining.dining_join_capability (capability_id,tenant_id,brand_id,store_id,session_id,version,status,capability_snapshot) VALUES ($1,$2,$3,$4,$5,1,'Active',$6::jsonb)",
+              [
+                joinCode.capabilityReference,
+                tenant,
+                scope.brandReference,
+                scope.storeReference,
+                session,
+                JSON.stringify(joinCode),
+              ],
+            );
+          };
+          // A guest scans a table's code and taps "Join this table" (the code it is issued).
+          const scanAt = (table, guestSession) =>
+            createPostgresDiningQrJoinStore(transactions(), {
+              scope: ownerScope,
+              credentials: diningCredentials,
+              pepperVersion: 1,
+              now: () => new Date().toISOString(),
+              authorize: async () => true,
+              audit: (record) => ({
+                auditId: fresh(),
+                brandId: scope.brandReference,
+                storeId: scope.storeReference,
+                actor: { type: "System" },
+                actionCode: "DINING_QR_JOIN_ISSUE",
+                targetType: "DiningTable",
+                targetId: record.tableReference,
+                reasonCode: "GUEST_SCANNED_OPEN_TABLE",
+                correlationId: record.operationReference,
+                occurredAt: record.observedAt,
+                sourceChannel: "CUSTOMER_PWA",
+                dataClassification: "Restricted",
+                retentionPolicyCode: "AUDIT_DEFAULT",
+                retentionPolicyVersion: 1,
+              }),
+            }).issue({
+              operationReference: fresh(),
+              guestSessionReference: guestSession,
+              tableReference: table,
+              observedAt: new Date().toISOString(),
+            });
+          await seedCode(
+            toTable,
+            sessionReference,
+            dining.session.startedAt,
+            dining.session.tableAssignmentVersion,
+          );
+          await seedCode(
+            fromTable,
+            mSession,
+            mDining.session.startedAt,
+            mDining.session.tableAssignmentVersion,
+          );
+          // Refused while this table is checking out (back to ordering after).
+          assert.equal((await closing(server, "Begin")).phase, "Closing");
+          await assert.rejects(merge(server, fresh()), { code: "DINING_TABLE_MERGE_CHECKING_OUT" });
+          assert.equal((await closing(server, "Cancel")).phase, "Active");
+          const partyBefore = (
+            await rows(
+              "SELECT party_size FROM rms_dining.dining_session_party_size WHERE session_id=$1 ORDER BY version DESC LIMIT 1",
+              [sessionReference],
+            )
+          )[0]?.party_size;
+
+          // ── Two staff merge T-M at the same moment: one merges, the other is told the tables
+          // changed (never two merges).
+          const versions = { from: await tableVersion(fromTable), to: await tableVersion(toTable) };
+          const [byServer, byManager] = [fresh(), fresh()];
+          const raced = await Promise.allSettled([
+            merge(server, byServer, versions),
+            merge(manager, byManager, versions),
+          ]);
+          const won = raced.filter((outcome) => outcome.status === "fulfilled");
+          assert.equal(
+            won.length,
+            1,
+            JSON.stringify(raced.map((o) => String(o.reason ?? o.status))),
+          );
+          assert.equal(
+            raced.find((outcome) => outcome.status === "rejected")?.reason?.code,
+            "DINING_TABLE_MERGE_CHANGED",
+          );
+          const merged = won[0].value;
+          const winner = raced[0].status === "fulfilled" ? byServer : byManager;
+          assert.deepEqual(
+            [
+              merged.status,
+              merged.diningSessionReference,
+              merged.tableLabel,
+              merged.fromTableLabel,
+            ],
+            ["Applied", sessionReference, dining.table.stableLabel, "T-M"],
+          );
+          // The same request again: the same merge, nothing recorded twice.
+          const again = await merge(
+            raced[0].status === "fulfilled" ? server : manager,
+            winner,
+            versions,
+          );
+          assert.equal(again.status, "AlreadyApplied");
+          assert.deepEqual(
+            await rows(
+              "SELECT operation_id::text op,source_session_id::text src,target_session_id::text dst,merged_party_size::int party FROM rms_dining.dining_session_merge_operation",
+            ),
+            [{ op: winner, src: mSession, dst: sessionReference, party: merged.partySize }],
+          );
+          assert.equal(merged.partySize, (partyBefore ?? 1) + 1);
+          assert.deepEqual(
+            await rows(
+              "SELECT count(*)::int n FROM platform_audit.audit_record WHERE action_code='DINING_SESSION_MERGE_TABLE' AND target_id=$1",
+              [mSession],
+            ),
+            [{ n: 1 }],
+          );
+          // T-M's party ended here; its table waits for cleaning; this table seats both parties.
+          assert.deepEqual(
+            await rows("SELECT phase FROM rms_dining.dining_session WHERE session_id=$1", [
+              mSession,
+            ]),
+            [{ phase: "Closed" }],
+          );
+          assert.deepEqual(
+            await rows(
+              "SELECT table_snapshot->>'activeDiningSessionReference' party,table_snapshot->>'blockReasonCode' reason FROM rms_dining.dining_table WHERE table_id=$1",
+              [fromTable],
+            ),
+            [{ party: null, reason: "CLEANING" }],
+          );
+          assert.deepEqual(
+            (
+              await rows(
+                "SELECT party_size FROM rms_dining.dining_session_party_size WHERE session_id=$1 ORDER BY version DESC LIMIT 1",
+                [sessionReference],
+              )
+            )[0],
+            { party_size: merged.partySize },
+          );
+          // Its Order is on this table's bill (Ordering and Payment each record their side).
+          assert.deepEqual(
+            await rows(
+              "SELECT source_order_id::text s,target_order_id::text t FROM rms_ordering.order_merge",
+            ),
+            [{ s: mOrder, t: orderReference }],
+          );
+          assert.deepEqual(
+            await rows(
+              "SELECT member_order_id::text m,bill_order_id::text b FROM rms_payment.dining_table_bill_order",
+            ),
+            [{ m: mOrder, b: orderReference }],
+          );
+          // ── Codes: T-M's code admits no one now (its party ended); this table's code admits a
+          // phone from either table (no host needed) — T-M's host scans it and joins again.
+          const stale = await scanAt(fromTable, fresh());
+          assert.equal(stale.status, "Refused", JSON.stringify(stale));
+          const rejoined = await scanAt(toTable, mGuest);
+          assert.equal(rejoined.status, "Issued", JSON.stringify(rejoined));
+          const another = await scanAt(toTable, fresh());
+          assert.equal(another.status, "Issued", JSON.stringify(another));
+          // T-M's phone reloads its table page: it is told its table was merged into this one
+          // (the real restore handler and the guest app's own clients, its cookie, the API role).
+          const bootstrap = createCustomerSessionBootstrapHandler({
+            allowedOrigin: "https://synthetic-journey.invalid",
+            port: createCustomerSessionBootstrapRead({
+              scope,
+              transactions: transactions(),
+              credentials: mHost.identity.session.credentials,
+              now: () => new Date().toISOString(),
+              // The pilot's binding: the phone's table (the one it scanned and joined at).
+              binding: (transaction) => ({
+                validate: async (session, observedAt) =>
+                  (await createDiningGuestBindingQuery({
+                    scope,
+                    now: () => observedAt,
+                    repository: createPostgresDiningGuestBindingStore(
+                      { run: (work) => work(transaction) },
+                      ownerScope,
+                    ),
+                  }).resolve({
+                    purpose: "GuestSessionBinding",
+                    diningSessionReference: session.diningSessionReference,
+                    participantReference: session.diningParticipantReference,
+                    tableReference: fromTable,
+                  }))
+                    ? "Current"
+                    : "Unavailable",
+              }),
+            }),
+          });
+          const restoreOnReload = async () => {
+            setCustomerCsrfCredential(null);
+            await restoreCustomerSession(async () => {
+              const wire = await new Promise((resolve, reject) => {
+                const headers = {};
+                const response = {
+                  statusCode: 0,
+                  setHeader: (name, value) => {
+                    headers[name.toLowerCase()] = value;
+                  },
+                  status(code) {
+                    this.statusCode = code;
+                    return this;
+                  },
+                  json(body) {
+                    resolve({
+                      status: this.statusCode,
+                      headers: { ...headers, "content-type": "application/json" },
+                      body: JSON.stringify(body),
+                    });
+                    return this;
+                  },
+                  end() {
+                    resolve({ status: this.statusCode, headers, body: null });
+                    return this;
+                  },
+                };
+                Promise.resolve(
+                  bootstrap(
+                    {
+                      get: (name) =>
+                        ({ "sec-fetch-site": "same-origin", "x-bop-session-bootstrap": "1" })[
+                          name.toLowerCase()
+                        ],
+                      query: {},
+                      body: undefined,
+                      headers: { cookie: "__Host-bop-guest=" + mHost.sessionCredential },
+                    },
+                    response,
+                    reject,
+                  ),
+                ).catch(reject);
+              });
+              return new globalThis.Response(wire.body, {
+                status: wire.status,
+                headers: wire.headers,
+              });
+            });
+            return createHttpDiningSessionClient(async () => {
+              throw new Error("the table page reads nothing without the visit's token");
+            })
+              .load()
+              .then(
+                () => "loaded",
+                (error) => [error.code, error.tableLabel ?? null],
+              );
+          };
+          assert.deepEqual(await restoreOnReload(), ["moved", dining.table.stableLabel]);
+          assert.equal(getMovedTableMerged(), true);
+          setCustomerCsrfCredential("x".repeat(43));
+          setCustomerCsrfCredential(null);
+          // The kitchen: T-M's dishes go to this table, "merged from T-M".
+          assert.deepEqual(
+            [
+              ...(
+                await transactions().run((tx) => listDiningSessionMergedInto(tx, scope, [mSession]))
+              ).values(),
+            ].map((entry) => [entry.tableLabel, entry.fromTableLabel]),
+            [[dining.table.stableLabel, "T-M"]],
+          );
+          const merges = await rows(
+            "SELECT count(*)::int n FROM rms_dining.dining_session_merge_operation",
+          );
+          // Refused after: T-M has no party now.
+          await assert.rejects(merge(server, fresh()), { code: "DINING_TABLE_MERGE_NOT_SEATED" });
+          assert.deepEqual(
+            await rows("SELECT count(*)::int n FROM rms_dining.dining_session_merge_operation"),
+            merges,
+          );
+          // The bill: every round of both tables, each with its own Order and who ordered it.
+          const merchantBill = await bill();
+          assert.deepEqual(
+            merchantBill.rounds.map((round) => [round.orderReference, round.orderBatchReference]),
+            [
+              [orderReference, R1.batch.orderBatchReference],
+              [orderReference, R2.batch.orderBatchReference],
+              [mOrder, M.batch.orderBatchReference],
+            ],
+          );
+          const mRound = merchantBill.rounds.find((round) => round.orderReference === mOrder);
+          assert.notEqual(mRound.orderedBy, null);
+          assert.ok(
+            merchantBill.rounds
+              .filter(
+                (round) => round.orderReference === orderReference && round.orderedBy !== null,
+              )
+              .every((round) => round.orderedBy !== mRound.orderedBy),
+          );
+
+          // ── The table eats, pays once and closes: both Orders' rounds cooked and served at this
+          // table, one cash payment whose lines keep each round's Order, both Orders closed.
+          await cookAndServeRound1([
+            { c: c1, event: event1, batch: R1.batch, items: items1 },
+            { c: c2, event: event2, batch: R2.batch, items: items2 },
+          ]);
+          await cookAndServeRound1([
+            {
+              c: mSent.confirmation,
+              event: mEvent,
+              batch: M.batch,
+              items: mItems,
+              orderReference: mOrder,
+            },
+          ]);
+          const owed = (await bill()).owed.totalMinor;
+          assert.equal((await closing(server, "Begin")).phase, "Closing");
+          await settleWith(server, { tip: { kind: "None" }, tenderedMinor: "100000" });
+          assert.deepEqual(
+            await rows(
+              "SELECT r.order_id::text o,r.order_batch_id::text b FROM rms_payment.dining_table_settlement_round r JOIN rms_payment.dining_table_settlement s ON s.settlement_id=r.settlement_id WHERE s.order_id=$1 ORDER BY r.line_number",
+              [orderReference],
+            ),
+            [
+              { o: orderReference, b: R1.batch.orderBatchReference },
+              { o: orderReference, b: R2.batch.orderBatchReference },
+              { o: mOrder, b: M.batch.orderBatchReference },
+            ],
+          );
+          assert.equal((await bill()).owed.totalMinor, "0");
+          assert.notEqual(owed, "0");
+          // Nothing more joins a bill once anything on it was paid (Payment's own rule, under the
+          // pilot role).
+          await assert.rejects(
+            transactions().run((tx) =>
+              recordDiningTableBillOrder(tx, scope, {
+                operationReference: fresh(),
+                billOrderReference: orderReference,
+                memberOrderReference: fresh(),
+                recordedAt: now(),
+              }),
+            ),
+            { code: "DINING_TABLE_SETTLEMENT_ALREADY_PAID" },
+          );
+          const closeOrder = async (order) => {
+            const progress = await createMerchantDiningOrderProgress({
+              persistence: persistenceOf(server),
+              locale: "en-CA",
+              authentication: server.authentication,
+            })({ ...as(server), query: { orderReference: order } });
+            return createMerchantDiningOrderCloseCommand({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+              resolveConfiguration: createDiningOrderCloseConfiguration({
+                ...ownerScope,
+                providerAccountReference: provider,
+                environment: "Test",
+              }),
+              newReference: fresh,
+              audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+            })({
+              ...as(server),
+              command: {
+                orderReference: order,
+                operationReference: fresh(),
+                expectedOrderVersion: progress.currentOrderVersion,
+                expectedClosureVersion: progress.closureVersion,
+                reasonCode: "ORDER_COMPLETED",
+              },
+            });
+          };
+          assert.equal((await closeOrder(mOrder)).status, "Committed");
+          assert.equal((await closeOrder(orderReference)).status, "Committed");
+          assert.equal((await closing(server, "Finalize")).phase, "Closed");
+          return;
+        }
         if (ending === "Moved") {
           // TEST-ONLY tables beside the party's: free B and F (with codes), C without a code,
           // D being cleaned, E with another party.
@@ -1776,7 +2273,7 @@ async function journey(ending) {
                     query: {
                       brandReference: scope.brandReference,
                       storeReference: scope.storeReference,
-                      orderReference,
+                      orderReference: round.orderReference ?? orderReference,
                       orderBatchReference: String(round.c.orderBatchReference),
                       confirmationReference: String(round.c.confirmationReference),
                       sourceEventReference: round.event.eventId,
@@ -1796,7 +2293,7 @@ async function journey(ending) {
             const sourceQuery = {
               brandReference: scope.brandReference,
               storeReference: scope.storeReference,
-              orderReference,
+              orderReference: round.orderReference ?? orderReference,
               orderBatchReference: String(round.c.orderBatchReference),
               confirmationReference: String(round.c.confirmationReference),
               sourceEventReference: round.event.eventId,
@@ -1827,7 +2324,7 @@ async function journey(ending) {
                 ticket,
                 scope.brandReference,
                 scope.storeReference,
-                orderReference,
+                round.orderReference ?? orderReference,
                 round.batch.orderBatchReference,
                 String(round.c.confirmationReference),
                 round.event.eventId,
@@ -1852,7 +2349,7 @@ async function journey(ending) {
                   scope.brandReference,
                   scope.storeReference,
                   ticket,
-                  orderReference,
+                  round.orderReference ?? orderReference,
                   round.batch.orderBatchReference,
                   String(item.orderItemReference),
                   evidence,
@@ -2005,6 +2502,8 @@ async function journey(ending) {
             void active;
           }
           // Inventory uses the dishes from the Kitchen lifecycle Events (as the pilot consumers do).
+          // WP-2423 item 8 ⑨: the rounds of one Order (a merged table's round is of its own).
+          const cooked = rounds[0]?.orderReference ?? orderReference;
           const consume = createKitchenInventoryConsumption({
             scope: ownerScope,
             nextReference: fresh,
@@ -2013,7 +2512,7 @@ async function journey(ending) {
           });
           for (const event of await rows(
             "SELECT event_id::text AS id FROM platform_eventing.outbox_event WHERE event_type IN ('KitchenWorkStarted','KitchenItemCompleted') AND payload_json->>'orderReference'=$1 ORDER BY occurred_at,event_id",
-            [orderReference],
+            [cooked],
           ))
             await transactions({ guc: true }).run(async (tx) =>
               consume(tx, await loadOutboxEnvelope(tx, event.id)),
@@ -2025,7 +2524,7 @@ async function journey(ending) {
               persistence: persistenceOf(server),
               locale: "en-CA",
               authentication: server.authentication,
-            })({ ...as(server), query: { orderReference } });
+            })({ ...as(server), query: { orderReference: cooked } });
           const ready = await progress();
           const serve = createMerchantDiningServeCommand({
             persistence: persistenceOf(server),
@@ -2042,7 +2541,7 @@ async function journey(ending) {
               ...as(server),
               command: {
                 operationReference: fresh(),
-                orderReference,
+                orderReference: cooked,
                 orderItemReference: String(item.orderItemReference),
                 quantity: item.quantity,
                 expectedOrderVersion: ready.currentOrderVersion,
@@ -2052,7 +2551,7 @@ async function journey(ending) {
               },
             });
           const served = await progress();
-          if (ending !== "Comped") {
+          if (ending !== "Comped" && ending !== "Merged" && cooked === orderReference) {
             // Round 1 served; round 2's dishes, taken off the bill before the table paid, are cancelled.
             assert.deepEqual(
               served.items.map((item) => [item.batchSequence, item.phase]),
