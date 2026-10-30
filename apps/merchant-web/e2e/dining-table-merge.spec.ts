@@ -137,6 +137,45 @@ test("@production staff merge a table's party into another seated table", async 
       },
     });
   });
+  // The merged bill (T7's and T6's rounds), as the staff bill read gives it.
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        diningSessionReference: id(4),
+        sessionPhase: "Active",
+        sessionVersion: 4,
+        paymentTiming: "PayLater",
+        tableLabel: "T7",
+        orderReference: id(54),
+        rounds: [
+          {
+            roundNumber: 1,
+            orderBatchReference: id(21),
+            submissionReference: id(31),
+            items: [{ displayName: "Milk tea", subtotalMinor: "750", totalMinor: "848" }],
+            subtotalMinor: "750",
+            taxMinor: "98",
+            totalMinor: "848",
+            paid: false,
+          },
+          {
+            roundNumber: 2,
+            orderBatchReference: id(22),
+            submissionReference: id(32),
+            items: [{ displayName: "Mapo tofu", subtotalMinor: "2038", totalMinor: "2303" }],
+            subtotalMinor: "2038",
+            taxMinor: "265",
+            totalMinor: "2303",
+            paid: false,
+          },
+        ],
+        owed: { subtotalMinor: "2788", taxMinor: "363", totalMinor: "3151" },
+        consistent: true,
+        settlement: null,
+      },
+    }),
+  );
   await page.route("**/merchant/dining/table-merge", (route) => {
     sent.push(route.request().postDataJSON() as Record<string, unknown>);
     merged = true;
@@ -202,5 +241,9 @@ test("@production staff merge a table's party into another seated table", async 
   });
   // T7 is shown with T6's rounds on its bill.
   await expect(page.getByRole("region", { name: "From table T6" })).toBeVisible();
+  // One bill for both tables (the cashier never adds the groups up).
+  const whole = page.getByRole("region", { name: "The table's whole bill" });
+  await expect(whole).toContainText("Whole bill");
+  await expect(whole).toContainText("$31.51");
   await expectNoInternalText(page, ["Mark unavailable"]);
 });

@@ -37,6 +37,7 @@ import { TableCheckout } from "./TableCheckout.js";
 import { TablePartySize, createTablePartySizeClient } from "./TablePartySize.js";
 import { TableMove } from "./TableMove.js";
 import { TableMerge } from "./TableMerge.js";
+import { TableBillTotal } from "./TableBillTotal.js";
 import { TableOrderRounds } from "./TableOrderRounds.js";
 import { RoundHoldSettingControl, TableHeldRounds, TablePanelPhones } from "./TablePhones.js";
 import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
@@ -1420,6 +1421,15 @@ function TablePanel({
             ),
           )
         : null}
+      {seated &&
+      (table.session?.mergedTables ?? []).length > 0 &&
+      table.currentDiningSessionReference !== null ? (
+        <TableBillTotal
+          diningSessionReference={table.currentDiningSessionReference}
+          csrf={csrf}
+          refreshKey={refreshKey + ":" + String(checkoutRevision)}
+        />
+      ) : null}
       {seated && table.paymentTiming === "PayLater" && table.session ? (
         // DEC-DINE-IN-PAY-LATER: the table pays once at the end, here (servers too, v18).
         <TableCheckout

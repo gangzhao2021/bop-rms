@@ -154,3 +154,26 @@ export async function diningSessionHasUnsentCart(
   ).rows as readonly { unsent?: unknown }[];
   return rows[0]?.unsent === true;
 }
+
+/** The dining session of each given dine-in Order (absent: not a dine-in Order of the Store). */
+export async function listOrderDiningSessions(
+  transaction: ConsumerTransaction,
+  scope: Scope,
+  orderReferences: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  if (orderReferences.length === 0) return new Map();
+  if (orderReferences.length > 200) return unavailable();
+  const { brand, store } = await context(transaction, scope);
+  const rows = (
+    await transaction.query(
+      "SELECT order_id::text order_ref,dining_session_id::text session_ref FROM rms_ordering.order_header WHERE brand_id=$1 AND store_id=$2 AND order_type='DineIn' AND order_id=ANY($3::uuid[])",
+      [brand, store, orderReferences.map((reference) => parseOrderingReference(reference))],
+    )
+  ).rows as readonly { order_ref?: unknown; session_ref?: unknown }[];
+  return new Map(
+    rows.map((row) => [
+      String(parseOrderingReference(row.order_ref)),
+      String(parseOrderingReference(row.session_ref)),
+    ]),
+  );
+}

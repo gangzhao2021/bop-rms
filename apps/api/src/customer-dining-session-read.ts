@@ -26,6 +26,8 @@ import {
   createPostgresStaffOrderCancellationReader,
   listDiningOrderBatchAuthorship,
   listOrderItemPrices,
+  listOrderBillOrders,
+  listOrderDiningSessions,
   listStoreDiningBatchPaymentDeadlines,
   listStoreUnpaidBatchCancellations,
   OrderStatusProjectionError,
@@ -730,392 +732,395 @@ function postgresDependencies(
       }).load(transaction, { diningSessionReference, guestSessionReference, observedAt: now() });
       if (orderReference === null)
         return { diningSessionReference, tableLabel, checkedAt: now(), ...timing, order: null };
-      if (options.diningScope === undefined || options.paymentScope === undefined)
-        return unavailable();
-      if (
-        options.paymentScope.brandReference !== scope.brandReference ||
-        options.paymentScope.storeReference !== scope.storeReference
-      )
-        return unavailable();
-      const projections = createPostgresOrderStatusProjectionStore({
-        ...scope,
-        authorize: async (_tx, target) =>
-          target.access === "Load" &&
-          target.orderReference === orderReference &&
-          target.brandReference === scope.brandReference &&
-          target.storeReference === scope.storeReference &&
-          (await stillAuthorized()),
-        validateCurrentSource: async () => false,
-      });
-      const status = await createOrderStatusQueryService({
-        authorization: {
-          authorizeCustomer: async () => null,
-          // The Order was resolved from this participant's own dining session above.
-          authorizeDiningParticipant: async (input) =>
-            input.orderReference === orderReference && (await stillAuthorized())
-              ? { guestSession: guest }
-              : null,
-          authorizeMerchant: async () => null,
-        },
-        projections: {
-          load: (reference) => projections.load({ transaction, orderReference: reference }),
-          list: async () => denied(),
-        },
-      })
-        .getDiningParticipant({ orderReference, observedAt: now() })
-        .catch((error: unknown) => {
-          if (
-            error instanceof OrderStatusProjectionError &&
-            error.code === "ORDER_STATUS_NOT_FOUND"
-          )
-            throw new DiningOrderStillProcessingError();
-          throw error;
-        });
-      const delivery = await createDiningOrderDeliveryProgress({
-        ...scope,
-        diningScope: options.diningScope,
-        authorize: async () => stillAuthorized(),
-        authorizeKitchen: async () => stillAuthorized(),
-        authorizeDining: async () => stillAuthorized(),
-      }).load({
-        transaction,
-        ...scope,
-        orderReference,
-        diningSessionReference,
-        guestSessionReference,
-        observedAt: now(),
-      });
-      const members = status.order.batches.flatMap((batch) =>
-        batch.items.map((item) => ({
-          orderBatchReference: String(batch.orderBatchReference),
-          orderItemReference: String(item.orderItemReference),
-          quantity: item.quantity,
-        })),
-      );
-      // v15 2026-10-28 a: a round Ordering already has (just sent, or held for staff) is added to
-      // the status view by its event consumer within seconds. Until then the view lacks whole
-      // rounds the delivery read has: the table's order is still being prepared (the page reads
-      // again), not unavailable. Anything else that disagrees stays unavailable.
-      const projected = new Set(members.map((member) => member.orderBatchReference));
-      if (
-        delivery &&
-        delivery.items.some((item) => !projected.has(item.orderBatchReference)) &&
-        delivery.items.filter((item) => projected.has(item.orderBatchReference)).length ===
-          members.length &&
-        members.every((member) =>
-          delivery.items.some(
-            (item) =>
-              item.orderItemReference === member.orderItemReference &&
-              item.orderBatchReference === member.orderBatchReference &&
-              item.orderedQuantity === member.quantity,
-          ),
+      // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the facts of one Order on this table's bill —
+      // the table's own (`own`) or a table's merged into it (its own session; never this guest's).
+      const orderFacts = async (orderReference: string, orderSession: string, own: boolean) => {
+        if (options.diningScope === undefined || options.paymentScope === undefined)
+          return unavailable();
+        if (
+          options.paymentScope.brandReference !== scope.brandReference ||
+          options.paymentScope.storeReference !== scope.storeReference
         )
-      )
-        throw new DiningOrderStillProcessingError();
-      if (
-        !delivery ||
-        delivery.items.length !== members.length ||
-        delivery.items.some(
-          (item) =>
-            !members.some(
-              (member) =>
-                member.orderItemReference === item.orderItemReference &&
-                member.orderBatchReference === item.orderBatchReference &&
-                member.quantity === item.orderedQuantity,
-            ),
-        )
-      )
-        return unavailable();
-      const authorship = await listDiningOrderBatchAuthorship(transaction, scope, {
-        orderReference,
-        diningSessionReference,
-        guestSessionReference,
-      });
-      if (!(await stillAuthorized())) return denied();
-      const payments = await createPostgresPaymentStatusStore({
-        scope: options.paymentScope,
-        authorizeOrder: async (_tx, target) =>
-          target.orderReference === orderReference && (await stillAuthorized()),
-        authorize: async () => stillAuthorized(),
-      }).listByOrder({ transaction, orderReference });
-      const paymentOutcomes = new Map<string, "Succeeded" | "Failed">();
-      for (const entry of await listStoreOrderBatchPaymentOutcomes(transaction, scope, [
-        orderReference,
-      ]))
-        paymentOutcomes.set(entry.orderBatchReference, entry.status);
-      const paymentDeadlines = new Map<string, string>();
-      for (const entry of await listStoreDiningBatchPaymentDeadlines(transaction, scope, [
-        orderReference,
-      ]))
-        paymentDeadlines.set(entry.orderBatchReference, entry.paymentDeadline);
-      const unpaidCancellations = new Set<string>();
-      for (const entry of await listStoreUnpaidBatchCancellations(transaction, scope, [
-        orderReference,
-      ]))
-        unpaidCancellations.add(entry.orderBatchReference);
-      // WP-2423 Q7 slice 2: rounds staff entered for the table, paid on the Store's card machine.
-      const staffRounds = new Set(
-        (
-          await createPostgresStaffDiningRoundEntryStore({
-            ...scope,
-            authorize: async () => stillAuthorized(),
-          }).listByOrders(transaction, [orderReference])
-        ).keys(),
-      );
-      const cardMachinePayments = await createPostgresCardMachinePaymentStore({
-        scope,
-        authorize: async (_tx, target) =>
-          target.orderReference === orderReference && (await stillAuthorized()),
-      }).listByOrder(transaction, orderReference);
-      for (const entry of cardMachinePayments)
-        paymentOutcomes.set(entry.payment.orderBatchReference, "Succeeded");
-      const paymentStarted = new Set(
-        await listStoreOrderBatchesWithOnlinePayment(transaction, scope, [orderReference]),
-      );
-      for (const entry of cardMachinePayments)
-        paymentStarted.add(entry.payment.orderBatchReference);
-      if (!(await stillAuthorized())) return denied();
-      const staffCancellations = new Map<
-        string,
-        { reason: DiningStoreCancellationReason; refundedMinor: bigint; pendingMinor: bigint }
-      >();
-      for (const record of await createPostgresStaffOrderCancellationReader(scope).listByOrders(
-        transaction,
-        [orderReference],
-      )) {
-        const position = await readStaffCancellationRefundPosition(
-          transaction,
-          scope,
-          record,
-          stillAuthorized,
-        );
-        staffCancellations.set(String(record.orderBatchReference), {
-          reason: customerCancellationReasons[record.reasonCode],
-          refundedMinor: position.confirmedMinor,
-          pendingMinor: position.pendingMinor,
-        });
-      }
-      const itemCancellations = [];
-      for (const record of await createPostgresStaffItemCancellationReader(scope).listByOrders(
-        transaction,
-        [orderReference],
-      ))
-        itemCancellations.push({
-          orderItemReferences: record.orderItemReferences.map(String),
-          refunded:
-            options.itemRefundScope !== undefined &&
-            (await readItemCancellationRefundStatus(
-              transaction,
-              { ...scope, ...options.itemRefundScope },
-              record,
-              stillAuthorized,
-            )) === "Refunded",
-          refundAmount: {
-            amountMinor: record.refundAmountMinor,
-            currencyCode: record.currencyCode,
-          },
-        });
-      // DEC-DINE-IN-PAY-LATER: dishes taken off the bill before the table paid (nothing charged).
-      if (paymentTiming === "PayLater")
-        for (const record of await createPostgresPayLaterItemCancellationStore({
+          return unavailable();
+        const projections = createPostgresOrderStatusProjectionStore({
           ...scope,
-          authorize: async (_tx, value) =>
-            value.orderReference === orderReference && (await stillAuthorized()),
-        }).listByOrders(transaction, [orderReference]))
-          itemCancellations.push({
-            orderItemReferences: [...record.orderItemReferences],
-            refunded: false,
-            refundAmount: { amountMinor: 0n, currencyCode: "CAD" },
-            notCharged: true as const,
-          });
-      // WP-2423 Q26: items the kitchen is remaking for this table's order.
-      const remakes = new Set(
-        (await listOpenKitchenReworkItems(transaction, scope, [orderReference])).map(
-          (entry) => entry.orderItemReference,
-        ),
-      );
-      // WP-2423 D5: each item's frozen price before tax (Ordering's own order items), only for the
-      // items this view shows and only when each one's total is the total shown. If they can't be
-      // read, the table keeps the totals it has.
-      let itemPrices:
-        | Map<
-            string,
-            {
-              subtotal: { amountMinor: bigint; currencyCode: string };
-              tax: { amountMinor: bigint; currencyCode: string };
-            }
-          >
-        | undefined;
-      // Owner 2026-10-23: item names in the guest's chosen language, by Order item.
-      let chosenNames: Map<string, string> | undefined;
-      // WP-2423 item 8 ③ (decision 13): what "Order again" adds, by Order item.
-      let orderAgain: Map<string, CustomerDiningOrderAgain> | undefined;
-      if (await stillAuthorized()) {
-        const shown = new Map(
-          status.order.batches.flatMap((batch) =>
-            batch.items.map((item) => [String(item.orderItemReference), item] as const),
-          ),
-        );
-        try {
-          await transaction.query("SAVEPOINT customer_dining_item_prices", []);
-          const found = await listOrderItemPrices(
-            transaction,
-            scope,
-            orderReference,
-            displayLocale === undefined ? undefined : [displayLocale, String(guest.locale)],
-          );
-          await transaction.query("RELEASE SAVEPOINT customer_dining_item_prices", []);
-          orderAgain = new Map(
-            found.map((price) => [
-              price.orderItemReference,
-              Object.freeze({
-                sellableReference: price.sellableReference,
-                optionSelections: price.optionSelections,
-              }),
-            ]),
-          );
-          if (displayLocale !== undefined)
-            chosenNames = new Map(
-              found.map((price) => [price.orderItemReference, price.displayName] as const),
-            );
-          const matched = found.filter((price) => shown.has(price.orderItemReference));
-          if (
-            matched.length === shown.size &&
-            matched.every(
-              (price) =>
-                shown.get(price.orderItemReference)?.lineTotal.amountMinor ===
-                  price.total.amountMinor &&
-                shown.get(price.orderItemReference)?.lineTotal.currencyCode ===
-                  price.total.currencyCode,
+          authorize: async (_tx, target) =>
+            target.access === "Load" &&
+            target.orderReference === orderReference &&
+            target.brandReference === scope.brandReference &&
+            target.storeReference === scope.storeReference &&
+            (await stillAuthorized()),
+          validateCurrentSource: async () => false,
+        });
+        const status = await createOrderStatusQueryService({
+          authorization: {
+            authorizeCustomer: async () => null,
+            // The Order was resolved from this participant's own dining session above.
+            authorizeDiningParticipant: async (input) =>
+              input.orderReference === orderReference && (await stillAuthorized())
+                ? { guestSession: guest }
+                : null,
+            authorizeMerchant: async () => null,
+          },
+          projections: {
+            load: (reference) => projections.load({ transaction, orderReference: reference }),
+            list: async () => denied(),
+          },
+        })
+          .getDiningParticipant({ orderReference, observedAt: now() })
+          .catch((error: unknown) => {
+            if (
+              error instanceof OrderStatusProjectionError &&
+              error.code === "ORDER_STATUS_NOT_FOUND"
             )
-          )
-            itemPrices = new Map(
-              matched.map((price) => [
-                price.orderItemReference,
-                { subtotal: price.subtotal, tax: price.tax },
-              ]),
-            );
-        } catch {
-          await transaction.query("ROLLBACK TO SAVEPOINT customer_dining_item_prices", []);
-          await transaction.query("RELEASE SAVEPOINT customer_dining_item_prices", []);
-        }
-      }
-      // Refund positions per captured payment, as the receipt reads them (Payment owner sources).
-      const refunds = { confirmedMinor: 0n, pendingMinor: 0n };
-      // A card-machine payment is refunded on the machine and recorded (only confirmed refunds).
-      for (const entry of cardMachinePayments)
-        for (const refund of entry.refunds) refunds.confirmedMinor += refund.amountMinor;
-      for (const projection of payments) {
-        if (projection.snapshot.terminalStatus !== "Succeeded") continue;
-        const payment = {
+              throw new DiningOrderStillProcessingError();
+            throw error;
+          });
+        const delivery = await createDiningOrderDeliveryProgress({
+          ...scope,
+          diningScope: options.diningScope,
+          authorize: async () => stillAuthorized(),
+          authorizeKitchen: async () => stillAuthorized(),
+          authorizeDining: async () => stillAuthorized(),
+        }).load({
+          transaction,
+          ...scope,
           orderReference,
-          paymentTransactionReference: String(projection.snapshot.paymentTransactionReference),
-          paymentAttemptReference: String(projection.snapshot.paymentAttemptReference),
-        };
-        const compensation = await createPostgresPaymentCompensationRefundPositionSource({
-          scope,
-          authorize: async (tx, input) =>
-            tx === transaction &&
-            input.orderReference === orderReference &&
-            (await stillAuthorized()),
-        })(transaction, payment);
-        refunds.confirmedMinor += compensation.confirmedMinor;
-        refunds.pendingMinor += compensation.pendingMinor;
-        if (options.itemRefundScope === undefined) continue;
-        const ordinary = await createPostgresOrdinaryRefundPositionSource({
-          scope: { ...scope, tenantReference: options.itemRefundScope.tenantReference },
-          providerAccountReference: options.itemRefundScope.providerAccountReference,
-          environment: options.itemRefundScope.environment,
-          authorize: async (tx, input) =>
-            tx === transaction &&
-            input.orderReference === orderReference &&
-            (await stillAuthorized()),
-        })(transaction, {
-          ...payment,
-          paymentIntentReference: String(projection.snapshot.paymentIntentReference),
+          diningSessionReference: orderSession,
+          guestSessionReference,
           observedAt: now(),
         });
-        refunds.confirmedMinor += ordinary.confirmedMinor;
-        refunds.pendingMinor += ordinary.pendingMinor;
-      }
-      // WP-2423 item 8 ⑤: rounds waiting for staff (only at a table that pays at the end).
-      const heldRounds = new Map(
-        paymentTiming !== "PayLater"
-          ? []
-          : (
-              await createPostgresOrderRoundStaffHoldStore({
-                brandReference: scope.brandReference,
-                storeReference: scope.storeReference,
-                authorize: async () => stillAuthorized(),
-              }).listWaiting({ transaction, orderReferences: [orderReference] })
-            ).map((hold) => [String(hold.orderBatchReference), hold.reason] as const),
-      );
-      const payLaterRounds = new Set(
-        paymentTiming !== "PayLater"
-          ? []
-          : (
-              await createPostgresOrderPayLaterConfirmationStore({
-                brandReference: scope.brandReference,
-                storeReference: scope.storeReference,
-                quoteVersion: 2,
-                sha256: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
-                authorize: async () => stillAuthorized(),
-              }).listByOrders({ transaction, orderReferences: [orderReference] })
-            ).map((entry) => String(entry.orderBatchReference)),
-      );
-      // DEC-DINE-IN-PAY-LATER: the table's one payment at the end (card machine or cash), what
-      // the guests paid in total (tip and cash rounding included).
-      const tableStore =
-        paymentTiming !== "PayLater" || options.diningScope === undefined
-          ? null
-          : createPostgresDiningTableSettlementStore({
-              scope: options.diningScope,
-              authorize: async (_tx, value) =>
-                value.orderReference === orderReference && (await stillAuthorized()),
-            });
-      const tableSettlements =
-        tableStore === null ? [] : await tableStore.listByOrders(transaction, [orderReference]);
-      // WP-2423 item 8 ④: a split bill's rounds are paid once every part is (each part is a
-      // payment with its own tip and cash rounding, added up below).
-      const [splitPlan] =
-        tableStore !== null ? await tableStore.listSplitPlans(transaction, [orderReference]) : [];
-      // WP-2423 item 8 ⑦ 4b-3: the table's per-head tea (a table that pays at the end).
-      const teaSetting =
-        paymentTiming === "PayLater" && options.diningScope !== undefined
-          ? await loadDiningTeaChargeSetting(
-              transaction as unknown as Parameters<typeof loadDiningTeaChargeSetting>[0],
-              options.diningScope as Parameters<typeof loadDiningTeaChargeSetting>[1],
-            )
-          : null;
-      const teaSkuLines = teaSetting?.teaSellableReference
-        ? (
-            await listOrderSkuLines(transaction as never, options.diningScope as never, {
-              orderReference: String(orderReference),
-              sellableReference: teaSetting.teaSellableReference,
-            })
-          ).lines
-        : [];
-      const teaItems = new Set(
-        teaSkuLines.filter((line) => !line.takenOff).map((line) => line.orderItemReference),
-      );
-      const teaLines = new Set(teaSkuLines.map((line) => line.orderItemReference));
-      const splitPaid =
-        splitPlan !== undefined &&
-        splitPlan.mode !== "Whole" &&
-        splitPlan.parts.every((part) =>
-          tableSettlements.some((settlement) => settlement.part?.partNumber === part.partNumber),
+        const members = status.order.batches.flatMap((batch) =>
+          batch.items.map((item) => ({
+            orderBatchReference: String(batch.orderBatchReference),
+            orderItemReference: String(item.orderItemReference),
+            quantity: item.quantity,
+          })),
         );
-      const settledRounds = new Set(
-        tableSettlements
-          .filter((settlement) => settlement.part === null || splitPaid)
-          .flatMap((settlement) => settlement.lines.map((line) => line.orderBatchReference)),
-      );
-      return {
-        diningSessionReference,
-        tableLabel,
-        checkedAt: now(),
-        ...timing,
-        order: {
+        // v15 2026-10-28 a: a round Ordering already has (just sent, or held for staff) is added to
+        // the status view by its event consumer within seconds. Until then the view lacks whole
+        // rounds the delivery read has: the table's order is still being prepared (the page reads
+        // again), not unavailable. Anything else that disagrees stays unavailable.
+        const projected = new Set(members.map((member) => member.orderBatchReference));
+        if (
+          delivery &&
+          delivery.items.some((item) => !projected.has(item.orderBatchReference)) &&
+          delivery.items.filter((item) => projected.has(item.orderBatchReference)).length ===
+            members.length &&
+          members.every((member) =>
+            delivery.items.some(
+              (item) =>
+                item.orderItemReference === member.orderItemReference &&
+                item.orderBatchReference === member.orderBatchReference &&
+                item.orderedQuantity === member.quantity,
+            ),
+          )
+        )
+          throw new DiningOrderStillProcessingError();
+        if (
+          !delivery ||
+          delivery.items.length !== members.length ||
+          delivery.items.some(
+            (item) =>
+              !members.some(
+                (member) =>
+                  member.orderItemReference === item.orderItemReference &&
+                  member.orderBatchReference === item.orderBatchReference &&
+                  member.quantity === item.orderedQuantity,
+              ),
+          )
+        )
+          return unavailable();
+        const authorship = own
+          ? await listDiningOrderBatchAuthorship(transaction, scope, {
+              orderReference,
+              diningSessionReference: orderSession,
+              guestSessionReference,
+            })
+          : // A merged table's rounds were never this phone's.
+            new Map<string, boolean>(
+              status.order.batches.map((batch) => [String(batch.orderBatchReference), false]),
+            );
+        if (!(await stillAuthorized())) return denied();
+        const payments = await createPostgresPaymentStatusStore({
+          scope: options.paymentScope,
+          authorizeOrder: async (_tx, target) =>
+            target.orderReference === orderReference && (await stillAuthorized()),
+          authorize: async () => stillAuthorized(),
+        }).listByOrder({ transaction, orderReference });
+        const paymentOutcomes = new Map<string, "Succeeded" | "Failed">();
+        for (const entry of await listStoreOrderBatchPaymentOutcomes(transaction, scope, [
+          orderReference,
+        ]))
+          paymentOutcomes.set(entry.orderBatchReference, entry.status);
+        const paymentDeadlines = new Map<string, string>();
+        for (const entry of await listStoreDiningBatchPaymentDeadlines(transaction, scope, [
+          orderReference,
+        ]))
+          paymentDeadlines.set(entry.orderBatchReference, entry.paymentDeadline);
+        const unpaidCancellations = new Set<string>();
+        for (const entry of await listStoreUnpaidBatchCancellations(transaction, scope, [
+          orderReference,
+        ]))
+          unpaidCancellations.add(entry.orderBatchReference);
+        // WP-2423 Q7 slice 2: rounds staff entered for the table, paid on the Store's card machine.
+        const staffRounds = new Set(
+          (
+            await createPostgresStaffDiningRoundEntryStore({
+              ...scope,
+              authorize: async () => stillAuthorized(),
+            }).listByOrders(transaction, [orderReference])
+          ).keys(),
+        );
+        const cardMachinePayments = await createPostgresCardMachinePaymentStore({
+          scope,
+          authorize: async (_tx, target) =>
+            target.orderReference === orderReference && (await stillAuthorized()),
+        }).listByOrder(transaction, orderReference);
+        for (const entry of cardMachinePayments)
+          paymentOutcomes.set(entry.payment.orderBatchReference, "Succeeded");
+        const paymentStarted = new Set(
+          await listStoreOrderBatchesWithOnlinePayment(transaction, scope, [orderReference]),
+        );
+        for (const entry of cardMachinePayments)
+          paymentStarted.add(entry.payment.orderBatchReference);
+        if (!(await stillAuthorized())) return denied();
+        const staffCancellations = new Map<
+          string,
+          { reason: DiningStoreCancellationReason; refundedMinor: bigint; pendingMinor: bigint }
+        >();
+        for (const record of await createPostgresStaffOrderCancellationReader(scope).listByOrders(
+          transaction,
+          [orderReference],
+        )) {
+          const position = await readStaffCancellationRefundPosition(
+            transaction,
+            scope,
+            record,
+            stillAuthorized,
+          );
+          staffCancellations.set(String(record.orderBatchReference), {
+            reason: customerCancellationReasons[record.reasonCode],
+            refundedMinor: position.confirmedMinor,
+            pendingMinor: position.pendingMinor,
+          });
+        }
+        const itemCancellations = [];
+        for (const record of await createPostgresStaffItemCancellationReader(scope).listByOrders(
+          transaction,
+          [orderReference],
+        ))
+          itemCancellations.push({
+            orderItemReferences: record.orderItemReferences.map(String),
+            refunded:
+              options.itemRefundScope !== undefined &&
+              (await readItemCancellationRefundStatus(
+                transaction,
+                { ...scope, ...options.itemRefundScope },
+                record,
+                stillAuthorized,
+              )) === "Refunded",
+            refundAmount: {
+              amountMinor: record.refundAmountMinor,
+              currencyCode: record.currencyCode,
+            },
+          });
+        // DEC-DINE-IN-PAY-LATER: dishes taken off the bill before the table paid (nothing charged).
+        if (paymentTiming === "PayLater")
+          for (const record of await createPostgresPayLaterItemCancellationStore({
+            ...scope,
+            authorize: async (_tx, value) =>
+              value.orderReference === orderReference && (await stillAuthorized()),
+          }).listByOrders(transaction, [orderReference]))
+            itemCancellations.push({
+              orderItemReferences: [...record.orderItemReferences],
+              refunded: false,
+              refundAmount: { amountMinor: 0n, currencyCode: "CAD" },
+              notCharged: true as const,
+            });
+        // WP-2423 Q26: items the kitchen is remaking for this table's order.
+        const remakes = new Set(
+          (await listOpenKitchenReworkItems(transaction, scope, [orderReference])).map(
+            (entry) => entry.orderItemReference,
+          ),
+        );
+        // WP-2423 D5: each item's frozen price before tax (Ordering's own order items), only for the
+        // items this view shows and only when each one's total is the total shown. If they can't be
+        // read, the table keeps the totals it has.
+        let itemPrices:
+          | Map<
+              string,
+              {
+                subtotal: { amountMinor: bigint; currencyCode: string };
+                tax: { amountMinor: bigint; currencyCode: string };
+              }
+            >
+          | undefined;
+        // Owner 2026-10-23: item names in the guest's chosen language, by Order item.
+        let chosenNames: Map<string, string> | undefined;
+        // WP-2423 item 8 ③ (decision 13): what "Order again" adds, by Order item.
+        let orderAgain: Map<string, CustomerDiningOrderAgain> | undefined;
+        if (await stillAuthorized()) {
+          const shown = new Map(
+            status.order.batches.flatMap((batch) =>
+              batch.items.map((item) => [String(item.orderItemReference), item] as const),
+            ),
+          );
+          try {
+            await transaction.query("SAVEPOINT customer_dining_item_prices", []);
+            const found = await listOrderItemPrices(
+              transaction,
+              scope,
+              orderReference,
+              displayLocale === undefined ? undefined : [displayLocale, String(guest.locale)],
+            );
+            await transaction.query("RELEASE SAVEPOINT customer_dining_item_prices", []);
+            orderAgain = new Map(
+              found.map((price) => [
+                price.orderItemReference,
+                Object.freeze({
+                  sellableReference: price.sellableReference,
+                  optionSelections: price.optionSelections,
+                }),
+              ]),
+            );
+            if (displayLocale !== undefined)
+              chosenNames = new Map(
+                found.map((price) => [price.orderItemReference, price.displayName] as const),
+              );
+            const matched = found.filter((price) => shown.has(price.orderItemReference));
+            if (
+              matched.length === shown.size &&
+              matched.every(
+                (price) =>
+                  shown.get(price.orderItemReference)?.lineTotal.amountMinor ===
+                    price.total.amountMinor &&
+                  shown.get(price.orderItemReference)?.lineTotal.currencyCode ===
+                    price.total.currencyCode,
+              )
+            )
+              itemPrices = new Map(
+                matched.map((price) => [
+                  price.orderItemReference,
+                  { subtotal: price.subtotal, tax: price.tax },
+                ]),
+              );
+          } catch {
+            await transaction.query("ROLLBACK TO SAVEPOINT customer_dining_item_prices", []);
+            await transaction.query("RELEASE SAVEPOINT customer_dining_item_prices", []);
+          }
+        }
+        // Refund positions per captured payment, as the receipt reads them (Payment owner sources).
+        const refunds = { confirmedMinor: 0n, pendingMinor: 0n };
+        // A card-machine payment is refunded on the machine and recorded (only confirmed refunds).
+        for (const entry of cardMachinePayments)
+          for (const refund of entry.refunds) refunds.confirmedMinor += refund.amountMinor;
+        for (const projection of payments) {
+          if (projection.snapshot.terminalStatus !== "Succeeded") continue;
+          const payment = {
+            orderReference,
+            paymentTransactionReference: String(projection.snapshot.paymentTransactionReference),
+            paymentAttemptReference: String(projection.snapshot.paymentAttemptReference),
+          };
+          const compensation = await createPostgresPaymentCompensationRefundPositionSource({
+            scope,
+            authorize: async (tx, input) =>
+              tx === transaction &&
+              input.orderReference === orderReference &&
+              (await stillAuthorized()),
+          })(transaction, payment);
+          refunds.confirmedMinor += compensation.confirmedMinor;
+          refunds.pendingMinor += compensation.pendingMinor;
+          if (options.itemRefundScope === undefined) continue;
+          const ordinary = await createPostgresOrdinaryRefundPositionSource({
+            scope: { ...scope, tenantReference: options.itemRefundScope.tenantReference },
+            providerAccountReference: options.itemRefundScope.providerAccountReference,
+            environment: options.itemRefundScope.environment,
+            authorize: async (tx, input) =>
+              tx === transaction &&
+              input.orderReference === orderReference &&
+              (await stillAuthorized()),
+          })(transaction, {
+            ...payment,
+            paymentIntentReference: String(projection.snapshot.paymentIntentReference),
+            observedAt: now(),
+          });
+          refunds.confirmedMinor += ordinary.confirmedMinor;
+          refunds.pendingMinor += ordinary.pendingMinor;
+        }
+        // WP-2423 item 8 ⑤: rounds waiting for staff (only at a table that pays at the end).
+        const heldRounds = new Map(
+          paymentTiming !== "PayLater"
+            ? []
+            : (
+                await createPostgresOrderRoundStaffHoldStore({
+                  brandReference: scope.brandReference,
+                  storeReference: scope.storeReference,
+                  authorize: async () => stillAuthorized(),
+                }).listWaiting({ transaction, orderReferences: [orderReference] })
+              ).map((hold) => [String(hold.orderBatchReference), hold.reason] as const),
+        );
+        const payLaterRounds = new Set(
+          paymentTiming !== "PayLater"
+            ? []
+            : (
+                await createPostgresOrderPayLaterConfirmationStore({
+                  brandReference: scope.brandReference,
+                  storeReference: scope.storeReference,
+                  quoteVersion: 2,
+                  sha256: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+                  authorize: async () => stillAuthorized(),
+                }).listByOrders({ transaction, orderReferences: [orderReference] })
+              ).map((entry) => String(entry.orderBatchReference)),
+        );
+        // DEC-DINE-IN-PAY-LATER: the table's one payment at the end (card machine or cash), what
+        // the guests paid in total (tip and cash rounding included).
+        const tableStore =
+          paymentTiming !== "PayLater" || options.diningScope === undefined
+            ? null
+            : createPostgresDiningTableSettlementStore({
+                scope: options.diningScope,
+                authorize: async (_tx, value) =>
+                  value.orderReference === orderReference && (await stillAuthorized()),
+              });
+        const tableSettlements =
+          tableStore === null ? [] : await tableStore.listByOrders(transaction, [orderReference]);
+        // WP-2423 item 8 ④: a split bill's rounds are paid once every part is (each part is a
+        // payment with its own tip and cash rounding, added up below).
+        const [splitPlan] =
+          tableStore !== null ? await tableStore.listSplitPlans(transaction, [orderReference]) : [];
+        // WP-2423 item 8 ⑦ 4b-3: the table's per-head tea (a table that pays at the end).
+        const teaSetting =
+          paymentTiming === "PayLater" && options.diningScope !== undefined
+            ? await loadDiningTeaChargeSetting(
+                transaction as unknown as Parameters<typeof loadDiningTeaChargeSetting>[0],
+                options.diningScope as Parameters<typeof loadDiningTeaChargeSetting>[1],
+              )
+            : null;
+        const teaSkuLines = teaSetting?.teaSellableReference
+          ? (
+              await listOrderSkuLines(transaction as never, options.diningScope as never, {
+                orderReference: String(orderReference),
+                sellableReference: teaSetting.teaSellableReference,
+              })
+            ).lines
+          : [];
+        const teaItems = new Set(
+          teaSkuLines.filter((line) => !line.takenOff).map((line) => line.orderItemReference),
+        );
+        const teaLines = new Set(teaSkuLines.map((line) => line.orderItemReference));
+        const splitPaid =
+          splitPlan !== undefined &&
+          splitPlan.mode !== "Whole" &&
+          splitPlan.parts.every((part) =>
+            tableSettlements.some((settlement) => settlement.part?.partNumber === part.partNumber),
+          );
+        const settledRounds = new Set(
+          tableSettlements
+            .filter((settlement) => settlement.part === null || splitPaid)
+            .flatMap((settlement) => settlement.lines.map((line) => line.orderBatchReference)),
+        );
+        return {
           orderNumber: status.order.orderNumber,
           batches: status.order.batches.map((batch) => ({
             orderBatchReference: String(batch.orderBatchReference),
@@ -1187,8 +1192,74 @@ function postgresDependencies(
           ],
           staffRounds,
           refunds,
-        },
+        };
       };
+      const ownOrder = await orderFacts(orderReference, diningSessionReference, true);
+      const billOrders = await listOrderBillOrders(transaction, scope, orderReference);
+      const mergedOrders = [];
+      for (const member of billOrders.slice(1)) {
+        const memberSession = (await listOrderDiningSessions(transaction, scope, [member])).get(
+          member,
+        );
+        if (memberSession === undefined) return unavailable();
+        mergedOrders.push(await orderFacts(member, memberSession, false));
+      }
+      return {
+        diningSessionReference,
+        tableLabel,
+        checkedAt: now(),
+        ...timing,
+        order: mergeBillOrderFacts(ownOrder, mergedOrders),
+      };
+    },
+  };
+}
+
+type CustomerBillOrderFacts = NonNullable<CustomerDiningSessionFacts["order"]>;
+/**
+ * WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the table's bill as one Order's facts — its own and
+ * those of the tables merged into it (their rounds in the order they were sent, never "you"). The
+ * table's payments (settlements, split, tip) are on its own Order and already cover every round.
+ */
+export function mergeBillOrderFacts(
+  own: CustomerBillOrderFacts,
+  merged: readonly CustomerBillOrderFacts[],
+): CustomerBillOrderFacts {
+  if (merged.length === 0) return own;
+  const all = [own, ...merged];
+  const maps = <K, V>(pick: (facts: CustomerBillOrderFacts) => ReadonlyMap<K, V> | undefined) =>
+    new Map(all.flatMap((facts) => [...(pick(facts) ?? new Map<K, V>())]));
+  const sets = <V>(pick: (facts: CustomerBillOrderFacts) => ReadonlySet<V> | undefined) =>
+    new Set(all.flatMap((facts) => [...(pick(facts) ?? new Set<V>())]));
+  const teaItems = sets((facts) => facts.teaItems),
+    teaLines = sets((facts) => facts.teaLines),
+    orderAgain = maps((facts) => facts.orderAgain),
+    itemPrices = maps((facts) => facts.itemPrices);
+  return {
+    ...own,
+    batches: all
+      .flatMap((facts) => facts.batches)
+      .sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : a.submittedAt > b.submittedAt ? 1 : 0)),
+    authorship: maps((facts) => facts.authorship),
+    staffRounds: sets((facts) => facts.staffRounds),
+    delivery: maps((facts) => facts.delivery),
+    paymentOutcomes: maps((facts) => facts.paymentOutcomes),
+    paymentDeadlines: maps((facts) => facts.paymentDeadlines),
+    paymentStarted: sets((facts) => facts.paymentStarted),
+    payLaterRounds: sets((facts) => facts.payLaterRounds),
+    heldRounds: maps((facts) => facts.heldRounds),
+    ...(teaItems.size === 0 ? {} : { teaItems }),
+    ...(teaLines.size === 0 ? {} : { teaLines }),
+    unpaidCancellations: sets((facts) => facts.unpaidCancellations),
+    staffCancellations: maps((facts) => facts.staffCancellations),
+    itemCancellations: all.flatMap((facts) => facts.itemCancellations),
+    remakes: sets((facts) => facts.remakes),
+    ...(orderAgain.size === 0 ? {} : { orderAgain }),
+    ...(own.itemPrices === undefined ? {} : { itemPrices }),
+    payments: all.flatMap((facts) => facts.payments),
+    refunds: {
+      confirmedMinor: all.reduce((sum, facts) => sum + facts.refunds.confirmedMinor, 0n),
+      pendingMinor: all.reduce((sum, facts) => sum + facts.refunds.pendingMinor, 0n),
     },
   };
 }
