@@ -6408,8 +6408,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A charge, no stock ingredients (such as tea)": "收费项目，不用库存原料（如茶位）",
   "Declared a charge that uses no stock ingredients (such as tea): it never counts or deducts stock, and guests see no allergens for it.":
     "已声明为不用库存原料的收费项目（如茶位）：不计库存、不扣库存，客人看到的过敏原为无。",
-  "{item} is declared a charge with no stock ingredients. You can list it now.":
-    "{item} 已声明为不用库存原料的收费项目，现在可以上架。",
   "This dish was already declared the other way (its allergens, or a charge with no stock ingredients). That record stays; ask the operator to change it.":
     "这道菜之前已按另一种方式声明（声明过敏原，或不用库存原料的收费项目）。该记录保留不变；如需更改，请联系系统管理员。",
   "This item has a recipe that uses stock, so it can't be the tea charge. Choose an item declared on the menu as a charge with no stock ingredients.":
@@ -6421,4 +6419,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{item} — hidden from this store on the menu; show it to choose it":
     "{item}——在菜单里对本店隐藏了，取消隐藏后才能选",
   "{item} — no price at this store": "{item}——本店没有价格",
+  "What it is": "它是什么",
+  "A dish: declare its allergens": "菜品：声明过敏原",
 });

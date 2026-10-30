@@ -263,18 +263,6 @@ export interface AllergenChoice {
   readonly name: string;
   readonly nameZh: string;
 }
-/** WP-2423 item 8 ⑦: the size uses no stock ingredients (a charge such as the per-head tea). */
-export interface DeclareNoIngredientsCommand {
-  readonly action: "DeclareNoIngredients";
-  readonly operationReference: string;
-  readonly skuReference: string;
-}
-export interface DeclareDishAllergensCommand {
-  readonly action: "DeclareDish";
-  readonly operationReference: string;
-  readonly skuReference: string;
-  readonly allergens: DishAllergens["declared"];
-}
 /** WP-2423 item 8 ⑥: one dish as the one-page menu saves it (see merchant-one-store-dishes). */
 export interface SaveDishCommand {
   readonly action: "SaveDish";
@@ -292,7 +280,11 @@ export interface SaveDishCommand {
     readonly optionSetReference: string;
     readonly options: readonly { readonly optionReference: string; readonly amountMinor: string }[];
   }[];
-  readonly allergens: DishAllergens["declared"] | null;
+  /**
+   * null: not declared in this save. "NoIngredients" (WP-2423 item 8 ⑦): a charge with no stock
+   * ingredients, such as the per-head tea.
+   */
+  readonly allergens: DishAllergens["declared"] | "NoIngredients" | null;
 }
 /** WP-2423 item 8 ⑥ part 4: a combo saved from the one-page menu. */
 export interface SaveComboCommand {
@@ -489,10 +481,6 @@ export type MenuCommand =
 export interface MenuClient {
   load(menuReference: string | null): Promise<unknown>;
   command?(command: MenuCommand): Promise<unknown>;
-  /** WP-2423 item 8 ⑥: a dish's allergens declared by staff (single store). */
-  declareAllergens?(
-    command: DeclareDishAllergensCommand | DeclareNoIngredientsCommand,
-  ): Promise<unknown>;
   /** WP-2423 item 8 ⑥: what the dish editor reads — the product (or the Brand's tax classes and
    * choice groups for a new dish) and the choice prices. */
   loadDish?(productReference: string | null): Promise<{ product: unknown; optionPrices: unknown }>;
@@ -846,7 +834,6 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
   return {
     load: (menuReference) => post("/merchant/commerce/menus/query", { menuReference }),
     command: (command) => post("/merchant/commerce/menus/command", command),
-    declareAllergens: (command) => post("/merchant/commerce/dish-allergens/command", command),
     loadDish: async (productReference) => {
       const [product, optionPrices] = await Promise.all([
         post("/merchant/commerce/products/query", { productReference }),

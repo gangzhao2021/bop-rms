@@ -335,6 +335,19 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
     expect(calls).toEqual(["allergens:DeclareDish"]);
   });
 
+  it("WP-2423 item 8 ⑦: declares a charge with no stock ingredients in the same save", async () => {
+    const { calls, dishes } = fakes();
+    await dishes.command({
+      ...session,
+      body: save({ choiceGroups: [], allergens: "NoIngredients" }),
+    });
+    expect(calls).toContain("allergens:DeclareNoIngredients");
+    expect(calls).not.toContain("allergens:DeclareDish");
+    expect(() => parseOneStoreDishBody(save({ allergens: "Tea" }))).toThrow(
+      MerchantOneStoreDishError,
+    );
+  });
+
   it("publishes nothing when the menu itself could not be listed (v15 2026-10-29 c)", async () => {
     const { calls, state, dishes } = fakes();
     await dishes.command({ ...session, body: save() });
