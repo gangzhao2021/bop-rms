@@ -542,6 +542,75 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expectNoInternalText(page);
   });
 
+  test("a guest whose table was paid and closed is thanked on reload, not asked to join", async ({
+    page,
+  }) => {
+    // Coordinator 2026-10-30: staff close the paid table; this phone's visit ends with it. On a
+    // reload the restore says the table was settled (with this visit's receipt when it placed the
+    // order). The server side is proven by the database acceptance test (dining pay-later merge).
+    let settled = false;
+    let receipt = true;
+    await page.route("**/api/v1/customer/session/csrf", (route) =>
+      settled
+        ? route.fulfill({
+            status: 200,
+            headers: { "cache-control": "no-store" },
+            json: {
+              schemaVersion: 1,
+              settledTable: { tableLabel: "12" },
+              ...(receipt
+                ? {
+                    endedVisit: {
+                      csrfToken: "e".repeat(43),
+                      order: { orderReference: id(40), orderNumber: "1042", orderType: "DineIn" },
+                      receiptAvailableUntil: new Date(Date.now() + 3_600_000).toISOString(),
+                    },
+                  }
+                : {}),
+            },
+          })
+        : route.fulfill({ status: 204, headers: { "cache-control": "no-store" } }),
+    );
+    await enterTable(page, () => ({ status: 200, json: session }));
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Round 1 · Ordered by you" })).toBeVisible();
+
+    settled = true;
+    await page.reload();
+    await expect(
+      main.getByRole("heading", { name: "This table is settled. Thank you for dining with us." }),
+    ).toBeVisible();
+    await expect(main).toContainText("Table 12 has paid and closed.");
+    await expect(main.getByRole("link", { name: "See your receipt" })).toHaveAttribute(
+      "href",
+      `/orders/${id(40)}/receipt`,
+    );
+    await expect(main).toContainText("New party? Scan the table code");
+    await expect(main).not.toContainText("Join your table first");
+    await expect(main.getByRole("button", { name: /staff/iu })).toHaveCount(0);
+    await expect(main.getByRole("link", { name: "Order more from the menu" })).toHaveCount(0);
+    await expectNoInternalText(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({ path: "test-results/customer-dining-settled-390.png", fullPage: true });
+
+    // In Chinese.
+    await page.getByRole("button", { name: "切换到中文" }).click();
+    await expect(main.getByRole("heading", { name: "这桌已结账，谢谢光临" })).toBeVisible();
+    await expect(main).toContainText("新的一桌？扫桌上的码");
+    await expect(main.getByRole("link", { name: "查看你的收据" })).toBeVisible();
+    await page.screenshot({
+      path: "test-results/customer-dining-settled-zh-390.png",
+      fullPage: true,
+    });
+
+    // A guest at that table whose visit placed no order: thanked, with no receipt offered.
+    receipt = false;
+    await page.reload();
+    await expect(main.getByRole("heading", { name: "这桌已结账，谢谢光临" })).toBeVisible();
+    await expect(main.getByRole("link", { name: "查看你的收据" })).toHaveCount(0);
+  });
+
   test("asks a guest who has not joined to join first", async ({ page }) => {
     await enterTable(page, () => ({ status: 404, json: { schemaVersion: 1 } }));
     const main = page.getByRole("main");

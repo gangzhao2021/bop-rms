@@ -23,7 +23,10 @@ import {
 } from "./dining-session-client.js";
 import { DiningInvitationPanel } from "./DiningInvitationPanel.js";
 import { TablePayPanel, type TablePayStatus } from "./TablePayPanel.js";
-import { subscribeCustomerCsrfContext } from "../session/customer-transaction-context.js";
+import {
+  getEndedDineInOrderReference,
+  subscribeCustomerCsrfContext,
+} from "../session/customer-transaction-context.js";
 import { DiningStaffCallPanel } from "./DiningStaffCallPanel.js";
 import type { DiningStaffCallClient } from "./dining-staff-call-client.js";
 import type { DiningInvitationClient } from "./dining-invitation-client.js";
@@ -494,6 +497,8 @@ export type DiningSessionState =
   | { readonly status: "not-joined" }
   /** WP-2423 item 8 ⑧: staff moved the party to this table after this phone joined. */
   | { readonly status: "moved"; readonly tableLabel: string; readonly merged: boolean }
+  /** The table was closed and its bill settled while this phone's guest sat at it. */
+  | { readonly status: "settled"; readonly tableLabel: string }
   | {
       readonly status: "unavailable";
       readonly view: DiningSessionView | null;
@@ -577,6 +582,12 @@ export function DiningSessionPage({
         error.tableLabel !== null
       )
         setState({ status: "moved", tableLabel: error.tableLabel, merged: error.merged });
+      else if (
+        error instanceof DiningSessionClientError &&
+        error.code === "settled" &&
+        error.tableLabel !== null
+      )
+        setState({ status: "settled", tableLabel: error.tableLabel });
       // Keep the last loaded table on screen; say it may be out of date.
       else
         setState((prior) => ({
@@ -645,6 +656,27 @@ export function DiningSessionPage({
   );
 }
 
+/**
+ * Coordinator 2026-10-30 (Owner authorized): the guest's table was closed after its bill was
+ * settled. Thank them; their receipt only when this visit placed the table's order (the receipt
+ * page reads it with the ended visit's access); a new party scans the table's code again.
+ */
+function SettledTable({ tableLabel }: { readonly tableLabel: string }) {
+  const receiptOrder = getEndedDineInOrderReference();
+  return (
+    <section className="order-status__card" role="status">
+      <h2>{t("This table is settled. Thank you for dining with us.")}</h2>
+      <p>{t("Table {table} has paid and closed.", { table: tableLabel })}</p>
+      {receiptOrder !== null ? (
+        <Link className="order-status__back" to={`/orders/${receiptOrder}/receipt`}>
+          {t("See your receipt")}
+        </Link>
+      ) : null}
+      <p>{t("New party? Scan the table code")}</p>
+    </section>
+  );
+}
+
 export function DiningSessionScreen({
   state,
   store,
@@ -691,7 +723,9 @@ export function DiningSessionScreen({
             : t("Your table")
         }
       >
-        <p>{t("Everything ordered at this table, by you and the other guests.")}</p>
+        {state.status === "settled" ? null : (
+          <p>{t("Everything ordered at this table, by you and the other guests.")}</p>
+        )}
       </PageHeading>
       {state.status === "loading" ? (
         <section role="status">
@@ -724,6 +758,7 @@ export function DiningSessionScreen({
           )}
         </section>
       ) : null}
+      {state.status === "settled" ? <SettledTable tableLabel={state.tableLabel} /> : null}
       {state.status === "not-joined" ? (
         <section className="order-status__card" role="alert">
           <h2>{t("Join your table first")}</h2>
@@ -838,7 +873,8 @@ export function DiningSessionScreen({
         </aside>
       ) : null}
       {/* DEC-DINE-IN-PAY-LATER: during checkout no more rounds are sent; paid, nothing to add. */}
-      {tablePay?.paid ? null : tablePay?.checkingOut ? (
+      {/* A settled table's visit has ended: nothing more to order here. */}
+      {state.status === "settled" || tablePay?.paid ? null : tablePay?.checkingOut ? (
         <p className="order-status__back" role="note">
           {t("Your table is checking out. To add dishes, ask a staff member.")}
         </p>

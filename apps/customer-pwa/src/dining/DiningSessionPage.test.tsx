@@ -11,6 +11,7 @@ import {
 import type { DiningRound, DiningSessionView } from "./dining-session-client.js";
 import { formatClockTime } from "../journey/format.js";
 import { CustomerPage } from "../journey/CustomerPage.js";
+import { setEndedVisitReceiptAccess } from "../session/customer-transaction-context.js";
 
 const cad = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
 const at = "2026-10-13T18:00:00.000Z";
@@ -238,6 +239,32 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(stale).toContain("You’re offline");
     expect(stale).toContain("Showing what was loaded before.");
     expect(stale).toContain("Round 1 · Ordered by you");
+  });
+
+  it("thanks a guest whose table was settled, linking their receipt only when it exists", () => {
+    const plain = render({ status: "settled", tableLabel: "DEMO-02" });
+    expect(plain).toContain("This table is settled. Thank you for dining with us.");
+    expect(plain).toContain("Table DEMO-02 has paid and closed.");
+    expect(plain).toContain("New party? Scan the table code");
+    expect(plain).not.toContain("See your receipt");
+    expect(plain).not.toContain("Join your table first");
+    expect(plain).not.toMatch(/staff member|Need a staff/iu);
+    expect(plain).not.toContain("Order more from the menu");
+    expect(plain).not.toContain("Everything ordered at this table");
+    setEndedVisitReceiptAccess({
+      csrfToken: "C".repeat(43),
+      orderReference: "018f8a00-0000-7000-8000-000000000016",
+      orderNumber: "22",
+      orderType: "DineIn",
+      receiptAvailableUntil: "2099-10-18T18:01:49.437Z",
+    });
+    try {
+      const withReceipt = render({ status: "settled", tableLabel: "DEMO-02" });
+      expect(withReceipt).toContain('href="/orders/018f8a00-0000-7000-8000-000000000016/receipt"');
+      expect(withReceipt).toContain("See your receipt");
+    } finally {
+      setEndedVisitReceiptAccess(null);
+    }
   });
 
   it("shows an empty table plainly and only keeps polling while something is in progress", () => {

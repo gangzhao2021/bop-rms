@@ -1268,7 +1268,7 @@ async function journey(ending) {
               }),
             }),
           });
-          const restoreOnReload = async () => {
+          const restoreOnReload = async (handler = bootstrap, cookie = mHost.sessionCredential) => {
             setCustomerCsrfCredential(null);
             await restoreCustomerSession(async () => {
               const wire = await new Promise((resolve, reject) => {
@@ -1296,7 +1296,7 @@ async function journey(ending) {
                   },
                 };
                 Promise.resolve(
-                  bootstrap(
+                  handler(
                     {
                       get: (name) =>
                         ({ "sec-fetch-site": "same-origin", "x-bop-session-bootstrap": "1" })[
@@ -1304,7 +1304,7 @@ async function journey(ending) {
                         ],
                       query: {},
                       body: undefined,
-                      headers: { cookie: "__Host-bop-guest=" + mHost.sessionCredential },
+                      headers: { cookie: "__Host-bop-guest=" + cookie },
                     },
                     response,
                     reject,
@@ -1598,6 +1598,50 @@ async function journey(ending) {
           assert.equal((await closeOrder(mOrder)).status, "Committed");
           assert.equal((await closeOrder(orderReference)).status, "Committed");
           assert.equal((await closing(server, "Finalize")).phase, "Closed");
+          // Coordinator 2026-10-30: the table paid and closed. A phone of this table and the phone
+          // merged in from T-M reload their table page: both are thanked at this table, never
+          // asked to join (the real restore handler and guest clients, the pilot API role).
+          const tableBootstrap = createCustomerSessionBootstrapHandler({
+            allowedOrigin: "https://synthetic-journey.invalid",
+            port: createCustomerSessionBootstrapRead({
+              scope,
+              transactions: transactions(),
+              credentials: tablePhone.identity.session.credentials,
+              now: () => new Date().toISOString(),
+              binding: (transaction) => ({
+                validate: async (session, observedAt) =>
+                  (await createDiningGuestBindingQuery({
+                    scope,
+                    now: () => observedAt,
+                    repository: createPostgresDiningGuestBindingStore(
+                      { run: (work) => work(transaction) },
+                      ownerScope,
+                    ),
+                  }).resolve({
+                    purpose: "GuestSessionBinding",
+                    diningSessionReference: session.diningSessionReference,
+                    participantReference: session.diningParticipantReference,
+                    tableReference: dining.table.tableReference,
+                  }))
+                    ? "Current"
+                    : "Unavailable",
+              }),
+            }),
+          });
+          for (const [handler, cookie] of [
+            [tableBootstrap, tablePhone.sessionCredential],
+            [bootstrap, mHost.sessionCredential],
+          ]) {
+            setCustomerCsrfCredential("x".repeat(43));
+            setCustomerCsrfCredential(null);
+            assert.deepEqual(await restoreOnReload(handler, cookie), [
+              "settled",
+              dining.table.stableLabel,
+            ]);
+            assert.equal(getMovedTableLabel(), null);
+          }
+          setCustomerCsrfCredential("x".repeat(43));
+          setCustomerCsrfCredential(null);
           return;
         }
         if (ending === "Moved") {

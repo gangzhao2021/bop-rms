@@ -510,6 +510,41 @@ export async function listDiningSessionMovedFrom(
 }
 
 /**
+ * WP-2423 (coordinator 2026-10-30, Owner authorized): this participant's table was closed — its bill
+ * settled (or written off by a manager) and the session ended normally — while the participant was
+ * still at it (not removed by staff). The label of the table it sat at; null otherwise (still
+ * open, cancelled, removed, or not this session's participant). A merge is answered by the caller.
+ */
+export async function loadDiningParticipantSettledTable(
+  transaction: DiningTableTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: { readonly diningSessionReference: string; readonly participantReference: string },
+): Promise<{ readonly tableLabel: string } | null> {
+  const brand = reference(scope.brandReference),
+    store = reference(scope.storeReference),
+    session = reference(input.diningSessionReference),
+    participant = reference(input.participantReference);
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const result = (await transaction.query(
+    "SELECT t.table_snapshot->>'stableLabel' label FROM rms_dining.dining_participant p " +
+      "JOIN rms_dining.dining_session s ON s.tenant_id=p.tenant_id AND s.brand_id=p.brand_id AND s.store_id=p.store_id AND s.session_id=p.session_id " +
+      "JOIN rms_dining.dining_table t ON t.tenant_id=s.tenant_id AND t.brand_id=s.brand_id AND t.store_id=s.store_id AND t.table_id=s.table_id " +
+      "WHERE p.brand_id=$1 AND p.store_id=$2 AND p.session_id=$3 AND p.participant_id=$4 AND s.phase='Closed' " +
+      "AND NOT EXISTS (SELECT 1 FROM rms_dining.dining_participant_removal r WHERE r.tenant_id=p.tenant_id AND r.brand_id=p.brand_id AND r.store_id=p.store_id AND r.session_id=p.session_id AND r.participant_id=p.participant_id)",
+    [brand, store, session, participant],
+  )) as { rows?: unknown } | null;
+  const found = result?.rows;
+  if (!Array.isArray(found) || found.length > 1) throw new Error("DINING_TABLE_UNAVAILABLE");
+  const row = found[0] as { label?: unknown } | undefined;
+  if (row === undefined) return null;
+  const label = tableLabel(row.label);
+  return label === null ? null : { tableLabel: label };
+}
+
+/**
  * WP-2423 item 8 ⑧ (Owner decision 3): when staff moved this participant's table after the
  * participant joined it, the table the party sits at now (a phone joined before the move no longer
  * acts for the party: the guest scans the code of the table it sits at now, which may be the same
