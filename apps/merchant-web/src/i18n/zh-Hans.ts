@@ -6424,6 +6424,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Cancelled unpaid rounds · not charged": "已取消的未付款轮次 · 不收费",
   "Moved from table {table}": "由 {table} 桌换来",
   "Merged from table {table}": "由 {table} 桌并入",
+  "· from table {table}": "· 由 {table} 桌并入",
+  "Each table that was merged pays its own rounds; move a round to another part if needed.":
+    "并在一起的每桌各付自己的轮次；需要时可以把某一轮挪到别的份。",
   "The table's whole bill": "整桌账单",
   "The table's whole bill could not be read.": "读不到整桌账单。",
   "Reading the whole bill…": "正在读取整桌账单…",

@@ -19,8 +19,21 @@ const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CA
 export const partMethodText = (method: "CardMachine" | "Cash" | "Online") =>
   method === "Cash" ? t("cash") : method === "Online" ? t("guest's phone") : t("card machine");
 
-/** Each round's part by default: one part per phone, staff rounds with the first part. */
+/**
+ * Each round's part by default: one part per phone, staff rounds with the first part. WP-2423
+ * item 8 ⑨: a table with tables merged into it pays one part per table — each table's rounds
+ * (its phones' and those staff entered for it) together, this table's first.
+ */
 export function defaultRoundParts(bill: TableBill): ReadonlyMap<number, number> {
+  const owing = bill.rounds.filter((round) => round.totalMinor !== "0");
+  if (owing.some((round) => round.fromTableLabel !== null)) {
+    const tables = [...new Set(owing.map((round) => round.fromTableLabel ?? ""))].sort((a, b) =>
+      a === "" ? -1 : b === "" ? 1 : 0,
+    );
+    return new Map(
+      owing.map((round) => [round.roundNumber, tables.indexOf(round.fromTableLabel ?? "") + 1]),
+    );
+  }
   const phones = [
     ...new Set(
       bill.rounds
@@ -177,7 +190,13 @@ export function TableSplitControls({
       ) : null}
       {mode === "ByRounds" && !locked ? (
         <div className="table-split__rounds">
-          <p>{t("Each phone pays the rounds it sent; move a round to another part if needed.")}</p>
+          <p>
+            {owing.some((round) => round.fromTableLabel !== null)
+              ? t(
+                  "Each table that was merged pays its own rounds; move a round to another part if needed.",
+                )
+              : t("Each phone pays the rounds it sent; move a round to another part if needed.")}
+          </p>
           <ul>
             {owing.map((round) => (
               <li key={round.roundNumber}>
@@ -186,6 +205,9 @@ export function TableSplitControls({
                   {round.orderedBy === null
                     ? t("entered by staff")
                     : t("phone {number}", { number: String(round.orderedBy) })}{" "}
+                  {round.fromTableLabel === null
+                    ? null
+                    : t("· from table {table}", { table: round.fromTableLabel }) + " "}
                   · {cad(round.totalMinor)}
                 </span>
                 <label>

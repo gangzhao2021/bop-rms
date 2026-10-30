@@ -58,6 +58,8 @@ export interface TableBill {
     readonly paid: boolean;
     /** WP-2423 item 8 ④: which phone sent the round (1, 2, …), or null for staff (older: null). */
     readonly orderedBy: number | null;
+    /** WP-2423 item 8 ⑨: the table the round came from when merged in (null: this table). */
+    readonly fromTableLabel: string | null;
   }[];
   readonly owed: {
     readonly subtotalMinor: string;
@@ -191,6 +193,13 @@ export function parseTableBill(value: unknown): TableBill {
               ? null
               : Number.isSafeInteger(round.orderedBy) && (round.orderedBy as number) >= 1
                 ? (round.orderedBy as number)
+                : invalid(),
+          fromTableLabel:
+            round.fromTableLabel === undefined || round.fromTableLabel === null
+              ? null
+              : typeof round.fromTableLabel === "string" &&
+                  /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(round.fromTableLabel)
+                ? round.fromTableLabel
                 : invalid(),
         });
       }),

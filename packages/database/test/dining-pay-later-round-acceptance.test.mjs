@@ -23,6 +23,7 @@ import {
 import { createMerchantDiningPartySize } from "../../../apps/api/src/merchant-dining-party-size.ts";
 import { createMerchantDiningTableMove } from "../../../apps/api/src/merchant-dining-table-move.ts";
 import { createMerchantDiningTableMerge } from "../../../apps/api/src/merchant-dining-table-merge.ts";
+import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import { recordDiningTableBillOrder } from "../../rms/payment/src/index.ts";
 import { createMerchantDiningTableCommand } from "../../../apps/api/src/merchant-dining-table-command.ts";
 import { parseDiningJoinCapability } from "../../bop/public-capability/src/index.ts";
@@ -1406,6 +1407,27 @@ async function journey(ending) {
             command: { action: "Read", diningSessionReference: sessionReference },
           });
           assert.ok(teaRead.charged >= 1, JSON.stringify(teaRead));
+
+          // v15 2026-10-30: each round says the table it came from (the default split gives each
+          // table one part), and the Orders list (the Tables page's amount) shows the whole bill.
+          const merchantRounds = (await bill()).rounds;
+          assert.deepEqual(
+            merchantRounds.map((round) => round.fromTableLabel),
+            merchantRounds.map((round) =>
+              round.orderBatchReference === M.batch.orderBatchReference ? "T-M" : null,
+            ),
+          );
+          const queued = await createPersistentMerchantOrderQueue({
+            persistence: persistenceOf(server),
+            quoteVersion: 1,
+            acceptanceConfigured: true,
+          })({ sessionCookie: server.sessionCookie, afterOrderReference: null, orderReference });
+          assert.deepEqual(queued.items[0].tableBill, {
+            totalMinor: merchantRounds
+              .reduce((sum, round) => sum + BigInt(round.totalMinor), 0n)
+              .toString(),
+            paid: null,
+          });
 
           // ── The table checks out and splits "each pays own rounds": T-M's phone pays its own
           // round on the phone (the guests' real payment entry), staff take the rest in cash.

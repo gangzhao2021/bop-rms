@@ -32,6 +32,24 @@ describe("WP-2423 item 8 ④ split bill at the Tables checkout", () => {
     ]);
   });
 
+  it("v15 2026-10-30 (item 8 ⑨): a merged bill gives each table one part, its staff rounds with it", () => {
+    const value = splitBillFixture();
+    const rounds = value.rounds as Record<string, unknown>[];
+    rounds.push(
+      // Staff entered this table's tea; the merged table's phone and its tea came from DEMO-02.
+      { ...rounds[1], roundNumber: 3, orderedBy: null, fromTableLabel: null },
+      { ...rounds[1], roundNumber: 4, orderedBy: 3, fromTableLabel: "DEMO-02" },
+      { ...rounds[1], roundNumber: 5, orderedBy: null, fromTableLabel: "DEMO-02" },
+    );
+    expect([...defaultRoundParts(parseTableBill(value))]).toEqual([
+      [1, 1],
+      [2, 1],
+      [3, 1],
+      [4, 2],
+      [5, 2],
+    ]);
+  });
+
   it("lists each part with its status, collects only an open part, and locks the split once paid", () => {
     const html = renderToStaticMarkup(
       <TableSplitControls
