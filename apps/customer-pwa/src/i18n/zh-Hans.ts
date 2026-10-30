@@ -252,6 +252,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This table is settled. Thank you for dining with us.": "这桌已结账，谢谢光临",
   "Table {table} has paid and closed.": "桌号 {table}，已付清。",
   "From table {table}": "来自 {table} 桌",
+  "This table isn’t open yet": "这桌还没开台",
+  "Ask staff to seat you, then scan again.": "请让店员带位，开台后再扫一次码。",
+  "New party? Ask staff to seat you, then scan again.":
+    "新的一桌？请让店员带位，开台后再扫一次码。",
+  "You can order once staff seat you": "入座后才能点单",
+  "You can order once staff seat you.": "入座后才能点单。",
+  "You can order once staff seat you. Ask a staff member, then scan again.":
+    "入座后才能点单。请让店员带位，然后再扫一次码。",
   Discounted: "已打折",
   "On the house": "店家赠送",
   "Part {number} paid by": "第 {number} 份付款方式",

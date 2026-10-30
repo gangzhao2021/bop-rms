@@ -1,5 +1,6 @@
 import { parseCanonicalInstant } from "@bop/tenant";
 import { createPostgresGuestSessionEntryStore } from "@bop/identity";
+import { loadDiningTableOpen } from "@rms/dining";
 import {
   createCustomerEntryComposition,
   type CustomerEntryCompositionOptions,
@@ -91,6 +92,20 @@ export function createPersistentCustomerEntryComposition(
               ...options.session,
               binding: sources.binding,
               store: createPostgresGuestSessionEntryStore({ run: async (work) => work(tx) }, scope),
+            },
+            // Coordinator 2026-10-30: the scanned table's public state, read in this transaction
+            // under a savepoint that is always rolled back (read only; it also restores the scope
+            // settings the read sets, and a failed read leaves the entry usable).
+            table: {
+              async isOpen(where) {
+                await tx.query("SAVEPOINT customer_entry_table_open", []);
+                try {
+                  return await loadDiningTableOpen(tx as never, scope, where.tableReference);
+                } finally {
+                  await tx.query("ROLLBACK TO SAVEPOINT customer_entry_table_open", []);
+                  await tx.query("RELEASE SAVEPOINT customer_entry_table_open", []);
+                }
+              },
             },
           }).establish(input);
           if (result.status === "NotAccepting" || result.status === "ServiceNotOffered")

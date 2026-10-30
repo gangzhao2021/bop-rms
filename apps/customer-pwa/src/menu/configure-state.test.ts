@@ -171,6 +171,13 @@ describe("WP-1702 in-memory Configurator state", () => {
     });
   });
 
+  it("tells a phone not seated at its table yet that it orders once seated", async () => {
+    const state = fixture(null);
+    state.failCreate(new CartClientError("cart_dining_not_seated"));
+    await state.controller.submit(id(3), draft);
+    expect(state.controller.getState()).toMatchObject({ status: "not-seated" });
+  });
+
   it("never calls or auto-replays a mutation while offline", async () => {
     const state = fixture(cart(3));
     state.controller.setOnline(false);

@@ -38,6 +38,11 @@ export interface CustomerEntryEstablished {
   readonly availableServiceModes: readonly ("DineIn" | "Pickup" | "Delivery")[];
   readonly locale: string;
   readonly contextExpiresAt: string;
+  /**
+   * Coordinator 2026-10-30: at a table, whether a party is seated there now (staff seat guests
+   * before they can join and order); absent for pickup or when it can't be read.
+   */
+  readonly tableOpen?: boolean;
   readonly sessionCredential: GuestRawCredential;
   readonly csrfCredential: GuestRawCredential;
   readonly cookie: GuestSessionCookieDescriptor;
@@ -273,10 +278,16 @@ function parseEstablished(
     "availableServiceModes",
     "locale",
     "contextExpiresAt",
+    ...(Object.hasOwn(value as object, "tableOpen") ? ["tableOpen"] : []),
     "sessionCredential",
     "csrfCredential",
     "cookie",
   ]);
+  if (
+    result.tableOpen !== undefined &&
+    (typeof result.tableOpen !== "boolean" || result.channel !== "DineIn")
+  )
+    throw new TypeError("table state only at a table");
   if (
     result.status !== "Established" ||
     (result.channel !== "DineIn" && result.channel !== "Pickup") ||
@@ -339,6 +350,7 @@ function parseEstablished(
     availableServiceModes,
     locale: result.locale,
     contextExpiresAt,
+    ...(result.tableOpen === undefined ? {} : { tableOpen: result.tableOpen as boolean }),
     sessionCredential: parseGuestRawCredential(result.sessionCredential),
     csrfCredential: parseGuestRawCredential(result.csrfCredential),
     cookie: parseCookie(result.cookie),
@@ -617,6 +629,7 @@ export class CustomerEntryHandler {
           availableServiceModes: result.availableServiceModes,
           locale: result.locale,
           contextExpiresAt: result.contextExpiresAt,
+          ...(result.tableOpen === undefined ? {} : { tableOpen: result.tableOpen }),
           csrfToken: result.csrfCredential,
         });
       } catch {

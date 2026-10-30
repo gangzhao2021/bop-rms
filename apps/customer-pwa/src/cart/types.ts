@@ -84,6 +84,8 @@ export type CartErrorCode =
   | "cart_checkout_in_progress"
   /** DEC-DINE-IN-PAY-LATER: the table is checking out; staff add dishes. */
   | "cart_table_checking_out"
+  /** Coordinator 2026-10-30: this phone scanned a table but hasn't joined it yet. */
+  | "cart_dining_not_seated"
   | "cart_service_unavailable"
   | "quote_operation_expired"
   | "network_unknown";

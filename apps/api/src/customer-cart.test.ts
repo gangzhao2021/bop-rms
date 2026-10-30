@@ -305,6 +305,8 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
 
   it.each([
     [{ status: "SessionExpired" }, 401, "cart_session_expired"],
+    // Coordinator 2026-10-30: a phone that scanned a table but wasn't seated there yet.
+    [{ status: "NotSeated" }, 409, "cart_dining_not_seated"],
     [{ status: "IdempotencyConflict" }, 409, "cart_idempotency_conflict"],
     [{ status: "LifecycleExpired" }, 409, "cart_expired"],
     [{ status: "LifecycleAbandoned" }, 409, "cart_abandoned"],

@@ -12,6 +12,8 @@ export interface CustomerEntryEstablishedContext {
   readonly locale: string;
   readonly contextExpiresAt: string;
   readonly csrfToken: string;
+  /** Coordinator 2026-10-30: at a table, whether staff seated a party there (absent: unknown). */
+  readonly tableOpen?: boolean;
 }
 
 export type CustomerEntryScreenState =

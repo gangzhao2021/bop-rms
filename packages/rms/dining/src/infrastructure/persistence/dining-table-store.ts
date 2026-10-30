@@ -519,7 +519,7 @@ export async function loadDiningParticipantSettledTable(
   transaction: DiningTableTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
   input: { readonly diningSessionReference: string; readonly participantReference: string },
-): Promise<{ readonly tableLabel: string } | null> {
+): Promise<{ readonly tableLabel: string; readonly tableReference: string } | null> {
   const brand = reference(scope.brandReference),
     store = reference(scope.storeReference),
     session = reference(input.diningSessionReference),
@@ -529,7 +529,7 @@ export async function loadDiningParticipantSettledTable(
     [brand, store],
   );
   const result = (await transaction.query(
-    "SELECT t.table_snapshot->>'stableLabel' label FROM rms_dining.dining_participant p " +
+    "SELECT t.table_snapshot->>'stableLabel' label,t.table_id::text table_ref FROM rms_dining.dining_participant p " +
       "JOIN rms_dining.dining_session s ON s.tenant_id=p.tenant_id AND s.brand_id=p.brand_id AND s.store_id=p.store_id AND s.session_id=p.session_id " +
       "JOIN rms_dining.dining_table t ON t.tenant_id=s.tenant_id AND t.brand_id=s.brand_id AND t.store_id=s.store_id AND t.table_id=s.table_id " +
       "WHERE p.brand_id=$1 AND p.store_id=$2 AND p.session_id=$3 AND p.participant_id=$4 AND s.phase='Closed' " +
@@ -538,10 +538,35 @@ export async function loadDiningParticipantSettledTable(
   )) as { rows?: unknown } | null;
   const found = result?.rows;
   if (!Array.isArray(found) || found.length > 1) throw new Error("DINING_TABLE_UNAVAILABLE");
-  const row = found[0] as { label?: unknown } | undefined;
+  const row = found[0] as { label?: unknown; table_ref?: unknown } | undefined;
   if (row === undefined) return null;
   const label = tableLabel(row.label);
-  return label === null ? null : { tableLabel: label };
+  return label === null ? null : { tableLabel: label, tableReference: reference(row.table_ref) };
+}
+
+/**
+ * Coordinator 2026-10-30: whether a party is seated at this table now (its Session is open or
+ * checking out) — the public "open / not open yet" a scanned code shows before joining.
+ */
+export async function loadDiningTableOpen(
+  transaction: DiningTableTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  tableReference: string,
+): Promise<boolean> {
+  const brand = reference(scope.brandReference),
+    store = reference(scope.storeReference),
+    table = reference(tableReference);
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const result = (await transaction.query(
+    "SELECT EXISTS (SELECT 1 FROM rms_dining.dining_session WHERE brand_id=$1 AND store_id=$2 AND table_id=$3 AND phase IN ('Active','Closing')) AS open",
+    [brand, store, table],
+  )) as { rows?: unknown } | null;
+  const found = result?.rows;
+  if (!Array.isArray(found) || found.length !== 1) throw new Error("DINING_TABLE_UNAVAILABLE");
+  return (found[0] as { open?: unknown }).open === true;
 }
 
 /**

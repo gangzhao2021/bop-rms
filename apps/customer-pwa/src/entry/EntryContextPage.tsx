@@ -4,6 +4,7 @@ import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { CustomerCurrentOrder } from "../session/session-bootstrap.js";
+import { getLastSettledTable, SettledTableReceiptView } from "../dining/SettledTableReceipt.js";
 import {
   createStoreProfileClient,
   type StoreProfileLoader,
@@ -486,6 +487,41 @@ function EntryState({
 
   const { context } = state;
   const locationOpen = context.operatingState === "Open";
+  // Coordinator 2026-10-30: staff seat a party before its phones can join and order.
+  const notSeated = context.channel === "DineIn" && context.tableOpen === false;
+  if (locationOpen && notSeated) {
+    // A guest whose table was just settled (this device's visit ended with it) scanning again
+    // before staff seat a new party: thanked, with that table's receipt, read before this scan.
+    const settled = getLastSettledTable();
+    return (
+      <div>
+        {settled === null ? (
+          <>
+            <StateHeading headingRef={headingRef}>{t("This table isn’t open yet")}</StateHeading>
+            <p className="entry-context">{t("Ask staff to seat you, then scan again.")}</p>
+          </>
+        ) : (
+          <>
+            <StateHeading headingRef={headingRef}>
+              {t("This table is settled. Thank you for dining with us.")}
+            </StateHeading>
+            <p className="entry-context">
+              {t("Table {table} has paid and closed.", { table: settled.tableLabel })}
+            </p>
+            {settled.receipt === null ? null : (
+              <SettledTableReceiptView receipt={settled.receipt} />
+            )}
+            <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
+          </>
+        )}
+        {onContinue ? (
+          <button className="entry-action" type="button" onClick={onContinue}>
+            {t("Look at the menu first")}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
   return (
     <div>
       <StateHeading headingRef={headingRef}>{t("Ready to order")}</StateHeading>

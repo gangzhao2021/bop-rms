@@ -68,6 +68,16 @@ export interface CustomerEntryCompositionOptions {
     consume(input: CustomerEntryAdmissionInput): Promise<GuestAdmissionEvidence | null>;
   };
   readonly session: Pick<GuestSessionServiceOptions, "binding" | "store" | "credentials">;
+  /** Coordinator 2026-10-30: the scanned table's public state (a party seated there or not). */
+  readonly table?: CustomerEntryTableReader;
+}
+
+export interface CustomerEntryTableReader {
+  isOpen(input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly tableReference: string;
+  }): Promise<boolean>;
 }
 
 const unavailable = Object.freeze({ status: "EntryUnavailable" } as const);
@@ -184,6 +194,20 @@ export function createCustomerEntryComposition(
             localDate,
           });
 
+        // Coordinator 2026-10-30: at a table, whether a party is seated there now (public state).
+        let tableOpen: boolean | undefined;
+        const tableReference = evidence.tableReference;
+        if (
+          options.table !== undefined &&
+          qr.context.channel === "DineIn" &&
+          tableReference !== null &&
+          tableReference !== undefined
+        ) {
+          tableOpen = await options.table
+            .isOpen({ ...scope, tableReference: String(tableReference) })
+            .catch(() => undefined);
+        }
+
         const admitted = parseGuestAdmissionEvidence(
           await options.admission.consume(
             Object.freeze({
@@ -247,6 +271,7 @@ export function createCustomerEntryComposition(
           availableServiceModes: operatingStatus.availableServiceModes,
           locale: String(qr.context.locale),
           contextExpiresAt,
+          ...(tableOpen === undefined ? {} : { tableOpen }),
           sessionCredential: session.sessionCredential,
           csrfCredential: session.csrfCredential,
           cookie: session.cookie,

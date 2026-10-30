@@ -99,8 +99,13 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
     "locale",
     "contextExpiresAt",
     "csrfToken",
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "tableOpen")
+      ? ["tableOpen"]
+      : []),
   ]);
   if (
+    (raw.tableOpen !== undefined &&
+      (typeof raw.tableOpen !== "boolean" || raw.channel !== "DineIn")) ||
     raw.schemaVersion !== 2 ||
     raw.status !== "Established" ||
     (raw.channel !== "DineIn" && raw.channel !== "Pickup") ||
@@ -140,6 +145,7 @@ function parseSuccess(value: unknown): CustomerEntryEstablishedContext {
     locale: raw.locale,
     contextExpiresAt: instant(raw.contextExpiresAt),
     csrfToken: raw.csrfToken,
+    ...(raw.tableOpen === undefined ? {} : { tableOpen: raw.tableOpen as boolean }),
   });
 }
 
