@@ -425,14 +425,14 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
         asApi(async (tx) =>
           teaItemRefusal(tx, { brandReference, storeReference }, await choices(), sku),
         );
-      const saveDish = (name, nameZh, priceMinor) =>
+      const saveDish = (name, nameZh, priceMinor, productReference = null, allergens = null) =>
         dishes.command({
           ...session,
           body: {
             action: "SaveDish",
             operationReference: op(),
             menuReference,
-            productReference: null,
+            productReference,
             sectionCode: "SOUPS",
             name,
             nameZh,
@@ -441,7 +441,7 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
             taxClassificationReference: taxClass,
             priceMinor,
             choiceGroups: [],
-            allergens: null,
+            allergens,
           },
         });
 
@@ -459,11 +459,15 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
 
       // 2. Declared a charge with no stock ingredients (who and when, labelled), not prepared by
       // the kitchen; "List it" now lists it.
-      const declared = await allergens.command({
-        ...session,
-        body: { action: "DeclareNoIngredients", operationReference: op(), skuReference: tea },
-      });
-      assert.equal(declared.status, "Applied");
+      // As the dish editor saves it: "A charge, no stock ingredients (such as tea)".
+      const declared = await saveDish(
+        "Tea charge (TEST)",
+        "茶位",
+        "150",
+        teaDish.productReference,
+        "NoIngredients",
+      );
+      assert.equal(declared.skuReference, tea);
       const [label] = (
         await admin.query(
           "SELECT label,inventory_item_id::text item,actor_id::text actor,recorded_at IS NOT NULL recorded FROM rms_recipe.staff_declared_allergen_source WHERE brand_id=$1 AND sku_id=$2",

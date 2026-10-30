@@ -79,12 +79,16 @@ export interface SaveDishBody {
     readonly optionSetReference: string;
     readonly options: readonly { readonly optionReference: string; readonly amountMinor: string }[];
   }[];
-  /** null: allergens not declared in this save. */
+  /**
+   * null: allergens not declared in this save. "NoIngredients" (WP-2423 item 8 ⑦, v15
+   * 2026-10-29): declared a charge with no stock ingredients, such as the per-head tea.
+   */
   readonly allergens:
     | readonly {
         readonly allergenReference: string;
         readonly classification: "Contains" | "CrossContactPossible";
       }[]
+    | "NoIngredients"
     | null;
 }
 export interface ListAllBody {
@@ -216,7 +220,9 @@ export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBod
       "action,allergens,choiceGroups,description,descriptionZh,menuReference,name,nameZh,operationReference,priceMinor,productReference,sectionCode,taxClassificationReference" ||
     !Array.isArray(r.choiceGroups) ||
     r.choiceGroups.length > 12 ||
-    (r.allergens !== null && (!Array.isArray(r.allergens) || r.allergens.length > 64))
+    (r.allergens !== null &&
+      r.allergens !== "NoIngredients" &&
+      (!Array.isArray(r.allergens) || r.allergens.length > 64))
   )
     return fail("Invalid");
   const choiceGroups = r.choiceGroups.map((candidate: unknown) => {
@@ -251,8 +257,8 @@ export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBod
   )
     return fail("Invalid");
   const allergens =
-    r.allergens === null
-      ? null
+    r.allergens === null || r.allergens === "NoIngredients"
+      ? r.allergens
       : (r.allergens as unknown[]).map((candidate) => {
           const a = candidate as Record<string, unknown> | null;
           if (
@@ -665,12 +671,19 @@ export function createMerchantOneStoreDishes(options: {
     if (body.allergens !== null)
       await options.dishAllergens.command({
         ...session,
-        body: {
-          action: "DeclareDish",
-          operationReference: step("allergens"),
-          skuReference: sku,
-          allergens: body.allergens,
-        },
+        body:
+          body.allergens === "NoIngredients"
+            ? {
+                action: "DeclareNoIngredients",
+                operationReference: step("allergens"),
+                skuReference: sku,
+              }
+            : {
+                action: "DeclareDish",
+                operationReference: step("allergens"),
+                skuReference: sku,
+                allergens: body.allergens,
+              },
       });
 
     // 6. A "no change" option recipe for each of its choices that has none yet.

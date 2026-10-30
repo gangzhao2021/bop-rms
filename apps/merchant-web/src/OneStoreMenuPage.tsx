@@ -31,7 +31,7 @@ import {
   type StoreAvailabilityView,
 } from "./store-availability-page.js";
 import { menuErrorText } from "./StoreMenuPages.js";
-import { allergenSummary } from "./DishAllergenEditor.js";
+import { allergenSummary } from "./dish-allergens.js";
 import { DishEditor } from "./DishEditor.js";
 import { ComboEditor, comboDishChoices } from "./ComboEditor.js";
 import {

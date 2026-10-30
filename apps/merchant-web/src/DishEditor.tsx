@@ -1,7 +1,7 @@
 import { t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
-import { AllergenFields, type AllergenAnswer } from "./DishAllergenEditor.js";
+import { AllergenFields, type AllergenAnswer } from "./dish-allergens.js";
 import { DishKitchenMark } from "./DishKitchenMark.js";
 import { NewChoiceGroupForm } from "./NewChoiceGroupForm.js";
 import { newOperationReference } from "./operation-reference.js";
@@ -138,6 +138,11 @@ export function DishEditor({
   const [allergensChecked, setAllergensChecked] = useState(
     dish?.allergens.source === "StaffDeclared",
   );
+  // WP-2423 item 8 ⑦ (v15 2026-10-29): a food with its allergens, or a charge with no stock
+  // ingredients such as the per-head tea. A dish declared one way stays that way (recorded).
+  const declaredCharge = dish?.allergens.noIngredients === true;
+  const declaredFood = dish?.allergens.source === "StaffDeclared" && !declaredCharge;
+  const [charge, setCharge] = useState(declaredCharge);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [makingGroup, setMakingGroup] = useState(false);
@@ -262,15 +267,20 @@ export function DishEditor({
           amountMinor: o.amountMinor ?? "0",
         })),
       })),
-      allergens:
-        recipeAllergens || !allergensChecked
-          ? null
-          : [...allergens]
-              .filter((entry): entry is [string, AllergenClassification] => entry[1] !== "None")
-              .map(([allergenReference, classification]) => ({
-                allergenReference,
-                classification,
-              })),
+      allergens: recipeAllergens
+        ? null
+        : charge
+          ? declaredCharge
+            ? null
+            : "NoIngredients"
+          : !allergensChecked
+            ? null
+            : [...allergens]
+                .filter((entry): entry is [string, AllergenClassification] => entry[1] !== "None")
+                .map(([allergenReference, classification]) => ({
+                  allergenReference,
+                  classification,
+                })),
     };
     try {
       await client.oneStore(command);
@@ -462,6 +472,38 @@ export function DishEditor({
           </p>
         ) : allergenChoices.length === 0 ? (
           <p className="dish-editor__note">{menuErrorText.RegistryMissing}</p>
+        ) : (
+          <>
+            {declaredCharge || declaredFood ? null : (
+              <div className="dish-editor__kind" role="radiogroup" aria-label={t("What it is")}>
+                <label>
+                  <input
+                    type="radio"
+                    name="dish-kind"
+                    checked={!charge}
+                    onChange={() => setCharge(false)}
+                  />
+                  {t("A dish: declare its allergens")}
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="dish-kind"
+                    checked={charge}
+                    onChange={() => setCharge(true)}
+                  />
+                  {t("A charge, no stock ingredients (such as tea)")}
+                </label>
+              </div>
+            )}
+          </>
+        )}
+        {recipeAllergens || allergenChoices.length === 0 ? null : charge ? (
+          <p className="dish-editor__note">
+            {t(
+              "Declared a charge that uses no stock ingredients (such as tea): it never counts or deducts stock, and guests see no allergens for it.",
+            )}
+          </p>
         ) : (
           <>
             <p className="dish-editor__note">

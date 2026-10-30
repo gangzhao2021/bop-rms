@@ -1064,7 +1064,7 @@ test("@production DEC-DINE-IN-PAY-LATER: staff take a dish off an unpaid table's
     await expect(group.getByRole("button", { name: "Take off $11.30" })).toBeDisabled();
     await group.getByLabel("Reason").selectOption("CUSTOMER_REQUEST");
     await group.getByRole("button", { name: "Take off $11.30" }).click();
-    await expect(page.getByText("Taken off the bill · not charged")).toBeVisible();
+    await expect(page.getByText("Taken off the bill · not charged").first()).toBeVisible();
     expect(sent.length).toBe(before + 1);
     expect(sent.at(-1)).toMatchObject({
       orderReference: id(1),
@@ -1073,7 +1073,11 @@ test("@production DEC-DINE-IN-PAY-LATER: staff take a dish off an unpaid table's
       expectedOrderVersion: 3,
       reasonCode: "CUSTOMER_REQUEST",
     });
-    await expect(page.getByText("Total after dishes taken off")).toBeVisible();
+    // v15 2026-10-29: the total is what is charged; the dish taken off is listed apart.
+    await expect(page.locator(".order-lines-cancelled-refund")).toContainText(
+      "Taken off the bill · not charged$11.30",
+    );
+    await expect(page.getByText("Total after dishes taken off")).toHaveCount(0);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);

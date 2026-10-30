@@ -451,11 +451,18 @@
 }
 .one-menu .dish-editor__group > label,
 .one-menu .dish-editor__choices label,
+.one-menu .dish-editor__kind label,
 .one-menu .dish-editor__confirm {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   min-height: 44px;
+}
+/* WP-2423 item 8 ⑦: a dish with allergens, or a charge with no stock ingredients. */
+.one-menu .dish-editor__kind {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--bop-space-4);
 }
 .one-menu .dish-editor__choices {
   margin: 0 0 0 28px;

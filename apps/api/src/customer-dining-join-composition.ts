@@ -94,7 +94,8 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
         const sessionCredential = parseGuestRawCredential(raw.sessionCredential);
         const csrfCredential = parseGuestRawCredential(raw.csrfCredential);
         const operationReference = parseGuestOperationReference(raw.operationReference);
-        if (byQr && options.qr === undefined) return unavailable();
+        const qr = options.qr;
+        if (byQr && qr === undefined) return unavailable();
         if (!byQr && typeof raw.joinCredential !== "string") return unavailable();
         const admit = request.abuse.admit.bind(request.abuse);
         const observedAt = now();
@@ -178,13 +179,13 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
             requestedAt: now(),
           });
         let result: Awaited<ReturnType<typeof joinWith>> | null = null;
-        if (byQr) {
+        if (byQr && qr !== undefined) {
           // Another phone scanning at the same moment replaces the code just issued; the join
           // then refuses it without writing anything, so issue again (bounded).
           for (let attempt = 0; attempt < 3; attempt += 1) {
             const at = now();
             const evidence = await current(initial.sessionReference, at);
-            const issued = await options.qr!.issue(
+            const issued = await qr.issue(
               {
                 guestSessionReference: String(initial.sessionReference),
                 tableReference: String(parseDiningReference(evidence.context.tableReference)),

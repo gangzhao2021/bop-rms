@@ -9,7 +9,7 @@ import {
   sectionInputs,
 } from "./one-store-menu.js";
 import { moveTo } from "./reorder.js";
-import { allergenSummary } from "./DishAllergenEditor.js";
+import { allergenSummary } from "./dish-allergens.js";
 import type { MenuSectionRow } from "./one-store-menu.js";
 import type { MenuBuilderView } from "./store-menu-pages.js";
 import type { AvailabilityItem } from "./store-availability-page.js";

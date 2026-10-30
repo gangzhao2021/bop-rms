@@ -130,6 +130,24 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
     expect(view.summary?.paid).toEqual(cad(0n));
   });
 
+  it("v15 2026-10-29: a round staff cancelled on a table paying at the end was never charged", () => {
+    const view = composeCustomerDiningSession({
+      ...facts({
+        paymentOutcomes: new Map(),
+        payments: [],
+        payLaterRounds: new Set([id(30), id(40)]),
+        staffCancellations: new Map([
+          [id(30), { reason: "SoldOut", refundedMinor: 0n, pendingMinor: 0n }],
+        ]),
+      }),
+      paymentTiming: "PayLater",
+    });
+    expect(view.rounds.map((round) => [round.status, round.payment])).toEqual([
+      ["StoreCancelled", "NotCharged"],
+      ["Received", "OnTableBill"],
+    ]);
+  });
+
   it("DEC-DINE-IN-PAY-LATER: once the table paid at the end, its rounds read paid and nothing is owed", () => {
     const view = composeCustomerDiningSession({
       ...facts({

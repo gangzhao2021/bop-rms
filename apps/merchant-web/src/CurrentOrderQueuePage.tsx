@@ -217,6 +217,13 @@ export function CurrentOrderLines({
   const removedLine = (item: CurrentOrderDetail["lines"]["items"][number]) =>
     removedItems?.has(item.orderItemReference) === true;
   const removed = removedItemsTotal(lines, removedItems);
+  // v15 2026-10-29: the totals are what the order is charged — never the dishes taken off an
+  // unpaid bill or the rounds cancelled for a failed payment (listed below as not charged), so staff
+  // read the same figure the payment takes.
+  const shown = chargedTotals(
+    lines,
+    lines.items.filter((item) => removedLine(item) || unpaidLine(item)),
+  );
   // One "Check refund" per pending cancellation, on its first line.
   const checkReferences = new Set<string>();
   const checkLines = new Map<string, string>();
@@ -366,7 +373,7 @@ export function CurrentOrderLines({
       <dl className="order-lines-totals">
         <div>
           <dt>{t("Subtotal")}</dt>
-          <dd>{orderMoney(totals.subtotal)}</dd>
+          <dd>{orderMoney(shown.subtotal)}</dd>
         </div>
         {totals.discount.amountMinor !== "0" ? (
           <div>
@@ -382,7 +389,7 @@ export function CurrentOrderLines({
         ) : null}
         <div>
           <dt>{t("Tax")}</dt>
-          <dd>{orderMoney(totals.tax)}</dd>
+          <dd>{orderMoney(shown.tax)}</dd>
         </div>
         {totals.tip !== null && totals.tip.amountMinor !== "0" ? (
           <div>
@@ -392,30 +399,22 @@ export function CurrentOrderLines({
         ) : null}
         <div>
           <dt>{t("Total")}</dt>
-          <dd>{orderMoney(orderTotalWithTip(totals))}</dd>
+          <dd>{orderMoney(orderTotalWithTip(shown))}</dd>
         </div>
       </dl>
       {unpaid !== null ? (
         <dl className="order-lines-totals order-lines-cancelled-refund">
           <div>
-            <dt>{t("Cancelled unpaid rounds")}</dt>
-            <dd>−{orderMoney(unpaid.cancelled)}</dd>
-          </div>
-          <div>
-            <dt>{t("Total after cancelled rounds")}</dt>
-            <dd>{orderMoney(unpaid.remaining)}</dd>
+            <dt>{t("Cancelled unpaid rounds · not charged")}</dt>
+            <dd>{orderMoney(unpaid.cancelled)}</dd>
           </div>
         </dl>
       ) : null}
       {removed !== null ? (
         <dl className="order-lines-totals order-lines-cancelled-refund">
           <div>
-            <dt>{t("Taken off the bill")}</dt>
-            <dd>−{orderMoney(removed.cancelled)}</dd>
-          </div>
-          <div>
-            <dt>{t("Total after dishes taken off")}</dt>
-            <dd>{orderMoney(removed.remaining)}</dd>
+            <dt>{t("Taken off the bill · not charged")}</dt>
+            <dd>{orderMoney(removed.cancelled)}</dd>
           </div>
         </dl>
       ) : null}
@@ -524,6 +523,34 @@ export function unpaidCancelledTotal(
       amountMinor: (BigInt(orderTotalWithTip(lines.totals).amountMinor) - amount).toString(),
       currencyCode,
     }),
+  });
+}
+
+/**
+ * v15 2026-10-29: the order's totals without the lines it is not charged for (dishes taken off an
+ * unpaid bill, rounds cancelled for a failed payment), each line's own subtotal, tax and total.
+ */
+export function chargedTotals(
+  lines: CurrentOrderDetail["lines"],
+  notCharged: readonly CurrentOrderDetail["lines"]["items"][number][],
+): CurrentOrderDetail["lines"]["totals"] {
+  const totals = lines.totals;
+  if (notCharged.length === 0) return totals;
+  const less = (
+    value: { readonly amountMinor: string; readonly currencyCode: string },
+    pick: (item: CurrentOrderDetail["lines"]["items"][number]) => { readonly amountMinor: string },
+  ) =>
+    Object.freeze({
+      amountMinor: notCharged
+        .reduce((sum, item) => sum - BigInt(pick(item).amountMinor), BigInt(value.amountMinor))
+        .toString(),
+      currencyCode: value.currencyCode,
+    });
+  return Object.freeze({
+    ...totals,
+    subtotal: less(totals.subtotal, (item) => item.subtotal),
+    tax: less(totals.tax, (item) => item.tax),
+    total: less(totals.total, (item) => item.total),
   });
 }
 

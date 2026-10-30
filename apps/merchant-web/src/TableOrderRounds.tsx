@@ -4,6 +4,7 @@ import {
   CurrentOrderLines,
   failedPaymentBatches,
   orderRefundRows,
+  removedUnpaidItems,
   storeCancelledBatches,
   unpaidCancelledBatches,
 } from "./CurrentOrderQueuePage.js";
@@ -104,6 +105,7 @@ export function TableOrderRounds({
           lines={detail.lines}
           cancelledBatches={storeCancelledBatches(detail.view)}
           unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
+          removedItems={removedUnpaidItems(detail.view)}
           failedPaymentBatches={failedPaymentBatches(detail.view)}
           refundRows={orderRefundRows(detail.order, detail.lines, detail.paymentPosition)}
           rounds={{ batches: detail.order.batches, timeZone, today, phones: roundPhones }}

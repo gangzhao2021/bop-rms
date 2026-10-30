@@ -375,6 +375,8 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   ]);
   const pending = new Map<string, string>();
   let keepsStock = false;
+  // WP-2423 item 8 ⑦: a new tea dish saved as a charge with no stock ingredients joins the menu.
+  let teaSaved = false;
   const order = [
     [30, 31],
     [32, 33],
@@ -389,7 +391,17 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
       menu: {
         ...base.menu,
         sections: [
-          ...base.menu.sections,
+          ...base.menu.sections.map((section, index) =>
+            index === 0 && teaSaved
+              ? {
+                  ...section,
+                  items: [
+                    ...section.items,
+                    { placementReference: id(234), skuReference: id(34), featured: false },
+                  ],
+                }
+              : section,
+          ),
           ...extraSections.map((x, n) => ({
             sectionReference: id(12 + n),
             code: x.code,
@@ -406,16 +418,21 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
         { allergenReference: wheat, name: "Wheat", nameZh: "小麦" },
       ],
       keepsStock,
-      sellables: base.sellables.map((s) => ({
+      sellables: [
+        ...base.sellables,
+        ...(teaSaved ? [sellable(34, "Tea charge (TEST)", "茶位", "150")] : []),
+      ].map((s) => ({
         ...s,
         productReference: id(Number.parseInt(s.skuReference.slice(-12), 16) + 100),
         pendingPriceMinor: pending.get(s.skuReference) ?? null,
         allergens:
-          s.skuReference === id(33)
-            ? { source: "Recipe", declared: [] }
-            : declared.has(s.skuReference)
-              ? { source: "StaffDeclared", declared: declared.get(s.skuReference) }
-              : { source: "None", declared: [] },
+          s.skuReference === id(34)
+            ? { source: "StaffDeclared", declared: [], noIngredients: true }
+            : s.skuReference === id(33)
+              ? { source: "Recipe", declared: [] }
+              : declared.has(s.skuReference)
+                ? { source: "StaffDeclared", declared: declared.get(s.skuReference) }
+                : { source: "None", declared: [] },
       })),
     };
   };
@@ -567,6 +584,7 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   await page.route("**/merchant/commerce/one-store-dishes/command", (route) => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     dishCommands.push(body);
+    if (body.action === "SaveDish" && body.allergens === "NoIngredients") teaSaved = true;
     if (body.action === "SaveDish" && body.productReference !== null) {
       const sku = id(Number.parseInt(String(body.productReference).slice(-12), 16) - 100);
       pending.set(sku, String(body.priceMinor));
@@ -734,6 +752,45 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
     choiceGroups: [],
     allergens: [{ allergenReference: wheat, classification: "Contains" }],
   });
+
+  // WP-2423 item 8 ⑦ (v15 2026-10-29): the per-head tea, a new dish declared in the editor as a
+  // charge with no stock ingredients (no allergens asked), so the listing accepts it.
+  await page.getByRole("button", { name: "New dish" }).click();
+  const tea = page.getByRole("form", { name: "New dish" });
+  await tea.getByLabel("English name").fill("Tea charge (TEST)");
+  await tea.getByLabel("Chinese name").fill("茶位");
+  await tea.getByLabel("Price ($)").fill("1.50");
+  const kind = tea.getByRole("radiogroup", { name: "What it is" });
+  await expect(kind.getByLabel("A dish: declare its allergens")).toBeChecked();
+  await kind.getByLabel("A charge, no stock ingredients (such as tea)").check();
+  await expect(tea.getByRole("radiogroup", { name: "Wheat 小麦" })).toHaveCount(0);
+  await expect(
+    tea.getByText("Declared a charge that uses no stock ingredients (such as tea)", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await tea.getByRole("button", { name: "Save dish" }).click();
+  await expect(page.getByText("Tea charge (TEST) saved.", { exact: false })).toBeVisible();
+  expect(dishCommands.at(-1)).toMatchObject({
+    action: "SaveDish",
+    productReference: null,
+    name: "Tea charge (TEST)",
+    nameZh: "茶位",
+    priceMinor: "150",
+    allergens: "NoIngredients",
+  });
+  // Its row says so; its editor shows the declaration, with no way to switch it.
+  const teaRow = page.getByRole("listitem").filter({ hasText: "Tea charge (TEST)" }).last();
+  await expect(teaRow).toContainText("A charge, no stock ingredients");
+  await page.getByRole("button", { name: "Edit Tea charge (TEST) 茶位" }).click();
+  const declaredTea = page.getByRole("form", { name: "Tea charge (TEST)" });
+  await expect(declaredTea.getByRole("radiogroup", { name: "What it is" })).toHaveCount(0);
+  await expect(
+    declaredTea.getByText("Declared a charge that uses no stock ingredients (such as tea)", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await declaredTea.getByRole("button", { name: "Close" }).last().click();
 
   // List it: the price book, choice prices and menu together.
   await page.getByRole("button", { name: "List it" }).click();

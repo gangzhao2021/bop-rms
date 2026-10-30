@@ -281,6 +281,28 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expectNoHorizontalOverflow(page);
   });
 
+  test("v15 2026-10-29: a round taken off a table's unpaid bill says it is not charged", async ({
+    page,
+  }) => {
+    const [round1] = session.session.rounds;
+    if (round1 === undefined) throw new Error("fixture");
+    await enterTable(page, () => ({
+      status: 200,
+      json: {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          paymentTiming: "PayLater",
+          rounds: [{ ...round1, status: "StoreCancelled", payment: "NotCharged" }],
+        },
+      },
+    }));
+    const main = page.getByRole("main");
+    await expect(main).toContainText("Staff took this round off the bill. It is not charged.");
+    await expect(main).not.toContainText("refunded");
+    await expectNoInternalText(page);
+  });
+
   test("shows rounds staff entered for the table and how they are paid", async ({ page }) => {
     const [round1] = session.session.rounds;
     if (round1 === undefined) throw new Error("fixture");
