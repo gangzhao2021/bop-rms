@@ -82,7 +82,11 @@ async function expectNoHorizontalOverflow(page: Page) {
     .toBe(true);
 }
 
-async function enterTable(page: Page, onSession: () => { status: number; json: unknown }) {
+async function enterTable(
+  page: Page,
+  onSession: () => { status: number; json: unknown },
+  csrf: () => string = () => "s".repeat(43),
+) {
   await page.route("**/bff/customer/entry", (route) =>
     route.fulfill({
       status: 201,
@@ -105,7 +109,7 @@ async function enterTable(page: Page, onSession: () => { status: number; json: u
   );
   await page.route("**/api/v1/dine-in/session", (route) => {
     expect(route.request().method()).toBe("GET");
-    expect(route.request().headers()["x-csrf-token"]).toBe("s".repeat(43));
+    expect(route.request().headers()["x-csrf-token"]).toBe(csrf());
     expect(new URL(route.request().url()).search).toBe("");
     const { status, json } = onSession();
     return route.fulfill({ status, headers: { "cache-control": "no-store" }, json });
@@ -466,6 +470,76 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expectNoInternalText(page);
     await page.setViewportSize({ width: 320, height: 844 });
     await expectNoHorizontalOverflow(page);
+  });
+
+  test("v15 2026-10-30: the moved party's phone scans its new table's code and joins it again", async ({
+    page,
+  }) => {
+    // The host's phone joined at the old table. After the move it is told where the party sits;
+    // scanning that table's code joins it again with one tap (no host needed), and the party's
+    // order is there. The server side (the code reissued for the new table) is proven by the
+    // database acceptance test.
+    let joined = false;
+    const qrJoins: string[] = [];
+    const ok = (route: import("@playwright/test").Route, json: Record<string, unknown>) =>
+      route.fulfill({
+        status: 200,
+        headers: { "cache-control": "no-store" },
+        json: { operationReference: route.request().headers()["idempotency-key"], ...json },
+      });
+    await page.route("**/bff/customer/dining/qr-join", (route) => {
+      qrJoins.push(route.request().postData() ?? "");
+      joined = true;
+      return ok(route, { status: "Joined", admissionReference: id(30) });
+    });
+    const expiresAt = new Date(Date.now() + 600_000).toISOString();
+    await page.route("**/bff/customer/dining-binding/prepare", (route) =>
+      ok(route, {
+        status: "Prepared",
+        candidateCsrfToken: "n".repeat(43),
+        recoveryProof: "r".repeat(43),
+        expiresAt,
+      }),
+    );
+    await page.route("**/bff/customer/dining-binding/activate", (route) =>
+      ok(route, { status: "Activated", csrfToken: "n".repeat(43) }),
+    );
+    await enterTable(
+      page,
+      () =>
+        joined
+          ? { status: 200, json: session }
+          : {
+              status: 409,
+              json: {
+                schemaVersion: 1,
+                error: {
+                  code: "dining_table_moved",
+                  messageKey: "customer.dining.session.table_moved",
+                },
+                tableLabel: "T7",
+              },
+            },
+      // The phone's session token is the one it activated when it joined again.
+      () => (joined ? "n" : "s").repeat(43),
+    );
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Your table moved to table T7" })).toBeVisible();
+
+    // The guest scans the code on table T7.
+    await page.goto("about:blank");
+    await page.goto("/#qr=ddd.eee.fff");
+    await page.getByRole("button", { name: "Join this table", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
+    expect(qrJoins).toEqual(["{}"]);
+    await page.evaluate(() => {
+      history.pushState(null, "", "/dine-in/session");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await expect(main.getByRole("heading", { name: "Your table · 12" })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "Round 1 · Ordered by you" })).toBeVisible();
+    await expect(main).not.toContainText("Your table moved");
+    await expectNoInternalText(page);
   });
 
   test("asks a guest who has not joined to join first", async ({ page }) => {

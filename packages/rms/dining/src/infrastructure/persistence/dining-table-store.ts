@@ -511,9 +511,9 @@ export async function listDiningSessionMovedFrom(
 
 /**
  * WP-2423 item 8 ⑧ (Owner decision 3): when staff moved this participant's table after the
- * participant joined it, the table the party sits at now (a phone joined at the old table is no
- * longer the table's: the guest scans the new table's code). Null when the table was not moved
- * since, or the party has left.
+ * participant joined it, the table the party sits at now (a phone joined before the move no longer
+ * acts for the party: the guest scans the code of the table it sits at now, which may be the same
+ * table after moving back). Null when the table was not moved since, or the party has left.
  */
 export async function loadDiningParticipantMove(
   transaction: DiningTableTransaction,
@@ -534,7 +534,10 @@ export async function loadDiningParticipantMove(
       "JOIN rms_dining.dining_table t ON t.tenant_id=s.tenant_id AND t.brand_id=s.brand_id AND t.store_id=s.store_id AND t.table_id=s.table_id " +
       "JOIN rms_dining.dining_table f ON f.tenant_id=a.tenant_id AND f.brand_id=a.brand_id AND f.store_id=a.store_id AND f.table_id=(a.admission_snapshot->>'tableReference')::uuid " +
       "WHERE a.brand_id=$1 AND a.store_id=$2 AND a.session_id=$3 AND a.participant_id=$4 AND s.phase IN ('Active','Closing') " +
-      "AND f.table_id<>s.table_id AND EXISTS (SELECT 1 FROM rms_dining.dining_session_move_operation m WHERE m.tenant_id=a.tenant_id AND m.brand_id=a.brand_id AND m.store_id=a.store_id AND m.session_id=a.session_id AND m.source_table_id=f.table_id)",
+      // Moved since this participant joined: its admission was for an earlier table assignment
+      // (the party may even be back at the same table, A to B and back to A).
+      "AND (a.admission_snapshot->>'tableAssignmentVersion')::numeric<>(s.session_snapshot->>'tableAssignmentVersion')::numeric " +
+      "AND EXISTS (SELECT 1 FROM rms_dining.dining_session_move_operation m WHERE m.tenant_id=a.tenant_id AND m.brand_id=a.brand_id AND m.store_id=a.store_id AND m.session_id=a.session_id)",
     [brand, store, session, participant],
   )) as { rows?: unknown } | null;
   const found = result?.rows;

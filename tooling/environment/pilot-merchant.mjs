@@ -1814,6 +1814,9 @@ export async function createInternalMerchant(
         newReference: () => resources.credentials.reference(),
         retentionPolicyCode: "AUDIT_DEFAULT",
         retentionPolicyVersion: 1,
+        // v15 2026-10-30: the party's join code is reissued for the table it moved to.
+        credentials: await createInternalDiningCredentials(resources),
+        pepperVersion: 1,
       }),
       ...(createInternalTableQr === undefined
         ? {}

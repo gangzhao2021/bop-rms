@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomInt } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { URL } from "node:url";
 import pg from "pg";
@@ -12,6 +12,7 @@ import {
   createDiningGuestBindingQuery,
   createDiningTable,
   createPostgresDiningGuestBindingStore,
+  createPostgresDiningQrJoinStore,
   listDiningSessionMovedFrom,
   listDiningSessionTableLabels,
   loadDiningParticipantMove,
@@ -20,6 +21,8 @@ import {
 } from "../../rms/dining/src/index.ts";
 import { createMerchantDiningPartySize } from "../../../apps/api/src/merchant-dining-party-size.ts";
 import { createMerchantDiningTableMove } from "../../../apps/api/src/merchant-dining-table-move.ts";
+import { createMerchantDiningTableCommand } from "../../../apps/api/src/merchant-dining-table-command.ts";
+import { parseDiningJoinCapability } from "../../bop/public-capability/src/index.ts";
 import { createMerchantDiningTeaCharge } from "../../../apps/api/src/merchant-dining-tea-charge.ts";
 import {
   createOrderNumberAllocation,
@@ -991,6 +994,19 @@ async function journey(ending) {
                 await rows("SELECT version FROM rms_dining.dining_table WHERE table_id=$1", [table])
               )[0].version,
             );
+          // TEST-ONLY dining credentials (the pilot's are internal, keyed per environment).
+          const joinKey = randomBytes(32);
+          const diningCredentials = {
+            generateReference: fresh,
+            generateJoinCredential: (kind) =>
+              kind === "HumanCode"
+                ? String(randomInt(0, 1000000)).padStart(6, "0")
+                : randomBytes(16).toString("base64url"),
+            hashJoinCredential: (kind, value) =>
+              createHmac("sha256", joinKey).update(`DiningJoin:${kind}:${value}`).digest("hex"),
+            hashOperationIntent: (value) => createHash("sha256").update(value).digest("hex"),
+            equals: (a, b) => a === b,
+          };
           const move = (who, operationReference, to, versions = {}) =>
             Promise.all([tableVersion(versions.from ?? fromTable), tableVersion(to)]).then(
               ([fromVersion, toVersion]) =>
@@ -1000,6 +1016,8 @@ async function journey(ending) {
                   newReference: fresh,
                   retentionPolicyCode: "AUDIT_DEFAULT",
                   retentionPolicyVersion: 1,
+                  credentials: diningCredentials,
+                  pepperVersion: 1,
                 })({
                   ...as(who),
                   command: {
@@ -1012,6 +1030,67 @@ async function journey(ending) {
                   },
                 }),
             );
+          // The table's join code, as a table started with one has it (the guests' QR joins renew
+          // it). TEST-ONLY code value.
+          const joinCode = parseDiningJoinCapability({
+            capabilityReference: fresh(),
+            purpose: "DiningJoin",
+            kind: "HumanCode",
+            storeReference: scope.storeReference,
+            tableReference: fromTable,
+            diningSessionReference: sessionReference,
+            selectorHash: diningCredentials.hashJoinCredential("HumanCode", "TEST-CODE"),
+            pepperVersion: 1,
+            assignmentVersion: dining.session.tableAssignmentVersion,
+            generation: 1,
+            status: "Active",
+            version: 1,
+            issuedAt: dining.session.startedAt,
+            expiresAt: new Date(Date.parse(dining.session.startedAt) + 15 * 60_000).toISOString(),
+            consumedAt: null,
+            revokedAt: null,
+          });
+          await admin.query(
+            "INSERT INTO rms_dining.dining_join_capability (capability_id,tenant_id,brand_id,store_id,session_id,version,status,capability_snapshot) VALUES ($1,$2,$3,$4,$5,1,'Active',$6::jsonb)",
+            [
+              joinCode.capabilityReference,
+              tenant,
+              scope.brandReference,
+              scope.storeReference,
+              sessionReference,
+              JSON.stringify(joinCode),
+            ],
+          );
+          // A guest scans a table's code and taps "Join this table" (the code it is issued).
+          const scanAt = (table, guestSession) =>
+            createPostgresDiningQrJoinStore(transactions(), {
+              scope: ownerScope,
+              credentials: diningCredentials,
+              pepperVersion: 1,
+              now: () => new Date().toISOString(),
+              authorize: async () => true,
+              audit: (record) => ({
+                auditId: fresh(),
+                brandId: scope.brandReference,
+                storeId: scope.storeReference,
+                actor: { type: "System" },
+                actionCode: "DINING_QR_JOIN_ISSUE",
+                targetType: "DiningTable",
+                targetId: record.tableReference,
+                reasonCode: "GUEST_SCANNED_OPEN_TABLE",
+                correlationId: record.operationReference,
+                occurredAt: record.observedAt,
+                sourceChannel: "CUSTOMER_PWA",
+                dataClassification: "Restricted",
+                retentionPolicyCode: "AUDIT_DEFAULT",
+                retentionPolicyVersion: 1,
+              }),
+            }).issue({
+              operationReference: fresh(),
+              guestSessionReference: guestSession,
+              tableReference: table,
+              observedAt: new Date().toISOString(),
+            });
           const partyBefore = await rows(
             "SELECT party_size,version FROM rms_dining.dining_session_party_size WHERE session_id=$1 ORDER BY version",
             [sessionReference],
@@ -1101,6 +1180,18 @@ async function journey(ending) {
             )[0].s,
             sessionReference,
           );
+          // v15 2026-10-30: the party's join code was reissued for the table it sits at now, linked
+          // to the move, so the host's phone (it joined at the old table) can scan the new table's
+          // code and join again, as can any phone (no host needed).
+          const rescanned = await scanAt(target, fresh());
+          assert.equal(rescanned.status, "Issued", JSON.stringify(rescanned));
+          assert.deepEqual(
+            await rows(
+              "SELECT move_operation_id::text m FROM rms_dining.dining_join_regeneration_operation WHERE session_id=$1 AND move_operation_id IS NOT NULL",
+              [sessionReference],
+            ),
+            [{ m: winner }],
+          );
           // The kitchen names the table the party came from beside the one it sits at.
           assert.deepEqual(
             await transactions().run(async (tx) => [
@@ -1156,6 +1247,43 @@ async function journey(ending) {
           await assert.rejects(move(server, fresh(), other, from), {
             code: "DINING_TABLE_MOVE_CHECKING_OUT",
           });
+          // Back to ordering: the party goes on, pays and its table closes (below, as usual).
+          assert.equal((await closing(server, "Cancel")).phase, "Active");
+
+          // ── v15 2026-10-30: moved back to the first table (A to B and back to A) once it is
+          // cleaned. The host's phone (it joined at A before) is told the party sits at A now; a
+          // scan of A's code joins it again.
+          const cleanedVersion = await tableVersion(fromTable);
+          await createMerchantDiningTableCommand({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            newReference: fresh,
+            retentionPolicyCode: "AUDIT_DEFAULT",
+            retentionPolicyVersion: 1,
+          })({
+            ...as(server),
+            command: {
+              action: "ClearBlock",
+              tableReference: fromTable,
+              expectedAggregateVersion: cleanedVersion,
+              operationReference: fresh(),
+              reasonCode: null,
+            },
+          });
+          const back = await move(server, fresh(), fromTable, from);
+          assert.equal(back.tableLabel, dining.table.stableLabel);
+          assert.deepEqual(
+            await transactions().run((tx) =>
+              loadDiningParticipantMove(tx, scope, {
+                diningSessionReference: sessionReference,
+                participantReference: id(0x601),
+              }),
+            ),
+            { tableLabel: dining.table.stableLabel, fromTableLabel: dining.table.stableLabel },
+          );
+          assert.equal(await binding(fromTable), null);
+          const rejoined = await scanAt(fromTable, fresh());
+          assert.equal(rejoined.status, "Issued", JSON.stringify(rejoined));
           assert.equal(
             (
               await rows(
@@ -1163,7 +1291,7 @@ async function journey(ending) {
                 [sessionReference],
               )
             )[0].n,
-            1,
+            2,
           );
           // The move record is append-only: the pilot role can't change it (and nothing does).
           const changed = await transactions({ guc: true })
@@ -1181,7 +1309,6 @@ async function journey(ending) {
             changed === 0 || /permission denied/u.test(String(changed)),
             "the move record changed: " + String(changed),
           );
-          return;
         }
         if (ending === "TeaCharge") {
           // The tea charge is round 2's dish (a synthetic stand-in for the Store's tea item).
@@ -3546,6 +3673,38 @@ async function journey(ending) {
           /pay-later round cannot expire unpaid/u,
         );
 
+        if (ending === "Moved") {
+          // v15 2026-10-30: the moved table, paid, closes as the Tables page does it — the Order,
+          // then the table (its session at the table it moved to).
+          await cookAndServeRound1();
+          const progress = await createMerchantDiningOrderProgress({
+            persistence: persistenceOf(server),
+            locale: "en-CA",
+            authentication: server.authentication,
+          })({ ...as(server), query: { orderReference } });
+          const closed = await createMerchantDiningOrderCloseCommand({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            resolveConfiguration: createDiningOrderCloseConfiguration({
+              ...ownerScope,
+              providerAccountReference: provider,
+              environment: "Test",
+            }),
+            newReference: fresh,
+            audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+          })({
+            ...as(server),
+            command: {
+              orderReference,
+              operationReference: fresh(),
+              expectedOrderVersion: progress.currentOrderVersion,
+              expectedClosureVersion: progress.closureVersion,
+              reasonCode: "ORDER_COMPLETED",
+            },
+          });
+          assert.equal(closed.status, "Committed");
+          assert.equal((await closing(server, "Finalize")).phase, "Closed");
+        }
         // ── Append-only, and another Store of the Brand sees none of it.
         await assert.rejects(
           admin.query("UPDATE rms_ordering.order_pay_later_confirmation SET confirmed_at=now()"),
