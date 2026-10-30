@@ -548,6 +548,25 @@ describe("WP-2423 D5 item prices before tax at the table", () => {
     expect(before.summary).not.toHaveProperty("ordered");
   });
 
+  it("v15 2026-10-29: the tea note is per guest before tax, counting only tea still on the bill", () => {
+    // Gyoza stands for the tea here ($7.96 before tax); the soda line was cancelled.
+    const tea = new Set([id(41), id(51)]);
+    const view = composeCustomerDiningSession(
+      facts({ ...threeRounds, itemPrices: prices, teaItems: tea }),
+    );
+    expect(view.summary?.teaCharge).toEqual({ perGuest: cad(796n), guests: 1 });
+    // A round that is only the tea (taken off or not) says so; the guest page folds those
+    // taken off into one line.
+    const marked = composeCustomerDiningSession(
+      facts({ ...threeRounds, itemPrices: prices, teaItems: tea, teaLines: tea }),
+    );
+    expect(marked.rounds.map((round) => round.tea === true)).toEqual([false, true, true]);
+    // No prices before tax: no note (never a price with tax in it).
+    expect(
+      composeCustomerDiningSession(facts({ ...threeRounds, teaItems: tea })).summary,
+    ).not.toHaveProperty("teaCharge");
+  });
+
   it("never mixes priced and unpriced items", () => {
     const partial = new Map([...prices].filter(([reference]) => reference !== id(41)));
     const view = composeCustomerDiningSession(facts({ ...threeRounds, itemPrices: partial }));

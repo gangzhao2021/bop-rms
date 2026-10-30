@@ -66,6 +66,16 @@ describe("WP-2423 Q8 dining session client", () => {
     }
   });
 
+  it("v15 2026-10-29: decodes a round that is only the tea, and nothing but true", () => {
+    const p = payload();
+    const tea = structuredClone(p) as unknown as { session: { rounds: Record<string, unknown>[] } };
+    (tea.session.rounds[0] as Record<string, unknown>).tea = true;
+    expect(parseDiningSessionView(tea).rounds[0]?.tea).toBe(true);
+    expect(parseDiningSessionView(p).rounds[0]).not.toHaveProperty("tea");
+    (tea.session.rounds[0] as Record<string, unknown>).tea = false;
+    expect(() => parseDiningSessionView(tea)).toThrow();
+  });
+
   it("decodes the closed table view", () => {
     const view = parseDiningSessionView(payload());
     expect(view.rounds[0]?.orderedBy).toBe("You");
