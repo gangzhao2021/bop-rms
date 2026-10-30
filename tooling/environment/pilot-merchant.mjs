@@ -45,6 +45,7 @@ import {
 } from "../../apps/api/dist/merchant-store-features.js";
 import { createMerchantDiningSessionStart } from "../../apps/api/dist/merchant-dining-session-start.js";
 import { createMerchantDiningTableCommand } from "../../apps/api/dist/merchant-dining-table-command.js";
+import { createMerchantDiningTableMove } from "../../apps/api/dist/merchant-dining-table-move.js";
 import { createMerchantDiningTables } from "../../apps/api/dist/merchant-dining-tables.js";
 import {
   createMerchantDiningStaffCallAnswer,
@@ -1806,6 +1807,14 @@ export async function createInternalMerchant(
       diningSessionStart,
       diningTables,
       diningTableCommand,
+      // WP-2423 item 8 ⑧ (Owner decision 3): move a table's party to another free table.
+      diningTableMove: createMerchantDiningTableMove({
+        persistence,
+        authentication: service,
+        newReference: () => resources.credentials.reference(),
+        retentionPolicyCode: "AUDIT_DEFAULT",
+        retentionPolicyVersion: 1,
+      }),
       ...(createInternalTableQr === undefined
         ? {}
         : { diningTableQr: createInternalTableQr(resources, persistence, service) }),

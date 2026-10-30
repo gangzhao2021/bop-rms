@@ -31,6 +31,8 @@ export interface KitchenOrderLabel {
   readonly tableLabel: string | null;
   /** WP-2423 Q7 slice 2: staff entered this order or table round for the guests. */
   readonly enteredByStaff?: boolean;
+  /** WP-2423 item 8 ⑧: the table the party was moved from (null or absent: not moved). */
+  readonly movedFromTableLabel?: string | null;
 }
 
 export interface KitchenBoardItem {
@@ -187,13 +189,18 @@ function selectedOptions(value: unknown): readonly KitchenSelectedOption[] {
 /** WP-2423 Q2: the Order's number and, for dine-in, its current table. */
 export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null {
   if (value === null) return null;
-  // WP-2423 Q7 slice 2: enteredByStaff (servers before it answered without the field).
-  const input = closed(
-    value,
-    typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "enteredByStaff")
-      ? ["orderNumber", "orderType", "tableLabel", "enteredByStaff"]
-      : ["orderNumber", "orderType", "tableLabel"],
-  );
+  // WP-2423 Q7 slice 2: enteredByStaff; item 8 ⑧: movedFromTableLabel (older servers answered
+  // without them).
+  const has = (key: string) =>
+    typeof value === "object" && Object.prototype.hasOwnProperty.call(value, key);
+  const input = closed(value, [
+    "orderNumber",
+    "orderType",
+    "tableLabel",
+    ...(has("enteredByStaff") ? ["enteredByStaff"] : []),
+    ...(has("movedFromTableLabel") ? ["movedFromTableLabel"] : []),
+  ]);
+  const movedFrom = input.movedFromTableLabel ?? null;
   if (
     typeof input.orderNumber !== "string" ||
     !/^[A-Z0-9][A-Z0-9-]{0,39}$/u.test(input.orderNumber) ||
@@ -202,7 +209,11 @@ export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null
       (input.orderType !== "DineIn" ||
         typeof input.tableLabel !== "string" ||
         !/^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(input.tableLabel))) ||
-    (input.enteredByStaff !== undefined && typeof input.enteredByStaff !== "boolean")
+    (input.enteredByStaff !== undefined && typeof input.enteredByStaff !== "boolean") ||
+    (movedFrom !== null &&
+      (input.orderType !== "DineIn" ||
+        typeof movedFrom !== "string" ||
+        !/^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(movedFrom)))
   )
     throw new Error("KITCHEN_BOARD_INVALID");
   return Object.freeze({
@@ -210,6 +221,7 @@ export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null
     orderType: input.orderType,
     tableLabel: input.tableLabel as string | null,
     enteredByStaff: input.enteredByStaff === true,
+    movedFromTableLabel: movedFrom as string | null,
   });
 }
 /** WP-2423: an order waiting for acceptance, with a pickup's refund deadline when one runs. */

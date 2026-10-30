@@ -5327,6 +5327,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (coordinator 2026-10-29 \"有小孩不收这类情况时，店员可以把茶位数量改得和人数不同，同样记下谁、什么时候、为什么\"): tea charged for other than the guests, with the reason"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session_move_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑧ Owner decision 3 (coordinator 2026-10-30 \"单桌详情加“换到…”\"): a table moved to another free table, recorded who, when, from and to"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session_move_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑧ Owner decision 3 (coordinator 2026-10-30 \"单桌详情加“换到…”\"): a table moved to another free table, recorded who, when, from and to"
     }
   ]
 }

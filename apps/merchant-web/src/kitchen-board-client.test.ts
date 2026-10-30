@@ -1,6 +1,10 @@
 import { expect, it, vi } from "vitest";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
-import { parseKitchenBoardView, parseKitchenWorkItemDetailView } from "./kitchen-board.js";
+import {
+  parseKitchenBoardView,
+  parseKitchenOrderLabel,
+  parseKitchenWorkItemDetailView,
+} from "./kitchen-board.js";
 const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-09-19T12:00:00.000Z";
 const item = (n = 1) => ({
@@ -344,6 +348,7 @@ it("WP-2423 v15: carries today's orders waiting for acceptance from the first pa
       orderType: "Pickup",
       tableLabel: null,
       enteredByStaff: false,
+      movedFromTableLabel: null,
       acceptBy: null,
     },
   ]);
@@ -351,6 +356,24 @@ it("WP-2423 v15: carries today's orders waiting for acceptance from the first pa
   expect(
     Object.hasOwn(parseKitchenBoardView(await f.client.loadQueue()), "awaitingAcceptance"),
   ).toBe(false);
+});
+it("WP-2423 item 8 ⑧: reads the table a dine-in party was moved from, only for dine-in", () => {
+  expect(
+    parseKitchenOrderLabel({
+      orderNumber: "14",
+      orderType: "DineIn",
+      tableLabel: "T6",
+      movedFromTableLabel: "T4",
+    }),
+  ).toMatchObject({ tableLabel: "T6", movedFromTableLabel: "T4" });
+  expect(() =>
+    parseKitchenOrderLabel({
+      orderNumber: "14",
+      orderType: "Pickup",
+      tableLabel: null,
+      movedFromTableLabel: "T4",
+    }),
+  ).toThrow();
 });
 it("Warn before timeouts: reads a paid pickup's refund deadline with one small first page", async () => {
   const f = setup();
@@ -376,6 +399,7 @@ it("Warn before timeouts: reads a paid pickup's refund deadline with one small f
       orderType: "Pickup",
       tableLabel: null,
       enteredByStaff: false,
+      movedFromTableLabel: null,
       acceptBy: "2026-10-17T13:58:00.000Z",
     },
     {
@@ -383,6 +407,7 @@ it("Warn before timeouts: reads a paid pickup's refund deadline with one small f
       orderType: "DineIn",
       tableLabel: "T4",
       enteredByStaff: false,
+      movedFromTableLabel: null,
       acceptBy: null,
     },
   ]);

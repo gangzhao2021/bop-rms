@@ -446,6 +446,28 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     });
   });
 
+  test("WP-2423 item 8 ⑧: a phone of a party staff moved says where the party sits now", async ({
+    page,
+  }) => {
+    await enterTable(page, () => ({
+      status: 409,
+      json: {
+        schemaVersion: 1,
+        error: { code: "dining_table_moved", messageKey: "customer.dining.session.table_moved" },
+        tableLabel: "T7",
+      },
+    }));
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Your table moved to table T7" })).toBeVisible();
+    await expect(main).toContainText(
+      "Scan the code on table T7 to keep ordering and paying together.",
+    );
+    await expect(main).not.toContainText("Join your table first");
+    await expectNoInternalText(page);
+    await page.setViewportSize({ width: 320, height: 844 });
+    await expectNoHorizontalOverflow(page);
+  });
+
   test("asks a guest who has not joined to join first", async ({ page }) => {
     await enterTable(page, () => ({ status: 404, json: { schemaVersion: 1 } }));
     const main = page.getByRole("main");

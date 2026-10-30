@@ -141,9 +141,13 @@ export interface DiningSessionView {
 }
 
 /** "processing": the table's first round was just sent and its order is still being prepared. */
-export type DiningSessionClientErrorCode = "not-joined" | "processing" | "unavailable";
+/** "moved" (WP-2423 item 8 ⑧): staff moved the party to `tableLabel` after this phone joined. */
+export type DiningSessionClientErrorCode = "not-joined" | "processing" | "moved" | "unavailable";
 export class DiningSessionClientError extends Error {
-  constructor(readonly code: DiningSessionClientErrorCode) {
+  constructor(
+    readonly code: DiningSessionClientErrorCode,
+    readonly tableLabel: string | null = null,
+  ) {
     super("dining session is " + code);
     this.name = "DiningSessionClientError";
   }
@@ -470,6 +474,18 @@ export function createHttpDiningSessionClient(
     if (!current()) throw new DiningSessionClientError("not-joined");
     if (response.status === 404 || response.status === 403 || response.status === 401)
       throw new DiningSessionClientError("not-joined");
+    if (response.status === 409) {
+      const body = (await response.json().catch(() => null)) as {
+        error?: { code?: unknown };
+        tableLabel?: unknown;
+      } | null;
+      if (
+        body?.error?.code === "dining_table_moved" &&
+        typeof body.tableLabel === "string" &&
+        /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(body.tableLabel)
+      )
+        throw new DiningSessionClientError("moved", body.tableLabel);
+    }
     if (response.status === 503) {
       const body = (await response.json().catch(() => null)) as {
         error?: { code?: unknown };

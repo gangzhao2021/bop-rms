@@ -35,6 +35,7 @@ import { TableSessionClose } from "./TableSessionClose.js";
 import { LastOrdersNotice } from "./LastOrdersNotice.js";
 import { TableCheckout } from "./TableCheckout.js";
 import { TablePartySize, createTablePartySizeClient } from "./TablePartySize.js";
+import { TableMove } from "./TableMove.js";
 import { TableOrderRounds } from "./TableOrderRounds.js";
 import { RoundHoldSettingControl, TableHeldRounds, TablePanelPhones } from "./TablePhones.js";
 import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
@@ -1156,6 +1157,14 @@ export function DiningSessionWorkspace({
                 )
               }
               hostTransferDisabled={state !== "Idle" || paused}
+              tables={tables}
+              onMoved={(text, targetReference) => {
+                // WP-2423 item 8 ⑧: the party sits at the other table now; show that table.
+                void loadRef.current(false, true).then(() => {
+                  if (targetReference !== null) setSelectedReference(targetReference);
+                  if (text !== "") setResult({ text });
+                });
+              }}
               onReread={reread}
               onChanged={() => {
                 setCheckoutRevision((value) => value + 1);
@@ -1218,7 +1227,13 @@ function TablePanel({
   onReread,
   hostTransferDisabled,
   onPartySize,
+  tables,
+  onMoved,
 }: {
+  /** WP-2423 item 8 ⑧: every table on the floor (where the party may move to). */
+  readonly tables: readonly StaffDiningTable[];
+  /** After a move (target null when only the tables are read again). */
+  readonly onMoved: (message: string, targetReference: string | null) => void;
   /** The Order host transfer's own retry stays pressable while it holds the page. */
   readonly hostTransferDisabled: boolean;
   /** v15 2026-10-29: a party size just recorded, for the table list. */
@@ -1320,6 +1335,17 @@ function TablePanel({
             if (table.currentDiningSessionReference !== null)
               onPartySize?.(table.currentDiningSessionReference, size);
           }}
+        />
+      ) : null}
+      {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
+        // WP-2423 item 8 ⑧ (Owner decision 3): move the party to another free table.
+        <TableMove
+          key={"move:" + table.currentDiningSessionReference}
+          table={table}
+          tables={tables}
+          csrf={csrf}
+          locked={locked}
+          onMoved={onMoved}
         />
       ) : null}
       {seated ? (

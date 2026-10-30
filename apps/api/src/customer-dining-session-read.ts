@@ -11,7 +11,11 @@ import {
   type GuestSession,
 } from "@bop/identity";
 import { createHash } from "node:crypto";
-import { createPostgresDiningPaymentTimingStore, listDiningSessionTableLabels } from "@rms/dining";
+import {
+  createPostgresDiningPaymentTimingStore,
+  listDiningSessionTableLabels,
+  loadDiningParticipantMove,
+} from "@rms/dining";
 import { listOpenKitchenReworkItems } from "@rms/kitchen";
 import {
   createOrderStatusQueryService,
@@ -278,6 +282,17 @@ const unavailable = (): never => {
  * status view is still being built (an event consumer does it, within seconds). Not "not joined":
  * the page waits a moment and reads again.
  */
+/**
+ * WP-2423 item 8 ⑧ (Owner decision 3): staff moved the guest's party to another table after this
+ * phone joined. The phone joined the old table, so it no longer acts for the party; the guest is
+ * told where the party sits now and scans that table's code to keep ordering together.
+ */
+export class DiningTableMovedError extends Error {
+  constructor(readonly tableLabel: string) {
+    super("the party moved to another table");
+    this.name = "DiningTableMovedError";
+  }
+}
 export class DiningOrderStillProcessingError extends Error {
   constructor() {
     super("the table's order is still being prepared");
@@ -598,6 +613,14 @@ export interface CustomerDiningSessionDependencies {
     transaction: ConsumerTransaction,
     now: () => string,
   ): { authorize(input: { observedAt: string }): Promise<GuestSession> };
+  /**
+   * WP-2423 item 8 ⑧: when this guest's table check failed, the table the party moved to — read
+   * only for an authentic, current guest Session of a party staff moved after it joined.
+   */
+  moved?(
+    transaction: ConsumerTransaction,
+    now: () => string,
+  ): Promise<{ readonly tableLabel: string } | null>;
   /** Owner facts for the participant's own dining session only. */
   facts(
     transaction: ConsumerTransaction,
@@ -629,6 +652,34 @@ function postgresDependencies(
         admission: { consume: async () => null },
       });
       return { authorize: (input) => service.authorize({ ...credentials, ...input }) };
+    },
+    async moved(transaction, now) {
+      const runner: CartQueryTransactionRunner = { run: async (work) => work(transaction) };
+      // The guest Session alone (credentials, expiry, revocation); not the table it joined at.
+      const guest = await new GuestSessionService({
+        store: createPostgresGuestSessionEntryStore(runner, scope),
+        credentials: options.credentials,
+        binding: { validate: async () => "Current" as const },
+        now,
+        admission: { consume: async () => null },
+      })
+        .authorize({ ...credentials, observedAt: now() })
+        .catch(() => null);
+      if (
+        guest === null ||
+        String(guest.brandReference) !== scope.brandReference ||
+        String(guest.storeReference) !== scope.storeReference ||
+        guest.channel !== "DineIn" ||
+        guest.diningState !== "DiningBound" ||
+        guest.diningSessionReference === null ||
+        guest.diningParticipantReference === null
+      )
+        return null;
+      const moved = await loadDiningParticipantMove(transaction as never, scope, {
+        diningSessionReference: String(guest.diningSessionReference),
+        participantReference: String(guest.diningParticipantReference),
+      });
+      return moved === null ? null : { tableLabel: moved.tableLabel };
     },
     async facts(transaction, context) {
       const {
@@ -1207,6 +1258,22 @@ export function createCustomerDiningSessionRead(
           return view;
         });
       } catch (error) {
+        // WP-2423 item 8 ⑧: a phone of a party staff moved says where the party sits now.
+        if (
+          deps.moved !== undefined &&
+          (error instanceof GuestSessionError ||
+            (error instanceof OrderStatusProjectionError &&
+              error.code === "ORDER_STATUS_PERMISSION_DENIED"))
+        ) {
+          const moved = await transactions
+            .run((transaction) =>
+              (deps.moved as NonNullable<typeof deps.moved>)(transaction, () =>
+                String(parseCanonicalInstant(options.now())),
+              ),
+            )
+            .catch(() => null);
+          if (moved !== null) throw new DiningTableMovedError(moved.tableLabel);
+        }
         if (error instanceof OrderStatusProjectionError) throw error;
         if (error instanceof DiningOrderStillProcessingError) throw error;
         if (error instanceof GuestSessionError)

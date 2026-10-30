@@ -660,6 +660,10 @@ system (staff cannot open this document offline).
   write why and who agreed). It is never left off the bill. When screens come back, record the
   number of guests on the table (the tea then follows it) or, if the tea was charged differently,
   change the tea count on the table with the reason.
+- **Moving a table** (WP-2423 item 8 ⑧): on the table's first slip write "moved from table A to
+  table B" and the time, and carry the slips to table B. When screens come back, open table A on
+  `Tables` and use `Move to…` to record it (table A is then marked for cleaning); guests scan
+  table B's code to keep ordering. A table with a party can't be joined to another yet.
 - **Setting up the tea item** (owner, once): on `Menu`, press `New dish`, enter its name and
   price, and under its allergens choose `A charge, no stock ingredients (such as tea)`; save, mark
   it `Not prepared by the kitchen`, and press `List it`. Do not hide it: guests never see the tea item on their menu, and a
