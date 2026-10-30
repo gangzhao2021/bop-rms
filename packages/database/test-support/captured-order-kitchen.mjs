@@ -4,6 +4,7 @@ import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persis
 import { seedMerchantAcceptanceSession } from "./merchant-acceptance-session.mjs";
 import { createMerchantOrderAcceptanceCommand } from "../../../apps/api/src/merchant-order-acceptance-command.ts";
 import { exerciseCapturedOrderFulfillment } from "./captured-order-fulfillment.mjs";
+import { grantPilotApiAcl } from "./pilot-api-acl.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createMerchantPaidOrderAcceptance } from "../../../apps/api/src/merchant-paid-order-acceptance.ts";
@@ -77,6 +78,10 @@ export async function exerciseCapturedOrderKitchen({
   await admin.query("GRANT SELECT ON rms_ordering.order_pay_later_confirmation TO " + role);
   await admin.query("GRANT SELECT ON rms_ordering.checkout_contact_redaction TO " + role);
   await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_eventing.consumer_inbox TO " + role);
+  // WP-2423: the order queue composes Ordering, Payment, Kitchen and Dining sources (table merges
+  // since DEC-DINING-TABLE-MERGE); hold the rendered pilot API ACL so the role cannot drift from
+  // the deployed grants as sources are added.
+  await grantPilotApiAcl(admin, role);
   const record = {
     acceptanceReference: next(),
     operationReference: next(),

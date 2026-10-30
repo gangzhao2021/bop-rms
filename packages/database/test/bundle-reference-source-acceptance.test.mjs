@@ -171,6 +171,11 @@ it("holds complete Bundle source graphs against effective source writes until ou
         [versionInsert, [id(100), id(10), id(1), names, past]],
         [groupInsert, [id(101), id(11), id(10), id(1), "SYNTHETIC_ADDED", names, 1]],
         [memberInsert, [id(13), id(11), id(10), id(1), id(102), "Sku"]],
+        // Since 2000_115 publishing a draft is the one effective bundle_version update.
+        [
+          "UPDATE rms_catalog.bundle_version SET status='Published',validation_digest=$2,updated_at=$3,published_at=$3 WHERE bundle_version_id=$1",
+          [id(11), "sha256:" + "c".repeat(64), past],
+        ],
         [rootInsert, [id(30), id(1), "SYNTHETIC_BUNDLE_30", id(31), past, id(2)]],
       ];
       await source().withCurrentSnapshot(request, async (s) => {
@@ -198,7 +203,6 @@ it("holds complete Bundle source graphs against effective source writes until ou
         );
         // Immutable child writes remain no-ops, rather than fictitious blocked mutations.
         for (const [table, column, value] of [
-          ["bundle_version", "bundle_version_id", id(11)],
           ["bundle_component_group", "group_id", id(13)],
           ["bundle_component_sellable", "group_id", id(13)],
         ]) {
@@ -211,17 +215,33 @@ it("holds complete Bundle source graphs against effective source writes until ou
             ).rowCount,
             0,
           );
+        }
+        for (const [table, column, value] of [
+          ["bundle_version", "bundle_version_id", id(11)],
+          ["bundle_component_group", "group_id", id(13)],
+          ["bundle_component_sellable", "group_id", id(13)],
+        ]) {
           assert.equal(
             (await writer.query(`DELETE FROM rms_catalog.${table} WHERE ${column}=$1`, [value]))
               .rowCount,
             0,
           );
         }
+        // Any other bundle_version update is refused outright (2000_115), before the fence.
+        await writer.query("SAVEPOINT version_edit");
+        await assert.rejects(
+          writer.query(
+            "UPDATE rms_catalog.bundle_version SET brand_id=brand_id WHERE bundle_version_id=$1",
+            [id(11)],
+          ),
+          (e) => e.code === "55000" && /only changes by being published/.test(e.message),
+        );
+        await writer.query("ROLLBACK TO SAVEPOINT version_edit");
         await writer.query("ROLLBACK");
         await scope(reader, id(40), id(20));
       });
       assert.equal(await source().withCurrentSnapshot(request, async (s) => s.digest), digest);
-      for (const [sql, values] of changes.slice(0, 4)) {
+      for (const [sql, values] of changes.slice(0, 5)) {
         await writer.query("BEGIN");
         await scope(writer);
         assert.equal((await writer.query(sql, values)).rowCount, 1);
