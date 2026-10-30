@@ -121,6 +121,8 @@ test.describe("@production a guest at the table asks staff to come over", () => 
     const panel = page.getByRole("region", { name: "Need a staff member?" });
     await expect(panel).toBeVisible();
     await expect(panel.getByRole("radio", { name: "A question" })).toBeChecked();
+    // DEC-DINING-STAFF-CALL (2026-10-30): a table can say it is ready to pay.
+    await expect(panel.getByRole("radio", { name: "We're ready to pay" })).toBeVisible();
     await panel
       .getByRole("radio", { name: "Something for the table (water, cutlery, napkins)" })
       .check();

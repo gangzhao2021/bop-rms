@@ -10,7 +10,13 @@ import {
  * reason and no free text. The browser never names a table or Session; the server uses this
  * browser's own joined Guest Session.
  */
-export const diningStaffCallReasons = ["Question", "TableNeeds", "OrderProblem"] as const;
+// "ReadyToPay" (DEC-DINING-STAFF-CALL 2026-10-30): the table is ready to pay.
+export const diningStaffCallReasons = [
+  "Question",
+  "TableNeeds",
+  "OrderProblem",
+  "ReadyToPay",
+] as const;
 export type DiningStaffCallReason = (typeof diningStaffCallReasons)[number];
 
 export interface DiningStaffCallView {

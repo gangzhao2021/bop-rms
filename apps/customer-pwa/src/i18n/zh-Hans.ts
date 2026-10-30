@@ -1085,6 +1085,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A question": "有问题想问",
   "Something for the table (water, cutlery, napkins)": "桌上需要东西（水、餐具、纸巾）",
   "A problem with my order": "我点的菜有问题",
+  "We're ready to pay": "可以买单了",
   "Staff have been asked to come to your table": "已请店员到你的桌边",
   "Asked at {time} · {reason}": "{time} 呼叫 · {reason}",
   "Everyone at your table sees this. Someone will come over as soon as they can.":

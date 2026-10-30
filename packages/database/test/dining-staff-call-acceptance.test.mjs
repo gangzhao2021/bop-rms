@@ -597,8 +597,9 @@ it("lets a seated guest call staff once at a time, within a budget, and staff an
         0,
       );
 
-      // Once the Session is closing, its guests are no longer seated for calls, and its open call
-      // is no longer counted for staff.
+      // DEC-DINING-STAFF-CALL (coordinator 2026-10-30, Owner-authorized): a table checking out still
+      // calls staff — its open call stays open and counted, and a guest may call "ready to pay";
+      // once the table is closed, no one is seated for calls.
       const open = await calls().call(asGuest(guest, sessionId, 93, 47), "Question");
       assert.equal(open.status, "Called");
       assert.equal(await staff((store, tx) => store.countOpen(tx, allowed)), 1);
@@ -706,12 +707,31 @@ it("lets a seated guest call staff once at a time, within a budget, and staff an
         requestedAt: at(48),
       });
       assert.equal(closedSession.session.phase, "Closing");
-      assert.equal(await staff((store, tx) => store.countOpen(tx, allowed)), 0);
-      const late = await calls(runner({ readOnly: true })).status(
+      assert.equal(await staff((store, tx) => store.countOpen(tx, allowed)), 1);
+      const checkingOut = await calls(runner({ readOnly: true })).status(
         asGuest(guest, sessionId, 57, 49),
       );
-      assert.deepEqual(late, { seated: false, open: null, recentlyClosed: null, nextCallAt: null });
-      assert.deepEqual(await calls().call(asGuest(guest, sessionId, 94, 49), "Question"), {
+      assert.equal(checkingOut.seated, true);
+      assert.notEqual(checkingOut.open, null);
+      assert.deepEqual(await calls().withdraw(asGuest(guest, sessionId, 94, 49), id(93)), {
+        status: "Closed",
+        kind: "Withdrawn",
+      });
+      const ready = await calls().call(asGuest(guest, sessionId, 95, 50), "ReadyToPay");
+      assert.equal(ready.status, "Called", JSON.stringify(ready));
+      assert.equal(ready.call.reason, "ReadyToPay");
+      assert.equal(await staff((store, tx) => store.countOpen(tx, allowed)), 1);
+      // The table closed (TEST-only owner fixture standing in for the closing command): no one is
+      // seated for calls any more.
+      await admin.query(
+        "UPDATE rms_dining.dining_session SET phase='Closed',version=version+1,session_snapshot=jsonb_set(jsonb_set(session_snapshot,'{phase}','\"Closed\"'),'{version}',to_jsonb(version+1)) WHERE session_id=$1",
+        [sessionId],
+      );
+      const late = await calls(runner({ readOnly: true })).status(
+        asGuest(guest, sessionId, 58, 51),
+      );
+      assert.equal(late.seated, false);
+      assert.deepEqual(await calls().call(asGuest(guest, sessionId, 96, 51), "Question"), {
         status: "Refused",
         reason: "NotSeated",
         retryAt: null,
