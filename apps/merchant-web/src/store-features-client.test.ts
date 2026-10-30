@@ -46,6 +46,26 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
     ])
       expect(() => parseStoreFeatures(bad)).toThrow();
   });
+  it("v15 2026-10-29: keeps only well-formed tea choices (none from an older server)", () => {
+    const tea = "019a3c00-0000-7000-8000-000000000505";
+    expect(parseStoreFeatures(view).teaChoices).toEqual([]);
+    expect(
+      parseStoreFeatures({
+        ...view,
+        teaChoices: [
+          { sellableReference: tea, name: "Tea (TEST) 茶位" },
+          { sellableReference: "tea", name: "Not a reference" },
+          { sellableReference: tea },
+        ],
+      }).teaChoices,
+    ).toEqual([{ sellableReference: tea, name: "Tea (TEST) 茶位", unavailable: null }]);
+    expect(
+      parseStoreFeatures({
+        ...view,
+        teaChoices: [{ sellableReference: tea, name: "Tea (TEST)", unavailable: "NotOffered" }],
+      }).teaChoices[0]?.unavailable,
+    ).toBe("NotOffered");
+  });
   it("sends the owner's change, and says when another change came first", async () => {
     const sent: unknown[] = [];
     const client = createStoreFeaturesClient("a".repeat(43), async (_url, init) => {

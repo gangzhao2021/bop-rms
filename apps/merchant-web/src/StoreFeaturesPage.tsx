@@ -449,7 +449,6 @@ export function StoreFeaturesPage({
         </div>
         {/* WP-2423 item 8 ⑦ 4b-2: the per-head tea charge (Dining's own setting). */}
         <StoreTeaCharge
-          csrf={csrf}
           view={view}
           client={client}
           locked={busy}

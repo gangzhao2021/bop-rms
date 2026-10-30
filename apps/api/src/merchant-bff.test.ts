@@ -2045,6 +2045,7 @@ it("WP-2423 item 8 ⑦: reads and changes the Store's modules, and says when ano
       changedAt: null,
     },
     teaCharge: { version: 0, teaSellableReference: null, changedAt: null },
+    teaChoices: [],
     tips: { version: 0, enabled: true, tierPercents: [10, 15, 18], changedAt: null },
     canChange: true,
   };

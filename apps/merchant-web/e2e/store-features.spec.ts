@@ -67,6 +67,12 @@ test("@production the owner applies the full-service setup, turns a module back 
       teaSellableReference: null as string | null,
       changedAt: null as string | null,
     },
+    // v15 2026-10-29: only items on the listed dine-in menu, each by its own name.
+    teaChoices: [
+      { sellableReference: id(505), name: "Tea (TEST) 茶位", unavailable: null },
+      // Hidden from this store on the menu: a staff round could not sell it.
+      { sellableReference: id(506), name: "Jasmine tea (TEST)", unavailable: "NotOffered" },
+    ],
     tips: {
       version: 0,
       enabled: true,
@@ -155,29 +161,6 @@ test("@production the owner applies the full-service setup, turns a module back 
     return route.fulfill({ headers, json: current });
   });
 
-  // WP-2423 item 8 ⑦ 4b-2: every item the Store sells (hidden ones too); tea is chosen from it.
-  await page.route("**/merchant/commerce/availability/query", (route) =>
-    route.fulfill({
-      headers,
-      json: {
-        screenId: "CAT-AVAILABILITY",
-        sourceAsOf: "2026-10-29T15:00:00.000Z",
-        viewer: id(500),
-        timeZone: "America/Toronto",
-        permissions: { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true },
-        items: [
-          {
-            skuReference: id(505),
-            skuCode: "SKU_TEA",
-            productName: "Tea (TEST)",
-            sizeName: "",
-            status: "Available",
-            soldOutUntil: null,
-          },
-        ],
-      },
-    }),
-  );
   // Fulfillment's current pickup queue (the Pickup page's read): two orders still waiting.
   let pickupReadable = true;
   const waitingItem = (n: number) => ({
@@ -340,7 +323,14 @@ test("@production the owner applies the full-service setup, turns a module back 
   ).toBeVisible();
   const teaItem = page.getByRole("combobox", { name: "Tea charge item" });
   await expect(teaItem).toHaveValue("");
-  await teaItem.selectOption({ label: "Tea (TEST)" });
+  // Only listed items, each named once; one hidden from this store can't be chosen, and says why.
+  await expect(teaItem.getByRole("option")).toHaveText([
+    "No tea charge",
+    "Tea (TEST) 茶位",
+    "Jasmine tea (TEST) — hidden from this store on the menu; show it to choose it",
+  ]);
+  await expect(teaItem.getByRole("option", { name: /^Jasmine tea/u })).toBeDisabled();
+  await teaItem.selectOption({ label: "Tea (TEST) 茶位" });
   await page.getByRole("button", { name: "Save tea charge" }).click();
   await expect(
     page.getByText("Saved. Tea is added for each guest from the next party size recorded."),

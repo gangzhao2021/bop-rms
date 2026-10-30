@@ -1779,6 +1779,10 @@ export async function createInternalMerchant(
         persistence,
         authentication: service,
         now: resources.now,
+        // v15 2026-10-29: the tea choices are priced and offered at the Store, as a round sells them.
+        ...(loadPricingCurrencyMetadata === undefined
+          ? {}
+          : { currencyMetadata: await loadPricingCurrencyMetadata() }),
       }),
       // WP-2423 item 8 ⑦: a server chases a dish (when the Store turned chasing on).
       diningChase: createMerchantDiningChase({

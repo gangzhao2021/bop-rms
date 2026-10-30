@@ -30,13 +30,13 @@ const ref = (value: unknown) =>
     ? value
     : fail("KITCHEN_NOT_PREPARED_INPUT_INVALID");
 
-export type MerchantKitchenNotPreparedResult = {
+export interface MerchantKitchenNotPreparedResult {
   readonly products: readonly {
     readonly productReference: string;
     readonly notPrepared: boolean;
     readonly version: number;
   }[];
-};
+}
 
 /**
  * WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 2, coordinator 2026-10-29): on

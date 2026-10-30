@@ -230,7 +230,7 @@ describe("WP-2423 menu page helpers", () => {
       "The menu review stopped at 二人套餐 without naming what is missing (code AllergenEvidenceDiffers). Nothing was listed. Tell the operator this code.",
     );
     expect(menuReviewProblemText({ ...base, missing: "Recipe" })).toBe(
-      "Latte has no published recipe for this menu's Stores. Publish one under Recipes and assign it to this size, then submit again.",
+      "Latte has no recipe for this menu's Stores. In this menu, declare its allergens, or mark it as a charge that uses no stock ingredients (such as tea); or publish a recipe under Recipes and assign it to this size. Then list it again.",
     );
     expect(
       menuReviewProblemText({

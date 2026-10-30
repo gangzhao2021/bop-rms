@@ -1,4 +1,10 @@
 import { readClosedRecord } from "@bop/identity";
+import {
+  createPostgresPublishedMenuQueryStore,
+  parseCatalogCode,
+  parseCatalogInstant,
+  parseCatalogReference,
+} from "@rms/catalog";
 import { skuRecipeUsesStock } from "@rms/recipe";
 import {
   changeDiningServiceSetting,
@@ -23,6 +29,8 @@ import {
   type StoreFeatureModules,
   type StoreFeatureSetting,
 } from "@rms/store";
+import type { CurrencyMetadataSnapshot } from "@rms/pricing";
+import { createCustomerMenuStoreFacts } from "./customer-menu-store-facts.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -35,6 +43,8 @@ export type MerchantStoreFeaturesErrorCode =
   | "STORE_FEATURES_CHANGED"
   /** WP-2423 item 8 ⑦ 4b-3: the tea charge item uses stock (a recipe); tea must not. */
   | "STORE_FEATURES_TEA_USES_STOCK"
+  /** WP-2423 item 8 ⑦ (v15 2026-10-29): the tea item is not on the Store's listed dine-in menu. */
+  | "STORE_FEATURES_TEA_NOT_LISTED"
   | "STORE_FEATURES_UNAVAILABLE";
 export class MerchantStoreFeaturesError extends Error {
   constructor(readonly code: MerchantStoreFeaturesErrorCode) {
@@ -118,6 +128,19 @@ export interface StoreFeaturesView {
     readonly teaSellableReference: string | null;
     readonly changedAt: string | null;
   };
+  /**
+   * v15 2026-10-29: what the owner may choose as the tea: the items on the Store's listed dine-in
+   * menu (hidden ones included; listing reviewed each with its price), by their own name.
+   */
+  readonly teaChoices: readonly {
+    readonly sellableReference: string;
+    readonly name: string;
+    /**
+     * Why it can't be the tea now (null: it can): not offered at this Store (hidden from it on
+     * the menu), or no price here. A staff round could not sell it.
+     */
+    readonly unavailable: "NotOffered" | "NoPrice" | null;
+  }[];
   /** Owner decision 11: the three tip percentages offered, or tips off (Payment's own setting). */
   readonly tips: {
     readonly version: number;
@@ -139,6 +162,8 @@ export function createMerchantStoreFeatures(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
   now(): string;
+  /** Prices the tea choices at the Store (absent: listed items are taken as priced). */
+  currencyMetadata?: CurrencyMetadataSnapshot;
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
   return async (input: {
@@ -355,24 +380,28 @@ export function createMerchantStoreFeatures(options: {
                 observedAt: new Date(Date.parse(options.now())).toISOString(),
               });
             let teaCharge = await loadDiningTeaChargeSetting(diningRunner, scope);
-            // Tea never uses stock: taking it off an unpaid bill would have stock to return.
-            if (
-              teaChange !== null &&
-              teaChange.teaSellableReference !== null &&
-              (await skuRecipeUsesStock(
-                tx as unknown as Parameters<typeof skuRecipeUsesStock>[0],
+            const teaChoices = await listedTeaChoices(
+              tx,
+              scope,
+              options.now(),
+              options.currencyMetadata,
+            );
+            if (teaChange !== null && teaChange.teaSellableReference !== null) {
+              const refused = await teaItemRefusal(
+                tx,
                 scope,
+                teaChoices,
                 teaChange.teaSellableReference,
-              ))
-            )
-              return fail("STORE_FEATURES_TEA_USES_STOCK");
+              );
+              if (refused !== null) return fail(refused);
+            }
             if (teaChange !== null)
               teaCharge = await changeDiningTeaChargeSetting(diningRunner, scope, {
                 ...teaChange,
                 actorReference: String(current.actorReference),
                 observedAt: new Date(Date.parse(options.now())).toISOString(),
               });
-            return storeFeaturesView(setting, services, tips, teaCharge, true);
+            return storeFeaturesView(setting, services, tips, teaCharge, teaChoices, true);
           },
         ),
       );
@@ -395,6 +424,7 @@ function storeFeaturesView(
   services: DiningServiceSetting,
   tips: StoreTipSetting,
   teaCharge: DiningTeaChargeSetting,
+  teaChoices: StoreFeaturesView["teaChoices"],
   canChange: boolean,
 ): StoreFeaturesView {
   return Object.freeze({
@@ -418,6 +448,7 @@ function storeFeaturesView(
       teaSellableReference: teaCharge.teaSellableReference,
       changedAt: teaCharge.changedAt,
     }),
+    teaChoices: Object.freeze(teaChoices.map((item) => Object.freeze({ ...item }))),
     tips: Object.freeze({
       version: tips.version,
       enabled: tips.tipsEnabled,
@@ -430,6 +461,115 @@ function storeFeaturesView(
 
 interface QueryTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
+}
+
+/**
+ * v15 2026-10-29: why this item can't be the per-head tea, or null. Only an item a staff round can
+ * sell — on the listed dine-in menu, offered at this Store, priced here — and never one whose
+ * recipe uses stock (taking tea off an unpaid bill would have stock to return); a dish declared a
+ * charge with no stock ingredients is fine. Exported for the restricted-role acceptance.
+ */
+export async function teaItemRefusal(
+  tx: QueryTransaction,
+  scope: { brandReference: string; storeReference: string },
+  choices: StoreFeaturesView["teaChoices"],
+  teaSellableReference: string,
+): Promise<"STORE_FEATURES_TEA_NOT_LISTED" | "STORE_FEATURES_TEA_USES_STOCK" | null> {
+  if (
+    !choices.some(
+      (item) => item.sellableReference === teaSellableReference && item.unavailable === null,
+    )
+  )
+    return "STORE_FEATURES_TEA_NOT_LISTED";
+  return (await skuRecipeUsesStock(
+    tx as unknown as Parameters<typeof skuRecipeUsesStock>[0],
+    scope,
+    teaSellableReference,
+  ))
+    ? "STORE_FEATURES_TEA_USES_STOCK"
+    : null;
+}
+
+/**
+ * v15 2026-10-29: the items on the Store's current listed dine-in menu, hidden ones included (a
+ * tea item is usually hidden from the guest menu), each by its own name — the menu listing
+ * reviewed each one with its price. Restores the Brand and Store context the read changes.
+ */
+export async function listedTeaChoices(
+  tx: QueryTransaction,
+  scope: { brandReference: string; storeReference: string },
+  at: string,
+  currencyMetadata: CurrencyMetadataSnapshot | undefined,
+): Promise<StoreFeaturesView["teaChoices"]> {
+  const before = (
+    (await tx.query(
+      "SELECT current_setting('bop.brand_id',true) brand,current_setting('bop.store_id',true) store",
+      [],
+    )) as { rows?: { brand: string | null; store: string | null }[] } | undefined
+  )?.rows?.[0];
+  try {
+    const requestedAt = parseCatalogInstant(new Date(Date.parse(at)).toISOString());
+    const projections = await createPostgresPublishedMenuQueryStore(
+      { run: (work) => work(tx as never) },
+      scope,
+    ).loadCandidates({
+      brandReference: parseCatalogReference(scope.brandReference),
+      storeReference: parseCatalogReference(scope.storeReference),
+      channelCode: parseCatalogCode("CUSTOMER_PWA"),
+      orderTypeCode: parseCatalogCode("DINE_IN"),
+      requestedAt,
+    });
+    const items = new Map<string, string>();
+    for (const projection of projections) {
+      const locale = projection.snapshot.defaultLocale;
+      for (const section of projection.snapshot.sections)
+        for (const item of section.sellables) {
+          if (item.configuredAvailability !== "Available") continue;
+          const sku = String(item.sellableReference);
+          const name = item.localizedNames[locale] ?? Object.values(item.localizedNames)[0] ?? "";
+          const zh = Object.entries(item.localizedNames).find(
+            ([key, value]) => key.startsWith("zh") && value !== name,
+          )?.[1];
+          if (!items.has(sku)) items.set(sku, zh === undefined ? name : `${name} ${zh}`);
+        }
+    }
+    // Offered at this Store with its price, as a staff round (and the guest menu) reads it.
+    const facts =
+      currencyMetadata === undefined || items.size === 0
+        ? null
+        : await createCustomerMenuStoreFacts({
+            transactions: { run: (work) => work(tx as never) },
+            currencyMetadata,
+            priceChannelCode: "CUSTOMER_WEB",
+          }).load({
+            brandReference: parseCatalogReference(scope.brandReference),
+            storeReference: parseCatalogReference(scope.storeReference),
+            channelCode: parseCatalogCode("CUSTOMER_PWA"),
+            orderTypeCode: parseCatalogCode("DINE_IN"),
+            requestedAt,
+            sellableReferences: [...items.keys()].map((sku) => parseCatalogReference(sku)),
+          });
+    return [...items].map(([sellableReference, name]) => {
+      const fact = facts?.get(parseCatalogReference(sellableReference));
+      return {
+        sellableReference,
+        name,
+        unavailable:
+          facts === null
+            ? null
+            : fact === undefined || fact.availability === "NotOffered"
+              ? ("NotOffered" as const)
+              : fact.price === null
+                ? ("NoPrice" as const)
+                : null,
+      };
+    });
+  } finally {
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      before?.brand ?? "",
+      before?.store ?? "",
+    ]);
+  }
 }
 const allModules: StoreFeatureModules = Object.freeze({
   counterOrder: true,

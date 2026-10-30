@@ -67,7 +67,9 @@ export class MerchantDishAllergenError extends Error {
       /** The size already has a real recipe: its allergens come from that recipe's ingredients. */
       | "RealRecipe"
       /** Declaring without review needs a Brand with exactly one store. */
-      | "NotSingleStore",
+      | "NotSingleStore"
+      /** WP-2423 item 8 ⑦: the size was declared the other way (allergens, or no ingredients). */
+      | "DeclaredOtherwise",
   ) {
     super(code);
     this.name = "MerchantDishAllergenError";
@@ -80,17 +82,43 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 const ref = (value: unknown): string =>
   typeof value === "string" && uuid.test(value) ? value : fail("Invalid");
 
-export interface DishAllergenCommandBody {
-  readonly action: "DeclareDish";
-  readonly operationReference: string;
-  readonly skuReference: string;
-  readonly allergens: readonly {
-    readonly allergenReference: string;
-    readonly classification: "Contains" | "CrossContactPossible";
-  }[];
-}
+export type DishAllergenCommandBody =
+  | {
+      readonly action: "DeclareDish";
+      readonly operationReference: string;
+      readonly skuReference: string;
+      readonly allergens: readonly {
+        readonly allergenReference: string;
+        readonly classification: "Contains" | "CrossContactPossible";
+      }[];
+    }
+  /**
+   * WP-2423 item 8 ⑦ (coordinator 2026-10-29): the owner declares the size uses no stock
+   * ingredients — a charge such as the per-head tea. Recorded like declared allergens (who and
+   * when; none declared), labelled NoIngredientsDeclaredByStaff; the listing review accepts its
+   * generated recipe, and it never counts or deducts stock.
+   */
+  | {
+      readonly action: "DeclareNoIngredients";
+      readonly operationReference: string;
+      readonly skuReference: string;
+    };
 export function parseDishAllergenCommandBody(value: unknown): DishAllergenCommandBody {
   const r = value as Record<string, unknown> | null;
+  if (
+    r !== null &&
+    typeof r === "object" &&
+    !Array.isArray(r) &&
+    r.action === "DeclareNoIngredients"
+  ) {
+    if (Object.keys(r).sort().join(",") !== "action,operationReference,skuReference")
+      return fail("Invalid");
+    return {
+      action: "DeclareNoIngredients",
+      operationReference: ref(r.operationReference),
+      skuReference: ref(r.skuReference),
+    };
+  }
   if (
     r === null ||
     typeof r !== "object" ||
@@ -192,6 +220,9 @@ export async function declareDishAllergens(
   },
 ) {
   const { may, body } = input;
+  const noIngredients = body.action === "DeclareNoIngredients";
+  const declared = body.action === "DeclareDish" ? body.allergens : [];
+  const label = noIngredients ? "NoIngredientsDeclaredByStaff" : "AllergensDeclaredByStaff";
   const name = (names: Readonly<Record<string, string>>, fallback: string) =>
     names[input.locale] ?? Object.values(names)[0] ?? fallback;
   // Every step is one staff would otherwise do themselves on the recipe, allergen and
@@ -230,7 +261,7 @@ export async function declareDishAllergens(
     const registry = await currentAllergenRegistry(tx as never, s);
     if (registry === null) return fail("RegistryMissing");
     const known = new Set(registry.entries.map((entry) => entry.allergenReference));
-    if (body.allergens.some((a) => !known.has(a.allergenReference))) fail("Invalid");
+    if (declared.some((a) => !known.has(a.allergenReference))) fail("Invalid");
     const sources = await listStaffDeclaredAllergenSources(rtx, s);
     const source = sources.find(
       (candidate) => candidate.subject === "Dish" && candidate.skuReference === sku.skuReference,
@@ -239,6 +270,8 @@ export async function declareDishAllergens(
     const recipes = await listRecipes(rtx, s, at);
     if (sizeRecipeSource(recipes, sources, sku.skuReference) === "Recipe")
       return fail("RealRecipe");
+    // A size stays declared the one way it was first declared (the record is append-only).
+    if (source !== undefined && source.label !== label) return fail("DeclaredOtherwise");
     const dishName = (() => {
       const product = name(sku.productLocalizedNames, "");
       const size = name(sku.localizedNames, sku.skuCode);
@@ -304,7 +337,13 @@ export async function declareDishAllergens(
             await itemCommand("item", "Create", {
               internalCode: code("DECL-", sku.skuCode),
               itemType: "FinishedGood",
-              localizedNames: { [input.locale]: dishName + " (allergens declared by staff)" },
+              localizedNames: {
+                [input.locale]:
+                  dishName +
+                  (noIngredients
+                    ? " (no stock ingredients, a charge)"
+                    : " (allergens declared by staff)"),
+              },
               baseUnit: {
                 unitCode: "EA",
                 dimension: "Count",
@@ -347,7 +386,7 @@ export async function declareDishAllergens(
         Date.parse(d.validUntil) > Date.parse(at),
     );
     const declaration =
-      latest !== undefined && allergenKey(latest.allergens) === allergenKey(body.allergens)
+      latest !== undefined && allergenKey(latest.allergens) === allergenKey(declared)
         ? latest
         : (
             await recordIngredientAllergenDeclaration(tx as never, s, {
@@ -355,7 +394,7 @@ export async function declareDishAllergens(
               itemReference: item.itemReference,
               itemVersionReference: item.configurationOperationReference,
               registryVersionReference: registry.registryVersionReference,
-              allergens: body.allergens,
+              allergens: declared,
               sourceKind: staffAllergenDeclarationSource,
               documentReference: "Declared by staff in the menu",
               note: null,
@@ -396,7 +435,9 @@ export async function declareDishAllergens(
     };
     const draftOf = (revision: number) =>
       parseRecipeDraft({
-        name: dishName + " — Allergens declared by staff",
+        name:
+          dishName +
+          (noIngredients ? " — No stock ingredients (a charge)" : " — Allergens declared by staff"),
         // Each revision keeps its own code, as the recipe editor names them (-R2, -R3, …).
         code: code("DECL-", sku.skuCode).slice(0, 44) + (revision > 1 ? "-R" + revision : ""),
         yieldQuantity: "1",
@@ -542,6 +583,7 @@ export async function declareDishAllergens(
         subject: "Dish",
         skuReference: sku.skuReference,
         recipeReference,
+        label,
       });
     return { status: "Applied" as const, skuReference: sku.skuReference };
   } catch (error) {

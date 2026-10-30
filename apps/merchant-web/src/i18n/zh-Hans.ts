@@ -5298,8 +5298,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{itemCount} items": "{itemCount} 项",
   "{itemReference} ({locationReference}): used {wastedQuantity} {unitCode}, taken off stock {recordedQuantity} {unitCode2}, not in stock {missingQuantity} {unitCode3}":
     "{itemReference}（{locationReference}）：用掉 {wastedQuantity} {unitCode}，从库存扣除 {recordedQuantity} {unitCode2}，库存中没有 {missingQuantity} {unitCode3}",
-  "{item} has no published recipe for this menu's Stores. Publish one under Recipes and assign it to this size, then submit again.":
-    '{item}在此菜单的门店中没有已发布的配方。请在"配方"中发布一个并分配给此规格，然后重新提交。',
+  "{item} has no recipe for this menu's Stores. In this menu, declare its allergens, or mark it as a charge that uses no stock ingredients (such as tea); or publish a recipe under Recipes and assign it to this size. Then list it again.":
+    "{item}在此菜单的门店中没有配方。请在本菜单中声明它的过敏原，或标为不用库存原料的收费项目（如茶位）；也可以在“配方”中发布配方并分配给此规格。然后重新上架。",
   "{item} is back in stock.": "{item}已恢复库存。",
   "{item} is no longer offered at this Store.": "{item}在本店已不再提供。",
   "{item} is now offered at this Store.": "{item}现在在本店提供。",
@@ -6328,13 +6328,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Tea charge item": "茶位项目",
   "No tea charge": "不收茶位",
   "The item set before (no longer on the menu)": "之前设的项目（已不在菜单上）",
-  "The menu could not be read, so the items can't be listed.": "读不到菜单，无法列出项目。",
-  "Mark that item “Not prepared by the kitchen” on the menu, so it never goes to the kitchen board.":
-    "请在菜单里把这一项标为“不经后厨”，这样它不会进后厨看板。",
   "Save tea charge": "保存茶位设置",
   "Reading this table…": "正在读取这张桌…",
-  "This item uses stock (it has a recipe), so it can't be the tea charge. Choose an item without a recipe.":
-    "这一项会扣库存（有配方），不能作为茶位。请选一项没有配方的。",
   "Tea for {count} instead of {guests} guests: {reason}":
     "按 {count} 位收茶位（人数 {guests}）：{reason}",
   "child not charged": "小孩不收",
@@ -6409,4 +6404,21 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Guests at this table have items in their shared cart that haven't been sent{value}, and guests can no longer send them after last orders. Add them to this round to order them.":
     "这桌客人的共用购物车里还有没送出的菜{value}，过了最后点单时间客人已经不能自己送出。把它们加进这一轮即可下单。",
   "Add them to this round": "加进这一轮",
+  "A charge, no stock ingredients": "收费项目，不用库存原料",
+  "A charge, no stock ingredients (such as tea)": "收费项目，不用库存原料（如茶位）",
+  "Declared a charge that uses no stock ingredients (such as tea): it never counts or deducts stock, and guests see no allergens for it.":
+    "已声明为不用库存原料的收费项目（如茶位）：不计库存、不扣库存，客人看到的过敏原为无。",
+  "{item} is declared a charge with no stock ingredients. You can list it now.":
+    "{item} 已声明为不用库存原料的收费项目，现在可以上架。",
+  "This dish was already declared the other way (its allergens, or a charge with no stock ingredients). That record stays; ask the operator to change it.":
+    "这道菜之前已按另一种方式声明（声明过敏原，或不用库存原料的收费项目）。该记录保留不变；如需更改，请联系系统管理员。",
+  "This item has a recipe that uses stock, so it can't be the tea charge. Choose an item declared on the menu as a charge with no stock ingredients.":
+    "这一项的配方会扣库存，不能作为茶位。请选在菜单里声明为不用库存原料的收费项目。",
+  "This item can't be the tea now: it must be on the listed menu, shown at this store, with its price here. Check it on the menu, then choose it here.":
+    "这一项现在不能作为茶位：它必须在已上架的菜单上、对本店显示，并且在本店有价格。请先在菜单里检查，再回到这里选择。",
+  "Only items on the listed menu are shown. For a new tea item: add it on the menu with its price, declare it a charge with no stock ingredients, mark it “Not prepared by the kitchen”, and list the menu; then choose it here. Don't hide it: guests never see the tea item on their menu, and staff must be able to add it.":
+    "这里只列出已上架菜单上的项目。新建茶位项：在菜单里加上并定价，声明为不用库存原料的收费项目，标为“不经后厨”，然后上架菜单，再回到这里选择。不要把它设为隐藏：客人菜单上本来就不会显示茶位项，而店员需要能加茶位。",
+  "{item} — hidden from this store on the menu; show it to choose it":
+    "{item}——在菜单里对本店隐藏了，取消隐藏后才能选",
+  "{item} — no price at this store": "{item}——本店没有价格",
 });

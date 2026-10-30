@@ -27,6 +27,16 @@ export interface StoreFeatures {
     readonly changedAt: string | null;
   };
   /**
+   * v15 2026-10-29: the items the tea charge can be — on the listed dine-in menu (hidden ones
+   * included), each by its own name. Absent from an older server: none.
+   */
+  readonly teaChoices: readonly {
+    readonly sellableReference: string;
+    readonly name: string;
+    /** Why it can't be the tea now: hidden from this Store on the menu, or no price here. */
+    readonly unavailable: "NotOffered" | "NoPrice" | null;
+  }[];
+  /**
    * WP-2423 item 8 ⑦ (Owner decision 11): the three tip percentages guests and staff are
    * offered (with "no tip" and "other amount"), or tips off. Payment's own versioned setting.
    */
@@ -44,7 +54,9 @@ export const validTipTiers = (tiers: readonly number[]): boolean =>
   (tiers[0] as number) < (tiers[1] as number) &&
   (tiers[1] as number) < (tiers[2] as number);
 export class StoreFeaturesClientError extends Error {
-  constructor(readonly code: "Denied" | "Changed" | "TeaUsesStock" | "Unavailable") {
+  constructor(
+    readonly code: "Denied" | "Changed" | "TeaUsesStock" | "TeaNotListed" | "Unavailable",
+  ) {
     super("store features " + code);
     this.name = "StoreFeaturesClientError";
   }
@@ -53,6 +65,7 @@ const fail = (code: StoreFeaturesClientError["code"] = "Unavailable"): never => 
   throw new StoreFeaturesClientError(code);
 };
 const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export function parseStoreFeatures(value: unknown): StoreFeatures {
   const raw = value as Record<string, unknown> | null;
@@ -135,6 +148,27 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
       teaSellableReference: tea.teaSellableReference as string | null,
       changedAt: tea.changedAt as string | null,
     }),
+    teaChoices: Object.freeze(
+      (Array.isArray(raw.teaChoices) ? (raw.teaChoices as unknown[]) : []).flatMap((entry) => {
+        const item = entry as Record<string, unknown> | null;
+        return item !== null &&
+          typeof item === "object" &&
+          typeof item.sellableReference === "string" &&
+          reference.test(item.sellableReference) &&
+          typeof item.name === "string"
+          ? [
+              Object.freeze({
+                sellableReference: item.sellableReference,
+                name: item.name,
+                unavailable:
+                  item.unavailable === "NotOffered" || item.unavailable === "NoPrice"
+                    ? item.unavailable
+                    : null,
+              }),
+            ]
+          : [];
+      }),
+    ),
     tips: Object.freeze({
       version: Number(tips.version),
       enabled: tips.enabled,
@@ -165,7 +199,13 @@ export function createStoreFeaturesClient(csrf: string, fetcher: typeof fetch = 
     if (response.status === 403) return fail("Denied");
     if (response.status === 409) {
       const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
-      return fail(payload?.error === "store_features_tea_uses_stock" ? "TeaUsesStock" : "Changed");
+      return fail(
+        payload?.error === "store_features_tea_uses_stock"
+          ? "TeaUsesStock"
+          : payload?.error === "store_features_tea_not_listed"
+            ? "TeaNotListed"
+            : "Changed",
+      );
     }
     if (!response.ok) return fail();
     return parseStoreFeatures(await response.json().catch(() => null));

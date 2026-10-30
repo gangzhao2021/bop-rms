@@ -19,14 +19,29 @@ describe("WP-2423 item 8 ⑥ dish allergens declared by staff", () => {
         { allergenReference: id(4), classification: "CrossContactPossible" },
       ],
     };
-    expect(parseDishAllergenCommandBody(body).allergens).toHaveLength(2);
-    expect(parseDishAllergenCommandBody({ ...body, allergens: [] }).allergens).toEqual([]);
+    const allergensOf = (value: unknown) => {
+      const parsed = parseDishAllergenCommandBody(value);
+      return parsed.action === "DeclareDish" ? parsed.allergens : null;
+    };
+    expect(allergensOf(body)).toHaveLength(2);
+    expect(allergensOf({ ...body, allergens: [] })).toEqual([]);
     for (const bad of [
       { ...body, extra: true },
       { ...body, action: "Declare" },
       { ...body, allergens: [{ allergenReference: id(3), classification: "Absent" }] },
       { ...body, allergens: [body.allergens[0], body.allergens[0]] },
       { ...body, skuReference: "not-a-reference" },
+    ])
+      expect(() => parseDishAllergenCommandBody(bad)).toThrow(MerchantDishAllergenError);
+  });
+
+  it("WP-2423 item 8 ⑦: declares a size uses no stock ingredients, with nothing else", () => {
+    const body = { action: "DeclareNoIngredients", operationReference: id(1), skuReference: id(2) };
+    expect(parseDishAllergenCommandBody(body)).toEqual(body);
+    for (const bad of [
+      { ...body, allergens: [] },
+      { ...body, skuReference: "not-a-reference" },
+      { action: "DeclareNoIngredients", operationReference: id(1) },
     ])
       expect(() => parseDishAllergenCommandBody(bad)).toThrow(MerchantDishAllergenError);
   });

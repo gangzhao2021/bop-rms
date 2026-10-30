@@ -2,18 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
 import { SourceTime } from "./StoreTime.js";
-import { createAvailabilityClient, parseStoreAvailabilityView } from "./store-availability-page.js";
 import {
   StoreFeaturesClientError,
   type StoreFeatures,
   type StoreFeaturesClient,
 } from "./store-features-client.js";
-
-/** A menu item the tea charge can be (hidden items included: tea is usually hidden). */
-export interface TeaChoice {
-  readonly sellableReference: string;
-  readonly name: string;
-}
 
 /**
  * WP-2423 item 8 ⑦ 4b-2 (Owner decision 2, coordinator 2026-10-29): the per-head tea charge. None
@@ -22,51 +15,23 @@ export interface TeaChoice {
  * none (known limit). Saved on its own, against the version the owner saw.
  */
 export function StoreTeaCharge({
-  csrf,
   view,
   client,
   locked,
   onSaved,
-  menu: injectedMenu,
 }: {
-  readonly csrf: string;
   readonly view: StoreFeatures;
   readonly client: StoreFeaturesClient;
   readonly locked: boolean;
   readonly onSaved: (next: StoreFeatures) => void;
-  readonly menu?: () => Promise<readonly TeaChoice[]>;
 }) {
-  const [items, setItems] = useState<readonly TeaChoice[] | null>(null);
-  const [menuProblem, setMenuProblem] = useState(false);
+  // v15 2026-10-29: only items on the listed dine-in menu (hidden ones included), each priced.
+  const items = view.teaChoices;
   const [chosen, setChosen] = useState<string>(view.teaCharge.teaSellableReference ?? "");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
   const operation = useRef<{ key: string; reference: string } | null>(null);
   useEffect(() => setChosen(view.teaCharge.teaSellableReference ?? ""), [view.teaCharge]);
-  useEffect(() => {
-    let active = true;
-    const load =
-      injectedMenu ??
-      // Every item the Store sells (the guest menu leaves hidden ones out, and tea is usually hidden).
-      (async () =>
-        parseStoreAvailabilityView(await createAvailabilityClient(csrf).load()).items.map(
-          (item) => ({
-            sellableReference: item.skuReference,
-            name:
-              item.sizeName === "" ? item.productName : `${item.productName} · ${item.sizeName}`,
-          }),
-        ));
-    void load()
-      .then((value) => {
-        if (active) setItems(value);
-      })
-      .catch(() => {
-        if (active) setMenuProblem(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, [csrf, injectedMenu]);
   const current = view.teaCharge.teaSellableReference ?? "";
   const save = async () => {
     if (busy || locked || chosen === current) return;
@@ -97,19 +62,22 @@ export function StoreTeaCharge({
         text:
           error instanceof StoreFeaturesClientError && error.code === "TeaUsesStock"
             ? t(
-                "This item uses stock (it has a recipe), so it can't be the tea charge. Choose an item without a recipe.",
+                "This item has a recipe that uses stock, so it can't be the tea charge. Choose an item declared on the menu as a charge with no stock ingredients.",
               )
-            : error instanceof StoreFeaturesClientError && error.code === "Changed"
+            : error instanceof StoreFeaturesClientError && error.code === "TeaNotListed"
               ? t(
-                  "Someone else changed these settings. The page now shows them; check and save again.",
+                  "This item can't be the tea now: it must be on the listed menu, shown at this store, with its price here. Check it on the menu, then choose it here.",
                 )
-              : t("This wasn't saved. Check the connection and try again."),
+              : error instanceof StoreFeaturesClientError && error.code === "Changed"
+                ? t(
+                    "Someone else changed these settings. The page now shows them; check and save again.",
+                  )
+                : t("This wasn't saved. Check the connection and try again."),
       });
     } finally {
       setBusy(false);
     }
   };
-  const named = (item: TeaChoice) => item.name;
   return (
     <fieldset className="store-features__modules" disabled={busy || locked}>
       <legend>{t("Tea charge")}</legend>
@@ -127,22 +95,29 @@ export function StoreTeaCharge({
         <span>{t("Tea charge item")}</span>
         <select value={chosen} onChange={(event) => setChosen(event.currentTarget.value)}>
           <option value="">{t("No tea charge")}</option>
-          {(items ?? []).map((item) => (
-            <option key={item.sellableReference} value={item.sellableReference}>
-              {named(item)}
+          {items.map((item) => (
+            <option
+              key={item.sellableReference}
+              value={item.sellableReference}
+              disabled={item.unavailable !== null && item.sellableReference !== current}
+            >
+              {item.unavailable === "NotOffered"
+                ? t("{item} — hidden from this store on the menu; show it to choose it", {
+                    item: item.name,
+                  })
+                : item.unavailable === "NoPrice"
+                  ? t("{item} — no price at this store", { item: item.name })
+                  : item.name}
             </option>
           ))}
-          {chosen !== "" && items !== null && !items.some((i) => i.sellableReference === chosen) ? (
+          {chosen !== "" && !items.some((i) => i.sellableReference === chosen) ? (
             <option value={chosen}>{t("The item set before (no longer on the menu)")}</option>
           ) : null}
         </select>
       </label>
-      {menuProblem ? (
-        <p role="alert">{t("The menu could not be read, so the items can't be listed.")}</p>
-      ) : null}
       <p className="store-features__detail">
         {t(
-          "Mark that item “Not prepared by the kitchen” on the menu, so it never goes to the kitchen board.",
+          "Only items on the listed menu are shown. For a new tea item: add it on the menu with its price, declare it a charge with no stock ingredients, mark it “Not prepared by the kitchen”, and list the menu; then choose it here. Don't hide it: guests never see the tea item on their menu, and staff must be able to add it.",
         )}
       </p>
       <div className="store-features__actions">

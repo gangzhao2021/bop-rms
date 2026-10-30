@@ -27,6 +27,8 @@ export type MenuErrorCode =
   | "NoKitchenStation"
   /** The dish has a real recipe; its allergens come from the recipe's ingredients. */
   | "RealRecipe"
+  /** WP-2423 item 8 ⑦: the dish was declared the other way (allergens, or no stock ingredients). */
+  | "DeclaredOtherwise"
   /** WP-2423 item 8 ⑥ (saving a dish): someone else's price changes wait to be listed. */
   | "OthersPending"
   /** The menu no longer has the chosen section. */
@@ -128,7 +130,7 @@ export function menuReviewProblemText(problem: MenuReviewProblem): string {
       );
     case "Recipe":
       return t(
-        "{item} has no published recipe for this menu's Stores. Publish one under Recipes and assign it to this size, then submit again.",
+        "{item} has no recipe for this menu's Stores. In this menu, declare its allergens, or mark it as a charge that uses no stock ingredients (such as tea); or publish a recipe under Recipes and assign it to this size. Then list it again.",
         { item: item },
       );
     case "SubRecipe":
@@ -249,6 +251,8 @@ export type AllergenClassification = "Contains" | "CrossContactPossible";
 export interface DishAllergens {
   /** Declared by staff in this page (labelled so, not a costed recipe), a real recipe, or not yet. */
   readonly source: "StaffDeclared" | "Recipe" | "None";
+  /** WP-2423 item 8 ⑦: declared to use no stock ingredients (a charge such as tea); absent: no. */
+  readonly noIngredients?: boolean;
   readonly declared: readonly {
     readonly allergenReference: string;
     readonly classification: AllergenClassification;
@@ -258,6 +262,12 @@ export interface AllergenChoice {
   readonly allergenReference: string;
   readonly name: string;
   readonly nameZh: string;
+}
+/** WP-2423 item 8 ⑦: the size uses no stock ingredients (a charge such as the per-head tea). */
+export interface DeclareNoIngredientsCommand {
+  readonly action: "DeclareNoIngredients";
+  readonly operationReference: string;
+  readonly skuReference: string;
 }
 export interface DeclareDishAllergensCommand {
   readonly action: "DeclareDish";
@@ -480,7 +490,9 @@ export interface MenuClient {
   load(menuReference: string | null): Promise<unknown>;
   command?(command: MenuCommand): Promise<unknown>;
   /** WP-2423 item 8 ⑥: a dish's allergens declared by staff (single store). */
-  declareAllergens?(command: DeclareDishAllergensCommand): Promise<unknown>;
+  declareAllergens?(
+    command: DeclareDishAllergensCommand | DeclareNoIngredientsCommand,
+  ): Promise<unknown>;
   /** WP-2423 item 8 ⑥: what the dish editor reads — the product (or the Brand's tax classes and
    * choice groups for a new dish) and the choice prices. */
   loadDish?(productReference: string | null): Promise<{ product: unknown; optionPrices: unknown }>;
@@ -787,6 +799,7 @@ const codes = new Set<MenuErrorCode>([
   "RegistryMissing",
   "NoKitchenStation",
   "RealRecipe",
+  "DeclaredOtherwise",
   "OthersPending",
   "NoSection",
   "ManySizes",
