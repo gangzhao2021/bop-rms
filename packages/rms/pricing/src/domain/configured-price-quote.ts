@@ -7,7 +7,8 @@ import {
   type PriceQuoteTaxLine,
 } from "./price-quote.js";
 import { createMoney, parsePricingReference, type PricingReference } from "./money-tax-contract.js";
-import { addMoney, calculateTax } from "./money-tax.js";
+import { addMoney } from "./money-tax.js";
+import { calculateQuoteTax } from "./quote-tax-allocation.js";
 import {
   resolveOptionPrice,
   type OptionPriceRuleSnapshot,
@@ -110,7 +111,7 @@ export function createConfiguredPriceQuote(input: {
       createMoney({ amountMinor: 0n, currencyCode: base.currencyMetadata.currencyCode });
     let subtotal = zero(),
       tax = zero();
-    const lines = base.lines.map((line): ConfiguredQuoteLineSnapshot => {
+    const priced = base.lines.map((line) => {
       const source = baseInput.lines.find(
         (candidate) => candidate.lineReference === line.lineReference,
       );
@@ -161,38 +162,34 @@ export function createConfiguredPriceQuote(input: {
         amountMinor: unitPrice.amountMinor * BigInt(line.quantity),
         currencyCode: base.currencyMetadata.currencyCode,
       });
-      let lineTax = zero();
-      const taxLines: PriceQuoteTaxLine[] = line.taxResolution.rules.map((component) => {
+      for (const component of line.taxResolution.rules)
         if (component.resolvedRule.priceInclusion !== "Exclusive")
           throw new PriceQuoteError("QUOTE_UNSUPPORTED_TAX_MODE");
-        const calculated = calculateTax({
-          calculationReference: component.resolvedRule.ruleVersionReference,
-          taxableReference: line.lineReference,
-          inputAmount: component.compoundOnPriorTax
-            ? addMoney(lineSubtotal, lineTax)
-            : lineSubtotal,
-          currencyMetadata: base.currencyMetadata,
-          resolvedRule: component.resolvedRule,
-        });
-        lineTax = addMoney(lineTax, calculated.taxAmount);
-        return Object.freeze({
-          taxAmount: calculated.taxAmount,
-          explanation: calculated.explanation,
-          calculationOrder: component.calculationOrder,
-          compoundOnPriorTax: component.compoundOnPriorTax,
-          ruleReference: component.resolvedRule.ruleVersionReference,
-        });
-      });
-      subtotal = addMoney(subtotal, lineSubtotal);
+      return { line, optionPrices, unitPrice, lineSubtotal };
+    });
+    // WP-2423 DEC-TAX-WHOLE-RECEIPT: tax per tax type on the whole quote, allocated to the lines.
+    const allocated = calculateQuoteTax(
+      priced.map((entry) => ({
+        lineReference: entry.line.lineReference,
+        subtotal: entry.lineSubtotal,
+        rules: entry.line.taxResolution.rules,
+      })),
+      base.currencyMetadata,
+      "WholeQuote",
+    );
+    const lines = priced.map((entry, index): ConfiguredQuoteLineSnapshot => {
+      const taxLines: PriceQuoteTaxLine[] = [...(allocated[index] ?? [])];
+      const lineTax = taxLines.reduce((sum, value) => addMoney(sum, value.taxAmount), zero());
+      subtotal = addMoney(subtotal, entry.lineSubtotal);
       tax = addMoney(tax, lineTax);
       return Object.freeze({
-        ...line,
-        baseUnitPrice: line.unitPrice,
-        optionPrices: Object.freeze(optionPrices),
-        unitPrice,
-        subtotal: lineSubtotal,
+        ...entry.line,
+        baseUnitPrice: entry.line.unitPrice,
+        optionPrices: Object.freeze(entry.optionPrices),
+        unitPrice: entry.unitPrice,
+        subtotal: entry.lineSubtotal,
         tax: lineTax,
-        total: addMoney(lineSubtotal, lineTax),
+        total: addMoney(entry.lineSubtotal, lineTax),
         taxLines: Object.freeze(taxLines),
       });
     });

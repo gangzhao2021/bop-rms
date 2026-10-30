@@ -1,3 +1,4 @@
+import { calculateQuoteTax, type QuoteTaxRounding } from "./quote-tax-allocation.js";
 import { createEffectivePeriod, type EffectivePeriod } from "@bop/effective-period";
 import {
   createCurrencyMetadataSnapshot,
@@ -459,9 +460,10 @@ function validate(
         currencyMetadata: quote.currencyMetadata,
         resolvedRule,
       });
+      // The amount is checked for the whole quote below (one rounding rule throughout).
       if (
         recorded.taxAmount.currencyCode !== currency ||
-        recorded.taxAmount.amountMinor !== calculated.taxAmount.amountMinor ||
+        recorded.taxAmount.amountMinor < 0n ||
         canonical(recorded.explanation) !== canonical(calculated.explanation)
       )
         fail();
@@ -488,6 +490,27 @@ function validate(
     subtotal += line.subtotal.amountMinor;
     tax += lineTax;
   }
+  // WP-2423 DEC-TAX-WHOLE-RECEIPT: every line's tax is exactly what one rule gives for the whole
+  // quote — each line rounded on its own (quotes recorded before the rule) or the quote's tax per
+  // tax type allocated to the lines (new quotes) — never a mix or any other amount.
+  const recordedTax = quote.lines.map((line) =>
+    line.taxLines.map((entry) => entry.taxAmount.amountMinor.toString()).join(","),
+  );
+  const matches = (rounding: QuoteTaxRounding) =>
+    calculateQuoteTax(
+      quote.lines.map((line) => ({
+        lineReference: line.lineReference,
+        subtotal: line.subtotal,
+        rules: line.taxResolution.rules,
+      })),
+      quote.currencyMetadata,
+      rounding,
+    ).every(
+      (entries, index) =>
+        entries.map((entry) => entry.taxAmount.amountMinor.toString()).join(",") ===
+        recordedTax[index],
+    );
+  if (!matches("WholeQuote") && !matches("PerLine")) fail();
   for (const amount of [quote.subtotal, quote.discount, quote.tax, quote.fee, quote.total]) {
     if (amount.currencyCode !== currency) fail();
   }
