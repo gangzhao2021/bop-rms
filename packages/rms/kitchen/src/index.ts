@@ -483,3 +483,4 @@ export {
 } from "./infrastructure/persistence/kitchen-stale-ticket-store.js";
 export * from "./infrastructure/persistence/kitchen-combo-part-store.js";
 export * from "./infrastructure/persistence/kitchen-not-prepared-store.js";
+export * from "./infrastructure/persistence/kitchen-section-store.js";

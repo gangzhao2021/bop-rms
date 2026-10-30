@@ -11,6 +11,8 @@ import {
   listKitchenWorkChases,
   listKitchenWorkItemPreparationFacts,
   type KitchenQueueItemView,
+  listKitchenWorkItemSections,
+  loadKitchenSections,
 } from "@rms/kitchen";
 import {
   allergenDisclosureForChoice,
@@ -136,6 +138,8 @@ export interface KitchenPreparation {
   readonly businessDate: string | null;
   /** Restricted (DEC-KDS-CUSTOMER-NOTE): displayed only; never logged or evented. */
   readonly customerNote: string | null;
+  /** WP-2423 item 8 ⑧ (decision 5): the dish's kitchen section (档口); null: no section. */
+  readonly kitchenSection: string | null;
 }
 const unavailableAllergens: KitchenItemAllergens = Object.freeze({ status: "Unavailable" });
 const noPreparation: KitchenPreparation = Object.freeze({
@@ -143,6 +147,7 @@ const noPreparation: KitchenPreparation = Object.freeze({
   orderLabel: null,
   businessDate: null,
   customerNote: null,
+  kitchenSection: null,
 });
 const itemView = (
   item: KitchenQueueItemView,
@@ -165,6 +170,7 @@ const itemView = (
   orderLabel: preparation.orderLabel,
   businessDate: preparation.businessDate,
   customerNote: preparation.customerNote,
+  kitchenSection: preparation.kitchenSection,
 });
 /**
  * WP-2423 Q3: Kitchen gives each work item's menu keys, Catalog the disclosure published for them.
@@ -237,6 +243,12 @@ export async function kitchenPreparation(
   ];
   const tables = await listDiningSessionTableLabels(transaction, scope, diningSessions);
   const movedFrom = await listDiningSessionMovedFrom(transaction, scope, diningSessions);
+  // WP-2423 item 8 ⑧ (decision 5): each dish's kitchen section, for the screen's section filter.
+  const sections = await listKitchenWorkItemSections(
+    transaction,
+    scope,
+    items.map((item) => item.workItemReference),
+  );
   // WP-2423 Q7 slice 2: counter orders and table rounds staff entered (Ordering's staff records).
   const staffOwners = { ...scope, authorize: async () => true };
   const counterOrders = await createPostgresCounterOrderEntryStore(staffOwners).listByOrders(
@@ -259,6 +271,7 @@ export async function kitchenPreparation(
         Object.freeze({
           allergens: facts?.allergens ?? unavailableAllergens,
           customerNote: facts?.customerNote ?? null,
+          kitchenSection: sections.get(item.workItemReference) ?? null,
           businessDate:
             (item.orderBatchReference === undefined
               ? undefined
@@ -631,9 +644,23 @@ export function createMerchantKitchenQuery(options: {
                     null,
                   )
                 : undefined;
+            // WP-2423 item 8 ⑧: the Store's kitchen sections, so a screen can be set to one before
+            // it has work. Read with the first page; left out when it cannot be read.
+            const kitchenSections =
+              query.cursor === null
+                ? await withOptionalRead(
+                    tx,
+                    async () =>
+                      (await loadKitchenSections(tx, authority)).sections.map(
+                        (section) => section.name,
+                      ),
+                    null,
+                  )
+                : null;
             return {
               ...result,
               operatorStatus: operatorStatus(result),
+              ...(kitchenSections === null ? {} : { kitchenSections }),
               storeReference: authority.storeReference,
               canCloseEarlierDayTickets,
               ...(awaitingAcceptance === undefined ? {} : { awaitingAcceptance }),

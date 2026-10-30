@@ -31,7 +31,10 @@ export function StoreTeaCharge({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
   const operation = useRef<{ key: string; reference: string } | null>(null);
-  useEffect(() => setChosen(view.teaCharge.teaSellableReference ?? ""), [view.teaCharge]);
+  // A re-read that saved the same tea item keeps the owner's unsaved choice; only a changed saved
+  // item (saved here or elsewhere) replaces it.
+  const savedTea = view.teaCharge.teaSellableReference ?? "";
+  useEffect(() => setChosen(savedTea), [savedTea]);
   const current = view.teaCharge.teaSellableReference ?? "";
   const save = async () => {
     if (busy || locked || chosen === current) return;

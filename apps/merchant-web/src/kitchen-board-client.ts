@@ -115,6 +115,8 @@ function item(value: unknown) {
     ...(otherName === null ? {} : { otherName }),
     ...("comboParts" in raw ? { comboParts: raw.comboParts } : {}),
     ...("chase" in raw ? { chase: raw.chase } : {}),
+    // WP-2423 item 8 ⑧: the dish's kitchen section, when this source gives it.
+    ...("kitchenSection" in raw ? { kitchenSection: raw.kitchenSection } : {}),
     status: raw.status,
     requiredQuantity: raw.requiredQuantity,
     completedQuantity: raw.completedQuantity,
@@ -258,6 +260,8 @@ export function createKitchenBoardClient(options: {
           ...("awaitingAcceptance" in first
             ? { awaitingAcceptance: first.awaitingAcceptance }
             : {}),
+          // WP-2423 item 8 ⑧: the Store's kitchen sections, read with the first page.
+          ...("kitchenSections" in first ? { kitchenSections: first.kitchenSections } : {}),
         });
       const next = record(cursor);
       // A page may be empty when every ticket on it was just closed (DEC-KITCHEN-STALE-TICKETS);

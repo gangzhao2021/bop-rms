@@ -47,6 +47,11 @@ export interface KitchenBoardItem {
   readonly comboParts?: readonly ComboPartView[];
   /** WP-2423 item 8 ⑦: a server chased this dish (how often, and when last). */
   readonly chase?: { readonly count: number; readonly lastChasedAt: string };
+  /**
+   * WP-2423 item 8 ⑧ (decision 5): the dish's kitchen section (档口); null: no section. Absent from
+   * older servers (no section filter then).
+   */
+  readonly kitchenSection?: string | null;
   readonly status: KitchenStatus;
   readonly requiredQuantity: number;
   readonly completedQuantity: number;
@@ -91,6 +96,8 @@ export interface KitchenBoardView {
    * yet), so the order search can say so. Omitted by older servers; null when not read.
    */
   readonly awaitingAcceptance?: readonly KitchenAwaitingLabel[] | null;
+  /** WP-2423 item 8 ⑧: the Store's kitchen sections, in its order (omitted: not read). */
+  readonly kitchenSections?: readonly string[];
 }
 /** A paid order not accepted yet; a pickup carries when it is refunded unless someone accepts it. */
 export interface KitchenAwaitingLabel extends KitchenOrderLabel {
@@ -301,6 +308,8 @@ function item(value: unknown): KitchenBoardItem {
   const hasComboParts =
     value !== null && typeof value === "object" && Object.hasOwn(value, "comboParts");
   const hasChase = value !== null && typeof value === "object" && Object.hasOwn(value, "chase");
+  const hasSection =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenSection");
   const input = closed(value, [
     "workItemReference",
     "ticketReference",
@@ -322,7 +331,14 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasOtherName ? ["otherName"] : []),
     ...(hasComboParts ? ["comboParts"] : []),
     ...(hasChase ? ["chase"] : []),
+    ...(hasSection ? ["kitchenSection"] : []),
   ]);
+  if (
+    hasSection &&
+    input.kitchenSection !== null &&
+    (typeof input.kitchenSection !== "string" || !SAFE_TEXT.test(input.kitchenSection))
+  )
+    throw new Error("KITCHEN_BOARD_INVALID");
   const chase = hasChase ? closed(input.chase, ["count", "lastChasedAt"]) : null;
   if (chase !== null && (!Number.isSafeInteger(chase.count) || Number(chase.count) < 1))
     throw new Error("KITCHEN_BOARD_INVALID");
@@ -352,6 +368,7 @@ function item(value: unknown): KitchenBoardItem {
     displayName: input.displayName,
     ...(hasOtherName ? { otherName: input.otherName as string } : {}),
     ...(hasComboParts ? { comboParts: parseComboParts(input.comboParts) } : {}),
+    ...(hasSection ? { kitchenSection: input.kitchenSection as string | null } : {}),
     ...(chase === null
       ? {}
       : {
@@ -410,6 +427,8 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     Object.hasOwn(value, "canCloseEarlierDayTickets");
   const hasAwaiting =
     value !== null && typeof value === "object" && Object.hasOwn(value, "awaitingAcceptance");
+  const hasSections =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenSections");
   const input = closed(value, [
     "screenId",
     "projectionName",
@@ -421,7 +440,16 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     "items",
     ...(hasCanClose ? ["canCloseEarlierDayTickets"] : []),
     ...(hasAwaiting ? ["awaitingAcceptance"] : []),
+    ...(hasSections ? ["kitchenSections"] : []),
   ]);
+  if (
+    hasSections &&
+    (!Array.isArray(input.kitchenSections) ||
+      input.kitchenSections.length > 12 ||
+      input.kitchenSections.some((name) => typeof name !== "string" || !SAFE_TEXT.test(name)) ||
+      new Set(input.kitchenSections).size !== input.kitchenSections.length)
+  )
+    throw new Error("KITCHEN_BOARD_INVALID");
   if (hasCanClose && typeof input.canCloseEarlierDayTickets !== "boolean")
     throw new Error("KITCHEN_BOARD_INVALID");
   if (
@@ -466,6 +494,9 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
       ? { canCloseEarlierDayTickets: input.canCloseEarlierDayTickets as boolean }
       : {}),
     ...(hasAwaiting ? { awaitingAcceptance: awaiting } : {}),
+    ...(hasSections
+      ? { kitchenSections: Object.freeze([...(input.kitchenSections as string[])]) }
+      : {}),
   });
 }
 

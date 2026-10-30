@@ -12,6 +12,7 @@ import {
   validTipTiers,
 } from "./store-features-client.js";
 import { createPickupClient } from "./pickup-client.js";
+import { StoreKitchenSections } from "./StoreKitchenSections.js";
 import { StoreTeaCharge } from "./StoreTeaCharge.js";
 import type { PickupClient } from "./pickup.js";
 
@@ -447,6 +448,8 @@ export function StoreFeaturesPage({
             {t("Save table settings")}
           </button>
         </div>
+        {/* WP-2423 item 8 ⑧ (decision 5): the kitchen sections a kitchen screen shows. */}
+        <StoreKitchenSections csrf={csrf} locked={busy} />
         {/* WP-2423 item 8 ⑦ 4b-2: the per-head tea charge (Dining's own setting). */}
         <StoreTeaCharge
           view={view}

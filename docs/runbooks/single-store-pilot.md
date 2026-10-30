@@ -693,6 +693,13 @@ system (staff cannot open this document offline).
   accepted, unfinished order, marked "online order N".
 - When the board returns, older online orders are still there; the kitchen marks them `Mark ready`
   as it finishes them as usual. Do not remake an online order that a paper slip already covers.
+- **Kitchen sections** (WP-2423 item 8 ⑧): the owner names the sections once on `Store features`
+  under `Kitchen sections`, and gives each dish its section on `Menu` (a dish with none shows under
+  `No section`). The board can then show one section on a screen, chosen on that screen and kept
+  on that device; it counts the orders waiting in the other sections. Without the
+  board, the counter writes the section beside each dish on the slip and hands the slip to that
+  section first. A screen left on one section shows only that section: switch it back to
+  `All sections` if one screen has to cover the whole kitchen.
 
 ### 5. Recovery (when screens load again)
 

@@ -601,3 +601,30 @@ fieldset.store-features__modules {
   color: var(--bop-color-accent);
   font: inherit;
 }
+/* WP-2423 item 8 ⑧: the Store's kitchen sections, one row each. */
+.store-kitchen-sections {
+  display: grid;
+  gap: var(--bop-space-2);
+  margin: var(--bop-space-2) 0;
+  padding: 0;
+  list-style: none;
+}
+.store-kitchen-sections li,
+.store-kitchen-sections__add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-2);
+  align-items: center;
+}
+.store-kitchen-sections input,
+.store-kitchen-sections__add input {
+  box-sizing: border-box;
+  flex: 1 1 160px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 var(--bop-space-3);
+}
+.store-kitchen-sections button,
+.store-kitchen-sections__add button {
+  min-height: 44px;
+}

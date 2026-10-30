@@ -34,7 +34,10 @@ export class KitchenNotPreparedError extends Error {
     this.name = "KitchenNotPreparedError";
   }
 }
-type Scope = { readonly brandReference: string; readonly storeReference: string };
+interface Scope {
+  readonly brandReference: string;
+  readonly storeReference: string;
+}
 const context = async (tx: NotPreparedTransaction, scope: Scope) => {
   const brand = reference(scope.brandReference);
   const store = reference(scope.storeReference);

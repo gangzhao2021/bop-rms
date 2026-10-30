@@ -37,6 +37,7 @@ import { createMerchantDiningJoinRegenerate } from "../../apps/api/dist/merchant
 import { createMerchantDiningChase } from "../../apps/api/dist/merchant-dining-chase.js";
 import { createMerchantDiningPartySize } from "../../apps/api/dist/merchant-dining-party-size.js";
 import { createMerchantKitchenNotPrepared } from "../../apps/api/dist/merchant-kitchen-not-prepared.js";
+import { createMerchantKitchenSections } from "../../apps/api/dist/merchant-kitchen-sections.js";
 import { createMerchantDiningTeaCharge } from "../../apps/api/dist/merchant-dining-tea-charge.js";
 import {
   createMerchantStoreFeatures,
@@ -1799,6 +1800,12 @@ export async function createInternalMerchant(
       }),
       // WP-2423 item 8 ⑦: the menu's "not prepared by the kitchen" mark of dishes.
       kitchenNotPrepared: createMerchantKitchenNotPrepared({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
+      // WP-2423 item 8 ⑧ (decision 5): the kitchen sections (档口) and each dish's section.
+      kitchenSections: createMerchantKitchenSections({
         persistence,
         authentication: service,
         now: resources.now,

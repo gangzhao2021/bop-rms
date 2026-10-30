@@ -1,6 +1,7 @@
 /** Merchant BFF routes: commerce workbench (recipes, products, prices, allergens, menus, availability, option sets, tax classifications). Registered by createMerchantBffRouter (merchant-bff.ts). */
 import express, { type Router } from "express";
 import { MerchantKitchenNotPreparedError } from "./merchant-kitchen-not-prepared.js";
+import { MerchantKitchenSectionsError } from "./merchant-kitchen-sections.js";
 import { MerchantRecipeError } from "./merchant-recipes.js";
 import { MerchantDishAllergenError } from "./merchant-dish-allergens.js";
 import { MerchantComboError } from "./merchant-combos.js";
@@ -185,6 +186,51 @@ export function installMerchantCommerceRoutes(
               error.code === "KITCHEN_NOT_PREPARED_INPUT_INVALID"
                 ? 400
                 : error.code === "KITCHEN_NOT_PREPARED_CHANGED"
+                  ? 409
+                  : 503,
+            )
+            .set("Cache-Control", "no-store")
+            .json({ error: error.code.toLowerCase() });
+        });
+    },
+  );
+  // WP-2423 item 8 ⑧ (decision 5): the kitchen sections (档口) and each dish's section.
+  router.post(
+    "/commerce/kitchen-sections/command",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.kitchenSections) {
+        response.status(503).json({ error: "kitchen_sections_unavailable" });
+        return;
+      }
+      void options
+        .kitchenSections({ sessionCookie, csrf, command: request.body })
+        .then((result) => response.set("Cache-Control", "no-store").json(result))
+        .catch((error: unknown) => {
+          if (
+            !(error instanceof MerchantKitchenSectionsError) ||
+            error.code === "KITCHEN_SECTIONS_PERMISSION_DENIED"
+          ) {
+            denied(response);
+            return;
+          }
+          response
+            .status(
+              error.code === "KITCHEN_SECTIONS_INPUT_INVALID"
+                ? 400
+                : error.code === "KITCHEN_SECTIONS_CHANGED" ||
+                    error.code === "KITCHEN_SECTIONS_UNKNOWN"
                   ? 409
                   : 503,
             )
