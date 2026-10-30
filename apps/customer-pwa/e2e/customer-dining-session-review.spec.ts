@@ -677,4 +677,95 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
     }
     await expectNoInternalText(page);
   });
+
+  test("WP-2423 item 8 ⑦: types an other amount as the tip and sees the total before paying", async ({
+    page,
+  }) => {
+    await page.route("**/bff/customer/payment-configuration", (route) =>
+      route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          mode: "stripe",
+          publishableKey: "pk_test_SyntheticBrowserOnly",
+          returnUrl: "https://synthetic-return.invalid/return",
+          wallets: false,
+          internalTestEntry: false,
+        },
+      }),
+    );
+    await page.route("https://js.stripe.com/**", (route) =>
+      route.fulfill({ contentType: "application/javascript", body: syntheticStripe }),
+    );
+    const payLater = {
+      schemaVersion: 1,
+      session: {
+        ...session.session,
+        paymentTiming: "PayLater",
+        rounds: [{ ...session.session.rounds[0], payment: "OnTableBill" }],
+      },
+    };
+    let paying = false;
+    const starts: unknown[] = [];
+    await page.route("**/api/v1/dine-in/table-payment", (route) => {
+      const body = route.request().postDataJSON() as { action: string };
+      if (body.action === "Start") {
+        starts.push(body);
+        paying = true;
+      }
+      return route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          payment: {
+            tableLabel: "12",
+            checkingOut: true,
+            rounds: [],
+            owed: { subtotalMinor: "1800", taxMinor: "234", totalMinor: "2034" },
+            consistent: true,
+            state: paying ? "Paying" : "NotPaid",
+            attempt: paying ? { totalMinor: "2384", tipMinor: "350" } : null,
+            receipt: null,
+          },
+        },
+      });
+    });
+    await page.route("**/api/v1/dine-in/table-payment/handoff", (route) =>
+      route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: { schemaVersion: 1, clientSecret: "pi_SYNTHETIC_secret_SYNTHETIC" },
+      }),
+    );
+    await enterTable(page, () => ({ status: 200, json: payLater }));
+    const pay = page.getByRole("region", { name: "Pay the bill" });
+    // Offered alike with the percentages; nothing is chosen for the guest.
+    const other = pay.getByRole("radio", { name: "Other amount" });
+    await expect(other).not.toBeChecked();
+    await other.check();
+    await expect(pay.getByRole("button", { name: "Enter the tip to pay" })).toBeDisabled();
+    const amount = pay.getByRole("textbox", { name: "Tip ($)" });
+    await amount.fill("3.505");
+    await expect(pay).toContainText("Enter a valid amount with up to two decimal places.");
+    await expect(amount).toHaveAttribute("aria-invalid", "true");
+    // Never more than the bill before tax ($18.00); the server refuses it too.
+    await amount.fill("18.01");
+    await expect(pay).toContainText("A tip can be at most the bill before tax ($18.00).");
+    await expect(pay.getByRole("button", { name: "Enter the tip to pay" })).toBeDisabled();
+    await amount.fill("3.5");
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expectNoHorizontalOverflow(page);
+    }
+    await pay.screenshot({ path: "test-results/guest-table-tip-other-320.png" });
+    await pay.getByRole("button", { name: "Pay $23.84" }).click();
+    await expect(pay).toContainText("Paying $23.84 for the whole table, tip included.");
+    expect(starts).toEqual([
+      {
+        action: "Start",
+        operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+        tip: { kind: "Amount", amountMinor: "350" },
+      },
+    ]);
+    await expectNoInternalText(page);
+  });
 });

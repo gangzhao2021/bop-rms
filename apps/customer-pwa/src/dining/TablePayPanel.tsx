@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { v7 as uuidv7 } from "uuid";
 import { t } from "../i18n/i18n.js";
+import { parseTipAmount } from "../checkout/tip-amount.js";
 import { formatMoney } from "../journey/format.js";
 import { paymentConfiguration } from "../payment/payment-configuration.js";
 import { StripeCardForm } from "../payment/StripeCardForm.js";
@@ -12,10 +13,15 @@ import {
 } from "./table-payment-client.js";
 
 const money = (amountMinor: string) => formatMoney(amountMinor, "CAD");
-/** "0": no tip; otherwise one of the Store's percentages, as text. */
+/** "0": no tip; "other": an amount the guest types; otherwise one of the Store's percentages. */
 type TipChoice = string;
-const tipOf = (choice: TipChoice): TableTip =>
-  choice === "0" ? { kind: "None" } : { kind: "Percent", percent: Number(choice) };
+const OTHER = "other";
+const tipOf = (choice: TipChoice, typedMinor: string | null): TableTip =>
+  choice === "0"
+    ? { kind: "None" }
+    : choice === OTHER
+      ? { kind: "Amount", amountMinor: typedMinor ?? "0" }
+      : { kind: "Percent", percent: Number(choice) };
 const tipMinor = (choice: TipChoice, subtotalMinor: string) =>
   ((BigInt(subtotalMinor) * BigInt(choice) + 50n) / 100n).toString();
 
@@ -91,6 +97,8 @@ export function TablePayPanel({
   // AGENTS.md (customer respect): no tip is chosen for the guest; every option, "No tip"
   // included, is offered alike and the guest chooses before paying.
   const [tip, setTip] = useState<TipChoice | null>(null);
+  // WP-2423 item 8 ⑦: the amount typed for "Other amount" (never kept across a reload).
+  const [typed, setTyped] = useState("");
   // WP-2423 item 8 ④: the part of a split bill this guest pays (null: the next one to pay).
   const [part, setPart] = useState<number | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -154,7 +162,7 @@ export function TablePayPanel({
 
   // WP-2423 item 8 ⑦: the Store's own tip percentages; with tips off the guest pays no tip and is
   // asked nothing. A choice the Store no longer offers counts as not chosen.
-  const tipOptions = view.tips.enabled ? ["0", ...view.tips.tierPercents.map(String)] : [];
+  const tipOptions = view.tips.enabled ? ["0", ...view.tips.tierPercents.map(String), OTHER] : [];
   const chosenTip: TipChoice | null = !view.tips.enabled
     ? "0"
     : tip !== null && tipOptions.includes(tip)
@@ -166,9 +174,24 @@ export function TablePayPanel({
     view.split === null
       ? null
       : (toPay.find((entry) => entry.partNumber === part) ?? toPay[0] ?? null);
+  // A split bill: the chosen part's own amount, and its tip on its own share before tax.
+  const subtotal = chosen ? chosen.subtotalMinor : view.owed.subtotalMinor;
+  const amountDue = chosen ? chosen.amountMinor : view.owed.totalMinor;
+  // A typed tip is whole cents, and never more than the bill before tax (the server agrees).
+  const typedMinor = chosenTip === OTHER ? parseTipAmount(typed.trim()) : null;
+  const typedTooHigh = typedMinor !== null && BigInt(typedMinor) > BigInt(subtotal);
+  const chosenTipMinor =
+    chosenTip === null
+      ? null
+      : chosenTip === OTHER
+        ? typedMinor === null || typedTooHigh
+          ? null
+          : typedMinor
+        : tipMinor(chosenTip, subtotal);
   const pay = async () => {
-    if (busy || chosenTip === null || (view.split !== null && chosen === null)) return;
-    const key = `${chosenTip}:${chosen?.partNumber ?? "table"}`;
+    if (busy || chosenTipMinor === null || chosenTip === null) return;
+    if (view.split !== null && chosen === null) return;
+    const key = `${chosenTip}:${chosenTipMinor}:${chosen?.partNumber ?? "table"}`;
     // A failed payment is followed by a new one; a lost answer is retried with the same one.
     if (operation.current?.key !== key || view.state === "Failed")
       operation.current = { key, reference: uuidv7() };
@@ -180,7 +203,7 @@ export function TablePayPanel({
       setView(
         await client.start(
           operation.current.reference,
-          tipOf(chosenTip),
+          tipOf(chosenTip, typedMinor),
           chosen?.partNumber ?? null,
         ),
       );
@@ -260,13 +283,8 @@ export function TablePayPanel({
       </section>
     );
 
-  // A split bill: the chosen part's own amount, and its tip on its own share before tax.
-  const subtotal = chosen ? chosen.subtotalMinor : view.owed.subtotalMinor;
-  const amountDue = chosen ? chosen.amountMinor : view.owed.totalMinor;
   const total =
-    chosenTip === null
-      ? null
-      : (BigInt(amountDue) + BigInt(tipMinor(chosenTip, subtotal))).toString();
+    chosenTipMinor === null ? null : (BigInt(amountDue) + BigInt(chosenTipMinor)).toString();
   return (
     <section className="order-status__card dining-session__table-pay" aria-labelledby="table-pay">
       <h2 id="table-pay">{t("Pay the bill")}</h2>
@@ -393,17 +411,43 @@ export function TablePayPanel({
                     checked={chosenTip === choice}
                     onChange={() => {
                       setTip(choice);
-                      saveTip(choice);
+                      // The typed amount is not kept: after a reload the guest types it again.
+                      saveTip(choice === OTHER ? null : choice);
                     }}
                   />{" "}
                   {choice === "0"
                     ? t("No tip")
-                    : t("{percent}% · {amount}", {
-                        percent: choice,
-                        amount: money(tipMinor(choice, subtotal)),
-                      })}
+                    : choice === OTHER
+                      ? t("Other amount")
+                      : t("{percent}% · {amount}", {
+                          percent: choice,
+                          amount: money(tipMinor(choice, subtotal)),
+                        })}
                 </label>
               ))}
+              {chosenTip === OTHER ? (
+                <div className="dining-session__tip-amount">
+                  <label htmlFor="table-tip-amount">{t("Tip ({symbol})", { symbol: "$" })}</label>
+                  <input
+                    id="table-tip-amount"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    value={typed}
+                    onChange={(event) => setTyped(event.target.value)}
+                    aria-invalid={typed.trim() !== "" && chosenTipMinor === null}
+                    aria-describedby="table-tip-amount-help"
+                  />
+                  <p id="table-tip-amount-help">
+                    {typedTooHigh
+                      ? t("A tip can be at most the bill before tax ({amount}).", {
+                          amount: money(subtotal),
+                        })
+                      : typed.trim() !== "" && typedMinor === null
+                        ? t("Enter a valid amount with up to two decimal places.")
+                        : t("Enter an amount in dollars.")}
+                  </p>
+                </div>
+              ) : null}
             </fieldset>
           )}
           <button
@@ -411,7 +455,7 @@ export function TablePayPanel({
             className="dining-session__pay-button"
             disabled={
               busy ||
-              chosenTip === null ||
+              chosenTipMinor === null ||
               !view.consistent ||
               view.owed.totalMinor === "0" ||
               (view.split !== null && chosen === null)
@@ -421,7 +465,9 @@ export function TablePayPanel({
             {busy
               ? t("Starting your payment…")
               : total === null
-                ? t("Choose a tip to pay")
+                ? chosenTip === OTHER
+                  ? t("Enter the tip to pay")
+                  : t("Choose a tip to pay")
                 : t("Pay {amount}", { amount: money(total) })}
           </button>
         </>
