@@ -6421,4 +6421,5 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{item} — no price at this store": "{item}——本店没有价格",
   "What it is": "它是什么",
   "A dish: declare its allergens": "菜品：声明过敏原",
+  "Cancelled unpaid rounds · not charged": "已取消的未付款轮次 · 不收费",
 });

@@ -380,8 +380,16 @@ export function composeCustomerDiningSession(
     } else if (staff !== undefined) {
       status = "StoreCancelled";
       reason = staff.reason;
+      // v15 2026-10-29: an unpaid round of a table paying at the end has nothing to refund.
       payment =
-        staff.refundedMinor > 0n && staff.pendingMinor === 0n ? "Refunded" : "RefundPending";
+        order.payLaterRounds?.has(reference) === true &&
+        order.settledRounds?.has(reference) !== true &&
+        staff.refundedMinor === 0n &&
+        staff.pendingMinor === 0n
+          ? "NotCharged"
+          : staff.refundedMinor > 0n && staff.pendingMinor === 0n
+            ? "Refunded"
+            : "RefundPending";
     } else if (outcome === "Failed") {
       status = "PaymentFailed";
       payment = "Failed";

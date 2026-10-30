@@ -162,9 +162,12 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
         {round.storeCancellationReason
           ? staffCancellationReasonText[round.storeCancellationReason] + " "
           : ""}
-        {round.payment === "Refunded"
-          ? t("The payment was refunded.")
-          : t("The payment is being refunded to the card that paid.")}
+        {round.payment === "NotCharged"
+          ? // v15 2026-10-29: a table paying at the end paid nothing for it; nothing is refunded.
+            t("Staff took this round off the bill. It is not charged.")
+          : round.payment === "Refunded"
+            ? t("The payment was refunded.")
+            : t("The payment is being refunded to the card that paid.")}
       </p>
     );
   if (round.status === "AwaitingPayment")

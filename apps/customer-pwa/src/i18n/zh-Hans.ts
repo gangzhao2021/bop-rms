@@ -1252,4 +1252,5 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "本店不接自取单。要在店里用餐，请扫桌上的二维码，或请店员安排桌位。",
   "Back to your table": "回到本桌",
   "Back to the menu": "回到菜单",
+  "Staff took this round off the bill. It is not charged.": "店员已从账单去掉这一轮，不收费。",
 });

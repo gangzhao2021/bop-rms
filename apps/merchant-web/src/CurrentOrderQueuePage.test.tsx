@@ -1081,10 +1081,10 @@ it("WP-2423: lines of a round cancelled for a failed payment are marked and not 
   expect(html.match(/class="order-line-cancelled"/gu)).toHaveLength(1);
   expect(html).toContain("Cancelled · not paid");
   expect(html).not.toContain("Cancelled by store");
-  // The original total stays; the cancelled unpaid round is taken off beside it.
-  expect(html).toMatch(/<dt>Total<\/dt><dd>\$22\.60<\/dd>/u);
-  expect(html).toMatch(/Cancelled unpaid rounds<\/dt><dd>−\$11\.30<\/dd>/u);
-  expect(html).toMatch(/Total after cancelled rounds<\/dt><dd>\$11\.30<\/dd>/u);
+  // v15 2026-10-29: the total is what is charged; the cancelled unpaid round is listed apart.
+  expect(html).toMatch(/<dt>Total<\/dt><dd>\$11\.30<\/dd>/u);
+  expect(html).toMatch(/Cancelled unpaid rounds · not charged<\/dt><dd>\$11\.30<\/dd>/u);
+  expect(html).not.toContain("Total after");
   expect(unpaidCancelledTotal(detail.lines, new Set())).toBeNull();
   // Without unpaid cancelled rounds nothing extra is shown.
   expect(renderToStaticMarkup(<CurrentOrderLines lines={detail.lines} />)).not.toContain(
