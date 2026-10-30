@@ -153,20 +153,21 @@ export function createMerchantDiningTeaCharge(options: {
           // WP-2423 item 8 ⑨: a merged table's tea lines are on this bill too (each on its own
           // Order); the tea is charged once for the merged party.
           const consumer = tx as unknown as ConsumerTransaction;
-          const orders =
-            tea === null || bill.orderReference === null
-              ? []
-              : await Promise.all(
-                  (await listOrderBillOrders(consumer, scope, bill.orderReference)).map(
-                    async (orderReference) => ({
-                      orderReference,
-                      ...(await listOrderSkuLines(consumer, scope, {
-                        orderReference,
-                        sellableReference: tea,
-                      })),
-                    }),
-                  ),
-                );
+          // One query at a time on the transaction (the pilot's runner refuses overlapping ones).
+          const orders = [];
+          if (tea !== null && bill.orderReference !== null)
+            for (const orderReference of await listOrderBillOrders(
+              consumer,
+              scope,
+              bill.orderReference,
+            ))
+              orders.push({
+                orderReference,
+                ...(await listOrderSkuLines(consumer, scope, {
+                  orderReference,
+                  sellableReference: tea,
+                })),
+              });
           const order = {
             orderVersion: orders[0]?.orderVersion ?? 0,
             lines: orders.flatMap((entry) =>

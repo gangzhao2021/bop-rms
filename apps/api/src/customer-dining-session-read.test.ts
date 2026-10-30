@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   composeCustomerDiningSession,
   createCustomerDiningSessionRead,
+  mergeBillOrderFacts,
   type CustomerDiningSessionDependencies,
   type CustomerDiningSessionFacts,
 } from "./customer-dining-session-read.js";
@@ -105,6 +106,40 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
       typeof value === "bigint" ? value.toString() : value,
     );
     for (const n of [10, 20, 21, 30, 31, 40, 41]) expect(serialized).not.toContain(id(n));
+  });
+
+  it("v15 2026-10-30 (item 8 ⑨): a table merged into this one is on its page and its bill", () => {
+    const own = facts({
+      paymentOutcomes: new Map(),
+      payments: [],
+      payLaterRounds: new Set([id(30), id(40)]),
+    }).order as Order;
+    const merged: Order = {
+      ...own,
+      batches: [
+        {
+          orderBatchReference: id(60),
+          submittedAt: "2026-10-13T18:05:00.000Z",
+          items: [item(61, "Mapo tofu", 1, 2303n)],
+        },
+      ],
+      authorship: new Map([[id(60), false]]),
+      delivery: new Map([[id(61), { phase: "Fulfilled", deliveredQuantity: 1 }]]),
+      paymentDeadlines: new Map(),
+      payLaterRounds: new Set([id(60)]),
+    };
+    const view = composeCustomerDiningSession({
+      ...facts(),
+      order: mergeBillOrderFacts(own, [merged]),
+      paymentTiming: "PayLater",
+    });
+    // Its round is listed (ordered by "another guest", never this phone) and on the table's bill.
+    expect(view.rounds.map((round) => [round.orderedBy, round.payment])).toEqual([
+      ["You", "OnTableBill"],
+      ["AnotherGuest", "OnTableBill"],
+      ["AnotherGuest", "OnTableBill"],
+    ]);
+    expect(view.summary?.due).toEqual(cad(3900n + 2303n));
   });
 
   it("DEC-DINE-IN-PAY-LATER: a round sent unpaid is in the kitchen, on the bill and never cancelled", () => {

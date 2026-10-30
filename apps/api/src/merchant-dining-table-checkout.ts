@@ -303,11 +303,10 @@ export async function readDiningTableBill(
       }).listByOrders(tx, billOrders)
     ).flatMap((record) => record.orderItemReferences),
   );
-  const prices = (
-    await Promise.all(billOrders.map((order) => listOrderItemPrices(tx, owner, order)))
-  )
-    .flat()
-    .filter((item) => !removed.has(String(item.orderItemReference)));
+  // One query at a time on the transaction (the pilot's runner refuses overlapping queries).
+  const billPrices = [];
+  for (const order of billOrders) billPrices.push(...(await listOrderItemPrices(tx, owner, order)));
+  const prices = billPrices.filter((item) => !removed.has(String(item.orderItemReference)));
   // Comps and discounts a manager decided (append-only): the dish stays on the bill at its price,
   // with what came off it.
   const reductions = new Map(
@@ -538,14 +537,14 @@ export async function readDiningTableBill(
   // The Order's priced total (Ordering) is what the rounds must come to: a round still being sent
   // (submitted, not yet in the kitchen) or a change to the Order makes the bill inconsistent.
   // WP-2423 item 8 ⑨: a merged bill comes to every Order on it.
-  const pricedOrders = await Promise.all(
-    billOrders.map((order) =>
-      createPostgresOrderPricedAmountSource({ ...owner, authorize: allowed })(tx, {
+  const pricedOrders = [];
+  for (const order of billOrders)
+    pricedOrders.push(
+      await createPostgresOrderPricedAmountSource({ ...owner, authorize: allowed })(tx, {
         orderReference: order,
         observedAt: input.observedAt,
       }),
-    ),
-  );
+    );
   const priced = {
     pendingAmendmentCount: pricedOrders.reduce(
       (sum, entry) => sum + entry.pendingAmendmentCount,

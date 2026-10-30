@@ -283,7 +283,20 @@ async function journey(ending) {
                   "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
                   [tenant, scope.brandReference, scope.storeReference],
                 );
-              const result = await work({ query: (sql, values) => client.query(sql, values) });
+              // As the pilot's transaction runner (v15 2026-10-14): one query at a time; a second query
+              // while one is in flight (Promise.all over one transaction) is refused.
+              let inFlight = false;
+              const result = await work({
+                query: async (sql, values) => {
+                  if (inFlight) throw new Error("TENANT_DATABASE_TRANSACTION_CONCURRENT_QUERY");
+                  inFlight = true;
+                  try {
+                    return await client.query(sql, values);
+                  } finally {
+                    inFlight = false;
+                  }
+                },
+              });
               await client.query("COMMIT");
               return result;
             } catch (error) {
@@ -1368,20 +1381,156 @@ async function journey(ending) {
             },
           ]);
           const owed = (await bill()).owed.totalMinor;
-          assert.equal((await closing(server, "Begin")).phase, "Closing");
-          await settleWith(server, { tip: { kind: "None" }, tenderedMinor: "100000" });
-          assert.deepEqual(
-            await rows(
-              "SELECT r.order_id::text o,r.order_batch_id::text b FROM rms_payment.dining_table_settlement_round r JOIN rms_payment.dining_table_settlement s ON s.settlement_id=r.settlement_id WHERE s.order_id=$1 ORDER BY r.line_number",
-              [orderReference],
-            ),
-            [
-              { o: orderReference, b: R1.batch.orderBatchReference },
-              { o: orderReference, b: R2.batch.orderBatchReference },
-              { o: mOrder, b: M.batch.orderBatchReference },
-            ],
+          // The tea read (staff) works on a merged bill (each Order's lines, one at a time).
+          const [{ sku }] = await rows(
+            "SELECT transaction_snapshot_json->'catalog'->>'sellableReference' AS sku FROM rms_ordering.order_item WHERE order_item_id=$1",
+            [String(mItems[0].orderItemReference)],
           );
-          assert.equal((await bill()).owed.totalMinor, "0");
+          await transactions().run((tx) =>
+            changeDiningTeaChargeSetting(tx, ownerScope, {
+              operationReference: fresh(),
+              expectedVersion: 0,
+              teaSellableReference: sku,
+              actorReference: id(0x701),
+              observedAt: now(),
+            }),
+          );
+          const teaRead = await createMerchantDiningTeaCharge({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            now,
+            placeRound: async () => ({ status: "Placed" }),
+            removeItems: async () => ({ status: "Removed" }),
+          })({
+            ...as(server),
+            command: { action: "Read", diningSessionReference: sessionReference },
+          });
+          assert.ok(teaRead.charged >= 1, JSON.stringify(teaRead));
+
+          // ── The table checks out and splits "each pays own rounds": T-M's phone pays its own
+          // round on the phone (the guests' real payment entry), staff take the rest in cash.
+          assert.equal((await closing(server, "Begin")).phase, "Closing");
+          // As the Tables page proposes it: one part per phone that ordered (staff rounds in 1).
+          const toSplit = await bill();
+          const phones = [...new Set(toSplit.rounds.map((round) => round.orderedBy ?? 0))].sort(
+            (a, b) => a - b,
+          );
+          const split = await createMerchantDiningTableSplit({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            nextReference: fresh,
+          })({
+            ...as(server),
+            command: {
+              operationReference: fresh(),
+              diningSessionReference: sessionReference,
+              mode: "ByRounds",
+              people: null,
+              rounds: toSplit.rounds.map((round) => ({
+                roundNumber: round.roundNumber,
+                partNumber: phones.indexOf(round.orderedBy ?? 0) + 1,
+              })),
+            },
+          });
+          assert.equal(split.status, "Recorded");
+          const mRoundNumber = split.bill.rounds.find(
+            (round) => round.orderBatchReference === M.batch.orderBatchReference,
+          ).roundNumber;
+          const mPart = split.bill.split.parts.find((part) =>
+            part.roundNumbers.includes(mRoundNumber),
+          );
+          assert.deepEqual(mPart.roundNumbers, [mRoundNumber]);
+          const intents = new Map();
+          const answer = (request, intent) => ({
+            kind: "Snapshot",
+            context: request.context,
+            providerIntentReference: intent.reference,
+            providerTransactionReference: intent.status === "Captured" ? intent.transaction : null,
+            paymentMethod: "OnlineCard",
+            captureMode: "Automatic",
+            status: intent.status,
+            requestedAmount: intent.amount,
+            authorizedAmount:
+              intent.status === "Captured"
+                ? intent.amount
+                : { amountMinor: 0n, currencyCode: "CAD" },
+            capturedAmount:
+              intent.status === "Captured"
+                ? intent.amount
+                : { amountMinor: 0n, currencyCode: "CAD" },
+            refundedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+            observedAt: new Date().toISOString(),
+            evidenceDigest: sha256("intent:" + intent.reference + ":" + intent.status),
+          });
+          const phone = createDiningTableOnlinePayments({
+            scope: ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+            provider: {
+              async createIntent(request) {
+                const intent = intents.get(request.idempotencyKey) ?? {
+                  reference: "pi_TESTMERGE" + String(intents.size + 1).padStart(4, "0"),
+                  transaction: "ch_TESTMERGE" + String(intents.size + 1).padStart(4, "0"),
+                  status: "RequiresCustomerAction",
+                  amount: request.amount,
+                };
+                intents.set(request.idempotencyKey, intent);
+                intents.set(intent.reference, intent);
+                return answer(request, intent);
+              },
+              async retrieveIntent(request) {
+                return answer(request, intents.get(String(request.providerIntentReference)));
+              },
+              async cancelIntent(request) {
+                const intent = intents.get(String(request.providerIntentReference));
+                if (intent.status === "RequiresCustomerAction") intent.status = "Cancelled";
+                return answer(request, intent);
+              },
+            },
+            transactions: transactions(),
+            now,
+            nextReference: fresh,
+          });
+          const guestAt = (guestSessionReference) => ({
+            diningSessionReference: sessionReference,
+            guestSessionReference,
+            allowed: async () => true,
+          });
+          const paying = await phone.start(guestAt(mGuest), {
+            operationReference: fresh(),
+            tip: { kind: "None" },
+            partNumber: mPart.partNumber,
+          });
+          assert.equal(paying.attempt.totalMinor, mPart.amountMinor);
+          for (const intent of intents.values()) intent.status = "Captured";
+          await phone.refresh(guestAt(mGuest));
+          for (const part of split.bill.split.parts.filter(
+            (entry) => entry.partNumber !== mPart.partNumber,
+          ))
+            await settleWith(server, {
+              partNumber: part.partNumber,
+              tip: { kind: "None" },
+              tenderedMinor: "100000",
+            });
+          const paid = await bill();
+          assert.deepEqual(
+            [paid.split.paidParts, paid.split.remainingMinor],
+            [split.bill.split.parts.length, "0"],
+          );
+          // Each payment line keeps its round's own Order.
+          assert.deepEqual(
+            (
+              await rows(
+                "SELECT DISTINCT r.order_id::text o,r.order_batch_id::text b FROM rms_payment.dining_table_settlement_round r JOIN rms_payment.dining_table_settlement s ON s.settlement_id=r.settlement_id WHERE s.order_id=$1 ORDER BY 2",
+                [orderReference],
+              )
+            ).map((row) => [row.o, row.b]),
+            [
+              [orderReference, R1.batch.orderBatchReference],
+              [orderReference, R2.batch.orderBatchReference],
+              [mOrder, M.batch.orderBatchReference],
+            ].sort((a, b) => (a[1] < b[1] ? -1 : 1)),
+          );
           assert.notEqual(owed, "0");
           // Nothing more joins a bill once anything on it was paid (Payment's own rule, under the
           // pilot role).

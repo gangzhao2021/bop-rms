@@ -338,6 +338,7 @@ export {
 export {
   diningSessionHasUnsentCart,
   listOrderBillOrders,
+  listOrderDiningSessions,
   listOrderMergedInto,
   recordOrderMerge,
 } from "./infrastructure/persistence/order-merge-store.js";
