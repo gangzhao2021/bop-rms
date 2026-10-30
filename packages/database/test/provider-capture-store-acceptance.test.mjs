@@ -128,6 +128,9 @@ it("atomically records unlinked capture evidence with Audit, concurrent replay a
           role,
       );
       await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO " + role);
+      // DEC-DINE-IN-PAY-LATER S4 (89c4de08): an unlinked capture may be a guest's whole-table
+      // payment, so the store reads it (pilot api SELECT, docs/spec/pilot-acl-additions.json).
+      await admin.query("GRANT SELECT ON rms_payment.dining_table_online_payment TO " + role);
       failAudit = true;
       await assert.rejects(run((tx) => owner.record(tx, request(100))));
       assert.deepEqual(await counts(), { evidence: 0, exceptions: 0, audit: 0 });
