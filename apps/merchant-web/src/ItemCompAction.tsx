@@ -110,16 +110,28 @@ export function ItemCompAction({
   lines,
   csrf,
   onSettled,
+  preselect,
   fetcher = fetch,
 }: {
   readonly order: Order;
   readonly lines: readonly CurrentOrderLine[];
   readonly csrf: string;
   readonly onSettled: () => void;
+  /**
+   * Coordinator 2026-10-30: dishes that couldn't be taken off the bill (already made or served):
+   * the comp opens with them ticked. A new request (`nonce`) opens it again.
+   */
+  readonly preselect?: { readonly items: readonly string[]; readonly nonce: number } | undefined;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [opened, setOpened] = useState<number | null>(null);
+  if (preselect !== undefined && preselect.nonce !== opened) {
+    setOpened(preselect.nonce);
+    setOpen(true);
+    setSelected(new Set(preselect.items));
+  }
   const [choice, setChoice] = useState<Choice>("Comp");
   const [percent, setPercent] = useState("");
   const [amountOff, setAmountOff] = useState("");

@@ -1084,3 +1084,160 @@ test("@production DEC-DINE-IN-PAY-LATER: staff take a dish off an unpaid table's
     await expectNoInternalText(page);
   }
 });
+
+test("@production Coordinator 2026-10-30: a dish that can't come off the bill says why and what to do instead", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/**", (route) =>
+    route.fulfill({ status: 503, json: { error: "unavailable" } }),
+  );
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-18",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "OPS-ORDER-QUEUE",
+              label: "Orders",
+              href: "/operations/orders",
+              permission: "ordering.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  const line = (n: number, name: string) => ({
+    orderItemReference: id(200 + n),
+    orderBatchReference: id(51),
+    name,
+    options: [],
+    quantity: 1,
+    customerNote: null,
+    unitPrice: money("1000"),
+    subtotal: money("1000"),
+    discount: money("0"),
+    tax: money("130"),
+    fee: money("0"),
+    total: money("1130"),
+    canCancel: false,
+    cancellation: null,
+  });
+  let refusal: "not_removable" | "already_paid" = "not_removable";
+  let refused = false;
+  const order = () => ({
+    orderReference: id(1),
+    orderNumber: "T-1",
+    orderType: "DineIn",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-18T14:00:00.000Z",
+    observedAt: "2026-10-18T14:05:00.000Z",
+    initialBatchReference: id(51),
+    batches: [
+      {
+        orderBatchReference: id(51),
+        sequence: 1,
+        acceptanceStatus: "Accepted",
+        canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
+        canCancelItems: false,
+        // Refused because the kitchen made it: it is no longer removable, and a manager may comp it.
+        unpaidRemovableItems: refused ? [] : [id(201), id(202)],
+        unpaidRemovedItems: [],
+        compableItems: refused && refusal === "not_removable" ? [id(202)] : [],
+        compedItems: [],
+      },
+    ],
+    canRequestAcceptance: false,
+    currentPhase: "InProgress",
+    currentVersion: 3,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+  });
+  await page.route("**/merchant/orders*", (route) =>
+    route.fulfill({ headers, json: { items: [order()], nextAfterOrderReference: null } }),
+  );
+  await page.route("**/merchant/orders/detail*", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "OPS-ORDER-DETAIL",
+        pickupContact: null,
+        order: order(),
+        lines: {
+          items: [line(1, "Synthetic rice bowl"), line(2, "Synthetic soup")],
+          totals: {
+            subtotal: money("2000"),
+            discount: money("0"),
+            tax: money("260"),
+            fee: money("0"),
+            total: money("2260"),
+          },
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/orders/remove-unpaid-items", (route) => {
+    refused = true;
+    return route.fulfill({ status: 409, headers, json: { error: refusal } });
+  });
+  for (const [width, mode] of [
+    [1440, "not_removable"],
+    [390, "already_paid"],
+  ] as const) {
+    refusal = mode;
+    refused = false;
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/operations/orders/" + id(1));
+    await page.getByRole("button", { name: "Take dishes off the bill" }).click();
+    const group = page.getByRole("group", { name: "Take dishes off the bill" });
+    await group.getByLabel(/Synthetic soup/u).check();
+    await group.getByLabel("Reason").selectOption("CUSTOMER_REQUEST");
+    await group.getByRole("button", { name: "Take off $11.30" }).click();
+    // The order is read again (the dish is no longer offered here), but the answer stays.
+    const alert = page.getByRole("alert").filter({ hasText: "the comp is recorded" });
+    if (mode === "not_removable") {
+      await expect(alert).toContainText(
+        "These dishes were already made or served, so they stay on the bill.",
+      );
+      await expect(
+        page.getByRole("link", { name: "Comp them on the table's page" }),
+      ).toHaveAttribute("href", "/operations/dining");
+    } else {
+      await expect(page.getByRole("alert").first()).toContainText(
+        "This table has paid, so dishes can't come off its bill.",
+      );
+      await expect(
+        page.getByRole("link", { name: "Give money back from the payment" }),
+      ).toHaveAttribute("href", "/operations/orders/" + id(1));
+    }
+    await expect(page.getByText(/UNPAID_ITEM|not_removable|already_paid/u)).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await expectNoInternalText(page);
+    await page.screenshot({ path: `test-results/remove-refused-${mode}-${width}.png` });
+  }
+});

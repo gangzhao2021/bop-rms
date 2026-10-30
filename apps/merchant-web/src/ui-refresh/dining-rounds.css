@@ -357,3 +357,19 @@
   align-items: center;
   gap: 4px 12px;
 }
+/* Coordinator 2026-10-30: what to do instead when dishes can't come off the bill. */
+.pay-later-remove__instead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.pay-later-remove__instead > p {
+  flex: 1 1 100%;
+  margin: 0;
+}
+a.table-checkout__primary {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}

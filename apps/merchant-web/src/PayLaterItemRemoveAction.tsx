@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Link } from "react-router";
 import { t } from "./i18n/i18n.js";
 import {
   type CurrentOrderLine,
@@ -32,13 +33,19 @@ export function payLaterRemoveFailureText(failure: Failure) {
     case "Denied":
       return t("Taking dishes off the bill was refused. Ask a manager to do it.");
     case "AlreadyPaid":
-      return t("This table has paid. Give the guest money back from its payment instead.");
+      return t(
+        "This table has paid, so dishes can't come off its bill. A manager gives the guest money back from the table's payment instead; it is recorded.",
+      );
     case "Started":
-      return t("The kitchen has started one of these dishes. Refresh the order.");
+      return t(
+        "The kitchen has started one of these dishes, so it stays on the bill. To not charge the table for it, comp it with a reason instead; the comp is recorded.",
+      );
     case "Changed":
       return t("This order changed since it was shown. Refresh it, then try again.");
     case "NotRemovable":
-      return t("These dishes can no longer be taken off the bill. Refresh the order.");
+      return t(
+        "These dishes were already made or served, so they stay on the bill. To not charge the table for them, comp them with a reason instead; the comp is recorded.",
+      );
     case "Unknown":
       return t(
         "We couldn't confirm the result. Check the connection and press the button again: it is never recorded twice.",
@@ -62,6 +69,72 @@ const failureOf = (status: number, payload: unknown): Failure => {
   return "Unknown";
 };
 
+export interface PayLaterRemoveRefusal {
+  readonly failure: "NotRemovable" | "Started" | "AlreadyPaid";
+  readonly orderItemReferences: readonly string[];
+}
+
+/**
+ * Coordinator 2026-10-30: why dishes couldn't come off the bill and what to do instead — comp them
+ * with a reason (offered only for dishes the order lists as compable, which the server lists only to
+ * people allowed to comp), or, on a paid table, a manager gives money back from its payment. Both
+ * are recorded and attributed; nothing is deleted.
+ */
+export function PayLaterRemoveRefusalNotice({
+  refusal,
+  order,
+  compInstead,
+  compHref,
+  refundHref,
+  onDone,
+}: {
+  readonly refusal: PayLaterRemoveRefusal;
+  readonly order: Order;
+  /** Opens the recorded comp for these dishes on this page. */
+  readonly compInstead?: ((orderItemReferences: readonly string[]) => void) | undefined;
+  /** Where the comp is done when it isn't on this page (the table's page). */
+  readonly compHref?: string | undefined;
+  /** Where a manager gives money back from a paid table's payment (the order's page). */
+  readonly refundHref?: string | undefined;
+  readonly onDone: () => void;
+}) {
+  const compableNow = order.batches
+    .flatMap((entry) => entry.compableItems)
+    .filter((item) => refusal.orderItemReferences.includes(item));
+  return (
+    <div role="alert" className="pay-later-remove__instead">
+      <p>{payLaterRemoveFailureText(refusal.failure)}</p>
+      {refusal.failure === "AlreadyPaid" ? (
+        refundHref !== undefined ? (
+          <Link className="table-checkout__primary" to={refundHref}>
+            {t("Give money back from the payment")}
+          </Link>
+        ) : null
+      ) : compableNow.length > 0 && compInstead !== undefined ? (
+        <button
+          type="button"
+          className="table-checkout__primary"
+          onClick={() => {
+            compInstead(compableNow);
+            onDone();
+          }}
+        >
+          {t("Comp these dishes")}
+        </button>
+      ) : compableNow.length > 0 && compHref !== undefined ? (
+        <Link className="table-checkout__primary" to={compHref}>
+          {t("Comp them on the table's page")}
+        </Link>
+      ) : (
+        <p>{t("Ask a manager to comp them.")}</p>
+      )}{" "}
+      <button type="button" onClick={onDone}>
+        {t("Close")}
+      </button>
+    </div>
+  );
+}
+
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER (rule 2): take dishes — or the whole round — off the bill of a table
  * that pays at the end, before it pays and before the kitchen starts them. Staff tick the dishes
@@ -74,6 +147,7 @@ export function PayLaterItemRemoveAction({
   lines,
   csrf,
   onSettled,
+  onRefused,
   fetcher = fetch,
 }: {
   readonly order: Order;
@@ -82,6 +156,8 @@ export function PayLaterItemRemoveAction({
   readonly lines: readonly CurrentOrderLine[];
   readonly csrf: string;
   readonly onSettled: () => void;
+  /** The dishes couldn't come off the bill (made, served or paid): the page shows what to do. */
+  readonly onRefused: (refusal: PayLaterRemoveRefusal) => void;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const [open, setOpen] = useState(false);
@@ -140,7 +216,18 @@ export function PayLaterItemRemoveAction({
       // A refusal that changed nothing keeps the attempt for the retry after signing in.
       if (next !== "FullSignInRequired" && next !== "Unknown") attempt.current = null;
       setFailure(next);
-      if (next === "AlreadyPaid" || next === "Started" || next === "Changed") onSettled();
+      // Made, served or paid: the page keeps the answer with what to do instead, even after the
+      // refreshed order no longer offers these dishes here (never a silent failure).
+      if (next === "NotRemovable" || next === "Started" || next === "AlreadyPaid")
+        onRefused({ failure: next, orderItemReferences: items });
+      // Read the order again: what changed (made, served, paid) decides what to offer instead.
+      if (
+        next === "AlreadyPaid" ||
+        next === "Started" ||
+        next === "Changed" ||
+        next === "NotRemovable"
+      )
+        onSettled();
     } catch {
       setFailure("Unknown");
     } finally {
@@ -218,7 +305,10 @@ export function PayLaterItemRemoveAction({
       </button>
       {failure === "FullSignInRequired" ? (
         <FullSignInPrompt csrf={csrf} fetcher={fetcher} />
-      ) : failure !== null ? (
+      ) : failure !== null &&
+        failure !== "NotRemovable" &&
+        failure !== "Started" &&
+        failure !== "AlreadyPaid" ? (
         <p role="alert">{payLaterRemoveFailureText(failure)}</p>
       ) : null}
     </div>

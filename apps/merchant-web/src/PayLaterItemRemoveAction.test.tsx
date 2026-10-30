@@ -2,7 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import { parseCurrentOrderDetail } from "./current-order-queue-client.js";
 import { removedItemsTotal } from "./CurrentOrderQueuePage.js";
-import { PayLaterItemRemoveAction, payLaterRemoveFailureText } from "./PayLaterItemRemoveAction.js";
+import {
+  PayLaterItemRemoveAction,
+  PayLaterRemoveRefusalNotice,
+  payLaterRemoveFailureText,
+} from "./PayLaterItemRemoveAction.js";
+import { MemoryRouter } from "react-router";
 
 const id = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
@@ -96,6 +101,7 @@ it("DEC-DINE-IN-PAY-LATER: offers the action only while a dish can come off the 
         lines={lines.items}
         csrf="synthetic"
         onSettled={() => undefined}
+        onRefused={() => undefined}
       />,
     );
   };
@@ -110,7 +116,50 @@ it("DEC-DINE-IN-PAY-LATER: the bill shows what came off and what is left", () =>
     remaining: money("1130"),
   });
   expect(removedItemsTotal(lines, new Set())).toBeNull();
+  // Coordinator 2026-10-30: each refusal says why and what to do instead, in staff words.
   expect(payLaterRemoveFailureText("AlreadyPaid")).toBe(
-    "This table has paid. Give the guest money back from its payment instead.",
+    "This table has paid, so dishes can't come off its bill. A manager gives the guest money back from the table's payment instead; it is recorded.",
   );
+  for (const failure of ["NotRemovable", "Started"] as const) {
+    const text = payLaterRemoveFailureText(failure);
+    expect(text).toContain("comp");
+    expect(text).toContain("recorded");
+    expect(text).not.toMatch(/UNPAID_ITEM|NOT_REMOVABLE|_/u);
+  }
+});
+
+it("Coordinator 2026-10-30: a refusal names what to do instead, with the way there when allowed", () => {
+  const notice = (
+    failure: "NotRemovable" | "AlreadyPaid",
+    compable: string[],
+    compInstead = true,
+  ) => {
+    const { order } = detail({ unpaidRemovableItems: [], unpaidRemovedItems: [] });
+    const batch = order.batches[0];
+    if (!batch) throw new Error("fixture");
+    const withComps = { ...order, batches: [{ ...batch, compableItems: compable }] };
+    return renderToStaticMarkup(
+      <MemoryRouter>
+        <PayLaterRemoveRefusalNotice
+          refusal={{ failure, orderItemReferences: [id(202)] }}
+          order={withComps}
+          compInstead={compInstead ? () => undefined : undefined}
+          compHref="/operations/dining"
+          refundHref={"/operations/orders/" + id(1)}
+          onDone={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+  };
+  // Made or served, and this person may comp it: one button to the recorded comp.
+  expect(notice("NotRemovable", [id(202)])).toContain("Comp these dishes");
+  // Comps given on another page: a link there.
+  expect(notice("NotRemovable", [id(202)], false)).toContain('href="/operations/dining"');
+  // Not allowed to comp (the order lists nothing compable for this person): ask a manager.
+  const manager = notice("NotRemovable", []);
+  expect(manager).toContain("Ask a manager to comp them.");
+  expect(manager).not.toContain("Comp these dishes");
+  // Paid: money back from the table's payment, on the order's page.
+  expect(notice("AlreadyPaid", [])).toContain('href="/operations/orders/' + id(1) + '"');
+  expect(notice("AlreadyPaid", [])).toContain("Give money back from the payment");
 });

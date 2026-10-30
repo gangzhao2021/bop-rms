@@ -5746,12 +5746,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "从账单删菜被拒绝。请让经理操作。",
   "This table has paid. Give the guest money back from its payment instead.":
     "这桌已经付款。请改为从这笔付款里退钱给客人。",
-  "The kitchen has started one of these dishes. Refresh the order.":
-    "后厨已经开始做其中一道菜。请刷新订单。",
+  "The kitchen has started one of these dishes, so it stays on the bill. To not charge the table for it, comp it with a reason instead; the comp is recorded.":
+    "后厨已经开始做其中一道菜，所以它留在账单上。如果不想向这桌收这道菜的钱，请改为填写原因免单，免单会被记录。",
   "This order changed since it was shown. Refresh it, then try again.":
     "这张订单在显示后有变动。请刷新后再试。",
-  "These dishes can no longer be taken off the bill. Refresh the order.":
-    "这些菜已经不能从账单删除。请刷新订单。",
+  "These dishes were already made or served, so they stay on the bill. To not charge the table for them, comp them with a reason instead; the comp is recorded.":
+    "这些菜已经做好或上桌，所以留在账单上。如果不想向这桌收这些菜的钱，请改为填写原因免单，免单会被记录。",
+  "This table has paid, so dishes can't come off its bill. A manager gives the guest money back from the table's payment instead; it is recorded.":
+    "这桌已经付款，菜不能再从账单删除。请经理改为从这桌的付款里退钱给客人，退款会被记录。",
+  "Comp these dishes": "为这些菜免单",
+  "Comp them on the table's page": "到桌台页面免单",
+  "Give money back from the payment": "从付款中退钱",
+  "Ask a manager to comp them.": "请经理为这些菜免单。",
   "Take dishes off the bill": "从账单删菜",
   "Tick the dishes the table won't be charged for. The kitchen stops them.":
     "勾选这桌不收钱的菜，后厨会停做。",
