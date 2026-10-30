@@ -341,7 +341,10 @@ export { createPostgresOrderPaymentAcceptanceWaitStore } from "./infrastructure/
 
 export { isPaidOrderWithinAcceptanceWindow } from "./application/paid-order-time-window.js";
 
-export { createPostgresMerchantOrderItemLabels } from "./infrastructure/persistence/merchant-order-item-labels.js";
+export {
+  createPostgresMerchantOrderItemLabels,
+  listOrderSkuLines,
+} from "./infrastructure/persistence/merchant-order-item-labels.js";
 
 export * from "./domain/dining-cart-replacement.js";
 

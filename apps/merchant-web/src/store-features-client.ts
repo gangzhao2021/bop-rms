@@ -20,6 +20,12 @@ export interface StoreFeatures {
     readonly askPartySize: boolean;
     readonly changedAt: string | null;
   };
+  /** WP-2423 item 8 ⑦ (decision 2): the menu item charged per guest, or none. */
+  readonly teaCharge: {
+    readonly version: number;
+    readonly teaSellableReference: string | null;
+    readonly changedAt: string | null;
+  };
   /**
    * WP-2423 item 8 ⑦ (Owner decision 11): the three tip percentages guests and staff are
    * offered (with "no tip" and "other amount"), or tips off. Payment's own versioned setting.
@@ -38,7 +44,7 @@ export const validTipTiers = (tiers: readonly number[]): boolean =>
   (tiers[0] as number) < (tiers[1] as number) &&
   (tiers[1] as number) < (tiers[2] as number);
 export class StoreFeaturesClientError extends Error {
-  constructor(readonly code: "Denied" | "Changed" | "Unavailable") {
+  constructor(readonly code: "Denied" | "Changed" | "TeaUsesStock" | "Unavailable") {
     super("store features " + code);
     this.name = "StoreFeaturesClientError";
   }
@@ -53,6 +59,21 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
   const modules = raw?.modules as Record<string, unknown> | null | undefined;
   const services = raw?.services as Record<string, unknown> | null | undefined;
   const tips = raw?.tips as Record<string, unknown> | null | undefined;
+  const tea = raw?.teaCharge as Record<string, unknown> | null | undefined;
+  if (
+    tea === null ||
+    typeof tea !== "object" ||
+    Object.keys(tea).sort().join(",") !== "changedAt,teaSellableReference,version" ||
+    !Number.isSafeInteger(tea.version) ||
+    Number(tea.version) < 0 ||
+    (tea.teaSellableReference !== null &&
+      (typeof tea.teaSellableReference !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+          tea.teaSellableReference,
+        ))) ||
+    (tea.changedAt !== null && (typeof tea.changedAt !== "string" || !instant.test(tea.changedAt)))
+  )
+    return fail();
   if (
     tips === null ||
     typeof tips !== "object" ||
@@ -109,6 +130,11 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
       askPartySize: services.askPartySize,
       changedAt: services.changedAt as string | null,
     }),
+    teaCharge: Object.freeze({
+      version: Number(tea.version),
+      teaSellableReference: tea.teaSellableReference as string | null,
+      changedAt: tea.changedAt as string | null,
+    }),
     tips: Object.freeze({
       version: Number(tips.version),
       enabled: tips.enabled,
@@ -137,7 +163,10 @@ export function createStoreFeaturesClient(csrf: string, fetcher: typeof fetch = 
       return fail();
     }
     if (response.status === 403) return fail("Denied");
-    if (response.status === 409) return fail("Changed");
+    if (response.status === 409) {
+      const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      return fail(payload?.error === "store_features_tea_uses_stock" ? "TeaUsesStock" : "Changed");
+    }
     if (!response.ok) return fail();
     return parseStoreFeatures(await response.json().catch(() => null));
   };
@@ -150,6 +179,11 @@ export function createStoreFeaturesClient(csrf: string, fetcher: typeof fetch = 
       chaseDish: boolean;
       askPartySize: boolean;
     }) => send({ action: "ChangeServices", ...input }),
+    changeTeaCharge: (input: {
+      operationReference: string;
+      expectedVersion: number;
+      teaSellableReference: string | null;
+    }) => send({ action: "ChangeTeaCharge", ...input }),
     changeTips: (input: {
       operationReference: string;
       expectedVersion: number;

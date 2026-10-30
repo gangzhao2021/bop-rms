@@ -28,6 +28,8 @@ it("lets the joined Host make a code over the composed API that seats the next g
       await client.query(
         "GRANT SELECT,INSERT,UPDATE,DELETE ON rms_store.public_store_profile_version TO " + role,
       );
+      // The pilot api role's read of the Store's modules (whether pickup is offered).
+      await client.query("GRANT SELECT ON rms_store.store_feature_setting TO " + role);
       await client.query(
         "GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_record,platform_audit.audit_chain_head TO " +
           role,

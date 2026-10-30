@@ -14,6 +14,7 @@ import {
   navigationForStoreFeatures,
   readStoreFeatures,
 } from "../../../apps/api/src/merchant-store-features.ts";
+import { skuRecipeUsesStock } from "../../rms/recipe/src/index.ts";
 import { waitingPickupOrders } from "../../../apps/api/src/merchant-pickup-query.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -300,6 +301,36 @@ it("keeps a Store's modules as versioned owner choices, per Store, under the pil
           [1, "FullService", owner],
           [2, "Custom", owner],
         ],
+      );
+
+      // The tea dish refuses a recipe that uses stock: a binding of this Store or the Brand
+      // counts, another Store's does not. Owner seed with constraints off; the read is the api role.
+      const stocked = id(0x60),
+        brandWide = id(0x61),
+        otherStore = id(0x62),
+        plain = id(0x63);
+      await admin.query("SET session_replication_role = replica");
+      try {
+        for (const [n, sku, store] of [
+          [0x70, stocked, scope.storeReference],
+          [0x71, brandWide, null],
+          [0x72, otherStore, other.storeReference],
+        ])
+          await admin.query(
+            "INSERT INTO rms_recipe.recipe_scope_binding(recipe_scope_binding_id,recipe_version_id,recipe_id,brand_id,sku_id,store_id,effective_from) VALUES($1,$2,$3,$4,$5,$6,now()-interval '1 minute')",
+            [id(n), id(n + 0x10), id(n + 0x20), scope.brandReference, sku, store],
+          );
+      } finally {
+        await admin.query("SET session_replication_role = origin");
+      }
+      assert.deepEqual(
+        await asApi(async (tx) => {
+          const uses = [];
+          for (const sku of [stocked, brandWide, otherStore, plain])
+            uses.push(await skuRecipeUsesStock(tx, scope, sku));
+          return uses;
+        }),
+        [true, true, false, false],
       );
     } finally {
       for (const name of [api, worker]) {

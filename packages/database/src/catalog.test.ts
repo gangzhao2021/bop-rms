@@ -765,6 +765,8 @@ describe("migration catalog", () => {
       "2000_121_create_store_tip_setting",
       "2000_122_create_dining_party_size",
       "2000_123_create_kitchen_not_prepared",
+      "2000_124_create_dining_tea_charge_setting",
+      "2000_125_create_dining_tea_override",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

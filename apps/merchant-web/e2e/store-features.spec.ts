@@ -62,6 +62,11 @@ test("@production the owner applies the full-service setup, turns a module back 
       askPartySize: false,
       changedAt: null as string | null,
     },
+    teaCharge: {
+      version: 0,
+      teaSellableReference: null as string | null,
+      changedAt: null as string | null,
+    },
     tips: {
       version: 0,
       enabled: true,
@@ -76,6 +81,19 @@ test("@production the owner applies the full-service setup, turns a module back 
     const body = route.request().postDataJSON() as Record<string, unknown>;
     commands.push(body);
     if (body.action === "Read") return route.fulfill({ headers, json: current });
+    if (body.action === "ChangeTeaCharge") {
+      if (body.expectedVersion !== current.teaCharge.version)
+        return route.fulfill({ headers, status: 409, json: { error: "store_features_changed" } });
+      current = {
+        ...current,
+        teaCharge: {
+          version: current.teaCharge.version + 1,
+          teaSellableReference: body.teaSellableReference as string | null,
+          changedAt: "2026-10-29T15:30:00.000Z",
+        },
+      };
+      return route.fulfill({ headers, json: current });
+    }
     if (body.action === "ChangeTips") {
       if (body.expectedVersion !== current.tips.version)
         return route.fulfill({ headers, status: 409, json: { error: "store_features_changed" } });
@@ -137,6 +155,29 @@ test("@production the owner applies the full-service setup, turns a module back 
     return route.fulfill({ headers, json: current });
   });
 
+  // WP-2423 item 8 ⑦ 4b-2: every item the Store sells (hidden ones too); tea is chosen from it.
+  await page.route("**/merchant/commerce/availability/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CAT-AVAILABILITY",
+        sourceAsOf: "2026-10-29T15:00:00.000Z",
+        viewer: id(500),
+        timeZone: "America/Toronto",
+        permissions: { mayOffer: true, mayMarkSoldOut: true, mayMarkUntilBack: true },
+        items: [
+          {
+            skuReference: id(505),
+            skuCode: "SKU_TEA",
+            productName: "Tea (TEST)",
+            sizeName: "",
+            status: "Available",
+            soldOutUntil: null,
+          },
+        ],
+      },
+    }),
+  );
   // Fulfillment's current pickup queue (the Pickup page's read): two orders still waiting.
   let pickupReadable = true;
   const waitingItem = (n: number) => ({
@@ -289,6 +330,26 @@ test("@production the owner applies the full-service setup, turns a module back 
     askPartySize: true,
   });
   await expect(askGuests).toBeChecked();
+
+  // WP-2423 item 8 ⑦ 4b-2: no tea charge until the owner chooses its item; only tables that pay
+  // at the end are charged it (said on the page).
+  await expect(
+    page.getByText(
+      "Tea is only added at tables that pay at the end. Tables that pay for each round are not charged tea automatically.",
+    ),
+  ).toBeVisible();
+  const teaItem = page.getByRole("combobox", { name: "Tea charge item" });
+  await expect(teaItem).toHaveValue("");
+  await teaItem.selectOption({ label: "Tea (TEST)" });
+  await page.getByRole("button", { name: "Save tea charge" }).click();
+  await expect(
+    page.getByText("Saved. Tea is added for each guest from the next party size recorded."),
+  ).toBeVisible();
+  expect(commands.at(-1)).toMatchObject({
+    action: "ChangeTeaCharge",
+    expectedVersion: 0,
+    teaSellableReference: id(505),
+  });
 
   // WP-2423 item 8 ⑦ (decision 11): tips 10 / 15 / 18 % at first; the owner sets 12 / 18 / 20.
   const lowest = page.getByRole("textbox", { name: "Lowest tip percentage" });

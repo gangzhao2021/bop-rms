@@ -5291,6 +5291,42 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 2; coordinator 2026-10-29 \"“不经后厨”做成菜品的通用标记…这道菜不进后厨看板，下单就算已上，不挡结账\"): a dish the kitchen does not prepare, and which lines of a round the kitchen did not prepare"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_tea_charge_setting",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 2 \"打开后可以按人头收茶位费\"; coordinator 2026-10-29 \"茶位费在店主设好之前不生效，默认没有\"): the menu item charged per guest at tables that pay at the end, versioned, chosen by the owner"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_tea_charge_setting",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 2 \"打开后可以按人头收茶位费\"; coordinator 2026-10-29 \"茶位费在店主设好之前不生效，默认没有\"): the menu item charged per guest at tables that pay at the end, versioned, chosen by the owner"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session_tea_override",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (coordinator 2026-10-29 \"有小孩不收这类情况时，店员可以把茶位数量改得和人数不同，同样记下谁、什么时候、为什么\"): tea charged for other than the guests, with the reason"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session_tea_override",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑦ DEC-STORE-FEATURES (coordinator 2026-10-29 \"有小孩不收这类情况时，店员可以把茶位数量改得和人数不同，同样记下谁、什么时候、为什么\"): tea charged for other than the guests, with the reason"
     }
   ]
 }

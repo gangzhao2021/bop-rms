@@ -446,6 +446,15 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
           </div>
         ) : null}
       </dl>
+      {summary.teaCharge !== undefined ? (
+        // WP-2423 item 8 ⑦ 4b-3: the per-head tea, set by staff from the number of guests.
+        <p className="dining-session__tea" role="note">
+          {t("Tea {price} per person · {count} at this table (added by staff).", {
+            price: money(summary.teaCharge.perGuest),
+            count: String(summary.teaCharge.guests),
+          })}
+        </p>
+      ) : null}
       <p>
         {summary.ordered === undefined
           ? ""

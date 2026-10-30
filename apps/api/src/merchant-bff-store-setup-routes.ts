@@ -64,7 +64,8 @@ export function installMerchantStoreSetupRoutes(
             ? 400
             : error.code === "STORE_FEATURES_PERMISSION_DENIED"
               ? 403
-              : error.code === "STORE_FEATURES_CHANGED"
+              : error.code === "STORE_FEATURES_CHANGED" ||
+                  error.code === "STORE_FEATURES_TEA_USES_STOCK"
                 ? 409
                 : 503;
         response

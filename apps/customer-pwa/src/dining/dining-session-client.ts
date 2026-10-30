@@ -121,6 +121,8 @@ export interface DiningSessionView {
     readonly paid: DiningMoney;
     readonly refunded: DiningMoney;
     readonly refundPending: DiningMoney;
+    /** WP-2423 item 8 ⑦ 4b-3: the per-head tea on the bill (staff's; guests don't add it). */
+    readonly teaCharge?: { readonly perGuest: DiningMoney; readonly guests: number };
     readonly due: DiningMoney;
     /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment, once paid. */
     readonly tableTip?: DiningMoney;
@@ -357,7 +359,12 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       session.summary !== null &&
       typeof session.summary === "object" &&
       Object.hasOwn(session.summary, "splitParts");
+    const withTea =
+      session.summary !== null &&
+      typeof session.summary === "object" &&
+      Object.hasOwn(session.summary, "teaCharge");
     const raw = record(session.summary, [
+      ...(withTea ? ["teaCharge"] : []),
       ...(withSettlement ? ["tableTip", "cashRounding"] : []),
       ...(withSplit ? ["splitParts"] : []),
       "paid",
@@ -387,6 +394,17 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       ...(ordered === null ? {} : { ordered }),
       ...(withSettlement
         ? { tableTip: money(raw.tableTip), cashRounding: money(raw.cashRounding) }
+        : {}),
+      ...(withTea
+        ? (() => {
+            const tea = record(raw.teaCharge, ["perGuest", "guests"]);
+            return {
+              teaCharge: Object.freeze({
+                perGuest: money(tea.perGuest),
+                guests: count(tea.guests, 1),
+              }),
+            };
+          })()
         : {}),
       ...(withSplit
         ? (() => {

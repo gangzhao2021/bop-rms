@@ -1,9 +1,13 @@
 import { readClosedRecord } from "@bop/identity";
+import { skuRecipeUsesStock } from "@rms/recipe";
 import {
   changeDiningServiceSetting,
+  changeDiningTeaChargeSetting,
   DiningSessionError,
   loadDiningServiceSetting,
+  loadDiningTeaChargeSetting,
   type DiningServiceSetting,
+  type DiningTeaChargeSetting,
 } from "@rms/dining";
 import {
   changeStoreTipSetting,
@@ -29,6 +33,8 @@ export type MerchantStoreFeaturesErrorCode =
   | "STORE_FEATURES_PERMISSION_DENIED"
   /** The setting changed since it was read: read it again. */
   | "STORE_FEATURES_CHANGED"
+  /** WP-2423 item 8 ⑦ 4b-3: the tea charge item uses stock (a recipe); tea must not. */
+  | "STORE_FEATURES_TEA_USES_STOCK"
   | "STORE_FEATURES_UNAVAILABLE";
 export class MerchantStoreFeaturesError extends Error {
   constructor(readonly code: MerchantStoreFeaturesErrorCode) {
@@ -103,6 +109,15 @@ export interface StoreFeaturesView {
     readonly askPartySize: boolean;
     readonly changedAt: string | null;
   };
+  /**
+   * Owner decision 2 (4b-2): the menu item charged per guest at tables that pay at the end, or
+   * none (Dining's own setting).
+   */
+  readonly teaCharge: {
+    readonly version: number;
+    readonly teaSellableReference: string | null;
+    readonly changedAt: string | null;
+  };
   /** Owner decision 11: the three tip percentages offered, or tips off (Payment's own setting). */
   readonly tips: {
     readonly version: number;
@@ -138,6 +153,11 @@ export function createMerchantStoreFeatures(options: {
       staffCall: boolean;
       chaseDish: boolean;
       askPartySize?: boolean;
+    } = null;
+    let teaChange: null | {
+      operationReference: string;
+      expectedVersion: number;
+      teaSellableReference: string | null;
     } = null;
     let tipChange: null | {
       operationReference: string;
@@ -181,6 +201,23 @@ export function createMerchantStoreFeatures(options: {
           staffCall: raw.staffCall,
           chaseDish: raw.chaseDish,
           ...(typeof raw.askPartySize === "boolean" ? { askPartySize: raw.askPartySize } : {}),
+        };
+      } else if (action === "ChangeTeaCharge") {
+        const raw = readClosedRecord(input.command, [
+          "action",
+          "operationReference",
+          "expectedVersion",
+          "teaSellableReference",
+        ]);
+        if (!Number.isSafeInteger(raw.expectedVersion) || Number(raw.expectedVersion) < 0)
+          return fail("STORE_FEATURES_INPUT_INVALID");
+        teaChange = {
+          operationReference: String(parseStoreAdministrationReference(raw.operationReference)),
+          expectedVersion: Number(raw.expectedVersion),
+          teaSellableReference:
+            raw.teaSellableReference === null
+              ? null
+              : String(parseStoreAdministrationReference(raw.teaSellableReference)),
         };
       } else if (action === "ChangeTips") {
         const raw = readClosedRecord(input.command, [
@@ -317,7 +354,25 @@ export function createMerchantStoreFeatures(options: {
                 actorReference: String(current.actorReference),
                 observedAt: new Date(Date.parse(options.now())).toISOString(),
               });
-            return storeFeaturesView(setting, services, tips, true);
+            let teaCharge = await loadDiningTeaChargeSetting(diningRunner, scope);
+            // Tea never uses stock: taking it off an unpaid bill would have stock to return.
+            if (
+              teaChange !== null &&
+              teaChange.teaSellableReference !== null &&
+              (await skuRecipeUsesStock(
+                tx as unknown as Parameters<typeof skuRecipeUsesStock>[0],
+                scope,
+                teaChange.teaSellableReference,
+              ))
+            )
+              return fail("STORE_FEATURES_TEA_USES_STOCK");
+            if (teaChange !== null)
+              teaCharge = await changeDiningTeaChargeSetting(diningRunner, scope, {
+                ...teaChange,
+                actorReference: String(current.actorReference),
+                observedAt: new Date(Date.parse(options.now())).toISOString(),
+              });
+            return storeFeaturesView(setting, services, tips, teaCharge, true);
           },
         ),
       );
@@ -339,6 +394,7 @@ function storeFeaturesView(
   setting: StoreFeatureSetting,
   services: DiningServiceSetting,
   tips: StoreTipSetting,
+  teaCharge: DiningTeaChargeSetting,
   canChange: boolean,
 ): StoreFeaturesView {
   return Object.freeze({
@@ -356,6 +412,11 @@ function storeFeaturesView(
       chaseDish: services.chaseDish,
       askPartySize: services.askPartySize,
       changedAt: services.changedAt,
+    }),
+    teaCharge: Object.freeze({
+      version: teaCharge.version,
+      teaSellableReference: teaCharge.teaSellableReference,
+      changedAt: teaCharge.changedAt,
     }),
     tips: Object.freeze({
       version: tips.version,

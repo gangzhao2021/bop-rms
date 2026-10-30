@@ -34,7 +34,7 @@ import { newOperationReference } from "./operation-reference.js";
 import { TableSessionClose } from "./TableSessionClose.js";
 import { LastOrdersNotice } from "./LastOrdersNotice.js";
 import { TableCheckout } from "./TableCheckout.js";
-import { TablePartySize } from "./TablePartySize.js";
+import { TablePartySize, createTablePartySizeClient } from "./TablePartySize.js";
 import { TableOrderRounds } from "./TableOrderRounds.js";
 import { RoundHoldSettingControl, TableHeldRounds, TablePanelPhones } from "./TablePhones.js";
 import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
@@ -890,6 +890,33 @@ export function DiningSessionWorkspace({
         return null;
     }
   };
+  // v15 live check (4a): the list shows how many guests sit at each seated table (when recorded).
+  const seatedSessions = tables
+    .map((table) => table.currentDiningSessionReference)
+    .filter((reference): reference is string => reference !== null)
+    .sort()
+    .join(",");
+  const [partySizes, setPartySizes] = useState<ReadonlyMap<string, number>>(new Map());
+  useEffect(() => {
+    if (!csrf || seatedSessions === "") return;
+    const controller = new AbortController();
+    void createTablePartySizeClient()
+      .readMany?.(csrf, seatedSessions.split(","), controller.signal)
+      .then((found) => {
+        if (!controller.signal.aborted) setPartySizes(found);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [csrf, seatedSessions, loadedAt.current]);
+  const guestsText = (table: StaffDiningTable) => {
+    const count =
+      table.currentDiningSessionReference === null
+        ? undefined
+        : partySizes.get(table.currentDiningSessionReference);
+    return count === undefined
+      ? ""
+      : " · " + (count === 1 ? t("1 guest") : t("{count} guests", { count }));
+  };
   const tableRow = ({ table, need }: { table: StaffDiningTable; need: TableNeed }) => (
     <li
       key={table.tableReference}
@@ -917,7 +944,7 @@ export function DiningSessionWorkspace({
                 : t("Seats {capacity} · {open}", {
                     capacity: table.capacity,
                     open: elapsedText(table.elapsedMinutes),
-                  })}
+                  }) + guestsText(table)}
           </span>
         </span>
         <span
@@ -1348,6 +1375,12 @@ function TablePanel({
           onClosed={onClosed}
           onRefresh={onReread}
         />
+      ) : seated && canCloseSessions ? (
+        // v15 live check (4a): a table just opened is read again before its checkout and close
+        // show; meanwhile it says so (never the note meant for staff who can't close tables).
+        <p role="status" className="dining-close-who">
+          {t("Reading this table…")}
+        </p>
       ) : seated ? (
         <p role="note" className="dining-close-who">
           {t("A manager or the owner closes the table. Tell them when the guests have left.")}

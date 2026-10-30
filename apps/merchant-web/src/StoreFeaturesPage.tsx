@@ -12,6 +12,7 @@ import {
   validTipTiers,
 } from "./store-features-client.js";
 import { createPickupClient } from "./pickup-client.js";
+import { StoreTeaCharge } from "./StoreTeaCharge.js";
 import type { PickupClient } from "./pickup.js";
 
 /**
@@ -446,6 +447,14 @@ export function StoreFeaturesPage({
             {t("Save table settings")}
           </button>
         </div>
+        {/* WP-2423 item 8 ⑦ 4b-2: the per-head tea charge (Dining's own setting). */}
+        <StoreTeaCharge
+          csrf={csrf}
+          view={view}
+          client={client}
+          locked={busy}
+          onSaved={(next) => setView(next)}
+        />
         <fieldset className="store-features__modules" disabled={busy}>
           <legend>{t("Tips")}</legend>
           <label className="store-features__row">

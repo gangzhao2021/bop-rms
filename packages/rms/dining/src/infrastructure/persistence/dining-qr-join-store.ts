@@ -872,3 +872,240 @@ export async function recordDiningPartySize(
   );
   return Object.freeze({ partySize: input.partySize, version });
 }
+
+/**
+ * WP-2423 item 8 ⑦ (Owner decision 2, coordinator 2026-10-29): the per-head tea charge (2000_124).
+ * None until the owner chooses the menu item charged per guest; only tables that pay at the end
+ * are charged it.
+ */
+export interface DiningTeaChargeSetting {
+  /** 0: never set (no tea charge). */
+  readonly version: number;
+  /** The menu item (sellable) charged per guest; null: no tea charge. */
+  readonly teaSellableReference: string | null;
+  readonly changedAt: string | null;
+}
+
+/** The Store's tea charge now, in the caller's transaction. */
+export async function loadDiningTeaChargeSetting(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+): Promise<DiningTeaChargeSetting> {
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const found = rows(
+    await tx.query(
+      "SELECT version,tea_sellable_id::text AS tea,to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at FROM rms_dining.dining_tea_charge_setting WHERE brand_id=$1 AND store_id=$2 ORDER BY version DESC LIMIT 1",
+      [brand, store],
+    ),
+  )[0];
+  if (found === undefined)
+    return Object.freeze({ version: 0, teaSellableReference: null, changedAt: null });
+  const version = Number(found.version);
+  if (!Number.isSafeInteger(version) || version < 1) return fail();
+  return Object.freeze({
+    version,
+    teaSellableReference: found.tea === null ? null : String(parseDiningReference(found.tea)),
+    changedAt: parseDiningInstant(found.occurred_at),
+  });
+}
+
+/**
+ * The owner sets (or clears) the tea charge's menu item: the next version, with who and when,
+ * against the version they saw. The same operation again returns it.
+ */
+export async function changeDiningTeaChargeSetting(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+  input: {
+    readonly operationReference: string;
+    readonly expectedVersion: number;
+    readonly teaSellableReference: string | null;
+    readonly actorReference: string;
+    readonly observedAt: string;
+  },
+): Promise<DiningTeaChargeSetting> {
+  const tenant = parseDiningReference(scopeInput.tenantReference);
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  const operation = parseDiningReference(input.operationReference);
+  const tea =
+    input.teaSellableReference === null
+      ? null
+      : String(parseDiningReference(input.teaSellableReference));
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    `DiningTeaChargeSetting:${brand}:${store}`,
+  ]);
+  const prior = rows(
+    await tx.query(
+      "SELECT tea_sellable_id::text AS tea FROM rms_dining.dining_tea_charge_setting WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      [brand, store, operation],
+    ),
+  )[0];
+  if (prior !== undefined) {
+    if ((prior.tea === null ? null : String(prior.tea)) !== tea)
+      throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+    return loadDiningTeaChargeSetting(tx, scopeInput);
+  }
+  const current = await loadDiningTeaChargeSetting(tx, scopeInput);
+  if (current.version !== input.expectedVersion)
+    throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+  if (current.teaSellableReference === tea) return current;
+  changed(
+    await tx.query(
+      "INSERT INTO rms_dining.dining_tea_charge_setting (tenant_id,brand_id,store_id,version,operation_id,tea_sellable_id,actor_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+      [
+        tenant,
+        brand,
+        store,
+        current.version + 1,
+        operation,
+        tea,
+        parseDiningReference(input.actorReference),
+        parseDiningInstant(input.observedAt),
+      ],
+    ),
+  );
+  return loadDiningTeaChargeSetting(tx, scopeInput);
+}
+
+/** WP-2423 item 8 ⑦ (2000_125): why staff charge tea for other than the guests counted. */
+export const diningTeaOverrideReasons = Object.freeze([
+  "ChildNotCharged",
+  "GuestDeclined",
+  "Other",
+] as const);
+export type DiningTeaOverrideReason = (typeof diningTeaOverrideReasons)[number];
+export interface DiningTeaOverride {
+  readonly version: number;
+  readonly partySizeVersion: number;
+  readonly teaQuantity: number;
+  readonly reason: DiningTeaOverrideReason;
+}
+
+/** The table's latest tea count set by staff (null: none). */
+export async function loadDiningTeaOverride(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+  diningSessionReference: string,
+): Promise<DiningTeaOverride | null> {
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  const session = parseDiningReference(diningSessionReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const found = rows(
+    await tx.query(
+      "SELECT version,party_size_version,tea_quantity,reason_code FROM rms_dining.dining_session_tea_override WHERE brand_id=$1 AND store_id=$2 AND session_id=$3 ORDER BY version DESC LIMIT 1",
+      [brand, store, session],
+    ),
+  )[0];
+  if (found === undefined) return null;
+  const version = Number(found.version),
+    partySizeVersion = Number(found.party_size_version),
+    teaQuantity = Number(found.tea_quantity);
+  if (
+    !Number.isSafeInteger(version) ||
+    !Number.isSafeInteger(partySizeVersion) ||
+    !Number.isSafeInteger(teaQuantity) ||
+    !(diningTeaOverrideReasons as readonly string[]).includes(String(found.reason_code))
+  )
+    return fail();
+  return Object.freeze({
+    version,
+    partySizeVersion,
+    teaQuantity,
+    reason: found.reason_code as DiningTeaOverrideReason,
+  });
+}
+
+/**
+ * Staff charge tea for `teaQuantity` guests instead of the party size (version `partySizeVersion`),
+ * with the reason, who and when: the table's next tea count version, against the one they saw.
+ * The same operation again returns it.
+ */
+export async function recordDiningTeaOverride(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+  input: {
+    readonly diningSessionReference: string;
+    readonly operationReference: string;
+    readonly expectedVersion: number;
+    readonly partySizeVersion: number;
+    readonly teaQuantity: number;
+    readonly reason: DiningTeaOverrideReason;
+    readonly actorReference: string;
+    readonly observedAt: string;
+  },
+): Promise<DiningTeaOverride> {
+  const tenant = parseDiningReference(scopeInput.tenantReference);
+  const brand = parseDiningReference(scopeInput.brandReference);
+  const store = parseDiningReference(scopeInput.storeReference);
+  const session = parseDiningReference(input.diningSessionReference);
+  const operation = parseDiningReference(input.operationReference);
+  if (
+    !Number.isSafeInteger(input.teaQuantity) ||
+    input.teaQuantity < 0 ||
+    input.teaQuantity > 99 ||
+    !Number.isSafeInteger(input.partySizeVersion) ||
+    input.partySizeVersion < 1 ||
+    !Number.isSafeInteger(input.expectedVersion) ||
+    input.expectedVersion < 0 ||
+    !(diningTeaOverrideReasons as readonly string[]).includes(input.reason)
+  )
+    return fail();
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    `DiningTeaOverride:${brand}:${store}:${session}`,
+  ]);
+  const prior = rows(
+    await tx.query(
+      "SELECT session_id::text AS session,tea_quantity,reason_code FROM rms_dining.dining_session_tea_override WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      [brand, store, operation],
+    ),
+  )[0];
+  if (prior !== undefined) {
+    if (
+      String(prior.session) !== session ||
+      Number(prior.tea_quantity) !== input.teaQuantity ||
+      prior.reason_code !== input.reason
+    )
+      throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+    return (await loadDiningTeaOverride(tx, scopeInput, session)) as DiningTeaOverride;
+  }
+  const current = await loadDiningTeaOverride(tx, scopeInput, session);
+  if ((current?.version ?? 0) !== input.expectedVersion)
+    throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
+  changed(
+    await tx.query(
+      "INSERT INTO rms_dining.dining_session_tea_override (tenant_id,brand_id,store_id,session_id,version,operation_id,party_size_version,tea_quantity,reason_code,actor_id,recorded_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+      [
+        tenant,
+        brand,
+        store,
+        session,
+        (current?.version ?? 0) + 1,
+        operation,
+        input.partySizeVersion,
+        input.teaQuantity,
+        input.reason,
+        parseDiningReference(input.actorReference),
+        parseDiningInstant(input.observedAt),
+      ],
+    ),
+  );
+  return (await loadDiningTeaOverride(tx, scopeInput, session)) as DiningTeaOverride;
+}

@@ -37,6 +37,7 @@ import { createMerchantDiningJoinRegenerate } from "../../apps/api/dist/merchant
 import { createMerchantDiningChase } from "../../apps/api/dist/merchant-dining-chase.js";
 import { createMerchantDiningPartySize } from "../../apps/api/dist/merchant-dining-party-size.js";
 import { createMerchantKitchenNotPrepared } from "../../apps/api/dist/merchant-kitchen-not-prepared.js";
+import { createMerchantDiningTeaCharge } from "../../apps/api/dist/merchant-dining-tea-charge.js";
 import {
   createMerchantStoreFeatures,
   navigationForStoreFeatures,
@@ -1693,6 +1694,15 @@ export async function createInternalMerchant(
                 ? {}
                 : {
                     staffDiningRound: storePresence.wrap(presenceScope, counter.staffDiningRound),
+                    // WP-2423 item 8 ⑦ 4b-2: the per-head tea follows the party size (adds tea as a
+                    // staff round, takes it off as an unpaid removal).
+                    diningTeaCharge: createMerchantDiningTeaCharge({
+                      persistence,
+                      authentication: service,
+                      now: resources.now,
+                      placeRound: counter.staffDiningRound,
+                      removeItems: unpaidItemRemoval,
+                    }),
                   }),
             };
           })()),

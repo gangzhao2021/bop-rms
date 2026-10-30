@@ -165,6 +165,7 @@ import type { createMerchantStoreFeatures } from "./merchant-store-features.js";
 import type { createMerchantDiningChase } from "./merchant-dining-chase.js";
 import type { createMerchantDiningPartySize } from "./merchant-dining-party-size.js";
 import type { createMerchantKitchenNotPrepared } from "./merchant-kitchen-not-prepared.js";
+import type { createMerchantDiningTeaCharge } from "./merchant-dining-tea-charge.js";
 import type { createMerchantDiningHostSelection } from "./merchant-dining-host-selection.js";
 import type { createMerchantDiningHostTransfer } from "./merchant-dining-host-transfer.js";
 import type { createMerchantDiningSessionStart } from "./merchant-dining-session-start.js";
@@ -594,6 +595,8 @@ export interface MerchantBffRouterOptions {
   readonly diningPartySize?: ReturnType<typeof createMerchantDiningPartySize>;
   /** WP-2423 item 8 ⑦: dishes the kitchen does not prepare (the menu's mark). */
   readonly kitchenNotPrepared?: ReturnType<typeof createMerchantKitchenNotPrepared>;
+  /** WP-2423 item 8 ⑦ 4b-2: the per-head tea charge of a table. */
+  readonly diningTeaCharge?: ReturnType<typeof createMerchantDiningTeaCharge>;
   readonly diningJoinRegenerate?: ReturnType<typeof createMerchantDiningJoinRegenerate>;
   readonly diningHostSelection?: ReturnType<typeof createMerchantDiningHostSelection>;
   readonly diningHostTransfer?: ReturnType<typeof createMerchantDiningHostTransfer>;
