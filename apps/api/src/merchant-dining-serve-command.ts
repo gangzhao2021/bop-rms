@@ -201,7 +201,8 @@ export function createMerchantDiningServeCommand(options: {
             serviceReference: options.reference(),
             operationReference: command.operationReference,
             auditReference: options.reference(),
-            diningSessionReference: selected.diningSessionReference,
+            // WP-2423 item 8 ⑨: a merged table's dish is served at the party it joined.
+            diningSessionReference: table.diningSessionReference,
             tableReference: table.tableReference,
             sessionVersion: table.sessionVersion,
             tableAssignmentVersion: table.tableAssignmentVersion,
@@ -246,6 +247,7 @@ export function createMerchantDiningServeCommand(options: {
             transaction: businessTransaction,
             record,
             guestSessionReference: selected.guestSessionReference,
+            orderDiningSessionReference: selected.diningSessionReference,
           });
           return Object.freeze({
             status: result.status,

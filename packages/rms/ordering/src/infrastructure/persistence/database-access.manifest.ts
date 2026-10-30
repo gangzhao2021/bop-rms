@@ -19,6 +19,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): a merged table's Order on the other's bill.
+      table: "order_merge",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "order_pay_later_confirmation",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },

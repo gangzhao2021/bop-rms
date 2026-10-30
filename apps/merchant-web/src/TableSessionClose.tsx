@@ -86,8 +86,10 @@ export function tableCloseBlockers(
 export interface TableClosePlan {
   begin?: ReturnType<ReturnType<typeof createDiningSessionCloseClient>["prepare"]>;
   order?: ReturnType<ReturnType<typeof createDiningOrderCloseClient>["prepare"]>;
+  /** WP-2423 item 8 ⑨: the Orders of tables merged into this one, closed before its own. */
+  merged?: Map<string, ReturnType<ReturnType<typeof createDiningOrderCloseClient>["prepare"]>>;
   finalize?: ReturnType<ReturnType<typeof createDiningSessionCloseClient>["prepare"]>;
-  readonly done: Set<"begin" | "order" | "finalize">;
+  readonly done: Set<string>;
 }
 
 /**
@@ -99,6 +101,8 @@ export async function closeTableSession(input: {
   readonly diningSessionReference: string;
   readonly session: StaffDiningTableSession;
   readonly progress: DiningProgress | null;
+  /** WP-2423 item 8 ⑨: the progress of the Orders of tables merged into this one. */
+  readonly mergedProgress?: readonly DiningProgress[];
   readonly plan: TableClosePlan;
   readonly csrf: string;
   readonly signal?: AbortSignal;
@@ -121,6 +125,29 @@ export async function closeTableSession(input: {
       plan.done.add("begin");
     }
     version += 1;
+  }
+  // WP-2423 item 8 ⑨: the merged tables' Orders close first (they are on this table's bill).
+  for (const merged of input.mergedProgress ?? []) {
+    if (
+      merged.closureStatus !== "Open" ||
+      (merged.phase !== "Fulfilled" && merged.phase !== "Cancelled")
+    )
+      continue;
+    plan.merged ??= new Map();
+    const prepared =
+      plan.merged.get(merged.orderReference) ??
+      createDiningOrderCloseClient(input.fetcher, input.recovery).prepare({
+        operationReference: serviceOperationReference(),
+        orderReference: merged.orderReference,
+        expectedOrderVersion: merged.currentOrderVersion,
+        expectedClosureVersion: merged.closureVersion,
+        reasonCode: merged.phase === "Cancelled" ? "ORDER_CANCELLED" : "ORDER_COMPLETED",
+      });
+    plan.merged.set(merged.orderReference, prepared);
+    if (!plan.done.has("merged:" + merged.orderReference)) {
+      await prepared.execute(csrf, signal);
+      plan.done.add("merged:" + merged.orderReference);
+    }
   }
   // WP-2423 item 2: an Order whose every round was cancelled is closed too (nothing was served).
   if (
@@ -152,7 +179,12 @@ export async function closeTableSession(input: {
 
 type Check =
   | { readonly kind: "Checking" }
-  | { readonly kind: "Ready"; readonly progress: DiningProgress | null }
+  | {
+      readonly kind: "Ready";
+      readonly progress: DiningProgress | null;
+      /** WP-2423 item 8 ⑨: the Orders of tables merged into this one. */
+      readonly merged?: readonly DiningProgress[];
+    }
   | { readonly kind: "Failed"; readonly denied: boolean; readonly missing?: boolean };
 type Outcome =
   | null
@@ -205,6 +237,9 @@ export function TableSessionClose({
   // One operation per step and intent; an unconfirmed result is retried with the same ones.
   const steps = useRef<TableClosePlan>({ done: new Set() });
   const orderReference = session.orderReference;
+  const mergedOrders = (session.mergedTables ?? [])
+    .flatMap((merged) => (merged.orderReference === null ? [] : [merged.orderReference]))
+    .join(",");
   useEffect(() => {
     if (orderReference === null) {
       setCheck({ kind: "Ready", progress: null });
@@ -212,10 +247,18 @@ export function TableSessionClose({
     }
     const controller = new AbortController();
     setCheck({ kind: "Checking" });
-    createDiningProgressClient(fetcher)
-      .load(orderReference, csrf, controller.signal)
-      .then((progress) => {
-        if (!controller.signal.aborted) setCheck({ kind: "Ready", progress });
+    const progressClient = createDiningProgressClient(fetcher);
+    Promise.all([
+      progressClient.load(orderReference, csrf, controller.signal),
+      ...(mergedOrders === ""
+        ? []
+        : mergedOrders
+            .split(",")
+            .map((merged) => progressClient.load(merged, csrf, controller.signal))),
+    ])
+      .then(([progress, ...merged]) => {
+        if (!controller.signal.aborted)
+          setCheck({ kind: "Ready", progress: progress ?? null, merged });
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted)
@@ -226,7 +269,7 @@ export function TableSessionClose({
           });
       });
     return () => controller.abort();
-  }, [orderReference, csrf, fetcher, session.version, attempt]);
+  }, [orderReference, mergedOrders, csrf, fetcher, session.version, attempt]);
   useEffect(() => () => pending.current?.abort(), []);
 
   const progress = check.kind === "Ready" ? check.progress : null;
@@ -251,9 +294,19 @@ export function TableSessionClose({
       ? [
           // v15 2026-10-28: dishes of rounds paid with the table can't be cancelled on Orders;
           // the plan's "Dishes still to serve" says what to do, so the generic line is left out.
-          ...tableCloseBlockers(table, progress, {
-            unservedExplained: plan?.paidWithTable === true,
-          }),
+          ...tableCloseBlockers(
+            table,
+            progress === null
+              ? null
+              : {
+                  // WP-2423 item 8 ⑨: the merged tables' dishes are served here too.
+                  items: [
+                    ...progress.items,
+                    ...(check.merged ?? []).flatMap((merged) => merged.items),
+                  ],
+                },
+            { unservedExplained: plan?.paidWithTable === true },
+          ),
           // WP-2423 (B759): when no round is left to close out, the close evaluation's own reasons.
           ...(plan && plan.open === 0
             ? closeReasonTexts(plan.blockers, table.paymentTiming ?? "PayFirst")
@@ -299,6 +352,9 @@ export function TableSessionClose({
         diningSessionReference: table.currentDiningSessionReference as string,
         session,
         progress,
+        ...(check.kind === "Ready" && check.merged !== undefined
+          ? { mergedProgress: check.merged }
+          : {}),
         plan: steps.current,
         csrf,
         signal: controller.signal,

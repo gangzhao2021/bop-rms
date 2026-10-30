@@ -124,6 +124,16 @@ export interface StaffDiningTableSession {
   readonly version: number;
   /** The session's Order; null while nobody has ordered at the table. */
   readonly orderReference: string | null;
+  /** WP-2423 item 8 ⑨: something on the bill was paid, split or written off (not merged). */
+  readonly paymentStarted?: boolean;
+  /**
+   * WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the tables merged into this one, oldest first; their
+   * Orders are on its bill (staff serve and close their rounds here).
+   */
+  readonly mergedTables?: readonly {
+    readonly fromTableLabel: string;
+    readonly orderReference: string | null;
+  }[];
 }
 export interface StaffDiningJoinState {
   diningSessionReference: string;
@@ -299,9 +309,15 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
         let session: StaffDiningTableSession | null = null;
         if (sessionValue !== undefined && sessionValue !== null) {
           const facts = obj(sessionValue);
+          // WP-2423 item 8 ⑨: paymentStarted and mergedTables (older servers answer without them).
+          const merging = "paymentStarted" in facts || "mergedTables" in facts;
           if (
             currentDiningSessionReference === null ||
-            Object.keys(facts).length !== 3 ||
+            Object.keys(facts).length !== (merging ? 5 : 3) ||
+            (merging &&
+              (typeof facts.paymentStarted !== "boolean" ||
+                !Array.isArray(facts.mergedTables) ||
+                facts.mergedTables.length > 50)) ||
             (facts.phase !== "Active" && facts.phase !== "Closing") ||
             typeof facts.version !== "number" ||
             !Number.isSafeInteger(facts.version) ||
@@ -312,6 +328,27 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
             phase: facts.phase,
             version: facts.version,
             orderReference: facts.orderReference === null ? null : ref(facts.orderReference),
+            ...(merging
+              ? {
+                  paymentStarted: facts.paymentStarted as boolean,
+                  mergedTables: Object.freeze(
+                    (facts.mergedTables as unknown[]).map((value) => {
+                      const merged = obj(value);
+                      if (
+                        Object.keys(merged).length !== 2 ||
+                        typeof merged.fromTableLabel !== "string" ||
+                        !/^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(merged.fromTableLabel)
+                      )
+                        return fail();
+                      return Object.freeze({
+                        fromTableLabel: merged.fromTableLabel,
+                        orderReference:
+                          merged.orderReference === null ? null : ref(merged.orderReference),
+                      });
+                    }),
+                  ),
+                }
+              : {}),
           });
         }
         // WP-2423 item 8 ⑤: rounds waiting for staff and phones that just joined (open tables).

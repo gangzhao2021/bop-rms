@@ -272,19 +272,25 @@ export function createPostgresOrderFinancialPosition(options: {
       // WP-2423 DEC-DINE-IN-PAY-LATER: a table that paid once at the end (card machine or cash),
       // one line per round. Each line is a capture of its round's total (and the tip on the last
       // line); cash rounding is the drawer's difference, not part of the Order's amounts.
+      // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): a merged table's Order is paid on the bill of
+      // the table it joined; only the lines of this Order's rounds are its captures.
+      const billStore = createPostgresDiningTableSettlementStore({
+        scope,
+        authorize: async () => authorize(),
+      });
+      const bill = await billStore.billOrderOf(tx, query.orderReference);
       const tableStore = createPostgresDiningTableSettlementStore({
         scope,
-        authorize: async (_tx, value) =>
-          value.orderReference === query.orderReference && (await authorize()),
+        authorize: async (_tx, value) => value.orderReference === bill && (await authorize()),
       });
-      const tableSettlements = (await tableStore.listByOrders(tx, [query.orderReference])).filter(
+      const tableSettlements = (await tableStore.listByOrders(tx, [bill])).filter(
         (settlement) => settlement.recordedAt <= query.observedAt,
       );
       // Cash given back from a table's cash payment: the Order's share first, then the tip; what
       // is left (the cash rounding) is not the Order's and stays unallocated.
       const tableCashRefunds = (
         tableSettlements.some((settlement) => settlement.method === "Cash")
-          ? await tableStore.listCashRefundsByOrders(tx, [query.orderReference])
+          ? await tableStore.listCashRefundsByOrders(tx, [bill])
           : []
       ).filter((refund) => refund.recordedAt <= query.observedAt);
       let tableRefundedMinor = 0n,
@@ -295,12 +301,10 @@ export function createPostgresOrderFinancialPosition(options: {
         tableTipMinor = 0n;
       const tableCaptures = [];
       for (const settlement of tableSettlements) {
-        if (
-          settlement.orderReference !== query.orderReference ||
-          settlement.environment !== environment
-        )
+        if (settlement.orderReference !== bill || settlement.environment !== environment)
           return fail();
         for (const line of settlement.lines) {
+          if (line.orderReference !== query.orderReference) continue;
           tableOrderMinor += line.roundMinor;
           tableTipMinor += line.tipMinor;
           tableCaptures.push(
@@ -324,10 +328,21 @@ export function createPostgresOrderFinancialPosition(options: {
         const toOrder = refunded < settlement.roundsMinor ? refunded : settlement.roundsMinor;
         const rest = refunded - toOrder;
         const toTip = rest < settlement.tipMinor ? rest : settlement.tipMinor;
-        tableRefundedMinor += refunded;
-        tableRefundedOrderMinor += toOrder;
-        tableRefundedTipMinor += toTip;
-        tableRefundedUnallocatedMinor += rest - toTip;
+        // A merged bill's refund (WP-2423 item 8 ⑨): the rounds' share is given back line by line
+        // in the payment's order, so each Order's share is what falls on its lines; the tip and
+        // what is left belong with the last line's Order.
+        let left = toOrder,
+          mine = 0n;
+        for (const line of settlement.lines) {
+          const share = left < line.roundMinor ? left : line.roundMinor;
+          left -= share;
+          if (line.orderReference === query.orderReference) mine += share;
+        }
+        const last = settlement.lines.at(-1)?.orderReference === query.orderReference;
+        tableRefundedMinor += mine + (last ? rest : 0n);
+        tableRefundedOrderMinor += mine;
+        tableRefundedTipMinor += last ? toTip : 0n;
+        tableRefundedUnallocatedMinor += last ? rest - toTip : 0n;
       }
       if (
         tableCashRefunds.some(

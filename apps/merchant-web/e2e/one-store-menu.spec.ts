@@ -746,13 +746,26 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
     ],
   });
 
+  // v15 2026-10-30: Siu mai again, only its kitchen section changed (saved on its own; guests never
+  // see it): "Save dish" records nothing, so the menu has no change to list.
+  await page.getByRole("button", { name: "Edit Siu mai (TEST) 烧卖" }).click();
+  const again = page.getByRole("form", { name: "Siu mai (TEST) 烧卖" });
+  await expect(again.getByLabel("English name")).toHaveValue("Siu mai (TEST)");
+  const savedDishes = dishCommands.length;
+  const sectionChanges = sectionCommands.length;
+  await again.getByRole("combobox", { name: "Kitchen section" }).selectOption({ label: "炒锅" });
+  await expect.poll(() => sectionCommands.length).toBe(sectionChanges + 1);
+  await again.getByRole("button", { name: "Save dish" }).click();
+  await expect(
+    page.getByText("Nothing in Siu mai (TEST) changed; there is nothing new to list."),
+  ).toBeVisible();
+  expect(dishCommands).toHaveLength(savedDishes);
+
   // A dish with a real recipe takes its allergens from it; nothing is declared over it.
   await page.getByRole("button", { name: "Edit Beef chow fun (TEST) 干炒牛河" }).click();
   await expect(
     page.getByText("This dish has a recipe, so its allergens come from the recipe's ingredients."),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Close" }).click();
-
   // A new section, then a new dish in it.
   await page.getByRole("button", { name: "New section" }).click();
   const sectionForm = page.getByRole("form", { name: "New section" });

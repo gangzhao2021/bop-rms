@@ -191,6 +191,7 @@ export class CustomerDiningSessionHandler {
               messageKey: "customer.dining.session.table_moved",
             },
             tableLabel: error.tableLabel,
+            ...(error.merged ? { merged: true } : {}),
           });
           return;
         }

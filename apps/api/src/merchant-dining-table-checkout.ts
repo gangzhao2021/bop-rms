@@ -8,6 +8,7 @@ import {
   listDiningSessionTableLabels,
   parseDiningReference,
   loadDiningSessionPhones,
+  listDiningSessionsMergedIn,
 } from "@rms/dining";
 import {
   createPostgresPayLaterItemCancellationStore,
@@ -15,6 +16,7 @@ import {
   createPostgresOrderPricedAmountSource,
   listOrderItemPrices,
   listOrderPriceReductions,
+  listOrderBillOrders,
   listStoreDiningSessionOrders,
 } from "@rms/ordering";
 import {
@@ -105,6 +107,11 @@ export interface DiningTableBill {
   readonly orderReference: string | null;
   readonly rounds: readonly {
     readonly roundNumber: number;
+    /**
+     * WP-2423 item 8 ⑨: the Order the round belongs to — the table's own, or a table merged into
+     * it (DEC-DINING-TABLE-MERGE).
+     */
+    readonly orderReference: string;
     readonly orderBatchReference: string;
     readonly submissionReference: string;
     readonly items: readonly {
@@ -210,6 +217,12 @@ interface Scope {
   storeReference: string;
 }
 
+/** WP-2423 item 8 ⑨: the Order of each round on the bill (a merged table's rounds keep theirs). */
+export const roundOrdersOf = (
+  rounds: readonly { readonly orderBatchReference: string; readonly orderReference: string }[],
+): ReadonlyMap<string, string> =>
+  new Map(rounds.map((round) => [round.orderBatchReference, round.orderReference]));
+
 /** The table's bill from the owners' records, in the caller's (authorized) transaction. */
 export async function readDiningTableBill(
   tx: ConsumerTransaction,
@@ -269,13 +282,16 @@ export async function readDiningTableBill(
       splitPlanRecord: null,
     });
   const allowed = async () => (await input.authorize()) === true;
+  // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the bill is the table's Order and the Orders of
+  // tables merged into it; each round stays on its own Order, with who ordered it.
+  const billOrders = await listOrderBillOrders(tx, owner, orderReference);
   const confirmations = [
     ...(await createPostgresOrderPayLaterConfirmationStore({
       ...owner,
       quoteVersion: 2,
       sha256,
       authorize: allowed,
-    }).listByOrders({ transaction: tx, orderReferences: [orderReference] })),
+    }).listByOrders({ transaction: tx, orderReferences: billOrders })),
   ].sort((a, b) => (a.confirmedAt < b.confirmedAt ? -1 : a.confirmedAt > b.confirmedAt ? 1 : 0));
   // Dishes taken off the bill before the table paid (rule 2) are no longer owed.
   const removed = new Set(
@@ -283,19 +299,22 @@ export async function readDiningTableBill(
       await createPostgresPayLaterItemCancellationStore({
         ...owner,
         authorize: async (_tx, value) =>
-          value.orderReference === orderReference && (await allowed()),
-      }).listByOrders(tx, [orderReference])
+          billOrders.includes(String(value.orderReference)) && (await allowed()),
+      }).listByOrders(tx, billOrders)
     ).flatMap((record) => record.orderItemReferences),
   );
-  const prices = (await listOrderItemPrices(tx, owner, orderReference)).filter(
-    (item) => !removed.has(String(item.orderItemReference)),
-  );
+  const prices = (
+    await Promise.all(billOrders.map((order) => listOrderItemPrices(tx, owner, order)))
+  )
+    .flat()
+    .filter((item) => !removed.has(String(item.orderItemReference)));
   // Comps and discounts a manager decided (append-only): the dish stays on the bill at its price,
   // with what came off it.
   const reductions = new Map(
-    (await listOrderPriceReductions(tx, owner, [orderReference], input.observedAt)).map(
-      (record) => [record.orderItemReference, record],
-    ),
+    (await listOrderPriceReductions(tx, owner, billOrders, input.observedAt)).map((record) => [
+      record.orderItemReference,
+      record,
+    ]),
   );
   const payments = createPostgresDiningTableSettlementStore({
     scope,
@@ -333,12 +352,17 @@ export async function readDiningTableBill(
   // Which phone sent each round: phones are numbered in the order they joined the table
   // (WP-2423 item 8 ⑤ decision 3, the same numbers staff see in the table's phone list); staff
   // rounds have none.
-  const phoneOf = new Map(
-    (await loadDiningSessionPhones(tx as never, scope, session)).map((phone) => [
-      String(phone.participantReference),
-      phone.phoneNumber,
-    ]),
-  );
+  // A merged table's phones follow this table's (WP-2423 item 8 ⑨), so "each pays their own"
+  // still tells the two tables' rounds apart.
+  const phoneOf = new Map<string, number>();
+  for (const party of [
+    session,
+    ...(billOrders.length > 1 ? await listDiningSessionsMergedIn(tx as never, scope, session) : []),
+  ]) {
+    const offset = phoneOf.size;
+    for (const phone of await loadDiningSessionPhones(tx as never, scope, party))
+      phoneOf.set(String(phone.participantReference), offset + phone.phoneNumber);
+  }
   const orderedByOf = (batch: string): number | null => {
     const participant = prices.find(
       (item) => String(item.orderBatchReference) === batch,
@@ -379,6 +403,7 @@ export async function readDiningTableBill(
     }
     return Object.freeze({
       roundNumber: index + 1,
+      orderReference: String(confirmation.orderReference),
       orderBatchReference: batch,
       submissionReference: String(confirmation.submissionReference),
       items: Object.freeze(
@@ -512,10 +537,22 @@ export async function readDiningTableBill(
   }
   // The Order's priced total (Ordering) is what the rounds must come to: a round still being sent
   // (submitted, not yet in the kitchen) or a change to the Order makes the bill inconsistent.
-  const priced = await createPostgresOrderPricedAmountSource({ ...owner, authorize: allowed })(tx, {
-    orderReference,
-    observedAt: input.observedAt,
-  });
+  // WP-2423 item 8 ⑨: a merged bill comes to every Order on it.
+  const pricedOrders = await Promise.all(
+    billOrders.map((order) =>
+      createPostgresOrderPricedAmountSource({ ...owner, authorize: allowed })(tx, {
+        orderReference: order,
+        observedAt: input.observedAt,
+      }),
+    ),
+  );
+  const priced = {
+    pendingAmendmentCount: pricedOrders.reduce(
+      (sum, entry) => sum + entry.pendingAmendmentCount,
+      0,
+    ),
+    pricedTotalMinor: pricedOrders.reduce((sum, entry) => sum + entry.pricedTotalMinor, 0n),
+  };
   const consistent =
     priced.pendingAmendmentCount === 0 &&
     priced.pricedTotalMinor === paidAllocation + owedTotal &&
@@ -851,6 +888,8 @@ export function createMerchantDiningTableSettle(options: {
               planPart === null ? BigInt(bill.owed.subtotalMinor) : planPart.subtotalMinor,
             );
             await store.record(tx, {
+              // WP-2423 item 8 ⑨: a merged table's rounds stay on their own Order.
+              roundOrders: roundOrdersOf(bill.rounds),
               ...(planPart === null || bill.splitPlanRecord === null
                 ? {}
                 : {
@@ -1099,6 +1138,7 @@ export function createMerchantDiningTableSplit(options: {
               diningSessionReference: command.diningSessionReference,
               orderReference: bill.orderReference,
               split,
+              roundOrders: roundOrdersOf(bill.rounds),
               recordedAt: observedAt,
               actorReference: String(authority.scope.actorReference),
               auditReference: options.nextReference(),

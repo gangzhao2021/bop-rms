@@ -17,6 +17,8 @@ vi.mock("@rms/ordering", async (original) => ({
 vi.mock("@rms/dining", async (original) => ({
   ...(await original<typeof import("@rms/dining")>()),
   createPostgresDiningItemServiceOperationReader: () => ({ load: m.prior }),
+  // WP-2423 item 8 ⑨: no party here was merged into another.
+  listDiningSessionMergedInto: async () => new Map(),
 }));
 vi.mock("./dining-order-preparation-progress.js", () => ({
   createDiningOrderPreparationProgress: () => ({ load: m.load }),
@@ -103,6 +105,8 @@ beforeEach(() => {
   m.load.mockResolvedValue(current());
   m.prior.mockResolvedValue(null);
   m.table.mockResolvedValue({
+    // The party the dish is served at (its own; a merged table's: the party it joined).
+    diningSessionReference: id(6),
     tableReference: id(7),
     sessionVersion: 2,
     tableAssignmentVersion: 3,

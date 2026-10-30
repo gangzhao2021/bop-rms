@@ -5381,6 +5381,60 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑧ Owner decision 5 (coordinator 2026-10-30 \"一块屏，菜品标档口，屏幕按档口筛选\"): the Store's kitchen sections and each dish's section"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session_merge_operation",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑨ (Owner decision 3, coordinator 2026-10-30 \"并桌\"): DEC-DINING-TABLE-MERGE — the merge record, the order merge and the bill's Orders"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session_merge_operation",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑨ (Owner decision 3, coordinator 2026-10-30 \"并桌\"): DEC-DINING-TABLE-MERGE — the merge record, the order merge and the bill's Orders"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_merge",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑨ (Owner decision 3, coordinator 2026-10-30 \"并桌\"): DEC-DINING-TABLE-MERGE — the merge record, the order merge and the bill's Orders"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_merge",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑨ (Owner decision 3, coordinator 2026-10-30 \"并桌\"): DEC-DINING-TABLE-MERGE — the merge record, the order merge and the bill's Orders"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_bill_order",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑨ (Owner decision 3, coordinator 2026-10-30 \"并桌\"): DEC-DINING-TABLE-MERGE — the merge record, the order merge and the bill's Orders"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_bill_order",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 ⑨ (Owner decision 3, coordinator 2026-10-30 \"并桌\"): DEC-DINING-TABLE-MERGE — the merge record, the order merge and the bill's Orders"
     }
   ]
 }

@@ -1256,6 +1256,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Tea adjusted by staff: {count} tea rounds taken off, not charged.":
     "茶位已由店员调整：撤下 {count} 轮茶位，不收费。",
   "Your table moved to table {table}": "您这桌已换到 {table} 桌",
+  "Your table was merged into table {table}": "你们这桌已并到 {table} 桌",
+  "Staff joined your party to table {table}. Everything your table ordered is on that table's bill. Scan the code on table {table} to keep ordering and paying together.":
+    "店员已把你们并到 {table} 桌，你们点过的菜都在那桌的账单上。请扫 {table} 桌的桌码继续点餐和一起付款。",
   "Staff moved your party to table {table}. Everything your table ordered moved with you. Scan the code on table {table} to keep ordering and paying together.":
     "店员已把您这桌换到 {table} 桌，已点的菜和账单都一起转过去了。请扫 {table} 桌的桌码，继续一起点单和付款。",
 });

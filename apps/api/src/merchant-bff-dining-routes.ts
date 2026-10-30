@@ -10,6 +10,7 @@ import { MerchantDiningHeldRoundError } from "./merchant-dining-held-round.js";
 import { MerchantDiningChaseError } from "./merchant-dining-chase.js";
 import { MerchantDiningPartySizeError } from "./merchant-dining-party-size.js";
 import { MerchantDiningTableMoveError } from "./merchant-dining-table-move.js";
+import { MerchantDiningTableMergeError } from "./merchant-dining-table-merge.js";
 import { MerchantDiningTeaChargeError } from "./merchant-dining-tea-charge.js";
 
 /** WP-2423: the order progress reply (exported so acceptance reads the wire form). */
@@ -230,6 +231,46 @@ export function installMerchantDiningRoutes(
           error.code === "DINING_TABLE_MOVE_INPUT_INVALID"
             ? 400
             : error.code === "DINING_TABLE_MOVE_UNAVAILABLE"
+              ? 503
+              : 409;
+        response
+          .status(status)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: error.code.replace(/^DINING_/u, "").toLowerCase() });
+      });
+  });
+  // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): merge this table's party into another seated table.
+  router.post("/dining/table-merge", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.diningTableMerge) {
+      response.status(503).json({ error: "dining_table_merge_unavailable" });
+      return;
+    }
+    void options
+      .diningTableMerge({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        if (
+          !(error instanceof MerchantDiningTableMergeError) ||
+          error.code === "DINING_TABLE_MERGE_PERMISSION_DENIED"
+        ) {
+          denied(response);
+          return;
+        }
+        const status =
+          error.code === "DINING_TABLE_MERGE_INPUT_INVALID"
+            ? 400
+            : error.code === "DINING_TABLE_MERGE_UNAVAILABLE"
               ? 503
               : 409;
         response

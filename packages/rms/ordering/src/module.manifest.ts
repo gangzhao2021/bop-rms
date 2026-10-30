@@ -79,6 +79,7 @@ const moduleManifestInput =
         "order_payment_disposition_record",
         "order_payment_acceptance_wait",
         "order_pay_later_confirmation",
+        "order_merge",
         "order_round_staff_hold",
         "order_round_staff_hold_release",
         "order_acceptance_hold",

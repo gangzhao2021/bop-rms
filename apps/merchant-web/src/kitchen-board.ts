@@ -33,6 +33,8 @@ export interface KitchenOrderLabel {
   readonly enteredByStaff?: boolean;
   /** WP-2423 item 8 ⑧: the table the party was moved from (null or absent: not moved). */
   readonly movedFromTableLabel?: string | null;
+  /** WP-2423 item 8 ⑨: the table the party was merged from (null or absent: not merged). */
+  readonly mergedFromTableLabel?: string | null;
 }
 
 export interface KitchenBoardItem {
@@ -206,8 +208,10 @@ export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null
     "tableLabel",
     ...(has("enteredByStaff") ? ["enteredByStaff"] : []),
     ...(has("movedFromTableLabel") ? ["movedFromTableLabel"] : []),
+    ...(has("mergedFromTableLabel") ? ["mergedFromTableLabel"] : []),
   ]);
   const movedFrom = input.movedFromTableLabel ?? null;
+  const mergedFrom = input.mergedFromTableLabel ?? null;
   if (
     typeof input.orderNumber !== "string" ||
     !/^[A-Z0-9][A-Z0-9-]{0,39}$/u.test(input.orderNumber) ||
@@ -217,10 +221,13 @@ export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null
         typeof input.tableLabel !== "string" ||
         !/^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(input.tableLabel))) ||
     (input.enteredByStaff !== undefined && typeof input.enteredByStaff !== "boolean") ||
-    (movedFrom !== null &&
-      (input.orderType !== "DineIn" ||
-        typeof movedFrom !== "string" ||
-        !/^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(movedFrom)))
+    [movedFrom, mergedFrom].some(
+      (label) =>
+        label !== null &&
+        (input.orderType !== "DineIn" ||
+          typeof label !== "string" ||
+          !/^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(label)),
+    )
   )
     throw new Error("KITCHEN_BOARD_INVALID");
   return Object.freeze({
@@ -229,6 +236,7 @@ export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null
     tableLabel: input.tableLabel as string | null,
     enteredByStaff: input.enteredByStaff === true,
     movedFromTableLabel: movedFrom as string | null,
+    mergedFromTableLabel: mergedFrom as string | null,
   });
 }
 /** WP-2423: an order waiting for acceptance, with a pickup's refund deadline when one runs. */

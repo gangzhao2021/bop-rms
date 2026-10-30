@@ -292,6 +292,7 @@ it("WP-2423 Q3: serves the published menu disclosure per work item and restores 
     tableLabel: "T4",
     // WP-2423 item 8 ⑧: the party was not moved.
     movedFromTableLabel: null,
+    mergedFromTableLabel: null,
     // WP-2423 Q7 slice 2: no staff record names this order or round.
     enteredByStaff: false,
   });
@@ -505,6 +506,7 @@ it("WP-2423 v15: names today's orders waiting for acceptance on the first page o
       orderType: "Pickup",
       tableLabel: null,
       movedFromTableLabel: null,
+      mergedFromTableLabel: null,
       acceptBy: "2026-09-19T12:02:00.000Z",
     },
     {
@@ -512,6 +514,7 @@ it("WP-2423 v15: names today's orders waiting for acceptance on the first page o
       orderType: "DineIn",
       tableLabel: "T4",
       movedFromTableLabel: null,
+      mergedFromTableLabel: null,
       acceptBy: null,
     },
   ]);

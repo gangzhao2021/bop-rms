@@ -1,5 +1,5 @@
 import { t } from "./i18n/i18n.js";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { AllergenFields, type AllergenAnswer } from "./dish-allergens.js";
 import { DishKitchenMark } from "./DishKitchenMark.js";
@@ -218,6 +218,48 @@ export function DishEditor({
     choicePrices.some(
       (g) => g.options.length === 0 || g.options.some((o) => o.amountMinor === null),
     );
+  // What "Save dish" records (all but its operation reference).
+  const dishContent = (): Omit<SaveDishCommand, "operationReference"> => ({
+    action: "SaveDish",
+    menuReference,
+    productReference,
+    sectionCode: form.section,
+    name: form.name.trim(),
+    nameZh: form.nameZh.trim(),
+    description: form.description.trim(),
+    descriptionZh: form.descriptionZh.trim(),
+    taxClassificationReference: form.tax,
+    priceMinor: priceMinor ?? "0",
+    choiceGroups: choicePrices.map((g) => ({
+      optionSetReference: g.optionSetReference,
+      options: g.options.map((o) => ({
+        optionReference: o.optionReference,
+        amountMinor: o.amountMinor ?? "0",
+      })),
+    })),
+    allergens: recipeAllergens
+      ? null
+      : charge
+        ? declaredCharge
+          ? null
+          : "NoIngredients"
+        : !allergensChecked
+          ? null
+          : [...allergens]
+              .filter((entry): entry is [string, AllergenClassification] => entry[1] !== "None")
+              .map(([allergenReference, classification]) => ({
+                allergenReference,
+                classification,
+              })),
+  });
+  // v15 2026-10-30: the dish as it was read. Saving it unchanged records nothing, so the menu has
+  // no change to list (the kitchen marks and section below save on their own; guests never see
+  // them).
+  const loaded = useRef<string | null>(null);
+  useEffect(() => {
+    if (source !== null && loaded.current === null && dish !== null)
+      loaded.current = JSON.stringify(dishContent());
+  });
   if (failed !== null)
     return (
       <div className="dish-editor" role="group" aria-label={label}>
@@ -246,42 +288,17 @@ export function DishEditor({
     if (client.oneStore === undefined || busy || invalid || priceMinor === null) return;
     setBusy(true);
     setProblem(null);
+    const content = dishContent();
+    if (loaded.current !== null && JSON.stringify(content) === loaded.current) {
+      setBusy(false);
+      onSaved(
+        t("Nothing in {item} changed; there is nothing new to list.", { item: content.name }),
+      );
+      return;
+    }
     const reference = operation ?? newOperationReference();
     setOperation(reference);
-    const command: SaveDishCommand = {
-      action: "SaveDish",
-      operationReference: reference,
-      menuReference,
-      productReference,
-      sectionCode: form.section,
-      name: form.name.trim(),
-      nameZh: form.nameZh.trim(),
-      description: form.description.trim(),
-      descriptionZh: form.descriptionZh.trim(),
-      taxClassificationReference: form.tax,
-      priceMinor,
-      choiceGroups: choicePrices.map((g) => ({
-        optionSetReference: g.optionSetReference,
-        options: g.options.map((o) => ({
-          optionReference: o.optionReference,
-          amountMinor: o.amountMinor ?? "0",
-        })),
-      })),
-      allergens: recipeAllergens
-        ? null
-        : charge
-          ? declaredCharge
-            ? null
-            : "NoIngredients"
-          : !allergensChecked
-            ? null
-            : [...allergens]
-                .filter((entry): entry is [string, AllergenClassification] => entry[1] !== "None")
-                .map(([allergenReference, classification]) => ({
-                  allergenReference,
-                  classification,
-                })),
-    };
+    const command: SaveDishCommand = { ...content, operationReference: reference };
     try {
       await client.oneStore(command);
       setOperation(null);

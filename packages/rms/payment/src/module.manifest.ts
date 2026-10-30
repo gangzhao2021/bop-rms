@@ -59,6 +59,7 @@ const moduleManifestInput =
         "dining_table_online_payment",
         "dining_table_online_payment_outcome",
         "dining_table_split_plan",
+        "dining_table_bill_order",
         "dining_table_split_part",
         "dining_table_split_part_round",
         "store_payment_configuration_version",

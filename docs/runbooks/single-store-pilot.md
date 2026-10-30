@@ -693,6 +693,16 @@ system (staff cannot open this document offline).
   accepted, unfinished order, marked "online order N".
 - When the board returns, older online orders are still there; the kitchen marks them `Mark ready`
   as it finishes them as usual. Do not remake an online order that a paper slip already covers.
+- **Merging tables** (WP-2423 item 8 ⑨): to seat one party with another, open the first table on
+  `Tables` and use `Merge into…` to choose the other table (both must pay at the end, still be
+  ordering, and have nothing paid or split yet; a table that hasn't ordered can only be merged
+  into one that has). Its rounds, bill and guests join the other table, the tea follows the
+  guests, and the first table waits for cleaning; its phones scan the other table's code to join
+  (no host needed). If the guests have dishes in their cart they haven't sent, ask them to send
+  or clear them first. There is no un-merge: if tables were merged by mistake, split the bill with
+  `Each pays own rounds` when paying. Without screens, write "table A merged into table B" and the
+  time on table A's first slip, carry the slips to table B, and record it with `Merge into…` when
+  screens come back.
 - **Kitchen sections** (WP-2423 item 8 ⑧): the owner names the sections once on `Store features`
   under `Kitchen sections`, and gives each dish its section on `Menu` (a dish with none shows under
   `No section`). The board can then show one section on a screen, chosen on that screen and kept

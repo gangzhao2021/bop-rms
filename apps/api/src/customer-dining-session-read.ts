@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import {
   createPostgresDiningPaymentTimingStore,
   listDiningSessionTableLabels,
+  listDiningSessionMergedInto,
   loadDiningParticipantMove,
 } from "@rms/dining";
 import { listOpenKitchenReworkItems } from "@rms/kitchen";
@@ -288,7 +289,11 @@ const unavailable = (): never => {
  * told where the party sits now and scans that table's code to keep ordering together.
  */
 export class DiningTableMovedError extends Error {
-  constructor(readonly tableLabel: string) {
+  /** `merged` (WP-2423 item 8 ⑨): staff merged the party into the party at that table. */
+  constructor(
+    readonly tableLabel: string,
+    readonly merged = false,
+  ) {
     super("the party moved to another table");
     this.name = "DiningTableMovedError";
   }
@@ -620,7 +625,7 @@ export interface CustomerDiningSessionDependencies {
   moved?(
     transaction: ConsumerTransaction,
     now: () => string,
-  ): Promise<{ readonly tableLabel: string } | null>;
+  ): Promise<{ readonly tableLabel: string; readonly merged?: boolean } | null>;
   /** Owner facts for the participant's own dining session only. */
   facts(
     transaction: ConsumerTransaction,
@@ -675,6 +680,16 @@ function postgresDependencies(
         guest.diningParticipantReference === null
       )
         return null;
+      // WP-2423 item 8 ⑨: the party was merged into another table's (it eats there now).
+      const merged = (
+        await listDiningSessionMergedInto(transaction as never, scope, [
+          String(guest.diningSessionReference),
+        ])
+      ).get(String(guest.diningSessionReference));
+      if (merged !== undefined)
+        return merged.phase === "Active" || merged.phase === "Closing"
+          ? { tableLabel: merged.tableLabel, merged: true }
+          : null;
       const moved = await loadDiningParticipantMove(transaction as never, scope, {
         diningSessionReference: String(guest.diningSessionReference),
         participantReference: String(guest.diningParticipantReference),
@@ -1272,7 +1287,8 @@ export function createCustomerDiningSessionRead(
               ),
             )
             .catch(() => null);
-          if (moved !== null) throw new DiningTableMovedError(moved.tableLabel);
+          if (moved !== null)
+            throw new DiningTableMovedError(moved.tableLabel, moved.merged === true);
         }
         if (error instanceof OrderStatusProjectionError) throw error;
         if (error instanceof DiningOrderStillProcessingError) throw error;

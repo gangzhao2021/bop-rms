@@ -2,11 +2,21 @@ import { createHash } from "node:crypto";
 import {
   createPostgresDiningClosingStore,
   createPostgresDiningTableStore,
+  listDiningSessionMergedInto,
   parseDiningHash,
   parseDiningReference,
   type DiningTableStoreScope,
   type DiningTableTransaction,
 } from "@rms/dining";
+export interface DiningTableContext {
+  readonly diningSessionReference: ReturnType<typeof parseDiningReference>;
+  readonly sessionPhase: "Active" | "Closing" | "Closed" | "Cancelled";
+  readonly tableReference: ReturnType<typeof parseDiningReference>;
+  readonly tableLabel: string;
+  readonly sessionVersion: number;
+  readonly tableAssignmentVersion: number;
+  readonly tableVersion: number;
+}
 /** Observed table context only. A serving write must still fence and revalidate versions. */
 export function createMerchantDiningTableContext(options: {
   scope: DiningTableStoreScope;
@@ -19,12 +29,19 @@ export function createMerchantDiningTableContext(options: {
       transaction: DiningTableTransaction,
       diningSessionReference: string,
       observedAt: string,
-    ) {
+    ): Promise<DiningTableContext> {
       const reference = parseDiningReference(diningSessionReference);
       const fail = (): never => {
         throw new Error("DINING_TABLE_CONTEXT_UNAVAILABLE");
       };
       if ((await options.authorize()) !== true) return fail();
+      // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): a party merged into another table's is served
+      // and closed at that table — its rounds' context is the party it joined.
+      const merged = (
+        await listDiningSessionMergedInto(transaction, options.scope, [String(reference)])
+      ).get(String(reference));
+      if (merged !== undefined)
+        return this.load(transaction, merged.diningSessionReference, observedAt);
       const runner = {
         run: <T>(work: (tx: DiningTableTransaction) => Promise<T>) => work(transaction),
       };
