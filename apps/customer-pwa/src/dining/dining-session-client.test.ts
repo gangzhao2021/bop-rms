@@ -6,7 +6,7 @@ import {
 } from "./dining-session-client.js";
 import {
   setCustomerCsrfCredential,
-  setSettledTableLabel,
+  setSettledTable,
 } from "../session/customer-transaction-context.js";
 
 const cad = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
@@ -115,14 +115,14 @@ describe("WP-2423 Q8 dining session client", () => {
     const request = vi.fn();
     const client = createHttpDiningSessionClient(request as unknown as typeof fetch);
     await expect(client.load()).rejects.toMatchObject({ code: "not-joined" });
-    setSettledTableLabel("DEMO-02");
+    setSettledTable({ tableLabel: "DEMO-02", csrfToken: "C".repeat(43) });
     try {
       await expect(client.load()).rejects.toMatchObject({
         code: "settled",
         tableLabel: "DEMO-02",
       });
     } finally {
-      setSettledTableLabel(null);
+      setSettledTable(null);
     }
     expect(request).not.toHaveBeenCalled();
   });

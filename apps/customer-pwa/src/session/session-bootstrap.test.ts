@@ -9,14 +9,14 @@ import {
   getMovedTableLabel,
   setMovedTableLabel,
   getSettledTableLabel,
-  setSettledTableLabel,
-  getEndedDineInOrderReference,
+  setSettledTable,
+  getSettledTableReceiptCsrf,
 } from "./customer-transaction-context.js";
 afterEach(() => {
   setCustomerCsrfCredential(null);
   setEndedVisitReceiptAccess(null);
   setMovedTableLabel(null);
-  setSettledTableLabel(null);
+  setSettledTable(null);
 });
 const response = (
   value: unknown = { schemaVersion: 1, csrfToken: "B".repeat(43) },
@@ -257,41 +257,34 @@ it("v15 2026-10-30: keeps where a moved party sits, restoring nothing to act wit
   }
 });
 
-it("keeps that a guest's table was settled, with the receipt access only when given", async () => {
-  const order = {
-    orderReference: "018f8a00-0000-7000-8000-000000000016",
-    orderNumber: "22",
-    orderType: "DineIn",
-  };
+it("keeps that a guest's table was settled, with the value that reads its receipt", async () => {
   const fetcher = vi.fn().mockResolvedValue(
     response({
       schemaVersion: 1,
-      settledTable: { tableLabel: "DEMO-02" },
-      endedVisit: {
-        csrfToken: "C".repeat(43),
-        order,
-        receiptAvailableUntil: "2099-10-18T18:01:49.437Z",
-      },
+      settledTable: { tableLabel: "DEMO-02", csrfToken: "C".repeat(43) },
     }),
   );
   const menu = vi.fn();
   expect(await restoreCustomerSession(fetcher, menu)).toBe(false);
+  // Nothing to order or pay with.
   expect(getCustomerCsrfCredential()).toBeNull();
   expect(menu).not.toHaveBeenCalled();
   expect(getSettledTableLabel()).toBe("DEMO-02");
-  expect(getEndedDineInOrderReference()).toBe(order.orderReference);
-  // A new visit forgets both.
+  expect(getSettledTableReceiptCsrf()).toBe("C".repeat(43));
+  // A new visit forgets it.
   setCustomerCsrfCredential("D".repeat(43));
   expect(getSettledTableLabel()).toBeNull();
-  expect(getEndedDineInOrderReference()).toBeNull();
+  expect(getSettledTableReceiptCsrf()).toBeNull();
   setCustomerCsrfCredential(null);
-  // Without a receipt: thanked, no receipt; anything malformed is ignored.
-  fetcher.mockResolvedValue(response({ schemaVersion: 1, settledTable: { tableLabel: "T7" } }));
-  expect(await restoreCustomerSession(fetcher)).toBe(false);
-  expect(getSettledTableLabel()).toBe("T7");
-  expect(getEndedDineInOrderReference()).toBeNull();
-  setSettledTableLabel(null);
-  for (const settledTable of [{ tableLabel: "<b>" }, { tableLabel: "T7", extra: 1 }, "T7", null]) {
+  // Anything malformed is ignored.
+  for (const settledTable of [
+    { tableLabel: "<b>", csrfToken: "C".repeat(43) },
+    { tableLabel: "T7", csrfToken: "short" },
+    { tableLabel: "T7" },
+    { tableLabel: "T7", csrfToken: "C".repeat(43), extra: 1 },
+    "T7",
+    null,
+  ]) {
     fetcher.mockResolvedValue(response({ schemaVersion: 1, settledTable }));
     expect(await restoreCustomerSession(fetcher)).toBe(false);
     expect(getSettledTableLabel()).toBeNull();

@@ -23,10 +23,8 @@ import {
 } from "./dining-session-client.js";
 import { DiningInvitationPanel } from "./DiningInvitationPanel.js";
 import { TablePayPanel, type TablePayStatus } from "./TablePayPanel.js";
-import {
-  getEndedDineInOrderReference,
-  subscribeCustomerCsrfContext,
-} from "../session/customer-transaction-context.js";
+import { subscribeCustomerCsrfContext } from "../session/customer-transaction-context.js";
+import { SettledTableReceiptPanel, type SettledTableReceiptClient } from "./SettledTableReceipt.js";
 import { DiningStaffCallPanel } from "./DiningStaffCallPanel.js";
 import type { DiningStaffCallClient } from "./dining-staff-call-client.js";
 import type { DiningInvitationClient } from "./dining-invitation-client.js";
@@ -658,22 +656,25 @@ export function DiningSessionPage({
 
 /**
  * Coordinator 2026-10-30 (Owner authorized): the guest's table was closed after its bill was
- * settled. Thank them; their receipt only when this visit placed the table's order (the receipt
- * page reads it with the ended visit's access); a new party scans the table's code again.
+ * settled. Thank them and show the table's receipt (whatever paid it); a new party scans the
+ * table's code again.
  */
-function SettledTable({ tableLabel }: { readonly tableLabel: string }) {
-  const receiptOrder = getEndedDineInOrderReference();
+function SettledTable({
+  tableLabel,
+  receipt,
+}: {
+  readonly tableLabel: string;
+  readonly receipt?: SettledTableReceiptClient | undefined;
+}) {
   return (
-    <section className="order-status__card" role="status">
-      <h2>{t("This table is settled. Thank you for dining with us.")}</h2>
-      <p>{t("Table {table} has paid and closed.", { table: tableLabel })}</p>
-      {receiptOrder !== null ? (
-        <Link className="order-status__back" to={`/orders/${receiptOrder}/receipt`}>
-          {t("See your receipt")}
-        </Link>
-      ) : null}
-      <p>{t("New party? Scan the table code")}</p>
-    </section>
+    <>
+      <section className="order-status__card" role="status">
+        <h2>{t("This table is settled. Thank you for dining with us.")}</h2>
+        <p>{t("Table {table} has paid and closed.", { table: tableLabel })}</p>
+        <p>{t("New party? Scan the table code")}</p>
+      </section>
+      <SettledTableReceiptPanel {...(receipt === undefined ? {} : { client: receipt })} />
+    </>
   );
 }
 
@@ -685,8 +686,11 @@ export function DiningSessionScreen({
   staffCall = null,
   cartClient,
   menu = null,
+  settledReceipt,
 }: {
   readonly cartClient?: CustomerCartClient | undefined;
+  /** The settled table's receipt reader (tests supply one). */
+  readonly settledReceipt?: SettledTableReceiptClient | undefined;
   /** WP-2423 item 8 ⑥ part 4: the published menu (a combo's chosen dishes and allergens). */
   readonly menu?: MenuView | null;
   readonly state: DiningSessionState;
@@ -758,7 +762,9 @@ export function DiningSessionScreen({
           )}
         </section>
       ) : null}
-      {state.status === "settled" ? <SettledTable tableLabel={state.tableLabel} /> : null}
+      {state.status === "settled" ? (
+        <SettledTable tableLabel={state.tableLabel} receipt={settledReceipt} />
+      ) : null}
       {state.status === "not-joined" ? (
         <section className="order-status__card" role="alert">
           <h2>{t("Join your table first")}</h2>
