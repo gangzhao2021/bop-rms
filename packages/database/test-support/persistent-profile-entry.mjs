@@ -505,6 +505,10 @@ export async function exercisePersistentProfileEntry({
           todayHours: [
             { startLocalTime: "00:00:00", endLocalTime: "08:00:00", endsNextDay: false },
           ],
+          // WP-2423 item 8 ③ (Owner decision 16): an ordinary day, and when the Store opens next.
+          todayKind: null,
+          localDate: "2026-01-15",
+          nextOpening: { localDate: "2026-01-16", startLocalTime: "00:00:00" },
         },
       });
       assert.equal(closed.headers.getSetCookie().length, 0);
