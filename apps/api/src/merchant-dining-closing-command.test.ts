@@ -16,7 +16,7 @@ vi.mock("./dining-settled-session-evidence.js", () => ({
 }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
-  needsCleaning: vi.fn(async (_tx: unknown, _input: unknown) => "Marked"),
+  needsCleaning: vi.fn<(tx: unknown, input: unknown) => Promise<string>>(async () => "Marked"),
   scope: vi.fn(),
   fence: vi.fn(),
   receipt: vi.fn(),
