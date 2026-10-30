@@ -134,7 +134,7 @@ it("WP-2423 Q28: asks with a reason and the request's own key, and says when sta
   });
   const already = await again.ask({ reason: "Question" });
   expect(already.status).toBe(200);
-  expect((await already.json()).status).toBe("AlreadyOpen");
+  expect(((await already.json()) as { status: string }).status).toBe("AlreadyOpen");
 });
 
 it("WP-2423 Q28: too many calls says when the next one is possible", async () => {
@@ -143,7 +143,7 @@ it("WP-2423 Q28: too many calls says when the next one is possible", async () =>
   const response = await t.ask({ reason: "Question" });
   expect(response.status).toBe(429);
   expect(Number(response.headers.get("retry-after"))).toBeGreaterThan(0);
-  expect((await response.json()).retryAt).toBe(retryAt);
+  expect(((await response.json()) as { retryAt: string }).retryAt).toBe(retryAt);
 });
 
 it("WP-2423 Q28: withdraws the open call by its reference", async () => {
