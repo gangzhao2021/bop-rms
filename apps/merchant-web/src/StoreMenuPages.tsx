@@ -91,6 +91,9 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   RealRecipe: t(
     "This dish has a recipe, so its allergens come from the recipe's ingredients. Change them on the recipe.",
   ),
+  DeclaredOtherwise: t(
+    "This dish was already declared the other way (its allergens, or a charge with no stock ingredients). That record stays; ask the operator to change it.",
+  ),
   OthersPending: t(
     "Someone else's price changes are waiting to be listed. They list them first, then try again.",
   ),

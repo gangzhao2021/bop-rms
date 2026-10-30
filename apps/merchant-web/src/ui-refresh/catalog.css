@@ -557,6 +557,16 @@
   margin: 2px 0 0;
   flex: none;
 }
+/* A long item name (or the reason it can't be chosen) never widens the page: a fieldset
+   otherwise grows to its widest content. */
+fieldset.store-features__modules {
+  min-width: 0;
+}
+.store-features__row select {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+}
 .store-features__row > span {
   display: flex;
   flex-direction: column;

@@ -1,5 +1,5 @@
 import { loadDiningTeaChargeSetting } from "@rms/dining";
-import { guestCartWithoutTea } from "./customer-cart-tea-guard.js";
+import { guestCartWithoutTea, guestMenuWithoutTea } from "./customer-cart-tea-guard.js";
 import {
   CustomerPaymentIntentHandler,
   type CustomerPaymentIntentPort,
@@ -317,7 +317,31 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
           },
           session: { ...entry.session, store },
         });
+  // WP-2423 item 8 ⑦: the Store's per-head tea item (Dining's setting), or none.
+  const teaTransactions = options.tipTransactions;
+  const teaSellable =
+    teaTransactions === undefined
+      ? undefined
+      : () =>
+          teaTransactions
+            .run((tx) =>
+              loadDiningTeaChargeSetting(
+                tx as unknown as Parameters<typeof loadDiningTeaChargeSetting>[0],
+                // The read sets only the Brand and Store context; no tenant is needed.
+                { ...scope, tenantReference: scope.brandReference } as Parameters<
+                  typeof loadDiningTeaChargeSetting
+                >[1],
+              ),
+            )
+            .then((setting) => setting.teaSellableReference);
   const projections = createPostgresPublishedMenuQueryStore(options.menuTransactions, scope);
+  // v15 2026-10-29: the tea stays offered at the Store (a staff round must be able to sell it),
+  // but guests never see it on the menu: staff add it by the party size, and the table page
+  // says "Tea $X per person". If the setting can't be read, the menu is shown as it is.
+  const menuStoreFacts =
+    options.menuStoreFacts === undefined || teaSellable === undefined
+      ? options.menuStoreFacts
+      : guestMenuWithoutTea(options.menuStoreFacts, teaSellable);
   const customerMenu = createCustomerMenuQueryService({
     stores: {
       async resolvePublic(reference) {
@@ -326,7 +350,7 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       },
     },
     projections,
-    ...(options.menuStoreFacts === undefined ? {} : { storeFacts: options.menuStoreFacts }),
+    ...(menuStoreFacts === undefined ? {} : { storeFacts: menuStoreFacts }),
   });
   let customerCart: CustomerCartHandler | undefined;
   let orderSubmission = options.orderSubmission;
@@ -459,23 +483,8 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
           });
     // WP-2423 item 8 ⑦ 4b-3: the per-head tea is staff's (it follows the party size); a guest's
     // phone can't add it, whatever it sends. Staff rounds use the port itself, not this route.
-    const teaTransactions = options.tipTransactions;
     const guestPort =
-      teaTransactions === undefined
-        ? composedPort
-        : guestCartWithoutTea(composedPort, () =>
-            teaTransactions
-              .run((tx) =>
-                loadDiningTeaChargeSetting(
-                  tx as unknown as Parameters<typeof loadDiningTeaChargeSetting>[0],
-                  // The read sets only the Brand and Store context; no tenant is needed.
-                  { ...scope, tenantReference: scope.brandReference } as Parameters<
-                    typeof loadDiningTeaChargeSetting
-                  >[1],
-                ),
-              )
-              .then((setting) => setting.teaSellableReference),
-          );
+      teaSellable === undefined ? composedPort : guestCartWithoutTea(composedPort, teaSellable);
     customerCart = new CustomerCartHandler({
       allowedOrigin: options.allowedOrigin,
       now,

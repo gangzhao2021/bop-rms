@@ -2325,17 +2325,21 @@ async function journey(ending) {
             now,
             nextReference: fresh,
           });
-          await assert.rejects(
-            phone.start(
-              {
-                diningSessionReference: sessionReference,
-                guestSessionReference: guestSession,
-                allowed: async () => true,
-              },
-              { operationReference: fresh(), tip: { kind: "Percent", percent: 15 } },
-            ),
-            { code: "TABLE_ONLINE_PAYMENT_TIPS_OFF" },
-          );
+          for (const tip of [
+            { kind: "Percent", percent: 15 },
+            { kind: "Amount", amountMinor: "250" },
+          ])
+            await assert.rejects(
+              phone.start(
+                {
+                  diningSessionReference: sessionReference,
+                  guestSessionReference: guestSession,
+                  allowed: async () => true,
+                },
+                { operationReference: fresh(), tip },
+              ),
+              { code: "TABLE_ONLINE_PAYMENT_TIPS_OFF" },
+            );
           // A tip selection (guest checkout, counter order, staff round): Payment's store refuses
           // it, and the database refuses it even when written directly under the api role.
           const selection = (n, amountMinor) =>
@@ -2546,8 +2550,26 @@ async function journey(ending) {
           const failedView = await payments.refresh(me);
           assert.equal(failedView.attempt, null);
           assert.equal(failedView.bill.onlinePayment?.status, "Failed");
-          await payments.start(me, { operationReference: fresh(), tip: fifteen });
+          // WP-2423 item 8 ⑦: this time the guest types the tip ("Other amount"). One larger
+          // than the bill before tax is refused before the Provider is asked for anything.
+          await assert.rejects(
+            payments.start(me, {
+              operationReference: fresh(),
+              tip: { kind: "Amount", amountMinor: (subtotalMinor + 1n).toString() },
+            }),
+            { code: "TABLE_ONLINE_PAYMENT_INPUT_INVALID" },
+          );
+          assert.equal(created, 1);
+          await payments.start(me, {
+            operationReference: fresh(),
+            tip: { kind: "Amount", amountMinor: "250" },
+          });
           assert.equal(created, 2);
+          assert.deepEqual((await attempts()).at(-1), {
+            total: (round1Minor + 250n).toString(),
+            tip: "250",
+            status: null,
+          });
 
           // ── The guest gives up; staff stop the phone payment (cancelled with the Provider,
           // recorded with who stopped it), so the table could be paid another way.

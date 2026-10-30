@@ -1,3 +1,4 @@
+import type { CustomerMenuQueryPorts } from "@rms/catalog";
 import type { CustomerCartPort } from "./customer-cart.js";
 
 /**
@@ -25,6 +26,29 @@ export function guestCartWithoutTea<P extends Pick<CustomerCartPort, "addItem">>
           issueCodes: Object.freeze(["TEA_CHARGED_BY_STAFF"]),
         };
       return port.addItem(...args);
+    },
+  };
+}
+
+/**
+ * v15 2026-10-29: the tea item stays offered at the Store, so a staff round can sell it, but the
+ * guest menu leaves it out (staff add it by the party size; the table page names it per person).
+ * An unreadable setting leaves the menu as it is: the cart guard still refuses the tea.
+ */
+export function guestMenuWithoutTea(
+  facts: NonNullable<CustomerMenuQueryPorts["storeFacts"]>,
+  teaSellable: () => Promise<string | null>,
+): NonNullable<CustomerMenuQueryPorts["storeFacts"]> {
+  return {
+    ...facts,
+    async load(input) {
+      const loaded = await facts.load(input);
+      const tea = await teaSellable().catch(() => null);
+      const fact = tea === null ? undefined : loaded.get(tea as never);
+      if (tea === null || fact === undefined) return loaded;
+      const shown = new Map(loaded);
+      shown.set(tea as never, { ...fact, availability: "NotOffered" });
+      return shown;
     },
   };
 }

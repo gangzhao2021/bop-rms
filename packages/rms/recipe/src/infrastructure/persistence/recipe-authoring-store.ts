@@ -1364,7 +1364,10 @@ export interface StaffDeclaredAllergenSource {
   readonly bindingReference: string | null;
   readonly optionReference: string | null;
   readonly recordedAt: string;
+  /** WP-2423 item 8 ⑦: declared allergens, or declared to use no stock ingredients (a charge). */
+  readonly label: StaffDeclaredSourceLabel;
 }
+export type StaffDeclaredSourceLabel = "AllergensDeclaredByStaff" | "NoIngredientsDeclaredByStaff";
 /** The Brand's staff-declared allergen sources. Caller authorizes (recipe.read). */
 export async function listStaffDeclaredAllergenSources(
   tx: RecipeAuthoringTransaction,
@@ -1374,7 +1377,7 @@ export async function listStaffDeclaredAllergenSources(
   return (
     await tx.query(
       `SELECT inventory_item_id::text item,subject_kind,sku_id::text sku,recipe_id::text recipe,binding_id::text binding,
-         option_id::text option,recorded_at FROM rms_recipe.staff_declared_allergen_source WHERE brand_id=$1
+         option_id::text option,recorded_at,label FROM rms_recipe.staff_declared_allergen_source WHERE brand_id=$1
        ORDER BY recorded_at,inventory_item_id LIMIT 5000`,
       [scope.brandReference],
     )
@@ -1387,6 +1390,10 @@ export async function listStaffDeclaredAllergenSources(
       bindingReference: row.binding === null ? null : String(row.binding),
       optionReference: row.option === null ? null : String(row.option),
       recordedAt: iso(row.recorded_at),
+      label:
+        row.label === "NoIngredientsDeclaredByStaff"
+          ? ("NoIngredientsDeclaredByStaff" as const)
+          : ("AllergensDeclaredByStaff" as const),
     }),
   );
 }
@@ -1405,6 +1412,8 @@ export async function recordStaffDeclaredAllergenSource(
         readonly subject: "Dish";
         readonly skuReference: string;
         readonly recipeReference: string;
+        /** Absent: AllergensDeclaredByStaff. */
+        readonly label?: StaffDeclaredSourceLabel;
       }
     | {
         readonly subject: "Option";
@@ -1416,6 +1425,10 @@ export async function recordStaffDeclaredAllergenSource(
   await tx.query(scopeSql, [scope.brandReference, ""]);
   const brand = scope.brandReference;
   const dish = input.subject === "Dish";
+  const label =
+    input.subject === "Dish" && input.label === "NoIngredientsDeclaredByStaff"
+      ? "NoIngredientsDeclaredByStaff"
+      : "AllergensDeclaredByStaff";
   const value = {
     item: parseRecipeReference(input.itemReference),
     sku: dish ? parseRecipeReference(input.skuReference) : null,
@@ -1425,7 +1438,7 @@ export async function recordStaffDeclaredAllergenSource(
   };
   const prior = (
     await tx.query(
-      `SELECT inventory_item_id::text item,sku_id::text sku,recipe_id::text recipe,binding_id::text binding,option_id::text option
+      `SELECT inventory_item_id::text item,sku_id::text sku,recipe_id::text recipe,binding_id::text binding,option_id::text option,label
        FROM rms_recipe.staff_declared_allergen_source WHERE brand_id=$1 AND operation_id=$2`,
       [brand, parseRecipeReference(input.operationReference)],
     )
@@ -1436,14 +1449,15 @@ export async function recordStaffDeclaredAllergenSource(
       prior.sku !== value.sku ||
       prior.recipe !== value.recipe ||
       prior.binding !== value.binding ||
-      prior.option !== value.option
+      prior.option !== value.option ||
+      prior.label !== label
     )
       return fail("RECIPE_AUTHORING_CONFLICT");
     return { status: "AlreadyApplied" };
   }
   await tx.query(
     `INSERT INTO rms_recipe.staff_declared_allergen_source(brand_id,inventory_item_id,label,subject_kind,sku_id,recipe_id,binding_id,option_id,
-       actor_id,recorded_at,operation_id,audit_id) VALUES($1,$2,'AllergensDeclaredByStaff',$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+       actor_id,recorded_at,operation_id,audit_id) VALUES($1,$2,$12,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [
       brand,
       value.item,
@@ -1456,6 +1470,7 @@ export async function recordStaffDeclaredAllergenSource(
       input.at,
       input.operationReference,
       input.auditReference,
+      label,
     ],
   );
   await appendBrandAudit(
@@ -1470,7 +1485,7 @@ export async function recordStaffDeclaredAllergenSource(
       at: input.at,
       auditReference: input.auditReference,
       reasonCode: "RECIPE_AUTHORING",
-      afterSummary: { label: "AllergensDeclaredByStaff", subject: input.subject },
+      afterSummary: { label, subject: input.subject },
     }),
   );
   return { status: "Applied" };

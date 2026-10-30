@@ -212,6 +212,27 @@
   align-items: center;
   gap: var(--bop-space-2);
 }
+.customer-page .dining-session__tip-amount label {
+  min-height: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.customer-page .dining-session__tip-amount input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  margin-top: var(--bop-space-1);
+  padding: 0 var(--bop-space-3);
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  font: inherit;
+  font-size: 1rem;
+}
+.customer-page .dining-session__tip-amount p {
+  margin: var(--bop-space-1) 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 0.875rem;
+}
 .customer-page .dining-session__split label[data-status="Paid"],
 .customer-page .dining-session__split label[data-status="Paying"],
 .customer-page .dining-session__split label[data-status="Mine"] {

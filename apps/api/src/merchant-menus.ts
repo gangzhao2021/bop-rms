@@ -675,6 +675,8 @@ export function createMerchantMenus(options: {
         readonly declared: readonly { allergenReference: string; classification: string }[];
         /** WP-2423 item 8 ⑥ part 4: the item holding the staff declaration (a combo choice adds it). */
         readonly itemReference: string | null;
+        /** WP-2423 item 8 ⑦: declared to use no stock ingredients (a charge such as tea). */
+        readonly noIngredients: boolean;
       }
     >();
     const skus = new Set([
@@ -695,6 +697,7 @@ export function createMerchantMenus(options: {
                 }))
               : [],
           itemReference: kind === "StaffDeclared" ? (item?.itemReference ?? null) : null,
+          noIngredients: kind === "StaffDeclared" && item?.label === "NoIngredientsDeclaredByStaff",
         });
     }
     await brandScope(tx, s.owner.brandReference);
@@ -899,6 +902,7 @@ export function createMerchantMenus(options: {
                     source: "None" as const,
                     declared: [],
                     itemReference: null,
+                    noIngredients: false,
                   },
                 })),
                 allergenChoices: allergens.choices,

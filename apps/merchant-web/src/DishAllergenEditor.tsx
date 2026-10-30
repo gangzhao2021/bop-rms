@@ -17,6 +17,7 @@ export type AllergenAnswer = "None" | AllergenClassification;
 export function allergenSummary(dish: MenuDish, choices: readonly AllergenChoice[]): string {
   if (dish.allergens.source === "Recipe") return t("Allergens from its recipe");
   if (dish.allergens.source === "None") return t("Allergens not declared");
+  if (dish.allergens.noIngredients === true) return t("A charge, no stock ingredients");
   const names = new Map(choices.map((c) => [c.allergenReference, c.name]));
   const of = (kind: AllergenClassification) =>
     dish.allergens.declared
@@ -83,6 +84,24 @@ export function DishAllergenEditor({
         </button>
       </div>
     );
+  // WP-2423 item 8 ⑦: a charge such as the per-head tea, declared to use no stock ingredients.
+  if (dish.allergens.noIngredients === true)
+    return (
+      <div
+        className="dish-editor"
+        role="group"
+        aria-label={t("Allergens of {item}", { item: label })}
+      >
+        <p>
+          {t(
+            "Declared a charge that uses no stock ingredients (such as tea): it never counts or deducts stock, and guests see no allergens for it.",
+          )}
+        </p>
+        <button type="button" onClick={onClose}>
+          {t("Close")}
+        </button>
+      </div>
+    );
   if (choices.length === 0)
     return (
       <div
@@ -96,24 +115,43 @@ export function DishAllergenEditor({
         </button>
       </div>
     );
-  const save = async () => {
+  const save = async (noIngredients = false) => {
     if (client.declareAllergens === undefined || busy) return;
     setBusy(true);
     setProblem(null);
-    const reference = operation ?? newOperationReference();
-    setOperation(reference);
+    // A different kind of save is a different operation.
+    const kept = operation?.startsWith(noIngredients ? "n:" : "a:") ? operation.slice(2) : null;
+    const reference = kept ?? newOperationReference();
+    setOperation((noIngredients ? "n:" : "a:") + reference);
     try {
-      await client.declareAllergens({
-        action: "DeclareDish",
-        operationReference: reference,
-        skuReference: dish.skuReference,
-        allergens: [...values]
-          .filter((entry): entry is [string, AllergenClassification] => entry[1] !== "None")
-          .map(([allergenReference, classification]) => ({ allergenReference, classification })),
-      });
+      await client.declareAllergens(
+        noIngredients
+          ? {
+              action: "DeclareNoIngredients",
+              operationReference: reference,
+              skuReference: dish.skuReference,
+            }
+          : {
+              action: "DeclareDish",
+              operationReference: reference,
+              skuReference: dish.skuReference,
+              allergens: [...values]
+                .filter((entry): entry is [string, AllergenClassification] => entry[1] !== "None")
+                .map(([allergenReference, classification]) => ({
+                  allergenReference,
+                  classification,
+                })),
+            },
+      );
       setOperation(null);
       onSaved(
-        t("Allergens of {item} saved. Guests see them when the menu is listed.", { item: label }),
+        noIngredients
+          ? t("{item} is declared a charge with no stock ingredients. You can list it now.", {
+              item: label,
+            })
+          : t("Allergens of {item} saved. Guests see them when the menu is listed.", {
+              item: label,
+            }),
       );
     } catch (error) {
       if (!(error instanceof MenuPageError) || error.code !== "Offline") setOperation(null);
@@ -168,6 +206,11 @@ export function DishAllergenEditor({
         <button type="submit" className="one-menu__primary" disabled={busy}>
           {busy ? t("Saving…") : t("Save allergens")}
         </button>
+        {dish.allergens.source === "None" ? (
+          <button type="button" disabled={busy} onClick={() => void save(true)}>
+            {t("A charge, no stock ingredients (such as tea)")}
+          </button>
+        ) : null}
         <button type="button" disabled={busy} onClick={onClose}>
           {t("Close")}
         </button>
