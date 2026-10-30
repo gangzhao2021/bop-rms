@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac, randomBytes, randomInt } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { setTimeout } from "node:timers";
 import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
@@ -3274,7 +3275,7 @@ async function journey(ending) {
           );
           assert.deepEqual(mark, { notPrepared: true, version: 1 });
           const ticketsMade = [];
-          const intake = (tx) =>
+          const intake = () =>
             createKitchenNotPreparedIntakeAdapter({
               inner: {
                 resolveByIdentity: async () => ({ status: "NotFound" }),
@@ -3292,13 +3293,13 @@ async function journey(ending) {
             semanticEventBindingDigest: sha256("semantic:" + event1.eventId),
           });
           const accepted = await transactions().run((tx) =>
-            intake(tx).accept({ receipt, transaction: tx }),
+            intake().accept({ receipt, transaction: tx }),
           );
           assert.equal(accepted.status, "Created");
           // Nothing to prepare: no ticket was asked for, and the round is known as taken.
           assert.deepEqual(ticketsMade, []);
           const again = await transactions().run((tx) =>
-            intake(tx).resolveByIdentity({
+            intake().resolveByIdentity({
               brandReference: receipt.brandReference,
               storeReference: receipt.storeReference,
               sourceEventReference: receipt.sourceEventReference,
@@ -3310,7 +3311,7 @@ async function journey(ending) {
           assert.equal(again.status, "Resolved");
           assert.equal(again.receipt.sourceAggregateVersion, receipt.sourceAggregateVersion);
           assert.equal(
-            (await transactions().run((tx) => intake(tx).accept({ receipt, transaction: tx })))
+            (await transactions().run((tx) => intake().accept({ receipt, transaction: tx })))
               .status,
             "AlreadyAccepted",
           );

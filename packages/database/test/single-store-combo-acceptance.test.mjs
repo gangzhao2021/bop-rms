@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import process from "node:process";
+import { URL } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
 import { createCustomerMenuStoreFacts } from "../../../apps/api/src/customer-menu-store-facts.ts";

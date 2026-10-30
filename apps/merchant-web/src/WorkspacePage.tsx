@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { LanguageSwitch } from "./i18n/i18n.js";
+import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 
 /**
  * WP-2423 M1: one page frame for every back-office page inside the workspace layout: a title,

@@ -453,7 +453,8 @@ export function createMerchantOrderQueueRead(options: {
             kitchenPhase: current.kitchenPhase,
             observedAt: current.observedAt,
             /** Orders v2: a dine-in Order's dining session (server side only, for its table). */
-            diningSessionReference,
+            // Assigned in the batch callback above, which control-flow narrowing does not see.
+            diningSessionReference: diningSessionReference as string | null,
           }),
         );
       }

@@ -247,19 +247,3 @@ export function chooseLanguage(language: StaffLanguage): void {
   current = language;
   globalThis.location.reload();
 }
-
-/** "中文" / "English": switches the whole back office on this device. */
-export function LanguageSwitch({ className }: { readonly className?: string }) {
-  const next: StaffLanguage = current === "zh-Hans" ? "en" : "zh-Hans";
-  return (
-    <button
-      type="button"
-      className={className === undefined ? "language-switch" : `language-switch ${className}`}
-      lang={next === "zh-Hans" ? "zh-Hans" : "en"}
-      aria-label={next === "zh-Hans" ? "切换到中文" : "Switch to English"}
-      onClick={() => chooseLanguage(next)}
-    >
-      {next === "zh-Hans" ? "中文" : "English"}
-    </button>
-  );
-}

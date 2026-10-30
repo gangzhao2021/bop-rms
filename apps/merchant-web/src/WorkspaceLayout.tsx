@@ -1,4 +1,5 @@
-import { LanguageSwitch, t } from "./i18n/i18n.js";
+import { t } from "./i18n/i18n.js";
+import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 import { useApprovalsWaiting, useStaffCallsWaiting } from "./approvals-waiting.js";
 import { SkipLinkProvidedContext, WorkspaceFrameContext } from "@bop-rms/ui";
 import {
