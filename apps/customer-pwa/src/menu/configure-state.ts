@@ -1,5 +1,9 @@
 import type { CustomerCartClient } from "../cart/cart-client.js";
 import { CartClientError, type CartItemDraft, type CartView } from "../cart/types.js";
+import {
+  getCustomerCsrfCredential,
+  isUnseatedTableScan,
+} from "../session/customer-transaction-context.js";
 
 export type ConfigureState =
   | Readonly<{ status: "idle" }>
@@ -130,6 +134,12 @@ export function createConfigureController({
   const execute = async (plan: AddPlan): Promise<void> => {
     if (!online) {
       publish({ status: "offline", canRetry: pending !== null });
+      return;
+    }
+    // Coordinator 2026-10-30: a scan of a table no party is seated at started no visit; nothing
+    // is sent until staff seat the party and the code is scanned again.
+    if (getCustomerCsrfCredential() === null && isUnseatedTableScan()) {
+      fail(new CartClientError("cart_dining_not_seated"), false);
       return;
     }
     pending = plan;

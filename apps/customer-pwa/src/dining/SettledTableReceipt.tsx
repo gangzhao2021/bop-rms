@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { t } from "../i18n/i18n.js";
 import { formatMoney } from "../journey/format.js";
-import {
-  getSettledTableLabel,
-  getSettledTableReceiptCsrf,
-} from "../session/customer-transaction-context.js";
+import { getSettledTableReceiptCsrf } from "../session/customer-transaction-context.js";
 
 /**
  * Coordinator 2026-10-30 (Owner authorized): the receipt of a table that was closed after its bill
@@ -275,36 +272,4 @@ export function SettledTableReceiptPanel({
       </section>
     );
   return <SettledTableReceiptView receipt={state.receipt} />;
-}
-
-/**
- * A table this device's visit ended with when it was settled, and its receipt, read before a new
- * scan starts another visit (which replaces the ended visit's access). Memory only.
- */
-let lastSettledTable: {
-  readonly tableLabel: string;
-  readonly receipt: SettledTableReceipt | null;
-} | null = null;
-
-export async function rememberSettledTable(
-  client: SettledTableReceiptClient = createSettledTableReceiptClient(),
-): Promise<void> {
-  const tableLabel = getSettledTableLabel();
-  if (tableLabel === null) return;
-  let receipt: SettledTableReceipt | null;
-  try {
-    receipt = await client.read();
-  } catch {
-    receipt = null;
-  }
-  lastSettledTable = Object.freeze({ tableLabel, receipt });
-}
-
-export function getLastSettledTable() {
-  return lastSettledTable;
-}
-
-/** Tests only: forget it. */
-export function forgetSettledTable() {
-  lastSettledTable = null;
 }

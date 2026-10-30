@@ -11,7 +11,6 @@ import {
   setCustomerCsrfCredential,
 } from "./session/customer-transaction-context.js";
 import { restoreCustomerSession, type CustomerCurrentOrder } from "./session/session-bootstrap.js";
-import { rememberSettledTable } from "./dining/SettledTableReceipt.js";
 import { protectCustomerHistoryRestore } from "./session/history-recovery.js";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -88,9 +87,6 @@ async function start() {
       currentOrder = order;
     },
   );
-  // Coordinator 2026-10-30: a guest whose table was just settled scans a code again: read that
-  // table's receipt now, before the new visit replaces the ended one's access.
-  if (hash.startsWith("#qr=")) await rememberSettledTable();
   const runtimePayment = await runtimePaymentLoad;
   const inMemoryToken = await loadInternalEntryToken({
     enabled:

@@ -8,6 +8,7 @@ import {
   captureCustomerCsrfContext,
   setCustomerCsrfCredential,
   setPaymentOperationReference,
+  setUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
 
 const compactTokenPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
@@ -236,6 +237,39 @@ function parseError(
     (value as { code?: unknown }).code === "entry_not_accepting"
   )
     return parseNotAccepting(value);
+  // Coordinator 2026-10-30: no party is seated at this table; no visit was started.
+  if (
+    status === 409 &&
+    value !== null &&
+    typeof value === "object" &&
+    (value as { code?: unknown }).code === "entry_table_not_open"
+  ) {
+    const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery", "store"]);
+    const store = exact(raw.store, [
+      "brandDisplayName",
+      "storeDisplayName",
+      "publicStoreReference",
+      "locale",
+    ]);
+    if (
+      raw.schemaVersion !== 1 ||
+      raw.messageKey !== "customer.entry.table_not_open" ||
+      typeof store.locale !== "string" ||
+      !localePattern.test(store.locale)
+    )
+      return Object.freeze({ kind: "ServiceUnavailable" });
+    setUnseatedTableScan(true);
+    return Object.freeze({
+      kind: "TableNotOpen",
+      context: Object.freeze({
+        publicStoreReference: reference(store.publicStoreReference),
+        channel: "DineIn" as const,
+        locale: store.locale,
+        brandDisplayName: publicLabel(store.brandDisplayName),
+        storeDisplayName: publicLabel(store.storeDisplayName),
+      }),
+    });
+  }
   // WP-2423 item 8 ⑦ 1b: the Store takes dine-in orders only.
   if (
     status === 409 &&

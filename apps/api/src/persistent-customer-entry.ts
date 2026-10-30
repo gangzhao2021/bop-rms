@@ -9,6 +9,7 @@ import {
 import type {
   CustomerEntryNotAccepting,
   CustomerEntryServiceNotOffered,
+  CustomerEntryTableNotOpen,
   CustomerEntryPort,
   CustomerEntryPortInput,
 } from "./customer-entry.js";
@@ -59,7 +60,11 @@ export function createPersistentCustomerEntryComposition(
       // WP-2423 Q4: a closed or paused Store is still rolled back, but its answer is kept.
       // WP-2423 item 8 ⑦ 1b (v15 2026-10-29: a pickup code at a dine-in-only Store read as an
       // unusable link): the Store takes no pickup orders, kept the same way.
-      let notAccepting: CustomerEntryNotAccepting | CustomerEntryServiceNotOffered | null = null;
+      let notAccepting:
+        | CustomerEntryNotAccepting
+        | CustomerEntryServiceNotOffered
+        | CustomerEntryTableNotOpen
+        | null = null;
       let retired: RetiredTableQrError | null = null;
       try {
         const requestedAt = parseCanonicalInstant(input.requestedAt);
@@ -108,7 +113,11 @@ export function createPersistentCustomerEntryComposition(
               },
             },
           }).establish(input);
-          if (result.status === "NotAccepting" || result.status === "ServiceNotOffered")
+          if (
+            result.status === "NotAccepting" ||
+            result.status === "ServiceNotOffered" ||
+            result.status === "TableNotOpen"
+          )
             notAccepting = result;
           if (result.status !== "Established") throw new Error("CUSTOMER_ENTRY_ROLLBACK");
           return result;

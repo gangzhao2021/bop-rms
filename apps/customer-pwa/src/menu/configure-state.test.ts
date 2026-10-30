@@ -1,3 +1,7 @@
+import {
+  setCustomerCsrfCredential,
+  setUnseatedTableScan,
+} from "../session/customer-transaction-context.js";
 import { describe, expect, it } from "vitest";
 import type { CustomerCartClient } from "../cart/cart-client.js";
 import { CartClientError, type CartView } from "../cart/types.js";
@@ -176,6 +180,19 @@ describe("WP-1702 in-memory Configurator state", () => {
     state.failCreate(new CartClientError("cart_dining_not_seated"));
     await state.controller.submit(id(3), draft);
     expect(state.controller.getState()).toMatchObject({ status: "not-seated" });
+  });
+
+  it("sends nothing from a phone that scanned a table no party is seated at", async () => {
+    setUnseatedTableScan(true);
+    setCustomerCsrfCredential(null);
+    try {
+      const state = fixture(null);
+      await state.controller.submit(id(3), draft);
+      expect(state.controller.getState()).toMatchObject({ status: "not-seated" });
+      expect(state.calls).toEqual([]);
+    } finally {
+      setUnseatedTableScan(false);
+    }
   });
 
   it("never calls or auto-replays a mutation while offline", async () => {

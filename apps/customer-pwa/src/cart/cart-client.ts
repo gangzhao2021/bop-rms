@@ -3,6 +3,7 @@ import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
   setCustomerCsrfCredential,
+  isUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
 import { browserRequestTimeoutMs } from "../network/bounded-fetch.js";
 import { withNameLocale } from "../i18n/i18n.js";
@@ -178,7 +179,11 @@ export function setCustomerCartCsrfCredential(value: string | null): void {
 
 function csrf(): string {
   const value = getCustomerCsrfCredential();
-  if (value === null) throw new CartClientError("cart_session_expired");
+  // Coordinator 2026-10-30: a scan of a table no party is seated at started no visit.
+  if (value === null)
+    throw new CartClientError(
+      isUnseatedTableScan() ? "cart_dining_not_seated" : "cart_session_expired",
+    );
   return value;
 }
 

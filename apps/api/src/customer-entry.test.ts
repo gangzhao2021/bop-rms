@@ -444,6 +444,34 @@ describe("WP-1004 Customer-entry contract", () => {
     expect((await post(await listen(customerEntry(port)))).status).toBe(503);
   });
 
+  it("a table no party is seated at starts no visit (no cookie) and gives the menu's public context", async () => {
+    const port = new MutablePort();
+    port.result = {
+      status: "TableNotOpen",
+      brandDisplayName: "BOP Kitchen",
+      storeDisplayName: "Synthetic Market Store",
+      publicStoreReference: STORE_REFERENCE,
+      locale: "en-CA",
+    };
+    const response = await post(await listen(customerEntry(port)));
+    expect(response.status).toBe(409);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      code: "entry_table_not_open",
+      messageKey: "customer.entry.table_not_open",
+      recovery: { action: "AskStaff", storeSelection: "Hidden" },
+      store: {
+        brandDisplayName: "BOP Kitchen",
+        storeDisplayName: "Synthetic Market Store",
+        publicStoreReference: STORE_REFERENCE,
+        locale: "en-CA",
+      },
+    });
+    port.result = { ...(port.result as object), storeDisplayName: "<script>" };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+  });
+
   it("WP-2423 Q11: tells a guest with a replaced or turned-off table code to ask staff, with no cookie", async () => {
     const port = new MutablePort();
     for (const [reason, messageKey] of [

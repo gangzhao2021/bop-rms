@@ -8,31 +8,31 @@ import { routeStorefrontReads } from "./storefront-reads";
 // server side (the table state read under the pilot API role) is proven by the database
 // acceptance test (public store profile: dining entry).
 test.beforeEach(({ context }) => routeStorefrontReads(context));
+const cartWrites: string[] = [];
 const id = (n: number) => `018f8a00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
-async function scanNotOpenTable(page: Page) {
+async function scanNotOpenTable(page: Page, entries: string[] = []) {
   const at = new Date().toISOString();
-  await page.route("**/bff/customer/entry", (route) =>
-    route.fulfill({
-      status: 201,
+  // No party is seated: the scan starts no visit (no cookie) and gives the menu's public context.
+  await page.route("**/bff/customer/entry", (route) => {
+    entries.push(route.request().url());
+    return route.fulfill({
+      status: 409,
       headers: { "cache-control": "no-store" },
       json: {
-        schemaVersion: 2,
-        status: "Established",
-        brandDisplayName: "Synthetic Brand",
-        storeDisplayName: "Synthetic Noodle Bar",
-        publicStoreReference: id(4),
-        publicTableReference: id(5),
-        channel: "DineIn",
-        operatingState: "Open",
-        availableServiceModes: ["DineIn"],
-        locale: "en-CA",
-        contextExpiresAt: new Date(Date.now() + 600_000).toISOString(),
-        tableOpen: false,
-        csrfToken: "s".repeat(43),
+        schemaVersion: 1,
+        code: "entry_table_not_open",
+        messageKey: "customer.entry.table_not_open",
+        recovery: { action: "AskStaff", storeSelection: "Hidden" },
+        store: {
+          brandDisplayName: "Synthetic Brand",
+          storeDisplayName: "Synthetic Noodle Bar",
+          publicStoreReference: id(4),
+          locale: "en-CA",
+        },
       },
-    }),
-  );
+    });
+  });
   await page.route("**/api/v1/public/stores/*/menu?*", (route) =>
     route.fulfill({
       status: 200,
@@ -104,26 +104,11 @@ async function scanNotOpenTable(page: Page) {
       },
     }),
   );
-  // The server refuses a cart for a phone that scanned but wasn't seated (no cart is created).
-  const notSeated = {
-    status: 409,
-    headers: { "cache-control": "no-store" },
-    json: {
-      schemaVersion: 1,
-      error: { code: "cart_dining_not_seated", messageKey: "customer.cart.dining_not_seated" },
-    },
-  };
-  await page.route("**/bff/customer/cart", (route) =>
-    route.request().method() === "GET"
-      ? route.fulfill({
-          status: 200,
-          headers: { "cache-control": "no-store" },
-          json: { schemaVersion: 1, cart: null },
-        })
-      : route.fulfill(notSeated),
-  );
-  await page.route("**/bff/customer/cart-binding/*", (route) => route.fulfill(notSeated));
-  await page.route("**/api/v1/carts**", (route) => route.fulfill(notSeated));
+  // Without a visit nothing is sent to a cart; the page says why (recorded to prove it).
+  await page.route("**/api/v1/carts**", (route) => {
+    cartWrites.push(route.request().method());
+    return route.abort();
+  });
   await page.goto("/#qr=aaa.bbb.ccc");
 }
 
@@ -160,16 +145,18 @@ test.describe("@production CUST-ENTRY table not open", () => {
       "You can order once staff seat you. Ask a staff member, then scan again.",
     );
     await expect(page.getByText("Session expired")).toHaveCount(0);
+    expect(cartWrites).toEqual([]);
     await expect(page.getByText("Scan the location QR code again")).toHaveCount(0);
     await expectNoInternalText(page);
     await page.screenshot({ path: "test-results/customer-not-seated-add-390.png", fullPage: true });
   });
 
-  test("a guest whose table was just settled scans it again: thanked, with the receipt", async ({
+  test("a guest whose table was just settled scans it again: thanked with the receipt, before and after", async ({
     page,
   }) => {
-    // The restore (the ended visit's cookie) says the table was settled; its receipt is read with
-    // that visit's value before the scan starts a new visit.
+    // The scan starts no visit, so the ended visit (its cookie) stays: the restore says the
+    // table was settled, the receipt is read with that visit's value, and a reload of the table
+    // page still shows them.
     const order: string[] = [];
     await page.route("**/api/v1/customer/session/csrf", (route) => {
       order.push("restore");
@@ -208,21 +195,32 @@ test.describe("@production CUST-ENTRY table not open", () => {
         },
       });
     });
+    const entries: string[] = [];
     page.on("request", (request) => {
       if (request.url().endsWith("/bff/customer/entry")) order.push("entry");
     });
-    await scanNotOpenTable(page);
+    await scanNotOpenTable(page, entries);
     const main = page.getByRole("main");
     await expect(
       main.getByRole("heading", { name: "This table is settled. Thank you for dining with us." }),
     ).toBeVisible();
     await expect(main).toContainText("Table 12 has paid and closed.");
-    await expect(main.getByRole("region", { name: "Receipt" })).toContainText("Total paid$5.10");
-    await expect(main.getByRole("region", { name: "Receipt" })).toContainText("Paid byCash");
+    const receipt = main.getByRole("region", { name: "Receipt" });
+    await expect(receipt).toContainText("Total paid$5.10");
+    await expect(receipt).toContainText("Paid byCash");
     await expect(main).toContainText("New party? Ask staff to seat you, then scan again.");
     await expect(main).not.toContainText("This table isn’t open yet");
-    expect(order).toEqual(["restore", "receipt", "entry"]);
+    expect(order).toEqual(["restore", "entry", "receipt"]);
     await expectNoInternalText(page);
     await page.screenshot({ path: "test-results/customer-settled-rescan-390.png", fullPage: true });
+
+    // After the scan, the table page (a fresh load) still thanks them with the receipt.
+    await page.goto("/dine-in/session");
+    await expect(
+      main.getByRole("heading", { name: "This table is settled. Thank you for dining with us." }),
+    ).toBeVisible();
+    await expect(main.getByRole("region", { name: "Receipt" })).toContainText("Total paid$5.10");
+    await expect(main).not.toContainText("Join your table first");
+    expect(entries).toHaveLength(1);
   });
 });

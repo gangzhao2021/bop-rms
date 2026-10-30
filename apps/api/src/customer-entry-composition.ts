@@ -207,6 +207,16 @@ export function createCustomerEntryComposition(
             .isOpen({ ...scope, tableReference: String(tableReference) })
             .catch(() => undefined);
         }
+        // Nobody can join or order at a table no party is seated at: start no visit (an earlier
+        // one on this browser, e.g. of a guest whose table was just settled, stays as it is).
+        if (tableOpen === false)
+          return Object.freeze({
+            status: "TableNotOpen" as const,
+            brandDisplayName: profile.profile.brandDisplayName,
+            storeDisplayName: profile.profile.storeDisplayName,
+            publicStoreReference: String(qr.context.publicStoreReference),
+            locale: String(qr.context.locale),
+          });
 
         const admitted = parseGuestAdmissionEvidence(
           await options.admission.consume(
