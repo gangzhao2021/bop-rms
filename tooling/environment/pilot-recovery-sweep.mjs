@@ -1,3 +1,7 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import process from "node:process";
+import { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
 import { runPilotService, parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 const allServices = Object.freeze([
   "api",
@@ -43,6 +47,25 @@ export const storeWorkerServices = Object.freeze([
   "daily-settlement-worker",
   "dining-exception-worker",
 ]);
+/**
+ * Every listed Store's workers as (service, runtime directory) — what an installation-wide stop or
+ * recovery stops in the same window (v15 2026-10-31). None for a single-Store installation.
+ */
+export async function servedStoreWorkerTargets(
+  runtimeDirectory,
+  listStores = async () =>
+    loadServedStoreDirectories(path.join(await fs.realpath(process.cwd()), runtimeDirectory)),
+) {
+  return (await listStores()).flatMap((relative) =>
+    storeWorkerServices.map((name) =>
+      Object.freeze({
+        name,
+        directory: runtimeDirectory + "/" + relative,
+        label: relative + ":" + name,
+      }),
+    ),
+  );
+}
 export function createPilotRecoverySweep({
   runtimeDirectory,
   // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: a listed Store's directory runs its workers only.
