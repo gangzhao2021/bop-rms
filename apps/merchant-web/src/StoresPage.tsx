@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import {
+  mayOpenStore,
   openStore,
   StoreOpeningClientError,
   storeOpeningLocales,
@@ -28,15 +29,15 @@ const localeText: Record<(typeof storeOpeningLocales)[number], string> = {
 
 /**
  * WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION (Section 88 ORG-STORE-LIST): the Brand's Stores
- * this person works in, switching between them, and — for the Brand's Owner — opening another one.
- * The server decides who may open a Store; the page only explains a refusal.
+ * this person works in, switching between them, and — for whoever may open a Store (Brand Owner
+ * authority, as the server answers it; coordinator 2026-10-31 decision 3) — opening another one.
+ * Everyone else sees no form. The server still decides each opening.
  */
 export function StoresPage({
   stores,
   currentStoreReference,
   csrf,
   switching,
-  mayOpen,
   onSwitchStore,
   fetcher,
 }: {
@@ -44,9 +45,56 @@ export function StoresPage({
   readonly currentStoreReference: string;
   readonly csrf: string;
   readonly switching: boolean;
-  /** The Owner of this Store (its setup is theirs); the server still decides. */
-  readonly mayOpen: boolean;
   readonly onSwitchStore: (storeReference: string) => void;
+  readonly fetcher?: typeof fetch;
+}) {
+  // Unknown until the server answers; no form meanwhile, or when the answer is no.
+  const [mayOpen, setMayOpen] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void mayOpenStore(csrf, fetcher).then((answer) => {
+      if (active) setMayOpen(answer);
+    });
+    return () => {
+      active = false;
+    };
+  }, [csrf, fetcher]);
+  return (
+    <WorkspacePage title={t("Stores")}>
+      <div className="stores-page">
+        <section aria-labelledby="stores-yours">
+          <h2 id="stores-yours">{t("Your stores")}</h2>
+          <ul className="stores-page__list">
+            {stores.map((store) => (
+              <li key={store.storeReference} className="stores-page__row">
+                <span>{store.storeLabel}</span>
+                {store.storeReference === currentStoreReference ? (
+                  <span className="stores-page__current">{t("You are here")}</span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={switching}
+                    onClick={() => onSwitchStore(store.storeReference)}
+                  >
+                    {t("Switch to this store")}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+        {mayOpen ? <OpenStoreSection csrf={csrf} {...(fetcher ? { fetcher } : {})} /> : null}
+      </div>
+    </WorkspacePage>
+  );
+}
+
+/** The opening form, for someone the server says may open a Store. */
+export function OpenStoreSection({
+  csrf,
+  fetcher,
+}: {
+  readonly csrf: string;
   readonly fetcher?: typeof fetch;
 }) {
   const [name, setName] = useState("");
@@ -107,98 +155,68 @@ export function StoresPage({
     }
   };
   return (
-    <WorkspacePage title={t("Stores")}>
-      <div className="stores-page">
-        <section aria-labelledby="stores-yours">
-          <h2 id="stores-yours">{t("Your stores")}</h2>
-          <ul className="stores-page__list">
-            {stores.map((store) => (
-              <li key={store.storeReference} className="stores-page__row">
-                <span>{store.storeLabel}</span>
-                {store.storeReference === currentStoreReference ? (
-                  <span className="stores-page__current">{t("You are here")}</span>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={switching}
-                    onClick={() => onSwitchStore(store.storeReference)}
-                  >
-                    {t("Switch to this store")}
-                  </button>
-                )}
-              </li>
+    <section aria-labelledby="stores-open">
+      <h2 id="stores-open">{t("Open a store")}</h2>
+      <p>
+        {t(
+          "For the brand's owner. The new store gets you as its first staff member; its menu, tables and roles are set up next.",
+        )}
+      </p>
+      <form
+        className="stores-page__form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        <label>
+          {t("Store name (as guests see it)")}
+          <input
+            value={name}
+            maxLength={160}
+            required
+            onChange={(event) => setName(event.target.value)}
+          />
+        </label>
+        <label>
+          {t("Short code")}
+          <input
+            value={code}
+            maxLength={63}
+            required
+            pattern="[A-Za-z][A-Za-z0-9_\\-]*"
+            onChange={(event) => setCode(event.target.value)}
+          />
+        </label>
+        <label>
+          {t("Time zone")}
+          <select value={timeZone} onChange={(event) => setTimeZone(event.target.value)}>
+            {storeOpeningTimeZones.map((zone) => (
+              <option key={zone} value={zone}>
+                {timeZoneText[zone]}
+              </option>
             ))}
-          </ul>
-        </section>
-        {mayOpen ? (
-          <section aria-labelledby="stores-open">
-            <h2 id="stores-open">{t("Open a store")}</h2>
-            <p>
-              {t(
-                "For the brand's owner. The new store gets you as its first staff member; its menu, tables and roles are set up next.",
-              )}
-            </p>
-            <form
-              className="stores-page__form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void submit();
-              }}
-            >
-              <label>
-                {t("Store name (as guests see it)")}
-                <input
-                  value={name}
-                  maxLength={160}
-                  required
-                  onChange={(event) => setName(event.target.value)}
-                />
-              </label>
-              <label>
-                {t("Short code")}
-                <input
-                  value={code}
-                  maxLength={63}
-                  required
-                  pattern="[A-Za-z][A-Za-z0-9_\\-]*"
-                  onChange={(event) => setCode(event.target.value)}
-                />
-              </label>
-              <label>
-                {t("Time zone")}
-                <select value={timeZone} onChange={(event) => setTimeZone(event.target.value)}>
-                  {storeOpeningTimeZones.map((zone) => (
-                    <option key={zone} value={zone}>
-                      {timeZoneText[zone]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                {t("Store language")}
-                <select value={locale} onChange={(event) => setLocale(event.target.value)}>
-                  {storeOpeningLocales.map((value) => (
-                    <option key={value} value={value}>
-                      {localeText[value]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button type="submit" disabled={busy}>
-                {busy ? t("Opening the store…") : t("Open store")}
-              </button>
-            </form>
-            {message === null ? null : (
-              <p
-                role={message.tone}
-                className={message.tone === "alert" ? "command-error" : undefined}
-              >
-                {message.text}
-              </p>
-            )}
-          </section>
-        ) : null}
-      </div>
-    </WorkspacePage>
+          </select>
+        </label>
+        <label>
+          {t("Store language")}
+          <select value={locale} onChange={(event) => setLocale(event.target.value)}>
+            {storeOpeningLocales.map((value) => (
+              <option key={value} value={value}>
+                {localeText[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="submit" disabled={busy}>
+          {busy ? t("Opening the store…") : t("Open store")}
+        </button>
+      </form>
+      {message === null ? null : (
+        <p role={message.tone} className={message.tone === "alert" ? "command-error" : undefined}>
+          {message.text}
+        </p>
+      )}
+    </section>
   );
 }
