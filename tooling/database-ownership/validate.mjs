@@ -1086,6 +1086,12 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.tables?.includes("brand_sole_operator_setting") &&
           moduleRelative === "src/infrastructure/persistence/sole-operator-setting-store.ts";
         // WP-2423 Q19 step 2: sole-operator approval marks (price book publication, menu approval).
+        // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9: each Store's own prices (2000_139).
+        const acceptedStorePriceChangeAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          module.manifest.ownedDatabase?.tables?.includes("store_price_change") &&
+          moduleRelative === "src/infrastructure/persistence/store-price-change-store.ts";
         const acceptedPriceBookSoleOperatorAsset =
           module.packageName === "@rms/pricing" &&
           module.manifest.ownedDatabase?.schema === "rms_pricing" &&
@@ -3211,6 +3217,12 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_tenant" &&
           module.manifest.ownedDatabase?.tables?.includes("store") &&
           moduleRelative === "src/infrastructure/persistence/store-opening-scope-source.ts";
+        // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9: the Brand's Stores (2000_138).
+        const acceptedBrandStoreIdsAsset =
+          module.packageName === "@bop/tenant" &&
+          module.manifest.ownedDatabase?.schema === "bop_tenant" &&
+          module.manifest.ownedDatabase?.tables?.includes("store") &&
+          moduleRelative === "src/infrastructure/persistence/brand-store-ids-source.ts";
         // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: opening another Store.
         const acceptedStoreOpeningAsset =
           module.packageName === "@bop/tenant" &&
@@ -3783,6 +3795,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedMerchantOrganizationAsset &&
           !acceptedBrandSoleOperatorSettingAsset &&
           !acceptedPriceBookSoleOperatorAsset &&
+          !acceptedStorePriceChangeAsset &&
           !acceptedMenuSoleOperatorAsset &&
           !acceptedStoreConfigurationSoleOperatorAsset &&
           !acceptedStoreConfigurationWithdrawalAsset &&
@@ -3935,6 +3948,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPaymentReceiptCoverageAsset &&
           !acceptedReceiptStoreIdentityAsset &&
           !acceptedStoreOpeningScopeAsset &&
+          !acceptedBrandStoreIdsAsset &&
           !acceptedStoreOpeningAsset &&
           !acceptedStoreRoleProvisioningAsset &&
           !acceptedBrandRoleProvisioningAsset &&

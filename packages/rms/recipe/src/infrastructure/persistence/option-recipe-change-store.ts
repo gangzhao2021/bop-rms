@@ -889,10 +889,11 @@ export async function publishOptionRecipeChange(
         !(await input.soleOperatorEffective(String(review.reviewer))))
     )
       fail("OPTION_RECIPE_SOLE_OPERATOR_NOT_IN_EFFECT");
-  // WP-2423 item 8 ⑥: a single-store listing review counts only while the Brand has that store.
+  // WP-2423 item 8 ⑥: a single-store listing review counts only while the Brand has that store;
+  // a Brand Owner listing only while its reviewer is still the Brand Owner (segment 9).
   for (const review of [cost, safety])
     if (
-      review.review_mode === "SingleStoreListing" &&
+      (review.review_mode === "SingleStoreListing" || review.review_mode === "BrandOwnerListing") &&
       (input.singleStoreListingEffective === undefined ||
         !(await input.singleStoreListingEffective(String(review.reviewer))))
     )
@@ -904,8 +905,13 @@ export async function publishOptionRecipeChange(
     evidenceDigest: change.digest,
     reviewedAt: iso(review.reviewed_at),
     decision: "Approved" as const,
-    ...(review.review_mode === "SoleOperator" || review.review_mode === "SingleStoreListing"
-      ? { reviewMode: review.review_mode as "SoleOperator" | "SingleStoreListing" }
+    ...(review.review_mode === "SoleOperator" ||
+    review.review_mode === "SingleStoreListing" ||
+    review.review_mode === "BrandOwnerListing"
+      ? {
+          reviewMode: review.review_mode as
+            "SoleOperator" | "SingleStoreListing" | "BrandOwnerListing",
+        }
       : {}),
   }));
   await tx.query(scopeSql, [brand, ""]);

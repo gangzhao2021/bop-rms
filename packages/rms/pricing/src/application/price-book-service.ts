@@ -120,12 +120,16 @@ async function authorize(
     const sole = evidence.soleOperatorApproval === true;
     const single = evidence.singleStoreListing === true;
     // WP-2423 Q19 / item 8 ⑥: a sole-operator or single-store publication says so in its Audit;
-    // any other carries no summary.
+    // any other carries no summary. DEC-BRAND-MULTI-STORE segment 9: a direct listing at a Brand
+    // with several Stores (by its Brand Owner) is marked BrandOwnerListing instead.
     const summary = JSON.stringify(audit.afterSummary);
+    const listed =
+      summary === JSON.stringify({ approvalMode: "SingleStoreListing" }) ||
+      summary === JSON.stringify({ approvalMode: "BrandOwnerListing" });
     if (
       (sole && single) ||
       sole !== (summary === JSON.stringify({ approvalMode: "SoleOperator" })) ||
-      single !== (summary === JSON.stringify({ approvalMode: "SingleStoreListing" }))
+      single !== listed
     )
       throw new Error("denied");
     const soleOperatorApproval = sole || single;

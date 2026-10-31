@@ -7,6 +7,15 @@ const databaseAccessManifestInput = {
   },
   tables: [
     {
+      // WP-2423 DEC-BRAND-MULTI-STORE segment 9: each Store's own prices (append-only).
+      table: "store_price_change",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "price_book_single_store_listing",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/pricing" },
@@ -494,6 +503,24 @@ const databaseAccessManifestInput = {
       readPattern: "owner-repository",
       source:
         "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "store-price-change.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "store_price_change" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/store-price-change-store.ts",
+    },
+    {
+      id: "store-price-change.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "store_price_change" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/store-price-change-store.ts",
     },
     {
       id: "price-book-single-store-listing.write",

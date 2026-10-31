@@ -68,6 +68,7 @@ const moduleManifestInput =
       tables: [
         "price_book_sole_operator_approval",
         "price_book_single_store_listing",
+        "store_price_change",
         "option_price_single_store_listing",
         "option_price_sole_operator_approval",
         "configuration_reference_generation",

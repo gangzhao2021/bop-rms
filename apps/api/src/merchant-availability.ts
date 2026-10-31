@@ -15,9 +15,11 @@ import {
   availabilityPermission,
   soldOutMarkPermission,
   soldOutReasonCode,
+  storeOfferedReasonCode,
   type AvailabilityRuleAggregate,
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
+import { listBrandStoreReferences } from "@bop/tenant";
 import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-authorization.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -33,8 +35,11 @@ import type {
 
 /**
  * WP-2423 8.5: CAT-AVAILABILITY for the selected Store — which items this Store sells now. Offering
- * an item at the Store (or stopping) is a Brand decision; marking an item sold out (until the end of
- * the business day or until it is back) and back in stock is also open to the Store's own manager.
+ * an item at the Store (or stopping: hidden here) is open to the Brand and, at a Brand with several
+ * Stores (segment 9 of DEC-BRAND-MULTI-STORE, coordinator 2026-10-31), to the Store's own manager,
+ * in that Store only;
+ * marking an item sold out (until the end of the business day or until it is back) and back in
+ * stock is also open to the Store's own manager.
  * Both use `catalog.sku.availability.manage`; rules are recorded by the Catalog availability service.
  * WP-2423 Q17: Kitchen and Front of House notice first, so `catalog.sku.sold_out.mark` lets them mark
  * an item sold out for the rest of the business day and bring today's marks back; offering items and
@@ -102,7 +107,7 @@ const contexts = [
 export type ItemAvailabilityStatus =
   "Available" | "SoldOut" | "Unavailable" | "NotOffered" | "Varies";
 const soldOutReason = soldOutReasonCode;
-const offeredReason = "STORE_OFFERED";
+const offeredReason = storeOfferedReasonCode;
 const effectiveAt = (rule: AvailabilityRuleAggregate, at: string) =>
   rule.lifecycle === "Active" &&
   Date.parse(rule.effectiveFrom) <= Date.parse(at) &&
@@ -225,8 +230,21 @@ export function createMerchantAvailability(options: {
     const brandDecision = async () => allow(await scope.authorizeAction(action));
     const storeDecision = async () => allow(await scope.authorizeStoreAction(action));
     const markDecision = async () => allow(await scope.authorizeStoreAction(markAction));
-    const mayOffer = (await brandDecision()) !== null;
-    const mayMarkUntilBack = mayOffer || (await storeDecision()) !== null;
+    const brandWide = (await brandDecision()) !== null;
+    const mayMarkUntilBack = brandWide || (await storeDecision()) !== null;
+    // DEC-BRAND-MULTI-STORE segment 9 (coordinator 2026-10-31 rules 1 and 4): at a Brand with
+    // several Stores, whoever manages availability at this Store shows or hides an item here
+    // directly; at a Brand with one Store offering stays the Brand's decision, as before.
+    const severalStores = async () => {
+      const stores = await listBrandStoreReferences(tx as never, {
+        brandReference: String(scope.context.brand.brandReference),
+      });
+      await tx.query("SELECT set_config('bop.store_id',$1,true)", [
+        String(scope.selectedStoreReference),
+      ]);
+      return stores.length > 1 && stores.includes(String(scope.selectedStoreReference));
+    };
+    const mayOffer = brandWide || (mayMarkUntilBack && (await severalStores()));
     const mayMarkToday = !mayMarkUntilBack && (await markDecision()) !== null;
     const mayRead =
       mayMarkToday ||
@@ -235,6 +253,7 @@ export function createMerchantAvailability(options: {
     if (!mayRead) fail("PermissionDenied");
     return {
       scope,
+      brandAuthority: brandWide,
       brandDecision,
       storeDecision,
       markDecision,
@@ -335,8 +354,8 @@ export function createMerchantAvailability(options: {
         withRememberedBrandAuthorization(tx, async () => {
           const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
           const at = options.persistence.now();
-          const brandWide = body.action === "Offer" || body.action === "StopOffering";
-          if (brandWide ? !s.permissions.mayOffer : !s.permissions.mayMarkSoldOut)
+          const offering = body.action === "Offer" || body.action === "StopOffering";
+          if (offering ? !s.permissions.mayOffer : !s.permissions.mayMarkSoldOut)
             fail("PermissionDenied");
           // Q17: the today-only mark never sets "until further notice".
           if (
@@ -390,14 +409,14 @@ export function createMerchantAvailability(options: {
             itemReference: sku.skuReference,
             storeReference: s.owner.storeReference,
             ...(body.action === "SoldOut" ? { soldOutUntil } : {}),
-            authority: brandWide
+            authority: s.brandAuthority
               ? "BrandAvailability"
               : s.permissions.mayMarkUntilBack
                 ? "StoreAvailability"
                 : "SoldOutToday",
             commandReference: body.operationReference,
           });
-          const service = availabilityService(tx, s, body.operationReference, !brandWide, summary);
+          const service = availabilityService(tx, s, body.operationReference, true, summary);
           const rules = (await listStoreAvailabilityRules(ptx(tx), s.owner)).filter(
             (rule) =>
               rule.sellableReference === sku.skuReference &&
@@ -438,7 +457,13 @@ export function createMerchantAvailability(options: {
               ? created
               : setLifecycle(created.aggregate, "Active");
           };
-          const store8 = s.owner.storeReference.replaceAll("-", "").slice(0, 8).toUpperCase();
+          // A Store's own code part. Not the reference's leading digits: Stores opened weeks apart
+          // share them (UUIDv7 time prefix), and rule codes are unique across the Brand.
+          const store8 = createHash("sha256")
+            .update("bop-rms/store-availability-code:" + s.owner.storeReference)
+            .digest("hex")
+            .slice(0, 8)
+            .toUpperCase();
           try {
             const before = itemAvailability(rules, s.owner, sku.skuReference, at);
             if (body.action === "Offer") {

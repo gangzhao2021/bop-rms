@@ -268,6 +268,8 @@ export function createMerchantOptionPrices(options: {
     soleOperator = false,
     /** WP-2423 item 8 ⑥: the author's own publication at a single store. */
     singleStoreListing = false,
+    /** DEC-BRAND-MULTI-STORE segment 9: how that direct listing was allowed (its Audit says so). */
+    listingMode: MerchantDirectListingMode = "SingleStoreListing",
   ) {
     const observedAt = options.persistence.now();
     const validUntil = new Date(Date.parse(observedAt) + 5000).toISOString();
@@ -371,7 +373,7 @@ export function createMerchantOptionPrices(options: {
               ? { afterSummary: { approvalMode: "SoleOperator" } }
               : {}),
             ...(singleStoreListing && m !== "Abandon" && command.action === "Publish"
-              ? { afterSummary: { approvalMode: "SingleStoreListing" } }
+              ? { afterSummary: { approvalMode: listingMode } }
               : {}),
           }) as never,
       },
@@ -589,6 +591,7 @@ export function createMerchantOptionPrices(options: {
             "Write",
             sole,
             single,
+            listingMode,
           );
           const results: { ruleReference: string; aggregateVersion: number; status: string }[] = [];
           try {

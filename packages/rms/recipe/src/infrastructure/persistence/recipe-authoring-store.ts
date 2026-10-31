@@ -102,7 +102,7 @@ export interface RecipeReviewView {
   readonly current: boolean;
   /** WP-2423 Q19: given by the sole operator alone (own recipe, or both kinds); WP-2423 item 8 ⑥:
    * given by the author alone when listing at the Brand's one store. */
-  readonly reviewMode: "Independent" | "SoleOperator" | "SingleStoreListing";
+  readonly reviewMode: "Independent" | "SoleOperator" | "SingleStoreListing" | "BrandOwnerListing";
 }
 export interface RecipeDetailView extends RecipeSummaryView {
   readonly snapshot: RecipeSnapshot;
@@ -319,8 +319,10 @@ async function reviewsOf(
     digest: String(row.subject_digest),
     current: true,
     reviewMode:
-      row.review_mode === "SoleOperator" || row.review_mode === "SingleStoreListing"
-        ? (row.review_mode as "SoleOperator" | "SingleStoreListing")
+      row.review_mode === "SoleOperator" ||
+      row.review_mode === "SingleStoreListing" ||
+      row.review_mode === "BrandOwnerListing"
+        ? (row.review_mode as "SoleOperator" | "SingleStoreListing" | "BrandOwnerListing")
         : ("Independent" as const),
   }));
 }
@@ -830,10 +832,11 @@ async function approvedReviews(
     )
       return fail("RECIPE_AUTHORING_SOLE_OPERATOR_NOT_IN_EFFECT");
   // WP-2423 item 8 ⑥: a single-store listing review counts only while the Brand still has that
-  // one store (read now, in the publishing transaction).
+  // one store (read now, in the publishing transaction); a Brand Owner listing only while its
+  // reviewer still holds Brand Owner authority (DEC-BRAND-MULTI-STORE segment 9).
   for (const review of [cost, safety])
     if (
-      review.reviewMode === "SingleStoreListing" &&
+      (review.reviewMode === "SingleStoreListing" || review.reviewMode === "BrandOwnerListing") &&
       (singleStoreListingEffective === undefined ||
         !(await singleStoreListingEffective(review.reviewerReference)))
     )

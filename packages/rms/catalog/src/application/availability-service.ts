@@ -126,9 +126,15 @@ export const availabilityPermission = "catalog.sku.availability.manage";
 export const soldOutMarkPermission = "catalog.sku.sold_out.mark";
 /** Reason code of a Store's sold-out mark. */
 export const soldOutReasonCode = "SOLD_OUT";
+/** Reason code of the rule offering an item at one Store (shown there; ending it hides it there). */
+export const storeOfferedReasonCode = "STORE_OFFERED";
 /** A Store business day ends at most 25 hours ahead (its start across a daylight-saving change). */
 const soldOutMarkMaxMs = 25 * 3_600_000;
-/** Store authority covers only unavailability at its own Store; the sold-out mark only today's marks. */
+/**
+ * Store authority covers only unavailability at its own Store, and (DEC-BRAND-MULTI-STORE segment 9,
+ * coordinator 2026-10-31 rule 1) showing or hiding an item there through that Store's own offer
+ * rule; the sold-out mark only today's marks.
+ */
 function withinStore(
   auth: AvailabilityAuthority,
   at: CatalogInstant,
@@ -139,7 +145,8 @@ function withinStore(
     rules.some(
       (rule) =>
         rule.storeReference !== auth.store ||
-        rule.decision !== "Unavailable" ||
+        (rule.decision !== "Unavailable" &&
+          (auth.soldOutOnly || rule.reasonCode !== storeOfferedReasonCode)) ||
         (auth.soldOutOnly &&
           (rule.reasonCode !== soldOutReasonCode ||
             rule.effectiveUntil === null ||

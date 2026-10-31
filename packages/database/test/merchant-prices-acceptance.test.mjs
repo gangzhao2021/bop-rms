@@ -20,6 +20,10 @@ const priceApiGrants = [
   "GRANT SELECT,INSERT ON rms_pricing.price_book_version,rms_pricing.price_entry,rms_pricing.price_book_operation_record TO ROLE_",
   "GRANT SELECT,INSERT ON rms_pricing.store_price_book_assignment,rms_pricing.store_price_book_assignment_end TO ROLE_",
   "GRANT SELECT ON platform_eventing.outbox_event TO ROLE_",
+  // DEC-BRAND-MULTI-STORE segment 9: which Stores a Brand assignment reaches.
+  "GRANT USAGE ON SCHEMA bop_tenant TO ROLE_",
+  "GRANT EXECUTE ON FUNCTION bop_tenant.brand_store_ids(uuid) TO ROLE_",
+  "GRANT SELECT,INSERT ON rms_pricing.store_price_change TO ROLE_",
   "GRANT SELECT ON rms_catalog.published_menu_projection,rms_catalog.published_menu_projection_checkpoint,rms_catalog.published_menu_projection_generation,rms_catalog.published_menu_projection_section,rms_catalog.published_menu_projection_sellable TO ROLE_",
 ];
 

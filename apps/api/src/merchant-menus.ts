@@ -58,6 +58,7 @@ import { derivedReference } from "./merchant-products.js";
 import { sizeRecipeSource } from "./merchant-dish-allergens.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { chineseOf, optionalChinese, withChinese } from "./merchant-chinese-text.js";
+import { storePrices } from "./merchant-store-prices.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 
 /**
@@ -605,6 +606,8 @@ export function createMerchantMenus(options: {
       for (const entry of book?.entries ?? [])
         if (entry.scopeKind === "Brand" && entry.channelCode === null && entry.orderType === null)
           found.set(entry.sellableReference, entry.amount.amountMinor.toString());
+      // DEC-BRAND-MULTI-STORE segment 9: this Store's own price, where it has one.
+      for (const [sku, own] of storePrices(book, s.owner.storeReference).own) found.set(sku, own);
       return found;
     };
     const prices =

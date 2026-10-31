@@ -229,7 +229,7 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
       });
   });
   it("v20 DEC-BRAND-MULTI-STORE: the Area Manager holds exactly the Store Manager's permissions, in each Store", () => {
-    expect(storePermissionCatalogVersion).toBe(20);
+    expect(storePermissionCatalogVersion).toBeGreaterThanOrEqual(20);
     expect(storeRoleTemplateCodes).toContain("area-manager");
     expect(storeRoleTemplateActions("area-manager")).toEqual(
       storeRoleTemplateActions("store-manager"),
@@ -246,5 +246,18 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
     for (const code of ["identity.role.assign", "payment.refund.approve"])
       if (storeRoleTemplateActions("owner").includes(code))
         expect(storeRoleTemplateActions("area-manager"), code).not.toContain(code);
+  });
+  it("v21 DEC-BRAND-MULTI-STORE segment 9: Store prices are changed by whoever runs the Store", () => {
+    expect(storePermissionCatalogVersion).toBe(21);
+    for (const template of ["owner", "store-manager", "area-manager"] as const)
+      expect(storeRoleTemplateActions(template), template).toContain("pricing.store_price.manage");
+    for (const template of ["front-of-house", "kitchen", "inventory-manager"] as const)
+      expect(storeRoleTemplateActions(template), template).not.toContain(
+        "pricing.store_price.manage",
+      );
+    expect(brandRoleTemplateActions("brand-owner")).toContain("pricing.store_price.manage");
+    expect(brandRoleTemplateActions("menu-manager")).not.toContain("pricing.store_price.manage");
+    // Brand prices stay with the price book permissions.
+    expect(storeRoleTemplateActions("store-manager")).not.toContain("pricing.price_book.update");
   });
 });

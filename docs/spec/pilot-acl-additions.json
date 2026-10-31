@@ -5507,6 +5507,33 @@
       "privilege": "EXECUTE",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9 (coordinator 2026-10-31, revision of trade-off 7, Owner may overrule): at a Brand with several Stores a Brand menu change is listed directly only by someone with Brand Owner authority"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "store_price_change",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9 (coordinator 2026-10-31 rule 1, revision of trade-off 7, Owner may overrule): each Store's manager changes that Store's own prices directly; a Brand listing reaches every Store"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "store_price_change",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9 (coordinator 2026-10-31 rule 1, revision of trade-off 7, Owner may overrule): each Store's manager changes that Store's own prices directly; a Brand listing reaches every Store"
+    },
+    {
+      "type": "routine",
+      "schema": "bop_tenant",
+      "object": "bop_tenant.brand_store_ids(uuid)",
+      "column": null,
+      "privilege": "EXECUTE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9 (coordinator 2026-10-31 rule 1, revision of trade-off 7, Owner may overrule): each Store's manager changes that Store's own prices directly; a Brand listing reaches every Store"
     }
   ]
 }

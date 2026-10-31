@@ -64,8 +64,13 @@
  * v20 (2026-10-30, WP-2423 DEC-BRAND-MULTI-STORE, Owner trade-off 14): the Area Manager template
  * (`area_manager`) runs several Stores with the Store Manager's permissions; it is assigned in each
  * Store they run. No permission code is added.
+ * v21 (2026-10-31, WP-2423 DEC-BRAND-MULTI-STORE segment 9, coordinator 2026-10-31 rule 1):
+ * pricing.store_price.manage changes this Store's own price for an item (or returns it to the Brand
+ * price), here only, at a Brand with several Stores. Store Manager, Area Manager and Owner hold it
+ * in their Stores; the Brand Owner holds it in every Store through the `pricing.` prefix. Brand
+ * prices stay with the price book permissions.
  */
-export const storePermissionCatalogVersion = 20 as const;
+export const storePermissionCatalogVersion = 21 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -225,6 +230,7 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     ["pricing.price_book.read", "Read price books", "Low"],
     ["pricing.price_book.update", "Edit price book drafts", "Medium"],
     ["pricing.price_book.approve", "Approve price book changes", "High"],
+    ["pricing.store_price.manage", "Change this Store's prices", "Medium"],
     ["pricing.promotion.manage", "Manage promotions", "High"],
     ["pricing.tax_config.read", "Read tax configuration", "Low"],
     ["pricing.tax_config.manage", "Edit and submit tax configuration", "High"],
@@ -543,6 +549,8 @@ const storeManagerTemplate: readonly string[] = Object.freeze([
   "catalog.sku.suspend",
   "catalog.sku.resume",
   "recipe.read",
+  // v21 (DEC-BRAND-MULTI-STORE segment 9): this Store's own prices.
+  "pricing.store_price.manage",
 ]);
 /** DEC-PERM-CATALOG Store role templates; an Owner may adjust a Store's copy. */
 export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly string[]>> =
