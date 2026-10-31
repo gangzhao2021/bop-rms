@@ -14,10 +14,12 @@ import { issueInternalTestStoreDirectory } from "./pilot-internal-test-store-dir
  *
  *   setup     — its first published configuration and synthetic launch gate (database, one
  *               audited transaction; `--dry-run` rolls it back);
+ *   stock-site — its default stock site and storage location (database, audited under the
+ *               approver; a Store that has its default site gets it back, nothing written);
  *   directory — its runtime directory `stores/<name>/`, listed in `stores.json`, so the next
  *               planned restart serves it: only the files its services read, its own identities
- *               (the same on every run for the same Store) and its own stock site (`--stock-site`,
- *               created first under Supply → Locations at that Store);
+ *               (the same on every run for the same Store) and its own default stock site, read
+ *               from the database (`--stock-site` must name it if given; never another Store's);
  *   settlement — once the Store's first business day has closed, its day-end settlement
  *               coverage (that day), read as the services do; its settlement worker starts at the
  *               next restart. The directory given is the Store's (`…/stores/<name>`);
@@ -47,7 +49,18 @@ const flags = {
     "--approved-by": "approvedBy",
     "--approval": "approval",
   },
+  "stock-site": {
+    "--database": "expectedDatabaseName",
+    "--migration-env": "envFile",
+    "--store": "storeReference",
+    "--approver": "approverActorReference",
+    "--reason": "reason",
+    "--approved-by": "approvedBy",
+    "--approval": "approval",
+  },
   directory: {
+    "--database": "expectedDatabaseName",
+    "--migration-env": "envFile",
     "--store": "storeReference",
     "--name": "name",
     "--stock-site": "stockSiteReference",
@@ -62,6 +75,8 @@ const flags = {
     "--approval": "approval",
   },
 };
+/** Flags a command may leave out: `directory` reads the Store's own default stock site. */
+const optionalFlags = new Set(["directory:stockSiteReference"]);
 export function parseStoreOpenArguments(args) {
   const [command, directory, ...rest] = args;
   const known = flags[command];
@@ -90,7 +105,11 @@ export function parseStoreOpenArguments(args) {
     options[name] = value;
     index += 1;
   }
-  if (Object.values(known).some((name) => !Object.hasOwn(options, name)))
+  if (
+    Object.values(known).some(
+      (name) => !Object.hasOwn(options, name) && !optionalFlags.has(command + ":" + name),
+    )
+  )
     return unavailable("arguments-invalid");
   delete options.dryRunSeen;
   return Object.freeze(options);
@@ -135,6 +154,92 @@ async function setup(options) {
   } finally {
     await client.end().catch(() => undefined);
   }
+}
+
+async function stockSite(options) {
+  const database = await import("./pilot-internal-test-renew-database.mjs");
+  const site = await import("./pilot-internal-test-stock-site.mjs");
+  const read = async (name) => JSON.parse(await readFile(join(options.directory, name), "utf8"));
+  const installation = await read("installation.json"),
+    profile = await read("internal-test-profile.json");
+  if (installation.environment !== "InternalTest" || profile.environment !== "InternalTest")
+    unavailable("not-internal-test");
+  if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
+  const client = await database.connectRenewalDatabase(
+    options.envFile,
+    options.expectedDatabaseName,
+  );
+  try {
+    const role = site.stockSiteRoleName(options.expectedDatabaseName);
+    for (const sql of site.renderStockSiteRoleSql(role)) await client.query(sql);
+    return await site.createInternalTestStockSite(client, {
+      environment: profile.environment,
+      database: options.expectedDatabaseName,
+      role,
+      binding: profile.binding,
+      storeReference: options.storeReference,
+      approverActorReference: options.approverActorReference,
+      now: () => new Date().toISOString(),
+      evidence: {
+        operationReference: uuidV7(),
+        approvedBy: options.approvedBy,
+        approval: options.approval,
+        reason: options.reason,
+      },
+      nextReference: () => uuidV7(),
+    });
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
+/** The Store's runtime directory, with its own default stock site read as the services read it. */
+async function directory(options) {
+  const database = await import("./pilot-internal-test-renew-database.mjs");
+  const site = await import("./pilot-internal-test-stock-site.mjs");
+  const read = async (name) => JSON.parse(await readFile(join(options.directory, name), "utf8"));
+  const installation = await read("installation.json"),
+    profile = await read("internal-test-profile.json");
+  if (installation.environment !== "InternalTest" || profile.environment !== "InternalTest")
+    unavailable("not-internal-test");
+  if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
+  const client = await database.connectRenewalDatabase(
+    options.envFile,
+    options.expectedDatabaseName,
+  );
+  let own;
+  try {
+    own = await site.readStoreDefaultStockSite(client, {
+      role: installation.roles.api,
+      binding: profile.binding,
+      storeReference: options.storeReference,
+    });
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+  return issueStoreDirectoryWithOwnSite(options, own);
+}
+
+/**
+ * Pure step of `directory` after the read: never another Store's site; with none yet, refuses and
+ * says to run `stock-site` first.
+ */
+export function issueStoreDirectoryWithOwnSite(
+  options,
+  own,
+  issue = issueInternalTestStoreDirectory,
+) {
+  if (own === null) unavailable("stock-site-missing-run-stock-site-first");
+  if (options.stockSiteReference !== undefined && options.stockSiteReference !== own)
+    unavailable("stock-site-not-this-store");
+  return issue({
+    directory: options.directory,
+    name: options.name,
+    storeReference: options.storeReference,
+    // The Store's own identities derive from the Store: a rerun gives the same ones.
+    operationReference: options.storeReference,
+    stockSiteReference: own,
+  });
 }
 
 async function settlement(options) {
@@ -315,14 +420,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           ? await settlement(options)
           : options.command === "renew"
             ? await renew(options)
-            : await issueInternalTestStoreDirectory({
-                directory: options.directory,
-                name: options.name,
-                storeReference: options.storeReference,
-                // The Store's own identities derive from the Store: a rerun gives the same ones.
-                operationReference: options.storeReference,
-                stockSiteReference: options.stockSiteReference,
-              });
+            : options.command === "stock-site"
+              ? await stockSite(options)
+              : await directory(options);
     console.log(JSON.stringify(result));
   } catch (error) {
     const reason = typeof error?.reason === "string" ? error.reason : "unexpected-error";

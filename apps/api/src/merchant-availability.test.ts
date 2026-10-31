@@ -115,6 +115,10 @@ describe("WP-2423 (2026-10-16) stock reason on the item availability page", () =
       ],
     });
     expect(stockSoldOutView({ status: "Available", shortages: [] })).toBeNull();
+    // DEC-BRAND-MULTI-STORE (coordinator 2026-10-31): a new Store before its first delivery says so.
+    expect(
+      stockSoldOutView({ status: "Unavailable", shortages: [milk], noStockReceived: true }),
+    ).toEqual({ noStockReceived: true, ingredients: [] });
     expect(stockSoldOutView({ status: "Indeterminate", shortages: [] })).toBeNull();
     expect(stockSoldOutView(undefined)).toBeNull();
   });

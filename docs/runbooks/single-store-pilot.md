@@ -1963,19 +1963,38 @@ owner,store-manager,area-manager,front-of-house,kitchen,inventory-manager` (the 
    commits only if the services' api role reads the new Store's operating status. A refusal
    prints `PILOT_INTERNAL_TEST_STORE_OPEN_UNAVAILABLE (<reason>)` and changes nothing.
 
-4. **Its stock site, then its runtime directory.** Signed in at the new Store, its Owner
-   creates its stock site under Supply → Locations. Read its reference (read-only):
-   `SELECT stock_site_id FROM rms_inventory.stock_site WHERE store_id='<new Store reference>' AND is_default`.
-   Then the same command with `directory /app/.local/pilot-v15 --store <new Store reference>
---name demo-2 --stock-site <its stock site reference>` writes `stores/demo-2/` (owner-only)
-   and lists it in `stores.json`. It holds only what the Store's services read: its own
-   configuration (its own identities, the same on every run), the keys and passwords those
-   services use (copied as they are) and an empty payment simulator — never the installation's
-   pids, locks, health files, logs, evidence or migration credentials. A Store directory that
-   cannot be loaded never stops the others: the services log `PILOT_HTTPS_STORE_UNAVAILABLE`,
-   `PILOT_CUSTOMER_STORE_UNAVAILABLE` or `PILOT_API_STORE_UNAVAILABLE` with its code and
-   `stores/<name>`, and serve the other Stores; the supervisor shows attention for that Store's
-   workers only. To redo it: set `stores.json` aside, delete `stores/<name>/`, rerun this step.
+4. **Its stock site, then its runtime directory.** First its default stock site, before its first
+   service (as a real restaurant's stock place exists before it opens), with the same flags as
+   step 3 (dry run not offered; it writes only the site and its storage location, audited under
+   the approver with the approval wording; run again it answers the same site and writes nothing):
+
+   ```bash
+   PILOT_UID=$(id -u) PILOT_GID=$(id -g) PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 \
+     docker compose -f compose.pilot.yaml run --rm --no-deps -T -e NODE_ENV=development pilot \
+     node --import ./tooling/environment/register-workspace-typescript.mjs \
+     tooling/environment/pilot-internal-test-store-open.mjs stock-site \
+     /app/.local/pilot-v15 --database bop_rms_pilot_v15 \
+     --migration-env .local/migrate-v14/migrate-v15.env \
+     --store <new Store reference> --approver <another staff member's actor reference> \
+     --reason "Multi-store live check" --approved-by "Owner" --approval "<the approval wording>"
+   ```
+
+   Then its runtime directory: the same command with `directory /app/.local/pilot-v15 --database
+bop_rms_pilot_v15 --migration-env .local/migrate-v14/migrate-v15.env --store <new Store
+reference> --name demo-2`. It reads the Store's own default stock site as the services do
+   (`--stock-site` may name it; another Store's is refused; with none it refuses and says to run
+   `stock-site` first), writes `stores/demo-2/` (owner-only) and lists it in `stores.json`. It
+   holds only what the Store's services read: its own configuration (its own identities, the same
+   on every run), the keys and passwords those services use (copied as they are) and an empty
+   payment simulator — never the installation's pids, locks, health files, logs, evidence or
+   migration credentials. Its stock starts empty: stock-tracked dishes show sold out there (Item
+   availability says no stock has been received at this store yet) until its first delivery is
+   recorded; untracked dishes sell. A Store directory that cannot be loaded never stops the
+   others: the services log `PILOT_HTTPS_STORE_UNAVAILABLE`, `PILOT_CUSTOMER_STORE_UNAVAILABLE`
+   or `PILOT_API_STORE_UNAVAILABLE` with its code and `stores/<name>`, and serve the other
+   Stores; the supervisor shows attention for that Store's workers only. To redo it: set
+   `stores.json` aside, delete `stores/<name>/`, rerun the directory command, restart.
+
 5. **Restart** in a planned update window. Only the Owner (Store Owner or Brand Owner) adds
    someone from another Store to this one (Staff, "Your staff at other stores"): moving staff
    between Stores changes who can act there. A Store Manager or Area Manager who needs someone
