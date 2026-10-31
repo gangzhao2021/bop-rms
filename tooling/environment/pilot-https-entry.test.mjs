@@ -1,5 +1,9 @@
 import { expect, it, vi } from "vitest";
-import { startConfiguredPilotHttps, parsePilotHttpsArguments } from "./pilot-https-entry.mjs";
+import {
+  loadServedStoreDirectories,
+  startConfiguredPilotHttps,
+  parsePilotHttpsArguments,
+} from "./pilot-https-entry.mjs";
 import { composeMerchantDependencies } from "./pilot-merchant-composition.mjs";
 const scope = { tenantReference: "tenant", brandReference: "brand", storeReference: "store" };
 const customerConfig = { scope, diningTableFiles: ["internal-test-dining-table.json"] };
@@ -205,4 +209,32 @@ it("opens Product credentials and handlers only through the explicitly configure
     createCursorKey: cursor,
   });
   expect(cursor).toHaveBeenCalledOnce();
+});
+it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: reads the other served Store directories, none without stores.json", async () => {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const directory = await mkdtemp(join(tmpdir(), "served-stores-"));
+  try {
+    expect(await loadServedStoreDirectories(directory)).toEqual([]);
+    await writeFile(
+      join(directory, "stores.json"),
+      JSON.stringify({ schemaVersion: 1, stores: ["stores/demo-2"] }),
+    );
+    expect(await loadServedStoreDirectories(directory)).toEqual(["stores/demo-2"]);
+    for (const bad of [
+      { schemaVersion: 1, stores: ["../elsewhere"] },
+      { schemaVersion: 1, stores: ["stores/a", "stores/a"] },
+      { schemaVersion: 1, stores: ["stores/A"] },
+      { schemaVersion: 2, stores: [] },
+      { schemaVersion: 1, stores: [], extra: true },
+    ]) {
+      await writeFile(join(directory, "stores.json"), JSON.stringify(bad));
+      await expect(loadServedStoreDirectories(directory)).rejects.toThrow(
+        "PILOT_HTTPS_STORES_INVALID",
+      );
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

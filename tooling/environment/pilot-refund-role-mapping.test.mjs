@@ -18,7 +18,7 @@ afterEach(async () => {
 
 it("WP-2423 Q5: maps the real Store/Brand roles; Finance stays empty until a finance role exists", () => {
   expect(standardRefundRoleMapping).toEqual({
-    Manager: ["store_manager"],
+    Manager: ["store_manager", "area_manager"],
     Owner: ["store_owner", "brand_owner"],
     Finance: [],
   });

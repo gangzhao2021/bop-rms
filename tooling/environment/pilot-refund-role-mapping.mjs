@@ -15,7 +15,11 @@ import {
  * confers refund authority. The catalog has no finance role yet, so Finance is empty.
  */
 export const standardRefundRoleMapping = Object.freeze({
-  Manager: Object.freeze([storeRoleTemplateProfiles["store-manager"].roleCode]),
+  // v20 DEC-BRAND-MULTI-STORE: an Area Manager runs each of their Stores as its Store Manager.
+  Manager: Object.freeze([
+    storeRoleTemplateProfiles["store-manager"].roleCode,
+    storeRoleTemplateProfiles["area-manager"].roleCode,
+  ]),
   Owner: Object.freeze([
     storeRoleTemplateProfiles.owner.roleCode,
     brandRoleTemplateProfiles["brand-owner"].roleCode,

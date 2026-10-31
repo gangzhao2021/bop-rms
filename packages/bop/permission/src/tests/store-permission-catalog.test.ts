@@ -7,6 +7,9 @@ import {
   brandRoleTemplateActions,
   storeRoleTemplateActions,
   storeRoleTemplates,
+  storePermissionCatalogVersion,
+  storeRoleTemplateCodes,
+  storeRoleTemplateProfiles,
 } from "../catalog/store-permission-catalog.js";
 
 // Mirrors the action code check that migration 0300_017 installs (underscore segments allowed).
@@ -224,5 +227,24 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
         module: "identity",
         risk: "High",
       });
+  });
+  it("v20 DEC-BRAND-MULTI-STORE: the Area Manager holds exactly the Store Manager's permissions, in each Store", () => {
+    expect(storePermissionCatalogVersion).toBe(20);
+    expect(storeRoleTemplateCodes).toContain("area-manager");
+    expect(storeRoleTemplateActions("area-manager")).toEqual(
+      storeRoleTemplateActions("store-manager"),
+    );
+    expect(storeRoleTemplateProfiles["area-manager"]).toEqual({
+      roleCode: "area_manager",
+      displayName: "Area Manager",
+      description: "Store Manager permissions in each of the Stores they run",
+    });
+    // Its own role code, so staff and Owners see who runs several Stores.
+    const codes = storeRoleTemplateCodes.map((code) => storeRoleTemplateProfiles[code].roleCode);
+    expect(new Set(codes).size).toBe(codes.length);
+    // Never the Owner's: staff, roles, finance and refund approval stay with the Owner.
+    for (const code of ["identity.role.assign", "payment.refund.approve"])
+      if (storeRoleTemplateActions("owner").includes(code))
+        expect(storeRoleTemplateActions("area-manager"), code).not.toContain(code);
   });
 });

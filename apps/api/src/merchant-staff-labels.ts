@@ -16,6 +16,8 @@ const fixedRoleLabels: readonly (readonly [string, string])[] = [
   ["store_owner", "Store owner"],
   ["brand_owner", "Brand owner"],
   ["store_manager", "Store manager"],
+  // v20 DEC-BRAND-MULTI-STORE.
+  ["area_manager", "Area manager"],
 ];
 /** The role a person is known by when they have no recorded name. */
 export function staffRoleLabel(roles: readonly StaffRole[]): string {

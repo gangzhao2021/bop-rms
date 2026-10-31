@@ -7,7 +7,12 @@ import { createMerchantProductListNavigationRuntime } from "./merchant-product-l
 import { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 import { createMerchantServicePauseProof } from "./merchant-service-pause-proof.js";
 import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
-import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
+import {
+  appendAuditRecordInTransaction,
+  canonicalizeRfc8785,
+  sha256Hex,
+  validateAuditRecord,
+} from "@bop/audit";
 import {
   createPostgresCurrentStorePublicationProof,
   createPostgresStoreOperatingStatusReader,
@@ -542,12 +547,20 @@ export function createPersistentMerchantBffService(
       try {
         const current = await base.authorize(input);
         const target = parseStoreReference(input.targetStoreReference);
-        const scope = await options.transactions.run(async (tx) => {
+        const { scope, from } = await options.transactions.run(async (tx) => {
           const session = await currentSession(tx, input.sessionCookie);
           if (session.sessionReference !== current.sessionReference)
             throw new Error("MERCHANT_BFF_UNAVAILABLE");
-          return options.targetScope(tx, session, target);
+          const source = await selectedContext(tx, session);
+          return {
+            scope: await options.targetScope(tx, session, target),
+            from: {
+              brandReference: String(source.context.brand.brandReference),
+              storeReference: String(source.context.store?.storeReference ?? ""),
+            },
+          };
         });
+        if (from.storeReference === "") throw new Error("MERCHANT_BFF_UNAVAILABLE");
         if (scope.storeReference !== target || current.actor.actorReference === null)
           throw new Error("MERCHANT_BFF_UNAVAILABLE");
         const bind = createMerchantSessionSelection({
@@ -561,6 +574,33 @@ export function createPersistentMerchantBffService(
         const finalizers: (() => void)[] = [];
         const rotation = service(async (tx, record) => {
           await bind(tx, record);
+          // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: switching Stores is an explicit, audited act,
+          // recorded in the Store the person left (this transaction's Store), naming the Store they
+          // switched to, with the rotation that binds the session to it.
+          const at = parseCanonicalInstant(options.now());
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [from.brandReference, from.storeReference],
+          );
+          await appendAuditRecordInTransaction(
+            tx,
+            validateAuditRecord({
+              auditId: options.identity.credentials.generateUuidV7(),
+              brandId: from.brandReference,
+              storeId: from.storeReference,
+              actor: { type: "User", reference: current.actor.actorReference as string },
+              actionCode: "MERCHANT_STORE_SWITCHED",
+              targetType: "Store",
+              targetId: scope.storeReference,
+              reasonCode: "STAFF_SELECTED_STORE",
+              correlationId: record.session.sessionReference,
+              occurredAt: at,
+              sourceChannel: "MERCHANT_WEB",
+              dataClassification: "Internal",
+              retentionPolicyCode: "AUDIT_DEFAULT",
+              retentionPolicyVersion: 1,
+            }),
+          );
           nextWorkspace = await workspace(tx, record.session, finalizers);
         });
         const result = await rotation.rotate(input.sessionCookie, "StoreContextElevation");
