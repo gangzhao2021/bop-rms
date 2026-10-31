@@ -1061,6 +1061,21 @@ export async function publishOptionRecipeChange(
  * Whether every recipe now bound to the target's sizes has a published rule for each quantity —
  * false after a recipe revision until the change is saved, reviewed and published again.
  */
+/**
+ * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION (coordinator 2026-10-31): which of the SKUs have a recipe
+ * at the Store in `scope` at `at` — a Brand-wide one or the Store's own. A recipe bound to another
+ * Store only does not count here.
+ */
+export async function skusWithRecipe(
+  tx: RecipeAuthoringTransaction,
+  scope: RecipeAuthoringScope,
+  skuReferences: readonly string[],
+  at: string,
+): Promise<ReadonlySet<string>> {
+  const bound = await boundRecipes(tx, scope, skuReferences, at);
+  return new Set(bound.map((item) => item.skuReference));
+}
+
 export async function optionRecipeCovered(
   tx: RecipeAuthoringTransaction,
   scope: RecipeAuthoringScope,

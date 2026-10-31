@@ -2035,17 +2035,46 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    `AlreadyPresent` and writes nothing. It refuses the installation's own Store, a Store not
    opened on the Stores page or not named "… – not production", one without a saved address
    (`store-address-not-set-in-store-setup`) and one in another province than the installation
-   Store's tax configuration (`store-province-differs`): rates are never guessed. Then staff open
-   Store setup at the new Store and publish it (Review): it carries the Store's own tax settings,
-   and Tax review shows its rates. No restart is needed; the Store's services read it on the next
-   quote.
+   Store's tax configuration (`store-province-differs`): rates are never guessed. Tax review then
+   shows its rates. No restart is needed.
 
-   Then the Brand Owner switches to the new Store, opens
-   Menu and chooses "Serve the menu here", then "List it": guests there see the Brand's dishes at
-   the Brand prices, and every later Brand listing reaches both Stores. Each Store's manager changes
-   that Store's own prices, sold out and hidden items under Item availability (a price change
-   confirms the old and the new price and is recorded with who made it). Offline, nothing changes:
-   the Store keeps charging the price shown, and the manager confirms again once back online.
+   **Store setup publication — required before guests can order there.** A guest quote uses the
+   tax configuration the Store's published setup names; the Store's first setup (step 3) names
+   none yet, so guests cannot be quoted until staff publish Store setup at the new Store. "Create
+   configuration from saved setup" needs every setting set (Review lists those still missing):
+   1. Identity: Brand or Store settings;
+   2. Address and timezone: time zone, business day start, address;
+   3. Service modes;
+   4. Hours: weekly hours;
+   5. Tax and payment: each fee (service charge, delivery fee, tip: set or turned off), payment
+      settings, receipt template;
+   6. Capacity: order limits;
+   7. Contacts: contact details;
+   8. Use the live Store's settings: tax settings (the Store's own, from `tax`), Brand settings,
+      holidays and special hours, when it takes effect.
+
+   Then, on Review: Create configuration from saved setup → Validate → Submit → approval by a
+   second staff member who holds Store setup approval (not the submitter) → Publish.
+
+   **Its menu.** The Brand Owner switches to the new Store, opens Menu and chooses "Serve the
+   menu here", then "List it". A menu is listed only when every Store it serves can sell each
+   item: each has a tax rate there and a recipe there (the Brand's, or that Store's own), and each
+   option has a published recipe change for that recipe. Otherwise "List it" is refused from any
+   Store with the Store, dish and option named. A recipe assigned "this store only" counts at that
+   Store alone: to use it at every Store, open it under Recipes and assign it to the size again
+   without "this store only" (the Store's own assignment stays for that Store). Listing offers
+   the menu's never-decided items at the Store it is listed from; at another Store its manager
+   shows them under Item availability.
+
+   **Its prices.** On the new Store's Prices page, open the Brand's published price book and
+   choose "Use at this Store". At a Brand with several Stores this makes that Brand book the one
+   every Store uses, each keeping its own Store prices. It is greyed out while an item on the
+   Store's menu has no price in that book (the page lists them). Guests then see the Brand's
+   dishes at the Brand prices, and every later Brand listing reaches both Stores. Each Store's
+   manager changes that Store's own prices, sold out and hidden items under Item availability (a
+   price change confirms the old and the new price and is recorded with who made it). Offline,
+   nothing changes: the Store keeps charging the price shown, and the manager confirms again once
+   back online.
 
 7. **Its day-end settlement**, once its first business day has closed: the same command with
    `settlement /app/.local/pilot-v15/stores/demo-2 --database bop_rms_pilot_v15

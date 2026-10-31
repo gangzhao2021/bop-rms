@@ -1,4 +1,4 @@
-import { listBrandStoreReferences } from "@bop/tenant";
+import { createPostgresMerchantOrganizationSource, listBrandStoreReferences } from "@bop/tenant";
 import {
   merchantBrandSoleOperatorGate,
   MerchantSingleStoreListingError,
@@ -48,11 +48,7 @@ import { withRememberedBrandAuthorization } from "./merchant-brand-transaction-a
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { createMerchantMenuPublicationCommand } from "./merchant-menu-publication-command.js";
-import {
-  menuItemsWithoutTax,
-  menuOptionsWithoutRecipes,
-  unpricedMenuOptions,
-} from "./menu-option-gates.js";
+import { menuListingGaps, unpricedMenuOptions, type MenuListingGap } from "./menu-option-gates.js";
 import { itemAvailability } from "./merchant-availability.js";
 import { localBoundary } from "./merchant-prices.js";
 import { derivedReference } from "./merchant-products.js";
@@ -104,14 +100,17 @@ export class MerchantMenuError extends Error {
 }
 /** A menu review gap in staff terms: names only, never references or internal codes. */
 export interface MenuReviewProblem {
-  /** "Stopped": nothing was named missing; `reason` says why it stopped (v15 2026-10-29). */
-  readonly missing: MenuReviewGap["missing"] | "Stopped";
+  /** "Stopped": nothing was named missing; `reason` says why it stopped (v15 2026-10-29).
+   * "Tax": an item is not taxed at one of the menu's Stores (listing gates, 2026-10-31). */
+  readonly missing: MenuReviewGap["missing"] | "Stopped" | "Tax";
   readonly reason?: string;
   readonly productName: string | null;
   readonly sizeName: string | null;
   readonly optionName: string | null;
   readonly quantity: number | null;
   readonly ingredientName: string | null;
+  /** The Store the gap is at, for a listing gate at a menu served at several Stores. */
+  readonly storeName?: string | null;
 }
 const fail = (code: MerchantMenuError["code"]): never => {
   throw new MerchantMenuError(code);
@@ -754,6 +753,54 @@ export function createMerchantMenus(options: {
         };
       }),
     );
+  /**
+   * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION (coordinator 2026-10-31): tax and option recipes at
+   * every Store the menu serves; the first gap is refused with the Store, item, size and option
+   * named (staff words, never references). Leaves the transaction in the Brand's scope.
+   */
+  const listingGate = async (tx: unknown, s: Scope, aggregate: MenuAggregate) => {
+    const at = options.persistence.now();
+    const gaps = await menuListingGaps(ptx(tx) as never, {
+      owner: s.owner,
+      observedAt: at,
+      menu: aggregate.draft,
+    });
+    const gap: MenuListingGap | undefined = gaps.find((item) => item.missing === "Tax") ?? gaps[0];
+    if (gap === undefined) {
+      await brandScope(tx, s.owner.brandReference);
+      return;
+    }
+    const sku = (await listBrandSkuChoices(ptx(tx) as never, s.owner)).find(
+      (item) => item.skuReference === gap.skuReference,
+    );
+    const option =
+      gap.optionReference === null
+        ? undefined
+        : (await listBrandOptionSets(ptx(tx), s.owner))
+            .flatMap((set) => set.draft.options)
+            .find((item) => String(item.optionReference) === gap.optionReference);
+    // The Store's name, read in that Store's scope; a Store that cannot be read is left unnamed.
+    const storeName = await createPostgresMerchantOrganizationSource(ptx(tx) as never, {
+      brandReference: s.owner.brandReference,
+      storeReference: gap.storeReference,
+      observedAt: at,
+    })
+      .getStore(gap.storeReference as never)
+      .then(
+        (store) => store?.displayName ?? null,
+        () => null,
+      );
+    await brandScope(tx, s.owner.brandReference);
+    throw new MerchantMenuError(gap.missing === "Tax" ? "TaxNotCovered" : "OptionRecipeMissing", {
+      missing: gap.missing,
+      productName: sku ? name(sku.productLocalizedNames, sku.skuCode) : null,
+      sizeName: sku ? name(sku.localizedNames, sku.skuCode) : null,
+      optionName: option ? name(option.localizedNames, "") || null : null,
+      quantity: null,
+      ingredientName: null,
+      storeName,
+    });
+  };
   const unpricedOptions = async (tx: unknown, s: Scope, aggregate: MenuAggregate) => {
     const missing = await unpricedMenuOptions(ptx(tx) as never, {
       owner: s.owner,
@@ -1090,28 +1137,7 @@ export function createMerchantMenus(options: {
             if (loaded === null) return fail("NotFound");
             if ((await currentAllergenRegistry(ptx(tx) as never, s.owner)) === null)
               return stopped("Check:NoAllergenList");
-            const at = options.persistence.now();
-            if (
-              (
-                await menuItemsWithoutTax(ptx(tx) as never, {
-                  owner: s.owner,
-                  observedAt: at,
-                  menu: loaded.aggregate.draft,
-                })
-              ).length > 0
-            )
-              fail("TaxNotCovered");
-            if (
-              (
-                await menuOptionsWithoutRecipes(ptx(tx) as never, {
-                  owner: s.owner,
-                  observedAt: at,
-                  menu: loaded.aggregate.draft,
-                })
-              ).length > 0
-            )
-              fail("OptionRecipeMissing");
-            await brandScope(tx, s.owner.brandReference);
+            await listingGate(tx, s, loaded.aggregate);
             return { status: "Ready" as const };
           }),
         ),
@@ -1135,30 +1161,9 @@ export function createMerchantMenus(options: {
               const registry = await currentAllergenRegistry(ptx(tx) as never, s.owner);
               if (loaded === null) return fail("NotFound");
               if (registry === null) return stopped("Submit:NoAllergenList");
-              if (
-                (
-                  await menuItemsWithoutTax(ptx(tx) as never, {
-                    owner: s.owner,
-                    observedAt: options.persistence.now(),
-                    menu: loaded.aggregate.draft,
-                  })
-                ).length > 0
-              )
-                fail("TaxNotCovered");
-              await brandScope(tx, s.owner.brandReference);
               if ((await unpricedOptions(tx, s, loaded.aggregate)).length > 0)
                 fail("OptionPriceMissing");
-              if (
-                (
-                  await menuOptionsWithoutRecipes(ptx(tx) as never, {
-                    owner: s.owner,
-                    observedAt: options.persistence.now(),
-                    menu: loaded.aggregate.draft,
-                  })
-                ).length > 0
-              )
-                fail("OptionRecipeMissing");
-              await brandScope(tx, s.owner.brandReference);
+              await listingGate(tx, s, loaded.aggregate);
               return { s, loaded, registry };
             }),
           ),

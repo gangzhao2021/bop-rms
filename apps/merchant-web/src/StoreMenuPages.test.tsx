@@ -186,6 +186,46 @@ describe("WP-2423 menu page helpers", () => {
     });
     await expect(offline.load(null)).rejects.toBeInstanceOf(MenuPageError);
   });
+  it("names the Store, dish and option a listing gate refused, never only the generic text (2026-10-31)", async () => {
+    const refusal = (body: unknown) =>
+      createMenuClient("csrf", async () => Response.json(body, { status: 409 })).load(null);
+    const named = (error: unknown) => {
+      const problem = error instanceof MenuPageError ? error.problem : null;
+      expect(problem).not.toBeNull();
+      return problem === null ? "" : menuReviewProblemText(problem);
+    };
+    const recipe = await refusal({
+      error: "OptionRecipeMissing",
+      part: "Menu",
+      problem: {
+        missing: "Recipe",
+        productName: "Flat white",
+        sizeName: "Small (8 oz)",
+        optionName: null,
+        quantity: null,
+        ingredientName: null,
+        storeName: "DEMO Store 2 – not production",
+      },
+    }).catch((error: unknown) => error);
+    expect(recipe).toMatchObject({ code: "OptionRecipeMissing" });
+    const text = named(recipe);
+    expect(text).toContain("Flat white — Small (8 oz)");
+    expect(text).toContain("DEMO Store 2 – not production");
+    expect(text).toContain("for the whole Brand");
+    const tax = await refusal({
+      error: "TaxNotCovered",
+      problem: {
+        missing: "Tax",
+        productName: "Jasmine tea",
+        sizeName: "Jasmine tea",
+        optionName: null,
+        quantity: null,
+        ingredientName: null,
+        storeName: "DEMO Store 2 – not production",
+      },
+    }).catch((error: unknown) => error);
+    expect(named(tax)).toContain("Check DEMO Store 2 – not production's Tax review");
+  });
   it("says which item, size, option or ingredient blocked the review, in staff words", async () => {
     const blocked = createMenuClient("csrf", async () =>
       Response.json(
