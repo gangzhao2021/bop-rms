@@ -1966,7 +1966,10 @@ owner,store-manager,area-manager,front-of-house,kitchen,inventory-manager` (the 
 4. **Its runtime directory:** the same command with `directory /app/.local/pilot-v15 --store
 <new Store reference> --name demo-2` writes `stores/demo-2/` (owner-only; secrets copied as
    they are) and lists it in `stores.json`.
-5. **Restart** in a planned update window. Staff assigned to the new Store see it on the Stores
+5. **Restart** in a planned update window. Only the Owner (Store Owner or Brand Owner) adds
+   someone from another Store to this one (Staff, "Your staff at other stores"): moving staff
+   between Stores changes who can act there. A Store Manager or Area Manager who needs someone
+   asks the Owner. Staff assigned to the new Store see it on the Stores
    page and switch to it; there they set its address, tax and payment in Store setup and add its
    tables (segment 3c). If the installation is down, each Store follows the outage procedure on
    its own (see "Several Stores on one installation" above).
