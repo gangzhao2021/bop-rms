@@ -18,6 +18,7 @@ import {
 import { withPilotRecoveryResumeAccess } from "./pilot-maintenance.mjs";
 import { startPilotRuntime } from "./pilot-start.mjs";
 import { runPilotService } from "./pilot-service.mjs";
+import { servedStoreWorkerTargets } from "./pilot-recovery-sweep.mjs";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 const fail = () => {
   throw Error("PILOT_RECOVERY_RESUME_REVIEW_REQUIRED");
@@ -54,18 +55,22 @@ export async function resumePilotRecoverySource(args, { takeover = false } = {})
     if (adopted) {
       await withPilotRecoveryResumeAccess(plan.runtimeDirectory, async () => {
         let failed = false;
-        for (const name of [
-          "customer",
-          "api",
-          "business-worker",
-          "kitchen-queue-worker",
-          "reconciliation-worker",
-          "daily-settlement-worker",
-          "dining-exception-worker",
+        for (const { name, directory } of [
+          ...[
+            "customer",
+            "api",
+            "business-worker",
+            "kitchen-queue-worker",
+            "reconciliation-worker",
+            "daily-settlement-worker",
+            "dining-exception-worker",
+          ].map((service) => ({ name: service, directory: plan.runtimeDirectory })),
+          // DEC-BRAND-MULTI-STORE (v15 2026-10-31): every served Store's workers too.
+          ...(await servedStoreWorkerTargets(plan.runtimeDirectory)),
         ]) {
           try {
             await adopted.assertUnchanged();
-            await runPilotService("stop", name, plan.runtimeDirectory);
+            await runPilotService("stop", name, directory);
           } catch {
             failed = true;
           }
@@ -163,17 +168,21 @@ export async function resumePilotRecoverySource(args, { takeover = false } = {})
         completed = true;
       } catch {
         // Attempt every service; uncertainty retains the original Recovery lease.
-        for (const name of [
-          "customer",
-          "api",
-          "business-worker",
-          "kitchen-queue-worker",
-          "reconciliation-worker",
-          "daily-settlement-worker",
-          "dining-exception-worker",
+        const stores = await servedStoreWorkerTargets(plan.runtimeDirectory).catch(() => []);
+        for (const { name, directory } of [
+          ...[
+            "customer",
+            "api",
+            "business-worker",
+            "kitchen-queue-worker",
+            "reconciliation-worker",
+            "daily-settlement-worker",
+            "dining-exception-worker",
+          ].map((service) => ({ name: service, directory: plan.runtimeDirectory })),
+          ...stores,
         ]) {
           try {
-            await service("stop", name, plan.runtimeDirectory);
+            await service("stop", name, directory);
           } catch {
             /* Retain exclusion. */
           }

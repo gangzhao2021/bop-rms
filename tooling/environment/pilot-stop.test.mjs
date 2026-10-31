@@ -25,6 +25,34 @@ it("stops ingress before producers/projections including disabled optional worke
     service.mock.calls.every(([action, , dir]) => action === "stop" && dir === ".local/other"),
   ).toBe(true);
 });
+it("v15 2026-10-31: an installation-wide stop also stops each served Store's workers in its window", async () => {
+  const service = vi.fn(async (_action, name) => ({ service: name, state: "stopped", pid: null }));
+  const windows = [];
+  const result = await stopPilotRuntime({
+    maintenance: (directory, work) => {
+      windows.push(directory);
+      return work();
+    },
+    runtimeDirectory: ".local/other",
+    service,
+    listStores: async () => ["stores/demo-2"],
+  });
+  expect(result.state).toBe("stopped");
+  // One window, the installation's; the Store's workers stop inside it, after the installation's.
+  expect(windows).toEqual([".local/other"]);
+  expect(service.mock.calls.slice(7).map(([action, name, dir]) => [action, name, dir])).toEqual(
+    [
+      "business-worker",
+      "kitchen-queue-worker",
+      "reconciliation-worker",
+      "daily-settlement-worker",
+      "dining-exception-worker",
+    ].map((name) => ["stop", name, ".local/other/stores/demo-2"]),
+  );
+  expect(result.services.slice(7).map((entry) => entry.service)).toContain(
+    "stores/demo-2:kitchen-queue-worker",
+  );
+});
 it.each(["throw", "running", "wrong-service"])(
   "returns exact partial state without continuing or restarting on %s",
   async (mode) => {

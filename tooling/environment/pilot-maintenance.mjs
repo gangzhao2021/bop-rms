@@ -6,13 +6,39 @@ const ownership = new AsyncLocalStorage();
 const fail = () => {
   throw Error("PILOT_MAINTENANCE_ACTIVE");
 };
+/**
+ * The installation directory a runtime directory's window belongs to. DEC-BRAND-MULTI-STORE (v15
+ * 2026-10-31): a served Store's directory (`.local/<name>/stores/<store>`) has no window of its
+ * own; a planned update window covers the whole installation, its Stores' workers included.
+ */
 function target(runtimeDirectory) {
+  const match =
+    typeof runtimeDirectory === "string"
+      ? /^(\.local\/[a-z0-9][a-z0-9_-]{0,63})(?:\/stores\/[a-z0-9][a-z0-9-]{0,62})?$/u.exec(
+          runtimeDirectory,
+        )
+      : null;
+  if (match === null) return fail();
+  return path.resolve(match[1]);
+}
+/** The served Stores' directories below an installation (`stores.json`; none when absent). */
+async function storeDirectories(directory) {
+  let text;
+  try {
+    text = await fs.readFile(path.join(directory, "stores.json"), "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+  const stores = JSON.parse(text)?.stores;
   if (
-    typeof runtimeDirectory !== "string" ||
-    !/^\.local\/[a-z0-9][a-z0-9_-]{0,63}$/u.test(runtimeDirectory)
+    !Array.isArray(stores) ||
+    stores.some(
+      (entry) => typeof entry !== "string" || !/^stores\/[a-z0-9][a-z0-9-]{0,62}$/u.test(entry),
+    )
   )
     return fail();
-  return path.resolve(runtimeDirectory);
+  return stores.map((entry) => path.join(directory, entry));
 }
 export async function assertPilotMaintenanceAccess(runtimeDirectory, action) {
   const directory = target(runtimeDirectory);
@@ -56,20 +82,27 @@ export async function withPilotMaintenance(runtimeDirectory, work, operation = "
     identity = await handle.stat();
   const context = { directory, active: true, operation, retain: false };
   try {
-    for (const name of [
-      "supervisor.lock",
+    const workers = [
+      "business-worker",
+      "kitchen-queue-worker",
+      "reconciliation-worker",
+      "daily-settlement-worker",
+      "dining-exception-worker",
+    ].map((v) => v + ".restart-lock");
+    const busy = [
       ...[
-        "api",
-        "customer",
-        "business-worker",
-        "kitchen-queue-worker",
-        "reconciliation-worker",
-        "daily-settlement-worker",
-        "dining-exception-worker",
-      ].map((v) => v + ".restart-lock"),
-    ]) {
+        "supervisor.lock",
+        ...["api", "customer"].map((v) => v + ".restart-lock"),
+        ...workers,
+      ].map((name) => path.join(directory, name)),
+      // A served Store's worker being started or stopped holds the window off too.
+      ...(await storeDirectories(directory)).flatMap((store) =>
+        workers.map((name) => path.join(store, name)),
+      ),
+    ];
+    for (const file of busy) {
       try {
-        await fs.lstat(path.join(directory, name));
+        await fs.lstat(file);
         return fail();
       } catch (e) {
         if (e.code !== "ENOENT") throw e;

@@ -73,3 +73,39 @@ it("a single-Store installation supervises exactly its own services", async () =
   expect(created).toHaveLength(1);
   expect(created[0].services).toBeUndefined();
 });
+it("v15 2026-10-31: the sweep starts a Store's worker with no window open and not while the installation's is", async () => {
+  const fs = await import("node:fs/promises");
+  const { randomUUID } = await import("node:crypto");
+  const { assertPilotMaintenanceAccess } = await import("./pilot-maintenance.mjs");
+  const { createPilotRecoverySweep } = await import("./pilot-recovery-sweep.mjs");
+  const directory = ".local/sweep-stores-" + randomUUID();
+  await fs.mkdir(directory + "/stores/demo-2", { recursive: true, mode: 0o700 });
+  try {
+    const started = [];
+    // Nothing is running; a start makes the real maintenance check every start makes
+    // (pilot-service), then reports the started process.
+    const service = async (action, name, dir) => {
+      if (action === "status") return { service: name, state: "stopped" };
+      await assertPilotMaintenanceAccess(dir, action);
+      started.push(dir + ":" + name);
+      return { service: name, state: "running", pid: 4242 };
+    };
+    const sweep = () =>
+      createPilotInstallationSweep({
+        runtimeDirectory: directory,
+        createSweep: (options) =>
+          createPilotRecoverySweep({ ...options, service, workloadHealth: null }),
+        listStores: async () => ["stores/demo-2"],
+        exists: async () => false,
+      }).sweep();
+    await sweep();
+    expect(started).toContain(directory + "/stores/demo-2:kitchen-queue-worker");
+    // The installation's planned update window is open: no start, its own or the Store's workers.
+    await fs.writeFile(directory + "/maintenance.lock", "{}", { mode: 0o600 });
+    started.length = 0;
+    await sweep();
+    expect(started).toEqual([]);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
