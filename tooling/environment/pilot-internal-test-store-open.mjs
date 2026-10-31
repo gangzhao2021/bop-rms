@@ -17,6 +17,11 @@ import {
  *
  *   setup     — its first published configuration and synthetic launch gate (database, one
  *               audited transaction; `--dry-run` rolls it back);
+ *   tax       — after `directory`, and once its address is set in Store setup: its own synthetic
+ *               tax configuration, a copy of the installation Store's (same province only;
+ *               database, audited under the approver; the Store's profile then names it). A
+ *               Store that has it gets it back, nothing written. Staff then publish Store setup
+ *               (Review), which carries the Store's tax settings;
  *   stock-site — its default stock site and storage location (database, audited under the
  *               approver; a Store that has its default site gets it back, nothing written);
  *   directory — its runtime directory `stores/<name>/`, listed in `stores.json`, so the next
@@ -30,8 +35,9 @@ import {
  *   settlement — once the Store's first business day has closed, its day-end settlement
  *               coverage (that day), read as the services do; its settlement worker starts at the
  *               next restart. The directory given is the Store's (`…/stores/<name>`);
- *   renew     — after the installation's own renewal: the Store's synthetic launch gate (database)
- *               and its files' common expiry move to the same `--until` (the Store's directory).
+ *   renew     — after the installation's own renewal: the Store's synthetic launch gate and its
+ *               own tax evidence (`tax`; database) and its files' common expiry move to the same
+ *               `--until` (the Store's directory).
  *
  * Refuses outside development mode or an InternalTest installation. Prints fixed codes only.
  */
@@ -57,6 +63,15 @@ const flags = {
     "--approval": "approval",
   },
   "stock-site": {
+    "--database": "expectedDatabaseName",
+    "--migration-env": "envFile",
+    "--store": "storeReference",
+    "--approver": "approverActorReference",
+    "--reason": "reason",
+    "--approved-by": "approvedBy",
+    "--approval": "approval",
+  },
+  tax: {
     "--database": "expectedDatabaseName",
     "--migration-env": "envFile",
     "--store": "storeReference",
@@ -199,6 +214,85 @@ async function stockSite(options) {
   } finally {
     await client.end().catch(() => undefined);
   }
+}
+
+/** The served Store's directory (`stores/<name>`) from `stores.json`: the one serving `store`. */
+export async function servedStoreDirectory(directory, storeReference) {
+  let list;
+  try {
+    list = JSON.parse(await readFile(join(directory, "stores.json"), "utf8"));
+  } catch {
+    return unavailable("store-not-served-run-directory-first");
+  }
+  if (list?.schemaVersion !== 1 || !Array.isArray(list.stores))
+    return unavailable("stores-list-invalid");
+  for (const relative of list.stores) {
+    if (typeof relative !== "string" || !/^stores\/[a-z0-9][a-z0-9-]{0,62}$/u.test(relative))
+      return unavailable("stores-list-invalid");
+    const profile = JSON.parse(
+      await readFile(join(directory, relative, "internal-test-profile.json"), "utf8"),
+    );
+    if (profile?.binding?.storeReference === storeReference) return join(directory, relative);
+  }
+  return unavailable("store-not-served-run-directory-first");
+}
+
+async function storeTax(options) {
+  const database = await import("./pilot-internal-test-renew-database.mjs");
+  const tax = await import("./pilot-internal-test-store-tax.mjs");
+  const { rename, writeFile } = await import("node:fs/promises");
+  const read = async (base, name) => JSON.parse(await readFile(join(base, name), "utf8"));
+  const installation = await read(options.directory, "installation.json"),
+    profile = await read(options.directory, "internal-test-profile.json");
+  if (installation.environment !== "InternalTest" || profile.environment !== "InternalTest")
+    unavailable("not-internal-test");
+  if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
+  const own = await servedStoreDirectory(options.directory, options.storeReference);
+  const storeProfile = await read(own, "internal-test-profile.json");
+  const client = await database.connectRenewalDatabase(
+    options.envFile,
+    options.expectedDatabaseName,
+  );
+  let result;
+  try {
+    const role = tax.storeTaxRoleName(options.expectedDatabaseName);
+    for (const sql of tax.renderStoreTaxRoleSql(role)) await client.query(sql);
+    result = await tax.createInternalTestStoreTax(client, {
+      environment: profile.environment,
+      database: options.expectedDatabaseName,
+      role,
+      readRole: installation.roles.api,
+      installationProfile: profile,
+      installationMenu: await read(options.directory, "internal-test-menu.json"),
+      storeProfile,
+      menu: await read(own, "internal-test-menu.json"),
+      approverActorReference: options.approverActorReference,
+      now: () => new Date().toISOString(),
+      evidence: {
+        operationReference: uuidV7(),
+        approvedBy: options.approvedBy,
+        approval: options.approval,
+        reason: options.reason,
+      },
+      nextReference: () => uuidV7(),
+    });
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+  // The Store's services read their tax configuration from its profile.
+  if (result.profile !== storeProfile) {
+    const file = join(own, "internal-test-profile.json");
+    await writeFile(file + ".next", JSON.stringify(result.profile, null, 2) + "\n", {
+      mode: 0o600,
+    });
+    await rename(file + ".next", file);
+  }
+  return Object.freeze({
+    status: result.status,
+    storeReference: options.storeReference,
+    taxConfigurationReference: result.configurationReference,
+    versionNumber: result.versionNumber,
+  });
 }
 
 /** The Store's runtime directory, with its own default stock site read as the services read it. */
@@ -364,7 +458,7 @@ async function renew(options) {
     options.envFile,
     options.expectedDatabaseName,
   );
-  let result;
+  let result, taxRenewal;
   try {
     const setupRole = store.storeSetupRoleName(options.expectedDatabaseName);
     for (const sql of store.renderStoreSetupRoleSql(setupRole)) await client.query(sql);
@@ -387,9 +481,34 @@ async function renew(options) {
       dryRun: options.dryRun,
       nextReference: () => uuidV7(),
     });
+    // Its own tax evidence (`tax`), when it has its own configuration.
+    const tax = await import("./pilot-internal-test-store-tax.mjs");
+    const taxRole = tax.storeTaxRoleName(options.expectedDatabaseName);
+    if (profile.storeTaxConfiguration !== undefined)
+      for (const sql of tax.renderStoreTaxRoleSql(taxRole)) await client.query(sql);
+    taxRenewal = await tax.renewInternalTestStoreTax(client, {
+      database: options.expectedDatabaseName,
+      role: taxRole,
+      readRole: installation.roles.api,
+      profile,
+      menu: await read("internal-test-menu.json"),
+      from,
+      to: options.until,
+      now: () => new Date().toISOString(),
+      evidence: {
+        renewalReference: uuidV7(),
+        approvedBy: options.approvedBy,
+        approval: options.approval,
+        reason: options.reason,
+        operatorAccount: "uid:" + process.getuid?.(),
+      },
+      dryRun: options.dryRun,
+      nextReference: () => uuidV7(),
+    });
   } finally {
     await client.end().catch(() => undefined);
   }
+  result = { ...result, tax: taxRenewal.status };
   if (options.dryRun) return result;
   // Files, the profile last: only the common expiry moves.
   const move = (value) => (value === from ? options.until : value);
@@ -405,7 +524,13 @@ async function renew(options) {
         }
       : {}),
   };
-  const nextProfile = { ...profile, binding: { ...profile.binding, validUntil: options.until } };
+  const nextProfile = {
+    ...profile,
+    binding: { ...profile.binding, validUntil: options.until },
+    ...(taxRenewal.status === "Renewed"
+      ? { taxConfigurationVersion: taxRenewal.taxConfigurationVersion }
+      : {}),
+  };
   for (const [name, value] of [
     ["internal-test-task-queue.json", nextQueue],
     ["internal-test-profile.json", nextProfile],
@@ -430,9 +555,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
             ? await renew(options)
             : options.command === "stock-site"
               ? await stockSite(options)
-              : options.command === "provider"
-                ? await provisionStoreSimulator(options.directory)
-                : await directory(options);
+              : options.command === "tax"
+                ? await storeTax(options)
+                : options.command === "provider"
+                  ? await provisionStoreSimulator(options.directory)
+                  : await directory(options);
     console.log(JSON.stringify(result));
   } catch (error) {
     const reason = typeof error?.reason === "string" ? error.reason : "unexpected-error";

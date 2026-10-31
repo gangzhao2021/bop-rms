@@ -1481,6 +1481,15 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === internalTestRenewalAsset.file;
+        // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION (2026-10-31): a TEST Store's synthetic tax configuration.
+        const acceptedInternalTestStoreTaxAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          ["tax_configuration", "tax_configuration_version", "tax_configuration_rule"].every(
+            (table) => module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/internal-test-store-tax-configuration-store.ts";
         // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION 3b: InternalTest first launch gate of a TEST Store.
         const acceptedInternalTestLiveGateCreationAsset =
           module.packageName === "@bop/publishing" &&
@@ -3832,6 +3841,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedCurrentMembershipAsset &&
           !acceptedInternalTestRenewalAsset &&
           !acceptedInternalTestLiveGateCreationAsset &&
+          !acceptedInternalTestStoreTaxAsset &&
           !acceptedInitialBrandMembershipAsset &&
           !acceptedApprovedWorkforceMembershipAsset &&
           !acceptedMembershipBrandDiscoveryAsset &&

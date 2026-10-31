@@ -1225,6 +1225,66 @@ const databaseAccessManifestInput = {
       source:
         "packages/rms/pricing/src/infrastructure/persistence/internal-test-tax-evidence-renewal-store.ts",
     },
+    {
+      id: "internal-test-store-tax-configuration.read.tax_configuration",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-store-tax-configuration-store.ts",
+    },
+    {
+      id: "internal-test-store-tax-configuration.write.tax_configuration",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-store-tax-configuration-store.ts",
+    },
+    {
+      id: "internal-test-store-tax-configuration.read.tax_configuration_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_version" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-store-tax-configuration-store.ts",
+    },
+    {
+      id: "internal-test-store-tax-configuration.write.tax_configuration_version",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_version" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-store-tax-configuration-store.ts",
+    },
+    {
+      id: "internal-test-store-tax-configuration.read.tax_configuration_rule",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_rule" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-store-tax-configuration-store.ts",
+    },
+    {
+      id: "internal-test-store-tax-configuration.write.tax_configuration_rule",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_rule" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-store-tax-configuration-store.ts",
+    },
   ],
 } as const;
 export const databaseAccessManifest = databaseAccessManifestInput;

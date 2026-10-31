@@ -2004,16 +2004,49 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
 5. **Restart** in a planned update window. Only the Owner (Store Owner or Brand Owner) adds
    someone from another Store to this one (Staff, "Your staff at other stores"): moving staff
    between Stores changes who can act there. A Store Manager or Area Manager who needs someone
-   asks the Owner. Staff assigned to the new Store see it on the Stores
-   page and switch to it; there they set its address, tax and payment in Store setup and add its
-   tables (segment 3c). If the installation is down, each Store follows the outage procedure on
-   its own (see "Several Stores on one installation" above).
-6. **Its menu and prices.** After its tax is set, the Brand Owner switches to the new Store, opens
+   asks the Owner. Staff assigned to the new Store see it on the Stores page and switch to it;
+   there, in Store setup, they set its name as guests see it, its address and contact, and its
+   receipts, and save; they add its tables (segment 3c). Tax rates and tax names are not set in
+   Store setup (Tax review shows them): a TEST Store gets them in the next step. If the
+   installation is down, each Store follows the outage procedure on its own (see "Several Stores
+   on one installation" above).
+6. **Its tax, then its menu and prices.** InternalTest only, a test-environment-only shortcut: a
+   real Store's tax configuration needs the Owner's tax registration and professional review
+   evidence (External Evidence gate) and is never made this way. Once its address is saved in
+   Store setup, the TEST Store gets its own synthetic tax configuration — the installation
+   Store's rules, rates and tax classes, its own synthetic identities and evidence ending with the
+   installation's — with the same flags as step 4:
+
+   ```bash
+   PILOT_UID=$(id -u) PILOT_GID=$(id -g) PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 \
+     docker compose -f compose.pilot.yaml run --rm --no-deps -T -e NODE_ENV=development pilot \
+     node --import ./tooling/environment/register-workspace-typescript.mjs \
+     tooling/environment/pilot-internal-test-store-open.mjs tax \
+     /app/.local/pilot-v15 --database bop_rms_pilot_v15 \
+     --migration-env .local/migrate-v14/migrate-v15.env \
+     --store <new Store reference> --approver <another staff member's actor reference> \
+     --reason "Multi-store live check" --approved-by "Owner" --approval "<the approval wording>"
+   ```
+
+   It writes through Pricing's own function as `<database>_internal_test_store_tax` (NOLOGIN
+   NOBYPASSRLS, created or re-restricted with only its grants), audits it under the approver with
+   the approval wording, commits only if the services' api role then reads it, and names it in
+   `stores/<name>/internal-test-profile.json` (`storeTaxConfiguration`). Run again it answers
+   `AlreadyPresent` and writes nothing. It refuses the installation's own Store, a Store not
+   opened on the Stores page or not named "… – not production", one without a saved address
+   (`store-address-not-set-in-store-setup`) and one in another province than the installation
+   Store's tax configuration (`store-province-differs`): rates are never guessed. Then staff open
+   Store setup at the new Store and publish it (Review): it carries the Store's own tax settings,
+   and Tax review shows its rates. No restart is needed; the Store's services read it on the next
+   quote.
+
+   Then the Brand Owner switches to the new Store, opens
    Menu and chooses "Serve the menu here", then "List it": guests there see the Brand's dishes at
    the Brand prices, and every later Brand listing reaches both Stores. Each Store's manager changes
    that Store's own prices, sold out and hidden items under Item availability (a price change
    confirms the old and the new price and is recorded with who made it). Offline, nothing changes:
    the Store keeps charging the price shown, and the manager confirms again once back online.
+
 7. **Its day-end settlement**, once its first business day has closed: the same command with
    `settlement /app/.local/pilot-v15/stores/demo-2 --database bop_rms_pilot_v15
 --migration-env .local/migrate-v14/migrate-v15.env` records that day; its settlement worker
@@ -2022,8 +2055,8 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    the same `--until`: `renew /app/.local/pilot-v15/stores/demo-2 --database bop_rms_pilot_v15
 --migration-env .local/migrate-v14/migrate-v15.env --until <the same instant> --reason "…"
 --approved-by "Owner" --approval "<the approval wording>"` (dry run first with `--dry-run`).
-   It moves the Store's synthetic launch gate (audited) and its files' common expiry; the
-   Store's staff and roles have no end.
+   It moves the Store's synthetic launch gate and its own tax evidence (a new synthetic tax
+   version, both audited) and its files' common expiry; the Store's staff and roles have no end.
 
 ## Renewing the internal test installation
 
