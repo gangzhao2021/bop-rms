@@ -13,6 +13,7 @@ import {
   MerchantSingleStoreListingError,
   requireMerchantBrandSingleStore,
 } from "../../../apps/api/src/merchant-sole-operator.ts";
+import { brandRoleTemplateActions } from "../../bop/permission/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import {
   createPilotApiRole,
@@ -63,15 +64,17 @@ it("single store: the submitter lists alone; no catalog permission or a second s
         brandReference,
         roleId: id(310),
         code: "menu_manager",
-        actions: ["catalog.menu.approve", "publishing.review.approve"],
+        // The real Menu Manager template (catalog v21).
+        actions: brandRoleTemplateActions("menu-manager"),
         from,
       });
       const kitchenRole = await seedBrandRole(admin, {
         id,
         brandReference,
         roleId: id(320),
-        code: "kitchen",
-        actions: ["kitchen.ticket.read"],
+        // A real Brand template without menu approval.
+        code: "recipe_developer",
+        actions: brandRoleTemplateActions("recipe-developer"),
         from,
       });
       await seedBrandMember(admin, {
@@ -386,7 +389,8 @@ it("single store: the submitter lists alone; no catalog permission or a second s
         brandReference,
         roleId: id(330),
         code: "brand_owner",
-        actions: ["catalog.menu.approve", "publishing.review.approve", "organization.brand.manage"],
+        // The real Brand Owner template (catalog v21).
+        actions: brandRoleTemplateActions("brand-owner"),
         from,
       });
       await seedBrandMember(admin, {

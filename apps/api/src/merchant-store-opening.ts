@@ -15,6 +15,7 @@ import {
 } from "@bop/tenant";
 import type { MerchantBffService } from "./merchant-bff-contract.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
+import { brandOwnerAuthority } from "./merchant-sole-operator.js";
 import { derivedReference } from "./merchant-products.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -22,12 +23,15 @@ import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 
 /**
  * WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: the Brand's Owner opens another Store
- * from the Store they are signed in to. Opening a Store is a Brand decision: it needs the Brand-level
- * `organization.manage` (the Brand Owner); a Store grant alone never satisfies it. The new Store is
+ * from the Store they are signed in to. Opening a Store is a Brand decision: it needs Brand Owner
+ * authority, the Brand-level `organization.brand.manage` the real Brand Owner template holds (the
+ * same definition as 2000_134; coordinator 2026-10-31, after v15 refused the Brand Owner under the
+ * legacy `organization.manage`, which no template grants); a Store grant alone never satisfies
+ * it. The new Store is
  * recorded with the opener's place there and an audit record; its roles, configuration, go-live
  * check and menu follow in their own steps, and customers order there only once it is live.
  */
-export const storeOpeningPermission = "organization.manage" as const;
+export const storeOpeningPermission = brandOwnerAuthority;
 export class MerchantStoreOpeningError extends Error {
   constructor(readonly code: "PermissionDenied" | "Invalid" | "CodeTaken" | "Conflict") {
     super("MERCHANT_STORE_OPENING_" + code.toUpperCase());

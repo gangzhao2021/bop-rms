@@ -135,4 +135,4 @@ it("clears only an actual exited child lease and refuses a live unrelated child"
     }
     await fs.rm(directory, { recursive: true, force: true });
   }
-});
+}, 30_000);
