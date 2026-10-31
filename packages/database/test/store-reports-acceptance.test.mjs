@@ -869,6 +869,51 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
       for (const body of [items.body, summaryCsv, tipsCsv, hourlyCsv])
         assert.doesNotMatch(body, /[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u, "no references");
 
+      // ── DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 6: each Store's Provider account keeps
+      // its own money. Read against another account (as another Store of the installation is),
+      // none of this account's online payments, refunds or captures appear; the Store's own card
+      // machine records stay the Store's. Nothing is mixed into one ledger.
+      const otherAccount = createPersistentMerchantStoreReports({
+        persistence,
+        resolveConfiguration: async () => ({
+          providerAccountReference: id(21),
+          environment: "Test",
+        }),
+      });
+      const mine = await reports.read({ sessionCookie: cookie, from: null, to: null });
+      const theirs = await otherAccount.read({ sessionCookie: cookie, from: null, to: null });
+      const online = (view) => view.byChannel.find((row) => row.channel === "Online");
+      assert.notEqual(online(mine).collectedMinor, "0");
+      assert.deepEqual(
+        {
+          collected: online(theirs).collectedMinor,
+          refunds: online(theirs).refundsMinor,
+          payments: online(theirs).paymentCount,
+          captured: theirs.reconciliation.settlementCollectedMinor,
+        },
+        {
+          collected: "0",
+          refunds: "0",
+          payments: 0,
+          captured: String(
+            BigInt(mine.reconciliation.settlementCollectedMinor) -
+              BigInt(online(mine).collectedMinor),
+          ),
+        },
+      );
+      const card = (view) => view.byChannel.find((row) => row.channel === "CardMachine");
+      assert.equal(card(theirs).collectedMinor, card(mine).collectedMinor);
+      const otherDay = await createPersistentMerchantSettlement({
+        persistence,
+        resolveConfiguration: async () => ({
+          providerAccountReference: id(21),
+          environment: "Test",
+        }),
+        settlementRunReference: async () => null,
+      })({ sessionCookie: cookie, businessDate: today });
+      assert.deepEqual(otherDay.captured, { count: 0, amountMinor: "0", currencyCode: "CAD" });
+      assert.deepEqual(otherDay.refunded, { count: 0, amountMinor: "0", currencyCode: "CAD" });
+
       // ── Reading never implies exporting; without the read permission nothing is shown.
       const grant = (n) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
       await admin.query(

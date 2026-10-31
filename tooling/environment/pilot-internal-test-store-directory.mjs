@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { chmod, lstat, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -12,6 +13,7 @@ import { join } from "node:path";
  * template, provider account); no dining tables yet (staff add them in the product). Secrets are
  * copied byte for byte (owner-only); nothing is read from or sent anywhere else.
  */
+const SIMULATOR = "simulated-provider.sqlite";
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const NAME = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 export class InternalTestStoreDirectoryError extends Error {
@@ -175,7 +177,10 @@ export async function issueInternalTestStoreDirectory({
     return refuse("directory-exists");
   }
   for (const file of copies) {
-    await writeFile(join(target, file), await readFile(join(directory, file)), { mode: 0o600 });
+    // Segment 6: the Store's own TEST payment simulator starts empty (never another Store's
+    // payments); everything else (keys, passwords) is copied as it is.
+    const bytes = file === SIMULATOR ? Buffer.alloc(0) : await readFile(join(directory, file));
+    await writeFile(join(target, file), bytes, { mode: 0o600 });
     await chmod(join(target, file), 0o600);
   }
   // The profile last: services refuse to start until it exists.

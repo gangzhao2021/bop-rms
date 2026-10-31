@@ -35,6 +35,7 @@ const files = () => ({
   },
   "customer-runtime.json": {
     environment: "InternalTest",
+    providerAccountReference: "0190fa60-0000-7000-8000-000000000020",
     scope: { storeReference: store1 },
     diningTableFiles: ["internal-test-dining-table.json"],
   },
@@ -58,6 +59,10 @@ it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION 3d: the TEST Store's files name it, w
   expect(newQueue).not.toBe(queue);
   expect(derived["internal-test-task-queue.json"].exceptionTaskPolicy.managerQueueReference).toBe(
     newQueue,
+  );
+  // Its own Provider account (segment 6: each Store's money in its own ledger).
+  expect(derived["customer-runtime.json"].providerAccountReference).not.toBe(
+    "0190fa60-0000-7000-8000-000000000020",
   );
   // Brand-level facts stay shared.
   expect(derived["internal-test-menu.json"].skuReference).toBe(sku);
@@ -94,6 +99,7 @@ it("writes stores/<name>/ owner-only with the secrets byte for byte, and lists i
     for (const [name, value] of Object.entries(files()))
       await writeFile(join(directory, name), JSON.stringify(value));
     await writeFile(join(directory, "api-password"), "secret-bytes\n", { mode: 0o600 });
+    await writeFile(join(directory, "simulated-provider.sqlite"), "store one's payments");
     const issued = await issueInternalTestStoreDirectory({
       directory,
       name: "demo-2",
@@ -106,6 +112,8 @@ it("writes stores/<name>/ owner-only with the secrets byte for byte, and lists i
       "secret-bytes\n",
     );
     expect((await stat(join(directory, "stores/demo-2"))).mode & 0o777).toBe(0o700);
+    // Its own payment simulator, empty: never the installation Store's payments.
+    expect((await stat(join(directory, "stores/demo-2/simulated-provider.sqlite"))).size).toBe(0);
     expect((await stat(join(directory, "stores/demo-2/api-password"))).mode & 0o777).toBe(0o600);
     const profile = JSON.parse(
       await readFile(join(directory, "stores/demo-2/internal-test-profile.json"), "utf8"),
