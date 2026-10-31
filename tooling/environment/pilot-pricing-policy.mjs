@@ -3,36 +3,77 @@ import { createHash } from "node:crypto";
 import { createEffectivePeriod } from "../../packages/bop/effective-period/src/index.ts";
 import { entryTorontoBoundary } from "./pilot-toronto-boundary.mjs";
 
-const fixtureId = (n) => "0190fa24-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+/** The installation Store's synthetic identities. */
+const INSTALLATION_PREFIX = "0190fa24";
+const syntheticId = (prefix, n) => prefix + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const fixtureId = (n) => syntheticId(INSTALLATION_PREFIX, n);
+/**
+ * WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION (coordinator 2026-10-31): a served TEST Store's
+ * own synthetic tax identities (`tax` in pilot-internal-test-store-open), the same shape as the
+ * installation Store's under a prefix derived from the Store: the same on every run, never the
+ * installation's, and recognisably synthetic (`…-0000-7000-8000-…`).
+ */
+export function servedStoreTaxPrefix(storeReference) {
+  const digest = createHash("sha256")
+    .update("InternalTestStoreTax:" + storeReference)
+    .digest("hex");
+  return digest.slice(0, 8) === INSTALLATION_PREFIX ? digest.slice(8, 16) : digest.slice(0, 8);
+}
 /**
  * Identities of the synthetic DEMO tax version `versionNumber`: version 1 is the installed one;
  * each Owner-approved InternalTest renewal (pilot-internal-test-renew) appends the next version
  * with its own fixture identities, so every version of the authority stays distinguishable.
+ * `prefix` is the Store's (the installation Store's when absent).
  */
-export function internalTestTaxVersionIdentity(versionNumber) {
-  if (!Number.isSafeInteger(versionNumber) || versionNumber < 1 || versionNumber > 4095)
+export function internalTestTaxVersionIdentity(versionNumber, prefix = INSTALLATION_PREFIX) {
+  if (
+    !Number.isSafeInteger(versionNumber) ||
+    versionNumber < 1 ||
+    versionNumber > 4095 ||
+    !/^[0-9a-f]{8}$/u.test(prefix)
+  )
     throw new Error("INTERNAL_PRICING_ONLY");
   const base = versionNumber === 1 ? 0 : versionNumber * 0x10000;
   return {
-    versionReference: fixtureId(base + 11),
-    ruleReferences: ["Pickup", "DineIn"].map((_, index) => fixtureId(base + 18 + index)),
+    versionReference: syntheticId(prefix, base + 11),
+    ruleReferences: ["Pickup", "DineIn"].map((_, index) => syntheticId(prefix, base + 18 + index)),
   };
 }
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
-/** The profile's renewed tax version (absent: the installed version 1, created with the profile). */
-function taxVersionOf(profile) {
+const instant = (value) =>
+  typeof value === "string" && INSTANT.test(value) && new Date(value).toISOString() === value;
+/**
+ * Whose synthetic tax configuration the profile names: the installation Store's (created with the
+ * profile), or — `storeTaxConfiguration` — a served TEST Store's own, created at its `createdAt`.
+ */
+function taxOriginOf(profile) {
+  const own = profile.storeTaxConfiguration;
+  if (own === undefined) return { prefix: INSTALLATION_PREFIX, createdAt: profile.createdAt };
+  if (
+    own === null ||
+    typeof own !== "object" ||
+    Object.keys(own).join() !== "createdAt" ||
+    !instant(own.createdAt) ||
+    own.createdAt < profile.createdAt
+  )
+    throw new Error("INTERNAL_PRICING_ONLY");
+  return {
+    prefix: servedStoreTaxPrefix(profile.binding.storeReference),
+    createdAt: own.createdAt,
+  };
+}
+/** The profile's renewed tax version (absent: version 1, created with the configuration). */
+function taxVersionOf(profile, origin) {
   const renewed = profile.taxConfigurationVersion;
-  if (renewed === undefined) return { versionNumber: 1, createdAt: profile.createdAt };
+  if (renewed === undefined) return { versionNumber: 1, createdAt: origin.createdAt };
   if (
     renewed === null ||
     typeof renewed !== "object" ||
     Object.keys(renewed).sort().join() !== "createdAt,versionNumber" ||
     !Number.isSafeInteger(renewed.versionNumber) ||
     renewed.versionNumber < 2 ||
-    typeof renewed.createdAt !== "string" ||
-    !INSTANT.test(renewed.createdAt) ||
-    new Date(renewed.createdAt).toISOString() !== renewed.createdAt ||
-    renewed.createdAt < profile.createdAt
+    !instant(renewed.createdAt) ||
+    renewed.createdAt < origin.createdAt
   )
     throw new Error("INTERNAL_PRICING_ONLY");
   return { versionNumber: renewed.versionNumber, createdAt: renewed.createdAt };
@@ -65,8 +106,10 @@ export async function createInternalPricingPolicy({ loadProfile, loadMenu, expec
   };
   const at = profile.createdAt,
     validUntil = profile.binding.validUntil;
-  const taxVersion = taxVersionOf(profile);
-  const taxIdentity = internalTestTaxVersionIdentity(taxVersion.versionNumber);
+  const taxOrigin = taxOriginOf(profile);
+  const taxId = (n) => syntheticId(taxOrigin.prefix, n);
+  const taxVersion = taxVersionOf(profile, taxOrigin);
+  const taxIdentity = internalTestTaxVersionIdentity(taxVersion.versionNumber, taxOrigin.prefix);
   const effectivePeriod = createEffectivePeriod({
     timeZone: "America/Toronto",
     effectiveFrom: entryTorontoBoundary(at),
@@ -104,8 +147,18 @@ export async function createInternalPricingPolicy({ loadProfile, loadMenu, expec
     createdAt: at,
   };
   const priceBook = { ...price, snapshotDigest: hash(price) };
+  // The tax configuration's period starts with its own creation (the installation's, or the
+  // served TEST Store's).
+  const taxEffectivePeriod =
+    taxOrigin.createdAt === at
+      ? effectivePeriod
+      : createEffectivePeriod({
+          timeZone: "America/Toronto",
+          effectiveFrom: entryTorontoBoundary(taxOrigin.createdAt),
+          effectiveUntil: null,
+        });
   const tax = {
-    configurationReference: id(10),
+    configurationReference: taxId(10),
     versionReference: taxIdentity.versionReference,
     ...scope,
     stableCode: "DEMO_STORE_TAX",
@@ -114,11 +167,11 @@ export async function createInternalPricingPolicy({ loadProfile, loadMenu, expec
     lifecycle: "Published",
     jurisdictionCode: "CA-ON",
     currencyMetadata,
-    effectivePeriod,
+    effectivePeriod: taxEffectivePeriod,
     registrationEvidence: {
-      applicabilityReference: id(12),
-      operatingEntityTaxReference: id(13),
-      jurisdictionProfileReference: id(14),
+      applicabilityReference: taxId(12),
+      operatingEntityTaxReference: taxId(13),
+      jurisdictionProfileReference: taxId(14),
       status: "Verified",
       validUntil,
     },
@@ -144,14 +197,14 @@ export async function createInternalPricingPolicy({ loadProfile, loadMenu, expec
     ...tax,
     snapshotDigest: digest,
     professionalEvidence: {
-      evidenceReference: id(15),
+      evidenceReference: taxId(15),
       snapshotReference: taxIdentity.versionReference,
       snapshotDigest: digest,
-      professionalReviewReference: id(16),
-      fixtureSuiteReference: id(17),
+      professionalReviewReference: taxId(16),
+      fixtureSuiteReference: taxId(17),
       fixtureSuiteDigest: hash("INTERNAL_TEST_ONLY"),
       result: "Pass",
-      reviewedAt: at,
+      reviewedAt: taxOrigin.createdAt,
       validUntil,
     },
   };

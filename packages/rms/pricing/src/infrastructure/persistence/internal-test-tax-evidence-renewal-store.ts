@@ -27,7 +27,9 @@ export class InternalTestTaxEvidenceRenewalError extends Error {
       | "INTERNAL_TEST_TAX_INPUT_INVALID"
       | "INTERNAL_TEST_TAX_NOT_SYNTHETIC"
       | "INTERNAL_TEST_TAX_WINDOW_MISMATCH"
-      | "INTERNAL_TEST_TAX_CONFLICT",
+      | "INTERNAL_TEST_TAX_CONFLICT"
+      | "INTERNAL_TEST_TAX_SOURCE_MISMATCH"
+      | "INTERNAL_TEST_TAX_OTHER_CONFIGURATION",
   ) {
     super(code);
     this.name = "InternalTestTaxEvidenceRenewalError";
@@ -106,9 +108,10 @@ export async function renewInternalTestTaxEvidence(
 ): Promise<InternalTestTaxEvidenceRenewal> {
   const next = input.next;
   if (
-    ![input.brandReference, input.storeReference, input.configurationReference].every((value) =>
-      SYNTHETIC.test(value),
-    ) ||
+    ![input.brandReference, input.configurationReference].every((value) => SYNTHETIC.test(value)) ||
+    // A TEST Store opened in the product has its own (not synthetic) reference; its configuration
+    // stays synthetic (internal-test-store-tax-configuration-store).
+    !UUID_V7.test(input.storeReference) ||
     !instant(input.from) ||
     !instant(input.to) ||
     !instant(input.at) ||
