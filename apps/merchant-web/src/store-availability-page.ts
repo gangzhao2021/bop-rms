@@ -37,13 +37,16 @@ export interface StockShortIngredient {
 }
 export interface StockSoldOut {
   readonly ingredients: readonly StockShortIngredient[];
+  /** A new Store before its first delivery: no stock was ever received there. */
+  readonly noStockReceived?: true;
 }
 const decimal = /^-?(0|[1-9][0-9]*)([.][0-9]{1,6})?$/u;
 function validStockSoldOut(value: unknown): boolean {
   if (value === undefined || value === null) return true;
-  const raw = value as { ingredients?: unknown };
+  const raw = value as { ingredients?: unknown; noStockReceived?: unknown };
   return (
     typeof value === "object" &&
+    (raw.noStockReceived === undefined || raw.noStockReceived === true) &&
     Array.isArray(raw.ingredients) &&
     raw.ingredients.length <= 50 &&
     raw.ingredients.every((entry: unknown) => {
@@ -103,6 +106,10 @@ const orders = (n: number) => (n === 1 ? t("1 open order") : t("{n} open orders"
  * Whole milk is set aside for 11 open orders." The page links to Orders (or Inventory).
  */
 export function stockSoldOutText(stock: StockSoldOut): string {
+  if (stock.noStockReceived === true)
+    return t(
+      "No stock has been received at this store yet. Record its first delivery and guests can order it.",
+    );
   const reasons = stock.ingredients.map((entry) => {
     const amount = (value: string) => stockAmount(value, entry.unitCode, entry.displayPrecision);
     const onHand = micro(entry.onHand),

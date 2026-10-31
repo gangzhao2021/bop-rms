@@ -91,6 +91,24 @@ export function createPostgresStockPlaceStore(
         ).map((row) => String(row.location));
       });
     },
+    /**
+     * WP-2423 DEC-BRAND-MULTI-STORE (coordinator 2026-10-31): whether stock was ever received or
+     * counted at this site (any stock account). A new Store's site has none until its first delivery.
+     */
+    async siteHasHeldStock(stockSiteReference: string): Promise<boolean> {
+      const site = parseInventoryReference(stockSiteReference);
+      return runner.run(async (tx) => {
+        await scoped(tx);
+        return (
+          rows(
+            await tx.query(
+              "SELECT 1 FROM rms_inventory.stock_account WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND stock_site_id=$4 LIMIT 1",
+              [tenant, brand, store, site],
+            ),
+          ).length > 0
+        );
+      });
+    },
     async list() {
       return runner.run(async (tx) => {
         await scoped(tx);

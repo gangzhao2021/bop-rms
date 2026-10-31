@@ -173,6 +173,9 @@ const catalogErrors: Partial<Record<CatalogError["code"], MerchantAvailabilityEr
  */
 export function stockSoldOutView(found: StaffStockShortage | undefined) {
   if (found === undefined || found.status !== "Unavailable") return null;
+  // A new Store before its first delivery: the reason is that, not each ingredient.
+  if (found.noStockReceived === true)
+    return Object.freeze({ noStockReceived: true as const, ingredients: Object.freeze([]) });
   const micro = (value: string) => {
     const negative = value.startsWith("-");
     const [whole = "0", fraction = ""] = (negative ? value.slice(1) : value).split(".");

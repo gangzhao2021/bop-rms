@@ -6,10 +6,11 @@ import {
   type CurrentAvailabilityQueryInput,
   type PublishedDefaultOptionSelection,
 } from "@rms/catalog";
-import type {
-  InventoryItemTransaction,
-  InventoryItemTransactionRunner,
-  SubmissionExpiryCutoff,
+import {
+  createPostgresStockPlaceStore,
+  type InventoryItemTransaction,
+  type InventoryItemTransactionRunner,
+  type SubmissionExpiryCutoff,
 } from "@rms/inventory";
 import { parseRecipeOptionSelection } from "@rms/recipe";
 import { createCustomerRecipeInventoryObservation } from "./customer-recipe-inventory-observation.js";
@@ -232,6 +233,11 @@ export interface StaffStockShortage {
   readonly status: "Available" | "Unavailable" | "Indeterminate";
   /** The stocked ingredients one item as normally ordered needs that the Store cannot cover. */
   readonly shortages: readonly RecipeStockShortageView[];
+  /**
+   * DEC-BRAND-MULTI-STORE (coordinator 2026-10-31): no stock was ever received or counted at this
+   * Store's stock site (a new Store before its first delivery). Absent when stock was.
+   */
+  readonly noStockReceived?: true;
 }
 export type RecipeStockShortageView = Awaited<
   ReturnType<ReturnType<typeof createCustomerRecipeInventoryObservation>["observe"]>
@@ -289,6 +295,13 @@ export function createStaffStockShortageSource(options: {
         resolveExpiryCutoff: options.resolveExpiryCutoff,
         explainShortage: true,
       });
+      // Read once, only when something is sold out from stock.
+      let held: boolean | undefined;
+      const stockReceived = async () =>
+        (held ??= await createPostgresStockPlaceStore(
+          { run: async (work) => work(transaction) },
+          scope,
+        ).siteHasHeldStock(scope.stockSiteReference));
       for (const sellableReference of input.sellableReferences.slice(0, maximum)) {
         try {
           const facts = await createPostgresCurrentSelectionFactsStore(joined, {
@@ -324,7 +337,13 @@ export function createStaffStockShortageSource(options: {
           });
           result.set(
             sellableReference,
-            Object.freeze({ status: found.status, shortages: found.shortages }),
+            Object.freeze({
+              status: found.status,
+              shortages: found.shortages,
+              ...(found.status === "Unavailable" && !(await stockReceived())
+                ? { noStockReceived: true as const }
+                : {}),
+            }),
           );
         } catch {
           // Unknown stock: no reason is shown (the menu never sells out an item from it either).

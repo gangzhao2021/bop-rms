@@ -160,6 +160,10 @@ describe("WP-2423 (2026-10-16) why guests see an offered item sold out from stoc
       stockSoldOutText({ ingredients: [{ ...milk, onHand: "0", reserved: "0", available: "0" }] }),
     ).toBe("No Whole milk 3.25% is in stock.");
     expect(stockSoldOutText({ ingredients: [] })).toContain("on hold or past their use-by date");
+    // DEC-BRAND-MULTI-STORE (coordinator 2026-10-31): a new Store before its first delivery.
+    expect(stockSoldOutText({ ingredients: [], noStockReceived: true })).toBe(
+      "No stock has been received at this store yet. Record its first delivery and guests can order it.",
+    );
     expect(stockAmount("0.018", "KG", 3)).toBe("0.018 kg");
     expect(stockAmount("12", "EA", 0)).toBe("12");
   });

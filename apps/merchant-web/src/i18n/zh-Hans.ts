@@ -6601,4 +6601,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This Brand has more than one store, so the Brand Owner lists menu changes. Your changes are saved for them to list.":
     "这个品牌有多家店，菜单改动由品牌老板上架。你的改动已保存，等他上架。",
   "Change this Store's prices": "改本店价格",
+  "No stock has been received at this store yet. Record its first delivery and guests can order it.":
+    "本店还没有收过货。记下第一次到货后，顾客就能点这道菜。",
 });
