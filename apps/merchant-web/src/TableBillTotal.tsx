@@ -21,6 +21,7 @@ export function TableBillTotal({
   const [bill, setBill] = useState<{
     subtotalMinor: string;
     taxMinor: string;
+    taxRoundingMinor: string;
     totalMinor: string;
   } | null>(null);
   const [failed, setFailed] = useState(false);
@@ -31,11 +32,14 @@ export function TableBillTotal({
       .then((read) => {
         if (controller.signal.aborted) return;
         const subtotal = read.rounds.reduce((sum, round) => sum + BigInt(round.subtotalMinor), 0n);
-        const tax = read.rounds.reduce((sum, round) => sum + BigInt(round.taxMinor), 0n);
+        // WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding on its own line.
+        const rounding = BigInt(read.taxRoundingMinor);
+        const tax = read.rounds.reduce((sum, round) => sum + BigInt(round.taxMinor), 0n) - rounding;
         const total = read.rounds.reduce((sum, round) => sum + BigInt(round.totalMinor), 0n);
         setBill({
           subtotalMinor: subtotal.toString(),
           taxMinor: tax.toString(),
+          taxRoundingMinor: rounding.toString(),
           totalMinor: total.toString(),
         });
         setFailed(false);
@@ -62,6 +66,12 @@ export function TableBillTotal({
             <dt>{t("Tax")}</dt>
             <dd>{cad(bill.taxMinor)}</dd>
           </div>
+          {bill.taxRoundingMinor !== "0" ? (
+            <div>
+              <dt>{t("Tax rounding")}</dt>
+              <dd>{cad(bill.taxRoundingMinor)}</dd>
+            </div>
+          ) : null}
           <div>
             <dt>{t("Whole bill")}</dt>
             <dd>{cad(bill.totalMinor)}</dd>

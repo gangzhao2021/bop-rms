@@ -92,6 +92,7 @@ import {
   createPostgresOrderPricedAmountSource,
   createPostgresStoreSalesOrderSource,
   listStorePriceReductionsDecided,
+  listOrdersTaxRoundingLines,
 } from "../../rms/ordering/src/index.ts";
 import {
   changeStoreTipSetting,
@@ -3488,7 +3489,7 @@ async function journey(ending) {
                 operationReference: fresh(),
                 diningSessionReference: sessionReference,
                 mode: "Even",
-                people: 2,
+                people: 3,
                 rounds: null,
               },
             });
@@ -3553,22 +3554,89 @@ async function journey(ending) {
             owed,
           );
 
-          // Part 1 in cash (rounded to 5¢ on its own), part 2 on the card machine.
+          // Part 1 in cash (rounded to 5¢ on its own), part 2 on the card machine, part 3 on a
+          // guest's phone (TEST Provider stand-in; everything else is the real composition).
           const cash = await settleWith(server, {
             partNumber: 1,
             tip: { kind: "None" },
             tenderedMinor: "100000",
           });
           assert.equal(cash.status, "Recorded");
-          const card = await settleWith(server, {
+          const cardPaid = await settleWith(server, {
             partNumber: 2,
             method: "CardMachine",
             tip: { kind: "None" },
             tenderedMinor: null,
             slipReference: "TEST 0002",
           });
-          assert.equal(card.status, "Recorded");
+          assert.equal(cardPaid.status, "Recorded");
+          const intents = new Map();
+          const answer = (request, intent) => ({
+            kind: "Snapshot",
+            context: request.context,
+            providerIntentReference: intent.reference,
+            providerTransactionReference: intent.status === "Captured" ? intent.transaction : null,
+            paymentMethod: "OnlineCard",
+            captureMode: "Automatic",
+            status: intent.status,
+            requestedAmount: intent.amount,
+            authorizedAmount:
+              intent.status === "Captured"
+                ? intent.amount
+                : { amountMinor: 0n, currencyCode: "CAD" },
+            capturedAmount:
+              intent.status === "Captured"
+                ? intent.amount
+                : { amountMinor: 0n, currencyCode: "CAD" },
+            refundedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+            observedAt: new Date().toISOString(),
+            evidenceDigest: sha256("intent:" + intent.reference + ":" + intent.status),
+          });
+          const phone = createDiningTableOnlinePayments({
+            scope: ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+            provider: {
+              async createIntent(request) {
+                const intent = intents.get(request.idempotencyKey) ?? {
+                  reference: "pi_TESTTAXR" + String(intents.size + 1).padStart(4, "0"),
+                  transaction: "ch_TESTTAXR" + String(intents.size + 1).padStart(4, "0"),
+                  status: "RequiresCustomerAction",
+                  amount: request.amount,
+                };
+                intents.set(request.idempotencyKey, intent);
+                intents.set(intent.reference, intent);
+                return answer(request, intent);
+              },
+              async retrieveIntent(request) {
+                return answer(request, intents.get(String(request.providerIntentReference)));
+              },
+              async cancelIntent(request) {
+                return answer(request, intents.get(String(request.providerIntentReference)));
+              },
+            },
+            transactions: transactions(),
+            now,
+            nextReference: fresh,
+          });
+          const guest = {
+            diningSessionReference: sessionReference,
+            guestSessionReference: guestSession,
+            allowed: async () => true,
+          };
+          const paying = await phone.start(guest, {
+            operationReference: fresh(),
+            tip: { kind: "None" },
+            partNumber: 3,
+          });
+          assert.equal(paying.attempt.totalMinor, paying.bill.split.parts[2].amountMinor);
+          for (const intent of intents.values()) intent.status = "Captured";
+          const card = { bill: (await phone.refresh(guest)).bill };
           const paidParts = card.bill.split.parts;
+          assert.deepEqual(
+            paidParts.map((part) => part.payment?.method),
+            ["Cash", "CardMachine", "Online"],
+          );
           assert.ok(paidParts.every((part) => part.payment !== null));
           // What was paid for the rounds is exactly the bill (cash rounding apart).
           const lines = await rows(
@@ -3609,6 +3677,16 @@ async function journey(ending) {
             });
           });
           assert.equal(settledNow.classification, "Settled");
+          // Reports read each round's share under tax (the sales source, as the pilot API role):
+          // the latest recorded version's lines, adding up to the bill's rounding.
+          const reported = await transactions().run((tx) =>
+            listOrdersTaxRoundingLines(tx, scope, [orderReference]),
+          );
+          assert.equal(
+            reported.reduce((sum, line) => sum + line.amountMinor, 0n),
+            1n,
+          );
+          assert.ok(reported.every((line) => line.taxComponentCode.length > 0));
           // Append-only: the records can't be changed or removed.
           for (const sql of [
             "UPDATE rms_ordering.order_tax_rounding_adjustment SET total_minor=0",

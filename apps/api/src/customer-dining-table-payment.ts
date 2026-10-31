@@ -203,7 +203,14 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
         })),
         totalMinor: round.totalMinor,
       })),
-      owed: bill.owed,
+      owed: {
+        ...bill.owed,
+        // WP-2423 DEC-TAX-WHOLE-RECEIPT: the tax rounding in what is owed (in its tax already).
+        taxRoundingMinor: bill.rounds
+          .filter((round) => !round.paid)
+          .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n)
+          .toString(),
+      },
       consistent: bill.consistent,
       // WP-2423 item 8 ⑦: the tips this Store offers (none chosen for the guest), or tips off.
       tips: { enabled: bill.tips.enabled, tierPercents: bill.tips.tierPercents },
@@ -319,7 +326,11 @@ export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentVi
         totalMinor: round.totalMinor,
       })),
       subtotalMinor: sum(rounds.map((round) => round.subtotalMinor)),
-      taxMinor: sum(rounds.map((round) => round.taxMinor)),
+      // Tax as the rounds were charged, and the bill's tax rounding on its own line.
+      taxMinor: (
+        BigInt(sum(rounds.map((round) => round.taxMinor))) - BigInt(bill.taxRoundingMinor)
+      ).toString(),
+      taxRoundingMinor: bill.taxRoundingMinor,
       ordersTotalMinor: sum(rounds.map((round) => round.totalMinor)),
       tipMinor: sum(payments.map((entry) => entry.tipMinor)),
       roundingMinor: sum(payments.map((entry) => entry.roundingMinor)),

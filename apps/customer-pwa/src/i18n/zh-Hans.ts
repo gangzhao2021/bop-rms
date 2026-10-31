@@ -261,6 +261,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "You can order once staff seat you. Ask a staff member, then scan again.":
     "入座后才能点单。请让店员带位，然后再扫一次码。",
   Discounted: "已打折",
+  "Tax rounding": "税额取整",
   "On the house": "店家赠送",
   "Part {number} paid by": "第 {number} 份付款方式",
   "We couldn’t load the receipt. Check your connection and try again.":

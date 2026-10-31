@@ -656,6 +656,19 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expect(card).toContainText("Part 1 paid byCard at the table · $3.22");
     await expect(card).toContainText("Part 2 paid byCard on a guest’s phone · $2.55");
     await expect(card).toContainText("Tip$0.68");
+    // WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding on its own line.
+    receipt = {
+      status: 200,
+      json: {
+        schemaVersion: 1,
+        receipt: {
+          ...(receipt.json as { receipt: Record<string, unknown> }).receipt,
+          taxRoundingMinor: "-1",
+        },
+      },
+    };
+    await page.reload();
+    await expect(card).toContainText("Tax rounding-$0.01");
     await page.screenshot({
       path: "test-results/customer-dining-settled-split-390.png",
       fullPage: true,

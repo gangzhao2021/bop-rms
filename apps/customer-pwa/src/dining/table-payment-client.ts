@@ -23,8 +23,11 @@ export interface TablePaymentView {
   }[];
   readonly owed: {
     readonly subtotalMinor: string;
+    /** Includes the tax rounding below. */
     readonly taxMinor: string;
     readonly totalMinor: string;
+    /** WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding still owed (older server: 0). */
+    readonly taxRoundingMinor: string;
   };
   readonly consistent: boolean;
   /**
@@ -135,6 +138,14 @@ export function parseTablePaymentView(value: unknown): TablePaymentView {
       subtotalMinor: amount(owed.subtotalMinor),
       taxMinor: amount(owed.taxMinor),
       totalMinor: amount(owed.totalMinor),
+      taxRoundingMinor:
+        owed.taxRoundingMinor === undefined
+          ? "0"
+          : typeof owed.taxRoundingMinor === "string" &&
+              /^-?(0|[1-9][0-9]{0,15})$/u.test(owed.taxRoundingMinor) &&
+              owed.taxRoundingMinor !== "-0"
+            ? owed.taxRoundingMinor
+            : fail(),
     }),
     consistent: p.consistent,
     tips: tipsOf(p.tips),

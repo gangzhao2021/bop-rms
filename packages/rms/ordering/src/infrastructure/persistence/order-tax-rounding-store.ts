@@ -184,3 +184,45 @@ export async function loadOrderTaxRoundingMinor(
   if (rows.length > 1) return unavailable();
   return rows.length === 0 ? 0n : integer(rows[0]?.amount);
 }
+
+/**
+ * The rounds of these Orders that carry a share of their bill's tax rounding, per tax type, in the
+ * latest recorded version of each bill (sales reports count it under tax).
+ */
+export async function listOrdersTaxRoundingLines(
+  transaction: ConsumerTransaction,
+  scope: Scope,
+  orderReferences: readonly string[],
+): Promise<readonly BillTaxRoundingLine[]> {
+  if (orderReferences.length === 0) return [];
+  if (orderReferences.length > 500) return unavailable();
+  const { brand, store } = await context(transaction, scope);
+  const rows = (
+    await transaction.query(
+      "SELECT l.order_id::text order_ref,l.order_batch_id::text batch_ref,l.tax_component_code code,l.amount_minor::text amount FROM rms_ordering.order_tax_rounding_adjustment a " +
+        "JOIN rms_ordering.order_tax_rounding_adjustment_line l ON l.adjustment_id=a.adjustment_id AND l.brand_id=a.brand_id AND l.store_id=a.store_id " +
+        "WHERE a.brand_id=$1 AND a.store_id=$2 AND l.order_id=ANY($3::uuid[]) AND a.version=(SELECT max(v.version) FROM rms_ordering.order_tax_rounding_adjustment v WHERE v.brand_id=a.brand_id AND v.store_id=a.store_id AND v.bill_order_id=a.bill_order_id) " +
+        "ORDER BY l.order_id,l.order_batch_id,l.tax_component_code LIMIT 10001",
+      [brand, store, orderReferences.map((value) => parseOrderingReference(value))],
+    )
+  ).rows as readonly {
+    order_ref?: unknown;
+    batch_ref?: unknown;
+    code?: unknown;
+    amount?: unknown;
+  }[];
+  if (rows.length > 10000) return unavailable();
+  return Object.freeze(
+    rows.map((row) =>
+      Object.freeze({
+        orderReference: String(parseOrderingReference(row.order_ref)),
+        orderBatchReference: String(parseOrderingReference(row.batch_ref)),
+        taxComponentCode:
+          typeof row.code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(row.code)
+            ? row.code
+            : unavailable(),
+        amountMinor: integer(row.amount),
+      }),
+    ),
+  );
+}

@@ -28,9 +28,11 @@ const bill = {
       subtotalMinor: "1800",
       taxMinor: "234",
       totalMinor: "2034",
+      taxRoundingMinor: "-1",
       paid: false,
     },
   ],
+  taxRoundingMinor: "-1",
   owed: { subtotalMinor: "1800", taxMinor: "234", totalMinor: "2034" },
   consistent: true,
   tips: { enabled: true, tierPercents: [10, 15, 18] },
@@ -95,7 +97,8 @@ it("DEC-DINE-IN-PAY-LATER S4: answers the guest's table payment in public fields
   expect(JSON.parse(text).payment).toMatchObject({
     state: "Paying",
     attempt: { totalMinor: "2304", tipMinor: "270" },
-    owed: { totalMinor: "2034" },
+    // WP-2423 DEC-TAX-WHOLE-RECEIPT: the tax rounding still owed, for its own line.
+    owed: { totalMinor: "2034", taxRoundingMinor: "-1" },
   });
   // No references, Provider identifiers or internal codes reach the guest.
   expect(text).not.toMatch(/pi_x|"p"|orderBatchReference|diningSessionReference|onlinePayment/u);

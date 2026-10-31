@@ -23,6 +23,12 @@ const cad = (minor: string | bigint) =>
 /** "0": no tip; one of the Store's percentages, as text; or an amount typed in. */
 type Tip = string;
 /** "12.50" → 1250; null when it isn't an amount of money. */
+/** WP-2423 DEC-TAX-WHOLE-RECEIPT: the tax rounding still owed (the unpaid rounds' shares). */
+const owedTaxRounding = (bill: TableBill) =>
+  bill.rounds
+    .filter((round) => !round.paid)
+    .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n);
+
 export function dollarsToMinor(value: string): bigint | null {
   const match = /^(0|[1-9][0-9]{0,6})(?:\.([0-9]{1,2}))?$/u.exec(value.trim());
   if (!match) return null;
@@ -491,8 +497,21 @@ export function TableCheckout({
                     </div>
                     <div>
                       <dt>{t("Tax")}</dt>
-                      <dd>{cad(selected ? selected.taxMinor : bill.owed.taxMinor)}</dd>
+                      <dd>
+                        {cad(
+                          selected
+                            ? selected.taxMinor
+                            : (BigInt(bill.owed.taxMinor) - owedTaxRounding(bill)).toString(),
+                        )}
+                      </dd>
                     </div>
+                    {/* WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax is rounded once. */}
+                    {selected === null && owedTaxRounding(bill) !== 0n ? (
+                      <div>
+                        <dt>{t("Tax rounding")}</dt>
+                        <dd>{cad(owedTaxRounding(bill).toString())}</dd>
+                      </div>
+                    ) : null}
                     <div>
                       <dt>{selected ? t("This part with tax") : t("Total with tax")}</dt>
                       <dd>{cad(selected ? selected.amountMinor : bill.owed.totalMinor)}</dd>
@@ -811,7 +830,8 @@ function TableReceipt({
   const paid = bill.settlement;
   if (paid === null) return null;
   const subtotal = bill.rounds.reduce((sum, round) => sum + BigInt(round.subtotalMinor), 0n);
-  const tax = bill.rounds.reduce((sum, round) => sum + BigInt(round.taxMinor), 0n);
+  const rounding = BigInt(bill.taxRoundingMinor);
+  const tax = bill.rounds.reduce((sum, round) => sum + BigInt(round.taxMinor), 0n) - rounding;
   return (
     <div
       className="table-receipt"
@@ -826,6 +846,12 @@ function TableReceipt({
           <dt>{t("Tax")}</dt>
           <dd>{cad(tax)}</dd>
         </div>
+        {rounding !== 0n ? (
+          <div>
+            <dt>{t("Tax rounding")}</dt>
+            <dd>{cad(rounding)}</dd>
+          </div>
+        ) : null}
         <div>
           <dt>{t("Tip")}</dt>
           <dd>{cad(paid.tipMinor)}</dd>

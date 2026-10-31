@@ -22,7 +22,10 @@ export interface SettledTableReceipt {
     }[];
   }[];
   readonly subtotalMinor: string;
+  /** Tax as the rounds were charged; the bill's tax rounding is on its own line. */
   readonly taxMinor: string;
+  /** WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding (older server: 0). */
+  readonly taxRoundingMinor: string;
   readonly ordersTotalMinor: string;
   readonly tipMinor: string;
   readonly roundingMinor: string;
@@ -88,6 +91,8 @@ export function parseSettledTableReceipt(payload: unknown): SettledTableReceipt 
     }),
     subtotalMinor: minor(receipt.subtotalMinor),
     taxMinor: minor(receipt.taxMinor),
+    taxRoundingMinor:
+      receipt.taxRoundingMinor === undefined ? "0" : minor(receipt.taxRoundingMinor),
     ordersTotalMinor: minor(receipt.ordersTotalMinor),
     tipMinor: minor(receipt.tipMinor),
     roundingMinor: minor(receipt.roundingMinor),
@@ -196,6 +201,12 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
           <dt>{t("Tax")}</dt>
           <dd>{money(receipt.taxMinor)}</dd>
         </div>
+        {receipt.taxRoundingMinor !== "0" ? (
+          <div>
+            <dt>{t("Tax rounding")}</dt>
+            <dd>{money(receipt.taxRoundingMinor)}</dd>
+          </div>
+        ) : null}
         {receipt.tipMinor !== "0" ? (
           <div>
             <dt>{t("Tip")}</dt>

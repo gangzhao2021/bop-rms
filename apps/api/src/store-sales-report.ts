@@ -185,9 +185,13 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
   const orders = new Map(input.orders.map((order) => [order.orderReference, order]));
   const kindOf = (order: StoreSalesOrder): StoreSalesOrderKind =>
     order.orderType === "DineIn" ? "DineIn" : order.sourceChannel === "Pos" ? "Counter" : "Pickup";
+  const batchOf = (orderReference: string, orderBatchReference: string) =>
+    orders.get(orderReference)?.batches.find((b) => b.orderBatchReference === orderBatchReference);
   const batchItems = (orderReference: string, orderBatchReference: string) =>
-    orders.get(orderReference)?.batches.find((b) => b.orderBatchReference === orderBatchReference)
-      ?.items ?? null;
+    batchOf(orderReference, orderBatchReference)?.items ?? null;
+  // WP-2423 DEC-TAX-WHOLE-RECEIPT: the round's share of its bill's tax rounding (tax it was paid).
+  const batchRounding = (orderReference: string, orderBatchReference: string) =>
+    batchOf(orderReference, orderBatchReference)?.taxRounding ?? [];
   const itemKey = (item: { skuReference: string; name: string }) =>
     item.skuReference + "\u0000" + item.name;
 
@@ -211,7 +215,12 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
     const order = orders.get(payment.orderReference) ?? null;
     const kind = order === null ? null : kindOf(order);
     const items = batchItems(payment.orderReference, payment.orderBatchReference);
-    const itemsTotal = items?.reduce((sum, item) => sum + item.totalMinor, 0n) ?? null;
+    const rounding = batchRounding(payment.orderReference, payment.orderBatchReference);
+    const roundingMinor = rounding.reduce((sum, line) => sum + line.amountMinor, 0n);
+    const itemsTotal =
+      items === null
+        ? null
+        : items.reduce((sum, item) => sum + item.totalMinor, 0n) + roundingMinor;
     const matched =
       items !== null && items.length > 0 && itemsTotal === payment.orderAllocationMinor;
     if (matched) matchedIntents.add(payment.paymentIntentReference);
@@ -239,6 +248,8 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
         for (const component of item.taxComponents)
           add(t.taxes, component.code, component.amountMinor);
       }
+      t.taxMinor += roundingMinor;
+      for (const line of rounding) add(t.taxes, line.code, line.amountMinor);
     }
     const tips = f.tips.get(payment.channel) ?? fail();
     tips.tipMinor += payment.tipMinor;
@@ -255,6 +266,7 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
     h.tipMinor += payment.tipMinor;
     h.collectedMinor += payment.totalMinor + payment.roundingMinor;
     if (!matched) continue;
+    h.taxMinor += roundingMinor;
     for (const item of items) {
       h.netSalesMinor += item.subtotalMinor - item.discountMinor - item.compMinor;
       h.taxMinor += item.taxMinor;
