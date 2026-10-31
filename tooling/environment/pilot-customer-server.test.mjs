@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+import console from "node:console";
 import { afterEach, expect, test, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -121,6 +123,115 @@ test("a Pilot Store serves pickup entry on its address but no DEMO launcher, leg
   } finally {
     await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
     await new Promise((resolve) => api.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("v15 2026-10-31: a served Store that cannot start is logged and skipped; the installation's Store keeps serving", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("BOP_PILOT_ENVIRONMENT", "Pilot");
+  const directory = await mkdtemp(join(tmpdir(), "bop-https-stores-"));
+  const { createTestCertificates } = await import("./pilot-test-certificates.mjs");
+  const certificates = await createTestCertificates(directory, {
+    hostname: "order.store-pilot.ca",
+  });
+  const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const brokenClose = vi.fn(async () => undefined);
+  let server;
+  try {
+    server = await startInternalCustomerServer({
+      publicOrigin: "https://order.store-pilot.ca",
+      listenPort: 0,
+      apiPort: 4300,
+      keyFile: certificates.keyFile,
+      certificateFile: certificates.certificateFile,
+      loadProfile: async () => ({ environment: "Pilot" }),
+      loadInternalPickupQr: async () => ({ token: () => "synthetic.pickup.token" }),
+      diningEntries: [],
+      createInternalTestResources: async () => ({
+        scope: { storeReference: "store-1" },
+        close: vi.fn(async () => undefined),
+      }),
+      createInternalSimulatedProvider: async () => ({ close: vi.fn() }),
+      createInternalCustomerEntry: async () => ({ dining: {} }),
+      createInternalTestItems: async () => ({ catalogCartItems: [] }),
+      createInternalCheckout: () => ({ preparation: {}, accessOptions: {} }),
+      createInternalOrder: async () => ({}),
+      createInternalDiningCheckout: () => ({ preparation: {} }),
+      createInternalChannelPayment: async () => ({}),
+      createInternalPaymentTerminal: () => ({}),
+      createInternalMerchant: async (served) => {
+        // The installation's own staff side is offered no Store it does not serve.
+        expect(served.servedStoreReferences).toBeUndefined();
+        return {
+          staffSignInMode: "cognito",
+          bff: {
+            exactOrigin: "https://order.store-pilot.ca",
+            acceptedHost: "order.store-pilot.ca",
+          },
+        };
+      },
+      additionalStores: [
+        {
+          storeReference: "store-2",
+          apiPort: 4301,
+          // demo-2 as v15 had it: its resources cannot be read.
+          createInternalTestResources: async () => {
+            throw new Error("PILOT_INSTALLATION_UNAVAILABLE");
+          },
+          createInternalMerchant: async () => assert.fail("never composed"),
+        },
+        {
+          storeReference: "store-3",
+          apiPort: 4302,
+          createInternalTestResources: async () => ({ close: brokenClose }),
+          createInternalMerchant: async () => {
+            throw Object.assign(new Error("STORE_REFERENCE_SOURCE_INVALID"), { code: "55000" });
+          },
+        },
+      ],
+    });
+    if (!server.listening) await new Promise((resolve) => server.once("listening", resolve));
+    const { request } = await import("node:https");
+    const entry = await new Promise((resolve, reject) => {
+      const call = request(
+        {
+          host: "127.0.0.1",
+          port: server.address().port,
+          path: "/bff/customer/pickup-entry",
+          servername: "order.store-pilot.ca",
+          ca: [certificates.root],
+          headers: { host: "order.store-pilot.ca", "sec-fetch-site": "same-origin" },
+        },
+        (response) => {
+          response.resume();
+          response.on("end", () => resolve(response.statusCode));
+        },
+      );
+      call.on("error", reject);
+      call.end();
+    });
+    expect(entry).toBe(200);
+    // Each failed Store is logged with its code; the one whose resources opened has them closed.
+    expect(
+      logged.mock.calls
+        .map(([line]) => {
+          try {
+            return JSON.parse(String(line));
+          } catch {
+            return null;
+          }
+        })
+        .filter((line) => line?.event === "PILOT_CUSTOMER_STORE_UNAVAILABLE")
+        .map(({ code, reason }) => ({ code, reason })),
+    ).toEqual([
+      { code: "PILOT_INSTALLATION_UNAVAILABLE", reason: undefined },
+      { code: "55000", reason: "STORE_REFERENCE_SOURCE_INVALID" },
+    ]);
+    expect(brokenClose).toHaveBeenCalledOnce();
+  } finally {
+    logged.mockRestore();
+    await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
     await rm(directory, { recursive: true, force: true });
   }
 });

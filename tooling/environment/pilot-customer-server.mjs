@@ -22,6 +22,7 @@ import { CustomerPaymentHandoffHandler } from "../../apps/api/dist/customer-paym
 import { createCustomerSessionPaymentHandoff } from "../../apps/api/dist/customer-session-payment-handoff.js";
 import { createPostgresPaymentIntentCreationStore } from "../../packages/rms/payment/src/index.ts";
 import { isStripeProvider } from "./pilot-stripe-provider.mjs";
+import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
 import { createServer } from "node:https";
 import { request } from "node:http";
 import { readFile, lstat } from "node:fs/promises";
@@ -150,40 +151,64 @@ export async function startInternalCustomerServer({
     registerInternalDiningTablePayment?.(app, { resources, checkout, simulator, origin });
     // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: each Store this installation serves has its own staff
     // composition (its own Store facts); every one may select the others. One Store: as before.
-    const storeReferences =
-      additionalStores.length === 0
+    // v15 2026-10-31: a Store whose resources or staff composition fail to start is logged and not
+    // served (nor offered to switch to); the installation's own Store and the others keep serving.
+    const served = [];
+    for (const store of additionalStores) {
+      let storeResources = null;
+      try {
+        storeResources = await store.createInternalTestResources();
+        served.push({ store, resources: storeResources });
+      } catch (error) {
+        await storeResources?.close().catch(() => undefined);
+        reportUnexpected("PILOT_CUSTOMER_STORE_UNAVAILABLE", error);
+      }
+    }
+    const routers = new Map(),
+      ports = new Map();
+    const storeReferences = () =>
+      served.length === 0
         ? []
-        : [
-            resources.scope.storeReference,
-            ...additionalStores.map((store) => store.storeReference),
-          ];
-    const othersThan = (reference) => storeReferences.filter((value) => value !== reference);
+        : [resources.scope.storeReference, ...served.map(({ store }) => store.storeReference)];
+    for (const entry of [...served]) {
+      const others = storeReferences().filter((value) => value !== entry.store.storeReference);
+      try {
+        const storeMerchant = await entry.store.createInternalMerchant({
+          ...entry.resources,
+          servedStoreReferences: others,
+        });
+        routers.set(entry.store.storeReference, createMerchantBffRouter(storeMerchant.bff));
+        additionalResources.push(entry.resources);
+        ports.set(entry.store.storeReference, entry.store.apiPort);
+      } catch (error) {
+        served.splice(served.indexOf(entry), 1);
+        await entry.resources.close().catch(() => undefined);
+        reportUnexpected("PILOT_CUSTOMER_STORE_UNAVAILABLE", error);
+      }
+    }
     const merchant = await createInternalMerchant(
-      additionalStores.length === 0
+      served.length === 0
         ? resources
-        : { ...resources, servedStoreReferences: othersThan(resources.scope.storeReference) },
+        : {
+            ...resources,
+            servedStoreReferences: storeReferences().filter(
+              (value) => value !== resources.scope.storeReference,
+            ),
+          },
     );
     const merchantRouter = createMerchantBffRouter(merchant.bff);
     let staffRoutes = merchantRouter;
-    if (additionalStores.length > 0) {
-      const routers = new Map([[resources.scope.storeReference, merchantRouter]]);
-      for (const store of additionalStores) {
-        const storeResources = await store.createInternalTestResources();
-        additionalResources.push(storeResources);
-        const storeMerchant = await store.createInternalMerchant({
-          ...storeResources,
-          servedStoreReferences: othersThan(store.storeReference),
-        });
-        routers.set(store.storeReference, createMerchantBffRouter(storeMerchant.bff));
-      }
+    if (served.length > 0) {
+      routers.set(resources.scope.storeReference, merchantRouter);
+      ports.set(resources.scope.storeReference, apiPort);
       // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 4: guest requests go to their Store's
       // customer API (the next local ports, in stores.json order).
       customerStore = createCustomerStoreRouting({
-        stores: [resources, ...additionalResources].map((storeResources, index) => ({
+        stores: [resources, ...additionalResources].map((storeResources) => ({
           storeReference: storeResources.scope.storeReference,
           brandReference: storeResources.scope.brandReference,
           publicStoreReference: storeResources.publicProfile.binding.publicStoreReference,
-          port: apiPort + index,
+          port: ports.get(storeResources.scope.storeReference),
           transactions: storeResources.transactions,
           hashSession: (credential) =>
             storeResources.credentials.sessions.hashCredential("Session", credential),

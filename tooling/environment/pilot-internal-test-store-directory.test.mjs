@@ -1,31 +1,54 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   deriveInternalTestStoreFiles,
   issueInternalTestStoreDirectory,
 } from "./pilot-internal-test-store-directory.mjs";
 import { loadServedStoreDirectories } from "./pilot-https-entry.mjs";
+import { loadPilotInstallation } from "./pilot-installation.mjs";
 
 const store1 = "00000000-0000-7000-8000-000000000003",
   store2 = "01909a2e-1000-7000-8000-000000000010",
   operation = "01909a2e-4000-7000-8000-000000000001",
   queue = "01a0bfd6-b825-709e-aafb-28e2b84a2ebc",
-  sku = "0190fa20-0000-7000-8000-00000000000d";
+  sku = "0190fa20-0000-7000-8000-00000000000d",
+  site1 = "0190fa30-0000-7000-8000-000000000001",
+  site2 = "01909a2e-5000-7000-8000-000000000002",
+  ref = (n) => "0190fa60-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const binding = {
+  tenantReference: "0190ed16-0000-7000-8000-00000000005a",
+  brandReference: "00000000-0000-7000-8000-000000000002",
+  storeReference: store1,
+};
 const files = () => ({
-  "installation.json": { schemaVersion: 1, environment: "InternalTest", database: "db" },
+  "installation.json": {
+    schemaVersion: 1,
+    environment: "InternalTest",
+    database: "db",
+    port: 55435,
+    roles: { api: "pilot_api", worker: "pilot_worker" },
+  },
   "internal-test-profile.json": {
     environment: "InternalTest",
     database: "db",
     binding: {
-      tenantReference: "0190ed16-0000-7000-8000-00000000005a",
-      brandReference: "00000000-0000-7000-8000-000000000002",
-      storeReference: store1,
+      ...binding,
       publicStoreReference: "00000000-0000-7000-8000-000000000001",
       validUntil: "2026-11-26T02:26:31.598Z",
     },
   },
+  "internal-test-inventory.json": {
+    environment: "InternalTest",
+    database: "db",
+    scope: { ...binding, stockSiteReference: site1 },
+  },
+  "internal-test-receipt-template.json": { environment: "InternalTest", versionReference: ref(9) },
+  "merchant-runtime.json": { environment: "InternalTest", scope: { ...binding } },
+  "business-worker.json": { environment: "InternalTest", scope: { ...binding } },
+  "kitchen-queue-worker.json": { environment: "InternalTest", scope: { ...binding } },
+  "dining-exception-worker.json": { environment: "InternalTest", scope: { ...binding } },
   "internal-test-menu.json": { environment: "InternalTest", database: "db", skuReference: sku },
   "internal-test-task-queue.json": {
     environment: "InternalTest",
@@ -34,9 +57,17 @@ const files = () => ({
     exceptionTaskPolicy: { storeReference: store1, managerQueueReference: queue },
   },
   "customer-runtime.json": {
+    schemaVersion: 1,
     environment: "InternalTest",
+    database: "db",
     providerAccountReference: "0190fa60-0000-7000-8000-000000000020",
-    scope: { storeReference: store1 },
+    controlReference: ref(21),
+    cart: {
+      policyVersionReference: ref(22),
+      idleTimeoutSeconds: 3600,
+      absoluteTimeoutSeconds: 86400,
+    },
+    scope: { ...binding },
     diningTableFiles: ["internal-test-dining-table.json"],
   },
   "internal-test-dining-table.json": { label: "DEMO-01", scope: { storeReference: store1 } },
@@ -48,6 +79,7 @@ it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION 3d: the TEST Store's files name it, w
   const derived = deriveInternalTestStoreFiles(files(), {
     storeReference: store2,
     operationReference: operation,
+    stockSiteReference: site2,
   });
   const text = JSON.stringify(derived);
   expect(text).not.toContain(store1);
@@ -77,6 +109,7 @@ it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION 3d: the TEST Store's files name it, w
     deriveInternalTestStoreFiles(files(), {
       storeReference: store2,
       operationReference: operation,
+      stockSiteReference: site2,
     }),
   ).toEqual(derived);
 });
@@ -84,14 +117,28 @@ it("refuses outside InternalTest or for the installation's own Store", () => {
   const pilot = files();
   pilot["installation.json"].environment = "Pilot";
   expect(() =>
-    deriveInternalTestStoreFiles(pilot, { storeReference: store2, operationReference: operation }),
+    deriveInternalTestStoreFiles(pilot, {
+      storeReference: store2,
+      operationReference: operation,
+      stockSiteReference: site2,
+    }),
   ).toThrow("INTERNAL_TEST_STORE_DIRECTORY_UNAVAILABLE");
   expect(() =>
     deriveInternalTestStoreFiles(files(), {
       storeReference: store1,
       operationReference: operation,
+      stockSiteReference: site2,
     }),
   ).toThrow("INTERNAL_TEST_STORE_DIRECTORY_UNAVAILABLE");
+  // v15 2026-10-31: its own stock site, never missing and never the installation Store's.
+  for (const stockSiteReference of [undefined, "not-a-reference", site1])
+    expect(() =>
+      deriveInternalTestStoreFiles(files(), {
+        storeReference: store2,
+        operationReference: operation,
+        stockSiteReference,
+      }),
+    ).toThrow(expect.objectContaining({ reason: "stock-site-required" }));
 });
 it("writes stores/<name>/ owner-only with the secrets byte for byte, and lists it once", async () => {
   const directory = await mkdtemp(join(tmpdir(), "store-dir-"));
@@ -99,12 +146,30 @@ it("writes stores/<name>/ owner-only with the secrets byte for byte, and lists i
     for (const [name, value] of Object.entries(files()))
       await writeFile(join(directory, name), JSON.stringify(value));
     await writeFile(join(directory, "api-password"), "secret-bytes\n", { mode: 0o600 });
+    for (const secret of ["worker-password", "guest-abuse-pepper", "internal-test-keys.json"])
+      await writeFile(join(directory, secret), "{}", { mode: 0o600 });
     await writeFile(join(directory, "simulated-provider.sqlite"), "store one's payments");
+    // v15 2026-10-31: what the installation's own services and operators leave there.
+    for (const runtime of [
+      "business-worker.pid",
+      "customer.log",
+      "supervisor.lock",
+      "api.health.json",
+      "api.health.json.tmp",
+      "release581-runtime-final.log",
+      "recovery615-result.json",
+      "session607.mjs",
+      "migration-admin-password",
+      "environment.env",
+      "customer-tls-key.pem",
+    ])
+      await writeFile(join(directory, runtime), "{}", { mode: 0o600 });
     const issued = await issueInternalTestStoreDirectory({
       directory,
       name: "demo-2",
       storeReference: store2,
       operationReference: operation,
+      stockSiteReference: site2,
     });
     expect(issued.directory).toBe("stores/demo-2");
     expect(await loadServedStoreDirectories(directory)).toEqual(["stores/demo-2"]);
@@ -119,12 +184,39 @@ it("writes stores/<name>/ owner-only with the secrets byte for byte, and lists i
       await readFile(join(directory, "stores/demo-2/internal-test-profile.json"), "utf8"),
     );
     expect(profile.binding.storeReference).toBe(store2);
+    // Only what its services read: its configuration, the keys and passwords they use and an
+    // empty payment simulator — never pids, locks, health, logs, evidence or other credentials.
+    expect((await readdir(join(directory, "stores/demo-2"))).sort()).toEqual(
+      [
+        "api-password",
+        "business-worker.json",
+        "customer-runtime.json",
+        "dining-exception-worker.json",
+        "guest-abuse-pepper",
+        "installation.json",
+        "internal-test-inventory.json",
+        "internal-test-keys.json",
+        "internal-test-menu.json",
+        "internal-test-profile.json",
+        "internal-test-receipt-template.json",
+        "internal-test-task-queue.json",
+        "kitchen-queue-worker.json",
+        "merchant-runtime.json",
+        "simulated-provider.sqlite",
+        "worker-password",
+      ].sort(),
+    );
+    const inventory = JSON.parse(
+      await readFile(join(directory, "stores/demo-2/internal-test-inventory.json"), "utf8"),
+    );
+    expect(inventory.scope).toMatchObject({ storeReference: store2, stockSiteReference: site2 });
     await expect(
       issueInternalTestStoreDirectory({
         directory,
         name: "demo-3",
         storeReference: store2,
         operationReference: operation,
+        stockSiteReference: site2,
       }),
     ).rejects.toMatchObject({ reason: "store-already-served" });
     await expect(
@@ -133,9 +225,40 @@ it("writes stores/<name>/ owner-only with the secrets byte for byte, and lists i
         name: "demo-2",
         storeReference: "01909a2e-1000-7000-8000-000000000011",
         operationReference: operation,
+        stockSiteReference: site2,
       }),
     ).rejects.toMatchObject({ reason: "stores-list-invalid" });
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+it("v15 2026-10-31: the issued Store directory loads through the real installation loader", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "store-dir-")));
+  try {
+    for (const [name, value] of Object.entries(files()))
+      await writeFile(join(directory, name), JSON.stringify(value), { mode: 0o600 });
+    for (const secret of [
+      "api-password",
+      "worker-password",
+      "guest-abuse-pepper",
+      "internal-test-keys.json",
+    ])
+      await writeFile(join(directory, secret), "{}", { mode: 0o600 });
+    await issueInternalTestStoreDirectory({
+      directory,
+      name: "demo-2",
+      storeReference: store2,
+      operationReference: store2,
+      stockSiteReference: site2,
+    });
+    const store = await loadPilotInstallation(join(directory, "stores/demo-2"));
+    const customer = await store.loadCustomerRuntime();
+    expect(customer.scope.storeReference).toBe(store2);
+    expect(customer.diningTableFiles).toEqual([]);
+    expect((await store.loadProfile()).binding.storeReference).toBe(store2);
+  } finally {
+    vi.unstubAllEnvs();
     await rm(directory, { recursive: true, force: true });
   }
 });

@@ -13,6 +13,7 @@ import { loadPilotHosting } from "./pilot-hosting.mjs";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 export { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
 import { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
+import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
 export function parsePilotHttpsArguments(args) {
   if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== "string")
     throw Error("PILOT_HTTPS_ARGUMENT_INVALID");
@@ -68,50 +69,58 @@ export async function startConfiguredPilotHttps(
   );
   // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the other Stores this installation serves, each a
   // complete Store runtime directory of the same database, Tenant and Brand (absent: one Store).
+  // v15 2026-10-31: one Store that cannot be loaded never stops the others; it is logged (its
+  // code) and not served until it is fixed and the service restarts.
   const additionalStores = [];
-  for (const relative of await loadServedStoreDirectories(directory)) {
-    const storeDirectory = path.join(directory, relative);
-    const storeInstallation = await loadInstallation(storeDirectory),
-      storeCustomerConfig = await storeInstallation.loadCustomerRuntime(),
-      storeMerchantConfig = await storeInstallation.loadMerchantRuntime();
-    if (
-      storeInstallation.database !== installation.database ||
-      storeCustomerConfig.scope.tenantReference !== customerConfig.scope.tenantReference ||
-      storeCustomerConfig.scope.brandReference !== customerConfig.scope.brandReference ||
-      storeCustomerConfig.scope.storeReference === customerConfig.scope.storeReference ||
-      Object.entries(storeCustomerConfig.scope).some(
-        ([key, value]) => storeMerchantConfig.scope[key] !== value,
+  for (const [index, relative] of (await loadServedStoreDirectories(directory)).entries()) {
+    try {
+      const storeDirectory = path.join(directory, relative);
+      const storeInstallation = await loadInstallation(storeDirectory),
+        storeCustomerConfig = await storeInstallation.loadCustomerRuntime(),
+        storeMerchantConfig = await storeInstallation.loadMerchantRuntime();
+      if (
+        storeInstallation.database !== installation.database ||
+        storeCustomerConfig.scope.tenantReference !== customerConfig.scope.tenantReference ||
+        storeCustomerConfig.scope.brandReference !== customerConfig.scope.brandReference ||
+        storeCustomerConfig.scope.storeReference === customerConfig.scope.storeReference ||
+        Object.entries(storeCustomerConfig.scope).some(
+          ([key, value]) => storeMerchantConfig.scope[key] !== value,
+        )
       )
-    )
-      throw Error("PILOT_HTTPS_SCOPE_CHANGED");
-    const storeCustomer = composeCustomer(
-      storeDirectory,
-      storeInstallation,
-      storeCustomerConfig,
-      await loadHosting(directory),
-    );
-    additionalStores.push({
-      storeReference: storeCustomerConfig.scope.storeReference,
-      createInternalMerchant: composeMerchant(
+        throw Error("PILOT_HTTPS_SCOPE_CHANGED");
+      const storeCustomer = composeCustomer(
         storeDirectory,
         storeInstallation,
-        storeMerchantConfig,
         storeCustomerConfig,
-        storeCustomer,
-      ),
-      createInternalTestResources: async () => {
-        const r = await createResources(storeDirectory);
-        if (
-          Object.entries(storeCustomerConfig.scope).some(
-            ([key, value]) => r.publicProfile.binding[key] !== value,
-          )
-        ) {
-          await r.close();
-          throw Error("PILOT_HTTPS_SCOPE_CHANGED");
-        }
-        return r;
-      },
-    });
+        await loadHosting(directory),
+      );
+      additionalStores.push({
+        storeReference: storeCustomerConfig.scope.storeReference,
+        // Its customer API's local port, by its place in stores.json (pilot-api-entry).
+        apiPort: 4301 + index,
+        createInternalMerchant: composeMerchant(
+          storeDirectory,
+          storeInstallation,
+          storeMerchantConfig,
+          storeCustomerConfig,
+          storeCustomer,
+        ),
+        createInternalTestResources: async () => {
+          const r = await createResources(storeDirectory);
+          if (
+            Object.entries(storeCustomerConfig.scope).some(
+              ([key, value]) => r.publicProfile.binding[key] !== value,
+            )
+          ) {
+            await r.close();
+            throw Error("PILOT_HTTPS_SCOPE_CHANGED");
+          }
+          return r;
+        },
+      });
+    } catch (error) {
+      reportUnexpected("PILOT_HTTPS_STORE_UNAVAILABLE", error, { store: relative });
+    }
   }
   return startServer({
     ...customer,
@@ -147,7 +156,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       parsePilotHttpsArguments(process.argv.slice(2)),
     );
     await startConfiguredPilotHttps(dir);
-  } catch {
+  } catch (error) {
+    // The real cause as a code (never message text, paths or secrets), then the fixed line.
+    reportUnexpected("PILOT_HTTPS_START_UNAVAILABLE", error);
     console.error("PILOT_HTTPS_START_UNAVAILABLE");
     process.exitCode = 1;
   }

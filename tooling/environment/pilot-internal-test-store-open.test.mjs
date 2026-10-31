@@ -31,14 +31,23 @@ it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: takes exactly the setup or directory
       "01909a2e-1000-7000-8000-000000000010",
       "--name",
       "demo-2",
+      "--stock-site",
+      "01909a2e-5000-7000-8000-000000000002",
     ]),
-  ).toMatchObject({ command: "directory", name: "demo-2", dryRun: false });
+  ).toMatchObject({
+    command: "directory",
+    name: "demo-2",
+    stockSiteReference: "01909a2e-5000-7000-8000-000000000002",
+    dryRun: false,
+  });
   for (const bad of [
     [],
     ["open", "/dir"],
     ["directory", "/dir", "--store", "x"],
     ["directory", "/dir", "--store", "x", "--name", "y", "--dry-run"],
     ["directory", "/dir", "--store", "x", "--store", "y", "--name", "z"],
+    // v15 2026-10-31: the Store's own stock site is required.
+    ["directory", "/dir", "--store", "x", "--name", "y"],
   ])
     expect(() => parseStoreOpenArguments(bad)).toThrow(
       "PILOT_INTERNAL_TEST_STORE_OPEN_UNAVAILABLE",
