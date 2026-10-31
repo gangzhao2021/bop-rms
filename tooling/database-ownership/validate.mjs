@@ -1475,6 +1475,15 @@ async function scanUnsupported(root, module, diagnostics) {
             module.manifest.ownedDatabase?.tables?.includes(table),
           ) &&
           moduleRelative === internalTestRenewalAsset.file;
+        // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION 3b: InternalTest first launch gate of a TEST Store.
+        const acceptedInternalTestLiveGateCreationAsset =
+          module.packageName === "@bop/publishing" &&
+          module.manifest.ownedDatabase?.schema === "bop_publishing" &&
+          ["live_gate_version", "live_gate_requirement"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative ===
+            "src/infrastructure/persistence/internal-test-live-gate-creation-store.ts";
         const acceptedCurrentLiveGateAsset =
           module.packageName === "@bop/publishing" &&
           module.manifest.ownedDatabase?.schema === "bop_publishing" &&
@@ -3809,6 +3818,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedStoreBusinessDateAsset &&
           !acceptedCurrentMembershipAsset &&
           !acceptedInternalTestRenewalAsset &&
+          !acceptedInternalTestLiveGateCreationAsset &&
           !acceptedInitialBrandMembershipAsset &&
           !acceptedApprovedWorkforceMembershipAsset &&
           !acceptedMembershipBrandDiscoveryAsset &&
