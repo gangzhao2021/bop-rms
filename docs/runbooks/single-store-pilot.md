@@ -1969,6 +1969,16 @@ owner,store-manager,area-manager,front-of-house,kitchen,inventory-manager` (the 
    page and switch to it; there they set its address, tax and payment in Store setup and add its
    tables (segment 3c). If the installation is down, each Store follows the outage procedure on
    its own (see "Several Stores on one installation" above).
+6. **Its day-end settlement**, once its first business day has closed: the same command with
+   `settlement /app/.local/pilot-v15/stores/demo-2 --database bop_rms_pilot_v15
+--migration-env .local/migrate-v14/migrate-v15.env` records that day; its settlement worker
+   starts at the next restart.
+7. **Renewal:** after renewing the installation itself (next section), renew the TEST Store with
+   the same `--until`: `renew /app/.local/pilot-v15/stores/demo-2 --database bop_rms_pilot_v15
+--migration-env .local/migrate-v14/migrate-v15.env --until <the same instant> --reason "…"
+--approved-by "Owner" --approval "<the approval wording>"` (dry run first with `--dry-run`).
+   It moves the Store's synthetic launch gate (audited) and its files' common expiry; the
+   Store's staff and roles have no end.
 
 ## Renewing the internal test installation
 

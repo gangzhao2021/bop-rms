@@ -18,7 +18,9 @@ import { issueInternalTestStoreDirectory } from "./pilot-internal-test-store-dir
  *               planned restart serves it;
  *   settlement — once the Store's first business day has closed, its day-end settlement
  *               coverage (that day), read as the services do; its settlement worker starts at the
- *               next restart. The directory given is the Store's (`…/stores/<name>`).
+ *               next restart. The directory given is the Store's (`…/stores/<name>`);
+ *   renew     — after the installation's own renewal: the Store's synthetic launch gate (database)
+ *               and its files' common expiry move to the same `--until` (the Store's directory).
  *
  * Refuses outside development mode or an InternalTest installation. Prints fixed codes only.
  */
@@ -45,6 +47,14 @@ const flags = {
   },
   directory: { "--store": "storeReference", "--name": "name" },
   settlement: { "--database": "expectedDatabaseName", "--migration-env": "envFile" },
+  renew: {
+    "--database": "expectedDatabaseName",
+    "--migration-env": "envFile",
+    "--until": "until",
+    "--reason": "reason",
+    "--approved-by": "approvedBy",
+    "--approval": "approval",
+  },
 };
 export function parseStoreOpenArguments(args) {
   const [command, directory, ...rest] = args;
@@ -54,7 +64,11 @@ export function parseStoreOpenArguments(args) {
   const options = { command, directory, dryRun: false };
   for (let index = 0; index < rest.length; index++) {
     const flag = rest[index];
-    if (flag === "--dry-run" && command === "setup" && !options.dryRunSeen) {
+    if (
+      flag === "--dry-run" &&
+      (command === "setup" || command === "renew") &&
+      !options.dryRunSeen
+    ) {
       options.dryRun = options.dryRunSeen = true;
       continue;
     }
@@ -215,6 +229,75 @@ async function settlement(options) {
   }
 }
 
+async function renew(options) {
+  const database = await import("./pilot-internal-test-renew-database.mjs");
+  const store = await import("./pilot-internal-test-store-setup.mjs");
+  const { rename, writeFile } = await import("node:fs/promises");
+  const read = async (name) => JSON.parse(await readFile(join(options.directory, name), "utf8"));
+  const installation = await read("installation.json"),
+    profile = await read("internal-test-profile.json"),
+    queue = await read("internal-test-task-queue.json");
+  if (installation.environment !== "InternalTest" || profile.environment !== "InternalTest")
+    unavailable("not-internal-test");
+  if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
+  const from = profile.binding.validUntil;
+  const client = await database.connectRenewalDatabase(
+    options.envFile,
+    options.expectedDatabaseName,
+  );
+  let result;
+  try {
+    const setupRole = store.storeSetupRoleName(options.expectedDatabaseName);
+    for (const sql of store.renderStoreSetupRoleSql(setupRole)) await client.query(sql);
+    result = await store.renewInternalTestStore(client, {
+      environment: profile.environment,
+      database: options.expectedDatabaseName,
+      setupRole,
+      readRole: installation.roles.api,
+      binding: profile.binding,
+      from,
+      to: options.until,
+      now: () => new Date().toISOString(),
+      evidence: {
+        renewalReference: uuidV7(),
+        approvedBy: options.approvedBy,
+        approval: options.approval,
+        reason: options.reason,
+        operatorAccount: "uid:" + process.getuid?.(),
+      },
+      dryRun: options.dryRun,
+      nextReference: () => uuidV7(),
+    });
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+  if (options.dryRun) return result;
+  // Files, the profile last: only the common expiry moves.
+  const move = (value) => (value === from ? options.until : value);
+  const nextQueue = {
+    ...queue,
+    effectiveUntil: move(queue.effectiveUntil),
+    ...(queue.exceptionTaskPolicy
+      ? {
+          exceptionTaskPolicy: {
+            ...queue.exceptionTaskPolicy,
+            effectiveUntil: move(queue.exceptionTaskPolicy.effectiveUntil),
+          },
+        }
+      : {}),
+  };
+  const nextProfile = { ...profile, binding: { ...profile.binding, validUntil: options.until } };
+  for (const [name, value] of [
+    ["internal-test-task-queue.json", nextQueue],
+    ["internal-test-profile.json", nextProfile],
+  ]) {
+    const file = join(options.directory, name);
+    await writeFile(file + ".next", JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
+    await rename(file + ".next", file);
+  }
+  return Object.freeze({ ...result, from, to: options.until });
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const options = parseStoreOpenArguments(process.argv.slice(2));
@@ -224,12 +307,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         ? await setup(options)
         : options.command === "settlement"
           ? await settlement(options)
-          : await issueInternalTestStoreDirectory({
-              directory: options.directory,
-              name: options.name,
-              storeReference: options.storeReference,
-              operationReference: uuidV7(),
-            });
+          : options.command === "renew"
+            ? await renew(options)
+            : await issueInternalTestStoreDirectory({
+                directory: options.directory,
+                name: options.name,
+                storeReference: options.storeReference,
+                operationReference: uuidV7(),
+              });
     console.log(JSON.stringify(result));
   } catch (error) {
     const reason = typeof error?.reason === "string" ? error.reason : "unexpected-error";

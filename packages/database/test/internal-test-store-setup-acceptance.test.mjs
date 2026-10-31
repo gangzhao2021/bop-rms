@@ -5,6 +5,7 @@ import { recordStoreOpening } from "../../../apps/api/src/merchant-store-opening
 import { createPostgresPublishedStoreOperatingStatusReader } from "../../rms/store/src/index.ts";
 import {
   renderStoreSetupRoleSql,
+  renewInternalTestStore,
   setUpInternalTestStore,
   storeSetupRoleName,
 } from "../../../tooling/environment/pilot-internal-test-store-setup.mjs";
@@ -222,6 +223,46 @@ it("InternalTest: a TEST Store opened in the product gets its first configuratio
       }
       // Set up once.
       await assert.rejects(setUp(store2, { dryRun: false }), { reason: "store-already-set-up" });
+
+      // InternalTest renewal moves the TEST Store's launch gate with the installation's window.
+      const to = new Date(Date.parse(binding.validUntil) + 5 * 86_400_000).toISOString();
+      const renew = (overrides = {}) =>
+        renewInternalTestStore(admin, {
+          environment: "InternalTest",
+          database,
+          setupRole,
+          readRole: api,
+          binding: { ...binding, storeReference: store2 },
+          from: binding.validUntil,
+          to,
+          now: () => new Date().toISOString().replace(/\d{3}Z$/u, "000Z"),
+          evidence: {
+            renewalReference: "01909a2e-2000-7000-8000-000000000002",
+            approvedBy: "Owner",
+            approval: "Renew the TEST store with the installation",
+            reason: "acceptance",
+            operatorAccount: "acceptance",
+          },
+          nextReference: () => "01909a2e-3000-7000-8000-" + (++n).toString(16).padStart(12, "0"),
+          ...overrides,
+        });
+      assert.equal((await renew()).status, "DryRun");
+      assert.equal((await renew({ dryRun: false })).status, "Renewed");
+      const [renewedGate] = (
+        await admin.query(
+          "SELECT max(v.gate_version)::int v,(SELECT max(valid_until) FROM bop_publishing.live_gate_requirement q WHERE q.store_id=$1) until FROM bop_publishing.live_gate_version v WHERE v.store_id=$1",
+          [store2],
+        )
+      ).rows;
+      assert.deepEqual(
+        { v: renewedGate.v, until: renewedGate.until.toISOString() },
+        { v: 2, until: to },
+      );
+      assert.equal((await renew({ dryRun: false })).status, "AlreadyRenewed");
+      // An unlabelled Store is never renewed this way.
+      await assert.rejects(renew({ binding: { ...binding, storeReference: store3 } }), {
+        reason: "store-not-labelled-test",
+      });
     } finally {
       await admin.end();
     }

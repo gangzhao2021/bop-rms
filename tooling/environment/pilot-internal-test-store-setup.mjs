@@ -2,6 +2,7 @@ import { appendAuditRecordInTransaction } from "../../packages/bop/audit/src/ind
 import {
   createInternalTestLiveGate,
   createPostgresPublishingMutationStore,
+  renewInternalTestLiveGates,
 } from "../../packages/bop/publishing/src/index.ts";
 import {
   createPostgresPublishedStoreOperatingStatusReader,
@@ -234,6 +235,7 @@ export async function setUpInternalTestStore(
       brandReference: brand,
       storeReference: targetStoreReference,
     };
+    const evidenceUntil = new Date(Date.parse(at) + 365 * 86_400_000).toISOString();
     const author = String(target.opener),
       approver = approverActorReference;
     const configuration = createStoreConfigurationVersion({
@@ -343,7 +345,9 @@ export async function setUpInternalTestStore(
       scope: publishingScope,
       result: "Pass",
       checkedAt: at,
-      validUntil: binding.validUntil,
+      // The configuration's own evidence outlives the installation window: renewal moves only
+      // the binding and the launch gate (append-only evidence cannot be renewed).
+      validUntil: evidenceUntil,
       checkCodes: [...storeConfigurationValidationCheckCodes],
     };
     const review = {
@@ -365,7 +369,7 @@ export async function setUpInternalTestStore(
       decision: "Accepted",
       approvedActorReference: approver,
       approvedAt: at,
-      validUntil: binding.validUntil,
+      validUntil: evidenceUntil,
     };
     const approved = {
       ...review,
@@ -484,6 +488,106 @@ export async function setUpInternalTestStore(
       storeReference: targetStoreReference,
       configurationReference: configuration.configurationReference,
       businessDate: status.businessDate.businessDate,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof InternalTestStoreSetupError) throw error;
+    return unavailable("database-check-failed", error);
+  }
+}
+
+/**
+ * InternalTest renewal of a TEST Store opened in the product (after the installation's own
+ * renewal, with the same window move): its synthetic launch gate's validity, through the
+ * Publishing owner's renewal (an appended version, audited with the approval), committed only if
+ * the services' read role reads the Store's operating status after the old expiry. Its staff and
+ * template roles have no end; its configuration evidence outlives the window (see setup).
+ */
+export async function renewInternalTestStore(
+  client,
+  {
+    environment,
+    database,
+    setupRole,
+    readRole,
+    binding,
+    from,
+    to,
+    now,
+    evidence,
+    dryRun = true,
+    nextReference,
+  },
+) {
+  if (environment !== "InternalTest") return unavailable("internal-test-only");
+  const at = now();
+  if (
+    ![
+      binding?.tenantReference,
+      binding?.brandReference,
+      binding?.storeReference,
+      evidence?.renewalReference,
+    ].every((value) => typeof value === "string" && UUID_V7.test(value)) ||
+    !IDENTIFIER.test(setupRole) ||
+    !IDENTIFIER.test(readRole) ||
+    binding.validUntil !== from ||
+    !(to > from) ||
+    Date.parse(to) > Date.parse(at) + 30 * 86_400_000
+  )
+    return unavailable("input-invalid");
+  const brand = binding.brandReference,
+    store = binding.storeReference;
+  const tx = { query: (sql, values = []) => client.query(sql, [...values]) };
+  await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+  try {
+    if ((await client.query("SELECT current_database() db")).rows[0]?.db !== database)
+      unavailable("database-mismatch");
+    await client.query(`SET LOCAL ROLE "${setupRole}"`);
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      brand,
+      store,
+    ]);
+    const [target] = (
+      await tx.query(
+        "SELECT s.display_name,s.time_zone FROM bop_tenant.store s JOIN bop_tenant.store_opening o ON o.brand_id=s.brand_id AND o.store_id=s.store_id WHERE s.brand_id=$1 AND s.store_id=$2",
+        [brand, store],
+      )
+    ).rows;
+    if (target === undefined) unavailable("store-not-opened-in-product");
+    if (!internalTestStoreLabel.test(String(target.display_name)))
+      unavailable("store-not-labelled-test");
+    const renewed = await renewInternalTestLiveGates(
+      tx,
+      {
+        brandReference: brand,
+        storeReference: store,
+        from,
+        to,
+        at,
+        evidence,
+        nextReference,
+        testStoreOpenedInProduct: true,
+      },
+      (transaction, record) => appendAuditRecordInTransaction(transaction, record),
+    );
+    // The services read the Store's operating status just after the old expiry, as their role.
+    await client.query("SAVEPOINT store_renewal_read_check");
+    await client.query(`SET LOCAL ROLE "${readRole}"`);
+    const after = new Date(Date.parse(from) + 60_000).toISOString();
+    const status = await createPostgresPublishedStoreOperatingStatusReader(
+      operatingOf(
+        { tenantReference: binding.tenantReference, brandReference: brand, storeReference: store },
+        String(target.time_zone),
+        { validFrom: binding.validFrom, validUntil: to },
+      ),
+    )(tx, after);
+    if (status.businessDate.storeReference !== store) unavailable("read-check-failed");
+    await client.query("RELEASE SAVEPOINT store_renewal_read_check");
+    await client.query(dryRun ? "ROLLBACK" : "COMMIT");
+    return Object.freeze({
+      status: renewed.renewed.length > 0 ? (dryRun ? "DryRun" : "Renewed") : "AlreadyRenewed",
+      storeReference: store,
+      gates: renewed.renewed.length,
     });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);

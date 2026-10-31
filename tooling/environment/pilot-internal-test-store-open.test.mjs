@@ -43,4 +43,23 @@ it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: takes exactly the setup or directory
     expect(() => parseStoreOpenArguments(bad)).toThrow(
       "PILOT_INTERNAL_TEST_STORE_OPEN_UNAVAILABLE",
     );
+  expect(
+    parseStoreOpenArguments([
+      "renew",
+      "/app/.local/pilot-v15/stores/demo-2",
+      "--database",
+      "bop_rms_pilot_v15",
+      "--migration-env",
+      ".local/migrate-v14/migrate-v15.env",
+      "--until",
+      "2026-12-20T02:26:31.598Z",
+      "--reason",
+      "Continue testing",
+      "--approved-by",
+      "Owner",
+      "--approval",
+      "批准",
+      "--dry-run",
+    ]),
+  ).toMatchObject({ command: "renew", dryRun: true, until: "2026-12-20T02:26:31.598Z" });
 });
