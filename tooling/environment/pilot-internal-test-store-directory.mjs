@@ -1,6 +1,14 @@
-import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 
 /**
@@ -256,9 +264,6 @@ export async function issueInternalTestStoreDirectory({
     await writeFile(join(target, file), await readFile(join(directory, file)), { mode: 0o600 });
     await chmod(join(target, file), 0o600);
   }
-  // Segment 6: the Store's own TEST payment simulator starts empty (never another Store's).
-  await writeFile(join(target, SIMULATOR), Buffer.alloc(0), { mode: 0o600 });
-  await chmod(join(target, SIMULATOR), 0o600);
   // The profile last: services refuse to start until it exists.
   const names = Object.keys(derived).sort((a, b) =>
     a === "internal-test-profile.json"
@@ -273,8 +278,35 @@ export async function issueInternalTestStoreDirectory({
     await writeFile(join(target, file), JSON.stringify(derived[file], null, 2) + "\n", {
       mode: 0o600,
     });
+  // Segment 6: the Store's own TEST payment simulator, empty (never another Store's records),
+  // created by the simulator's own initialiser — never a bare file (v15 2026-10-31: a 0-byte one
+  // had no tables, and the Store's reconciliation worker could not start). Before the Store is
+  // listed, so a Store whose simulator cannot be created is never served.
+  await provisionStoreSimulator(target);
   const next = { schemaVersion: 1, stores: [...list.stores, relative] };
   await writeFile(listPath + ".next", JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
   await rename(listPath + ".next", listPath);
   return Object.freeze({ directory: relative, files: names.length + copies.length + 1 });
+}
+
+/**
+ * The Store's TEST payment simulator, through its own initialiser: created when absent, its tables
+ * added when missing, never a record removed or changed. Also the repair for a Store directory
+ * written before the initialiser ran (`provider`). Development mode (InternalTest) only.
+ */
+export async function provisionStoreSimulator(storeDirectory) {
+  const { loadPilotInstallation } = await import("./pilot-installation.mjs");
+  const { createInternalSimulatedProvider } = await import("./pilot-payment-provider.mjs");
+  const directory = await realpath(storeDirectory);
+  const store = await loadPilotInstallation(directory);
+  const simulator = await createInternalSimulatedProvider(
+    { provision: true },
+    {
+      path: join(directory, SIMULATOR),
+      loadProfile: store.loadProfile,
+      expectedDatabaseName: store.database,
+    },
+  );
+  simulator.close();
+  return Object.freeze({ simulator: SIMULATOR, status: "Ready" });
 }

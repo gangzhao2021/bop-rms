@@ -2,10 +2,13 @@ import { mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import {
   deriveInternalTestStoreFiles,
   issueInternalTestStoreDirectory,
+  provisionStoreSimulator,
 } from "./pilot-internal-test-store-directory.mjs";
+import { createPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
 import { loadServedStoreDirectories } from "./pilot-https-entry.mjs";
 import { loadPilotInstallation } from "./pilot-installation.mjs";
 
@@ -141,6 +144,7 @@ it("refuses outside InternalTest or for the installation's own Store", () => {
     ).toThrow(expect.objectContaining({ reason: "stock-site-required" }));
 });
 it("writes stores/<name>/ owner-only with the secrets byte for byte, and lists it once", async () => {
+  vi.stubEnv("NODE_ENV", "development");
   const directory = await mkdtemp(join(tmpdir(), "store-dir-"));
   try {
     for (const [name, value] of Object.entries(files()))
@@ -177,8 +181,22 @@ it("writes stores/<name>/ owner-only with the secrets byte for byte, and lists i
       "secret-bytes\n",
     );
     expect((await stat(join(directory, "stores/demo-2"))).mode & 0o777).toBe(0o700);
-    // Its own payment simulator, empty: never the installation Store's payments.
-    expect((await stat(join(directory, "stores/demo-2/simulated-provider.sqlite"))).size).toBe(0);
+    // Its own payment simulator, with its tables and no records: never the installation Store's
+    // payments, never a bare file (v15 2026-10-31).
+    const simulator = new DatabaseSync(join(directory, "stores/demo-2/simulated-provider.sqlite"));
+    try {
+      const tables = simulator
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        .all()
+        .map((row) => row.name);
+      expect(tables).toEqual(
+        expect.arrayContaining(["cancelled_outcome", "failed_outcome", "intent", "outcome"]),
+      );
+      for (const table of tables)
+        expect(simulator.prepare(`SELECT count(*) n FROM ${table}`).get().n, table).toBe(0);
+    } finally {
+      simulator.close();
+    }
     expect((await stat(join(directory, "stores/demo-2/api-password"))).mode & 0o777).toBe(0o600);
     const profile = JSON.parse(
       await readFile(join(directory, "stores/demo-2/internal-test-profile.json"), "utf8"),
@@ -257,6 +275,44 @@ it("v15 2026-10-31: the issued Store directory loads through the real installati
     expect(customer.scope.storeReference).toBe(store2);
     expect(customer.diningTableFiles).toEqual([]);
     expect((await store.loadProfile()).binding.storeReference).toBe(store2);
+    // v15 2026-10-31: the Store's reconciliation execution opens its payment simulator exactly so.
+    const storeDirectory = join(directory, "stores/demo-2"),
+      simulatorPath = join(storeDirectory, "simulated-provider.sqlite");
+    const open = () =>
+      createPilotPaymentProvider(
+        {},
+        {
+          directory: storeDirectory,
+          path: simulatorPath,
+          loadProfile: store.loadProfile,
+          expectedDatabaseName: store.database,
+        },
+      );
+    (await open()).close();
+    // The repair (`provider`) adds the tables to a bare file and never removes a record.
+    await writeFile(simulatorPath, "", { mode: 0o600 });
+    await expect(open()).rejects.toThrow();
+    await provisionStoreSimulator(storeDirectory);
+    (await open()).close();
+    const db = new DatabaseSync(simulatorPath);
+    db.prepare(
+      "INSERT INTO intent VALUES ('pi_DEMO0','b','s','a','o','i','f','100','2026-10-31T00:00:00.000Z')",
+    ).run();
+    db.close();
+    await provisionStoreSimulator(storeDirectory);
+    const again = new DatabaseSync(simulatorPath);
+    expect(again.prepare("SELECT count(*) n FROM intent").get().n).toBe(1);
+    again.close();
+    // Writing the directory again is refused: the Store's simulator records stay as they are.
+    await expect(
+      issueInternalTestStoreDirectory({
+        directory,
+        name: "demo-2",
+        storeReference: store2,
+        operationReference: store2,
+        stockSiteReference: site2,
+      }),
+    ).rejects.toMatchObject({ reason: "stores-list-invalid" });
   } finally {
     vi.unstubAllEnvs();
     await rm(directory, { recursive: true, force: true });

@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import process from "node:process";
+import assert from "node:assert/strict";
 const health = vi.hoisted(() => ({ snapshots: [] }));
 vi.mock("./pilot-workload-health.mjs", () => ({
   createPilotWorkloadHealthObserver: () => (snapshot) => health.snapshots.push(snapshot),
@@ -209,4 +210,38 @@ it("rejects capture activation without configured operational ownership", async 
   expect(startRuntime).not.toHaveBeenCalled();
   expect(close).toHaveBeenCalledOnce();
   expect(process.exitCode).toBe(1);
+});
+it("v15 2026-10-31: a failed start writes its code to the log, never message text or ids", async () => {
+  const { default: console } = await import("node:console");
+  const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const close = vi.fn(async () => undefined);
+  const previous = process.exitCode;
+  try {
+    await startPilotReconciliationWorker({
+      directory: "/app/.local/pilot-v15/stores/demo-2",
+      operational: true,
+      createResources: async () => ({ close }),
+      // As v15's demo-2 had it: its payment simulator has no tables.
+      createExecution: async () => {
+        throw Object.assign(new Error("no such table: failed_outcome"), {
+          code: "ERR_SQLITE_ERROR",
+        });
+      },
+      startRuntime: async () => assert.fail("never started"),
+    });
+    expect(process.exitCode).toBe(1);
+    expect(close).toHaveBeenCalledOnce();
+    const lines = logged.mock.calls.map(([line]) => String(line));
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({
+        event: "RECONCILIATION_WORKER_START_UNAVAILABLE",
+        code: "ERR_SQLITE_ERROR",
+      }),
+    ]);
+    expect(lines.join("")).not.toContain("failed_outcome");
+    expect(lines.join("")).not.toContain("demo-2");
+  } finally {
+    process.exitCode = previous;
+    logged.mockRestore();
+  }
 });

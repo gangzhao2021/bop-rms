@@ -7,6 +7,7 @@ import { loadPilotInstallation } from "./pilot-installation.mjs";
 import { createBackgroundPilotResources } from "./pilot-configured-resources.mjs";
 import { createInternalKitchenQueue } from "./pilot-kitchen-queue.mjs";
 import { startPilotKitchenWorker } from "./pilot-worker-entry.mjs";
+import { reportUnexpected } from "./pilot-unexpected.mjs";
 
 export function parseKitchenWorkerArguments(args) {
   if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== "string")
@@ -46,7 +47,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     await startConfiguredKitchenWorker({
       directory: path.join(fileURLToPath(new URL("../../", import.meta.url)), runtimeDirectory),
     });
-  } catch {
+  } catch (error) {
+    reportUnexpected("KITCHEN_WORKER_START_UNAVAILABLE", error);
     console.error("KITCHEN_WORKER_START_UNAVAILABLE");
     process.exitCode = 1;
   }
