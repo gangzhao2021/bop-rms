@@ -238,3 +238,56 @@ it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: reads the other served Store directo
     await rm(directory, { recursive: true, force: true });
   }
 });
+it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: serves each listed Store of the same database, Tenant and Brand", async () => {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const directory = await mkdtemp(join(tmpdir(), "https-stores-"));
+  try {
+    await writeFile(
+      join(directory, "stores.json"),
+      JSON.stringify({ schemaVersion: 1, stores: ["stores/demo-2"] }),
+    );
+    const second = { ...scope, storeReference: "store-2" };
+    const storeInstallation = (overrides = {}) => ({
+      ...installation,
+      loadCustomerRuntime: async () => ({ scope: second, diningTableFiles: [] }),
+      loadMerchantRuntime: async () => ({ ...merchantConfig, scope: second }),
+      ...overrides,
+    });
+    const loadFor = (other) => async (dir) =>
+      dir === join(directory, "stores/demo-2") ? other : installation;
+    const serve = (loadInstallation) =>
+      startConfiguredPilotHttps(directory, {
+        ...setup(),
+        loadInstallation,
+        createResources: async (dir) => ({
+          publicProfile: { binding: dir.endsWith("demo-2") ? second : scope },
+        }),
+        loadHosting: async () => ({}),
+        startServer: async (options) => options,
+      });
+    const options = await serve(loadFor(storeInstallation()));
+    expect(options.additionalStores.map((store) => store.storeReference)).toEqual(["store-2"]);
+    expect(
+      (await options.additionalStores[0].createInternalTestResources()).publicProfile.binding,
+    ).toEqual(second);
+    // Another database, Brand, or the installation's own Store is refused before serving.
+    for (const other of [
+      storeInstallation({ database: "other" }),
+      storeInstallation({
+        loadCustomerRuntime: async () => ({
+          scope: { ...second, brandReference: "other" },
+          diningTableFiles: [],
+        }),
+      }),
+      storeInstallation({
+        loadCustomerRuntime: async () => ({ scope, diningTableFiles: [] }),
+        loadMerchantRuntime: async () => merchantConfig,
+      }),
+    ])
+      await expect(serve(loadFor(other))).rejects.toThrow("PILOT_HTTPS_SCOPE_CHANGED");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
