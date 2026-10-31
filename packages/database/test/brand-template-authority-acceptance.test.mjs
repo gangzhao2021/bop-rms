@@ -4,7 +4,10 @@ import { it } from "vitest";
 import { brandOwnerAuthority } from "../../../apps/api/src/merchant-sole-operator.ts";
 import { storeOpeningPermission } from "../../../apps/api/src/merchant-store-opening.ts";
 import { storePricePermission } from "../../../apps/api/src/merchant-store-prices.ts";
-import { storeReportsReadPermission } from "../../../apps/api/src/persistent-merchant-store-reports.ts";
+import {
+  storeReportsExportPermission,
+  storeReportsReadPermission,
+} from "../../../apps/api/src/persistent-merchant-store-reports.ts";
 import {
   createPostgresCurrentMembershipSource,
   resolveActiveMembership,
@@ -269,6 +272,14 @@ it("segments 3–9: each new check passes exactly the real templates meant to pa
           "merchant.access",
           storeReportsReadPermission,
         ]),
+        "7 reports at this Store (Store One)": await passing(storeOne, [
+          "merchant.access",
+          storeReportsReadPermission,
+        ]),
+        "7 download Store Two's reports (Store Two)": await passing(storeTwo, [
+          "merchant.access",
+          storeReportsExportPermission,
+        ]),
       };
       assert.deepEqual(table, {
         // Opening a Store is Brand Owner authority, the same definition as 2000_134.
@@ -287,7 +298,16 @@ it("segments 3–9: each new check passes exactly the real templates meant to pa
           "areaManager",
         ],
         "8 add someone from another Store (Store One)": ["brandOwner", "storeOwner"],
-        "7 another Store's tonight (Store Two)": ["areaManager"],
+        // v22 (coordinator 2026-10-31 decision 2): the Brand Owner reads and downloads every
+        // Store's reports through the Brand role alone (this Brand Owner holds no Store role).
+        "7 another Store's tonight (Store Two)": ["brandOwner", "areaManager"],
+        "7 reports at this Store (Store One)": [
+          "brandOwner",
+          "storeOwner",
+          "storeManager",
+          "areaManager",
+        ],
+        "7 download Store Two's reports (Store Two)": ["brandOwner", "areaManager"],
       });
       assert.equal(storeOpeningPermission, brandOwnerAuthority);
     } finally {

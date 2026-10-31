@@ -248,7 +248,7 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
         expect(storeRoleTemplateActions("area-manager"), code).not.toContain(code);
   });
   it("v21 DEC-BRAND-MULTI-STORE segment 9: Store prices are changed by whoever runs the Store", () => {
-    expect(storePermissionCatalogVersion).toBe(21);
+    expect(storePermissionCatalogVersion).toBeGreaterThanOrEqual(21);
     for (const template of ["owner", "store-manager", "area-manager"] as const)
       expect(storeRoleTemplateActions(template), template).toContain("pricing.store_price.manage");
     for (const template of ["front-of-house", "kitchen", "inventory-manager"] as const)
@@ -259,5 +259,21 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
     expect(brandRoleTemplateActions("menu-manager")).not.toContain("pricing.store_price.manage");
     // Brand prices stay with the price book permissions.
     expect(storeRoleTemplateActions("store-manager")).not.toContain("pricing.price_book.update");
+  });
+  it("v22 DEC-BRAND-MULTI-STORE: the Brand Owner reads and downloads Reports at every Store", () => {
+    expect(storePermissionCatalogVersion).toBe(22);
+    const brandOwner = brandRoleTemplateActions("brand-owner");
+    expect(brandOwner).toEqual(
+      expect.arrayContaining(["reporting.sales.read", "reporting.sales.export"]),
+    );
+    // Read-only reporting: nothing else of the Store's operations comes with it.
+    expect(brandOwner.filter((code) => code.startsWith("reporting."))).toEqual([
+      "reporting.sales.export",
+      "reporting.sales.read",
+    ]);
+    for (const template of ["menu-manager", "recipe-developer", "recipe-reviewer"] as const)
+      expect(brandRoleTemplateActions(template).some((code) => code.startsWith("reporting."))).toBe(
+        false,
+      );
   });
 });
