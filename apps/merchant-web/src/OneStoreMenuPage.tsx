@@ -130,7 +130,9 @@ export function OneStoreMenuPage({
       .then(([menu, items, comboList, unreadable]) => {
         if (!active) return;
         const builder = parseMenuBuilderView(menu);
-        if (builder.menu.storeReferences.length !== 1) {
+        // DEC-BRAND-MULTI-STORE segment 9: at a Brand with several Stores the one-page menu stays
+        // (the Brand Owner lists directly); another menu serving several Stores uses the review flow.
+        if (builder.menu.storeReferences.length !== 1 && builder.stores?.severalStores !== true) {
           onMultiStore();
           return;
         }
@@ -253,7 +255,7 @@ export function OneStoreMenuPage({
       setBusy(false);
     }
   };
-  const saveOrder = async () => {
+  const saveOrder = async (done = t("New order saved. Guests see it when the menu is listed.")) => {
     if (client.command === undefined || busy) return;
     setBusy(true);
     setProblem(null);
@@ -281,7 +283,7 @@ export function OneStoreMenuPage({
           sectionReference: references.get(section.code) ?? section.sectionReference,
         })),
       });
-      setProblem(t("New order saved. Guests see it when the menu is listed."));
+      setProblem(done);
       reload();
     } catch (error) {
       setProblem(
@@ -652,6 +654,32 @@ export function OneStoreMenuPage({
   );
   return (
     <WorkspacePage className="one-menu" title={t("Menu")} meta={view.menu.name}>
+      {view.stores?.severalStores === true && !view.stores.servesHere ? (
+        <StatePanel heading={t("Guests at this Store do not see this menu yet")} status>
+          {mayList ? (
+            <>
+              <p>
+                {t(
+                  "Serve it here, then list it: guests at this Store see the Brand's dishes at this Store's prices. Check this Store's tax setup first.",
+                )}
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void saveOrder(
+                    t("This Store is added to the menu. List it to show it to guests here."),
+                  )
+                }
+              >
+                {t("Serve the menu here")}
+              </button>
+            </>
+          ) : (
+            <p>{t("The Brand Owner adds this Store to the menu.")}</p>
+          )}
+        </StatePanel>
+      ) : null}
       <div className="one-menu__tools">
         <label className="one-menu__search">
           <span>{t("Search dishes")}</span>

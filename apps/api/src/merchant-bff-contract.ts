@@ -124,6 +124,7 @@ import type { createMerchantComboPartCommands } from "./merchant-combo-part-comm
 import type { createMerchantOneStoreDishes } from "./merchant-one-store-dishes.js";
 import type { createMerchantProducts } from "./merchant-products.js";
 import type { createMerchantPrices } from "./merchant-prices.js";
+import type { createMerchantStorePrices } from "./merchant-store-prices.js";
 import type { createMerchantAllergens } from "./merchant-allergens.js";
 import type { createMerchantMenus } from "./merchant-menus.js";
 import type { createMerchantAvailability } from "./merchant-availability.js";
@@ -543,6 +544,8 @@ export interface MerchantBffRouterOptions {
   readonly comboParts?: ReturnType<typeof createMerchantComboPartCommands>;
   readonly products?: ReturnType<typeof createMerchantProducts>;
   readonly prices?: ReturnType<typeof createMerchantPrices>;
+  /** DEC-BRAND-MULTI-STORE segment 9: this Store's own prices at a Brand with several Stores. */
+  readonly storePrices?: ReturnType<typeof createMerchantStorePrices>;
   readonly allergens?: ReturnType<typeof createMerchantAllergens>;
   readonly menus?: ReturnType<typeof createMerchantMenus>;
   readonly availability?: ReturnType<typeof createMerchantAvailability>;

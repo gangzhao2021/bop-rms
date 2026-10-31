@@ -97,6 +97,7 @@ import { createMerchantOneStoreDishes } from "../../apps/api/dist/merchant-one-s
 import { createMerchantProducts } from "../../apps/api/dist/merchant-products.js";
 import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
 import { createMerchantPrices } from "../../apps/api/dist/merchant-prices.js";
+import { createMerchantStorePrices } from "../../apps/api/dist/merchant-store-prices.js";
 import { createMerchantAllergens } from "../../apps/api/dist/merchant-allergens.js";
 import { createMerchantMenus } from "../../apps/api/dist/merchant-menus.js";
 import { createMerchantAvailability } from "../../apps/api/dist/merchant-availability.js";
@@ -1437,6 +1438,15 @@ export async function createInternalMerchant(
           currencyMetadata: await loadPricingCurrencyMetadata(),
           locale: "en-CA",
         });
+  // DEC-BRAND-MULTI-STORE segment 9: this Store's own prices at a Brand with several Stores.
+  const storePrices =
+    loadPricingCurrencyMetadata === undefined
+      ? undefined
+      : createMerchantStorePrices({
+          persistence,
+          authentication: service,
+          currencyMetadata: await loadPricingCurrencyMetadata(),
+        });
   const optionPrices =
     loadPricingCurrencyMetadata === undefined
       ? undefined
@@ -1893,6 +1903,7 @@ export async function createInternalMerchant(
       dishAllergens,
       products,
       ...(prices === undefined ? {} : { prices }),
+      ...(storePrices === undefined ? {} : { storePrices }),
       allergens,
       ...(menus === undefined ? {} : { menus }),
       availability,

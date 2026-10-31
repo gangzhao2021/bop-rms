@@ -332,7 +332,9 @@ test("@production a single store's menu on one page: search, filters, sold out, 
   refuseListing = true;
   await page.getByRole("button", { name: "List it" }).click();
   await expect(
-    page.getByText("This Brand has more than one store, so a menu is reviewed", { exact: false }),
+    page.getByText("This Brand has more than one store, so the Brand Owner lists menu changes", {
+      exact: false,
+    }),
   ).toBeVisible();
   refuseListing = false;
   await page.getByRole("button", { name: "List it" }).click();

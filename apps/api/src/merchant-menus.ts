@@ -1,3 +1,4 @@
+import { listBrandStoreReferences } from "@bop/tenant";
 import {
   merchantBrandSoleOperatorGate,
   MerchantSingleStoreListingError,
@@ -877,10 +878,19 @@ export function createMerchantMenus(options: {
           // Whether the viewer may offer items at this Store (Item availability) from here.
           const mayOfferHere = (await s.decision(availabilityPermission))?.effect === "Allow";
           const customerView = await customerViewOf(tx, s, summary);
+          // DEC-BRAND-MULTI-STORE segment 9: whether the Brand has several Stores, and whether
+          // this menu serves the selected one (the Brand Owner adds a Store to it when it opens).
+          const brandStores = await listBrandStoreReferences(ptx(tx) as never, s.owner);
           await brandScope(tx, s.owner.brandReference);
           return {
             screenId: "CAT-MENU-BUILDER" as const,
             ...base,
+            stores: {
+              severalStores: brandStores.length > 1,
+              servesHere: loaded.aggregate.draft.storeReferences.some(
+                (store) => String(store) === s.owner.storeReference,
+              ),
+            },
             menu: menuView(loaded.aggregate),
             publication: summary.publication,
             latestRelease: summary.latestRelease,
@@ -1223,6 +1233,7 @@ export function createMerchantMenus(options: {
             if (!s.permissions.mayEdit) fail("PermissionDenied");
             const at = options.persistence.now();
             const brand = s.owner.brandReference;
+            const brandStores = await listBrandStoreReferences(ptx(tx) as never, s.owner);
             const menus = createPostgresMenuDraftStore({
               brandReference: brand,
               transactions: { run: (work) => work(ptx(tx)) },
@@ -1241,8 +1252,11 @@ export function createMerchantMenus(options: {
               menus,
               categories: {} as never,
               facts: {
+                // DEC-BRAND-MULTI-STORE segment 9: a Brand menu serves Stores of the Brand.
                 validateStores: async (value) =>
-                  value.storeReferences.every((store) => store === s.owner.storeReference),
+                  value.storeReferences.every(
+                    (store) => store === s.owner.storeReference || brandStores.includes(store),
+                  ),
                 validateCategories: async (value) => value.categoryReferences.length === 0,
                 validateSellables: async (value) => {
                   const active = new Set(

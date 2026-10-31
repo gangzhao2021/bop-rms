@@ -787,7 +787,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     )}
                     onSwitchStore={(reference) => void switchStore(reference)}
                   />
-                ) : null}
+                ) : (
+                  // Signed out or no session: fails closed as before (sign-in or unavailable).
+                  <StoreListPage />
+                )}
               </LocalDemoRoute>
             </SessionPending>
           }
@@ -1118,6 +1121,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     <StoreAvailabilityPage
                       key={state.workspace.selectedScope.storeReference + state.csrf}
                       client={clients.createAvailabilityClient(state.csrf)}
+                      storePrices={clients.createStorePricesClient(state.csrf)}
                       {...(soldOutFromKitchen
                         ? {
                             kitchenDisplay: {

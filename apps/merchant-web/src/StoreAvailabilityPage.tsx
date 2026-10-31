@@ -31,6 +31,13 @@ import {
   type AvailabilityItem,
   type StoreAvailabilityView,
 } from "./store-availability-page.js";
+import { StorePriceCell } from "./StorePriceCell.js";
+import {
+  parseStorePricesView,
+  type ChangeStorePrice,
+  type StorePricesClient,
+  type StorePricesView,
+} from "./store-prices-client.js";
 
 /** WP-2423 8.5: which items this Store sells now — offer, sold out, back in stock. */
 const copy: Record<AvailabilityErrorCode | "Loading", string> = {
@@ -69,10 +76,16 @@ export function groupByProduct<T extends { readonly productName: string }>(
 
 export function StoreAvailabilityPage({
   client = unavailableAvailabilityClient,
+  storePrices,
   navigation: workspaceNavigation,
   kitchenDisplay,
 }: {
   readonly client?: AvailabilityClient;
+  /**
+   * DEC-BRAND-MULTI-STORE segment 9: with it, at a Brand with several Stores, each item shows this
+   * Store's price, and whoever may change it changes it here.
+   */
+  readonly storePrices?: StorePricesClient;
   /** A frame navigation of the caller's own (the workspace layout supplies one otherwise). */
   readonly navigation?: ReactNode;
   /**
@@ -141,6 +154,35 @@ export function StoreAvailabilityPage({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
+  // The Store's prices; null until read, or when they cannot be read (the page still works).
+  const [prices, setPrices] = useState<StorePricesView | null>(null);
+  useEffect(() => {
+    if (storePrices === undefined || kitchenDisplay !== undefined) return;
+    let active = true;
+    storePrices.load().then(
+      (value) => {
+        if (active) setPrices(parseStorePricesView(value));
+      },
+      () => {
+        if (active) setPrices(null);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [storePrices, kitchenDisplay, generation]);
+  const changePrice = async (command: ChangeStorePrice, done: string) => {
+    if (storePrices === undefined) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await storePrices.command(command);
+      setMessage({ tone: "neutral", text: done });
+    } finally {
+      setBusy(false);
+      reload();
+    }
+  };
   useEffect(() => {
     let active = true;
     void client
@@ -352,6 +394,7 @@ export function StoreAvailabilityPage({
             <tr>
               <th>{t("Item")}</th>
               <th>{t("Status")}</th>
+              {prices?.multiStore === true ? <th>{t("Price here")}</th> : null}
               <th aria-label={t("Actions")} />
             </tr>
           </thead>
@@ -360,7 +403,7 @@ export function StoreAvailabilityPage({
             <tbody key={group.productName}>
               {group.items.length > 1 ? (
                 <tr className="availability-product">
-                  <th colSpan={3} scope="colgroup">
+                  <th colSpan={prices?.multiStore === true ? 4 : 3} scope="colgroup">
                     {group.productName}
                   </th>
                 </tr>
@@ -393,6 +436,17 @@ export function StoreAvailabilityPage({
                       </p>
                     ) : null}
                   </td>
+                  {prices?.multiStore === true ? (
+                    <td data-label={t("Price here")}>
+                      <StorePriceCell
+                        item={label(item)}
+                        price={prices.prices.get(item.skuReference)}
+                        mayChange={prices.mayChange}
+                        busy={busy}
+                        onChange={changePrice}
+                      />
+                    </td>
+                  ) : null}
                   <td>{actions(item)}</td>
                 </tr>
               ))}

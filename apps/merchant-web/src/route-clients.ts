@@ -11,6 +11,7 @@ export { createStaffPageClient } from "./staff-administration-pages.js";
 export { createStockCountClient } from "./stock-count-pages.js";
 export { createStockLocationClient } from "./stock-location-pages.js";
 export { createAvailabilityClient } from "./store-availability-page.js";
+export { createStorePricesClient } from "./store-prices-client.js";
 export { createMenuClient } from "./store-menu-pages.js";
 export { createOptionPriceClient } from "./store-option-prices-page.js";
 export { createOptionRecipeClient } from "./store-option-recipes-page.js";

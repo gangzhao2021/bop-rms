@@ -6183,8 +6183,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "List it": "上架",
   "A manager or the owner lists the menu.": "由经理或老板上架菜单。",
   "Open the menu": "打开菜单",
-  "This Brand has more than one store, so a menu is reviewed by someone else before it is listed.":
-    "这个品牌有不止一家门店，菜单要由另一个人审核后才能上架。",
   "Allergens not declared": "未申报过敏原",
   "Allergens from its recipe": "过敏原来自配方",
   "No allergens": "不含过敏原",
@@ -6571,4 +6569,36 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Each section needs its own name of up to 24 characters.":
     "每个档口要有不重复的名字，最多 24 个字。",
   "Save sections": "保存档口",
+  "You do not have permission to change prices at this Store.": "你没有在本店改价格的权限。",
+  "This item has no Brand price yet.": "这道菜还没有品牌价格。",
+  "That price is not valid.": "这个价格无效。",
+  "The price changed since you opened the page. Check the price now shown and confirm again.":
+    "打开页面后价格已被改过。请看现在显示的价格，再确认一次。",
+  "This Store has no prices yet. The Brand Owner lists the menu first.":
+    "本店还没有价格。请品牌老板先上架菜单。",
+  "At a Brand with one Store, change prices on the menu page.":
+    "品牌只有一家店时，请在菜单页改价格。",
+  "Some items this Store sells have no price.": "本店在卖的菜有的还没有价格。",
+  "Prices are unavailable right now. Nothing was changed.": "现在读不到价格，什么都没有改。",
+  "{item} now costs {price} at this Store.": "{item} 在本店现在卖 {price}。",
+  "This Store's price; Brand price {price}": "本店价格；品牌价格 {price}",
+  "Change the price of {item} at this Store": "改 {item} 在本店的价格",
+  "Change price": "改价格",
+  "Enter a price such as 7.25.": "请输入价格，例如 7.25。",
+  "New price for {item} at this Store": "{item} 在本店的新价格",
+  "Use the Brand price ({price})": "用品牌价格（{price}）",
+  "Confirm the price": "确认价格",
+  "Change {item} at this Store from {old} to {new}? Guests here see it at once.":
+    "把 {item} 在本店的价格从 {old} 改成 {new}？本店顾客马上看到。",
+  Continue: "继续",
+  "Guests at this Store do not see this menu yet": "本店顾客还看不到这份菜单",
+  "Serve it here, then list it: guests at this Store see the Brand's dishes at this Store's prices. Check this Store's tax setup first.":
+    "先加到本店，再上架：本店顾客就能按本店价格看到品牌的菜。请先检查本店的税务设置。",
+  "This Store is added to the menu. List it to show it to guests here.":
+    "本店已加入菜单。上架后本店顾客就能看到。",
+  "Serve the menu here": "在本店使用这份菜单",
+  "The Brand Owner adds this Store to the menu.": "由品牌老板把本店加入菜单。",
+  "This Brand has more than one store, so the Brand Owner lists menu changes. Your changes are saved for them to list.":
+    "这个品牌有多家店，菜单改动由品牌老板上架。你的改动已保存，等他上架。",
+  "Change this Store's prices": "改本店价格",
 });

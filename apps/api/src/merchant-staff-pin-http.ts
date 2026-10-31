@@ -42,6 +42,8 @@ export const fullSignInMutationPaths: ReadonlySet<string> = new Set([
   // WP-2423 item 8 ① segment 2: a manager comps or discounts dishes (money off the bill).
   "/orders/comp-items",
   "/commerce/pricing/command",
+  // DEC-BRAND-MULTI-STORE segment 9: a Store's own price change (attributed to who confirmed).
+  "/commerce/store-prices/command",
   "/pricing/price-books",
   "/commerce/option-prices/command",
   "/pricing/option-prices/command",

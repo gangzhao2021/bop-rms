@@ -1930,8 +1930,9 @@ Actual existing-order manual refresh shows CAD 11.30 refunded and CAD 0.00 pendi
 ## Opening a TEST second Store on the internal test installation
 
 **InternalTest only; a test-environment-only shortcut** (DEC-BRAND-MULTI-STORE-ONE-INSTALLATION,
-coordinator 2026-10-30). Not before the coordinator says so: a Brand with two Stores loses the
-single-Store direct menu listing until the brand menu (segment 9) is live. A real Store is opened
+coordinator 2026-10-30). Not before the coordinator says so. With two Stores the Brand Owner (a
+person holding Brand Owner authority) still lists menu changes directly; anyone else's menu
+changes wait for the Brand Owner (segment 9, coordinator 2026-10-31). A real Store is opened
 through its governed opening (B2), never this way.
 
 1. **Open the Store in the product.** The Brand's Owner, on the Stores page
@@ -1969,11 +1970,17 @@ owner,store-manager,area-manager,front-of-house,kitchen,inventory-manager` (the 
    page and switch to it; there they set its address, tax and payment in Store setup and add its
    tables (segment 3c). If the installation is down, each Store follows the outage procedure on
    its own (see "Several Stores on one installation" above).
-6. **Its day-end settlement**, once its first business day has closed: the same command with
+6. **Its menu and prices.** After its tax is set, the Brand Owner switches to the new Store, opens
+   Menu and chooses "Serve the menu here", then "List it": guests there see the Brand's dishes at
+   the Brand prices, and every later Brand listing reaches both Stores. Each Store's manager changes
+   that Store's own prices, sold out and hidden items under Item availability (a price change
+   confirms the old and the new price and is recorded with who made it). Offline, nothing changes:
+   the Store keeps charging the price shown, and the manager confirms again once back online.
+7. **Its day-end settlement**, once its first business day has closed: the same command with
    `settlement /app/.local/pilot-v15/stores/demo-2 --database bop_rms_pilot_v15
 --migration-env .local/migrate-v14/migrate-v15.env` records that day; its settlement worker
    starts at the next restart.
-7. **Renewal:** after renewing the installation itself (next section), renew the TEST Store with
+8. **Renewal:** after renewing the installation itself (next section), renew the TEST Store with
    the same `--until`: `renew /app/.local/pilot-v15/stores/demo-2 --database bop_rms_pilot_v15
 --migration-env .local/migrate-v14/migrate-v15.env --until <the same instant> --reason "…"
 --approved-by "Owner" --approval "<the approval wording>"` (dry run first with `--dry-run`).

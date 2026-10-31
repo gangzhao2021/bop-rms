@@ -16,6 +16,7 @@ import {
 import { MerchantProductError } from "./merchant-products.js";
 import { Buffer } from "node:buffer";
 import { MerchantPriceError } from "./merchant-prices.js";
+import { MerchantStorePriceError } from "./merchant-store-prices.js";
 import { MerchantAllergenError } from "./merchant-allergens.js";
 import { MerchantMenuError } from "./merchant-menus.js";
 import { MerchantAvailabilityError } from "./merchant-availability.js";
@@ -521,6 +522,52 @@ export function installMerchantCommerceRoutes(
       .then((result) => response.json(result))
       .catch((error: unknown) => priceFailure(response, error));
   });
+
+  // DEC-BRAND-MULTI-STORE segment 9: this Store's own prices (Item availability).
+  const storePriceStatus = {
+    PermissionDenied: 403,
+    NotFound: 404,
+    Invalid: 400,
+    Changed: 409,
+    NoPriceBook: 409,
+    NotMultiStore: 409,
+    NotCovered: 409,
+  } as const;
+  const storePriceRoute = (
+    path: string,
+    run: (
+      prices: NonNullable<typeof options.storePrices>,
+      input: { sessionCookie: string; csrf: string; body: unknown },
+    ) => Promise<unknown>,
+  ) =>
+    router.post(path, sameOriginMutation(options), (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.storePrices) {
+        response.status(503).json({ error: "store_prices_unavailable" });
+        return;
+      }
+      void run(options.storePrices, { sessionCookie, csrf, body: request.body })
+        .then((result) => response.json(result))
+        .catch((error: unknown) => {
+          if (!(error instanceof MerchantStorePriceError)) {
+            denied(response);
+            return;
+          }
+          response.status(storePriceStatus[error.code]).json({ error: error.code });
+        });
+    });
+  storePriceRoute("/commerce/store-prices/query", (prices, input) => prices.query(input));
+  storePriceRoute("/commerce/store-prices/command", (prices, input) => prices.command(input));
 
   // WP-2423 / DEC-ALLERGEN-DECLARATIONS: CMP-ALLERGEN-REVIEW reads and commands.
   const allergenStatus = {
