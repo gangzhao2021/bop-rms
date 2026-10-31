@@ -124,6 +124,29 @@ export function installMerchantReportRoutes(
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
       .catch(reportFailure(response));
   });
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 7: another Store's closing summary for the
+  // Brand page, for a person allowed at that Store (checked there; no switch).
+  router.get("/reports/stores/:storeReference/tonight", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const storeReference = request.params.storeReference;
+    if (
+      sessionCookie === null ||
+      Object.keys(request.query).length > 0 ||
+      typeof storeReference !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(storeReference)
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.storeReports) {
+      response.status(503).set("Cache-Control", NO_STORE).json({ error: "reports_unavailable" });
+      return;
+    }
+    void options.storeReports
+      .storeTonight({ sessionCookie, storeReference })
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch(reportFailure(response));
+  });
   router.get("/reports/export", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
     const range = reportRange(request, ["report"]);

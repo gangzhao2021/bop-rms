@@ -24,6 +24,7 @@ import {
 } from "node:crypto";
 import { createPersistentMerchantBffService } from "../../../apps/api/src/persistent-merchant-bff.ts";
 import { createMerchantSessionStoreResolver } from "../../../apps/api/src/merchant-store-routing.ts";
+import { createMerchantTargetStoreAuthority } from "../../../apps/api/src/merchant-target-store-authority.ts";
 import { createPersistentMerchantOrderExceptions } from "../../../apps/api/src/persistent-merchant-order-exceptions.ts";
 import { createMerchantRuntime } from "../../../apps/api/src/merchant-runtime.ts";
 import { orderQueryFixture } from "../../rms/ordering/src/tests/order-creation-query.fixture.ts";
@@ -991,6 +992,36 @@ export async function verifyPersistentMerchantBff({
   assert.equal(await sessionStore(cookie.value), null);
   assert.equal(await sessionStore(credentials.generate()), null);
   assert.equal(await sessionStore(undefined), null);
+  // Segment 7: from the switched-to Store, the person may read the other Store (where they are
+  // assigned and allowed) without switching; a Store of another Brand, an unknown Store or a
+  // rotated-away Session gives nothing.
+  const targetAuthority = createMerchantTargetStoreAuthority(options);
+  const atStore = (sessionCookie, store) =>
+    options.transactions.run((tx) => targetAuthority(tx, sessionCookie, store, "merchant.access"));
+  assert.equal((await atStore(switched.cookie.value, f.STORE))?.storeReference, f.STORE);
+  assert.equal(await atStore(cookie.value, f.STORE), null);
+  assert.equal(await atStore(switched.cookie.value, f.uuid("699")), null);
+  // Not allowed at that Store (a Deny there): nothing, whatever the person may do where they are.
+  await admin.query(
+    "INSERT INTO bop_permission.permission_override VALUES ($1,$2,$3,$4,$5,'Deny','Active',$6,$7,$8,$9,1,$8,$8)",
+    [
+      f.uuid("879"),
+      accessPermission,
+      f.ACTOR,
+      f.BRAND,
+      f.STORE,
+      f.REASON,
+      f.CORRELATION,
+      clock.from,
+      clock.until,
+    ],
+  );
+  assert.equal(await atStore(switched.cookie.value, f.STORE), null);
+  await admin.query(
+    "UPDATE bop_permission.permission_override SET lifecycle='Revoked',version=2 WHERE override_id=$1",
+    [f.uuid("879")],
+  );
+  assert.equal((await atStore(switched.cookie.value, f.STORE))?.storeReference, f.STORE);
   await assert.rejects(service().bootstrap(cookie.value));
   const refreshed = await service().bootstrap(switched.cookie.value);
   assert.notEqual(refreshed.csrf, initial.csrf);

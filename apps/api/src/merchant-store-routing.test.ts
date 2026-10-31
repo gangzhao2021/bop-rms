@@ -10,7 +10,7 @@ const router = (name: string): RequestHandler & { readonly label: string } =>
     }) as RequestHandler,
     { label: name },
   );
-function call(handler: RequestHandler, cookie?: string) {
+function call(handler: RequestHandler, cookie?: string, url = "/session") {
   const sent: { status: number; body: unknown; headers: Record<string, string> } = {
     status: 200,
     body: undefined,
@@ -30,6 +30,7 @@ function call(handler: RequestHandler, cookie?: string) {
     },
   } as unknown as Response;
   const request = {
+    url,
     rawHeaders: cookie === undefined ? [] : ["Cookie", "__Host-bop-merchant=" + cookie],
   } as unknown as Request;
   return new Promise<typeof sent>((done) => {
@@ -107,5 +108,22 @@ describe("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: staff requests go to their Ses
         resolve: async () => null,
       }),
     ).toThrow("MERCHANT_STORE_ROUTING_INVALID");
+  });
+  it("segment 7: another Store's summary goes to that Store's routes, which authorize there", async () => {
+    const second = "018f4f8a-9c2d-7a11-8d01-000000000002";
+    const handler = createMerchantStoreRouting({
+      primaryStoreReference: store(1),
+      routers: new Map([
+        [store(1), router("first")],
+        [second, router("second")],
+      ]),
+      resolve: async () => store(1),
+    });
+    expect((await call(handler, "s", "/reports/stores/" + second + "/tonight")).body).toEqual({
+      served: "second",
+    });
+    expect(
+      await call(handler, "s", "/reports/stores/018f4f8a-9c2d-7a11-8d01-000000000009/tonight"),
+    ).toMatchObject({ status: 403, body: { code: "MERCHANT_STORE_NOT_SERVED" } });
   });
 });

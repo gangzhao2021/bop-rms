@@ -41,6 +41,9 @@ export function createMerchantSessionStoreResolver(
   };
 }
 
+const BRAND_STORE_READ =
+  /^\/reports\/stores\/([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/tonight(?:\?.*)?$/u;
+
 /**
  * One installation, several Stores: each Store has its own staff composition (its own Store facts,
  * Provider account, queues). A request goes to the composition of the Store its Session is bound
@@ -59,6 +62,19 @@ export function createMerchantStoreRouting(options: {
   // A single-Store installation reads nothing extra per request.
   if (options.routers.size === 1) return primary;
   return (request: Request, response: Response, next: NextFunction) => {
+    // Segment 7: another Store's summary is read by that Store's composition, which authorizes
+    // the person at that Store itself; a Store this installation does not serve gets no data.
+    const brandRead = BRAND_STORE_READ.exec(request.url);
+    if (brandRead) {
+      const router = options.routers.get(brandRead[1] ?? "");
+      if (router === undefined) {
+        response.setHeader("Cache-Control", "no-store");
+        response.status(403).json({ code: "MERCHANT_STORE_NOT_SERVED" });
+        return;
+      }
+      router(request, response, next);
+      return;
+    }
     options
       .resolve(cookie(request, "__Host-bop-merchant"))
       .then((store) => {

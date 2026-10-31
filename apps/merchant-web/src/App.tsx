@@ -1697,6 +1697,9 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 <StoreReportsPage
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   storeLabel={state.workspace.selectedScope.storeLabel}
+                  stores={state.workspace.authorizedStores}
+                  currentStoreReference={state.workspace.selectedScope.storeReference}
+                  onSwitchStore={(reference) => void switchStore(reference)}
                 />
               ) : demo !== null ? (
                 <OperationalDashboardPage />

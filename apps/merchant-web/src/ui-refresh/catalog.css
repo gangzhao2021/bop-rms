@@ -658,3 +658,18 @@ fieldset.store-features__modules {
   display: grid;
   gap: var(--bop-space-1);
 }
+/* DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 7: tonight at each Store (rows, hairlines). */
+.brand-stores__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.brand-stores__table th,
+.brand-stores__table td {
+  padding: var(--bop-space-2) var(--bop-space-2) var(--bop-space-2) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+  text-align: left;
+}
+.brand-stores__note {
+  display: block;
+  color: var(--bop-color-text-muted);
+}

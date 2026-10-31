@@ -504,6 +504,34 @@ export function createStoreReportsClient(fetcher: typeof fetch = fetch) {
         return fail();
       }
     },
+    /**
+     * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 7: another Store's closing summary for the
+     * Brand page (the server checks the person may read that Store's sales).
+     */
+    async storeTonight(storeReference: string, signal: AbortSignal): Promise<TonightSummary> {
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+          storeReference,
+        )
+      )
+        return fail();
+      const response = await request(
+        fetcher,
+        "/merchant/reports/stores/" + storeReference + "/tonight",
+        "application/json",
+        signal,
+      );
+      try {
+        if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/json"))
+          return fail();
+        const body = await response.text();
+        if (body.length > 4_194_304) return fail();
+        return parseTonightSummary(JSON.parse(body) as unknown);
+      } catch (error) {
+        if (error instanceof StoreReportsClientError) throw error;
+        return fail();
+      }
+    },
     /** The CSV file for one report: its server-chosen name and bytes. */
     async download(
       report: StoreReportExportKind,
