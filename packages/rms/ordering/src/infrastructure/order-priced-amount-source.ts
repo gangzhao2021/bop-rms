@@ -1,6 +1,7 @@
 import { createPostgresOrderCancelledAmountSource } from "./persistence/order-cancelled-amount-source.js";
 import { createHash } from "node:crypto";
 import { createPostgresSubmittedOrderAmountSource } from "./persistence/submitted-order-amount-source.js";
+import { loadOrderTaxRoundingMinor } from "./persistence/order-tax-rounding-store.js";
 import { createPostgresOrderAmendmentPosition } from "./persistence/dining-session-order-inventory.js";
 import { parseOrderingInstant, parseOrderingReference } from "../domain/cart.js";
 const fail = (): never => {
@@ -75,7 +76,14 @@ export function createPostgresOrderPricedAmountSource(
         !/^sha256:[a-f0-9]{64}$/u.test(cancelled.snapshotDigest)
       )
         return fail();
-      const pricedTotalMinor = base.totalMinor + adjustment - cancelled.cancelledTotalMinor;
+      // WP-2423 DEC-TAX-WHOLE-RECEIPT: this Order's share of its bill's recorded tax rounding.
+      const taxRounding = await loadOrderTaxRoundingMinor(
+        tx as never,
+        { brandReference, storeReference },
+        query.orderReference,
+      );
+      const pricedTotalMinor =
+        base.totalMinor + adjustment - cancelled.cancelledTotalMinor + taxRounding;
       if (pricedTotalMinor < 0n || pricedTotalMinor > 9223372036854775807n) return fail();
       const evidence = Object.freeze(
         changes.amendments.map((change) => Object.freeze({ ...change })),
@@ -92,6 +100,7 @@ export function createPostgresOrderPricedAmountSource(
               cancelled.snapshotDigest,
               evidence,
               adjustment.toString(),
+              taxRounding.toString(),
               pricedTotalMinor.toString(),
             ]),
           )
@@ -106,6 +115,7 @@ export function createPostgresOrderPricedAmountSource(
         submittedTotalMinor: base.totalMinor,
         appliedAmendmentDeltaMinor: adjustment,
         cancelledBatchTotalMinor: cancelled.cancelledTotalMinor,
+        taxRoundingMinor: taxRounding,
         pricedTotalMinor,
         pendingAmendmentCount: pending,
         amendments: evidence,

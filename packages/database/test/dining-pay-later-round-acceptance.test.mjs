@@ -92,6 +92,7 @@ import {
   createPostgresOrderPricedAmountSource,
   createPostgresStoreSalesOrderSource,
   listStorePriceReductionsDecided,
+  listOrdersTaxRoundingLines,
 } from "../../rms/ordering/src/index.ts";
 import {
   changeStoreTipSetting,
@@ -167,6 +168,11 @@ it("a manager comps and discounts served dishes before the table pays; it stays 
 // v15 2026-10-27 follow-up: a table whose every dish was comped owes nothing and closes as usual.
 it("a table comped in full owes nothing and closes without a payment", () =>
   journey("CompedWhole"));
+
+// WP-2423 DEC-TAX-WHOLE-RECEIPT step 2: the bill's tax is rounded once over every dish; the rounds'
+// difference is recorded by the system rule as the bill's tax rounding, paid exactly, part by part.
+it("a table's bill is charged its whole-bill tax; the rounding is recorded and paid exactly", () =>
+  journey("TaxRounding"));
 
 // WP-2423 item 8 ④ DEC-DINE-IN-SPLIT-BILL: the table splits the bill evenly in three; each part is
 // paid once, by its own method, with its own tip and cash rounding; a whole-table payment, a
@@ -262,25 +268,27 @@ async function journey(ending) {
           ? "wp2423_paylater"
           : ending === "WrittenOff"
             ? "wp2423_plwo"
-            : ending === "Comped"
-              ? "wp2423_plcomp"
-              : ending === "CompedWhole"
-                ? "wp2423_plcwhole"
-                : ending === "PaidSplit"
-                  ? "wp2423_plsplit"
-                  : ending === "SplitWrittenOff"
-                    ? "wp2423_plsplwo"
-                    : ending === "Held"
-                      ? "wp2423_plheld"
-                      : ending === "TipsOff"
-                        ? "wp2423_pltips"
-                        : ending === "TeaCharge"
-                          ? "wp2423_pltea"
-                          : ending === "Moved"
-                            ? "wp2423_plmove"
-                            : ending === "Merged"
-                              ? "wp2423_plmerge"
-                              : "wp2423_plon",
+            : ending === "TaxRounding"
+              ? "wp2423_pltaxr"
+              : ending === "Comped"
+                ? "wp2423_plcomp"
+                : ending === "CompedWhole"
+                  ? "wp2423_plcwhole"
+                  : ending === "PaidSplit"
+                    ? "wp2423_plsplit"
+                    : ending === "SplitWrittenOff"
+                      ? "wp2423_plsplwo"
+                      : ending === "Held"
+                        ? "wp2423_plheld"
+                        : ending === "TipsOff"
+                          ? "wp2423_pltips"
+                          : ending === "TeaCharge"
+                            ? "wp2423_pltea"
+                            : ending === "Moved"
+                              ? "wp2423_plmove"
+                              : ending === "Merged"
+                                ? "wp2423_plmerge"
+                                : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -2374,7 +2382,7 @@ async function journey(ending) {
           return;
         }
         // The Comped ending keeps round 2 on the bill: its one dish is comped instead (v15 case).
-        if (ending !== "Comped") {
+        if (ending !== "Comped" && ending !== "TaxRounding") {
           const removeOperation = fresh();
           const beforeRemoval = await versionNow();
           // Without the cancel permission nothing is written.
@@ -2451,7 +2459,10 @@ async function journey(ending) {
         }
         // Round 2's only dish came off: the whole round is off the bill (it owes nothing).
         assert.equal(items2.length, 1);
-        const removedMinor = ending === "Comped" ? 0n : items2[0].pricing.total.amountMinor;
+        const removedMinor =
+          ending === "Comped" || ending === "TaxRounding"
+            ? 0n
+            : items2[0].pricing.total.amountMinor;
         // Paying before checkout started is refused: rounds can still be added.
         await assert.rejects(settleWith(server, {}), { code: "TABLE_CHECKOUT_NOT_STARTED" });
         // Checkout starts again with round 2 on the table.
@@ -2462,7 +2473,7 @@ async function journey(ending) {
         const round1Minor = items1.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n);
         const round2Minor =
           items2.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n) - removedMinor;
-        if (ending !== "Comped") assert.equal(round2Minor, 0n);
+        if (ending !== "Comped" && ending !== "TaxRounding") assert.equal(round2Minor, 0n);
         const open = await bill();
         assert.equal(open.paymentTiming, "PayLater");
         assert.equal(open.sessionPhase, "Closing");
@@ -2818,7 +2829,12 @@ async function journey(ending) {
               },
             });
           const served = await progress();
-          if (ending !== "Comped" && ending !== "Merged" && cooked === orderReference) {
+          if (
+            ending !== "Comped" &&
+            ending !== "TaxRounding" &&
+            ending !== "Merged" &&
+            cooked === orderReference
+          ) {
             // Round 1 served; round 2's dishes, taken off the bill before the table paid, are cancelled.
             assert.deepEqual(
               served.items.map((item) => [item.batchSequence, item.phase]),
@@ -3436,6 +3452,270 @@ async function journey(ending) {
           );
         }
 
+        /**
+         * WP-2423 DEC-TAX-WHOLE-RECEIPT step 2: the bill is one receipt — its tax is rounded once
+         * over every dish, and the difference from what the rounds were charged is the bill's "Tax
+         * rounding", recorded by the system rule before a payment is planned or taken (a new version
+         * when the bill changed), frozen once anything is paid, and part of the Order's priced total.
+         * $0.50 off a $20.00 dish leaves 253.5¢ tax, charged 253¢ on its round: two such rounds are
+         * charged 506¢ while the bill's tax is 507¢.
+         */
+        async function taxRoundingEnding() {
+          await cookAndServeRound1([round1, round2]);
+          const dish1 = String(items1[0].orderItemReference),
+            dish2 = String(items2[0].orderItemReference);
+          // What the bill's tax should be, from its own figures (every dish here is 13% HST).
+          const wholeBill = (current) => {
+            const taxable = current.rounds.reduce((sum, r) => sum + BigInt(r.subtotalMinor), 0n);
+            const charged = current.rounds.reduce(
+              (sum, r) => sum + BigInt(r.taxMinor) - BigInt(r.taxRoundingMinor),
+              0n,
+            );
+            return { taxable, charged, tax: (taxable * 13n + 50n) / 100n };
+          };
+          const recorded = () =>
+            rows(
+              "SELECT version,supersedes_adjustment_id IS NOT NULL AS supersedes,rule_code,rule_version,total_minor::text AS total,(SELECT array_agg(l.order_batch_id::text||':'||l.tax_component_code||':'||l.amount_minor ORDER BY l.line_number) FROM rms_ordering.order_tax_rounding_adjustment_line l WHERE l.adjustment_id=a.adjustment_id) AS lines FROM rms_ordering.order_tax_rounding_adjustment a WHERE bill_order_id=$1 ORDER BY version",
+              [orderReference],
+            );
+          const splitInTwo = () =>
+            createMerchantDiningTableSplit({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+              nextReference: fresh,
+            })({
+              ...as(server),
+              command: {
+                operationReference: fresh(),
+                diningSessionReference: sessionReference,
+                mode: "Even",
+                people: 3,
+                rounds: null,
+              },
+            });
+          const discount = (dish) =>
+            comp(manager, {
+              orderItemReferences: [dish],
+              kind: "Amount",
+              amountOffMinor: "50",
+              reasonCode: "GOODWILL",
+            });
+
+          // Before any discount the rounds already add up to the bill's tax: nothing to round.
+          const before = await bill();
+          const plain = wholeBill(before);
+          assert.equal(before.taxRoundingMinor, "0");
+          assert.equal(plain.charged, plain.tax);
+
+          // $0.50 off round 1's dish: the bill shows the rounding it would record (not yet recorded).
+          await discount(dish1);
+          const one = await bill();
+          const afterOne = wholeBill(one);
+          assert.equal(BigInt(one.taxRoundingMinor), afterOne.tax - afterOne.charged);
+          assert.equal(one.consistent, true);
+          assert.deepEqual(await recorded(), []);
+          // Planning the split records it (system rule, version 1) when there is something to round.
+          const firstSplit = await splitInTwo();
+          assert.equal(firstSplit.status, "Recorded");
+          const v1 = await recorded();
+          assert.deepEqual(
+            v1.map((row) => [row.version, row.total]),
+            afterOne.tax === afterOne.charged ? [] : [[1, one.taxRoundingMinor]],
+          );
+
+          // $0.50 off round 2's dish: the bill changed before anything was paid, so the split is
+          // stale and planning it again records a new version superseding the last.
+          await discount(dish2);
+          const two = await bill();
+          const afterTwo = wholeBill(two);
+          assert.equal(afterTwo.tax - afterTwo.charged, 1n);
+          assert.equal(two.taxRoundingMinor, "1");
+          assert.equal(two.split.stale, true);
+          const resplit = await splitInTwo();
+          assert.equal(resplit.status, "Recorded");
+          const versions = await recorded();
+          const last = versions.at(-1);
+          assert.deepEqual(
+            [last.version, last.supersedes, last.rule_code, last.rule_version, last.total],
+            [versions.length, versions.length > 1, "DEC_TAX_WHOLE_RECEIPT", 1, "1"],
+          );
+          assert.equal(last.lines.length, 1);
+          // The bill charges exactly the whole bill's tax: the rounds' tax (with the rounding)
+          // adds up to round(taxable × 13%), and the parts add up to the bill.
+          const planned = resplit.bill;
+          const owed = BigInt(planned.owed.totalMinor);
+          assert.equal(
+            planned.rounds.reduce((sum, r) => sum + BigInt(r.taxMinor), 0n),
+            afterTwo.tax,
+          );
+          assert.equal(owed, afterTwo.taxable + afterTwo.tax);
+          assert.equal(
+            planned.split.parts.reduce((sum, part) => sum + BigInt(part.amountMinor), 0n),
+            owed,
+          );
+
+          // Part 1 in cash (rounded to 5¢ on its own), part 2 on the card machine, part 3 on a
+          // guest's phone (TEST Provider stand-in; everything else is the real composition).
+          const cash = await settleWith(server, {
+            partNumber: 1,
+            tip: { kind: "None" },
+            tenderedMinor: "100000",
+          });
+          assert.equal(cash.status, "Recorded");
+          const cardPaid = await settleWith(server, {
+            partNumber: 2,
+            method: "CardMachine",
+            tip: { kind: "None" },
+            tenderedMinor: null,
+            slipReference: "TEST 0002",
+          });
+          assert.equal(cardPaid.status, "Recorded");
+          const intents = new Map();
+          const answer = (request, intent) => ({
+            kind: "Snapshot",
+            context: request.context,
+            providerIntentReference: intent.reference,
+            providerTransactionReference: intent.status === "Captured" ? intent.transaction : null,
+            paymentMethod: "OnlineCard",
+            captureMode: "Automatic",
+            status: intent.status,
+            requestedAmount: intent.amount,
+            authorizedAmount:
+              intent.status === "Captured"
+                ? intent.amount
+                : { amountMinor: 0n, currencyCode: "CAD" },
+            capturedAmount:
+              intent.status === "Captured"
+                ? intent.amount
+                : { amountMinor: 0n, currencyCode: "CAD" },
+            refundedAmount: { amountMinor: 0n, currencyCode: "CAD" },
+            observedAt: new Date().toISOString(),
+            evidenceDigest: sha256("intent:" + intent.reference + ":" + intent.status),
+          });
+          const phone = createDiningTableOnlinePayments({
+            scope: ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+            provider: {
+              async createIntent(request) {
+                const intent = intents.get(request.idempotencyKey) ?? {
+                  reference: "pi_TESTTAXR" + String(intents.size + 1).padStart(4, "0"),
+                  transaction: "ch_TESTTAXR" + String(intents.size + 1).padStart(4, "0"),
+                  status: "RequiresCustomerAction",
+                  amount: request.amount,
+                };
+                intents.set(request.idempotencyKey, intent);
+                intents.set(intent.reference, intent);
+                return answer(request, intent);
+              },
+              async retrieveIntent(request) {
+                return answer(request, intents.get(String(request.providerIntentReference)));
+              },
+              async cancelIntent(request) {
+                return answer(request, intents.get(String(request.providerIntentReference)));
+              },
+            },
+            transactions: transactions(),
+            now,
+            nextReference: fresh,
+          });
+          const guest = {
+            diningSessionReference: sessionReference,
+            guestSessionReference: guestSession,
+            allowed: async () => true,
+          };
+          const paying = await phone.start(guest, {
+            operationReference: fresh(),
+            tip: { kind: "None" },
+            partNumber: 3,
+          });
+          assert.equal(paying.attempt.totalMinor, paying.bill.split.parts[2].amountMinor);
+          for (const intent of intents.values()) intent.status = "Captured";
+          const card = { bill: (await phone.refresh(guest)).bill };
+          const paidParts = card.bill.split.parts;
+          assert.deepEqual(
+            paidParts.map((part) => part.payment?.method),
+            ["Cash", "CardMachine", "Online"],
+          );
+          assert.ok(paidParts.every((part) => part.payment !== null));
+          // What was paid for the rounds is exactly the bill (cash rounding apart).
+          const lines = await rows(
+            "SELECT coalesce(sum(r.round_minor),0)::text AS rounds FROM rms_payment.dining_table_settlement_round r JOIN rms_payment.dining_table_settlement s ON s.settlement_id=r.settlement_id WHERE s.order_id=$1",
+            [orderReference],
+          );
+          assert.equal(lines[0].rounds, owed.toString());
+          // Frozen once paid: the bill keeps the recorded rounding; nothing new is recorded.
+          assert.equal(card.bill.taxRoundingMinor, "1");
+          assert.deepEqual(await recorded(), versions);
+          await assert.rejects(discount(dish1), { code: "ITEM_COMP_ALREADY_PAID" });
+          // Ordering's priced total includes the rounding, so the Order is settled.
+          const settledNow = await transactions().run(async (tx) => {
+            const at = now();
+            const financial = await createPostgresOrderFinancialPosition({
+              scope: ownerScope,
+              providerAccountReference: provider,
+              environment: "Test",
+              authorize: async () => true,
+            })(tx, { orderReference, observedAt: at });
+            const priced = await createPostgresOrderPricedAmountSource({
+              ...scope,
+              authorize: async () => true,
+            })(tx, { orderReference, observedAt: at });
+            assert.equal(priced.pricedTotalMinor, owed);
+            assert.equal(priced.taxRoundingMinor, 1n);
+            return assessOrderSettlement({
+              currencyCode: "CAD",
+              pricedOrderTotalMinor: priced.pricedTotalMinor,
+              capturedMinor: financial.settlement.capturedMinor,
+              capturedOrderAllocationMinor: financial.settlement.capturedOrderAllocationMinor,
+              capturedTipMinor: financial.settlement.capturedTipMinor,
+              confirmedRefundMinor: financial.settlement.confirmedRefundMinor,
+              refundAllocation: financial.settlement.refundAllocation,
+              pendingRefundMinor: financial.settlement.pendingRefundMinor,
+              unresolvedAttemptCount: financial.unresolvedAttemptCount,
+              pendingAmendmentCount: priced.pendingAmendmentCount,
+            });
+          });
+          assert.equal(settledNow.classification, "Settled");
+          // Reports read each round's share under tax (the sales source, as the pilot API role):
+          // the latest recorded version's lines, adding up to the bill's rounding.
+          const reported = await transactions().run((tx) =>
+            listOrdersTaxRoundingLines(tx, scope, [orderReference]),
+          );
+          assert.equal(
+            reported.reduce((sum, line) => sum + line.amountMinor, 0n),
+            1n,
+          );
+          assert.ok(reported.every((line) => line.taxComponentCode.length > 0));
+          // Append-only: the records can't be changed or removed.
+          for (const sql of [
+            "UPDATE rms_ordering.order_tax_rounding_adjustment SET total_minor=0",
+            "DELETE FROM rms_ordering.order_tax_rounding_adjustment_line",
+          ])
+            await assert.rejects(admin.query(sql), /append-only tax rounding/u);
+          // The lines must add up to the record (checked at commit).
+          await assert.rejects(
+            (async () => {
+              await admin.query("BEGIN");
+              try {
+                await admin.query(
+                  "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+                  [scope.brandReference, scope.storeReference],
+                );
+                await admin.query(
+                  "INSERT INTO rms_ordering.order_tax_rounding_adjustment (adjustment_id,brand_id,store_id,bill_order_id,version,supersedes_adjustment_id,rule_code,rule_version,basis_digest,total_minor,currency_code,recorded_at) SELECT $1,brand_id,store_id,bill_order_id,version+1,adjustment_id,rule_code,rule_version,basis_digest,5,'CAD',date_trunc('milliseconds',now()) FROM rms_ordering.order_tax_rounding_adjustment WHERE bill_order_id=$2 ORDER BY version DESC LIMIT 1",
+                  [fresh(), orderReference],
+                );
+                await admin.query("COMMIT");
+              } catch (error) {
+                await admin.query("ROLLBACK");
+                throw error;
+              }
+            })(),
+            /do not add up to the total/u,
+          );
+        }
+
         async function compedWholeEnding() {
           const recordPartySize = await partySizeWhileOpen();
           await notPreparedRound1();
@@ -3968,6 +4248,10 @@ async function journey(ending) {
         }
         if (ending === "Comped") {
           await compedEnding();
+          return;
+        }
+        if (ending === "TaxRounding") {
+          await taxRoundingEnding();
           return;
         }
         if (ending === "CompedWhole") {

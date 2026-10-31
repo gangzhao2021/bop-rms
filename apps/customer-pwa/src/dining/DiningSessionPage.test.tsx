@@ -315,6 +315,15 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     ])
       expect(cash).toContain(text);
     expect(cash).not.toContain("Tip");
+    expect(cash).not.toContain("Tax rounding");
+    // WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding on its own line.
+    const rounded = receipt([{ partNumber: null, method: "Cash", totalMinor: "1864" }], {
+      taxRoundingMinor: "-1",
+      ordersTotalMinor: "1864",
+      paidMinor: "1865",
+    });
+    expect(rounded).toContain("Tax rounding");
+    expect(rounded).toContain("-$0.01");
     const split = receipt(
       [
         { partNumber: 1, method: "Online", totalMinor: "1100" },

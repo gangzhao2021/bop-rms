@@ -53,8 +53,11 @@ export interface TableBill {
       };
     }[];
     readonly subtotalMinor: string;
+    /** Includes the round's share of the bill's tax rounding. */
     readonly taxMinor: string;
     readonly totalMinor: string;
+    /** WP-2423 DEC-TAX-WHOLE-RECEIPT: the round's share of the bill's tax rounding (older: 0). */
+    readonly taxRoundingMinor: string;
     readonly paid: boolean;
     /** WP-2423 item 8 ④: which phone sent the round (1, 2, …), or null for staff (older: null). */
     readonly orderedBy: number | null;
@@ -66,6 +69,11 @@ export interface TableBill {
     readonly taxMinor: string;
     readonly totalMinor: string;
   };
+  /**
+   * WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding (whole-bill tax less what the rounds
+   * were charged; positive or negative), already in the rounds' tax (older server: 0).
+   */
+  readonly taxRoundingMinor: string;
   readonly consistent: boolean;
   /**
    * WP-2423 item 8 ⑦ (Owner decision 11): the Store's tip percentages (of the subtotal before
@@ -134,6 +142,13 @@ const amount = (value: unknown) =>
   typeof value === "string" && minor.test(value) ? value : invalid();
 const text = (value: unknown) =>
   typeof value === "string" && value.length > 0 && value.length <= 200 ? value : invalid();
+/** A signed amount (the tax rounding can be negative); absent from an older server: 0. */
+const signed = (value: unknown) =>
+  value === undefined
+    ? "0"
+    : typeof value === "string" && /^-?(0|[1-9][0-9]{0,17})$/u.test(value) && value !== "-0"
+      ? value
+      : invalid();
 
 export function parseTableBill(value: unknown): TableBill {
   if (value === null || typeof value !== "object") return invalid();
@@ -187,6 +202,7 @@ export function parseTableBill(value: unknown): TableBill {
           subtotalMinor: amount(round.subtotalMinor),
           taxMinor: amount(round.taxMinor),
           totalMinor: amount(round.totalMinor),
+          taxRoundingMinor: signed(round.taxRoundingMinor),
           paid: round.paid,
           orderedBy:
             round.orderedBy === undefined || round.orderedBy === null
@@ -209,6 +225,7 @@ export function parseTableBill(value: unknown): TableBill {
       taxMinor: amount(owed?.taxMinor),
       totalMinor: amount(owed?.totalMinor),
     }),
+    taxRoundingMinor: signed(raw.taxRoundingMinor),
     consistent: raw.consistent,
     settlement:
       settlement === null

@@ -591,3 +591,57 @@ test("@production split bill: staff collect one part in cash while the others ar
   });
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
+
+test("@production DEC-TAX-WHOLE-RECEIPT: the bill shows its tax rounding on its own line", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state);
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: ["ORDER_BALANCE_UNPAID"],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  // The rounds were charged 260¢ + 130¢; the whole bill's tax is 1¢ less (on round 2).
+  const bill = unpaidBill("Closing", 7);
+  const rounds = bill.rounds.map((round, index) =>
+    index === 1
+      ? { ...round, taxMinor: "129", totalMinor: "1129", taxRoundingMinor: "-1" }
+      : { ...round, taxRoundingMinor: "0" },
+  );
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        ...bill,
+        rounds,
+        taxRoundingMinor: "-1",
+        owed: { subtotalMinor: "3003", taxMinor: "389", totalMinor: "3392" },
+        tips: { enabled: false, tierPercents: [12, 18, 20] },
+      },
+    }),
+  );
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await expect(checkout).toContainText("Tax$3.90");
+  await expect(checkout).toContainText("Tax rounding−$0.01");
+  await expect(checkout).toContainText("Total with tax$33.92");
+  await checkout.getByRole("radio", { name: "Card machine" }).check();
+  await expect(
+    checkout.getByRole("button", { name: "Paid on card machine · $33.92" }),
+  ).toBeEnabled();
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});

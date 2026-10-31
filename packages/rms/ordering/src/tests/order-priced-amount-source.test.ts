@@ -1,5 +1,10 @@
 import { beforeEach, expect, it, vi } from "vitest";
-const mock = vi.hoisted(() => ({ submitted: vi.fn(), amendments: vi.fn(), cancelled: vi.fn() }));
+const mock = vi.hoisted(() => ({
+  submitted: vi.fn(),
+  amendments: vi.fn(),
+  cancelled: vi.fn(),
+  taxRounding: vi.fn(),
+}));
 vi.mock("../infrastructure/persistence/submitted-order-amount-source.js", () => ({
   createPostgresSubmittedOrderAmountSource: () => mock.submitted,
 }));
@@ -8,6 +13,9 @@ vi.mock("../infrastructure/persistence/dining-session-order-inventory.js", () =>
 }));
 vi.mock("../infrastructure/persistence/order-cancelled-amount-source.js", () => ({
   createPostgresOrderCancelledAmountSource: () => mock.cancelled,
+}));
+vi.mock("../infrastructure/persistence/order-tax-rounding-store.js", () => ({
+  loadOrderTaxRoundingMinor: mock.taxRounding,
 }));
 import { createPostgresOrderPricedAmountSource } from "../infrastructure/order-priced-amount-source.js";
 const id = (n: number) => "0190faec-0000-7000-8000-" + String(n).padStart(12, "0");
@@ -35,6 +43,7 @@ function setup() {
     cancelledTotalMinor: 0n,
     snapshotDigest: "sha256:" + "c".repeat(64),
   });
+  mock.taxRounding.mockResolvedValue(0n);
   mock.submitted.mockResolvedValue(base);
   mock.amendments.mockResolvedValue(changes);
   const authorize = vi.fn(async () => true),
@@ -124,4 +133,15 @@ it.each([-1n, 1001n])("rejects invalid cancellation deduction %s", async (amount
     snapshotDigest: "sha256:" + "d".repeat(64),
   });
   await expect(f.load()).rejects.toThrow("ORDER_PRICED_AMOUNT_UNAVAILABLE");
+});
+
+it("WP-2423 DEC-TAX-WHOLE-RECEIPT: includes the Order's share of its bill's recorded tax rounding", async () => {
+  const f = setup();
+  mock.taxRounding.mockResolvedValue(1n);
+  const value = await f.load();
+  expect(value.pricedTotalMinor).toBe(1001n);
+  expect(value.taxRoundingMinor).toBe(1n);
+  expect(mock.taxRounding).toHaveBeenCalledWith(f.tx, scope, query.orderReference);
+  mock.taxRounding.mockResolvedValue(-1n);
+  expect((await f.load()).pricedTotalMinor).toBe(999n);
 });

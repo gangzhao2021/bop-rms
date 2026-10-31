@@ -72,7 +72,11 @@ const order = (
   orderType,
   sourceChannel,
   businessDate: "2026-10-14",
-  batches: batches.map((items, index) => ({ orderBatchReference: ref(n + 10 + index), items })),
+  batches: batches.map((items, index) => ({
+    orderBatchReference: ref(n + 10 + index),
+    items,
+    taxRounding: [],
+  })),
 });
 const orders = [
   { ...order(100, "Pickup", "Web", [p0Items]), businessDate: "2026-10-13" },
@@ -324,6 +328,42 @@ describe("store sales report (WP-2423 Q14)", () => {
     ]);
     expect(view.summary.collectedMinor).toBe("5097");
     expect(view.reconciliation.matchesSettlement).toBe(true);
+  });
+
+  it("WP-2423 DEC-TAX-WHOLE-RECEIPT: a round's share of the bill's tax rounding is tax it was paid", () => {
+    // A table round paid with the bill's tax rounding (-1¢ here): the payment still matches the
+    // round, and the rounding is counted under tax (per tax type), so every total adds up.
+    const table = order(800, "DineIn", "Qr", [t1b1]);
+    const rounded = {
+      ...table,
+      batches: table.batches.map((batch) => ({
+        ...batch,
+        taxRounding: [{ code: "SYNTHETIC_TAX", amountMinor: -1n }],
+      })),
+    };
+    const paid = payment("CardMachine", 800, 0, t1b1, 0, "2026-10-14T16:00:00.000Z");
+    const view = computeStoreSalesReport({
+      ...today,
+      orders: [rounded],
+      payments: [{ ...paid, orderAllocationMinor: total(t1b1) - 1n, totalMinor: total(t1b1) - 1n }],
+      refundedPayments: [],
+      refunds: [],
+      settlement: {
+        onlineCaptured: { count: 0, amountMinor: 0n },
+        onlineRefunded: { count: 0, amountMinor: 0n },
+        cardMachineTaken: { count: 1, amountMinor: total(t1b1) - 1n, tipMinor: 0n },
+        cardMachineRefunded: { count: 0, amountMinor: 0n },
+        cashTaken: { count: 0, amountMinor: 0n, tipMinor: 0n, roundingMinor: 0n },
+        cashRefunded: { count: 0, amountMinor: 0n },
+      },
+    });
+    const itemsTax = t1b1.reduce((sum, item) => sum + item.taxMinor, 0n);
+    expect(view.summary).toMatchObject({
+      unmatchedMinor: "0",
+      taxMinor: (itemsTax - 1n).toString(),
+      taxes: [{ label: "SYNTHETIC TAX", amountMinor: (itemsTax - 1n).toString() }],
+      collectedMinor: (total(t1b1) - 1n).toString(),
+    });
   });
 
   it("WP-2423 D4: counts a table's later round on the day it was paid, not the day the table opened", () => {

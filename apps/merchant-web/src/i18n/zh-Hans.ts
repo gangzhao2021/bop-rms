@@ -5755,6 +5755,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This table has paid, so dishes can't come off its bill. A manager gives the guest money back from the table's payment instead; it is recorded.":
     "这桌已经付款，菜不能再从账单删除。请经理改为从这桌的付款里退钱给客人，退款会被记录。",
   "Comp these dishes": "为这些菜免单",
+  "Tax rounding": "税额取整",
   "Comp them on the table's page": "到桌台页面免单",
   "Give money back from the payment": "从付款中退钱",
   "Ask a manager to comp them.": "请经理为这些菜免单。",

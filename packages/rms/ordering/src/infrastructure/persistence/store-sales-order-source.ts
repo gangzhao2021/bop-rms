@@ -5,6 +5,7 @@ import {
   decodeOrderItemSnapshot,
 } from "../../domain/order-item-snapshot-codec.js";
 import { listOrderPriceReductions } from "./order-item-price-reduction-store.js";
+import { listOrdersTaxRoundingLines } from "./order-tax-rounding-store.js";
 import { createPostgresPayLaterItemCancellationStore } from "./pay-later-item-cancellation-store.js";
 
 /** One priced line as the customer was charged for it (immutable snapshot, minor units). */
@@ -37,6 +38,11 @@ export interface StoreSalesOrder {
   readonly batches: readonly {
     readonly orderBatchReference: string;
     readonly items: readonly StoreSalesOrderItem[];
+    /**
+     * WP-2423 DEC-TAX-WHOLE-RECEIPT: the round's share of its bill's tax rounding, per tax type
+     * (part of the tax charged and of what the round was paid; empty when none).
+     */
+    readonly taxRounding: readonly { readonly code: string; readonly amountMinor: bigint }[];
   }[];
 }
 
@@ -174,6 +180,11 @@ export function createPostgresStoreSalesOrderSource(options: {
           }),
         );
       }
+      const rounding = await listOrdersTaxRoundingLines(
+        tx,
+        { brandReference: brand, storeReference: store },
+        chunk,
+      );
       for (const row of headers.rows as readonly Record<string, unknown>[]) {
         const orderReference = String(parseOrderingReference(row.order_id));
         if (
@@ -184,6 +195,14 @@ export function createPostgresStoreSalesOrderSource(options: {
         )
           return fail();
         const batches = byOrder.get(orderReference) ?? new Map<string, StoreSalesOrderItem[]>();
+        const roundingOf = (batch: string) =>
+          Object.freeze(
+            rounding
+              .filter((line) => line.orderBatchReference === batch)
+              .map((line) =>
+                Object.freeze({ code: line.taxComponentCode, amountMinor: line.amountMinor }),
+              ),
+          );
         orders.push(
           Object.freeze({
             orderReference,
@@ -192,7 +211,11 @@ export function createPostgresStoreSalesOrderSource(options: {
             businessDate: row.business_date,
             batches: Object.freeze(
               [...batches].map(([orderBatchReference, lines]) =>
-                Object.freeze({ orderBatchReference, items: Object.freeze(lines) }),
+                Object.freeze({
+                  orderBatchReference,
+                  items: Object.freeze(lines),
+                  taxRounding: roundingOf(orderBatchReference),
+                }),
               ),
             ),
           }),
