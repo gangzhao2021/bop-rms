@@ -8,6 +8,7 @@ import { createMerchantOneStoreDishes } from "../../../apps/api/src/merchant-one
 import { createMerchantPrices } from "../../../apps/api/src/merchant-prices.ts";
 import { createMerchantProducts } from "../../../apps/api/src/merchant-products.ts";
 import { createMerchantStorePrices } from "../../../apps/api/src/merchant-store-prices.ts";
+import { brandRoleTemplateActions } from "../../bop/permission/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { syntheticMerchantBrandScope } from "../test-support/merchant-brand-scope.mjs";
 import {
@@ -105,11 +106,8 @@ it("two Stores: Brand Owner lists, each Store keeps its own price, sold out and 
         brandReference,
         roleId: id(310),
         code: "brand_owner",
-        actions: [
-          "pricing.price-book.approve",
-          "pricing.price-book.manage",
-          "organization.brand.manage",
-        ],
+        // The real Brand Owner template (catalog v21).
+        actions: brandRoleTemplateActions("brand-owner"),
         from,
       });
       await seedBrandMember(admin, {

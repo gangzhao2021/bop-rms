@@ -10,6 +10,7 @@ import {
   listBrandMembersNotAtStore,
   listStoreMembers,
 } from "../../bop/membership/src/index.ts";
+import { brandRoleTemplateActions } from "../../bop/permission/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import {
   createPilotApiRole,
@@ -54,7 +55,9 @@ it("the Brand's Owner opens a second Store once, recorded and audited", async ()
         brandReference,
         roleId: id(310),
         code: "brand_owner",
-        actions: ["organization.manage"],
+        // The real Brand Owner template (catalog v21); who may open is checked in
+        // brand-template-authority-acceptance.
+        actions: brandRoleTemplateActions("brand-owner"),
         from,
       });
       await seedBrandMember(admin, {
@@ -74,8 +77,9 @@ it("the Brand's Owner opens a second Store once, recorded and audited", async ()
         id,
         brandReference,
         roleId: id(320),
-        code: "kitchen",
-        actions: ["kitchen.ticket.read"],
+        // A real Brand template that is not the Brand Owner's.
+        code: "recipe_developer",
+        actions: brandRoleTemplateActions("recipe-developer"),
         from,
       });
       await seedBrandMember(admin, {
