@@ -142,6 +142,26 @@ const fail = (): never => {
 const s = (value: bigint) => value.toString();
 const add = <K>(map: Map<K, bigint>, key: K, value: bigint) =>
   map.set(key, (map.get(key) ?? 0n) + value);
+/** Largest remainder over positive weights: floor shares, then the leftover cents in remainder order. */
+function allocate(total: bigint, weights: readonly bigint[]): readonly bigint[] {
+  const sum = weights.reduce((a, b) => a + b, 0n);
+  if (sum <= 0n) return fail();
+  const negative = total < 0n;
+  const magnitude = negative ? -total : total;
+  const result = weights.map((weight) => (magnitude * weight) / sum);
+  let left = magnitude - result.reduce((a, b) => a + b, 0n);
+  const order = weights
+    .map((weight, index) => ({ index, remainder: (magnitude * weight) % sum }))
+    .sort((a, b) =>
+      a.remainder === b.remainder ? a.index - b.index : a.remainder > b.remainder ? -1 : 1,
+    );
+  for (const entry of order) {
+    if (left <= 0n) break;
+    result[entry.index] = (result[entry.index] ?? 0n) + 1n;
+    left -= 1n;
+  }
+  return negative ? result.map((value) => -value) : result;
+}
 
 /** Store-local hour (0–23) of an instant. */
 function localHour(instant: string, timeZone: string): number {
@@ -206,24 +226,114 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
     }
   }
 
-  // Sales: each payment taken in the range, with the priced items of the Batch it paid for.
-  const matchedIntents = new Set<string>();
+  // Sales: each payment taken in the range, with its share of the priced items of the round it
+  // paid for. WP-2423: a round is sold once, however the table paid it — whole, split evenly, by
+  // rounds or across cash, card machine and phone. Its paid lines (every part, in or out of the
+  // range) together must equal what the round was priced; its sales, comps, service charges and
+  // tax are then shared out to the lines by what each paid (largest remainder), so each part
+  // counts on its own day and payment method and the round adds up exactly once.
+  type SalesPayment = (typeof input.payments)[number];
+  interface LineShare {
+    grossMinor: bigint;
+    discountMinor: bigint;
+    compMinor: bigint;
+    feeMinor: bigint;
+    taxMinor: bigint;
+    taxes: Map<string, bigint>;
+    /** The line that carries the round's dishes in the item rows (they are counted, not split). */
+    readonly primary: boolean;
+  }
+  const roundKey = (orderReference: string, orderBatchReference: string) =>
+    orderReference + "\u0000" + orderBatchReference;
+  const roundLines = new Map<string, SalesPayment[]>();
+  for (const payment of [...input.payments, ...input.refundedPayments]) {
+    const key = roundKey(payment.orderReference, payment.orderBatchReference);
+    const lines = roundLines.get(key) ?? [];
+    roundLines.set(key, lines);
+    lines.push(payment);
+  }
+  const lineShares = new Map<SalesPayment, LineShare>();
+  for (const lines of roundLines.values()) {
+    const head = lines[0] ?? fail();
+    const items = batchItems(head.orderReference, head.orderBatchReference);
+    if (items === null || items.length === 0) continue;
+    const rounding = batchRounding(head.orderReference, head.orderBatchReference);
+    const priced =
+      items.reduce((sum, item) => sum + item.totalMinor, 0n) +
+      rounding.reduce((sum, line) => sum + line.amountMinor, 0n);
+    const paid = lines.reduce((sum, line) => sum + line.orderAllocationMinor, 0n);
+    // A split bill whose other parts are not paid (yet, or written off when the guests left):
+    // the parts paid count their own share; the rest is not sold until it is paid.
+    const unpaid =
+      paid < priced && lines.every((line) => line.splitPart === true) ? priced - paid : 0n;
+    if (paid + unpaid !== priced) continue;
+    const ordered = [...lines].sort((a, b) =>
+      a.takenAt === b.takenAt
+        ? a.paymentIntentReference.localeCompare(b.paymentIntentReference)
+        : a.takenAt.localeCompare(b.takenAt),
+    );
+    // The unpaid rest, if any, takes its share last and is dropped.
+    const weights = [
+      ...ordered.map((line) => line.orderAllocationMinor),
+      ...(unpaid > 0n ? [unpaid] : []),
+    ];
+    const sum = (pick: (item: StoreSalesOrder["batches"][number]["items"][number]) => bigint) =>
+      items.reduce((total, item) => total + pick(item), 0n);
+    const discount = allocate(
+      sum((item) => item.discountMinor),
+      weights,
+    );
+    const comp = allocate(
+      sum((item) => item.compMinor),
+      weights,
+    );
+    const fee = allocate(
+      sum((item) => item.feeMinor),
+      weights,
+    );
+    const tax = allocate(
+      sum((item) => item.taxMinor) + rounding.reduce((total, line) => total + line.amountMinor, 0n),
+      weights,
+    );
+    const codes = new Map<string, bigint>();
+    for (const item of items)
+      for (const component of item.taxComponents) add(codes, component.code, component.amountMinor);
+    for (const line of rounding) add(codes, line.code, line.amountMinor);
+    const codeShares = [...codes].map(
+      ([code, amount]) => [code, allocate(amount, weights)] as const,
+    );
+    let primary = 0;
+    ordered.forEach((line, index) => {
+      if (line.orderAllocationMinor > (ordered[primary]?.orderAllocationMinor ?? 0n))
+        primary = index;
+    });
+    ordered.forEach((line, index) => {
+      const d = discount[index] ?? fail(),
+        c = comp[index] ?? fail(),
+        f = fee[index] ?? fail(),
+        t = tax[index] ?? fail();
+      lineShares.set(line, {
+        // What the line paid is its net sales, service charges and tax: gross is the rest, so
+        // each line adds up and the shares of gross still sum to the round's gross.
+        grossMinor: line.orderAllocationMinor + d + c - f - t,
+        discountMinor: d,
+        compMinor: c,
+        feeMinor: f,
+        taxMinor: t,
+        taxes: new Map(codeShares.map(([code, shares]) => [code, shares[index] ?? fail()])),
+        // A round not paid in full lists no dishes (they are sold when it is).
+        primary: unpaid === 0n && index === primary,
+      });
+    });
+  }
   for (const payment of input.payments) {
     const day = dayOf(payment.takenAt);
     if (day === null) return fail();
     const f = facts.get(day.businessDate) ?? fail();
     const order = orders.get(payment.orderReference) ?? null;
     const kind = order === null ? null : kindOf(order);
-    const items = batchItems(payment.orderReference, payment.orderBatchReference);
-    const rounding = batchRounding(payment.orderReference, payment.orderBatchReference);
-    const roundingMinor = rounding.reduce((sum, line) => sum + line.amountMinor, 0n);
-    const itemsTotal =
-      items === null
-        ? null
-        : items.reduce((sum, item) => sum + item.totalMinor, 0n) + roundingMinor;
-    const matched =
-      items !== null && items.length > 0 && itemsTotal === payment.orderAllocationMinor;
-    if (matched) matchedIntents.add(payment.paymentIntentReference);
+    const items = batchItems(payment.orderReference, payment.orderBatchReference) ?? [];
+    const share = lineShares.get(payment) ?? null;
     const groups = [f.all, f.channels.get(payment.channel) ?? fail()];
     if (kind !== null) groups.push(f.kinds.get(kind) ?? fail());
     for (const t of groups) {
@@ -233,23 +343,18 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
       t.tipMinor += payment.tipMinor;
       t.collectedMinor += payment.totalMinor + payment.roundingMinor;
       t.roundingMinor += payment.roundingMinor;
-      if (!matched) {
+      if (share === null) {
         t.unmatchedMinor += payment.orderAllocationMinor;
         t.unmatchedCount++;
         continue;
       }
-      for (const item of items) {
-        t.grossMinor += item.subtotalMinor;
-        t.discountMinor += item.discountMinor;
-        t.compMinor += item.compMinor;
-        if (item.compMinor > 0n) t.compCount++;
-        t.serviceChargeMinor += item.feeMinor;
-        t.taxMinor += item.taxMinor;
-        for (const component of item.taxComponents)
-          add(t.taxes, component.code, component.amountMinor);
-      }
-      t.taxMinor += roundingMinor;
-      for (const line of rounding) add(t.taxes, line.code, line.amountMinor);
+      t.grossMinor += share.grossMinor;
+      t.discountMinor += share.discountMinor;
+      t.compMinor += share.compMinor;
+      if (share.primary) t.compCount += items.filter((item) => item.compMinor > 0n).length;
+      t.serviceChargeMinor += share.feeMinor;
+      t.taxMinor += share.taxMinor;
+      for (const [code, amount] of share.taxes) add(t.taxes, code, amount);
     }
     const tips = f.tips.get(payment.channel) ?? fail();
     tips.tipMinor += payment.tipMinor;
@@ -265,11 +370,11 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
     h.paymentCount += payment.paymentCount;
     h.tipMinor += payment.tipMinor;
     h.collectedMinor += payment.totalMinor + payment.roundingMinor;
-    if (!matched) continue;
-    h.taxMinor += roundingMinor;
+    if (share === null) continue;
+    h.netSalesMinor += share.grossMinor - share.discountMinor - share.compMinor;
+    h.taxMinor += share.taxMinor;
+    if (!share.primary) continue;
     for (const item of items) {
-      h.netSalesMinor += item.subtotalMinor - item.discountMinor - item.compMinor;
-      h.taxMinor += item.taxMinor;
       const key = itemKey(item);
       const row = f.items.get(key) ?? {
         name: item.name,
@@ -287,7 +392,6 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
       row.compMinor += item.compMinor;
     }
   }
-
   // Rounds comped in full: sold at their price, all of it comped, nothing collected (no payment
   // line). Never left out of the sales (AGENTS.md: no sales suppression).
   const paidBatches = new Set(

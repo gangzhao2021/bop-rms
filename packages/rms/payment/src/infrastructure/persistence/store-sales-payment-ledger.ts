@@ -34,6 +34,11 @@ export interface StoreSalesPayment {
   readonly paymentCount: 0 | 1;
   /** When the money was taken: the Provider capture or the card-machine approval time. */
   readonly takenAt: string;
+  /**
+   * WP-2423 item 8 ④: a line of one part of a split table bill (its slice of the round; the
+   * other parts pay the rest, or are written off). Absent: not a split part.
+   */
+  readonly splitPart?: true;
 }
 /** A refund's share of one order item, from the refund request's own allocation. */
 export interface StoreSalesRefundItemShare {
@@ -343,7 +348,12 @@ export function createPostgresStoreSalesPaymentLedger(options: {
     const cashRefunded = { count: 0, amountMinor: 0n };
     for (const refund of table.cashRefunds) {
       const settlement = tableSettlements.get(refund.settlementReference) ?? fail();
-      const last = settlement.lines.at(-1) ?? fail();
+      // The cash came back from the bill's own Order (a merged table's rounds keep theirs): its
+      // last round line on this payment, else the payment's last line.
+      const last =
+        settlement.lines.findLast((line) => line.orderReference === refund.orderReference) ??
+        settlement.lines.at(-1) ??
+        fail();
       cashRefunded.count++;
       cashRefunded.amountMinor += refund.amountMinor;
       refunds.push(
@@ -351,7 +361,7 @@ export function createPostgresStoreSalesPaymentLedger(options: {
           channel: "Cash" as const,
           kind: "Cash" as const,
           refundReference: refund.cashRefundReference,
-          orderReference: refund.orderReference,
+          orderReference: last.orderReference,
           paymentIntentReference: lineKey(settlement.settlementReference, last.lineNumber),
           amountMinor: refund.amountMinor,
           refundedAt: refund.refundedAt,
@@ -476,7 +486,8 @@ export function createPostgresStoreSalesPaymentLedger(options: {
                 ? ("Online" as const)
                 : ("CardMachine" as const),
           paymentIntentReference: lineKey(settlement.settlementReference, line.lineNumber),
-          orderReference: settlement.orderReference,
+          // WP-2423 item 8 ⑨: a merged table's round is sold on its own Order.
+          orderReference: line.orderReference,
           orderBatchReference: line.orderBatchReference,
           orderAllocationMinor: line.roundMinor,
           tipMinor: line.tipMinor,
@@ -484,6 +495,7 @@ export function createPostgresStoreSalesPaymentLedger(options: {
           roundingMinor: line.roundingMinor,
           paymentCount: index === 0 ? (1 as const) : (0 as const),
           takenAt: settlement.takenAt,
+          ...(settlement.part === null ? {} : { splitPart: true as const }),
         });
         if (inWindow) payments.push(record);
         else refundedPayments.push(record);

@@ -366,6 +366,132 @@ describe("store sales report (WP-2423 Q14)", () => {
     });
   });
 
+  it("WP-2423: a table split across cash and phone counts each round once in sales and tax", () => {
+    // Two rounds (11.30 and 7.11 with tax) split evenly in two parts: part 1 cash, part 2 the
+    // guest's phone with a tip. Each part pays a slice of each round; no slice equals a round.
+    const table = order(810, "DineIn", "Qr", [t1b1, t1b2]);
+    const [r1, r2] = [total(t1b1), total(t1b2)];
+    const slice = (n: number, batch: number, amount: bigint, channel: "Cash" | "Online") =>
+      ({
+        channel,
+        paymentIntentReference: ref(860 + n),
+        orderReference: table.orderReference,
+        orderBatchReference: ref(820 + batch),
+        orderAllocationMinor: amount,
+        tipMinor: 0n,
+        totalMinor: amount,
+        roundingMinor: 0n,
+        paymentCount: n % 2 === 0 ? 1 : 0,
+        takenAt: channel === "Cash" ? "2026-10-14T19:00:00.000Z" : "2026-10-14T19:05:00.000Z",
+        splitPart: true,
+      }) satisfies StoreSalesPayment;
+    const half = (amount: bigint) => [amount - amount / 2n, amount / 2n] as const;
+    const [r1a, r1b] = half(r1),
+      [r2a, r2b] = half(r2);
+    const phoneTip = 50n;
+    const payments = [
+      slice(0, 0, r1a, "Cash"),
+      slice(1, 1, r2a, "Cash"),
+      slice(2, 0, r1b, "Online"),
+      { ...slice(3, 1, r2b, "Online"), tipMinor: phoneTip, totalMinor: r2b + phoneTip },
+    ];
+    const settlement = {
+      onlineCaptured: { count: 1, amountMinor: r1b + r2b + phoneTip },
+      onlineRefunded: { count: 0, amountMinor: 0n },
+      cardMachineTaken: { count: 0, amountMinor: 0n, tipMinor: 0n },
+      cardMachineRefunded: { count: 0, amountMinor: 0n },
+      cashTaken: { count: 1, amountMinor: r1a + r2a, tipMinor: 0n, roundingMinor: 0n },
+      cashRefunded: { count: 0, amountMinor: 0n },
+    };
+    const view = computeStoreSalesReport({
+      ...today,
+      orders: [table],
+      payments,
+      refundedPayments: [],
+      refunds: [],
+      settlement,
+    });
+    const items = [...t1b1, ...t1b2];
+    const sum = (pick: (item: StoreSalesOrderItem) => bigint) =>
+      items.reduce((total, item) => total + pick(item), 0n);
+    expect(view.summary).toMatchObject({
+      unmatchedMinor: "0",
+      grossSalesMinor: sum((item) => item.subtotalMinor).toString(),
+      discountsMinor: sum((item) => item.discountMinor).toString(),
+      taxMinor: sum((item) => item.taxMinor).toString(),
+      collectedMinor: (r1 + r2 + phoneTip).toString(),
+      tipsMinor: phoneTip.toString(),
+    });
+    expect(view.reconciliation.matchesSettlement).toBe(true);
+    // Each method keeps its own share, and the shares add up to the table.
+    const cash = view.byChannel.find((row) => row.channel === "Cash");
+    const online = view.byChannel.find((row) => row.channel === "Online");
+    expect(BigInt(cash?.netSalesMinor ?? "0") + BigInt(cash?.taxMinor ?? "0")).toBe(r1a + r2a);
+    expect(BigInt(online?.netSalesMinor ?? "0") + BigInt(online?.taxMinor ?? "0")).toBe(r1b + r2b);
+    // The dishes are counted once, not once per part.
+    expect(view.items.map((row) => [row.name, row.quantitySold])).toEqual([
+      ["Muffin", 2],
+      ["Latte — Large", 1],
+    ]);
+
+    // A part paid after the business day ended: each day keeps its own part's share.
+    const late = payments.map((line) => ({
+      ...line,
+      takenAt: line.channel === "Online" ? "2026-10-14T09:00:00.000Z" : "2026-10-14T08:10:00.000Z",
+    }));
+    const split = computeStoreSalesReport({
+      ...today,
+      // Only the later part's day is in range; the earlier part's cash was taken before it.
+      days: [
+        {
+          businessDate: "2026-10-15",
+          startsAt: "2026-10-14T08:30:00.000Z",
+          endsAt: "2026-10-14T23:00:00.000Z",
+          timeZone: "America/Toronto",
+          status: "Open" as const,
+        },
+      ],
+      orders: [table],
+      payments: late.filter((line) => line.channel === "Online"),
+      refundedPayments: late.filter((line) => line.channel === "Cash"),
+      refunds: [],
+      settlement: {
+        ...settlement,
+        cashTaken: { count: 0, amountMinor: 0n, tipMinor: 0n, roundingMinor: 0n },
+      },
+    });
+    expect(split.summary.unmatchedMinor).toBe("0");
+    expect(BigInt(split.summary.netSalesMinor) + BigInt(split.summary.taxMinor)).toBe(r1b + r2b);
+
+    // Only the cash part was paid and the guests left (the rest written off): the cash part
+    // counts its own share; no dish is listed as sold until its round is paid in full.
+    const cashOnly = {
+      ...today,
+      orders: [table],
+      payments: payments.filter((line) => line.channel === "Cash"),
+      refundedPayments: [],
+      refunds: [],
+      settlement: {
+        ...settlement,
+        onlineCaptured: { count: 0, amountMinor: 0n },
+      },
+    };
+    const left = computeStoreSalesReport(cashOnly);
+    expect(left.summary.unmatchedMinor).toBe("0");
+    expect(BigInt(left.summary.netSalesMinor) + BigInt(left.summary.taxMinor)).toBe(r1a + r2a);
+    expect(left.items).toEqual([]);
+    // A line short of its round that is not a split part is still flagged, never guessed.
+    const short = computeStoreSalesReport({
+      ...cashOnly,
+      payments: cashOnly.payments.map((line) => {
+        const whole: StoreSalesPayment = { ...line };
+        delete (whole as { splitPart?: true }).splitPart;
+        return whole;
+      }),
+    });
+    expect(short.summary.unmatchedMinor).toBe((r1a + r2a).toString());
+  });
+
   it("WP-2423 D4: counts a table's later round on the day it was paid, not the day the table opened", () => {
     // Table opened on Oct 13 (first round paid then); a second round was added and paid on Oct 14.
     const opened = {

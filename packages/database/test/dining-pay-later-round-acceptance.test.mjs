@@ -1701,6 +1701,8 @@ async function journey(ending) {
           }
           setCustomerCsrfCredential("x".repeat(43));
           setCustomerCsrfCredential(null);
+          // The merged-in table's round is sold on its own Order, once.
+          await assertSalesCountEveryRoundOnce();
           return;
         }
         if (ending === "Moved") {
@@ -2980,8 +2982,9 @@ async function journey(ending) {
           subtotal: item.pricing.subtotal.amountMinor,
         });
         /** The day's sales reports from the same sources and composition the reports page uses. */
-        const salesReport = () =>
-          transactions().run(async (tx) => {
+        // Function declarations (hoisted): the merged table's journey ends earlier in this block.
+        function salesReport() {
+          return transactions().run(async (tx) => {
             const window = {
               startsAt: time(-minutes(120)),
               endsAt: new Date(Date.now() + 1000).toISOString(),
@@ -3017,6 +3020,36 @@ async function journey(ending) {
               generatedAt: new Date().toISOString(),
             });
           });
+        }
+        /**
+         * v15 2026-10-30 (the reported books gap): every round a table paid counts once in the day's
+         * sales and tax, however it paid — whole, split evenly or by rounds, across cash, card
+         * machine and phone, merged or comped — so net sales, service charges and tax are exactly
+         * what the table bills took for their rounds, nothing is left unmatched, and the money
+         * still agrees with the day-end settlement.
+         */
+        async function assertSalesCountEveryRoundOnce() {
+          const report = await salesReport();
+          const [paid] = await rows(
+            "SELECT coalesce(sum(rounds_minor),0)::text AS rounds FROM rms_payment.dining_table_settlement",
+          );
+          const s = report.summary;
+          assert.deepEqual(
+            {
+              unmatched: s.unmatchedMinor,
+              sold: (
+                BigInt(s.netSalesMinor) +
+                BigInt(s.serviceChargesMinor) +
+                BigInt(s.taxMinor)
+              ).toString(),
+              taxes: s.taxes.reduce((sum, tax) => sum + BigInt(tax.amountMinor), 0n).toString(),
+              matches: report.reconciliation.matchesSettlement,
+            },
+            { unmatched: "0", sold: paid.rounds, taxes: s.taxMinor, matches: true },
+          );
+          for (const row of report.byChannel) assert.equal(row.unmatchedMinor, "0", row.channel);
+          return report;
+        }
         /** WP-2423 item 8 ②: the closing summary's open tables and cancellations, as the API role. */
         const tonightFacts = () =>
           transactions().run((tx) =>
@@ -4244,22 +4277,27 @@ async function journey(ending) {
         }
         if (ending === "WrittenOff") {
           await writtenOffEnding();
+          await assertSalesCountEveryRoundOnce();
           return;
         }
         if (ending === "Comped") {
           await compedEnding();
+          await assertSalesCountEveryRoundOnce();
           return;
         }
         if (ending === "TaxRounding") {
           await taxRoundingEnding();
+          await assertSalesCountEveryRoundOnce();
           return;
         }
         if (ending === "CompedWhole") {
           await compedWholeEnding();
+          await assertSalesCountEveryRoundOnce();
           return;
         }
         if (ending === "PaidOnline") {
           await paidOnlineEnding();
+          await assertSalesCountEveryRoundOnce();
           return;
         }
 
@@ -4391,6 +4429,7 @@ async function journey(ending) {
               [1, part1Total],
             );
             assert.deepEqual(day.settlement.cashRefunded, { count: 1, amountMinor: 500n });
+            await assertSalesCountEveryRoundOnce();
             return;
           }
           // Part 1 on the card machine with a 15 % tip on its own share before tax.
@@ -4642,6 +4681,7 @@ async function journey(ending) {
             BigInt(receipt.ordersTotalMinor),
             BigInt(receipt.subtotalMinor) + BigInt(receipt.taxMinor),
           );
+          await assertSalesCountEveryRoundOnce();
           return;
         }
         if (ending === "TipsOff") await tipsOffRefusals();
@@ -4893,6 +4933,7 @@ async function journey(ending) {
           /pay-later round cannot expire unpaid/u,
         );
 
+        await assertSalesCountEveryRoundOnce();
         if (ending === "Moved") {
           // v15 2026-10-30: the moved table, paid, closes as the Tables page does it — the Order,
           // then the table (its session at the table it moved to).

@@ -128,6 +128,8 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
   const open = summary.openTables.filter((table) => table.owedMinor !== "0");
   const paidSeated = summary.openTables.filter((table) => table.owedMinor === "0");
   const c = summary.cancelled;
+  // Every payment taken is counted in sales and tax, and the money agrees with the settlement.
+  const matches = report.reconciliation.matchesSettlement && s.unmatchedMinor === "0";
   return (
     <div className="tonight">
       <header className="tonight__head">
@@ -171,6 +173,9 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
           ))}
           {s.serviceChargesMinor !== "0" ? (
             <Row label={t("Service charges")} value={money(s.serviceChargesMinor)} />
+          ) : null}
+          {s.unmatchedMinor !== "0" ? (
+            <Row label={t("Paid but not matched to items")} value={money(s.unmatchedMinor)} />
           ) : null}
         </dl>
       </section>
@@ -340,7 +345,18 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
       </section>
 
       <section aria-labelledby="tonight-match" className="tonight__section">
-        <h3 id="tonight-match">{t("Matches the day-end settlement")}</h3>
+        <h3 id="tonight-match">
+          {matches
+            ? t("Matches the day-end settlement")
+            : t("Doesn't match the day-end settlement")}
+        </h3>
+        {matches ? null : (
+          <p role="alert" className="command-error">
+            {t(
+              "Some of tonight's payments are not counted in these figures yet. Refresh; if it stays, check the day in Settlement and tell the manager before closing.",
+            )}
+          </p>
+        )}
         <p className="tonight__detail">
           {t(
             "These are the reports' figures for today so far, from the same records as tomorrow's day-end settlement. Payments taken after the business day ends count on the next day.",
