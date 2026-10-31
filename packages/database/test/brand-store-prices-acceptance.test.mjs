@@ -465,6 +465,12 @@ it("two Stores: Brand Owner lists, each Store keeps its own price, sold out and 
         (error) => error.code === "PermissionDenied",
       );
       assert.equal(await price(store1, sku), "6.80");
+
+      // 9. The record is append-only: not even its owner empties it.
+      await assert.rejects(
+        admin.query("TRUNCATE rms_pricing.store_price_change CASCADE"),
+        /append-only store price change/u,
+      );
     } finally {
       await admin.end();
     }

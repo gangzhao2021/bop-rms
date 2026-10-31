@@ -811,6 +811,12 @@ export async function createInternalMerchant(
     export: logUnexpected("INTERNAL_STORE_REPORTS_EXPORT_UNAVAILABLE", reports.export),
     // WP-2423 item 8 ②: the closing summary (Reports "Tonight" and the closing reminder on Home).
     tonight: logUnexpected("INTERNAL_STORE_TONIGHT_UNAVAILABLE", reports.tonight),
+    // DEC-BRAND-MULTI-STORE segment 7: another Store's tonight (Reports → Stores), authorized at
+    // that Store by its own composition.
+    storeTonight: logUnexpected(
+      "INTERNAL_STORE_TONIGHT_BY_STORE_UNAVAILABLE",
+      reports.storeTonight,
+    ),
   };
   const refundPaymentContext = createMerchantRefundPaymentContext({
     persistence,
