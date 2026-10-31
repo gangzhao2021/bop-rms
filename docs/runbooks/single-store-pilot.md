@@ -1940,7 +1940,7 @@ through its governed opening (B2), never this way.
    result, or the `STORE_OPENED` audit record).
 2. **Store roles.** As for any Store: `tooling/environment/store-role-provisioning.mjs`
    prepare → sign → apply for the new Store with `--templates
-   owner,store-manager,area-manager,front-of-house,kitchen,inventory-manager` (the opener is
+owner,store-manager,area-manager,front-of-house,kitchen,inventory-manager` (the opener is
    already a member there, so they may be named the Owner).
 3. **Its first configuration and launch gate** (dry run first, then without `--dry-run`), in the
    container, with the paths the container sees (`/app/.local/...`):
@@ -1961,8 +1961,9 @@ through its governed opening (B2), never this way.
    publishes them with a `SYNTHETIC-STORE-LIVE-GATE`, audits every step with the approval, and
    commits only if the services' api role reads the new Store's operating status. A refusal
    prints `PILOT_INTERNAL_TEST_STORE_OPEN_UNAVAILABLE (<reason>)` and changes nothing.
+
 4. **Its runtime directory:** the same command with `directory /app/.local/pilot-v15 --store
-   <new Store reference> --name demo-2` writes `stores/demo-2/` (owner-only; secrets copied as
+<new Store reference> --name demo-2` writes `stores/demo-2/` (owner-only; secrets copied as
    they are) and lists it in `stores.json`.
 5. **Restart** in a planned update window. Staff assigned to the new Store see it on the Stores
    page and switch to it; there they set its address, tax and payment in Store setup and add its
