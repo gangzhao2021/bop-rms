@@ -268,6 +268,79 @@ function InvitePanel({
   );
 }
 
+/**
+ * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 8: people of the Brand's other Stores, added here
+ * with one tap; their role here is then requested and approved as for anyone at this Store.
+ */
+function OtherStoresPanel({
+  view,
+  client,
+  csrf,
+  reload,
+  onAdded,
+}: {
+  readonly view: StaffPageView;
+  readonly client: StaffPageClient;
+  readonly csrf: string;
+  readonly reload: () => void;
+  readonly onAdded: (label: string) => void;
+}) {
+  const [pending, setPending] = useState<StaffCommandRequest | null>(null),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState<StaffPageErrorCode | null>(null);
+  const run = async (request: StaffCommandRequest, label: string) => {
+    if (!client.command || busy) return;
+    setPending(request);
+    setBusy(true);
+    setError(null);
+    try {
+      await client.command(request);
+      setPending(null);
+      onAdded(label);
+      reload();
+    } catch (failure) {
+      setError(failure instanceof StaffPageError ? failure.code : "Unavailable");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <StatePanel heading={t("People from your other stores")}>
+      <ul className="stores-page__list">
+        {view.otherStoresStaff.map((person) => (
+          <li key={person.actorReference} className="stores-page__row">
+            <span>{person.label}</span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void run(
+                  {
+                    operation: "AddToStore",
+                    actorReference: person.actorReference,
+                    operationReference: newOperationReference(),
+                  },
+                  person.label,
+                )
+              }
+            >
+              {t("Add to this store")}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <CommandError
+        error={error}
+        csrf={csrf}
+        busy={busy}
+        retry={pending ? () => void run(pending, "") : null}
+        reload={reload}
+        text={copy}
+      />
+    </StatePanel>
+  );
+}
+
 /** WP-2423 DEC-COGNITO-STORE-STAFF: an invitation not accepted yet — resend or cancel it. */
 function InvitationPanel({
   member,
@@ -691,6 +764,8 @@ function Page({
   const { id } = useParams();
   const [state, setState] = useState<State>({ kind: "Loading" });
   const [generation, setGeneration] = useState(0);
+  // Segment 8: who was just added from another store (kept while the list reloads).
+  const [added, setAdded] = useState("");
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
     let active = true;
@@ -746,6 +821,18 @@ function Page({
       </header>
       {!detail && view.viewer.mayInvite ? (
         <InvitePanel view={view} client={client} csrf={csrf} reload={reload} />
+      ) : null}
+      {added ? <p role="status">{added}</p> : null}
+      {!detail && view.otherStoresStaff.length > 0 ? (
+        <OtherStoresPanel
+          view={view}
+          client={client}
+          csrf={csrf}
+          reload={reload}
+          onAdded={(label) =>
+            setAdded(t("{name} now works at this store. Give them a role below.", { name: label }))
+          }
+        />
       ) : null}
       {view.staff.length === 0 ? (
         <StatePanel heading={t("No staff")} status>

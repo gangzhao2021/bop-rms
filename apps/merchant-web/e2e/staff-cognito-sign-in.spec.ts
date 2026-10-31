@@ -604,3 +604,47 @@ test("@production a PIN sign-in confirms it is you by signing in again, without 
   await expect(dialog.getByLabel("Six-digit code")).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Continue to sign in" })).toBeVisible();
 });
+
+test("@production DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: a manager adds someone from another store", async ({
+  page,
+}) => {
+  await session(page, { value: true });
+  const staff: Record<string, unknown>[] = [
+    staffMember(1, "Mia Manager", { self: true, mayRemove: false, mayRequest: false }),
+  ];
+  let others = [{ actorReference: id(7), label: "Kai Cook" }];
+  const commands: Record<string, unknown>[] = [];
+  await page.route("**/merchant/organization/staff/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "IAM-USER-LIST",
+        sourceAsOf: new Date().toISOString().replace(/\.\d+Z$/u, ".000Z"),
+        viewer,
+        roles: [role],
+        staff,
+        otherStoresStaff: others,
+      },
+    }),
+  );
+  await page.route("**/merchant/organization/staff/command", (route) => {
+    expect(route.request().headers()["x-bop-csrf"]).toBe(csrf);
+    const body = json(route);
+    commands.push(body);
+    staff.push(staffMember(7, "Kai Cook", {}));
+    others = [];
+    return route.fulfill({ headers, json: { status: "Added" } });
+  });
+  await page.goto("/app/organization/users");
+  const panel = card(page, "People from your other stores");
+  await expect(panel.getByText("Kai Cook")).toBeVisible();
+  await panel.getByRole("button", { name: "Add to this store" }).click();
+  await expect(
+    page.getByText("Kai Cook now works at this store. Give them a role below."),
+  ).toBeVisible();
+  expect(commands).toHaveLength(1);
+  expect(commands[0]).toMatchObject({ operation: "AddToStore", actorReference: id(7) });
+  // Listed with the Store's staff now; the panel is gone with nobody left to add.
+  await expect(card(page, "People from your other stores")).toHaveCount(0);
+  await expect(page.getByText("Kai Cook", { exact: true }).first()).toBeVisible();
+});

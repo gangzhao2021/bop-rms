@@ -1,8 +1,11 @@
-import { appendAuditRecordInTransaction } from "@bop/audit";
+import { appendAuditRecordInTransaction, validateAuditRecord } from "@bop/audit";
+import { holdBrandSingleStore } from "@bop/tenant";
 import {
+  assignMemberToStore,
   confirmBrandMemberScope,
   confirmStoreMemberScope,
   endStoreMemberAssignment,
+  listBrandMembersNotAtStore,
   listStoreMembers,
   loadStoreMember,
   memberDisplayNames,
@@ -108,6 +111,12 @@ export type StaffCommand =
       readonly actorReference: string;
       readonly operationReference: string;
     }
+  | {
+      /** DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 8: a Brand member gets a place here. */
+      readonly operation: "AddToStore";
+      readonly actorReference: string;
+      readonly operationReference: string;
+    }
   | StaffInvitationCommand;
 const version = (value: unknown): number =>
   Number.isSafeInteger(value) && (value as number) >= 1 ? (value as number) : fail("Invalid");
@@ -153,9 +162,10 @@ export function parseStaffCommand(value: unknown): StaffCommand {
         operationReference: ref(r.operationReference),
       };
     case "RemoveFromStore":
+    case "AddToStore":
       if (keys !== "actorReference,operation,operationReference") return fail("Invalid");
       return {
-        operation: "RemoveFromStore",
+        operation: r.operation,
         actorReference: ref(r.actorReference),
         operationReference: ref(r.operationReference),
       };
@@ -346,8 +356,23 @@ export function createMerchantStaffAdministration(options: {
         ? "You"
         : (names.get(reference) ??
           staffRoleLabel(assignments.filter((item) => item.actorReference === reference)));
+    // Segment 8: the Brand's other members who could be added here (names only; never PII).
+    const elsewhere =
+      actor === null && mayManage
+        ? (await listBrandMembersNotAtStore(directoryTx(tx), owner))
+            .filter((member) => member.actorReference !== viewer)
+            .map((member) => ({
+              actorReference: member.actorReference,
+              label:
+                member.displayName ??
+                staffRoleLabel(
+                  assignments.filter((item) => item.actorReference === member.actorReference),
+                ),
+            }))
+        : [];
     return {
       screenId: actor === null ? "IAM-USER-LIST" : "IAM-USER-DETAIL",
+      otherStoresStaff: elsewhere,
       sourceAsOf: now,
       viewer: {
         mayManage,
@@ -811,7 +836,16 @@ export function createMerchantStaffAdministration(options: {
                     : brandAllowed("identity.role.approve")))
                 )
                   fail("PendingRequestsRemain");
-              // Brand roles end too; a Store manager cannot end them, so says so instead.
+              // Brand roles end too when this is the Brand's only Store; a Store manager cannot end
+              // them, so says so instead. DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: at a Brand with
+              // several Stores a Brand role is the Brand's and stays (the person may work elsewhere).
+              const singleStore = await holdBrandSingleStore(
+                tx as unknown as Parameters<typeof holdBrandSingleStore>[0],
+                owner.brandReference,
+                owner.storeReference,
+              );
+              if (!singleStore)
+                held.splice(0, held.length, ...held.filter((item) => item.scope === "Store"));
               if (
                 held.some((item) => item.scope === "Brand") &&
                 !(await brandAllowed("organization.staff.manage"))
@@ -871,6 +905,56 @@ export function createMerchantStaffAdministration(options: {
                 rolesEnded: held.length,
                 sessionsEnded: signedOut,
               };
+            }
+            case "AddToStore": {
+              await require("organization.staff.manage");
+              const candidate = (await listBrandMembersNotAtStore(directoryTx(tx), owner)).find(
+                (member) => member.actorReference === command.actorReference,
+              );
+              const assignmentReference = derivedReference(
+                command.operationReference,
+                "store-assignment",
+              );
+              if (candidate === undefined) {
+                // Already here: the same request answers from its own assignment.
+                const here = await listStoreMembers(directoryTx(tx), owner);
+                if (
+                  here.some(
+                    (member) =>
+                      member.actorReference === command.actorReference &&
+                      member.storeAssignmentReference === assignmentReference,
+                  )
+                )
+                  return { status: "AlreadyApplied" as const };
+                return fail("Conflict");
+              }
+              await assignMemberToStore(directoryTx(tx), {
+                ...owner,
+                actorReference: command.actorReference,
+                membershipReference: candidate.membershipReference,
+                storeAssignmentReference: assignmentReference,
+                at,
+              });
+              await appendAuditRecordInTransaction(
+                tx as unknown as Parameters<typeof appendAuditRecordInTransaction>[0],
+                validateAuditRecord({
+                  auditId: options.references.next(),
+                  brandId: owner.brandReference,
+                  storeId: owner.storeReference,
+                  actor: { type: "User", reference: viewer },
+                  actionCode: "MEMBER_ADDED_TO_STORE",
+                  targetType: "StoreAssignment",
+                  targetId: assignmentReference,
+                  reasonCode: "STAFF_ADDED_FROM_BRAND",
+                  correlationId: command.operationReference,
+                  occurredAt: at,
+                  sourceChannel: "MERCHANT_WEB",
+                  dataClassification: "Internal",
+                  retentionPolicyCode: "AUDIT_STANDARD",
+                  retentionPolicyVersion: 1,
+                }),
+              );
+              return { status: "Added" as const };
             }
             case "Revoke": {
               const assignment = (await assignmentsOf(tx, owner)).assignments.find(

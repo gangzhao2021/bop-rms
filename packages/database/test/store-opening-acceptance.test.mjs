@@ -5,6 +5,11 @@ import {
   MerchantStoreOpeningError,
   recordStoreOpening,
 } from "../../../apps/api/src/merchant-store-opening.ts";
+import {
+  assignMemberToStore,
+  listBrandMembersNotAtStore,
+  listStoreMembers,
+} from "../../bop/membership/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import {
   createPilotApiRole,
@@ -64,6 +69,26 @@ it("the Brand's Owner opens a second Store once, recorded and audited", async ()
         enrolledAt: from,
       });
       const membership = id(400);
+      // A cook who works only at the first Store (segment 8: added to the second one later).
+      const cookRole = await seedBrandRole(admin, {
+        id,
+        brandReference,
+        roleId: id(320),
+        code: "kitchen",
+        actions: ["kitchen.ticket.read"],
+        from,
+      });
+      await seedBrandMember(admin, {
+        id,
+        base: 600,
+        brandReference,
+        storeReference: storeOne,
+        actorReference: id(6),
+        name: "Kai",
+        roles: [cookRole],
+        from,
+        enrolledAt: from,
+      });
       const run = async (work) => {
         await admin.query("BEGIN");
         try {
@@ -212,6 +237,71 @@ it("the Brand's Owner opens a second Store once, recorded and audited", async ()
         "DELETE FROM bop_tenant.store_opening",
       ])
         await assert.rejects(scoped(operation, sql, []), /append-only store opening/u);
+
+      // Segment 8: at the new Store, the Brand's other members are listed by name (the opener is
+      // already there); adding the cook gives them a place there on their existing Membership.
+      const atStoreTwo = (work) =>
+        run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [brandReference, operation],
+          );
+          return work(tx);
+        });
+      assert.deepEqual(
+        (
+          await atStoreTwo((tx) =>
+            listBrandMembersNotAtStore(tx, { brandReference, storeReference: operation }),
+          )
+        ).map((member) => [member.actorReference, member.displayName]),
+        [[id(6), "Kai"]],
+      );
+      await atStoreTwo((tx) =>
+        assignMemberToStore(tx, {
+          brandReference,
+          storeReference: operation,
+          actorReference: id(6),
+          membershipReference: id(600),
+          storeAssignmentReference: "01909a2e-1000-7000-8000-000000000060",
+          at: new Date(Date.parse(from) + 3800_000).toISOString(),
+        }),
+      );
+      assert.deepEqual(
+        await atStoreTwo((tx) =>
+          listBrandMembersNotAtStore(tx, { brandReference, storeReference: operation }),
+        ),
+        [],
+      );
+      assert.deepEqual(
+        (
+          await atStoreTwo((tx) =>
+            listStoreMembers(tx, { brandReference, storeReference: operation }),
+          )
+        )
+          .map((member) => member.actorReference)
+          .sort(),
+        [owner, id(6)].sort(),
+      );
+      // Once at a Store; the first Store's own list is unchanged.
+      await assert.rejects(
+        atStoreTwo((tx) =>
+          assignMemberToStore(tx, {
+            brandReference,
+            storeReference: operation,
+            actorReference: id(6),
+            membershipReference: id(600),
+            storeAssignmentReference: "01909a2e-1000-7000-8000-000000000061",
+            at: new Date(Date.parse(from) + 3900_000).toISOString(),
+          }),
+        ),
+        { code: "MEMBER_DIRECTORY_IDEMPOTENCY_CONFLICT" },
+      );
+      assert.deepEqual(
+        await run((tx) =>
+          listBrandMembersNotAtStore(tx, { brandReference, storeReference: storeOne }),
+        ),
+        [],
+      );
 
       // Two Stores: the single-Store menu exception no longer applies to this Brand.
       assert.equal(

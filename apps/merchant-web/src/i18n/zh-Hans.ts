@@ -1602,6 +1602,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Inuvik, Northwest Territories": "伊努维克，西北地区",
   Invalidated: "已失效",
   "Inventory Manager": "库存经理",
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 8: staff of the Brand's other Stores.
+  "People from your other stores": "你其他门店的员工",
+  "Add to this store": "加到这家店",
+  "{name} now works at this store. Give them a role below.":
+    "{name} 已加到这家店。请在下面给他一个角色。",
   // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 7: the Brand view on Reports.
   "Tonight at each store": "今晚各门店",
   "Still to take": "还要收",
