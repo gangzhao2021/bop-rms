@@ -1602,6 +1602,36 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Inuvik, Northwest Territories": "伊努维克，西北地区",
   Invalidated: "已失效",
   "Inventory Manager": "库存经理",
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: the Stores page.
+  "Your stores": "你的门店",
+  "You are here": "当前门店",
+  "Switch to this store": "切换到这家店",
+  "Open a store": "开新店",
+  "For the brand's owner. The new store gets you as its first staff member; its menu, tables and roles are set up next.":
+    "品牌老板使用。新店的第一位员工就是你；之后再设置它的菜单、桌台和角色。",
+  "Store name (as guests see it)": "店名（客人看到的）",
+  "Short code": "简称代码",
+  "Store language": "门店语言",
+  "Open store": "开店",
+  "Opening the store…": "正在开店…",
+  "Eastern time (Toronto, Ottawa, Montréal)": "东部时间（多伦多、渥太华、蒙特利尔）",
+  "Pacific time (Vancouver)": "太平洋时间（温哥华）",
+  "Mountain time (Calgary, Edmonton)": "山地时间（卡尔加里、埃德蒙顿）",
+  "Central time (Winnipeg)": "中部时间（温尼伯）",
+  "Saskatchewan (Regina, Saskatoon)": "萨斯喀彻温（里贾纳、萨斯卡通）",
+  "Atlantic time (Halifax)": "大西洋时间（哈利法克斯）",
+  "Newfoundland time (St. John's)": "纽芬兰时间（圣约翰斯）",
+  "Atlantic time (Moncton)": "大西洋时间（蒙克顿）",
+  "Yukon (Whitehorse)": "育空（白马市）",
+  "{name} is opened. Before staff can work there, its roles, setup and go-live check are installed; it then appears in this list. Guests can't order there until it is live.":
+    "{name} 已开店。员工要在那里工作，还需安装它的角色、设置和上线核对，之后会出现在这个列表里。上线之前客人不能在那里点单。",
+  "Only the brand's owner can open a store.": "只有品牌老板可以开新店。",
+  "Another store of this brand already uses this code. Choose another code.":
+    "这个品牌已有门店用了这个代码，请换一个。",
+  "Check the name and code: the code starts with a letter and uses letters, digits, - or _.":
+    "请检查店名和代码：代码以字母开头，只能用字母、数字、- 或 _。",
+  "This store was already opened with other details. Refresh the page.":
+    "这家店已用其他资料开过了，请刷新页面。",
   // v20 DEC-BRAND-MULTI-STORE.
   "Area Manager": "区域经理",
   "Store Manager permissions in each of the Stores they run": "在所管的每家门店有门店经理的权限",

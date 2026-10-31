@@ -3202,6 +3202,12 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_tenant" &&
           module.manifest.ownedDatabase?.tables?.includes("store") &&
           moduleRelative === "src/infrastructure/persistence/store-opening-scope-source.ts";
+        // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: opening another Store.
+        const acceptedStoreOpeningAsset =
+          module.packageName === "@bop/tenant" &&
+          module.manifest.ownedDatabase?.schema === "bop_tenant" &&
+          module.manifest.ownedDatabase?.tables?.includes("store_opening") &&
+          moduleRelative === "src/infrastructure/persistence/store-opening-store.ts";
         // WP-2423: Store staff role assignment (IAM-USER-DETAIL).
         const acceptedRoleAssignmentAsset =
           module.packageName === "@bop/permission" &&
@@ -3919,6 +3925,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedPaymentReceiptCoverageAsset &&
           !acceptedReceiptStoreIdentityAsset &&
           !acceptedStoreOpeningScopeAsset &&
+          !acceptedStoreOpeningAsset &&
           !acceptedStoreRoleProvisioningAsset &&
           !acceptedBrandRoleProvisioningAsset &&
           !acceptedRoleAdministrationAsset &&

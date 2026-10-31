@@ -628,3 +628,33 @@ fieldset.store-features__modules {
 .store-kitchen-sections__add button {
   min-height: 44px;
 }
+/* DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Stores page (row hairlines, no boxes). */
+.stores-page {
+  max-width: 720px;
+}
+.stores-page__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.stores-page__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bop-space-3);
+  min-height: 44px;
+  padding: var(--bop-space-2) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.stores-page__current {
+  color: var(--bop-color-text-muted);
+}
+.stores-page__form {
+  display: grid;
+  gap: var(--bop-space-3);
+  max-width: 420px;
+}
+.stores-page__form label {
+  display: grid;
+  gap: var(--bop-space-1);
+}

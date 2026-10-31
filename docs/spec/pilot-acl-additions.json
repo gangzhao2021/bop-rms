@@ -5471,6 +5471,33 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-TAX-WHOLE-RECEIPT step 2 (coordinator 2026-10-30, Owner authorized): the bill's tax rounding, recorded by the system rule"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "store_opening",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a (coordinator 2026-10-30, Owner standing authority): a Brand's Owner opens another Store from the product"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "store_opening",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a (coordinator 2026-10-30, Owner standing authority): a Brand's Owner opens another Store from the product"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "store",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a (coordinator 2026-10-30, Owner standing authority): a Brand's Owner opens another Store from the product"
     }
   ]
 }

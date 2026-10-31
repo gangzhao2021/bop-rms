@@ -1,3 +1,4 @@
+import { createMerchantStoreOpening } from "../../apps/api/dist/merchant-store-opening.js";
 import { servedStoresOf } from "./pilot-served-stores.mjs";
 import console from "node:console";
 import { URL } from "node:url";
@@ -280,6 +281,13 @@ export async function createInternalMerchant(
           label: "Store setup",
           href: "/app/organization/stores/" + selected.storeReference + "/setup",
           permission: "organization.manage",
+        },
+        // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Stores this person works in (switch, open).
+        {
+          screenId: "ORG-STORE-LIST",
+          label: "Stores",
+          href: "/app/organization/stores",
+          permission: "organization.store.read",
         },
         // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the modules the Store uses.
         {
@@ -1583,6 +1591,8 @@ export async function createInternalMerchant(
       // sign-in for staff; with Cognito (DEC-COGNITO-STORE-STAFF) the staff sign-in page.
       signInEntry: session.signInEntry ?? { path: "/internal-test/staff", testOnly: true },
       ...(staffPin === undefined ? {} : { staffPin }),
+      // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: the Brand's Owner opens a Store.
+      storeOpening: createMerchantStoreOpening({ persistence, authentication: service }),
       // WP-2423 Q4: busy mode — a manager pauses and resumes taking new online orders.
       ...(() => {
         const control = createMerchantServiceControl({

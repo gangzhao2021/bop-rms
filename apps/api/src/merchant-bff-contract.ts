@@ -1,4 +1,5 @@
 /** Merchant BFF public contract: the workspace snapshot, navigation, Session service and router options. */
+import type { createMerchantStoreOpening } from "./merchant-store-opening.js";
 import type {
   createMerchantDiningStaffCallAnswer,
   createMerchantDiningStaffCallCount,
@@ -561,6 +562,8 @@ export interface MerchantBffRouterOptions {
   readonly menuPublication?: ReturnType<typeof createMerchantMenuPublicationCommand>;
   readonly menuDraft?: ReturnType<typeof createMerchantMenuDraftQuery>;
   readonly brandLifecycle?: ReturnType<typeof createBrandLifecycleCommand>;
+  /** WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: the Brand's Owner opens a Store. */
+  readonly storeOpening?: ReturnType<typeof createMerchantStoreOpening>;
   readonly productDraft?: ReturnType<typeof createMerchantProductDraftCommand>;
   readonly productCreation?: ReturnType<typeof createMerchantProductCreationCommand>;
   readonly productLifecycle?: ReturnType<typeof createMerchantProductLifecycleCommand>;

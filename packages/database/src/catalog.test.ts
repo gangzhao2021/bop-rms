@@ -774,6 +774,7 @@ describe("migration catalog", () => {
       "2000_130_create_dining_table_bill_order",
       "2000_131_alter_dining_staff_call_checking_out",
       "2000_132_create_order_tax_rounding_adjustment",
+      "2000_133_create_store_opening",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
