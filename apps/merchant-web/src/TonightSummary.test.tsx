@@ -77,6 +77,27 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
     ])
       expect(html, text).toContain(text);
   });
+  it("v15 2026-10-30: says it matches the day-end settlement only when every payment is in sales", () => {
+    expect(render(tonightSummaryFixture())).toContain("Matches the day-end settlement");
+    const short = tonightSummaryFixture();
+    const report = short.report as {
+      summary: Record<string, unknown>;
+      reconciliation: Record<string, unknown>;
+    };
+    // A payment not counted in sales and tax (the sales are short by it).
+    report.summary.unmatchedMinor = "4606";
+    report.summary.netSalesMinor = String(BigInt(String(report.summary.netSalesMinor)) - 4606n);
+    report.summary.grossSalesMinor = String(BigInt(String(report.summary.grossSalesMinor)) - 4606n);
+    const html = render(short);
+    expect(html).toContain("Paid but not matched to items");
+    expect(html).toContain("$46.06");
+    expect(html).toContain("Doesn&#x27;t match the day-end settlement");
+    expect(html).not.toContain("Matches the day-end settlement");
+    const money = tonightSummaryFixture();
+    (money.report as { reconciliation: Record<string, unknown> }).reconciliation.matchesSettlement =
+      false;
+    expect(render(money)).toContain("are not counted in these figures yet");
+  });
   it("v15 finding a: never lists a paid table under not paid yet at $0.00", () => {
     const html = render(tonightSummaryFixture());
     const notPaid = html.slice(

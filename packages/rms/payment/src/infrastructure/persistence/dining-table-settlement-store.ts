@@ -640,7 +640,9 @@ export function createPostgresDiningTableSettlementStore(options: {
       const refunds = await cashRefunds(tx, "r.refunded_at>=$3 AND r.refunded_at<$4", [from, to]);
       const taken = await settlements(
         tx,
-        "((s.taken_at>=$3 AND s.taken_at<$4) OR s.settlement_id=ANY($5::uuid[])) ORDER BY s.taken_at,s.settlement_id LIMIT 100001",
+        // WP-2423: and the other parts of a split bill one of them paid in the window (a round
+        // sold in parts adds up only with all of them).
+        "((s.taken_at>=$3 AND s.taken_at<$4) OR s.settlement_id=ANY($5::uuid[]) OR s.split_plan_id IN (SELECT w.split_plan_id FROM rms_payment.dining_table_settlement w WHERE w.brand_id=$1 AND w.store_id=$2 AND w.taken_at>=$3 AND w.taken_at<$4 AND w.split_plan_id IS NOT NULL)) ORDER BY s.taken_at,s.settlement_id LIMIT 100001",
         [from, to, [...new Set(refunds.map((refund) => refund.settlementReference))]],
       );
       // DEC-DINE-IN-PAY-LATER (decision 4): bills written off when the guests left, by when the

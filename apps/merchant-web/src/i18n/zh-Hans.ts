@@ -5986,6 +5986,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Dishes cancelled after payment (refunded)": "付款后取消的菜（已退款）",
   "Rounds and orders cancelled unpaid": "未付款取消的轮次和订单",
   "Matches the day-end settlement": "和日结对得上",
+  "Doesn't match the day-end settlement": "和日结对不上",
+  "Some of tonight's payments are not counted in these figures yet. Refresh; if it stays, check the day in Settlement and tell the manager before closing.":
+    "今晚有些付款还没算进这些数字。请刷新；如果还是这样，到“结算”核对当天，并在打烊前告诉经理。",
   "These are the reports' figures for today so far, from the same records as tomorrow's day-end settlement. Payments taken after the business day ends count on the next day.":
     "这些是报表“今天到目前为止”的数字，和明早的日结用同一来源。营业日结束后再收的款算在下一天。",
   "Reading tonight's figures…": "正在读取今晚的数字…",
