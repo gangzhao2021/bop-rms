@@ -25,6 +25,7 @@ import {
   MerchantSingleStoreListingError,
   MerchantSoleOperatorGateError,
   requireMerchantBrandSingleStore,
+  type MerchantDirectListingMode,
   requireMerchantBrandSoleOperator,
 } from "./merchant-sole-operator.js";
 
@@ -538,9 +539,10 @@ export function createMerchantOptionPrices(options: {
           const single = body.action === "Publish" && body.approvalMode === "SingleStoreListing";
           // WP-2423 item 8 ⑥: the author's own publication at a single store ("List it"): they
           // hold price approval and the Brand has exactly one store (held until this commits).
+          let listingMode: MerchantDirectListingMode = "SingleStoreListing";
           if (single)
             try {
-              await requireMerchantBrandSingleStore(tx as never, {
+              listingMode = await requireMerchantBrandSingleStore(tx as never, {
                 brandReference: s.brand,
                 storeReference: s.store,
                 actorReference: s.actor,
@@ -688,6 +690,7 @@ export function createMerchantOptionPrices(options: {
                     actorReference: s.actor,
                     listedAt: result.occurredAt,
                     auditReference: String(result.auditReference),
+                    approvalMode: listingMode,
                   });
                 if (soleOperatorMfaAt !== null && result.outcome === "Committed")
                   await recordOptionPriceSoleOperatorApproval(tx as never, {

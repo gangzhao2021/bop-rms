@@ -5498,6 +5498,15 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a (coordinator 2026-10-30, Owner standing authority): a Brand's Owner opens another Store from the product"
+    },
+    {
+      "type": "routine",
+      "schema": "bop_permission",
+      "object": "bop_permission.actor_holds_brand_owner_authority(uuid,uuid)",
+      "column": null,
+      "privilege": "EXECUTE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9 (coordinator 2026-10-31, revision of trade-off 7, Owner may overrule): at a Brand with several Stores a Brand menu change is listed directly only by someone with Brand Owner authority"
     }
   ]
 }

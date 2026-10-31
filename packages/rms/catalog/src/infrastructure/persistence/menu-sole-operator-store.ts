@@ -111,9 +111,13 @@ export async function recordMenuSingleStoreListing(
     readonly actorReference: string;
     readonly listedAt: string;
     readonly auditReference: string;
+    /** DEC-BRAND-MULTI-STORE segment 9: at a Brand with several Stores, by its Owner. */
+    readonly approvalMode?: "SingleStoreListing" | "BrandOwnerListing";
   },
 ): Promise<"Created" | "AlreadyCommitted"> {
   const ref = (value: string) => String(parseCatalogReference(value));
+  const mode = input.approvalMode ?? "SingleStoreListing";
+  if (mode !== "SingleStoreListing" && mode !== "BrandOwnerListing") return conflict();
   const v = {
     brand: ref(input.brandReference),
     store: ref(input.storeReference),
@@ -146,7 +150,7 @@ export async function recordMenuSingleStoreListing(
     return "AlreadyCommitted";
   }
   await tx.query(
-    "INSERT INTO rms_catalog.menu_single_store_listing (brand_id,approval_evidence_id,operation_id,menu_id,menu_version_id,lifecycle_id,approval_mode,listing_store_id,actor_id,listed_at,audit_id) VALUES ($1,$2,$3,$4,$5,$6,'SingleStoreListing',$7,$8,$9,$10)",
+    "INSERT INTO rms_catalog.menu_single_store_listing (brand_id,approval_evidence_id,operation_id,menu_id,menu_version_id,lifecycle_id,approval_mode,listing_store_id,actor_id,listed_at,audit_id) VALUES ($1,$2,$3,$4,$5,$6,$11,$7,$8,$9,$10)",
     [
       v.brand,
       v.evidence,
@@ -158,6 +162,7 @@ export async function recordMenuSingleStoreListing(
       v.actor,
       v.at,
       v.audit,
+      mode,
     ],
   );
   return "Created";

@@ -667,7 +667,11 @@ export async function recordRecipeReview(
     /** WP-2423 item 8 ⑥: the author reviews alone, listing at the Brand's one store. The caller
      * has read, in this transaction, that the Brand has exactly that one store (the database
      * holds it until commit). */
-    readonly singleStoreListing?: { readonly storeReference: string };
+    readonly singleStoreListing?: {
+      readonly storeReference: string;
+      /** DEC-BRAND-MULTI-STORE segment 9: at a Brand with several Stores, by its Owner. */
+      readonly mode?: "SingleStoreListing" | "BrandOwnerListing";
+    };
   },
 ) {
   await tx.query(scopeSql, [scope.brandReference, ""]);
@@ -723,13 +727,17 @@ export async function recordRecipeReview(
   const mode = sole
     ? ("SoleOperator" as const)
     : input.singleStoreListing !== undefined
-      ? ("SingleStoreListing" as const)
+      ? (input.singleStoreListing.mode ?? ("SingleStoreListing" as const))
       : ("Independent" as const);
   const marked = mode !== "Independent";
   if (!marked && (ownRecipe || otherKind !== undefined))
     return fail("RECIPE_AUTHORING_REVIEWER_NOT_INDEPENDENT");
   // A single-store listing is the author's own; the sole operator may also review another's.
-  if (marked && !ownRecipe && (otherKind === undefined || mode === "SingleStoreListing"))
+  if (
+    marked &&
+    !ownRecipe &&
+    (otherKind === undefined || mode === "SingleStoreListing" || mode === "BrandOwnerListing")
+  )
     return fail("RECIPE_AUTHORING_INVALID");
   if (marked && otherKind !== undefined && otherKind.reviewMode !== mode)
     return fail("RECIPE_AUTHORING_REVIEWER_NOT_INDEPENDENT");

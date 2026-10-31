@@ -235,12 +235,17 @@ export async function recordBundleSingleStoreListing(
     readonly actorReference: string;
     readonly listedAt: string;
     readonly auditReference: string;
+    /** DEC-BRAND-MULTI-STORE segment 9: at a Brand with several Stores, by its Owner. */
+    readonly approvalMode?: "SingleStoreListing" | "BrandOwnerListing";
   },
 ): Promise<void> {
+  const mode = input.approvalMode ?? "SingleStoreListing";
+  if (mode !== "SingleStoreListing" && mode !== "BrandOwnerListing")
+    throw new Error("BUNDLE_LISTING_MODE_INVALID");
   await tx.query(
     `INSERT INTO rms_catalog.bundle_single_store_listing(brand_id,operation_id,bundle_id,bundle_version_id,approval_mode,
        listing_store_id,actor_id,listed_at,audit_id)
-     VALUES($1,$2,$3,$4,'SingleStoreListing',$5,$6,$7,$8)`,
+     VALUES($1,$2,$3,$4,$9,$5,$6,$7,$8)`,
     [
       parseCatalogReference(input.brandReference),
       parseCatalogReference(input.operationReference),
@@ -250,6 +255,7 @@ export async function recordBundleSingleStoreListing(
       parseCatalogReference(input.actorReference),
       input.listedAt,
       parseCatalogReference(input.auditReference),
+      mode,
     ],
   );
 }

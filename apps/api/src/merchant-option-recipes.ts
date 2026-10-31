@@ -468,11 +468,12 @@ export function createMerchantOptionRecipes(options: {
                       ).actorMfaAt,
                     }
                   : undefined;
-              if (body.approvalMode === "SingleStoreListing") await singleStore(s.actor);
+              const listingMode =
+                body.approvalMode === "SingleStoreListing" ? await singleStore(s.actor) : null;
               return await reviewOptionRecipeChange(rtx(tx), scope, {
                 ...(soleOperator === undefined ? {} : { soleOperator }),
-                ...(body.approvalMode === "SingleStoreListing"
-                  ? { singleStoreListing: { storeReference: s.storeReference } }
+                ...(listingMode !== null
+                  ? { singleStoreListing: { storeReference: s.storeReference, mode: listingMode } }
                   : {}),
                 operationReference: body.operationReference,
                 actorReference: s.actor,

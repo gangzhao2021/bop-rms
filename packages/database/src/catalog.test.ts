@@ -775,6 +775,10 @@ describe("migration catalog", () => {
       "2000_131_alter_dining_staff_call_checking_out",
       "2000_132_create_order_tax_rounding_adjustment",
       "2000_133_create_store_opening",
+      "2000_134_create_brand_owner_authority",
+      "2000_135_alter_catalog_brand_owner_listing",
+      "2000_136_alter_pricing_brand_owner_listing",
+      "2000_137_alter_recipe_brand_owner_listing",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -1992,6 +1996,8 @@ describe("migration catalog", () => {
       ["2000_004_alter_store_role_provisioning_upgrade", "@bop/permission", "bop_permission"],
       ["2000_006_create_role_assignment_change", "@bop/permission", "bop_permission"],
       ["2000_010_create_brand_role_provisioning", "@bop/permission", "bop_permission"],
+      // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9: Brand Owner authority read.
+      ["2000_134_create_brand_owner_authority", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",

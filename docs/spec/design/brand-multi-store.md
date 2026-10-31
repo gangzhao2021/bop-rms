@@ -79,3 +79,14 @@
 9. **品牌层菜单与门店改价、售罄**（决定 5）。门槛：受限角色验收（价格是钱，完整证据）与浏览器测试。
 
 每段完整证据（受限角色验收、会咬），每段一行 WP-2423。
+
+## 修订取舍 7：多店品牌的菜单（协调人 2026-10-31，依 Owner 常设授权；Owner 可推翻）
+
+原话：“Segment 9 decision: B, narrowed as below. I'm deciding this as coordinator under the Owner's standing authority. Record it as a revision of trade-off 7, quoting this message, and state that the Owner can overrule it.” 规则：
+
+1. 店长、区域经理、老板在各店直接改本店价格、今天售完、本店隐藏；改价先显示“原价 → 新价”确认，记录是谁改的。
+2. 品牌层菜单改动（菜名、规格、新菜、套餐、过敏原）只有持有品牌老板权限的人上架才直接生效，每次上架记录是谁（与单店上架相同，记为 BrandOwnerListing）。
+3. 没有品牌老板权限的店长或区域经理改品牌菜单，存为草稿等品牌老板审核；品牌老板在自己的页面一次操作上架。绝不允许非老板自己批准。
+4. 单店路径不变。
+
+“品牌老板权限”= 在品牌层（不限门店）持有 `organization.brand.manage`（品牌老板模板特有）。数据库对 BrandOwnerListing 记录同样核对（`bop_permission.actor_holds_brand_owner_authority`）。
