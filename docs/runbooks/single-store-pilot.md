@@ -1993,7 +1993,13 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    others: the services log `PILOT_HTTPS_STORE_UNAVAILABLE`, `PILOT_CUSTOMER_STORE_UNAVAILABLE`
    or `PILOT_API_STORE_UNAVAILABLE` with its code and `stores/<name>`, and serve the other
    Stores; the supervisor shows attention for that Store's workers only. To redo it: set
-   `stores.json` aside, delete `stores/<name>/`, rerun the directory command, restart.
+   `stores.json` aside, delete `stores/<name>/`, rerun the directory command, restart. The
+   directory command also creates the Store's TEST payment simulator through its own initialiser
+   (its tables, no records); running it again on an existing Store is refused and leaves the
+   Store's files as they are. A Store directory written before that (an empty
+   `simulated-provider.sqlite`) is repaired with the same command and `provider
+/app/.local/pilot-v15/stores/<name>` (no other flags; it adds missing tables and never removes a
+   record).
 
 5. **Restart** in a planned update window. Only the Owner (Store Owner or Brand Owner) adds
    someone from another Store to this one (Staff, "Your staff at other stores"): moving staff

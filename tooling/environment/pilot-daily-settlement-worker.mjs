@@ -11,6 +11,7 @@ import {
   supervisedCycleFailures,
 } from "../../apps/worker/dist/outbox-workload.js";
 import { createPilotWorkloadHealthObserver } from "./pilot-workload-health.mjs";
+import { reportUnexpected } from "./pilot-unexpected.mjs";
 export async function startPilotDailySettlementWorker({
   directory,
   createResources,
@@ -69,7 +70,9 @@ export async function startPilotDailySettlementWorker({
         },
       },
     });
-  } catch {
+  } catch (error) {
+    // v15 2026-10-31: never a silent start failure — its code (no secrets or ids) goes to the log.
+    reportUnexpected("DAILY_SETTLEMENT_WORKER_START_UNAVAILABLE", error);
     await close();
     process.exitCode = 1;
   }
@@ -89,7 +92,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       directory,
       createResources: () => createBackgroundPilotResources(directory),
     });
-  } catch {
+  } catch (error) {
+    reportUnexpected("DAILY_SETTLEMENT_WORKER_START_UNAVAILABLE", error);
     console.error("DAILY_SETTLEMENT_WORKER_START_UNAVAILABLE");
     process.exitCode = 1;
   }

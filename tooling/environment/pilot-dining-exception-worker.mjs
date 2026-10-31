@@ -12,6 +12,7 @@ import {
 } from "../../apps/worker/dist/outbox-workload.js";
 import { createInternalDiningProjection } from "./pilot-dining-projection.mjs";
 import { createPilotWorkloadHealthObserver } from "./pilot-workload-health.mjs";
+import { reportUnexpected } from "./pilot-unexpected.mjs";
 export async function startPilotDiningExceptionWorker({
   directory,
   createResources,
@@ -60,7 +61,9 @@ export async function startPilotDiningExceptionWorker({
         },
       },
     });
-  } catch {
+  } catch (error) {
+    // v15 2026-10-31: never a silent start failure — its code (no secrets or ids) goes to the log.
+    reportUnexpected("DINING_EXCEPTION_WORKER_START_UNAVAILABLE", error);
     await close();
     process.exitCode = 1;
   }
@@ -96,7 +99,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         return resources;
       },
     });
-  } catch {
+  } catch (error) {
+    reportUnexpected("DINING_EXCEPTION_WORKER_START_UNAVAILABLE", error);
     console.error("DINING_EXCEPTION_WORKER_START_UNAVAILABLE");
     process.exitCode = 1;
   }

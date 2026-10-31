@@ -5,7 +5,10 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
-import { issueInternalTestStoreDirectory } from "./pilot-internal-test-store-directory.mjs";
+import {
+  issueInternalTestStoreDirectory,
+  provisionStoreSimulator,
+} from "./pilot-internal-test-store-directory.mjs";
 
 /**
  * WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segments 3b/3d — InternalTest only, a
@@ -20,6 +23,10 @@ import { issueInternalTestStoreDirectory } from "./pilot-internal-test-store-dir
  *               planned restart serves it: only the files its services read, its own identities
  *               (the same on every run for the same Store) and its own default stock site, read
  *               from the database (`--stock-site` must name it if given; never another Store's);
+ *   provider  — the Store's TEST payment simulator through its own initialiser (created when
+ *               absent, missing tables added, no record removed); the directory given is the
+ *               Store's (`…/stores/<name>`). `directory` runs it; this repairs a directory
+ *               written before it did;
  *   settlement — once the Store's first business day has closed, its day-end settlement
  *               coverage (that day), read as the services do; its settlement worker starts at the
  *               next restart. The directory given is the Store's (`…/stores/<name>`);
@@ -66,6 +73,7 @@ const flags = {
     "--stock-site": "stockSiteReference",
   },
   settlement: { "--database": "expectedDatabaseName", "--migration-env": "envFile" },
+  provider: {},
   renew: {
     "--database": "expectedDatabaseName",
     "--migration-env": "envFile",
@@ -422,7 +430,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
             ? await renew(options)
             : options.command === "stock-site"
               ? await stockSite(options)
-              : await directory(options);
+              : options.command === "provider"
+                ? await provisionStoreSimulator(options.directory)
+                : await directory(options);
     console.log(JSON.stringify(result));
   } catch (error) {
     const reason = typeof error?.reason === "string" ? error.reason : "unexpected-error";
