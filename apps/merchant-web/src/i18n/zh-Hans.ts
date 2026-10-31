@@ -1602,6 +1602,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Inuvik, Northwest Territories": "伊努维克，西北地区",
   Invalidated: "已失效",
   "Inventory Manager": "库存经理",
+  // v20 DEC-BRAND-MULTI-STORE.
+  "Area Manager": "区域经理",
+  "Store Manager permissions in each of the Stores they run": "在所管的每家门店有门店经理的权限",
   "Inventory adjustment execute": "执行库存调整",
   "Inventory count execute": "执行盘点",
   "Inventory item": "库存品项",

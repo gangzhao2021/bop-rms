@@ -51,7 +51,14 @@ export async function openSyntheticStoreRoles(admin, input) {
     ownerAssignment: owner ?? null,
     effectiveFrom: at,
     reasonCode: "STORE_OPENING",
-    templates: ["owner", "store-manager", "front-of-house", "kitchen", "inventory-manager"],
+    templates: [
+      "owner",
+      "store-manager",
+      "area-manager",
+      "front-of-house",
+      "kitchen",
+      "inventory-manager",
+    ],
     nextReference: next,
   });
   const keys = generateKeyPairSync("ed25519");

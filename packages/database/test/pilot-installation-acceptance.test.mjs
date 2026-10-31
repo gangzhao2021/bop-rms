@@ -181,7 +181,8 @@ it("installs a Pilot Store from an empty database with the operator tools and st
           "--brand": brand,
           "--store": store,
           "--effective-from": new Date(Date.now() - 60_000).toISOString(),
-          "--templates": "owner,store-manager,front-of-house,kitchen,inventory-manager",
+          "--templates":
+            "owner,store-manager,area-manager,front-of-house,kitchen,inventory-manager",
           "--out": file("roles-plan.json"),
           "--owner-actor": owner,
           "--owner-membership": membership,

@@ -235,6 +235,7 @@ it("provisions a Store's template System roles once under an independent signed 
         )
       ).rows.map((row) => row.action_code);
       assert.deepEqual(kitchen, [...storeRoleTemplateActions("kitchen")]);
+
       const administration = (
         await admin.query(
           "SELECT role_code,role_type,lifecycle,submitted_by_reference::text s,approved_by_reference::text a FROM bop_permission.role_administration_version ORDER BY role_code",
@@ -320,7 +321,14 @@ it("provisions a Store's template System roles once under an independent signed 
         existingRoles: current.roles,
         effectiveFrom: at,
         reasonCode: "STORE_ROLE_TEMPLATE_UPGRADE",
-        templates: ["owner", "store-manager", "front-of-house", "kitchen", "inventory-manager"],
+        templates: [
+          "owner",
+          "store-manager",
+          "area-manager",
+          "front-of-house",
+          "kitchen",
+          "inventory-manager",
+        ],
         nextReference: next,
       });
       // Platform may assign an Owner only while the Store has none.
@@ -342,7 +350,14 @@ it("provisions a Store's template System roles once under an independent signed 
         },
         effectiveFrom: at,
         reasonCode: "STORE_ROLE_TEMPLATE_UPGRADE",
-        templates: ["owner", "store-manager", "front-of-house", "kitchen", "inventory-manager"],
+        templates: [
+          "owner",
+          "store-manager",
+          "area-manager",
+          "front-of-house",
+          "kitchen",
+          "inventory-manager",
+        ],
         nextReference: next,
       });
       await assert.rejects(
@@ -364,7 +379,12 @@ it("provisions a Store's template System roles once under an independent signed 
       );
       assert.deepEqual(
         { status: upgraded.status, added: upgraded.addedCount, revoked: upgraded.revokedCount },
-        { status: "Applied", added: 1, revoked: 0 },
+        // The Store Manager's restored grant, and the new Area Manager role's (v20).
+        {
+          status: "Applied",
+          added: 1 + storeRoleTemplateActions("area-manager").length,
+          revoked: 0,
+        },
       );
       await admin.query(
         "SELECT set_config('bop.brand_id',$1,false),set_config('bop.store_id',$2,false)",
@@ -376,8 +396,23 @@ it("provisions a Store's template System roles once under an independent signed 
             "SELECT max(version)::int v,count(DISTINCT role_id)::int n FROM bop_permission.role_administration_version",
           )
         ).rows[0],
-        { v: 2, n: 5 },
+        { v: 2, n: 6 },
       );
+      // v20 DEC-BRAND-MULTI-STORE: a Store opened before v20 gains the Area Manager role on upgrade,
+      // holding the Store Manager's actions exactly.
+      const roleActions = async (roleCode) =>
+        (
+          await admin.query(
+            `SELECT d.action_code FROM bop_permission.role r JOIN bop_permission.permission_grant g ON g.role_id=r.role_id
+             JOIN bop_permission.permission_definition d ON d.permission_id=g.permission_id
+             WHERE r.role_code=$2 AND r.store_id=$1 AND g.lifecycle='Active' ORDER BY d.action_code COLLATE "C"`,
+            [store, roleCode],
+          )
+        ).rows.map((row) => row.action_code);
+      assert.deepEqual(await roleActions("area_manager"), [
+        ...storeRoleTemplateActions("area-manager"),
+      ]);
+      assert.deepEqual(await roleActions("area_manager"), await roleActions("store_manager"));
       const repeated = await transaction((tx) =>
         provisionStoreRoles(
           tx,

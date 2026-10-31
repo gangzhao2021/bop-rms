@@ -844,7 +844,7 @@ All these references must be UUIDv7 strings. Role mapping has exactly `Manager`,
 `Owner` and `Finance`, each an array of Store/Brand role codes from the installed
 role catalog, each code in one group only (WP-2423 Q5: synthetic or unknown codes are
 refused at startup). The refund mapping is by real Store roles: `Manager:
-["store_manager"]`, `Owner: ["store_owner", "brand_owner"]`, `Finance: []` (the catalog
+["store_manager", "area_manager"]`, `Owner: ["store_owner", "brand_owner"]`, `Finance: []` (the catalog
 has no finance role yet). `node --import
 ./tooling/environment/register-workspace-typescript.mjs
 tooling/environment/pilot-refund-role-mapping.mjs --directory <runtime dir>` shows the

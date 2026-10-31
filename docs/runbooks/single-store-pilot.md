@@ -2185,7 +2185,7 @@ the local entry certificate the `front` service re-encrypts to (after step 5, it
 3. Permission catalog: `node --import … tooling/environment/permission-catalog-install.mjs --env-file <migration env> --confirm-target <target> --operator <operator> --approved-by <approver> --approval-evidence <uuid>`.
 4. Brand and Store records: the governed Brand/Store opening (B2, external identity and approval).
 5. Store roles: `store-role-provisioning.mjs` `keygen` (approver, once; publish the key with purpose
-   `STORE_ROLE_PROVISIONING`), `prepare --templates owner,store-manager,front-of-house,kitchen,inventory-manager …`,
+   `STORE_ROLE_PROVISIONING`), `prepare --templates owner,store-manager,area-manager,front-of-house,kitchen,inventory-manager …`,
    `sign`, `apply` (no Owner yet; the first Owner comes in step 7).
 6. In the product, the Owner (with the Platform operator for the first sign-in, step 7) publishes
    Store setup with its approved go-live check, the menu, and the stock site **at least one full

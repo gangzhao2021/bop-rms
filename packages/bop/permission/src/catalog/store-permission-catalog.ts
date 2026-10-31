@@ -61,8 +61,11 @@
  * ordering.order.comp comps or discounts dishes the kitchen started or the table was served,
  * before the table pays (an append-only compensating record). Owner and Store Manager hold it
  * (Store Manager through the `ordering.order.` prefix); Front of House does not.
+ * v20 (2026-10-30, WP-2423 DEC-BRAND-MULTI-STORE, Owner trade-off 14): the Area Manager template
+ * (`area_manager`) runs several Stores with the Store Manager's permissions; it is assigned in each
+ * Store they run. No permission code is added.
  */
-export const storePermissionCatalogVersion = 19 as const;
+export const storePermissionCatalogVersion = 20 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -477,7 +480,7 @@ export const legacyPermissionReplacements: Readonly<Record<string, readonly stri
   });
 
 export type StoreRoleTemplateCode =
-  "owner" | "store-manager" | "front-of-house" | "kitchen" | "inventory-manager";
+  "owner" | "store-manager" | "area-manager" | "front-of-house" | "kitchen" | "inventory-manager";
 /** v10: the Store-floor sold-out code; Brand templates hold the broader availability code instead. */
 const storeFloorOnly = new Set(["catalog.sku.sold_out.mark"]);
 const pick = (prefixes: readonly string[]) =>
@@ -485,66 +488,69 @@ const pick = (prefixes: readonly string[]) =>
     .map((entry) => entry.code)
     .filter((code) => prefixes.some((prefix) => code === prefix || code.startsWith(prefix)));
 
+const storeManagerTemplate: readonly string[] = Object.freeze([
+  "merchant.access",
+  "organization.store.read",
+  // v8: drafts and submits Store hours; the Owner approves and publishes them.
+  "organization.store.update",
+  // v16: submits hours changes for review when the configuration came from Store setup; it
+  // holds no catalog/pricing permission, so it cannot submit menus or prices.
+  "publishing.draft.create",
+  "publishing.review.submit",
+  "organization.staff.read",
+  "identity.role.read",
+  "identity.role.approve",
+  // v15 (WP-2423 Q18 option A): sets up shared tablets and resets staff PINs.
+  "identity.store_device.manage",
+  "identity.staff_pin.reset",
+  ...pick([
+    "ordering.order.",
+    "kitchen.",
+    "fulfillment.",
+    "dining.",
+    "operations.",
+    "task.",
+    "workflow.",
+    // v12 (WP-2423 Q14): sales reports and their CSV export.
+    "reporting.",
+  ]),
+  "payment.refund.request",
+  "payment.refund.execute",
+  // v17 (WP-2423): reads the day-end settlement.
+  "payment.settlement.read",
+  ...pick([
+    "inventory.item.read",
+    "inventory.item.history.read",
+    "inventory.item.reorder.manage",
+    "inventory.location.",
+    "inventory.stock.read",
+    "inventory.receipt.",
+    "inventory.count.",
+    "inventory.waste.",
+    "inventory.transfer.",
+    "inventory.movement.read",
+    "inventory.adjustment.read",
+    "inventory.adjustment.execute",
+  ]),
+  "catalog.product.read",
+  "catalog.sku.read",
+  "catalog.menu.read",
+  "catalog.product.availability.manage",
+  "catalog.sku.availability.manage",
+  "catalog.sku.sold_out.mark",
+  "catalog.product.suspend",
+  "catalog.product.resume",
+  "catalog.sku.suspend",
+  "catalog.sku.resume",
+  "recipe.read",
+]);
 /** DEC-PERM-CATALOG Store role templates; an Owner may adjust a Store's copy. */
 export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly string[]>> =
   Object.freeze({
     owner: Object.freeze(catalog.map((entry) => entry.code)),
-    "store-manager": Object.freeze([
-      "merchant.access",
-      "organization.store.read",
-      // v8: drafts and submits Store hours; the Owner approves and publishes them.
-      "organization.store.update",
-      // v16: submits hours changes for review when the configuration came from Store setup; it
-      // holds no catalog/pricing permission, so it cannot submit menus or prices.
-      "publishing.draft.create",
-      "publishing.review.submit",
-      "organization.staff.read",
-      "identity.role.read",
-      "identity.role.approve",
-      // v15 (WP-2423 Q18 option A): sets up shared tablets and resets staff PINs.
-      "identity.store_device.manage",
-      "identity.staff_pin.reset",
-      ...pick([
-        "ordering.order.",
-        "kitchen.",
-        "fulfillment.",
-        "dining.",
-        "operations.",
-        "task.",
-        "workflow.",
-        // v12 (WP-2423 Q14): sales reports and their CSV export.
-        "reporting.",
-      ]),
-      "payment.refund.request",
-      "payment.refund.execute",
-      // v17 (WP-2423): reads the day-end settlement.
-      "payment.settlement.read",
-      ...pick([
-        "inventory.item.read",
-        "inventory.item.history.read",
-        "inventory.item.reorder.manage",
-        "inventory.location.",
-        "inventory.stock.read",
-        "inventory.receipt.",
-        "inventory.count.",
-        "inventory.waste.",
-        "inventory.transfer.",
-        "inventory.movement.read",
-        "inventory.adjustment.read",
-        "inventory.adjustment.execute",
-      ]),
-      "catalog.product.read",
-      "catalog.sku.read",
-      "catalog.menu.read",
-      "catalog.product.availability.manage",
-      "catalog.sku.availability.manage",
-      "catalog.sku.sold_out.mark",
-      "catalog.product.suspend",
-      "catalog.product.resume",
-      "catalog.sku.suspend",
-      "catalog.sku.resume",
-      "recipe.read",
-    ]),
+    "store-manager": storeManagerTemplate,
+    // v20 (DEC-BRAND-MULTI-STORE): the Store Manager's permissions, in each Store they run.
+    "area-manager": storeManagerTemplate,
     "front-of-house": Object.freeze([
       "merchant.access",
       "ordering.order.read",
@@ -588,6 +594,7 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
 export const storeRoleTemplateCodes: readonly StoreRoleTemplateCode[] = Object.freeze([
   "owner",
   "store-manager",
+  "area-manager",
   "front-of-house",
   "kitchen",
   "inventory-manager",
@@ -609,6 +616,11 @@ export const storeRoleTemplateProfiles: Readonly<
     displayName: "Store Manager",
     description:
       "Orders, exceptions, refunds within limit, kitchen, pickup, stock and availability",
+  },
+  "area-manager": {
+    roleCode: "area_manager",
+    displayName: "Area Manager",
+    description: "Store Manager permissions in each of the Stores they run",
   },
   "front-of-house": {
     roleCode: "front_of_house",
