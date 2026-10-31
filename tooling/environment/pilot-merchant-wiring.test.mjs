@@ -76,7 +76,9 @@ it("wires every method the merchant BFF routes call on options the pilot builds 
     ))
       called.set(match[1], new Set([...(called.get(match[1]) ?? []), match[2]]));
   }
-  expect(called.get("storeReports")).toEqual(new Set(["read", "tonight", "export"]));
+  expect(called.get("storeReports")).toEqual(
+    new Set(["read", "tonight", "export", "storeTonight"]),
+  );
   // Whole-line comments only (a "//" inside a string, such as a URL, stays).
   const composition = (await readFile(pilot, "utf8")).replace(/^\s*\/\/.*$/gmu, "");
   const missing = [];

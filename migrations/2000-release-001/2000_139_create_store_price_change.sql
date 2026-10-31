@@ -66,6 +66,8 @@ $$;
 REVOKE ALL ON FUNCTION rms_pricing.reject_store_price_change_mutation() FROM PUBLIC;
 CREATE TRIGGER store_price_change_append_only BEFORE UPDATE OR DELETE ON rms_pricing.store_price_change
  FOR EACH ROW EXECUTE FUNCTION rms_pricing.reject_store_price_change_mutation();
+CREATE TRIGGER store_price_change_no_truncate BEFORE TRUNCATE ON rms_pricing.store_price_change
+ FOR EACH STATEMENT EXECUTE FUNCTION rms_pricing.reject_store_price_change_mutation();
 
 -- The entries of a version that a Store price may differ in, as comparable text: one line per
 -- entry, without its own identity.
