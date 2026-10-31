@@ -110,7 +110,8 @@ export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
   route("/operations/sign-in"),
   route("/app/identity/step-up-complete"),
   // Layout reviews without sources: local demo only.
-  route("/app/organization/stores", home),
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Stores page (switch, and open a Store).
+  listedRoute("/app/organization/stores", "ORG-STORE-LIST", home),
   route("/app/organization/stores/:id", home),
   route("/app/organization/stores/:id/live-gate", home),
   // The Store capability page has no source in the pilot (its read answers 503) and no link.

@@ -31,6 +31,7 @@ import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   requireMerchantBrandSingleStore,
+  type MerchantDirectListingMode,
   requireMerchantBrandSoleOperator,
 } from "./merchant-sole-operator.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -182,6 +183,7 @@ export function createMerchantMenuPublicationCommand(options: {
     )
       return fail("CATALOG_INPUT_INVALID");
     let singleStoreListed = false;
+    let listingMode: MerchantDirectListingMode = "SingleStoreListing";
     let soleOperatorMfaAt: string | null = null;
     return options.merchant.transactions.run(async (identityTransaction) => {
       const transaction: ProductLifecycleTransaction = {
@@ -375,15 +377,18 @@ export function createMerchantMenuPublicationCommand(options: {
                     // WP-2423 item 8 ⑥: the Brand has exactly one store (held to commit), and the
                     // caller still holds menu approval.
                     singleStoreListing: async () => {
-                      await requireMerchantBrandSingleStore(tx as unknown as ConsumerTransaction, {
-                        brandReference: String(brand),
-                        storeReference: String(scope.selectedStoreReference),
-                        actorReference: String(scope.actorReference),
-                        permissionCode: "catalog.menu.approve",
-                        observedAt: String(command.requestedAt),
-                        allowed: async () =>
-                          (await permission()) !== null && (await publishingApprovalAllowed()),
-                      });
+                      listingMode = await requireMerchantBrandSingleStore(
+                        tx as unknown as ConsumerTransaction,
+                        {
+                          brandReference: String(brand),
+                          storeReference: String(scope.selectedStoreReference),
+                          actorReference: String(scope.actorReference),
+                          permissionCode: "catalog.menu.approve",
+                          observedAt: String(command.requestedAt),
+                          allowed: async () =>
+                            (await permission()) !== null && (await publishingApprovalAllowed()),
+                        },
+                      );
                       singleStoreListed = true;
                       await tx.query(
                         "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
@@ -504,7 +509,7 @@ export function createMerchantMenuPublicationCommand(options: {
                     ? { afterSummary: { approvalMode: "SoleOperator" } }
                     : {}),
                   ...(single && input.action === "Approve"
-                    ? { afterSummary: { approvalMode: "SingleStoreListing" } }
+                    ? { afterSummary: { approvalMode: listingMode } }
                     : {}),
                 },
               };
@@ -536,6 +541,7 @@ export function createMerchantMenuPublicationCommand(options: {
               auditReference: String(
                 parseCatalogReference(options.reference("Audit", command.operationReference)),
               ),
+              approvalMode: listingMode,
             });
         }
         if (sole && options.reviewApproval) {

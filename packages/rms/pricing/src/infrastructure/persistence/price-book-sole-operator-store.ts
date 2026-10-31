@@ -136,8 +136,12 @@ export async function recordPricingSingleStoreListing(
     readonly actorReference: string;
     readonly listedAt: string;
     readonly auditReference: string;
+    /** DEC-BRAND-MULTI-STORE segment 9: at a Brand with several Stores, by its Owner. */
+    readonly approvalMode?: "SingleStoreListing" | "BrandOwnerListing";
   },
 ): Promise<"Created" | "AlreadyCommitted"> {
+  const mode = input.approvalMode ?? "SingleStoreListing";
+  if (mode !== "SingleStoreListing" && mode !== "BrandOwnerListing") return conflict();
   const table =
     input.subject === "PriceBook"
       ? { name: "price_book_single_store_listing", target: "price_book_id" }
@@ -166,8 +170,17 @@ export async function recordPricingSingleStoreListing(
     return "AlreadyCommitted";
   }
   await tx.query(
-    `INSERT INTO rms_pricing.${table.name} (operation_id,brand_id,${table.target},approval_mode,listing_store_id,actor_id,listed_at,audit_id) VALUES ($1,$2,$3,'SingleStoreListing',$4,$5,$6,$7)`,
-    [value.operation, value.brand, value.target, value.store, value.actor, value.at, value.audit],
+    `INSERT INTO rms_pricing.${table.name} (operation_id,brand_id,${table.target},approval_mode,listing_store_id,actor_id,listed_at,audit_id) VALUES ($1,$2,$3,$8,$4,$5,$6,$7)`,
+    [
+      value.operation,
+      value.brand,
+      value.target,
+      value.store,
+      value.actor,
+      value.at,
+      value.audit,
+      mode,
+    ],
   );
   return "Created";
 }

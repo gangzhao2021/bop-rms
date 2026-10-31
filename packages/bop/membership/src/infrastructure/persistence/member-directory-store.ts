@@ -374,6 +374,92 @@ export async function addInvitedStoreMember(
 }
 
 /**
+ * WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 8: the Brand's current (Active) members
+ * who have no place at this Store yet (they work at another of its Stores, or hold only a Brand
+ * role), with their names, for "Add to this store". Memberships and names are the Brand's; this
+ * Store's own assignments decide who is already here.
+ */
+export async function listBrandMembersNotAtStore(
+  tx: MemberDirectoryTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+): Promise<
+  readonly {
+    readonly actorReference: string;
+    readonly membershipReference: string;
+    readonly displayName: string | null;
+  }[]
+> {
+  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  const rows = (
+    await tx.query(
+      `SELECT m.actor_id::text actor,m.membership_id::text membership,p.display_name
+       FROM bop_membership.membership m
+       LEFT JOIN LATERAL (SELECT display_name FROM bop_membership.member_profile_version x
+         WHERE x.membership_id=m.membership_id ORDER BY x.version DESC LIMIT 1) p ON true
+       WHERE m.brand_id=$1 AND m.lifecycle='Active'
+         AND NOT EXISTS (SELECT 1 FROM bop_membership.store_assignment s
+           WHERE s.brand_id=m.brand_id AND s.store_id=$2 AND s.membership_id=m.membership_id AND s.lifecycle<>'Ended')
+       ORDER BY p.display_name NULLS LAST,m.actor_id LIMIT 201`,
+      [scope.brandReference, scope.storeReference],
+    )
+  ).rows;
+  if (rows.length > 200) throw new MemberDirectoryError("MEMBER_DIRECTORY_INPUT_INVALID");
+  return Object.freeze(
+    rows.map((item) =>
+      Object.freeze({
+        actorReference: String(item.actor),
+        membershipReference: String(item.membership),
+        displayName: item.display_name === null ? null : String(item.display_name),
+      }),
+    ),
+  );
+}
+
+/**
+ * WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: a current (Active) member of the Brand gets a
+ * place at another of its Stores — the Owner at the Store they open (segment 3a), later staff an
+ * Owner assigns to several Stores (segment 8). Their existing Membership is kept; one Active
+ * assignment per Store. Roles at that Store are granted separately.
+ */
+export async function assignMemberToStore(
+  tx: MemberDirectoryTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly actorReference: string;
+    readonly membershipReference: string;
+    readonly storeAssignmentReference: string;
+    readonly at: string;
+  },
+): Promise<void> {
+  const membership = String(parseMembershipReference(input.membershipReference)),
+    assignment = String(parseStoreAssignmentReference(input.storeAssignmentReference));
+  await tx.query(scopeSql, [input.brandReference, input.storeReference]);
+  if ((await lockMembership(tx, input, membership)) !== "Active")
+    throw new MemberDirectoryError("MEMBER_DIRECTORY_NOT_FOUND");
+  const existing = (
+    await tx.query(
+      "SELECT 1 FROM bop_membership.store_assignment WHERE brand_id=$1 AND store_id=$2 AND membership_id=$3 AND lifecycle='Active'",
+      [input.brandReference, input.storeReference, membership],
+    )
+  ).rows;
+  if (existing.length > 0) throw new MemberDirectoryError("MEMBER_DIRECTORY_IDEMPOTENCY_CONFLICT");
+  await tx.query(
+    `INSERT INTO bop_membership.store_assignment(assignment_id,membership_id,actor_id,brand_id,store_id,lifecycle,
+       effective_from,effective_until,version,created_at,updated_at)
+     VALUES($1,$2,$3,$4,$5,'Active',$6,NULL,1,$6,$6)`,
+    [
+      assignment,
+      membership,
+      input.actorReference,
+      input.brandReference,
+      input.storeReference,
+      input.at,
+    ],
+  );
+}
+
+/**
  * WP-2423 DEC-COGNITO-STORE-STAFF: the invited person signed in for the first time; their
  * Membership becomes Active with the accepted invitation as its workforce relationship evidence.
  * A Membership that is already Active (a retried sign-in) is left as it is.

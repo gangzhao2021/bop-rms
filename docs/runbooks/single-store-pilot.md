@@ -1927,6 +1927,66 @@ Manual refresh is also available. Failed reads hide summary amounts while keepin
 the existing refund intent; browser recovery tests preserve same-request retries.
 Actual existing-order manual refresh shows CAD 11.30 refunded and CAD 0.00 pending.
 
+## Opening a TEST second Store on the internal test installation
+
+**InternalTest only; a test-environment-only shortcut** (DEC-BRAND-MULTI-STORE-ONE-INSTALLATION,
+coordinator 2026-10-30). Not before the coordinator says so. With two Stores the Brand Owner (a
+person holding Brand Owner authority) still lists menu changes directly; anyone else's menu
+changes wait for the Brand Owner (segment 9, coordinator 2026-10-31). A real Store is opened
+through its governed opening (B2), never this way.
+
+1. **Open the Store in the product.** The Brand's Owner, on the Stores page
+   (`/app/organization/stores`, "Open a store"): name `DEMO Store 2 – not production`, a code
+   (`DEMO_02`), its time zone and language. Note the new Store's reference (the Stores page
+   result, or the `STORE_OPENED` audit record).
+2. **Store roles.** As for any Store: `tooling/environment/store-role-provisioning.mjs`
+   prepare → sign → apply for the new Store with `--templates
+owner,store-manager,area-manager,front-of-house,kitchen,inventory-manager` (the opener is
+   already a member there, so they may be named the Owner).
+3. **Its first configuration and launch gate** (dry run first, then without `--dry-run`), in the
+   container, with the paths the container sees (`/app/.local/...`):
+
+   ```bash
+   PILOT_UID=$(id -u) PILOT_GID=$(id -g) PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 \
+     docker compose -f compose.pilot.yaml run --rm --no-deps -T -e NODE_ENV=development pilot \
+     node --import ./tooling/environment/register-workspace-typescript.mjs \
+     tooling/environment/pilot-internal-test-store-open.mjs setup \
+     /app/.local/pilot-v15 --database bop_rms_pilot_v15 \
+     --migration-env .local/migrate-v14/migrate-v15.env \
+     --store <new Store reference> --approver <another staff member's actor reference> \
+     --reason "Multi-store live check" --approved-by "Owner" --approval "<the approval wording>" \
+     --dry-run
+   ```
+
+   It copies the installation Store's published hours into the new Store (its own time zone),
+   publishes them with a `SYNTHETIC-STORE-LIVE-GATE`, audits every step with the approval, and
+   commits only if the services' api role reads the new Store's operating status. A refusal
+   prints `PILOT_INTERNAL_TEST_STORE_OPEN_UNAVAILABLE (<reason>)` and changes nothing.
+
+4. **Its runtime directory:** the same command with `directory /app/.local/pilot-v15 --store
+<new Store reference> --name demo-2` writes `stores/demo-2/` (owner-only; secrets copied as
+   they are) and lists it in `stores.json`.
+5. **Restart** in a planned update window. Staff assigned to the new Store see it on the Stores
+   page and switch to it; there they set its address, tax and payment in Store setup and add its
+   tables (segment 3c). If the installation is down, each Store follows the outage procedure on
+   its own (see "Several Stores on one installation" above).
+6. **Its menu and prices.** After its tax is set, the Brand Owner switches to the new Store, opens
+   Menu and chooses "Serve the menu here", then "List it": guests there see the Brand's dishes at
+   the Brand prices, and every later Brand listing reaches both Stores. Each Store's manager changes
+   that Store's own prices, sold out and hidden items under Item availability (a price change
+   confirms the old and the new price and is recorded with who made it). Offline, nothing changes:
+   the Store keeps charging the price shown, and the manager confirms again once back online.
+7. **Its day-end settlement**, once its first business day has closed: the same command with
+   `settlement /app/.local/pilot-v15/stores/demo-2 --database bop_rms_pilot_v15
+--migration-env .local/migrate-v14/migrate-v15.env` records that day; its settlement worker
+   starts at the next restart.
+8. **Renewal:** after renewing the installation itself (next section), renew the TEST Store with
+   the same `--until`: `renew /app/.local/pilot-v15/stores/demo-2 --database bop_rms_pilot_v15
+--migration-env .local/migrate-v14/migrate-v15.env --until <the same instant> --reason "…"
+--approved-by "Owner" --approval "<the approval wording>"` (dry run first with `--dry-run`).
+   It moves the Store's synthetic launch gate (audited) and its files' common expiry; the
+   Store's staff and roles have no end.
+
 ## Renewing the internal test installation
 
 **InternalTest only, Owner-approved action.** The internal test installation is valid for a fixed

@@ -253,7 +253,7 @@ export async function declareDishAllergens(
       allowed: async () => await may("recipe.approve"),
     });
   try {
-    await singleStore();
+    const listingMode = await singleStore();
     const sku = (await listBrandSkuChoices(tx as never, s)).find(
       (candidate) => candidate.skuReference === body.skuReference && candidate.active,
     );
@@ -507,7 +507,9 @@ export async function declareDishAllergens(
     });
     const saved = await loadRecipe(rtx, s, recipeReference, at);
     if (saved === null) return fail("Conflict");
-    const listing = { singleStoreListing: { storeReference: s.storeReference } };
+    const listing = {
+      singleStoreListing: { storeReference: s.storeReference, mode: listingMode },
+    };
     const effective = async () => {
       try {
         await singleStore();

@@ -1,7 +1,6 @@
 import console from "node:console";
 import process from "node:process";
 import path from "node:path";
-import { readFile } from "node:fs/promises";
 import { URL, fileURLToPath, pathToFileURL } from "node:url";
 import { loadPilotInstallation } from "./pilot-installation.mjs";
 import { createConfiguredPilotResources } from "./pilot-configured-resources.mjs";
@@ -12,34 +11,8 @@ import { startInternalCustomerServer } from "./pilot-customer-server.mjs";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { loadPilotHosting } from "./pilot-hosting.mjs";
 import { isPilotRuntime } from "./pilot-environment.mjs";
-/**
- * `stores.json` in the installation directory: {"schemaVersion":1,"stores":["stores/<name>",…]},
- * each a Store runtime directory below this one. Absent: this installation serves one Store.
- */
-export async function loadServedStoreDirectories(directory) {
-  let text;
-  try {
-    text = await readFile(path.join(directory, "stores.json"), "utf8");
-  } catch (error) {
-    if (error?.code === "ENOENT") return [];
-    throw Error("PILOT_HTTPS_STORES_INVALID", { cause: error });
-  }
-  const value = JSON.parse(text);
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    Object.keys(value).sort().join() !== "schemaVersion,stores" ||
-    value.schemaVersion !== 1 ||
-    !Array.isArray(value.stores) ||
-    value.stores.length > 99 ||
-    new Set(value.stores).size !== value.stores.length ||
-    value.stores.some(
-      (entry) => typeof entry !== "string" || !/^stores\/[a-z0-9][a-z0-9-]{0,62}$/u.test(entry),
-    )
-  )
-    throw Error("PILOT_HTTPS_STORES_INVALID");
-  return Object.freeze([...value.stores]);
-}
+export { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
+import { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
 export function parsePilotHttpsArguments(args) {
   if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== "string")
     throw Error("PILOT_HTTPS_ARGUMENT_INVALID");

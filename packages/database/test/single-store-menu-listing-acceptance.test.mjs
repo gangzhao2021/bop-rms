@@ -216,6 +216,7 @@ it("single store: the submitter lists alone; no catalog permission or a second s
         const operation = id(++n);
         return run(async (tx) => {
           const at = await dbNow(admin);
+          let mode = "SingleStoreListing";
           const next = await approval.approve(tx, {
             actorReference: actor,
             menuReference: submitted.menu,
@@ -226,7 +227,7 @@ it("single store: the submitter lists alone; no catalog permission or a second s
             expectedVersion: 2,
             observedAt: at,
             singleStoreListing: async () => {
-              await requireMerchantBrandSingleStore(tx, {
+              mode = await requireMerchantBrandSingleStore(tx, {
                 brandReference,
                 storeReference,
                 actorReference: actor,
@@ -251,6 +252,7 @@ it("single store: the submitter lists alone; no catalog permission or a second s
             actorReference: actor,
             listedAt: at,
             auditReference: id(0xa000 + n),
+            approvalMode: mode,
           });
           return next;
         });
@@ -371,6 +373,80 @@ it("single store: the submitter lists alone; no catalog permission or a second s
       } finally {
         await admin.query("ROLLBACK");
       }
+
+      // ── 5. DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9 (coordinator 2026-10-31, a revision
+      // of trade-off 7): with two active Stores, only someone with Brand Owner authority lists a
+      // Brand change directly (marked BrandOwnerListing); a menu manager's change stays a draft
+      // for the Owner, and the database refuses an Owner mark for anyone else.
+      const thirdStore = id(7);
+      await store(thirdStore, "STORE_THREE", "Active");
+      const boss = id(8);
+      const ownerRole = await seedBrandRole(admin, {
+        id,
+        brandReference,
+        roleId: id(330),
+        code: "brand_owner",
+        actions: ["catalog.menu.approve", "publishing.review.approve", "organization.brand.manage"],
+        from,
+      });
+      await seedBrandMember(admin, {
+        id,
+        base: 700,
+        brandReference,
+        storeReference,
+        actorReference: boss,
+        name: "Bo",
+        roles: [ownerRole],
+        from,
+        enrolledAt,
+      });
+      const managers = await submit(owner);
+      await assert.rejects(list(managers, owner), refused("NotSingleStore"));
+      assert.deepEqual(await approved(managers), []);
+      const bosses = await submit(boss);
+      assert.equal((await list(bosses, boss)).state, "Approved");
+      assert.deepEqual((await marks()).at(-1), {
+        version: bosses.version,
+        actor: boss,
+        approval_mode: "BrandOwnerListing",
+        store: storeReference,
+      });
+      // A Brand Owner mark for the manager is refused by the database itself.
+      const ownerAt = await dbNow(admin);
+      await assert.rejects(
+        run((tx) =>
+          recordMenuSingleStoreListing(tx, {
+            brandReference,
+            storeReference,
+            approvalEvidenceReference: id(0x9a00),
+            operationReference: id(0x9a01),
+            menuReference: managers.menu,
+            menuVersionReference: managers.version,
+            lifecycleReference: managers.lifecycle,
+            actorReference: owner,
+            listedAt: ownerAt,
+            auditReference: id(0x9a02),
+            approvalMode: "BrandOwnerListing",
+          }),
+        ),
+        /menu brand owner listing needs Brand Owner authority/u,
+      );
+      // The Owner approves the manager's waiting change in one action — an independent approval
+      // (the Owner is not its author), never the manager approving their own.
+      const ownerApproval = await run(async (tx) =>
+        approval.approve(tx, {
+          actorReference: boss,
+          menuReference: managers.menu,
+          menuVersionReference: managers.version,
+          lifecycleReference: managers.lifecycle,
+          snapshotDigest: digest,
+          operationReference: id(0x9b00),
+          expectedVersion: 2,
+          observedAt: await dbNow(admin),
+        }),
+      );
+      assert.equal(ownerApproval.state, "Approved");
+      assert.deepEqual(await approved(managers), [{ actor: boss }]);
     } finally {
       await admin.end();
     }

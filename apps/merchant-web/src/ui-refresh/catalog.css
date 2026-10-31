@@ -165,6 +165,41 @@
   letter-spacing: 0;
   text-transform: none;
 }
+/* DEC-BRAND-MULTI-STORE segment 9: this Store's price on Item availability. */
+.store-price {
+  display: grid;
+  justify-items: start;
+  gap: var(--bop-space-2);
+}
+.store-price__note,
+.store-price__problem {
+  max-width: 48ch;
+  margin: 0;
+  font-size: 13px;
+}
+.store-price__note {
+  color: var(--bop-color-text-muted);
+}
+.store-price__form,
+.store-price__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--bop-space-2);
+}
+.store-price__confirm {
+  display: grid;
+  justify-items: start;
+  gap: var(--bop-space-2);
+}
+.store-price__form label {
+  display: grid;
+  gap: var(--bop-space-1);
+}
+.store-price__confirm p {
+  max-width: 48ch;
+  margin: 0;
+}
 .availability-actions {
   display: flex;
   flex-wrap: wrap;
@@ -627,4 +662,49 @@ fieldset.store-features__modules {
 .store-kitchen-sections button,
 .store-kitchen-sections__add button {
   min-height: 44px;
+}
+/* DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Stores page (row hairlines, no boxes). */
+.stores-page {
+  max-width: 720px;
+}
+.stores-page__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.stores-page__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bop-space-3);
+  min-height: 44px;
+  padding: var(--bop-space-2) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.stores-page__current {
+  color: var(--bop-color-text-muted);
+}
+.stores-page__form {
+  display: grid;
+  gap: var(--bop-space-3);
+  max-width: 420px;
+}
+.stores-page__form label {
+  display: grid;
+  gap: var(--bop-space-1);
+}
+/* DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 7: tonight at each Store (rows, hairlines). */
+.brand-stores__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.brand-stores__table th,
+.brand-stores__table td {
+  padding: var(--bop-space-2) var(--bop-space-2) var(--bop-space-2) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+  text-align: left;
+}
+.brand-stores__note {
+  display: block;
+  color: var(--bop-color-text-muted);
 }

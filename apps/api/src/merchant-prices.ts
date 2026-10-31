@@ -1,3 +1,4 @@
+import { listBrandStoreReferences } from "@bop/tenant";
 import { listBrandSkuChoices, listStoreMenuSellables } from "@rms/catalog";
 import {
   assignStorePriceBook,
@@ -20,6 +21,7 @@ import { derivedReference } from "./merchant-products.js";
 import { createPriceBookDraftAuthorSource } from "./price-book-draft-author-source.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { carryBrandPriceBook, MerchantStorePriceError } from "./merchant-store-prices.js";
 import {
   merchantBrandSoleOperatorGate,
   MerchantSingleStoreListingError,
@@ -647,6 +649,36 @@ export function createMerchantPrices(options: {
           const at = options.persistence.now();
           const snapshot = await loadBook(tx, s.owner, body.priceBookReference);
           if (snapshot === null) return fail("NotFound");
+          // DEC-BRAND-MULTI-STORE segment 9 (coordinator 2026-10-31 rule 1): at a Brand with
+          // several Stores, a Brand price book goes live at every Store, each keeping its own
+          // Store prices.
+          const stores = await listBrandStoreReferences(reads(tx), s.owner);
+          if (stores.length > 1 && stores.includes(s.owner.storeReference)) {
+            if (snapshot.lifecycle !== "Published") fail("NotPublished");
+            try {
+              const results = await carryBrandPriceBook(tx as never, {
+                tenantReference: s.owner.tenantReference,
+                brandReference: s.owner.brandReference,
+                priceBookReference: body.priceBookReference,
+                operationReference: body.operationReference,
+                actorReference: s.actor,
+                at,
+                currencyMetadata: options.currencyMetadata,
+                uncovered: (owner, book) => uncovered(tx, owner, book, at),
+              });
+              const here = await currentStorePriceBook(reads(tx), s.owner);
+              return {
+                status: results.some((r) => r.status === "Applied") ? "Applied" : "AlreadyApplied",
+                assignment: here,
+                stores: results,
+              };
+            } catch (error) {
+              if (error instanceof MerchantStorePriceError)
+                return fail(error.code === "NotCovered" ? "NotCovered" : "NotFound");
+              if (error instanceof StorePriceBookError) return fail(assignmentErrors[error.code]);
+              throw error;
+            }
+          }
           const missing = await uncovered(tx, s.owner, snapshot, at);
           if (missing.length > 0) fail("NotCovered", missing);
           try {

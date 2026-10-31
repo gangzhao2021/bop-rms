@@ -90,6 +90,11 @@ export interface StaffPageView {
     readonly scope: "Store" | "Brand";
   }[];
   readonly staff: readonly StaffMemberView[];
+  /**
+   * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 8: the Brand's other members who may be added
+   * to this Store (only for those who manage staff here; empty otherwise).
+   */
+  readonly otherStoresStaff: readonly { readonly actorReference: string; readonly label: string }[];
 }
 export type StaffCommandRequest =
   | {
@@ -112,7 +117,7 @@ export type StaffCommandRequest =
       readonly operationReference: string;
     }
   | {
-      readonly operation: "RemoveFromStore";
+      readonly operation: "RemoveFromStore" | "AddToStore";
       readonly actorReference: string;
       readonly operationReference: string;
     }
@@ -240,7 +245,17 @@ export function parseStaffPageView(
   value: unknown,
   screenId: StaffPageView["screenId"],
 ): StaffPageView {
-  const r = closed(value, ["screenId", "sourceAsOf", "viewer", "roles", "staff"]);
+  // Segment 8 adds `otherStoresStaff`; a server before it sends none.
+  const withOthers =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "otherStoresStaff");
+  const r = closed(value, [
+    "screenId",
+    "sourceAsOf",
+    "viewer",
+    "roles",
+    "staff",
+    ...(withOthers ? ["otherStoresStaff"] : []),
+  ]);
   if (r.screenId !== screenId) invalid();
   const viewer = closedWith(
     r.viewer,
@@ -340,6 +355,12 @@ export function parseStaffPageView(
       });
     }),
     staff,
+    otherStoresStaff: withOthers
+      ? list(r.otherStoresStaff, (item) => {
+          const x = closed(item, ["actorReference", "label"]);
+          return Object.freeze({ actorReference: ref(x.actorReference), label: text(x.label) });
+        })
+      : Object.freeze([]),
   });
 }
 

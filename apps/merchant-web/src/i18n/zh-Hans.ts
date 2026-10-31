@@ -1602,6 +1602,48 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Inuvik, Northwest Territories": "伊努维克，西北地区",
   Invalidated: "已失效",
   "Inventory Manager": "库存经理",
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 8: staff of the Brand's other Stores.
+  "People from your other stores": "你其他门店的员工",
+  "Add to this store": "加到这家店",
+  "{name} now works at this store. Give them a role below.":
+    "{name} 已加到这家店。请在下面给他一个角色。",
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 7: the Brand view on Reports.
+  "Tonight at each store": "今晚各门店",
+  "Still to take": "还要收",
+  "Open this store": "打开这家店",
+  "You don't see this store's sales": "你没有这家店的销售权限",
+  "This store can't be read now. Refresh.": "这家店现在读不出来，请刷新。",
+  "{counted} of {all} stores": "{all} 家店中的 {counted} 家",
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: the Stores page.
+  "Your stores": "你的门店",
+  "You are here": "当前门店",
+  "Switch to this store": "切换到这家店",
+  "Open a store": "开新店",
+  "For the brand's owner. The new store gets you as its first staff member; its menu, tables and roles are set up next.":
+    "品牌老板使用。新店的第一位员工就是你；之后再设置它的菜单、桌台和角色。",
+  "Store name (as guests see it)": "店名（客人看到的）",
+  "Short code": "简称代码",
+  "Store language": "门店语言",
+  "Open store": "开店",
+  "Opening the store…": "正在开店…",
+  "Eastern time (Toronto, Ottawa, Montréal)": "东部时间（多伦多、渥太华、蒙特利尔）",
+  "Pacific time (Vancouver)": "太平洋时间（温哥华）",
+  "Mountain time (Calgary, Edmonton)": "山地时间（卡尔加里、埃德蒙顿）",
+  "Central time (Winnipeg)": "中部时间（温尼伯）",
+  "Saskatchewan (Regina, Saskatoon)": "萨斯喀彻温（里贾纳、萨斯卡通）",
+  "Atlantic time (Halifax)": "大西洋时间（哈利法克斯）",
+  "Newfoundland time (St. John's)": "纽芬兰时间（圣约翰斯）",
+  "Atlantic time (Moncton)": "大西洋时间（蒙克顿）",
+  "Yukon (Whitehorse)": "育空（白马市）",
+  "{name} is opened. Before staff can work there, its roles, setup and go-live check are installed; it then appears in this list. Guests can't order there until it is live.":
+    "{name} 已开店。员工要在那里工作，还需安装它的角色、设置和上线核对，之后会出现在这个列表里。上线之前客人不能在那里点单。",
+  "Only the brand's owner can open a store.": "只有品牌老板可以开新店。",
+  "Another store of this brand already uses this code. Choose another code.":
+    "这个品牌已有门店用了这个代码，请换一个。",
+  "Check the name and code: the code starts with a letter and uses letters, digits, - or _.":
+    "请检查店名和代码：代码以字母开头，只能用字母、数字、- 或 _。",
+  "This store was already opened with other details. Refresh the page.":
+    "这家店已用其他资料开过了，请刷新页面。",
   // v20 DEC-BRAND-MULTI-STORE.
   "Area Manager": "区域经理",
   "Store Manager permissions in each of the Stores they run": "在所管的每家门店有门店经理的权限",
@@ -6141,8 +6183,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "List it": "上架",
   "A manager or the owner lists the menu.": "由经理或老板上架菜单。",
   "Open the menu": "打开菜单",
-  "This Brand has more than one store, so a menu is reviewed by someone else before it is listed.":
-    "这个品牌有不止一家门店，菜单要由另一个人审核后才能上架。",
   "Allergens not declared": "未申报过敏原",
   "Allergens from its recipe": "过敏原来自配方",
   "No allergens": "不含过敏原",
@@ -6529,4 +6569,36 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Each section needs its own name of up to 24 characters.":
     "每个档口要有不重复的名字，最多 24 个字。",
   "Save sections": "保存档口",
+  "You do not have permission to change prices at this Store.": "你没有在本店改价格的权限。",
+  "This item has no Brand price yet.": "这道菜还没有品牌价格。",
+  "That price is not valid.": "这个价格无效。",
+  "The price changed since you opened the page. Check the price now shown and confirm again.":
+    "打开页面后价格已被改过。请看现在显示的价格，再确认一次。",
+  "This Store has no prices yet. The Brand Owner lists the menu first.":
+    "本店还没有价格。请品牌老板先上架菜单。",
+  "At a Brand with one Store, change prices on the menu page.":
+    "品牌只有一家店时，请在菜单页改价格。",
+  "Some items this Store sells have no price.": "本店在卖的菜有的还没有价格。",
+  "Prices are unavailable right now. Nothing was changed.": "现在读不到价格，什么都没有改。",
+  "{item} now costs {price} at this Store.": "{item} 在本店现在卖 {price}。",
+  "This Store's price; Brand price {price}": "本店价格；品牌价格 {price}",
+  "Change the price of {item} at this Store": "改 {item} 在本店的价格",
+  "Change price": "改价格",
+  "Enter a price such as 7.25.": "请输入价格，例如 7.25。",
+  "New price for {item} at this Store": "{item} 在本店的新价格",
+  "Use the Brand price ({price})": "用品牌价格（{price}）",
+  "Confirm the price": "确认价格",
+  "Change {item} at this Store from {old} to {new}? Guests here see it at once.":
+    "把 {item} 在本店的价格从 {old} 改成 {new}？本店顾客马上看到。",
+  Continue: "继续",
+  "Guests at this Store do not see this menu yet": "本店顾客还看不到这份菜单",
+  "Serve it here, then list it: guests at this Store see the Brand's dishes at this Store's prices. Check this Store's tax setup first.":
+    "先加到本店，再上架：本店顾客就能按本店价格看到品牌的菜。请先检查本店的税务设置。",
+  "This Store is added to the menu. List it to show it to guests here.":
+    "本店已加入菜单。上架后本店顾客就能看到。",
+  "Serve the menu here": "在本店使用这份菜单",
+  "The Brand Owner adds this Store to the menu.": "由品牌老板把本店加入菜单。",
+  "This Brand has more than one store, so the Brand Owner lists menu changes. Your changes are saved for them to list.":
+    "这个品牌有多家店，菜单改动由品牌老板上架。你的改动已保存，等他上架。",
+  "Change this Store's prices": "改本店价格",
 });

@@ -53,6 +53,25 @@ function eventFor(action: PriceBookAction, aggregate: PriceBookSnapshot): PriceB
     occurredAt: aggregate.createdAt,
   };
 }
+/**
+ * DEC-BRAND-MULTI-STORE segment 9: the operation record a Store's own price book is written with
+ * (see store-price-change-store.ts), shaped exactly as the price book service writes its own.
+ */
+export function createPriceBookOperationRecord(
+  action: PriceBookAction,
+  operationReference: string,
+  operationIntentHash: string,
+  aggregate: PriceBookSnapshot,
+): PriceBookOperationRecord {
+  const snapshot = createPriceBookSnapshot(aggregate);
+  return Object.freeze({
+    action,
+    operationReference: parsePricingReference(operationReference),
+    operationIntentHash: parsePricingDigest(operationIntentHash),
+    aggregate: snapshot,
+    event: eventFor(action, snapshot),
+  });
+}
 const selectVersion = `SELECT jsonb_build_object(
  'priceBookReference',b.price_book_id,'versionReference',v.price_book_version_id,
  'brandReference',b.brand_id,'stableCode',b.stable_code,'aggregateVersion',v.version_number,

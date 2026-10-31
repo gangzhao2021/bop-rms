@@ -413,6 +413,13 @@ export async function requireMerchantStoreConfigurationSoleOperatorBasis(
   if (setting.state !== "On") throw new MerchantSoleOperatorBasisError();
 }
 
+/**
+ * How a direct listing (no second person) is allowed: the Brand's only Store (DEC-SINGLE-STORE-MENU)
+ * or, at a Brand with several Stores, Brand Owner authority (DEC-BRAND-MULTI-STORE segment 9).
+ */
+export type MerchantDirectListingMode = "SingleStoreListing" | "BrandOwnerListing";
+/** The Brand Owner template's own code: who may list a Brand change directly at several Stores. */
+export const brandOwnerAuthority = "organization.brand.manage";
 /** WP-2423 item 8 ⑥: why a single-store listing was refused. */
 export class MerchantSingleStoreListingError extends Error {
   constructor(readonly code: "NotSingleStore" | "NotPermitted") {
@@ -438,7 +445,7 @@ export async function requireMerchantBrandSingleStore(
     readonly observedAt: string;
     allowed(): Promise<boolean>;
   },
-): Promise<void> {
+): Promise<MerchantDirectListingMode> {
   if (!(await input.allowed())) throw new MerchantSingleStoreListingError("NotPermitted");
   const holders = await merchantBrandApprovalHolders(tx, input);
   // The Brand-level holder read leaves the transaction without a Store; the command's writes are
@@ -449,13 +456,30 @@ export async function requireMerchantBrandSingleStore(
   );
   if (!holders.includes(input.actorReference))
     throw new MerchantSingleStoreListingError("NotPermitted");
+  let mode: MerchantDirectListingMode = "SingleStoreListing";
   if (
     !(await holdBrandSingleStore(
       tx as unknown as SoleOperatorSettingTransaction,
       input.brandReference,
       input.storeReference,
     ))
-  )
-    throw new MerchantSingleStoreListingError("NotSingleStore");
+  ) {
+    // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9 (coordinator 2026-10-31, revision of
+    // trade-off 7; the Owner may overrule it): at a Brand with several Stores only someone with
+    // Brand Owner authority lists directly. Anyone else's change stays a draft for the Owner.
+    const owners = await merchantBrandApprovalHolders(tx, {
+      brandReference: input.brandReference,
+      permissionCode: brandOwnerAuthority,
+      observedAt: input.observedAt,
+    });
+    await (tx as { query(sql: string, values: unknown[]): Promise<unknown> }).query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [input.brandReference, input.storeReference],
+    );
+    if (!owners.includes(input.actorReference))
+      throw new MerchantSingleStoreListingError("NotSingleStore");
+    mode = "BrandOwnerListing";
+  }
   if (!(await input.allowed())) throw new MerchantSingleStoreListingError("NotPermitted");
+  return mode;
 }

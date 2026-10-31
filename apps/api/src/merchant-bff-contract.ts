@@ -1,4 +1,5 @@
 /** Merchant BFF public contract: the workspace snapshot, navigation, Session service and router options. */
+import type { createMerchantStoreOpening } from "./merchant-store-opening.js";
 import type {
   createMerchantDiningStaffCallAnswer,
   createMerchantDiningStaffCallCount,
@@ -123,6 +124,7 @@ import type { createMerchantComboPartCommands } from "./merchant-combo-part-comm
 import type { createMerchantOneStoreDishes } from "./merchant-one-store-dishes.js";
 import type { createMerchantProducts } from "./merchant-products.js";
 import type { createMerchantPrices } from "./merchant-prices.js";
+import type { createMerchantStorePrices } from "./merchant-store-prices.js";
 import type { createMerchantAllergens } from "./merchant-allergens.js";
 import type { createMerchantMenus } from "./merchant-menus.js";
 import type { createMerchantAvailability } from "./merchant-availability.js";
@@ -542,6 +544,8 @@ export interface MerchantBffRouterOptions {
   readonly comboParts?: ReturnType<typeof createMerchantComboPartCommands>;
   readonly products?: ReturnType<typeof createMerchantProducts>;
   readonly prices?: ReturnType<typeof createMerchantPrices>;
+  /** DEC-BRAND-MULTI-STORE segment 9: this Store's own prices at a Brand with several Stores. */
+  readonly storePrices?: ReturnType<typeof createMerchantStorePrices>;
   readonly allergens?: ReturnType<typeof createMerchantAllergens>;
   readonly menus?: ReturnType<typeof createMerchantMenus>;
   readonly availability?: ReturnType<typeof createMerchantAvailability>;
@@ -561,6 +565,8 @@ export interface MerchantBffRouterOptions {
   readonly menuPublication?: ReturnType<typeof createMerchantMenuPublicationCommand>;
   readonly menuDraft?: ReturnType<typeof createMerchantMenuDraftQuery>;
   readonly brandLifecycle?: ReturnType<typeof createBrandLifecycleCommand>;
+  /** WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: the Brand's Owner opens a Store. */
+  readonly storeOpening?: ReturnType<typeof createMerchantStoreOpening>;
   readonly productDraft?: ReturnType<typeof createMerchantProductDraftCommand>;
   readonly productCreation?: ReturnType<typeof createMerchantProductCreationCommand>;
   readonly productLifecycle?: ReturnType<typeof createMerchantProductLifecycleCommand>;

@@ -2624,6 +2624,12 @@ describe("WP-2423 Q14 store reports routes", () => {
         async () =>
           ({ report: view, openTables: [] }) as unknown as Awaited<ReturnType<Reports["tonight"]>>,
       ),
+      storeTonight: vi.fn(
+        async () =>
+          ({ report: view, openTables: [] }) as unknown as Awaited<
+            ReturnType<Reports["storeTonight"]>
+          >,
+      ),
       export: vi.fn(async () => ({
         fileName: "items-2026-10-13-to-2026-10-14.csv",
         body: "﻿business_date,item\r\n2026-10-14,Muffin\r\n",

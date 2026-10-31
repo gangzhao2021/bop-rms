@@ -4,7 +4,8 @@ import process from "node:process";
 import console from "node:console";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
-import { createPilotRecoverySweep } from "./pilot-recovery-sweep.mjs";
+import { createPilotRecoverySweep, storeWorkerServices } from "./pilot-recovery-sweep.mjs";
+import { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import {
   assertPilotReady,
@@ -143,14 +144,69 @@ export function createPilotSupervisorHealthWriter(
     }
   };
 }
+/**
+ * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the installation's own services, then each other Store's
+ * workers from its own directory (`stores.json`), each Store's processes started, watched and
+ * reported on their own, so one Store's failing worker never stops another's. A Store's day-end
+ * settlement worker starts once its first closed business day is recorded
+ * (`daily-settlement-coverage.json`). Reported as `stores/<name>:<service>`.
+ */
+export function createPilotInstallationSweep({
+  runtimeDirectory,
+  createSweep = createPilotRecoverySweep,
+  listStores = async () =>
+    loadServedStoreDirectories(path.join(await fs.realpath(process.cwd()), runtimeDirectory)),
+  exists = async (file) =>
+    fs.lstat(file).then(
+      () => true,
+      () => false,
+    ),
+}) {
+  const own = createSweep({
+    runtimeDirectory,
+    workloadHealth: createPilotWorkloadHealthOptions(runtimeDirectory),
+  });
+  let stores = null;
+  const storeSweeps = async () => {
+    if (stores !== null) return stores;
+    stores = [];
+    for (const relative of await listStores()) {
+      const directory = runtimeDirectory + "/" + relative;
+      const settles = await exists(path.join(directory, "daily-settlement-coverage.json"));
+      stores.push({
+        relative,
+        sweep: createSweep({
+          runtimeDirectory: directory,
+          services: storeWorkerServices.filter(
+            (service) => settles || service !== "daily-settlement-worker",
+          ),
+          workloadHealth: createPilotWorkloadHealthOptions(directory),
+        }),
+      });
+    }
+    return stores;
+  };
+  return Object.freeze({
+    async sweep(options) {
+      const services = [...(await own.sweep(options))];
+      for (const store of await storeSweeps()) {
+        if (options?.signal?.aborted) break;
+        try {
+          for (const entry of await store.sweep.sweep(options))
+            services.push({ ...entry, service: store.relative + ":" + entry.service });
+        } catch {
+          services.push({ service: store.relative, state: "attention_required" });
+        }
+      }
+      return services;
+    },
+  });
+}
 export async function runPilotSupervisor({
   runtimeDirectory,
   signal,
   acquire = acquirePilotSupervisorLease,
-  sweep = createPilotRecoverySweep({
-    runtimeDirectory,
-    workloadHealth: createPilotWorkloadHealthOptions(runtimeDirectory),
-  }),
+  sweep = createPilotInstallationSweep({ runtimeDirectory }),
   wait = delay,
   observe = () => undefined,
 }) {

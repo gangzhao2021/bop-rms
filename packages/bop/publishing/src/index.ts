@@ -45,3 +45,4 @@ export * from "./contracts/platform-publishing-source.js";
 export * from "./infrastructure/persistence/platform-publishing-store.js";
 export * from "./infrastructure/persistence/platform-template-brand-reference-source.js";
 export * from "./infrastructure/persistence/internal-test-live-gate-renewal-store.js";
+export * from "./infrastructure/persistence/internal-test-live-gate-creation-store.js";

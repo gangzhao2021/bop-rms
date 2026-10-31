@@ -52,6 +52,13 @@ export interface InternalTestLiveGateRenewalInput {
     readonly operatorAccount: string;
   };
   readonly nextReference: () => string;
+  /**
+   * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION (InternalTest only): the Store is a TEST Store the
+   * Owner opened in the product, which the caller confirmed (its opening record and TEST label):
+   * its own and its gate's references are ordinary ones, not fixture identities. Everything else
+   * (synthetic gate id, codes and categories, the Tenant and Brand) is checked as for any Store.
+   */
+  readonly testStoreOpenedInProduct?: true;
 }
 export interface InternalTestLiveGateRenewal {
   readonly gateReference: string;
@@ -87,9 +94,10 @@ export async function renewInternalTestLiveGates(
     readonly decisionEvidenceReference: string;
   }[];
 }> {
+  const opened = input.testStoreOpenedInProduct === true;
   if (
     !SYNTHETIC.test(input.brandReference) ||
-    !SYNTHETIC.test(input.storeReference) ||
+    !(SYNTHETIC.test(input.storeReference) || (opened && UUID_V7.test(input.storeReference))) ||
     !instant(input.from) ||
     !instant(input.to) ||
     !instant(input.at) ||
@@ -138,9 +146,10 @@ export async function renewInternalTestLiveGates(
     if (
       typeof head.gate_id !== "string" ||
       !head.gate_id.startsWith("SYNTHETIC-") ||
-      ![head.gate_reference, head.tenant_id].every(
-        (value) => typeof value === "string" && SYNTHETIC.test(value),
-      ) ||
+      typeof head.tenant_id !== "string" ||
+      !SYNTHETIC.test(head.tenant_id) ||
+      typeof head.gate_reference !== "string" ||
+      !(SYNTHETIC.test(head.gate_reference) || (opened && UUID_V7.test(head.gate_reference))) ||
       head.state !== "Approved" ||
       requirements.length < 1 ||
       requirements.length > 100 ||

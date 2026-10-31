@@ -12,6 +12,8 @@ export * from "./application/platform-tenant-administration-service.js";
 
 export * from "./infrastructure/persistence/receipt-store-identity-source.js";
 export * from "./infrastructure/persistence/store-opening-scope-source.js";
+export * from "./infrastructure/persistence/brand-store-ids-source.js";
+export * from "./infrastructure/persistence/store-opening-store.js";
 
 export * from "./infrastructure/persistence/merchant-organization-source.js";
 

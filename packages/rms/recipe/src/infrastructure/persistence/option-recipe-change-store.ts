@@ -733,7 +733,11 @@ export async function reviewOptionRecipeChange(
     readonly soleOperator?: { readonly reviewerMfaAt: string };
     /** WP-2423 item 8 ⑥: the author reviews alone, listing at the Brand's one store (read by the
      * caller in this transaction; the database holds it until commit). */
-    readonly singleStoreListing?: { readonly storeReference: string };
+    readonly singleStoreListing?: {
+      readonly storeReference: string;
+      /** DEC-BRAND-MULTI-STORE segment 9: at a Brand with several Stores, by its Owner. */
+      readonly mode?: "SingleStoreListing" | "BrandOwnerListing";
+    };
   },
 ): Promise<{ readonly status: "Applied" | "AlreadyApplied" }> {
   const brand = scope.brandReference;
@@ -765,13 +769,17 @@ export async function reviewOptionRecipeChange(
     input.soleOperator !== undefined
       ? "SoleOperator"
       : input.singleStoreListing !== undefined
-        ? "SingleStoreListing"
+        ? (input.singleStoreListing.mode ?? "SingleStoreListing")
         : "Independent";
   const marked = mode !== "Independent";
   const ownChange = change.author === input.actorReference;
   if (!marked && (ownChange || others.length > 0)) fail("OPTION_RECIPE_REVIEWER_NOT_INDEPENDENT");
   // A single-store listing is the author's own; the sole operator may also review another's.
-  if (marked && !ownChange && (others.length === 0 || mode === "SingleStoreListing"))
+  if (
+    marked &&
+    !ownChange &&
+    (others.length === 0 || mode === "SingleStoreListing" || mode === "BrandOwnerListing")
+  )
     fail("OPTION_RECIPE_INVALID");
   if (marked && others.some((row) => row.review_mode !== mode))
     fail("OPTION_RECIPE_REVIEWER_NOT_INDEPENDENT");
@@ -881,10 +889,11 @@ export async function publishOptionRecipeChange(
         !(await input.soleOperatorEffective(String(review.reviewer))))
     )
       fail("OPTION_RECIPE_SOLE_OPERATOR_NOT_IN_EFFECT");
-  // WP-2423 item 8 ⑥: a single-store listing review counts only while the Brand has that store.
+  // WP-2423 item 8 ⑥: a single-store listing review counts only while the Brand has that store;
+  // a Brand Owner listing only while its reviewer is still the Brand Owner (segment 9).
   for (const review of [cost, safety])
     if (
-      review.review_mode === "SingleStoreListing" &&
+      (review.review_mode === "SingleStoreListing" || review.review_mode === "BrandOwnerListing") &&
       (input.singleStoreListingEffective === undefined ||
         !(await input.singleStoreListingEffective(String(review.reviewer))))
     )
@@ -896,8 +905,13 @@ export async function publishOptionRecipeChange(
     evidenceDigest: change.digest,
     reviewedAt: iso(review.reviewed_at),
     decision: "Approved" as const,
-    ...(review.review_mode === "SoleOperator" || review.review_mode === "SingleStoreListing"
-      ? { reviewMode: review.review_mode as "SoleOperator" | "SingleStoreListing" }
+    ...(review.review_mode === "SoleOperator" ||
+    review.review_mode === "SingleStoreListing" ||
+    review.review_mode === "BrandOwnerListing"
+      ? {
+          reviewMode: review.review_mode as
+            "SoleOperator" | "SingleStoreListing" | "BrandOwnerListing",
+        }
       : {}),
   }));
   await tx.query(scopeSql, [brand, ""]);

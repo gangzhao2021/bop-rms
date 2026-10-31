@@ -421,6 +421,11 @@ export interface MenuBuilderView extends MenuViewBase {
   readonly allergenChoices?: readonly AllergenChoice[];
   /** WP-2423 item 8 ⑥: the Brand keeps stock: declared allergens should become real recipes. */
   readonly keepsStock?: boolean;
+  /**
+   * DEC-BRAND-MULTI-STORE segment 9: whether the Brand has several Stores, and whether this menu
+   * serves the selected Store. Absent from older views (one Store).
+   */
+  readonly stores?: { readonly severalStores: boolean; readonly servesHere: boolean };
 }
 export interface MenuSectionInput {
   readonly sectionReference: string | null;

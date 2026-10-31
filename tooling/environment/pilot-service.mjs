@@ -20,7 +20,11 @@ const fail = () => {
   throw new Error("PILOT_PROCESS_UNAVAILABLE");
 };
 export function parsePilotRuntimeDirectory(value = pilotRuntimeDirectory) {
-  if (typeof value !== "string" || !/^\.local\/[a-z0-9][a-z0-9_-]{0,63}$/u.test(value))
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: or another Store's directory below the installation's.
+  if (
+    typeof value !== "string" ||
+    !/^\.local\/[a-z0-9][a-z0-9_-]{0,63}(?:\/stores\/[a-z0-9][a-z0-9-]{0,62})?$/u.test(value)
+  )
     return fail();
   return value;
 }

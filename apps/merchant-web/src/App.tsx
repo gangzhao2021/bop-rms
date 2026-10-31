@@ -1,3 +1,4 @@
+import { StoresPage } from "./StoresPage.js";
 import { t } from "./i18n/i18n.js";
 import { CurrentOrderDetailRoute, CurrentOrderQueuePage } from "./CurrentOrderQueuePage.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
@@ -770,9 +771,28 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         <Route
           path="/app/organization/stores"
           element={
-            <LocalDemoRoute notice={demo?.Notice ?? null}>
-              <StoreListPage {...clientProps(demo?.storeAdmin)} />
-            </LocalDemoRoute>
+            <SessionPending pending={sessionPending}>
+              <LocalDemoRoute notice={demo?.Notice ?? null}>
+                {demo !== null ? (
+                  <StoreListPage {...clientProps(demo.storeAdmin)} />
+                ) : state.kind === "Ready" ? (
+                  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Stores this person works in.
+                  <StoresPage
+                    stores={state.workspace.authorizedStores}
+                    currentStoreReference={state.workspace.selectedScope.storeReference}
+                    csrf={state.csrf}
+                    switching={state.switching}
+                    mayOpen={state.workspace.navigation.some(
+                      (entry) => entry.screenId === "STORE-SETUP",
+                    )}
+                    onSwitchStore={(reference) => void switchStore(reference)}
+                  />
+                ) : (
+                  // Signed out or no session: fails closed as before (sign-in or unavailable).
+                  <StoreListPage />
+                )}
+              </LocalDemoRoute>
+            </SessionPending>
           }
         />
         <Route
@@ -1101,6 +1121,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     <StoreAvailabilityPage
                       key={state.workspace.selectedScope.storeReference + state.csrf}
                       client={clients.createAvailabilityClient(state.csrf)}
+                      storePrices={clients.createStorePricesClient(state.csrf)}
                       {...(soldOutFromKitchen
                         ? {
                             kitchenDisplay: {
@@ -1680,6 +1701,9 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 <StoreReportsPage
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   storeLabel={state.workspace.selectedScope.storeLabel}
+                  stores={state.workspace.authorizedStores}
+                  currentStoreReference={state.workspace.selectedScope.storeReference}
+                  onSwitchStore={(reference) => void switchStore(reference)}
                 />
               ) : demo !== null ? (
                 <OperationalDashboardPage />

@@ -23,6 +23,7 @@ import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { createPriceBookDraftAuthorSource } from "./price-book-draft-author-source.js";
 import {
   requireMerchantBrandSingleStore,
+  type MerchantDirectListingMode,
   requireMerchantBrandSoleOperator,
 } from "./merchant-sole-operator.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -239,6 +240,7 @@ export function createMerchantPriceBookCommands(options: {
         // WP-2423 item 8 ⑥: the author's own publication at a single store (no review): they hold
         // price approval, and the Brand has exactly one store (held until this commits).
         let singleStoreListed = false;
+        let listingMode: MerchantDirectListingMode = "SingleStoreListing";
         if (single && prior === null) {
           const provenance = await author.load(transaction, book);
           if (
@@ -246,7 +248,7 @@ export function createMerchantPriceBookCommands(options: {
             String(provenance.actorReference) !== String(scope.actorReference)
           )
             return fail("PRICE_BOOK_APPROVAL_REQUIRED");
-          await requireMerchantBrandSingleStore(transaction, {
+          listingMode = await requireMerchantBrandSingleStore(transaction, {
             brandReference: brand,
             storeReference: String(scope.selectedStoreReference),
             actorReference: String(scope.actorReference),
@@ -323,9 +325,7 @@ export function createMerchantPriceBookCommands(options: {
                   ...(soleOperatorMfaAt === null
                     ? {}
                     : { afterSummary: { approvalMode: "SoleOperator" } }),
-                  ...(singleStoreListed
-                    ? { afterSummary: { approvalMode: "SingleStoreListing" } }
-                    : {}),
+                  ...(singleStoreListed ? { afterSummary: { approvalMode: listingMode } } : {}),
                 },
               };
             },
@@ -344,6 +344,7 @@ export function createMerchantPriceBookCommands(options: {
             actorReference: String(scope.actorReference),
             listedAt: String(raw.requestedAt),
             auditReference: parsePricingReference(options.auditReference(operation)),
+            approvalMode: listingMode,
           });
           await brandScope();
         }

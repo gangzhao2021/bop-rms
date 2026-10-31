@@ -1243,6 +1243,43 @@ it("WP-2423 Cognito store staff: invite, first sign-in, sessions, step-up, resen
       } finally {
         await new Promise((resolve) => server.close(resolve));
       }
+
+      // ── 10. DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Brand now has two Stores. Removing
+      // someone from one Store ends their place and Store roles there, never their Brand role
+      // (they may work at the other Store). Before: refused, or the Brand role went too.
+      const brandRole = next(),
+        brandAssignment = next();
+      await admin.query("RESET ROLE");
+      await admin.query(
+        "INSERT INTO bop_permission.role VALUES ($1,$2,NULL,'synthetic_brand_menu','Active',$3,NULL,1,$3,$3)",
+        [brandRole, brand, from],
+      );
+      await admin.query(
+        "INSERT INTO bop_permission.role_assignment (assignment_id,role_id,membership_id,store_assignment_id,actor_id,brand_id,store_id,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES ($1,$2,$3,NULL,$4,$5,NULL,'Active',$6,NULL,1,$6,$6)",
+        [brandAssignment, brandRole, members[cashier].membership, cashier, brand, from],
+      );
+      const removed = await command("owner-cookie", {
+        operation: "RemoveFromStore",
+        actorReference: cashier,
+        operationReference: next(),
+      });
+      assert.equal(removed.rolesEnded >= 0, true);
+      assert.deepEqual(
+        await rows("SELECT lifecycle FROM bop_permission.role_assignment WHERE assignment_id=$1", [
+          brandAssignment,
+        ]),
+        [{ lifecycle: "Active" }],
+      );
+      await admin.query(
+        "SELECT set_config('bop.brand_id',$1,false),set_config('bop.store_id',$2,false)",
+        [brand, store],
+      );
+      assert.deepEqual(
+        await rows("SELECT lifecycle FROM bop_membership.store_assignment WHERE assignment_id=$1", [
+          members[cashier].assignment,
+        ]),
+        [{ lifecycle: "Ended" }],
+      );
     } finally {
       await fake.close();
       await admin.end();

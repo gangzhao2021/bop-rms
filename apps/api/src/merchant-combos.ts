@@ -434,7 +434,7 @@ export async function listComboDrafts(
         "combo-" + bundle.bundleReference.slice(-12),
       );
       // The author lists alone only at the Brand's one store (held until this commits).
-      await requireMerchantBrandSingleStore(tx as never, {
+      const listingMode = await requireMerchantBrandSingleStore(tx as never, {
         brandReference: authority.brandReference,
         storeReference: authority.storeReference,
         actorReference: authority.actorReference,
@@ -447,7 +447,7 @@ export async function listComboDrafts(
         tx,
         authority,
         operation,
-        { afterSummary: { approvalMode: "SingleStoreListing" } },
+        { afterSummary: { approvalMode: listingMode } },
         async (aggregate) =>
           bundleSellablesActive(ptx, {
             brandReference: authority.brandReference,
@@ -483,6 +483,7 @@ export async function listComboDrafts(
           actorReference: authority.actorReference,
           listedAt: input.at,
           auditReference: derivedReference(operation, "audit:Publish"),
+          approvalMode: listingMode,
         });
       listed += 1;
     }

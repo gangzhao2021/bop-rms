@@ -6,6 +6,7 @@ import {
 import { createPostgresStoreSalesPaymentLedger } from "@rms/payment";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { createMerchantTargetStoreAuthority } from "./merchant-target-store-authority.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { readTonightFacts, type TonightFacts } from "./merchant-tonight-summary.js";
@@ -62,7 +63,35 @@ export function createPersistentMerchantStoreReports(options: {
   retryDelaysMs?: readonly number[];
 }) {
   const persistence = options.persistence,
-    resolve = createMerchantStoreScope(persistence);
+    resolve = createMerchantStoreScope(persistence),
+    authority = createMerchantTargetStoreAuthority(persistence);
+  /** The same shape as the selected Store's scope, for another Store authorized at that Store. */
+  const targetScope = async (
+    tx: Parameters<typeof authority>[0],
+    sessionCookie: unknown,
+    storeReference: string,
+    permission: string,
+  ) => {
+    const found = await authority(tx, sessionCookie, storeReference, permission);
+    if (found === null) return unavailable();
+    const decide = async (action: string) =>
+      (await authority(tx, sessionCookie, storeReference, action)) === null
+        ? null
+        : ({ effect: "Allow" } as const);
+    return {
+      sessionReference: found.sessionReference,
+      selected: { tenantReference: found.tenantReference },
+      context: { brand: { brandReference: found.brandReference } },
+      store: {
+        storeReference: found.storeReference,
+        displayName: found.storeLabel,
+        timeZone: found.timeZone,
+        locale: found.locale,
+      },
+      allowed: async () => (await decide(permission)) !== null,
+      authorizeAction: decide,
+    };
+  };
   const read = (input: {
     readonly sessionCookie: unknown;
     readonly from: string | null;
@@ -70,6 +99,11 @@ export function createPersistentMerchantStoreReports(options: {
     readonly permission: typeof storeReportsReadPermission | typeof storeReportsExportPermission;
     /** WP-2423 item 8 ②: also read tonight's open tables and cancellations (today only). */
     readonly tonight?: boolean;
+    /**
+     * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 7: another Store of the Brand (the Brand
+     * page), authorized for the person at that Store itself, without switching to it.
+     */
+    readonly targetStoreReference?: string;
   }): Promise<{ readonly view: StoreSalesReportView; readonly tonight: TonightFacts | null }> =>
     persistence.transactions.run(async (original) => {
       const tx: ConsumerTransaction = {
@@ -94,12 +128,28 @@ export function createPersistentMerchantStoreReports(options: {
         {
           transaction: tx,
           resolve: async () => {
-            const value = await resolve(original, input.sessionCookie, input.permission);
+            const value =
+              input.targetStoreReference === undefined
+                ? await resolve(original, input.sessionCookie, input.permission)
+                : await targetScope(
+                    original,
+                    input.sessionCookie,
+                    input.targetStoreReference,
+                    input.permission,
+                  );
             if (!(await value.allowed())) return unavailable();
             return value;
           },
           recheck: async (value) => {
-            const again = await resolve(original, input.sessionCookie, input.permission);
+            const again =
+              input.targetStoreReference === undefined
+                ? await resolve(original, input.sessionCookie, input.permission)
+                : await targetScope(
+                    original,
+                    input.sessionCookie,
+                    input.targetStoreReference,
+                    input.permission,
+                  );
             return (
               String(again.sessionReference) === String(value.sessionReference) &&
               String(again.store.storeReference) === String(value.store.storeReference) &&
@@ -212,6 +262,23 @@ export function createPersistentMerchantStoreReports(options: {
      * figures as the reports page and, once the day closes, the day-end settlement) with the
      * tables still open and tonight's cancellations.
      */
+    /**
+     * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 7: another Store's closing summary for the
+     * Brand page, the same figures as that Store's own Tonight, for a person allowed there.
+     */
+    storeTonight: async (input: { sessionCookie: unknown; storeReference: string }) => {
+      const read_ = await retrying(() =>
+        read({
+          sessionCookie: input.sessionCookie,
+          from: null,
+          to: null,
+          permission: storeReportsReadPermission,
+          tonight: true,
+          targetStoreReference: input.storeReference,
+        }),
+      );
+      return Object.freeze({ report: read_.view, ...(read_.tonight as TonightFacts) });
+    },
     tonight: async (input: { sessionCookie: unknown }) => {
       const read_ = await retrying(() =>
         read({

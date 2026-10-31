@@ -1,4 +1,5 @@
 /** Merchant BFF routes: brand/store topology, brand lifecycle, roles, staff and sole operator. Registered by createMerchantBffRouter (merchant-bff.ts). */
+import { MerchantStoreOpeningError } from "./merchant-store-opening.js";
 import express, { type Router } from "express";
 import {
   BrandAdministrationServiceError,
@@ -444,6 +445,44 @@ export function installMerchantOrganizationRoutes(
       .nameSelf({ sessionCookie, csrf, body: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => staffFailure(response, error));
+  });
+
+  // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: the Brand's Owner opens a Store.
+  router.post("/organization/stores", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    response.setHeader("Cache-Control", "no-store");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.storeOpening) {
+      response.status(503).json({ error: "store_opening_unavailable" });
+      return;
+    }
+    void options
+      .storeOpening({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.status(result.status === "Opened" ? 201 : 200).json(result))
+      .catch((error: unknown) => {
+        if (!(error instanceof MerchantStoreOpeningError)) {
+          response.status(503).json({ error: "store_opening_unavailable" });
+          return;
+        }
+        const [status, code] =
+          error.code === "Invalid"
+            ? [400, "store_opening_invalid"]
+            : error.code === "CodeTaken"
+              ? [409, "store_code_taken"]
+              : error.code === "Conflict"
+                ? [409, "store_opening_conflict"]
+                : [403, "request_denied"];
+        response.status(status).json({ error: code });
+      });
   });
 
   router.post(

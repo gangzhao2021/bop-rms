@@ -487,6 +487,19 @@ function validateSql(
         /^\s*\(/u.test(body.slice(match.index + match[0].length))
       ) &&
       !(
+        // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9: the listing guards call the
+        // Organization owner's single-store read (2000_108) and the Permission owner's Brand Owner
+        // authority read (2000_134), never their tables.
+        [
+          "migrations/2000-release-001/2000_135_alter_catalog_brand_owner_listing.sql:@rms/catalog:rms_catalog",
+          "migrations/2000-release-001/2000_136_alter_pricing_brand_owner_listing.sql:@rms/pricing:rms_pricing",
+          "migrations/2000-release-001/2000_137_alter_recipe_brand_owner_listing.sql:@rms/recipe:rms_recipe",
+        ].includes(`${file}:${metadata.owner}:${metadata.schema}`) &&
+        ((match[1] === "bop_tenant" && match[2] === "brand_has_single_store") ||
+          (match[1] === "bop_permission" && match[2] === "actor_holds_brand_owner_authority")) &&
+        /^\s*\(/u.test(body.slice(match.index + match[0].length))
+      ) &&
+      !(
         // WP-2423 (v15 2026-10-16): the sole-operator approval guards call the Organization
         // owner's database read of the Brand's sole-operator setting (2000_066), never its table.
         ((file ===

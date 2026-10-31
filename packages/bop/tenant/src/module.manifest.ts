@@ -30,6 +30,8 @@ const moduleManifestInput = {
       "brand_store_topology_draft_revision",
       "brand_store_topology_draft_operation",
       "store",
+      // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: a Store's opening (append-only).
+      "store_opening",
       "store_reference_generation",
       "store_reference_projection",
       "tenant_administration_operation",

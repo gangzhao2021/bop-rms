@@ -601,8 +601,10 @@ export function createMerchantRecipes(options: {
                         ).actorMfaAt,
                       }
                     : undefined;
-                if (body.approvalMode === "SingleStoreListing")
-                  await singleStore(scope.actorReference);
+                const listingMode =
+                  body.approvalMode === "SingleStoreListing"
+                    ? await singleStore(scope.actorReference)
+                    : null;
                 return await recordRecipeReview(rtx, scope, {
                   ...writer,
                   reviewReference: body.operationReference,
@@ -614,8 +616,13 @@ export function createMerchantRecipes(options: {
                   comment: body.comment,
                   auditReference: options.references.next(),
                   ...(soleOperator === undefined ? {} : { soleOperator }),
-                  ...(body.approvalMode === "SingleStoreListing"
-                    ? { singleStoreListing: { storeReference: scope.storeReference } }
+                  ...(listingMode !== null
+                    ? {
+                        singleStoreListing: {
+                          storeReference: scope.storeReference,
+                          mode: listingMode,
+                        },
+                      }
                     : {}),
                 });
               }

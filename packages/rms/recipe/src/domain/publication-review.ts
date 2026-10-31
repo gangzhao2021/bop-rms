@@ -14,7 +14,8 @@ export interface RecipePublicationReview {
   readonly decision: "Approved";
   /** WP-2423 Q19: given alone by the sole operator; WP-2423 item 8 ⑥: given alone by the author
    * listing at the Brand's one store (absent for an independent review). */
-  readonly reviewMode?: "SoleOperator" | "SingleStoreListing";
+  /** DEC-BRAND-MULTI-STORE segment 9: BrandOwnerListing, a direct listing at several Stores. */
+  readonly reviewMode?: "SoleOperator" | "SingleStoreListing" | "BrandOwnerListing";
 }
 export interface RecipePublicationEvidence {
   readonly recipeReference: string;
@@ -90,7 +91,8 @@ export function parseRecipePublicationEvidence(
     if (
       marked &&
       review.reviewMode !== "SoleOperator" &&
-      review.reviewMode !== "SingleStoreListing"
+      review.reviewMode !== "SingleStoreListing" &&
+      review.reviewMode !== "BrandOwnerListing"
     )
       return fail();
     if (
@@ -115,7 +117,10 @@ export function parseRecipePublicationEvidence(
         reviewedAt: review.reviewedAt,
         decision: "Approved",
         ...(marked
-          ? { reviewMode: review.reviewMode as "SoleOperator" | "SingleStoreListing" }
+          ? {
+              reviewMode: review.reviewMode as
+                "SoleOperator" | "SingleStoreListing" | "BrandOwnerListing",
+            }
           : {}),
       }),
     );

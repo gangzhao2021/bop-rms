@@ -17,6 +17,7 @@ import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness, storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { TonightReport } from "./TonightSummary.js";
+import { BrandStoresReport } from "./BrandStoresReport.js";
 
 const money = formatCad;
 export const channelLabel: Record<StoreReportChannel, string> = {
@@ -481,11 +482,21 @@ export function StoreReportsPage({
   storeLabel,
   fetcher,
   initialTab = "Tonight",
+  stores = [],
+  currentStoreReference = "",
+  onSwitchStore = () => undefined,
 }: {
   /** WP-2423 item 8 ②: the page opens on tonight's closing summary. */
-  readonly initialTab?: "Tonight" | "Period";
+  readonly initialTab?: "Tonight" | "Period" | "Stores";
   readonly storeLabel: string;
   readonly fetcher?: typeof fetch | undefined;
+  /**
+   * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 7: the Brand's Stores this person works in;
+   * with two or more the page also shows each Store's tonight (never with one Store).
+   */
+  readonly stores?: readonly { readonly storeReference: string; readonly storeLabel: string }[];
+  readonly currentStoreReference?: string;
+  readonly onSwitchStore?: (storeReference: string) => void;
 }) {
   const client = useMemo(() => createStoreReportsClient(fetcher), [fetcher]);
   // WP-2423 Q21: "today" is the Store's current business day.
@@ -499,7 +510,9 @@ export function StoreReportsPage({
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const active = useRef<AbortController | null>(null);
   // WP-2423 item 8 ② (Figma 47-2): the page opens on tonight's closing summary.
-  const [tab, setTab] = useState<"Tonight" | "Period">(initialTab);
+  const [tab, setTab] = useState<"Tonight" | "Period" | "Stores">(
+    initialTab === "Stores" && stores.length < 2 ? "Tonight" : initialTab,
+  );
   useEffect(() => {
     if (range === null && today !== null) {
       setRange({ from: today, to: today });
@@ -604,6 +617,7 @@ export function StoreReportsPage({
           [
             ["Tonight", t("Tonight")],
             ["Period", t("Sales by period")],
+            ...(stores.length >= 2 ? ([["Stores", t("Stores")]] as const) : []),
           ] as const
         ).map(([value, label]) => (
           <button
@@ -617,7 +631,16 @@ export function StoreReportsPage({
         ))}
       </nav>
       {tab === "Tonight" ? <TonightReport client={client} revision={revision} /> : null}
-      {tab === "Tonight" ? null : (
+      {tab === "Stores" ? (
+        <BrandStoresReport
+          client={client}
+          stores={stores}
+          currentStoreReference={currentStoreReference}
+          revision={revision}
+          onSwitchStore={onSwitchStore}
+        />
+      ) : null}
+      {tab !== "Period" ? null : (
         <>
           <form
             className="list-filters store-reports__picker"

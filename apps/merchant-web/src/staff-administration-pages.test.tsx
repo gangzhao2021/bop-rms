@@ -178,3 +178,19 @@ function parseInvitation(value: object) {
   if (!parsed) throw new Error("no invitation");
   return parsed;
 }
+
+describe("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 8: people from the Brand's other Stores", () => {
+  it("reads them by name (none from an older server) and refuses anything else", () => {
+    expect(parseStaffPageView(view(), "IAM-USER-LIST").otherStoresStaff).toEqual([]);
+    const withOthers = { ...view(), otherStoresStaff: [{ actorReference: id(77), label: "Kai" }] };
+    expect(parseStaffPageView(withOthers, "IAM-USER-LIST").otherStoresStaff).toEqual([
+      { actorReference: id(77), label: "Kai" },
+    ]);
+    expect(() =>
+      parseStaffPageView(
+        { ...view(), otherStoresStaff: [{ actorReference: id(77), label: "Kai", email: "x" }] },
+        "IAM-USER-LIST",
+      ),
+    ).toThrow();
+  });
+});

@@ -80,7 +80,7 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   ),
   NeedsReverification: t("Confirm it is you with your authenticator code, then approve again."),
   NotSingleStore: t(
-    "This Brand has more than one store, so a menu is reviewed by someone else before it is listed.",
+    "This Brand has more than one store, so the Brand Owner lists menu changes. Your changes are saved for them to list.",
   ),
   RegistryMissing: t(
     "The Brand's allergen list is not approved yet. Approve it under Allergens, then declare the dish's allergens.",
