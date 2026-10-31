@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
 import { WorkspacePage } from "./WorkspacePage.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { FULL_SIGN_IN_REQUIRED } from "./full-sign-in.js";
 import {
   mayOpenStore,
   openStore,
@@ -38,6 +40,7 @@ export function StoresPage({
   currentStoreReference,
   csrf,
   switching,
+  switchFailed = false,
   onSwitchStore,
   fetcher,
 }: {
@@ -45,6 +48,8 @@ export function StoresPage({
   readonly currentStoreReference: string;
   readonly csrf: string;
   readonly switching: boolean;
+  /** The last switch was refused (v15 2026-10-31: it must never look like nothing happened). */
+  readonly switchFailed?: boolean | typeof FULL_SIGN_IN_REQUIRED;
   readonly onSwitchStore: (storeReference: string) => void;
   readonly fetcher?: typeof fetch;
 }) {
@@ -64,6 +69,20 @@ export function StoresPage({
       <div className="stores-page">
         <section aria-labelledby="stores-yours">
           <h2 id="stores-yours">{t("Your stores")}</h2>
+          {switchFailed === FULL_SIGN_IN_REQUIRED ? (
+            <>
+              <p role="status">
+                {t("Your previous Store is unchanged. After you verify, switch again.")}
+              </p>
+              <FullSignInPrompt csrf={csrf} />
+            </>
+          ) : switchFailed ? (
+            <p className="command-error" role="alert">
+              {t(
+                "Couldn't switch to this store. Try again, or ask the brand owner to check your access there.",
+              )}
+            </p>
+          ) : null}
           <ul className="stores-page__list">
             {stores.map((store) => (
               <li key={store.storeReference} className="stores-page__row">

@@ -20,6 +20,10 @@ export function reportUnexpected(event, error, context = {}) {
       /^stores\/[a-z0-9][a-z0-9-]{0,62}$/.test(context.store)
         ? { store: context.store }
         : {}),
+      // Which step of a multi-step action failed (a fixed name such as "Workspace").
+      ...(typeof context.step === "string" && /^[A-Za-z]{1,40}$/.test(context.step)
+        ? { step: context.step }
+        : {}),
       frames:
         String(error?.stack ?? "")
           .match(

@@ -47,6 +47,7 @@ export async function verifyPersistentMerchantBff({
   fixtureClock,
 }) {
   const clock = fixtureClock ?? { from: f.FROM, at: f.AT, until: f.UNTIL };
+  const switchDenials = [];
   const businessWeekday = fixtureClock?.businessWeekday ?? 2;
   const businessDate = fixtureClock?.businessDate ?? "2026-07-28";
   const targetBusinessDate = fixtureClock?.targetBusinessDate ?? "2026-07-27";
@@ -581,6 +582,8 @@ export async function verifyPersistentMerchantBff({
     },
     initialScope: async () => scope,
     targetScope: async (_tx, _session, storeReference) => ({ ...scope, storeReference }),
+    // v15 2026-10-31: which step refused a switch (the pilot logs it as a code).
+    onStoreSwitchDenied: (step) => switchDenials.push(step),
     // Synthetic metadata/candidate navigation; actual Permission policy is enforced by service.
     workspace: async (_tx, { context }) => {
       if (denyWorkspace) throw new Error("synthetic current access denied");
@@ -944,8 +947,11 @@ export async function verifyPersistentMerchantBff({
   assert.equal(await nextRows(), 0);
   denyWorkspace = false;
   wrongWorkspace = true;
+  switchDenials.length = 0;
   await assert.rejects(service().switchStore(switchInput));
   assert.equal(await nextRows(), 0);
+  // As on v15: a workspace naming another Store than the session's is refused at that step.
+  assert.deepEqual(switchDenials, ["Workspace"]);
   wrongWorkspace = false;
   assert.equal(
     (await service().bootstrap(cookie.value)).workspace.selectedScope.storeReference,

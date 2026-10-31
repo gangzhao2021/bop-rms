@@ -87,7 +87,16 @@ export interface PersistentMerchantBffOptions {
   /** Supply Store candidates and current operational metadata. Candidate access and
    * labels are verified through public owners; navigation is filtered by policy. */
   workspace(tx: Transaction, selected: SelectedContext): Promise<unknown>;
+  /**
+   * v15 2026-10-31: a refused Store switch is reported to the operator — which step refused it
+   * and its error (the caller logs codes only; never ids or secrets). The person is still told
+   * only that it was refused.
+   */
+  onStoreSwitchDenied?(step: MerchantStoreSwitchStep, error: unknown): void;
 }
+/** The steps of a Store switch, in order. */
+export type MerchantStoreSwitchStep =
+  "Session" | "TargetStore" | "Selection" | "Audit" | "Workspace" | "Rotation";
 
 export function createPersistentMerchantBffService(
   options: PersistentMerchantBffOptions,
@@ -544,6 +553,7 @@ export function createPersistentMerchantBffService(
       return result;
     },
     async switchStore(input) {
+      let step: MerchantStoreSwitchStep = "Session";
       try {
         const current = await base.authorize(input);
         const target = parseStoreReference(input.targetStoreReference);
@@ -552,6 +562,7 @@ export function createPersistentMerchantBffService(
           if (session.sessionReference !== current.sessionReference)
             throw new Error("MERCHANT_BFF_UNAVAILABLE");
           const source = await selectedContext(tx, session);
+          step = "TargetStore";
           return {
             scope: await options.targetScope(tx, session, target),
             from: {
@@ -573,7 +584,9 @@ export function createPersistentMerchantBffService(
         let nextWorkspace: MerchantWorkspaceSnapshot | undefined;
         const finalizers: (() => void)[] = [];
         const rotation = service(async (tx, record) => {
+          step = "Selection";
           await bind(tx, record);
+          step = "Audit";
           // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: switching Stores is an explicit, audited act,
           // recorded in the Store the person left (this transaction's Store), naming the Store they
           // switched to, with the rotation that binds the session to it.
@@ -601,14 +614,22 @@ export function createPersistentMerchantBffService(
               retentionPolicyVersion: 1,
             }),
           );
+          step = "Workspace";
           nextWorkspace = await workspace(tx, record.session, finalizers);
+          step = "Rotation";
         });
+        step = "Rotation";
         const result = await rotation.rotate(input.sessionCookie, "StoreContextElevation");
         for (const finalize of finalizers) finalize();
         if (!nextWorkspace) throw new Error("MERCHANT_BFF_UNAVAILABLE");
         return Object.freeze({ cookie: result.cookie, workspace: nextWorkspace });
-      } catch {
-        throw new Error("STORE_SWITCH_DENIED");
+      } catch (error) {
+        try {
+          options.onStoreSwitchDenied?.(step, error);
+        } catch {
+          // Reporting never changes the answer.
+        }
+        throw new Error("STORE_SWITCH_DENIED", { cause: error });
       }
     },
   };
