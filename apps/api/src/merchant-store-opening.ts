@@ -35,6 +35,7 @@ export const storeOpeningPermission = brandOwnerAuthority;
 export class MerchantStoreOpeningError extends Error {
   constructor(readonly code: "PermissionDenied" | "Invalid" | "CodeTaken" | "Conflict") {
     super("MERCHANT_STORE_OPENING_" + code.toUpperCase());
+    this.name = "MerchantStoreOpeningError";
   }
 }
 export interface MerchantStoreOpeningCommand {

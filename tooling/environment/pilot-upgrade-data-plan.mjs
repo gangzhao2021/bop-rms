@@ -25,6 +25,16 @@ function inventory(value) {
 }
 // Used only between fresh canonical pre-data/data and post-data restoration.
 // The caller must verify migration history on the fresh template and final target.
+/**
+ * Statements the owner runs after the data-only load, before any service starts. A data-only
+ * restore runs with triggers disabled and after the migrations' own backfills, so registries
+ * that triggers keep from root rows stay empty (v15 2026-10-31: no Store could be opened). Each
+ * statement is idempotent and only adds missing rows.
+ */
+export const pilotUpgradePostRestoreStatements = Object.freeze([
+  // 2000_140: the Store reference registry, as the trigger would have written it.
+  "SELECT bop_tenant.repair_store_reference_projection();",
+]);
 export function createPilotUpgradeDataPlan({ sourceTables, canonicalTables, archiveList }) {
   inventory(sourceTables);
   inventory(canonicalTables);
@@ -76,5 +86,6 @@ export function createPilotUpgradeDataPlan({ sourceTables, canonicalTables, arch
     expectedBusinessTables,
     skippedTables: [...skipped].sort(),
     sequenceNames: [...sequenceNames].sort(),
+    postRestoreStatements: [...pilotUpgradePostRestoreStatements],
   };
 }

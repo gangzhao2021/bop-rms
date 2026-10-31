@@ -1608,7 +1608,14 @@ export async function createInternalMerchant(
       signInEntry: session.signInEntry ?? { path: "/internal-test/staff", testOnly: true },
       ...(staffPin === undefined ? {} : { staffPin }),
       // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: the Brand's Owner opens a Store.
-      storeOpening: createMerchantStoreOpening({ persistence, authentication: service }),
+      // Unexpected failures of opening a Store are logged (v15 2026-10-31: a 503 was silent).
+      storeOpening: (() => {
+        const opening = createMerchantStoreOpening({ persistence, authentication: service });
+        return {
+          open: logUnexpected("INTERNAL_STORE_OPENING_UNAVAILABLE", opening.open),
+          mayOpen: logUnexpected("INTERNAL_STORE_OPENING_CHECK_UNAVAILABLE", opening.mayOpen),
+        };
+      })(),
       // WP-2423 Q4: busy mode — a manager pauses and resumes taking new online orders.
       ...(() => {
         const control = createMerchantServiceControl({
